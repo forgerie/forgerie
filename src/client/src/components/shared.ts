@@ -156,17 +156,32 @@ export const appStyles = css`
     main.workspace-view .empty { display: none; }
     main.workspace-view { overflow: hidden; }
   }
-  @media (max-width: 760px) {
-    .shell { grid-template-columns: minmax(0, 1fr); }
-    aside, .navigation-panel-edge { display: none; }
-    main, .shell.workspace-view > workspace-panel { grid-column: 1; }
-    .context-bar { display: flex; }
-    .mobile-navigation-tab { display: block; }
-    main.navigation-view chat-view, main.navigation-view prompt-editor, main.navigation-view status-bar,
-    main.navigation-view .empty { display: none; }
-    main.navigation-view .mobile-navigation-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-    main.navigation-view .mobile-navigation-panel app-navigation-panel { flex: 1 1 auto; min-height: 0; }
+  .shell.overlay-navigation { grid-template-columns: minmax(0, 1fr); }
+  .shell.overlay-navigation > aside, .shell.overlay-navigation .navigation-panel-edge { display: none; }
+  .shell.overlay-navigation main, .shell.overlay-navigation.workspace-view > workspace-panel { grid-column: 1; }
+  .shell.overlay-navigation .context-bar { display: flex; }
+  .shell.overlay-navigation .mobile-navigation-tab { display: block; }
+  .shell.overlay-navigation main { position: relative; }
+  /*
+   * The session stays mounted underneath: navigation slides over it so scroll
+   * position, drafts, and streaming output survive summoning the panel.
+   */
+  .shell.overlay-navigation main.navigation-view .mobile-navigation-panel {
+    position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+    background: var(--pi-bg); border-right: 1px solid var(--pi-border);
+    max-width: min(100%, 420px); box-shadow: 0 0 40px var(--pi-shadow);
+    animation: navigation-overlay-in 160ms ease-out;
   }
+  .shell.overlay-navigation main.navigation-view .mobile-navigation-panel app-navigation-panel { flex: 1 1 auto; min-height: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .shell.overlay-navigation main.navigation-view .mobile-navigation-panel { animation: none; }
+  }
+  .shell.overlay-navigation main.navigation-view .navigation-scrim {
+    position: absolute; inset: 0; z-index: 29; display: block; width: 100%; height: 100%;
+    padding: 0; border: 0; border-radius: 0; background: var(--pi-shadow); cursor: pointer;
+  }
+  .navigation-scrim { display: none; }
+  @keyframes navigation-overlay-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
   status-bar { flex: 0 0 auto; }
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }

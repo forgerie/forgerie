@@ -41,6 +41,7 @@ import { AppShellController } from "../appShell/appShellController";
 import { BrowserResumeController } from "../appShell/browserResumeController";
 import { NavigationSectionsController, type NavigationSection } from "../appShell/navigationState";
 import { PanelCollapseController, mainViewClass } from "../appShell/panelCollapseController";
+import { shellLayoutModeClass } from "../appShell/shellLayoutMode";
 import { PanelResizeController, type PanelResizeConstraints, type ResizablePanelSide } from "../appShell/panelResizeController";
 import { readRoute, writeRoute, type AppRoute } from "../route";
 import { readSettingsSection, writeSettingsSection, type SettingsSection } from "../settingsRoute";
@@ -2097,6 +2098,12 @@ export class PiWebApp extends LitElement {
     `;
   }
 
+  /** Dismisses the summoned navigation overlay by returning to the session underneath. */
+  private renderNavigationScrim(state: AppState) {
+    if (!this.appShell.isMobileNavigationLayout || state.mainView !== "navigation") return null;
+    return html`<button type="button" class="navigation-scrim" aria-label="Close navigation" @click=${() => { this.selectMainView("chat"); }}></button>`;
+  }
+
   private renderContextBar() {
     if (!this.appShell.isMobileNavigationLayout) return null;
     return html`
@@ -2153,13 +2160,14 @@ export class PiWebApp extends LitElement {
   override render() {
     const state = this.state;
     return html`
-      <div class=${this.panelCollapse.shellClass(state.mainView)} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
+      <div class=${`${this.panelCollapse.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)}`} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
         <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout ? null : this.renderNavigationPanel()}</aside>
         ${this.renderNavigationPanelEdgeControl()}
         <main class=${mainViewClass(state.mainView)}>
           ${this.renderContextBar()}
           ${this.renderMobileMainTabs()}
           ${state.error ? html`<div class="error">${state.error}</div>` : null}
+          ${this.renderNavigationScrim(state)}
           <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout ? this.renderNavigationPanel() : null}</div>
           ${state.selectedSession ? html`
             ${this.renderChatView(state, state.selectedSession)}

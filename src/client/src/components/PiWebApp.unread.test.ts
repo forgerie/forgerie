@@ -399,7 +399,7 @@ function exposeSelectedChat(app: PiWebApp): void {
 
 function setMobileNavigationLayout(app: PiWebApp, mobile: boolean): void {
   const appShell: unknown = Reflect.get(app, "appShell");
-  if (typeof appShell !== "object" || appShell === null || !Reflect.set(appShell, "isMobileNavigationLayout", mobile)) {
+  if (typeof appShell !== "object" || appShell === null || !Reflect.set(appShell, "layoutMode", mobile ? "overlay" : "docked")) {
     throw new Error("Could not update the app-shell layout");
   }
 }
