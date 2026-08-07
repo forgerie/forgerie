@@ -55,6 +55,38 @@ describe("fork grouping in the session list", () => {
   });
 });
 
+describe("orphaned forks of an unavailable parent", () => {
+  it("replaces repeated sibling rows with one collapsible header", async () => {
+    const list = await renderList(orphanSiblings());
+
+    expect(visibleLabels(list)).toEqual(["lost work"]);
+    const header = list.shadowRoot?.querySelector(".action-row.orphan-group");
+    expect(header?.querySelector("small")?.textContent).toBe("3 forks · parent unavailable");
+    expect(forkToggle(list)?.getAttribute("aria-label")).toBe("Show 3 forks of an unavailable session");
+  });
+
+  it("reveals the siblings from the header control", async () => {
+    const list = await renderList(orphanSiblings());
+
+    forkToggle(list)?.click();
+    await list.updateComplete;
+
+    expect(visibleLabels(list)).toEqual(["lost work", "lost work", "lost work", "lost work"]);
+    expect(forkToggle(list)?.getAttribute("aria-label")).toBe("Hide 3 forks of an unavailable session");
+  });
+
+  it("leaves a lone orphan as an ordinary row", async () => {
+    const list = await renderList([session("only", { name: "lost work", parentSessionPath: "/sessions/gone.jsonl" })]);
+
+    expect(list.shadowRoot?.querySelector(".action-row.orphan-group")).toBeNull();
+    expect(visibleLabels(list)).toEqual(["lost work"]);
+  });
+});
+
+function orphanSiblings(): SessionInfo[] {
+  return ["a", "b", "c"].map((id) => session(id, { name: "lost work", parentSessionPath: "/sessions/gone.jsonl" }));
+}
+
 function forkedTree(): SessionInfo[] {
   const root = session("root");
   return [
