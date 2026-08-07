@@ -76,6 +76,70 @@ tracks `main` without a NixOS rebuild.
 - Provider registrations freeze at sessiond startup. Provider/extension
   changes need a sessiond restart, not `/reload`.
 
+## Acceptance device and visual testing
+
+The acceptance target is the user's daily driver: **Samsung Galaxy Z Fold 8
+(non-Ultra)**. Every user-facing change must be validated on this device's
+full posture matrix before it is called done.
+
+Physical panels:
+
+- Unfolded (main): 2448 × 1848 px, 7.6", 4:3
+- Folded (cover): 1972 × 1248 px, 5.5", ~10:16
+
+CSS-pixel viewports for testing (working assumption DPR 2.5 — verify against
+the real device once and correct here if it differs):
+
+| Posture | CSS viewport (w × h) |
+|---|---|
+| Unfolded portrait | 739 × 979 |
+| Unfolded landscape | 979 × 739 |
+| Folded portrait | 499 × 789 |
+| Folded landscape | 789 × 499 |
+
+Headless capture (chromium is on PATH on zao):
+
+```bash
+chromium --headless=new --disable-gpu --window-size=739,979 \
+  --screenshot=/tmp/forgerie-unfolded-portrait.png \
+  --virtual-time-budget=8000 http://127.0.0.1:8504/
+```
+
+Repeat for all four viewports. The agent must **look at** the captures (Read
+the PNGs) and judge them — capturing without reviewing does not count as
+validation.
+
+### Seamlessness requirement
+
+The UX must be seamless across all four postures and the transitions between
+them (fold/unfold, rotate). The same surface must not flip between unrelated
+layout paradigms across adjacent postures.
+
+Known upstream defect (fork point): a viewport-width breakpoint near ~768px
+splits this device's posture matrix — 739px (unfolded portrait) renders the
+phone layout while 789px (folded landscape) renders the desktop layout.
+Rotating the unfolded device swaps the entire UI paradigm. Removing this
+cliff is a standing UX goal; do not add new width breakpoints that fall
+inside or near the 499–979px posture range.
+
+### Intrinsic design rules
+
+All Forgerie UI work follows intrinsic design principles:
+
+- Components respond to their **container**, not the viewport. Use container
+  queries and container-relative units; reserve viewport units for the page
+  frame itself.
+- Size and space fluidly: `clamp()`, `min()`, `max()`, flexible tracks — not
+  stepped values keyed to device classes.
+- Grids and lists gain or lose tracks from available space
+  (`repeat(auto-fit, minmax(…))`), never from a hardcoded column count per
+  breakpoint.
+- Layout changes are continuous morphs driven by available space. A discrete
+  layout change (e.g. sidebar collapses to a drawer) must key off the space
+  the component actually has, and must hold state across the change —
+  scroll position, draft text, open panels survive fold/unfold and rotation.
+- No user-agent, touch, or device-model sniffing for layout decisions.
+
 ## Upstream inheritance
 
 - License: MIT (upstream © Federico Jaramillo Martinez). Keep attribution.
