@@ -17,3 +17,6 @@ dist/
 
 # Dev docs site staging output (scripts/build-docs-dev.mjs).
 /docs/.deploy/
+
+# Machine-local agent instructions
+AGENTS.local.md
