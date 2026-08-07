@@ -234,15 +234,29 @@ export function notificationTargetKey(target: SessionNotificationTarget): string
   return JSON.stringify([target.machineId, target.cwd, target.sessionId]);
 }
 
-export function notificationTrayIsCollapsed(collapsedTargetKeys: ReadonlySet<string>, target: SessionNotificationTarget): boolean {
-  return collapsedTargetKeys.has(notificationTargetKey(target));
+/**
+ * Per-target tray preference. Absent means "no explicit choice yet", which
+ * falls back to {@link notificationTrayDefaultCollapsed}.
+ */
+export type NotificationTrayPreferences = ReadonlyMap<string, boolean>;
+
+export type NotificationTrayTarget = SessionNotificationTarget & Pick<SelectedSessionNotificationView, "notifications">;
+
+/**
+ * The transcript owns the session view. Only errors interrupt it unasked;
+ * info and warning notifications wait behind the collapsed tray header.
+ */
+export function notificationTrayDefaultCollapsed(target: Pick<NotificationTrayTarget, "notifications">): boolean {
+  return !target.notifications.some((notification) => notification.severity === "error");
 }
 
-export function setNotificationTrayCollapsed(collapsedTargetKeys: ReadonlySet<string>, target: SessionNotificationTarget, collapsed: boolean): ReadonlySet<string> {
-  const next = new Set(collapsedTargetKeys);
-  const key = notificationTargetKey(target);
-  if (collapsed) next.add(key);
-  else next.delete(key);
+export function notificationTrayIsCollapsed(preferences: NotificationTrayPreferences, target: NotificationTrayTarget): boolean {
+  return preferences.get(notificationTargetKey(target)) ?? notificationTrayDefaultCollapsed(target);
+}
+
+export function setNotificationTrayCollapsed(preferences: NotificationTrayPreferences, target: SessionNotificationTarget, collapsed: boolean): NotificationTrayPreferences {
+  const next = new Map(preferences);
+  next.set(notificationTargetKey(target), collapsed);
   return next;
 }
 

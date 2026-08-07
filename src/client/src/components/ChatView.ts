@@ -22,6 +22,7 @@ import {
   notificationTrayIsCollapsed,
   setNotificationTrayCollapsed,
   type NotificationFocusTarget,
+  type NotificationTrayPreferences,
   type SelectedSessionNotificationView,
   type SessionNotificationTarget,
 } from "../sessionNotifications";
@@ -220,7 +221,7 @@ export class ChatView extends LitElement {
   @state() private expandedMetaKey: string | undefined;
   @state() private copiedMessageKey: string | undefined;
   @state() private currentConversationIndex: number | undefined;
-  @state() private collapsedNotificationTargetKeys: ReadonlySet<string> = new Set();
+  @state() private collapsedNotificationTargetKeys: NotificationTrayPreferences = new Map();
   @state() private retainedEmptyNotificationTrayTargetKey: string | undefined;
   private pendingNotificationFocus: PendingNotificationFocus | undefined;
   private imageZoomModalRegistration: RenderedModalRegistration | undefined;
@@ -434,7 +435,6 @@ export class ChatView extends LitElement {
           ${this.renderOpenAsk()}
           ${this.renderExtensionDialogs()}
         </div>
-        ${this.renderActivityDock()}
       </div>
       ${this.renderImageZoom()}
     `;
@@ -658,26 +658,6 @@ export class ChatView extends LitElement {
       || this.activity?.phase === "active";
   }
 
-  private renderActivityDock() {
-    if (this.isSendingPrompt) {
-      return html`
-        <div class="activity-dock active" aria-live="polite">
-          <span class="dot"></span>
-          <span class="activity-text">Sending your message…</span>
-        </div>
-      `;
-    }
-    const state = this.activityState();
-    if (state === undefined) return null;
-    const active = state !== "idle" || this.activity?.phase === "active";
-    return html`
-      <div class=${active ? "activity-dock active" : "activity-dock"} aria-live="polite">
-        <span class="dot"></span>
-        <span class="activity-text">${this.activityText(state)}</span>
-      </div>
-    `;
-  }
-
   private renderQueuedMessages() {
     const serverQueued = this.status?.queuedMessages ?? [];
     return html`${chatQueuedMessageSections(this.clientQueuedMessages, serverQueued).map((section) => this.renderQueuedMessageList(section))}`;
@@ -759,23 +739,6 @@ export class ChatView extends LitElement {
         ${this.pendingMessageCount > 0 ? html`<small>${this.pendingMessageCount} queued ${this.pendingMessageCount === 1 ? "message" : "messages"}</small>` : null}
       </aside>
     `;
-  }
-
-  private activityState(): string | undefined {
-    const status = this.status;
-    if (status === undefined) return this.activity?.label;
-    if (status.isCompacting) return "compacting";
-    if (status.isBashRunning) return "bash";
-    if (status.isStreaming) return "running";
-    if (status.pendingMessageCount > 0) return "queued";
-    return "idle";
-  }
-
-  private activityText(state: string): string {
-    const activity = this.activity;
-    if (activity === undefined) return state;
-    if (state !== "idle" && activity.phase === "idle") return state;
-    return activity.detail !== undefined && activity.detail !== "" ? `${activity.label}: ${activity.detail}` : activity.label;
   }
 
   private renderConversationRail() {

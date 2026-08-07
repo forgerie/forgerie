@@ -1,6 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { SessionStatus } from "../api";
+import type { SessionActivity, SessionStatus } from "../api";
+import { sessionActivityIndicator } from "../sessionStatusStrip";
 import { formatCost, formatTokenCount } from "../utils/format";
 import { renderSessionWarningIcon, statusBarStyles } from "./shared";
 
@@ -21,6 +22,8 @@ export function statusBarWarningControlContent(count: number, expanded: boolean)
 @customElement("status-bar")
 export class StatusBar extends LitElement {
   @property({ attribute: false }) status?: SessionStatus;
+  @property({ attribute: false }) activity?: SessionActivity;
+  @property({ type: Boolean }) isSendingPrompt = false;
   @property({ type: Number }) warningCount = 0;
   @property({ type: Boolean }) warningsExpanded = false;
   @property({ attribute: false }) onToggleWarnings?: () => void;
@@ -29,9 +32,20 @@ export class StatusBar extends LitElement {
     this.onToggleWarnings?.();
   };
 
+  private renderActivity() {
+    const indicator = sessionActivityIndicator({ status: this.status, activity: this.activity, isSendingPrompt: this.isSendingPrompt });
+    if (indicator === undefined) return null;
+    return html`
+      <span class=${indicator.active ? "activity active" : "activity"} aria-live="polite">
+        <span class="dot"></span>
+        <span class="activity-text">${indicator.text}</span>
+      </span>
+    `;
+  }
+
   override render() {
     const status = this.status;
-    if (status === undefined) return html`<div class="bar muted">No session status yet</div>`;
+    if (status === undefined) return html`<div class="bar muted">${this.renderActivity() ?? "No session status yet"}</div>`;
     const context = status.contextUsage;
     const contextText = context
       ? context.percent == null
@@ -42,6 +56,7 @@ export class StatusBar extends LitElement {
     const warningControl = statusBarWarningControlContent(this.warningCount, this.warningsExpanded);
     return html`
       <div class="bar">
+        ${this.renderActivity()}
         ${warningControl === undefined || this.onToggleWarnings === undefined ? null : html`
           <button
             type="button"

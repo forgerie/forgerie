@@ -16,6 +16,7 @@ import {
   notificationMessageTruncationLabel,
   notificationTargetKey,
   notificationTrayHeading,
+  notificationTrayDefaultCollapsed,
   notificationTrayIsCollapsed,
   selectedNotificationView,
   setNotificationTrayCollapsed,
@@ -159,15 +160,34 @@ describe("notification presentation helpers", () => {
     expect(notificationFocusTargetAfterDismiss([notification(1)], "daemon-a:1")).toEqual({ kind: "header" });
   });
 
-  it("retains collapse state by exact machine, cwd, and session identity", () => {
-    const collapsed = setNotificationTrayCollapsed(new Set(), target, true);
+  it("keeps the tray collapsed by default so routine notices never take transcript space", () => {
+    expect(notificationTrayDefaultCollapsed({ notifications: [] })).toBe(true);
+    expect(notificationTrayDefaultCollapsed({ notifications: [notification(1, "info"), notification(2, "warning")] })).toBe(true);
+  });
 
-    expect(notificationTrayIsCollapsed(collapsed, target)).toBe(true);
-    expect(notificationTrayIsCollapsed(collapsed, { ...target, machineId: "remote" })).toBe(false);
-    expect(notificationTrayIsCollapsed(collapsed, { ...target, cwd: "/other" })).toBe(false);
-    expect(notificationTrayIsCollapsed(collapsed, { ...target, sessionId: "session-2" })).toBe(false);
+  it("opens the tray by default only when an error is waiting", () => {
+    expect(notificationTrayDefaultCollapsed({ notifications: [notification(1, "info"), notification(2, "error")] })).toBe(false);
+    expect(notificationTrayIsCollapsed(new Map(), { ...target, notifications: [notification(1, "error")] })).toBe(false);
+  });
+
+  it("lets an explicit choice override the default in both directions", () => {
+    const routine = { ...target, notifications: [notification(1, "info")] };
+    const failing = { ...target, notifications: [notification(1, "error")] };
+
+    expect(notificationTrayIsCollapsed(setNotificationTrayCollapsed(new Map(), target, false), routine)).toBe(false);
+    expect(notificationTrayIsCollapsed(setNotificationTrayCollapsed(new Map(), target, true), failing)).toBe(true);
+  });
+
+  it("retains collapse state by exact machine, cwd, and session identity", () => {
+    const collapsed = setNotificationTrayCollapsed(new Map(), target, true);
+    const errorNotifications = [notification(1, "error")];
+
+    expect(notificationTrayIsCollapsed(collapsed, { ...target, notifications: errorNotifications })).toBe(true);
+    expect(notificationTrayIsCollapsed(collapsed, { ...target, machineId: "remote", notifications: errorNotifications })).toBe(false);
+    expect(notificationTrayIsCollapsed(collapsed, { ...target, cwd: "/other", notifications: errorNotifications })).toBe(false);
+    expect(notificationTrayIsCollapsed(collapsed, { ...target, sessionId: "session-2", notifications: errorNotifications })).toBe(false);
     expect(notificationTargetKey(target)).not.toBe(notificationTargetKey({ ...target, cwd: "/repo|session-1" }));
-    expect(notificationTrayIsCollapsed(setNotificationTrayCollapsed(collapsed, target, false), target)).toBe(false);
+    expect(notificationTrayIsCollapsed(setNotificationTrayCollapsed(collapsed, target, false), { ...target, notifications: errorNotifications })).toBe(false);
   });
 
   it("derives compact tray copy and a count that includes older unseen notifications", () => {

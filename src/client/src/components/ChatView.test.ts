@@ -219,7 +219,14 @@ describe("ChatView notification tray wiring", () => {
     expect(headerFocus).not.toHaveBeenCalled();
   });
 
-  it("keeps a collapsed tray closed for new arrivals and isolates matching session ids by exact chat", () => {
+  it("starts collapsed for a routine notice so the transcript keeps the space", () => {
+    const view = withNotificationInbox(new ChatView());
+    const inbox = requireNotificationInbox(view);
+
+    expect(notificationTrayIsCollapsed(new Map(), inbox)).toBe(true);
+  });
+
+  it("keeps an opened tray open for new arrivals and isolates matching session ids by exact chat", () => {
     const view = withNotificationInbox(new ChatView());
     const inbox = requireNotificationInbox(view);
     const rendered = renderNotificationTray(view);
@@ -227,8 +234,8 @@ describe("ChatView notification tray wiring", () => {
 
     templateEventHandlerAfterMarker(rendered, "notification-toggle")(new Event("click"));
 
-    const collapsedTargetKeys: unknown = Reflect.get(view, "collapsedNotificationTargetKeys");
-    if (!(collapsedTargetKeys instanceof Set)) throw new Error("Expected collapsed notification target keys");
+    const preferences: unknown = Reflect.get(view, "collapsedNotificationTargetKeys");
+    if (!(preferences instanceof Map)) throw new Error("Expected notification tray preferences");
     const firstNotification = inbox.notifications[0];
     if (firstNotification === undefined) throw new Error("expected a retained notification");
     const newArrival = {
@@ -236,10 +243,10 @@ describe("ChatView notification tray wiring", () => {
       notifications: [{ ...firstNotification, id: "daemon-a:2", order: 2 }, ...inbox.notifications],
       retainedCount: 2,
     };
-    expect(notificationTrayIsCollapsed(collapsedTargetKeys, newArrival)).toBe(true);
-    expect(notificationTrayIsCollapsed(collapsedTargetKeys, { ...newArrival, cwd: "/other" })).toBe(false);
-    expect(notificationTrayIsCollapsed(collapsedTargetKeys, { ...newArrival, machineId: "remote" })).toBe(false);
-    expect(collapsedTargetKeys.has(notificationTargetKey(inbox))).toBe(true);
+    expect(notificationTrayIsCollapsed(preferences, newArrival)).toBe(false);
+    expect(notificationTrayIsCollapsed(preferences, { ...newArrival, cwd: "/other" })).toBe(true);
+    expect(notificationTrayIsCollapsed(preferences, { ...newArrival, machineId: "remote" })).toBe(true);
+    expect(preferences.get(notificationTargetKey(inbox))).toBe(false);
   });
 });
 
