@@ -37,6 +37,8 @@ describe("orphan child row indicator", () => {
       parentLocation: () => workspaceLocation,
     });
 
+    await expandForks(list);
+
     const markers = [...list.shadowRoot?.querySelectorAll(".tree-marker") ?? []];
     expect(markers.map((marker) => marker.textContent)).toEqual(["↳", "↳"]);
     expect(markers.filter((marker) => marker.classList.contains("orphan-marker"))).toHaveLength(1);
@@ -78,6 +80,7 @@ describe("orphan child row indicator", () => {
     const parent = session("parent");
     const child = session("child", { parentSessionPath: parent.path });
     const list = await renderList({ sessions: [parent, child] });
+    await expandForks(list);
 
     const childRow = [...list.shadowRoot?.querySelectorAll(".action-row") ?? []][1];
     expect(childRow?.querySelector(".tree-marker")?.textContent).toBe("↳");
@@ -159,6 +162,7 @@ describe("go to parent session action", () => {
       onGoToParent: vi.fn(),
     });
 
+    await expandForks(list);
     await openMenu(list, 1);
     expect(findMenuButton(list, "Go to parent session")).toBeUndefined();
   });
@@ -176,6 +180,12 @@ async function renderList(options: {
   document.body.append(list);
   await list.updateComplete;
   return list;
+}
+
+/** Forks collapse under their root by default; nested rows need summoning first. */
+async function expandForks(list: SessionList): Promise<void> {
+  for (const toggle of [...list.shadowRoot?.querySelectorAll<HTMLButtonElement>(".fork-toggle") ?? []]) toggle.click();
+  await list.updateComplete;
 }
 
 function row(list: SessionList, index = 0): Element {

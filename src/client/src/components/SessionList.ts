@@ -2,6 +2,7 @@ import { LitElement, css, html, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { SessionActivity, SessionInfo, SessionStatus } from "../api";
 import { isCachedNewSessionInfo } from "../cachedNewSessions";
+import { forkGroupedRows, toggleExpandedSessionId, type DepthRow, type ForkGroupedRow } from "../sessionForkGrouping";
 import { shortSessionId } from "../sessionLabels";
 import { isArchivableSessionInfo, isTransientNewSessionInfo } from "../sessionPersistence";
 import { parentSessionLocationLabel, parentSessionLocationTitle, type ParentSessionLocation } from "../parentSessionLocation";
@@ -23,6 +24,9 @@ export interface SessionRow {
   depth: number;
   hasMissingParent: boolean;
 }
+
+/** A session row keyed for the fork-grouping model. */
+type ForkRow = SessionRow & DepthRow;
 
 type SessionSelectionScope = "current" | "archived";
 
@@ -55,6 +59,7 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
   @property({ attribute: false }) onDetachParent?: (session: SessionInfo) => void;
   /** Resolves where a row's out-of-workspace parent lives; defaults to "unknown" so the list works standalone. */
   @property({ attribute: false }) parentLocation: (session: SessionInfo) => ParentSessionLocation = () => ({ kind: "unknown" });
+  @state() private expandedForkIds: ReadonlySet<string> = new Set();
   @property({ attribute: false }) onGoToParent?: (session: SessionInfo, location: ParentSessionLocation) => void;
   @property({ attribute: false }) onMarkRead?: (session: SessionInfo) => void;
   @property({ attribute: false }) onMarkReadMany?: (sessions: SessionInfo[]) => void | Promise<void>;
@@ -127,6 +132,8 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     const archivedRows = sessionRows(this.sessions.filter((session) => session.archived === true && !currentRowIds.has(session.id)));
     const descendantCounts = unarchivedDescendantCounts(this.sessions);
     const unreadCount = unreadSessionCount(currentSelectableSessions, this.unreadSessionIds);
+    const groupedCurrent = this.groupedRows(currentRows);
+    const groupedArchived = this.groupedRows(archivedRows);
     return html`
       <section>
         ${this.renderHeading(currentRows.length + archivedRows.length, currentSelectableSessions, unreadCount)}
@@ -134,18 +141,30 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
           <div class="list-body">
             ${this.renderCurrentSelectionToolbar(currentSelectableSessions)}
             ${this.startingCount > 0 ? this.renderStartingSession() : null}
-            ${currentRows.map((row) => this.renderSession(row, descendantCounts.get(row.session.id) ?? 0, "current"))}
+            ${groupedCurrent.map((grouped) => this.renderSession(grouped, descendantCounts.get(grouped.row.session.id) ?? 0, "current"))}
             ${archivedRows.length > 0 ? html`
               ${this.renderArchivedHeading(archivedRows.map((row) => row.session))}
               ${this.archivedExpanded ? html`
                 ${this.renderArchivedSelectionToolbar(archivedRows.map((row) => row.session))}
-                ${archivedRows.map((row) => this.renderSession(row, descendantCounts.get(row.session.id) ?? 0, "archived"))}
+                ${groupedArchived.map((grouped) => this.renderSession(grouped, descendantCounts.get(grouped.row.session.id) ?? 0, "archived"))}
               ` : null}
             ` : null}
           </div>
         `}
       </section>
     `;
+  }
+
+  /** Collapses fork subtrees, always keeping the selected session reachable. */
+  private groupedRows(rows: SessionRow[]): ForkGroupedRow<ForkRow>[] {
+    return forkGroupedRows(
+      rows.map((row) => ({ ...row, id: row.session.id })),
+      { expandedIds: this.expandedForkIds, ...(this.selected === undefined ? {} : { revealId: this.selected.id }) },
+    );
+  }
+
+  private toggleForkGroup(sessionId: string): void {
+    this.expandedForkIds = toggleExpandedSessionId(this.expandedForkIds, sessionId);
   }
 
   private renderHeading(sessionCount: number, currentSessions: SessionInfo[], unreadCount: number) {
@@ -264,7 +283,8 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
       : html`<button @click=${() => { this.clearSelection(scope); }}>Clear selected (${selectedCount})</button>`;
   }
 
-  private renderSession(row: SessionRow, descendantCount: number, scope: SessionSelectionScope) {
+  private renderSession(grouped: ForkGroupedRow<ForkRow>, descendantCount: number, scope: SessionSelectionScope) {
+    const row = grouped.row;
     const { session } = row;
     const cappedDepth = Math.min(row.depth, 2);
     const canBulkSelect = sessionSelectionScope(session) === scope;
@@ -288,7 +308,7 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
       >
         <div class="action-main ${selectionActive ? "selecting" : ""}">
           ${showsCheckbox ? html`<input class="session-checkbox" type="checkbox" aria-label=${`Select ${sessionLabel(session)}`} .checked=${bulkSelected} @click=${(event: MouseEvent) => { event.stopPropagation(); }} @change=${() => { this.toggleSelected(session.id); }}>` : null}
-          <span class="action-name-line"><span class="action-name" dir="auto">${this.renderRowMarker(row)}${sessionLabel(session)}</span>${this.renderRowBadges(row)}</span><small>${this.renderSessionMetaPrefix(session, status, activity)}${this.renderRelatedSessionsMeta(row)}${String(session.messageCount)} messages</small>
+          <span class="action-name-line">${this.renderForkToggle(grouped)}<span class="action-name" dir="auto">${this.renderRowMarker(row)}${sessionLabel(session)}</span>${this.renderRowBadges(row)}</span><small>${this.renderSessionMetaPrefix(session, status, activity)}${this.renderRelatedSessionsMeta(row)}${String(session.messageCount)} messages</small>
           ${this.renderActivity(indicatorKind, unread)}
         </div>
         <div class="action-menu">
@@ -326,6 +346,24 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
    * to signal that the parent itself is not shown here. Where that parent lives
    * is a separate question, answered by the badge on the other side of the row.
    */
+  /**
+   * Fork count doubles as the disclosure control: a root states how many forks
+   * it hides, so the list shows distinct work instead of a repeated title.
+   */
+  private renderForkToggle(grouped: ForkGroupedRow<ForkRow>) {
+    if (!grouped.expandable) return null;
+    const count = grouped.descendantCount;
+    const noun = count === 1 ? "fork" : "forks";
+    const label = `${grouped.expanded ? "Hide" : "Show"} ${String(count)} ${noun} of ${sessionLabel(grouped.row.session)}`;
+    return html`<button
+      class="fork-toggle"
+      title=${label}
+      aria-label=${label}
+      aria-expanded=${String(grouped.expanded)}
+      @click=${(event: MouseEvent) => { event.stopPropagation(); this.toggleForkGroup(grouped.row.session.id); }}
+    ><span class="fork-chevron ${grouped.expanded ? "expanded" : ""}">›</span><span class="fork-count">${String(count)}</span></button>`;
+  }
+
   private renderRowMarker(row: SessionRow) {
     if (row.hasMissingParent) {
       const location = this.parentLocation(row.session);
@@ -511,6 +549,14 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     .plain-heading { min-width: 0; }
     .action-name-line { min-width: 0; display: flex; align-items: flex-start; gap: 6px; }
     .action-name-line .action-name { flex: 1 1 auto; min-width: 0; }
+    .fork-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; min-height: 24px; margin: -2px 0; padding: 1px 6px 1px 4px; border: 1px solid var(--pi-border-muted); border-radius: 999px; background: var(--pi-surface); color: var(--pi-muted); font: 11px system-ui, sans-serif; cursor: pointer; }
+    .fork-toggle:hover, .fork-toggle:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
+    .fork-toggle:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
+    .fork-chevron { display: inline-block; line-height: 1; transition: transform 120ms ease-out; }
+    .fork-chevron.expanded { transform: rotate(90deg); }
+    .fork-count { font-variant-numeric: tabular-nums; }
+    @media (prefers-reduced-motion: reduce) { .fork-chevron { transition: none; } }
+    @media (pointer: coarse) { .fork-toggle { min-height: 28px; padding-inline: 8px 6px; } }
     /* Badges must not sit inside the line-clamped title, or a long name hides them entirely. */
     .row-badges { flex: 0 0 auto; display: flex; align-items: flex-start; gap: 4px; }
     .row-badges .badge { margin-left: 0; white-space: nowrap; }
