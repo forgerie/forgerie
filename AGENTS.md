@@ -54,6 +54,14 @@ review. A partial review does not move the cursor.
 - **Low / usually skip**: upstream client UI (`src/client/`), styling, bundled
   plugin UX — this is where we diverge.
 
+## Machine-local instructions
+
+If `AGENTS.local.md` exists in the repo root (gitignored, per-machine), read
+it before making changes. It carries the local deployment rules — including
+the standing rule that **user-facing changes on `main` must be followed by
+updating/restarting the local systemd user units**, so the running instance
+tracks `main` without a NixOS rebuild.
+
 ## Product facts
 
 - Runs on the user's server (zao, NixOS), accessed over Tailscale only. No
