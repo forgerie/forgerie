@@ -118,6 +118,20 @@ describe("PiWebApp global shortcut modality boundary", () => {
   });
 });
 
+describe("PiWebApp on-screen keyboard layout", () => {
+  it("keeps the composer and omits the session status strip while the keyboard is open", () => {
+    const app = new PiWebApp();
+    const selectedSession = session("session-keyboard");
+    setAppState(app, { selectedSession, sessions: [selectedSession], mainView: "chat" });
+    setOnScreenKeyboardOpen(app, true);
+
+    const container = renderApp(app);
+
+    expect(container.querySelector("prompt-editor")).not.toBeNull();
+    expect(container.querySelector("status-bar")).toBeNull();
+  });
+});
+
 type AppKeyDownHandler = (event: KeyboardEvent) => void;
 type FocusChatComposer = (this: PiWebApp) => Promise<void>;
 
@@ -242,6 +256,13 @@ function actionPaletteIsOpen(app: PiWebApp): boolean {
 
 function setAppState(app: PiWebApp, patch: Partial<AppState>): void {
   if (!Reflect.set(app, "state", { ...initialAppState(), ...patch })) throw new Error("Could not set PiWebApp state");
+}
+
+function setOnScreenKeyboardOpen(app: PiWebApp, open: boolean): void {
+  const controller: unknown = Reflect.get(app, "onScreenKeyboard");
+  if (typeof controller !== "object" || controller === null || !Reflect.set(controller, "isOpen", open)) {
+    throw new Error("Could not update the on-screen keyboard state");
+  }
 }
 
 function appendKeyTarget(): HTMLButtonElement {

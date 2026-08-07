@@ -18,6 +18,7 @@ describe("production client build contents", () => {
       });
 
       const html = await readFile(join(outDir, "index.html"), "utf8");
+      expect(html).toContain("interactive-widget=resizes-content");
       const references = htmlAssetReferences(html);
       expect(references).toContain("./favicon.svg");
       expect(references).toContain("./apple-touch-icon.png");

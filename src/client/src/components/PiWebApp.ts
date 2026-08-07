@@ -40,6 +40,7 @@ import { queryNamespace, readNamespacedString, setNamespacedQueryKey } from "../
 import { AppShellController } from "../appShell/appShellController";
 import { BrowserResumeController } from "../appShell/browserResumeController";
 import { NavigationSectionsController, type NavigationSection } from "../appShell/navigationState";
+import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
 import { PanelCollapseController, mainViewClass } from "../appShell/panelCollapseController";
 import { shellLayoutModeClass } from "../appShell/shellLayoutMode";
 import { PanelResizeController, type PanelResizeConstraints, type ResizablePanelSide } from "../appShell/panelResizeController";
@@ -210,6 +211,9 @@ export class PiWebApp extends LitElement {
   private readonly machineNavigation = new SessionStorageMachineNavigationMemory();
   private readonly terminalSelection = new SessionStorageTerminalSelectionMemory();
   private readonly appShell = new AppShellController(this);
+  private readonly onScreenKeyboard = new OnScreenKeyboardController(this, {
+    isComposerFocused: () => this.promptEditor?.matches(":focus-within") === true,
+  });
   private readonly browserResume = new BrowserResumeController({
     onResumeSignal: () => { this.handleBrowserResumeSignal(); },
     refreshAfterResume: () => this.refreshAfterBrowserResume(),
@@ -2092,6 +2096,7 @@ export class PiWebApp extends LitElement {
   }
 
   private renderStatusBar(state: AppState) {
+    if (this.onScreenKeyboard.isOpen) return null;
     const warningCount = this.sessionWarningVisibility.warningCount;
     return html`
       <status-bar .status=${state.status} .activity=${state.activity} .isSendingPrompt=${state.selectedSession !== undefined && state.sendingPrompts[state.selectedSession.id] === true} .warningCount=${warningCount} .warningsExpanded=${warningCount > 0 && !this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings}></status-bar>
