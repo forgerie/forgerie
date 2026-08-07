@@ -1,49 +1,79 @@
-# Agent Notes
+# Forgerie
 
-This project is expected to run locally using split systemd user services:
+Forgerie is a web-based control surface for the Pi coding agent: multi-project,
+multi-session, server-hosted, browser-driven. It is a **hard fork** of
+[jmfederico/pi-web](https://github.com/jmfederico/pi-web), kept as its own
+product. The UX will diverge heavily from upstream by design.
 
-- `pi-web-sessiond.service` runs `npm run start:sessiond` in non-autoreload, non-auto-restart mode.
-- `pi-web-ui-dev.service` runs the web/API and Vite UI in dev autoreload mode with `npm run dev:web` and `npm run dev:client`.
+## Fork model: quasi-upstream via `upstream.lock`
 
-When working on this project, assume the session runtime owner is long-lived and separate from the autoreloading UI/API process. Browser disconnects and UI/API restarts should not stop active Pi sessions.
+We do not merge from upstream. Upstream is a supplier of ideas and fixes that
+we review deliberately and adopt selectively.
 
-If you make changes that affect `src/server/sessiond.ts`, session runtime ownership, the session daemon protocol, or any code path only loaded by the session daemon, inform the user that a manual restart of the session daemon is needed.
+- `upstream.lock` (repo root) pins the last upstream commit we have fully
+  reviewed. It is a cursor, not a dependency. "Everything up to this commit has
+  been seen and judged."
+- The git remote `upstream` points at jmfederico/pi-web. There is no tracking
+  relationship between our branches and upstream branches.
+- Divergence is expected and permanent. Do not try to keep files mergeable
+  with upstream. Never run `git merge upstream/main`.
 
-Changes to the web/API/UI side generally only require the `pi-web-ui-dev.service` autoreload/restart path.
+### Upstream review ritual
 
-## Documentation boundaries
+When asked to "review upstream", "catch up with upstream", or similar:
 
-`README.md` is a concise landing page and quick start. Keep it focused on what PI WEB is, basic requirements, the shortest supported install path, essential commands, the core model, and links to detailed documentation.
+1. Read `upstream.lock` for the current cursor commit.
+2. `git fetch upstream`, then diff/log from the cursor to `upstream/main`:
+   `git log --oneline <cursor>..upstream/main` and targeted
+   `git diff <cursor>..upstream/main -- <paths>`.
+3. Produce a digest grouped by relevance, not by commit:
+   - **Adopt**: fixes and features we want (sessiond/session-daemon fixes,
+     reconnect/persistence work, security fixes are high priority).
+   - **Skip**: upstream UI/UX work that conflicts with our diverged UX,
+     or features we do not want. Say why.
+   - **Discuss**: anything ambiguous. Ask before porting.
+4. Port adopted changes **semantically**: reimplement them against our
+   diverged code. Cherry-picks are allowed only when the touched files have
+   not diverged; otherwise rewrite by hand. Never resolve a port by reverting
+   our divergence.
+5. Record the session in `docs/upstream-reviews/YYYY-MM-DD.md`: cursor range
+   reviewed, what was adopted (with our commit shas), what was skipped and
+   why. Skipped decisions are final unless the user reopens them — do not
+   re-litigate old skips in later reviews.
+6. Advance `upstream.lock` to the reviewed upstream commit (update
+   `reviewedCommit`, `reviewedDescribe`, `reviewedAt`).
 
-Put installation variants, troubleshooting, configuration details, operational behavior, architecture, edge cases, and exhaustive explanations under `docs/`. Avoid duplicating detailed documentation in the README; link to its canonical location instead.
+The lock file only ever moves forward, and only at the end of a completed
+review. A partial review does not move the cursor.
 
-Use `.agents/skills/documentation-guide/SKILL.md` whenever writing, modifying, reviewing, or planning user-facing documentation.
+### Adoption priorities
 
-## Testing guidance
+- **High**: `src/server/sessiond*`, session persistence, reconnect/replay,
+  ask/dialog stores, subsession machinery, security fixes, pi SDK version
+  bumps (`@earendil-works/pi-*`).
+- **Low / usually skip**: upstream client UI (`src/client/`), styling, bundled
+  plugin UX — this is where we diverge.
 
-Project-specific testing rules live in `.agents/skills/testing-guide/SKILL.md`.
+## Product facts
 
-Use that skill whenever writing, modifying, reviewing, or planning tests, closing coverage gaps, triaging test failures, or creating test helpers/harnesses. Keep detailed testing conventions there rather than growing this top-level orientation file.
+- Runs on the user's server (zao, NixOS), accessed over Tailscale only. No
+  auth layer of its own; network exposure is Tailscale's job.
+- Chat is fully web-native; embedded terminals are the escape hatch, not the
+  primary surface.
+- Reuses the user's real pi profile at `~/.pi/agent` (credentials, sessions,
+  packages, extensions) via the session daemon.
+- The daemon's `ask_user` custom tool shadows any extension-registered
+  `ask_user` (pi merges tools by name, SDK customTools last). This is relied
+  upon: the TUI keeps `pi-ask-user`, Forgerie uses the web-native form.
+- Provider registrations freeze at sessiond startup. Provider/extension
+  changes need a sessiond restart, not `/reload`.
 
-## Verification reporting
+## Upstream inheritance
 
-Never report failed, incomplete, or skipped verification as passing. Identify any expected check that was not run and why, and do not mask a non-zero result. If a command intentionally probes a failure path or captures an exit for inspection, state that purpose and interpret the result.
-
-## Client application URL convention
-
-- Build PI WEB-owned browser paths as application-relative references without a leading slash, for example `api/...` and `pi-web-plugins/...`.
-- Encode every dynamic path segment with `encodeURIComponent`; encode query values, using `URLSearchParams` for multi-field queries.
-- Resolve each reference exactly once at the browser boundary: ordinary JSON HTTP paths go to `request()`, direct browser APIs receive URLs from helpers backed by `resolveAppUrl()`, and WebSockets use `resolveAppWebSocketUrl()`.
-- Name helpers returning unresolved application references with a `Path` suffix and helpers returning browser-ready absolute values with a `Url` suffix.
-- Plugin module references must go through `resolvePluginModuleUrl()`. Its leading-slash handling is the documented rolling-compatibility exception; do not introduce other leading-root app references.
-- Pre-JavaScript HTML assets use Vite `%BASE_URL%`; PWA manifest references stay `./`-relative. External links, data URLs, and module-relative plugin assets are not application paths.
-- To assess deviations, search production client code for raw `fetch`, `WebSocket`, `XMLHttpRequest`, URL-bearing DOM attributes, and leading `/api` or `/pi-web-plugins` literals. Every app-owned result must follow one of the boundaries above.
-- Published nested deployments require a canonical trailing slash; the reverse proxy must redirect a slashless prefix before serving the app.
-
-## Configuration conventions
-
-- `$PI_WEB_DATA_DIR` (`~/.pi-web` by default) contains PI WEB-managed state such as `projects.json` and `machines.json`; do not treat it as the user-editable config API.
-- Global user/machine config lives at `$PI_WEB_CONFIG` or `~/.config/pi-web/config.json`.
-- Project-local PI WEB core config should use one commit-able file: `<project>/.pi-web/config.json`.
-- Core features should add keys to these config files, not create one project file per feature.
-- Plugins may own separate project config files, such as `.pi-web/tasks.json`.
+- License: MIT (upstream © Federico Jaramillo Martinez). Keep attribution.
+- Before any publish: rename the npm package and bins; do not ship as
+  `@jmfederico/pi-web`.
+- Dev commands (inherited, still valid until we change them):
+  - `npm install` then `npm run dev` (sessiond + web + client watchers)
+  - `npm run verify` (typecheck, lint, knip, tests) — run before commits
+  - Node >= 22.19.0; on this machine use `nix shell nixpkgs#nodejs_22`
