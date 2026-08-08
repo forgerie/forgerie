@@ -46,6 +46,11 @@ export class AppNavigationPanel extends LitElement {
    * Fires when the inbox new-session button is clicked.
    */
   @property({ attribute: false }) onNewSession?: () => void | Promise<void>;
+  /**
+   * Entry point for U7 (manage workspaces).
+   * Fires when the inbox 'Workspaces' management button is clicked.
+   */
+  @property({ attribute: false }) onManageWorkspaces?: () => void | Promise<void>;
   @property({ attribute: false }) unavailableCwds: ReadonlySet<string> = new Set();
   @property({ attribute: false }) onFocusNavigationTarget?: (target: NavigationFocusTarget) => void | Promise<void>;
   @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
@@ -114,6 +119,7 @@ export class AppNavigationPanel extends LitElement {
         .onArchiveSession=${this.onArchiveSession === undefined ? undefined : (s: SessionInfo) => this.onArchiveSession?.(s)}
         .onRestoreSession=${this.onRestoreSession === undefined ? undefined : (s: SessionInfo) => this.onRestoreSession?.(s)}
         .onNewSession=${this.onNewSession === undefined ? undefined : () => this.onNewSession?.()}
+        .onManageWorkspaces=${this.onManageWorkspaces === undefined ? undefined : () => this.onManageWorkspaces?.()}
         .unavailableCwds=${this.unavailableCwds}
         data-machine=${machineId ?? ""}
       ></session-inbox-panel>

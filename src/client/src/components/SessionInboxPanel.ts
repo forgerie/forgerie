@@ -119,6 +119,11 @@ export class SessionInboxPanel extends LitElement {
   @property({ attribute: false }) onRestoreSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onNewSession?: () => void;
   /**
+   * Opens the workspace management picker (manage mode). Fires when the
+   * persistent 'Workspaces' entry in the inbox header is clicked.
+   */
+  @property({ attribute: false }) onManageWorkspaces?: () => void;
+  /**
    * Cwds confirmed to have no matching workspace after lazy loading all
    * known projects. Rows whose session.cwd is in this set render as disabled
    * with a 'workspace removed' label, identical to unknown-location rows.
@@ -306,6 +311,13 @@ export class SessionInboxPanel extends LitElement {
             @click=${() => { this.setGroupBy("project"); }}
           >Project</button>
         </div>
+        <button
+          class="manage-workspaces-btn"
+          data-action="manage-workspaces"
+          title="Manage workspaces"
+          aria-label="Manage workspaces"
+          @click=${() => { this.onManageWorkspaces?.(); }}
+        >Workspaces</button>
         <button
           class="new-session-btn"
           data-action="new-session"
@@ -553,12 +565,33 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-text-bright, #fff);
     }
 
+    .manage-workspaces-btn {
+      box-sizing: border-box;
+      display: inline-grid;
+      place-items: center;
+      min-height: 44px;
+      padding: 0 10px;
+      font: inherit;
+      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      color: var(--pi-muted, #aaa4bd);
+      background: var(--pi-surface, #101527);
+      border: 1px solid var(--pi-border, #26304f);
+      border-radius: 8px;
+      cursor: pointer;
+      margin-left: auto;
+    }
+
+    .manage-workspaces-btn:hover {
+      color: var(--pi-text, #f7f4ff);
+      background: var(--pi-surface-hover, #151b31);
+    }
+
     .new-session-btn {
       box-sizing: border-box;
       display: inline-grid;
       place-items: center;
-      min-width: 30px;
-      height: 30px;
+      min-width: 44px;
+      min-height: 44px;
       padding: 0 9px;
       font: inherit;
       color: var(--pi-text);
@@ -566,7 +599,6 @@ export class SessionInboxPanel extends LitElement {
       border: 1px solid var(--pi-border, #26304f);
       border-radius: 8px;
       cursor: pointer;
-      margin-left: auto;
     }
 
     .new-session-btn:hover {

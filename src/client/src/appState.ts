@@ -100,6 +100,8 @@ export interface AppState {
   thinkingDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
   themeDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
   authDialog: AuthDialogState | undefined;
+  /** State for the new-session / workspace-management picker dialog (U7). */
+  newSessionDialog: NewSessionDialogState | undefined;
   actionPaletteOpen: boolean;
   projectDialogOpen: boolean;
   machineDialogOpen: boolean;
@@ -130,6 +132,31 @@ export interface ClosedExtensionDialog {
   /** Present only when `reason` is `"answered"`. */
   answer?: ExtensionDialogAnswer;
 }
+
+/**
+ * State for the new-session / workspace-management picker dialog (U7).
+ *
+ * Owned by PiWebApp, passed to SessionInboxNewSessionDialog.
+ * The dialog is closed when this is `undefined`.
+ *
+ * Steps:
+ *   "project" — the user is picking which project to use.
+ *   "workspace" — workspaces are loaded (or loading) for the chosen project.
+ *
+ * Mode:
+ *   "start" — the primary action is "Start session".
+ *   "manage" — the primary action is "Manage" (no session is started).
+ */
+export type NewSessionDialogState =
+  | { step: "project"; mode: "start" | "manage" }
+  | {
+      step: "workspace";
+      project: Project;
+      mode: "start" | "manage";
+      workspaces: readonly Workspace[];
+      loading: boolean;
+      error: string | undefined;
+    };
 
 export type AuthDialogState =
   | { step: "method" }
@@ -222,6 +249,7 @@ export function initialAppState(): AppState {
     thinkingDialog: undefined,
     themeDialog: undefined,
     authDialog: undefined,
+    newSessionDialog: undefined,
     actionPaletteOpen: false,
     projectDialogOpen: false,
     machineDialogOpen: false,

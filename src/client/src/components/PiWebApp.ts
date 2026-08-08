@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
-import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
+import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
 import { isSessionActive } from "../../../shared/activity";
@@ -79,6 +79,7 @@ import "./appShell/AppMobileMainTabs";
 import type { AppMobileMainTab, AppMobileMainTabIcon } from "./appShell/AppMobileMainTabs";
 import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import "./SessionInboxPanel";
+import "./SessionInboxNewSessionDialog";
 import { navigateToInboxSession } from "../controllers/inboxNavigation";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
@@ -1331,7 +1332,8 @@ export class PiWebApp extends LitElement {
         .onSelectSession=${(session: SessionInfo) => { void this.selectInboxSession(session); }}
         .onArchiveSession=${(session: SessionInfo) => this.sessions.archiveSession(session)}
         .onRestoreSession=${(session: SessionInfo) => { void this.restoreInboxSession(session); }}
-        .onNewSession=${() => { void this.startSessionFromNavigation(); }}
+        .onNewSession=${() => { this.setState({ newSessionDialog: { step: "project", mode: "start" } }); }}
+        .onManageWorkspaces=${() => { this.setState({ newSessionDialog: { step: "project", mode: "manage" } }); }}
         .onCancelKeyboardNavigation=${() => { void this.focusChatComposer(); }}
         .unavailableCwds=${this.unavailableCwds}
       ></app-navigation-panel>
@@ -1471,6 +1473,96 @@ export class PiWebApp extends LitElement {
       if (project === undefined) return;
       await this.workspaces.selectProject(project, { workspaceId: location.workspaceId, sessionId: location.sessionId });
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // U7: new-session / workspace-management dialog
+  // -------------------------------------------------------------------------
+
+  /**
+   * Called when the user selects a project in the dialog.
+   * Loads workspaces (lazy) and advances the dialog to the workspace step.
+   */
+  private async openNewSessionDialogWorkspaceStep(project: Project): Promise<void> {
+    const mode = this.state.newSessionDialog?.mode ?? "start";
+    // Show loading state immediately so the user knows work is in flight.
+    this.setState({
+      newSessionDialog: {
+        step: "workspace",
+        project,
+        mode,
+        workspaces: [],
+        loading: true,
+        error: undefined,
+      },
+    });
+    try {
+      const workspaces = await this.workspaces.refreshProjectWorkspaces(project.id);
+      // Guard: if the user cancelled or navigated away, discard the result.
+      const current = this.state.newSessionDialog;
+      if (current?.step !== "workspace" || current.project.id !== project.id) return;
+      this.setState({ newSessionDialog: { ...current, workspaces, loading: false } });
+    } catch (error: unknown) {
+      const current = this.state.newSessionDialog;
+      if (current?.step !== "workspace" || current.project.id !== project.id) return;
+      this.setState({
+        newSessionDialog: { ...current, loading: false, error: String(error) },
+      });
+    }
+  }
+
+  /**
+   * User confirmed a workspace in "start" mode.
+   * Navigate to the workspace via the normal cascade, then start a session.
+   * Closes the dialog before the async work starts so the UI unblocks.
+   */
+  private async confirmNewSessionStart(workspace: Workspace): Promise<void> {
+    this.setState({ newSessionDialog: undefined });
+    const seq = ++this.navigationSelectionSeq;
+    const isCurrentToken = () => seq === this.navigationSelectionSeq;
+    const navigated = await this.navigateToWorkspace(workspace, isCurrentToken);
+    if (!navigated || !isCurrentToken()) return;
+    await this.startSessionAndOpenChat(isCurrentToken);
+  }
+
+  /**
+   * User confirmed a workspace in "manage" mode.
+   * Navigate to the workspace via the normal cascade but do NOT start a session.
+   * Closes the dialog, then exposes the workspace tools.
+   */
+  private async confirmManageWorkspace(workspace: Workspace): Promise<void> {
+    this.setState({ newSessionDialog: undefined });
+    const seq = ++this.navigationSelectionSeq;
+    const isCurrentToken = () => seq === this.navigationSelectionSeq;
+    const navigated = await this.navigateToWorkspace(workspace, isCurrentToken);
+    if (!navigated || !isCurrentToken()) return;
+    // Expose the workspace panel (switch main view to the active workspace tool).
+    this.openWorkspaceTool(this.state.workspaceTool);
+  }
+
+  /**
+   * Pure navigation helper shared by the start and manage dialog flows.
+   * Routes through the same selectProject / selectWorkspace cascade used
+   * everywhere else — no special-casing.
+   */
+  private async navigateToWorkspace(
+    workspace: Workspace,
+    isCurrentToken: () => boolean,
+  ): Promise<boolean> {
+    if (!isCurrentToken()) return false;
+    if (this.state.selectedProject?.id === workspace.projectId) {
+      // Same project — just switch workspace.
+      await this.workspaces.selectWorkspace(workspace, { isCurrent: isCurrentToken });
+    } else {
+      // Different project — go through selectProject which loads the workspace list.
+      const project = this.state.projects.find((p) => p.id === workspace.projectId);
+      if (project === undefined) return false;
+      await this.workspaces.selectProject(project, {
+        workspaceId: workspace.id,
+        isCurrent: isCurrentToken,
+      });
+    }
+    return isCurrentToken() && this.state.selectedWorkspace?.id === workspace.id;
   }
 
   private async startSessionFromNavigation(): Promise<void> {
@@ -2323,6 +2415,20 @@ export class PiWebApp extends LitElement {
         </main>
         ${this.renderWorkspacePanelEdgeControl()}
         ${this.renderWorkspacePanel()}
+        ${state.newSessionDialog !== undefined ? html`<session-inbox-new-session-dialog
+          .dialogState=${state.newSessionDialog}
+          .projects=${state.projects}
+          .onSelectProject=${(project: Project) => { void this.openNewSessionDialogWorkspaceStep(project); }}
+          .onConfirmStart=${(workspace: Workspace) => { void this.confirmNewSessionStart(workspace); }}
+          .onConfirmManage=${(workspace: Workspace) => { void this.confirmManageWorkspace(workspace); }}
+          .onBack=${() => {
+            const current = state.newSessionDialog;
+            if (current !== undefined) {
+              this.setState({ newSessionDialog: { step: "project", mode: current.mode } });
+            }
+          }}
+          .onCancel=${() => { this.setState({ newSessionDialog: undefined }); }}
+        ></session-inbox-new-session-dialog>` : null}
         ${state.authDialog !== undefined ? html`<auth-dialog .state=${state.authDialog} .onChooseMethod=${(authType: "oauth" | "api_key") => { void this.auth.chooseLoginMethod(authType); }} .onSelectProvider=${(providerId: string, authType: "oauth" | "api_key") => { void this.auth.selectLoginProvider(providerId, authType); }} .onLogoutProvider=${(providerId: string) => { void this.auth.logoutProvider(providerId); }} .onOAuthInput=${(value: string) => { this.auth.updateOAuthInput(value); }} .onOAuthRespond=${(value?: string) => { void this.auth.respondOAuth(value); }} .onOAuthCancel=${() => { void this.auth.cancelOAuth(); }} .onCancel=${() => { this.auth.closeDialog(); }}></auth-dialog>` : null}
         ${state.actionPaletteOpen ? html`<action-palette .actions=${this.getActions()} .onRun=${(action: AppAction) => { this.setState({ actionPaletteOpen: false }); this.runAction(action); }} .onCancel=${() => { this.setState({ actionPaletteOpen: false }); }}></action-palette>` : null}
         ${this.renderSessionTreeNavigator(state)}
