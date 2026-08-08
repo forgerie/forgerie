@@ -3,7 +3,7 @@ id: 01KZF4JF5TPQA7C6F4ZXC84ESZ
 slug: render-pi-processes-custom-messages-from-details-instead-of-
 title: Render pi-processes custom messages from details instead of raw model-facing XML
 origin: parked
-status: To Do
+status: Done
 priority: medium
 labels:
   - ux
@@ -21,11 +21,11 @@ Each `ad-process:notification` entry paints ~510 characters of `<process_event>`
 
 ## Acceptance Criteria
 
-- [ ] A custom_message with a details.summary renders as a compact card (status, process name, exit code, duration) instead of raw content
-- [ ] The raw model-facing content stays reachable behind disclosure
-- [ ] Unknown customTypes with no usable details fall back to today's raw-content rendering
-- [ ] Survey which other extensions emit custom_message types with details before fixing the projection shape
-- [ ] Verified across the four Fold 8 postures per AGENTS.md
+- [x] A custom_message with a details.summary renders as a compact card (status, process name, exit code, duration) instead of raw content
+- [x] The raw model-facing content stays reachable behind disclosure
+- [x] Unknown customTypes with no usable details fall back to today's raw-content rendering
+- [x] Survey which other extensions emit custom_message types with details before fixing the projection shape
+- [x] Verified across the four Fold 8 postures per AGENTS.md
 
 ## Related
 
