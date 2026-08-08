@@ -75,6 +75,12 @@ tracks `main` without a NixOS rebuild.
   upon: the TUI keeps `pi-ask-user`, Forgerie uses the web-native form.
 - Provider registrations freeze at sessiond startup. Provider/extension
   changes need a sessiond restart, not `/reload`.
+- Managed background processes are first-class: `ad-process:notification`
+  messages render as chat cards, and the Processes workspace panel exposes the
+  selected session's list, logs, stop, and capability-gated stdin. Runtime
+  reliability depends on the locally patched `pi-processes` package maintained
+  in `mountainous/packages/pi-processes-patched`; keep its fork divergence to
+  the non-login spawn fix and additive stdin-write protocol.
 
 ## Acceptance device and visual testing
 
