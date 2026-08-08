@@ -22,6 +22,8 @@ import { SessionStorageWorkspaceSelectionMemory } from "../controllers/workspace
 import { KeyboardShortcutDispatcher } from "../keyboardShortcuts";
 import { selectedMachineId } from "../controllers/types";
 import { machineSessionKey } from "../machineKeys";
+import { createManagedProcessesRuntime } from "../managedProcessesRuntime";
+import type { ManagedProcessesBrowserEvent, ManagedProcessesRuntime } from "../../../plugin-api/unstable";
 import { resolveParentSessionLocation, type ParentSessionLocation } from "../parentSessionLocation";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
 import { selectedNotificationView } from "../sessionNotifications";
@@ -127,6 +129,7 @@ export class PiWebApp extends LitElement {
   private unreadConnected = false;
   private committedChatIdentity: string | undefined;
   private readyChatIdentity: string | undefined;
+  private readonly managedProcessesListeners = new Set<(event: ManagedProcessesBrowserEvent) => void>();
 
   private readonly notifications = new SessionNotificationController(
     () => this.state,
@@ -140,6 +143,9 @@ export class PiWebApp extends LitElement {
     new SessionStorageSessionSelectionMemory(),
     {
       notifications: this.notifications,
+      onManagedProcessesEvent: (event) => {
+        for (const listener of this.managedProcessesListeners) listener(event);
+      },
       onSelectedSessionReady: ({ machineId, session }) => {
         void this.commitReadyChatAfterRender(machineId, session);
       },
@@ -849,6 +855,18 @@ export class PiWebApp extends LitElement {
     return runtime;
   }
 
+  private managedProcessesRuntime(machineId: string): ManagedProcessesRuntime {
+    const selected = this.state.selectedSession;
+    return createManagedProcessesRuntime(
+      selected === undefined ? undefined : { machineId, id: selected.id, cwd: selected.cwd },
+      sessionsApi,
+      (listener) => {
+        this.managedProcessesListeners.add(listener);
+        return () => { this.managedProcessesListeners.delete(listener); };
+      },
+    );
+  }
+
   private async openRuntimeTerminal(machineId: string, workspace: Workspace | undefined, options?: { terminalId?: string | undefined }): Promise<void> {
     if (selectedMachineId(this.state) !== machineId || (workspace !== undefined && (this.state.selectedWorkspace?.id !== workspace.id || this.state.selectedProject?.id !== workspace.projectId))) {
       if (!this.routeRestoreInProgress) this.rememberCurrentMachineNavigation();
@@ -1536,7 +1554,7 @@ export class PiWebApp extends LitElement {
         },
         openTerminal: (options) => { void this.openRuntimeTerminal(machineId, workspace, options); },
         host: this.createWorkspaceHost(),
-        piWebUnstable: { terminalCommandRuns },
+        piWebUnstable: { terminalCommandRuns, managedProcesses: this.managedProcessesRuntime(machineId) },
         fileTree: this.state.fileTree,
         expandedDirs: this.state.expandedDirs,
         selectedFilePath: this.state.selectedFilePath,
@@ -1729,6 +1747,7 @@ export class PiWebApp extends LitElement {
       prompt: this.createPromptEditor(),
       piWebUnstable: {
         terminalCommandRuns: this.terminalCommandRunsForOrigin(origin),
+        managedProcesses: this.managedProcessesRuntime(selectedMachineId(this.state)),
         openSettings: (section) => { this.openSettings(section); },
       },
       openActionPalette: () => { this.setState({ actionPaletteOpen: true }); },

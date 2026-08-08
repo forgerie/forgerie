@@ -4,6 +4,7 @@ import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeEntry, F
 import type { AppState } from "../appState";
 import type { SettingsSection } from "../settingsRoute";
 import type { LocalContributionId, PluginId, QualifiedContributionId } from "./ids";
+import type { ManagedProcessesRuntime } from "../../../plugin-api/unstable";
 
 export type { LocalContributionId, PluginId, QualifiedContributionId } from "./ids";
 export type HtmlTemplateTag = (strings: TemplateStringsArray, ...values: unknown[]) => TemplateResult;
@@ -77,6 +78,7 @@ export interface WorkspacePanelTerminal {
 
 export interface PiWebUnstableRuntimeContext {
   terminalCommandRuns: TerminalCommandRunsInternalRuntime;
+  managedProcesses?: ManagedProcessesRuntime;
   openSettings?: (section?: SettingsSection) => void;
 }
 
@@ -151,7 +153,7 @@ export interface WorkspacePanelContext extends WorkspaceContext {
    * This is intentionally not part of the public `forgerie/plugin-api` declarations.
    */
   openTerminal?: (options?: { terminalId?: string | undefined }) => void;
-  piWebUnstable?: Pick<PiWebUnstableRuntimeContext, "terminalCommandRuns">;
+  piWebUnstable?: Pick<PiWebUnstableRuntimeContext, "terminalCommandRuns" | "managedProcesses">;
   fileTree: FileTreeEntry[];
   expandedDirs: Record<string, FileTreeEntry[]>;
   selectedFilePath: string | undefined;

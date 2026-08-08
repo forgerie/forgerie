@@ -11,7 +11,7 @@ import { fileCompletionInsertText } from "../promptCompletions";
 import { SessionSocket, type GlobalSessionEvent, type SessionUiEvent } from "../sessionSocket";
 import { isArchivableSessionInfo, isTransientNewSessionInfo } from "../sessionPersistence";
 import { isSessionActive } from "../../../shared/activity";
-import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent } from "../../../shared/apiTypes";
+import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
 import { sessionPathsEqual } from "../sessionPaths";
@@ -56,6 +56,7 @@ export interface SessionControllerDependencies {
   notifications?: SessionNotificationSessionBridge;
   replacePromptEditorText?: (replacement: PromptEditorTextReplacement) => void | Promise<void>;
   onSelectedSessionReady?: (selection: SelectedSessionReady) => void;
+  onManagedProcessesEvent?: (event: Extract<SharedSessionUiEvent, { type: "processes.update" | "processes.output" }> | { type: "processes.refresh" }) => void;
 }
 
 interface BulkSessionMutationResult {
@@ -108,6 +109,7 @@ export class SessionController {
   private readonly notifications: SessionNotificationSessionBridge | undefined;
   private readonly replacePromptEditorText: SessionControllerDependencies["replacePromptEditorText"];
   private readonly onSelectedSessionReady: SessionControllerDependencies["onSelectedSessionReady"];
+  private readonly onManagedProcessesEvent: SessionControllerDependencies["onManagedProcessesEvent"];
   private selectionSeq = 0;
   private disposed = false;
   // Join-time stream watermark for the selected session. `seq` is the
@@ -139,6 +141,7 @@ export class SessionController {
     this.notifications = deps.notifications;
     this.replacePromptEditorText = deps.replacePromptEditorText;
     this.onSelectedSessionReady = deps.onSelectedSessionReady;
+    this.onManagedProcessesEvent = deps.onManagedProcessesEvent;
   }
 
   applyGlobalEvent(event: GlobalSessionEvent): void {
@@ -245,7 +248,10 @@ export class SessionController {
       this.socket.connect(
         session,
         (event) => socketBuffer.push(event),
-        () => { void this.refreshSelectedSession(session.id); },
+        () => {
+          this.onManagedProcessesEvent?.({ type: "processes.refresh" });
+          void this.refreshSelectedSession(session.id);
+        },
         machineId,
         () => { void this.notifications?.refreshSelectedSession(session, machineId); },
       );
@@ -1437,6 +1443,10 @@ export class SessionController {
     // transcript sequence cannot be lost.
     if (event.type === "notifications.inbox") {
       this.notifications?.applyInboxEvent(selectedMachineId(this.getState()), event);
+      return;
+    }
+    if (event.type === "processes.update" || event.type === "processes.output") {
+      this.onManagedProcessesEvent?.(event);
       return;
     }
     // Drop events already reflected in the seeded join snapshot (committed

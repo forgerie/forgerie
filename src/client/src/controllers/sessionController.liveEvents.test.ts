@@ -82,6 +82,36 @@ describe("SessionController live events", () => {
     expect(state.status?.messageCount).toBe(8);
   });
 
+  it("forwards managed process events and requests an authoritative refresh after reconnect", async () => {
+    const socket = new EmitSocket();
+    const processEvents: unknown[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => Promise.resolve(emptyPage),
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket, onManagedProcessesEvent: (event) => { processEvents.push(event); } },
+    );
+    await controller.selectSession(oldSession, { updateUrl: false });
+
+    socket.emit({ type: "processes.update", snapshot: { available: true, writeSupported: false, processes: [] } });
+    socket.emit({ type: "processes.output", id: "process-1", lines: [{ type: "stdout", text: "ready\n" }], droppedLines: 0 });
+    socket.reconnect();
+
+    expect(processEvents).toEqual([
+      { type: "processes.update", snapshot: { available: true, writeSupported: false, processes: [] } },
+      { type: "processes.output", id: "process-1", lines: [{ type: "stdout", text: "ready\n" }], droppedLines: 0 },
+      { type: "processes.refresh" },
+    ]);
+  });
+
   it("clears stale active activity when an idle status arrives", () => {
     const activeActivity: SessionActivity = { sessionId: oldSession.id, phase: "active", label: "running tool", at: "2026-05-15T00:00:00.000Z" };
     let state: AppState = {

@@ -280,6 +280,17 @@ describe("session API compatibility", () => {
     expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo", text: "hello" });
   });
 
+  it("writes process stdin with the server's input field through the selected machine", async () => {
+    const fetchMock = stubJsonFetch({ ok: true });
+
+    await expect(sessionsApi.writeProcess({ id: "s /?", cwd: "/repo with spaces" }, "p /?", "yes\n", "remote /?")).resolves.toEqual({ ok: true });
+
+    const [url, init] = fetchCall(fetchMock, 0);
+    expect(url).toBe("https://pi.example.test/api/machines/remote%20%2F%3F/sessions/s%20%2F%3F/processes/p%20%2F%3F/write");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo with spaces", input: "yes\n" });
+  });
+
   it("clears a session queue through an encoded machine route and parses the returned status", async () => {
     const fetchMock = stubJsonFetch({
       sessionId: "s /?",

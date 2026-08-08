@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH } from "../../../shared/apiTypes";
-import { parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
+import { parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
 
 describe("API parsers", () => {
+  it("validates managed process route results", () => {
+    expect(parseManagedProcessesSnapshot({ available: true, writeSupported: true, processes: [] })).toEqual({ available: true, writeSupported: true, processes: [] });
+    expect(parseManagedProcessOutputResult({ ok: true, lines: [{ type: "stdout", text: "ready\n" }] })).toEqual({ ok: true, lines: [{ type: "stdout", text: "ready\n" }] });
+    expect(parseManagedProcessKillResult({ ok: false, reason: "timeout" })).toEqual({ ok: false, reason: "timeout" });
+    expect(parseManagedProcessWriteResult({ ok: false, reason: "stdin_closed" })).toEqual({ ok: false, reason: "stdin_closed" });
+    expect(() => parseManagedProcessesSnapshot({ available: false, writeSupported: true, processes: [] })).toThrow();
+    expect(() => parseManagedProcessOutputResult({ ok: false, reason: "surprise" })).toThrow();
+  });
+
   it("preserves interactive API-key flow hints and defaults providers without one", () => {
     const base = { id: "openai", name: "OpenAI", authType: "api_key", status: { configured: false } };
 

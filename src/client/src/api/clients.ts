@@ -22,6 +22,10 @@ import {
   parseMachineHealth,
   parseMachineRuntime,
   parseMachinesResponse,
+  parseManagedProcessKillResult,
+  parseManagedProcessOutputResult,
+  parseManagedProcessesSnapshot,
+  parseManagedProcessWriteResult,
   parseMessagePage,
   parseModelSelectionResponse,
   parseMoveWorkspaceFileResponse,
@@ -206,6 +210,14 @@ export const sessionsApi = {
   messages: (session: SessionRef, options?: { limit?: number; before?: number }, machineId = "local") => request(messagePath(session, options, machineId), parseMessagePage),
   status: (session: SessionRef, machineId = "local") => request(sessionQueryPath(session, "status", machineId), parseSessionStatus),
   streamSnapshot: (session: SessionRef, machineId = "local") => request(sessionQueryPath(session, "stream-snapshot", machineId), parseSessionStreamSnapshot),
+  processes: (session: SessionRef, machineId = "local") => request(sessionQueryPath(session, "processes", machineId), parseManagedProcessesSnapshot, { cache: "no-store" }),
+  processOutput: (session: SessionRef, processId: string, tailLines?: number, machineId = "local") => {
+    const params = new URLSearchParams({ cwd: session.cwd });
+    if (tailLines !== undefined) params.set("tailLines", String(tailLines));
+    return request(`${sessionPath(session, `processes/${encodeURIComponent(processId)}/output`, machineId)}?${params.toString()}`, parseManagedProcessOutputResult, { cache: "no-store" });
+  },
+  killProcess: (session: SessionRef, processId: string, machineId = "local") => request(sessionPath(session, `processes/${encodeURIComponent(processId)}/kill`, machineId), parseManagedProcessKillResult, { method: "POST", body: sessionBody(session) }),
+  writeProcess: (session: SessionRef, processId: string, input: string, machineId = "local") => request(sessionPath(session, `processes/${encodeURIComponent(processId)}/write`, machineId), parseManagedProcessWriteResult, { method: "POST", body: sessionBody(session, { input }) }),
   clearQueue: (session: SessionRef, machineId = "local") => request(sessionPath(session, "queue/clear", machineId), parseSessionStatus, { method: "POST", body: sessionBody(session) }),
   dismissWarning: (session: SessionRef, dismissId: string, machineId = "local") => request(sessionPath(session, "warnings/dismiss", machineId), parseSessionStatus, { method: "POST", body: sessionBody(session, { dismissId }) }),
   submitAsk: (session: SessionRef, askId: string, submission: AskUserSubmission, machineId = "local") => request(sessionPath(session, "ask/submit", machineId), parseAskUserCloseResponse, { method: "POST", body: sessionBody(session, { askId, answers: submission.answers }) }),
