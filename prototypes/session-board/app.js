@@ -24,7 +24,9 @@ const state = {
   sessions: world.sessions,
   groupBy: "state",
   showArchived: false,
-  collapsedGroups: new Set(["archived"]),
+  // Calm default: only what wants something from you is open. The piles you are
+  // still thinking about stay shut until you ask for them.
+  collapsedGroups: new Set(["open", "archived"]),
   selectedId: "s-01",
   lastArchived: undefined,
 };
@@ -91,13 +93,16 @@ function renderSummary(board) {
   const open = board.counts.open;
 
   dom.summary.replaceChildren();
-  if (needsYou === 0 && working === 0) {
-    dom.summary.append(text(`Nothing needs you · ${String(open)} open`));
+  // The group counts already say how many of what. The header only answers the
+  // one question the counts cannot: is there anything for me at all?
+  if (needsYou === 0) {
+    dom.summary.append(text(working > 0 ? "nothing waiting" : "clear"));
     return;
   }
   const strong = document.createElement("strong");
-  strong.textContent = `${String(needsYou)} need${needsYou === 1 ? "s" : ""} you`;
-  dom.summary.append(strong, text(` · ${String(working)} working · ${String(open)} open`));
+  strong.textContent = String(needsYou);
+  dom.summary.append(strong, text(" waiting"));
+  void open;
 }
 
 function renderBoard(board) {
@@ -123,11 +128,12 @@ function renderGroup(group, board) {
     style: `--group-tone: ${tone}`,
     "aria-expanded": String(!collapsed),
   });
+  // No hint text: the group label plus the rows under it are the explanation.
   header.append(
     el("span", { class: "group-chevron" }, "▾"),
     el("span", { class: "group-label" }, group.label),
     el("span", { class: "group-count" }, String(group.rows.length)),
-    el("span", { class: "group-hint" }, group.hint ?? ""),
+    el("span", { class: "group-spacer" }),
   );
   header.addEventListener("click", () => {
     toggleGroup(group.kind);
@@ -154,11 +160,10 @@ function renderRow(row, board) {
   });
 
   const meta = el("div", { class: "row-meta" });
+  if (row.session.parentSessionId !== undefined) meta.append(el("span", { class: "row-fork" }, "↳"));
   meta.append(locationChip(row.location));
   const detail = stateDetail(row.state);
   if (detail !== undefined) meta.append(el("span", { class: "row-detail" }, detail));
-  meta.append(el("span", { class: "row-count" }, `${String(row.session.messageCount)} msgs`));
-  if (row.session.parentSessionId !== undefined) meta.append(el("span", { class: "row-count" }, "↳ fork"));
 
   const aside = el("div", { class: "row-aside" });
   aside.append(el("span", { class: "row-time" }, relativeTime(row.session.modified, NOW)));
@@ -188,12 +193,13 @@ function rowActions(row) {
     actions.append(actionButton("Restore", () => { setArchived(row.session.id, false); }));
     return actions;
   }
-  actions.append(actionButton("Archive", () => { archive(row.session.id); }));
+  // A glyph, not a word. The row is the content; the control should recede.
+  actions.append(actionButton("✓", () => { archive(row.session.id); }, "Archive"));
   return actions;
 }
 
-function actionButton(label, onClick) {
-  const button = el("button", { class: "row-action" }, label);
+function actionButton(label, onClick, title = label) {
+  const button = el("button", { class: "row-action", title, "aria-label": title }, label);
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
@@ -239,8 +245,7 @@ function renderThread(board) {
   const meta = el("div", { class: "thread-meta" });
   meta.append(el("span", { class: "state-badge", style: `--row-tone: ${toneVariable(kind)}` }, group.label));
   meta.append(locationChip(row.location));
-  meta.append(el("span", {}, `${String(row.session.messageCount)} messages`));
-  meta.append(el("span", {}, `last activity ${relativeTime(row.session.modified, NOW)} ago`));
+  meta.append(el("span", {}, relativeTime(row.session.modified, NOW)));
 
   const heading = el("div", { class: "thread-heading" });
   heading.append(el("h2", { class: "thread-title" }, row.session.firstMessage), meta);
@@ -255,7 +260,7 @@ function renderThread(board) {
   const header = el("header", { class: "thread-header" });
   header.append(back, heading, actions);
 
-  dom.thread.append(header, renderTranscript(row), renderComposer(), renderShortcutBar());
+  dom.thread.append(header, renderTranscript(row), renderComposer());
 }
 
 function renderTranscript(row) {
@@ -295,17 +300,6 @@ function renderComposer() {
   const input = el("input", { class: "composer-input", type: "text", placeholder: "Reply to this session…" });
   composer.append(input, el("button", { class: "button button-primary" }, "Send"));
   return composer;
-}
-
-function renderShortcutBar() {
-  const bar = el("div", { class: "shortcut-bar" });
-  for (const [keys, label] of [["J K", "move"], ["E", "archive"], ["G", "group by"], ["A", "archived"]]) {
-    const item = el("span", {});
-    for (const key of keys.split(" ")) item.append(el("kbd", {}, key));
-    item.append(text(label));
-    bar.append(item);
-  }
-  return bar;
 }
 
 /* ---------------------------------------------------------- interaction -- */

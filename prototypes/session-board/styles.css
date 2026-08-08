@@ -33,12 +33,16 @@
   --pi-purple: #b7a2ff;
   --pi-shadow-strong: #000b;
 
-  /* Fluid type scale */
-  --text-2xs: clamp(0.625rem, 0.61rem + 0.08vw, 0.6875rem);
-  --text-xs: clamp(0.6875rem, 0.665rem + 0.11vw, 0.75rem);
-  --text-sm: clamp(0.8125rem, 0.79rem + 0.11vw, 0.875rem);
-  --text-md: clamp(0.9375rem, 0.915rem + 0.11vw, 1rem);
-  --text-lg: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  /*
+   * Fluid type scale. The floor matters more than the ceiling here: this is read
+   * at arm's length on a dense phone panel, so nothing drops below 13px — the
+   * meta line is real content (branch, question, error), not fine print.
+   */
+  --text-2xs: clamp(0.8125rem, 0.8rem + 0.1vw, 0.875rem);
+  --text-xs: clamp(0.875rem, 0.86rem + 0.1vw, 0.9375rem);
+  --text-sm: clamp(0.9375rem, 0.92rem + 0.1vw, 1rem);
+  --text-md: clamp(1rem, 0.98rem + 0.12vw, 1.0625rem);
+  --text-lg: clamp(1.25rem, 1.18rem + 0.3vw, 1.5rem);
 
   /* Fluid space scale */
   --space-1: 0.25rem;
@@ -301,23 +305,8 @@ button {
   border-radius: var(--radius-pill);
 }
 
-.group-hint {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--text-2xs);
-  color: var(--pi-dim);
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* A narrow board has no room for prose; the group label carries the meaning. */
-@container board (max-width: 30rem) {
-  .group-hint { display: none; }
-  /* Message count is the least useful token in a cramped row — drop it first. */
-  .row-count { display: none; }
-}
+/* Spacer so the count sits beside the label instead of stretching across. */
+.group-spacer { flex: 1 1 auto; }
 
 .group[data-collapsed="true"] .group-rows { display: none; }
 
@@ -354,15 +343,15 @@ button {
 .row-marker {
   grid-row: 1 / span 2;
   align-self: center;
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  border: 1.5px solid var(--row-tone, var(--pi-dim));
   background: var(--row-tone, transparent);
 }
 
+/* Nothing is wrong with these, so they get no mark at all. */
 .row[data-state="open"] .row-marker,
-.row[data-state="archived"] .row-marker { background: transparent; }
+.row[data-state="archived"] .row-marker { background: none; }
 
 .row[data-state="working"] .row-marker { animation: pulse 1.6s ease-in-out infinite; }
 
@@ -413,35 +402,42 @@ button {
   color: var(--pi-dim);
 }
 
-/* Location is metadata on the row, not a level you navigate through. */
+/*
+ * Location is metadata on the row, not a level you navigate through — so it
+ * reads as quiet text, not as a button-like token competing with the title.
+ */
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
-  padding: 1px var(--space-2);
   font-size: var(--text-2xs);
-  color: var(--pi-muted);
-  background: var(--pi-surface);
-  border: 1px solid var(--pi-border-muted);
-  border-radius: var(--radius-sm);
+  color: var(--pi-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.chip-branch { color: var(--pi-purple); }
+.chip-branch { color: var(--pi-muted); }
 
+.row-fork { color: var(--pi-dim); }
+
+/*
+ * The detail is real content (the question, the command, the error), so it stays
+ * — but the marker dot already carries the state, so it does not need colour too.
+ */
 .row-detail {
   flex: 0 1 auto;
   min-width: 0;
-  color: var(--row-tone, var(--pi-dim));
+  color: var(--pi-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.row[data-state="errored"] .row-detail { color: var(--tone-errored); }
 
 .row-aside {
   grid-column: 3;
@@ -475,11 +471,14 @@ button {
 }
 
 .row-action {
-  padding: 2px var(--space-2);
-  font-size: var(--text-2xs);
-  color: var(--pi-muted);
-  background: var(--pi-surface);
-  border: 1px solid var(--pi-border);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  font-size: var(--text-sm);
+  line-height: 1;
+  color: var(--pi-dim);
+  border: 1px solid var(--pi-border-muted);
   border-radius: var(--radius-sm);
 }
 
@@ -713,33 +712,4 @@ button {
   color: var(--pi-purple);
   border: 1px solid var(--pi-accent-border);
   border-radius: var(--radius-pill);
-}
-
-/* ----------------------------------------------------------- shortcuts -- */
-
-.shortcut-bar {
-  flex: 0 0 auto;
-  display: flex;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-2xs);
-  color: var(--pi-dim);
-  border-top: 1px solid var(--pi-border-muted);
-  background: var(--pi-bg);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.shortcut-bar kbd {
-  display: inline-block;
-  min-width: 1.4em;
-  padding: 0 4px;
-  margin-right: 3px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: var(--text-2xs);
-  text-align: center;
-  color: var(--pi-muted);
-  background: var(--pi-surface);
-  border: 1px solid var(--pi-border);
-  border-radius: 4px;
 }
