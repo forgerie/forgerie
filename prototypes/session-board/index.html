@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>Forgerie — session board prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell" data-view="board">
+      <section class="pane-board" aria-label="Session inbox">
+        <header class="board-header">
+          <div class="board-title-row">
+            <h1 class="board-title">Inbox</h1>
+            <p class="board-summary" id="board-summary"></p>
+          </div>
+          <div class="board-controls">
+            <div class="segmented" role="group" aria-label="Group sessions by">
+              <button type="button" data-group-by="state" aria-pressed="true">State</button>
+              <button type="button" data-group-by="project" aria-pressed="false">Project</button>
+            </div>
+            <button type="button" class="toggle" id="toggle-archived" aria-pressed="false">
+              <span class="toggle-dot"></span>Archived
+            </button>
+          </div>
+        </header>
+        <div class="board-scroll" id="board-scroll" role="listbox" aria-label="Sessions"></div>
+      </section>
+
+      <section class="pane-thread" id="pane-thread" aria-label="Session"></section>
+    </div>
+
+    <div class="toast" id="toast" hidden>
+      <div class="toast-inner">
+        <span id="toast-text"></span>
+        <button type="button" class="toast-undo" id="toast-undo">Undo</button>
+      </div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

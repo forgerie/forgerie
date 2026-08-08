@@ -1,0 +1,745 @@
+/*
+ * Forgerie session board — prototype styling.
+ *
+ * Rules followed from AGENTS.md:
+ *  - Palette comes from the real `pi-web-dark` theme tokens, not invented colours.
+ *  - Type and space are fluid (`clamp`), never stepped per device class.
+ *  - The layout morph is a CONTAINER query on the shell, not a viewport
+ *    breakpoint, and its threshold is content-derived: it matches
+ *    `NAVIGATION_DOCK_MIN_WIDTH` (260 + 560) from src/client/src/appShell/shellLayoutMode.ts.
+ *  - No user-agent or device sniffing anywhere.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* pi-web-dark theme tokens (src/client/src/plugins/themes/index.ts) */
+  --pi-bg: #070912;
+  --pi-surface: #101527;
+  --pi-surface-hover: #151b31;
+  --pi-border: #26304f;
+  --pi-border-muted: #1b2340;
+  --pi-text: #f7f4ff;
+  --pi-text-secondary: #aaa4bd;
+  --pi-text-bright: #ffffff;
+  --pi-muted: #aaa4bd;
+  --pi-dim: #817a99;
+  --pi-accent: #7c3cff;
+  --pi-accent-border: #5a47b0;
+  --pi-selection-bg: #1d2547;
+  --pi-success: #00f0d8;
+  --pi-warning: #ffb000;
+  --pi-danger: #ff4f7b;
+  --pi-purple: #b7a2ff;
+  --pi-shadow-strong: #000b;
+
+  /* Fluid type scale */
+  --text-2xs: clamp(0.625rem, 0.61rem + 0.08vw, 0.6875rem);
+  --text-xs: clamp(0.6875rem, 0.665rem + 0.11vw, 0.75rem);
+  --text-sm: clamp(0.8125rem, 0.79rem + 0.11vw, 0.875rem);
+  --text-md: clamp(0.9375rem, 0.915rem + 0.11vw, 1rem);
+  --text-lg: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+
+  /* Fluid space scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: clamp(0.625rem, 0.6rem + 0.15vw, 0.75rem);
+  --space-4: clamp(0.875rem, 0.83rem + 0.22vw, 1.125rem);
+  --space-5: clamp(1.25rem, 1.15rem + 0.4vw, 1.75rem);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --tone-blocked: var(--pi-warning);
+  --tone-errored: var(--pi-danger);
+  --tone-working: var(--pi-success);
+  --tone-unread: var(--pi-purple);
+  --tone-open: var(--pi-dim);
+  --tone-archived: var(--pi-dim);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font-family: system-ui, sans-serif;
+  font-size: var(--text-md);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+
+  /*
+   * The page frame is the container, NOT `.shell`. An element cannot query the
+   * container it establishes itself, so putting `container-type` on `.shell`
+   * would leave `.shell`'s own grid rules unreachable while still applying the
+   * descendant rules — a half-applied layout.
+   */
+  container: shell / inline-size;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--pi-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------------------------------------------------------------- shell -- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  /* `100%` chains off html/body and tracks the real viewport. `100dvh` reports
+     the outer window in headless chromium, which silently oversizes captures. */
+  height: 100%;
+  overflow: hidden;
+}
+
+.pane-board,
+.pane-thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * The board is its own container. Rows and group headers respond to the width
+ * of the PANE they sit in, not the shell — the pane is ~330px while docked and
+ * full-width while overlaid, and the rows must adapt to that, not to the device.
+ */
+.pane-board {
+  container: board / inline-size;
+}
+
+.pane-thread {
+  background: var(--pi-bg);
+  border-left: 1px solid var(--pi-border-muted);
+}
+
+/* Overlay posture (the default): one pane at a time. */
+.shell[data-view="board"] .pane-thread { display: none; }
+.shell[data-view="thread"] .pane-board { display: none; }
+
+/*
+ * Docked posture. The threshold is what the CONTENT needs — a readable session
+ * list (260px) beside a comfortable transcript (560px) — not a device class.
+ * Below it the board owns the shell and the thread takes over on selection.
+ */
+@container shell (min-width: 820px) {
+  .shell {
+    grid-template-columns: clamp(19rem, 34cqi, 28rem) 1fr;
+  }
+  .shell[data-view="board"] .pane-thread,
+  .shell[data-view="thread"] .pane-board { display: flex; }
+  .back-to-board { display: none; }
+}
+
+/* --------------------------------------------------------- board header -- */
+
+.board-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--pi-border);
+  background: linear-gradient(var(--pi-surface), var(--pi-bg));
+}
+
+.board-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.board-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--pi-text-bright);
+}
+
+.board-summary {
+  font-size: var(--text-xs);
+  color: var(--pi-muted);
+  text-align: right;
+  text-wrap: balance;
+}
+
+.board-summary strong {
+  color: var(--pi-purple);
+  font-weight: 600;
+}
+
+.board-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  background: var(--pi-bg);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--radius-pill);
+}
+
+.segmented button {
+  padding: 4px var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--pi-muted);
+  border-radius: var(--radius-pill);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--pi-selection-bg);
+  color: var(--pi-text-bright);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--pi-muted);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--radius-pill);
+}
+
+.toggle[aria-pressed="true"] {
+  color: var(--pi-text-bright);
+  border-color: var(--pi-accent-border);
+  background: var(--pi-selection-bg);
+}
+
+.toggle-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pi-dim);
+}
+
+.toggle[aria-pressed="true"] .toggle-dot { background: var(--pi-purple); }
+
+/* ---------------------------------------------------------- board list -- */
+
+.board-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pi-border) transparent;
+}
+
+.group + .group { margin-top: var(--space-2); }
+
+.group-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  text-align: left;
+  background: color-mix(in srgb, var(--pi-bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-block: 1px solid var(--pi-border-muted);
+}
+
+.group-chevron {
+  flex: 0 0 auto;
+  font-size: var(--text-2xs);
+  color: var(--pi-dim);
+  transition: transform 140ms ease;
+}
+
+.group[data-collapsed="true"] .group-chevron { transform: rotate(-90deg); }
+
+.group-label {
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--group-tone, var(--pi-muted));
+}
+
+.group-count {
+  flex: 0 0 auto;
+  min-width: 1.5em;
+  padding: 1px var(--space-2);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--group-tone, var(--pi-muted));
+  background: color-mix(in srgb, var(--group-tone, var(--pi-dim)) 14%, transparent);
+  border-radius: var(--radius-pill);
+}
+
+.group-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-2xs);
+  color: var(--pi-dim);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A narrow board has no room for prose; the group label carries the meaning. */
+@container board (max-width: 30rem) {
+  .group-hint { display: none; }
+  /* Message count is the least useful token in a cramped row — drop it first. */
+  .row-count { display: none; }
+}
+
+.group[data-collapsed="true"] .group-rows { display: none; }
+
+/* ----------------------------------------------------------------- row -- */
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  border-bottom: 1px solid var(--pi-border-muted);
+  transition: background 120ms ease;
+}
+
+.row:hover { background: var(--pi-surface); }
+
+.row[aria-selected="true"] {
+  background: var(--pi-selection-bg);
+}
+
+.row[aria-selected="true"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 2px;
+  background: var(--pi-accent);
+}
+
+.row-marker {
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--row-tone, var(--pi-dim));
+  background: var(--row-tone, transparent);
+}
+
+.row[data-state="open"] .row-marker,
+.row[data-state="archived"] .row-marker { background: transparent; }
+
+.row[data-state="working"] .row-marker { animation: pulse 1.6s ease-in-out infinite; }
+
+.row[data-state="blocked"] .row-marker {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone-blocked) 22%, transparent);
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone-working) 40%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone-working) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row[data-state="working"] .row-marker { animation: none; }
+  .group-chevron { transition: none; }
+}
+
+.row-title {
+  grid-column: 2;
+  /* Grid tracks size to min-content by default; without this the nowrap meta
+     text below blows the track past the pane edge instead of ellipsising. */
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--pi-text);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.row[data-state="unread"] .row-title,
+.row[data-state="blocked"] .row-title {
+  font-weight: 620;
+  color: var(--pi-text-bright);
+}
+
+.row[data-state="archived"] .row-title { color: var(--pi-muted); }
+
+.row-meta {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--text-2xs);
+  color: var(--pi-dim);
+}
+
+/* Location is metadata on the row, not a level you navigate through. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--pi-muted);
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border-muted);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-branch { color: var(--pi-purple); }
+
+.row-detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--row-tone, var(--pi-dim));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-aside {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.row-time {
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--pi-dim);
+}
+
+.row-actions {
+  display: flex;
+  gap: var(--space-1);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.row:hover .row-actions,
+.row:focus-within .row-actions,
+.row[aria-selected="true"] .row-actions { opacity: 1; }
+
+/* Touch has no hover, so actions stay visible when the pointer is coarse. */
+@media (hover: none) {
+  .row-actions { opacity: 1; }
+}
+
+.row-action {
+  padding: 2px var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--pi-muted);
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--radius-sm);
+}
+
+.row-action:hover {
+  color: var(--pi-text-bright);
+  border-color: var(--pi-accent-border);
+  background: var(--pi-surface-hover);
+}
+
+.board-empty {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--pi-dim);
+  font-size: var(--text-sm);
+}
+
+/* -------------------------------------------------------------- thread -- */
+
+.thread-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--pi-border);
+  background: var(--pi-surface);
+}
+
+.back-to-board {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-2);
+  color: var(--pi-muted);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
+.thread-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.thread-title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 620;
+  color: var(--pi-text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.thread-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--text-2xs);
+  color: var(--pi-dim);
+}
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  color: var(--row-tone, var(--pi-muted));
+  background: color-mix(in srgb, var(--row-tone, var(--pi-dim)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--row-tone, var(--pi-dim)) 35%, transparent);
+  border-radius: var(--radius-pill);
+}
+
+.thread-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.button {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--pi-text);
+  background: var(--pi-bg);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.button:hover { background: var(--pi-surface-hover); }
+
+.button-primary {
+  color: var(--pi-text-bright);
+  background: var(--pi-accent);
+  border-color: var(--pi-accent-border);
+}
+
+.button-primary:hover { background: color-mix(in srgb, var(--pi-accent) 84%, white); }
+
+.thread-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--pi-border) transparent;
+}
+
+.bubble {
+  max-width: min(68ch, 92%);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--pi-border-muted);
+}
+
+.bubble-user {
+  align-self: flex-end;
+  background: var(--pi-selection-bg);
+  border-color: var(--pi-accent-border);
+}
+
+.bubble-agent {
+  align-self: flex-start;
+  background: var(--pi-surface);
+}
+
+.bubble-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pi-dim);
+}
+
+.ask-card {
+  align-self: stretch;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--pi-warning) 8%, var(--pi-surface));
+  border: 1px solid color-mix(in srgb, var(--pi-warning) 40%, transparent);
+  border-radius: var(--radius-lg);
+}
+
+.ask-card .bubble-label { color: var(--pi-warning); }
+
+.ask-options {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.composer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--pi-border);
+  background: var(--pi-surface);
+}
+
+.composer-input {
+  flex: 1 1 auto;
+  padding: var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--pi-text);
+  background: var(--pi-bg);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--radius-md);
+}
+
+.composer-input::placeholder { color: var(--pi-dim); }
+
+.thread-placeholder {
+  display: grid;
+  place-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--pi-dim);
+}
+
+.thread-placeholder strong {
+  font-size: var(--text-md);
+  color: var(--pi-muted);
+}
+
+/* --------------------------------------------------------------- toast -- */
+
+.toast {
+  position: fixed;
+  inset-inline: 0;
+  bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.toast[hidden] { display: none; }
+
+.toast-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--pi-text);
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 10px 30px var(--pi-shadow-strong);
+  pointer-events: auto;
+}
+
+.toast-undo {
+  padding: 2px var(--space-3);
+  font-weight: 600;
+  color: var(--pi-purple);
+  border: 1px solid var(--pi-accent-border);
+  border-radius: var(--radius-pill);
+}
+
+/* ----------------------------------------------------------- shortcuts -- */
+
+.shortcut-bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-2xs);
+  color: var(--pi-dim);
+  border-top: 1px solid var(--pi-border-muted);
+  background: var(--pi-bg);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shortcut-bar kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 4px;
+  margin-right: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-2xs);
+  text-align: center;
+  color: var(--pi-muted);
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: 4px;
+}
