@@ -9,7 +9,7 @@ import type {
 } from "forgerie/plugin-api/unstable";
 
 export const processesPanelTagName = "pi-web-processes-panel";
-const LOG_TAIL_LINES = 500;
+const LOG_TAIL_LINES = 200;
 const MAX_LOG_LINES = 1_000;
 const MAX_LOG_BYTES = 64 * 1024;
 const textEncoder = new TextEncoder();

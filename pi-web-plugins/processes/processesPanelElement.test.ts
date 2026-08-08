@@ -62,7 +62,7 @@ describe("managed processes panel", () => {
     element.shadowRoot?.querySelector<HTMLButtonElement>("[data-toggle='process-1']")?.click();
     await settle();
 
-    expect(output).toHaveBeenCalledWith("process-1", 500);
+    expect(output).toHaveBeenCalledWith("process-1", 200);
     const lines = [...(element.shadowRoot?.querySelectorAll(".logs span") ?? [])];
     expect(lines.map((line) => line.textContent)).toEqual(["one\n", "two\n", "three\n"]);
     expect(lines.map((line) => line.className)).toEqual(["stdout", "stderr", "stdout"]);
