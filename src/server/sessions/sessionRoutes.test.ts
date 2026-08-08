@@ -58,6 +58,48 @@ afterEach(async () => {
 });
 
 describe("session routes", () => {
+  it("serves machine listing and asks catalogs through static routes before session-id routes", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const listing = await routeApp.inject({ method: "GET", url: "/sessions/all" });
+      const asks = await routeApp.inject({ method: "GET", url: "/sessions/asks" });
+
+      expect(listing.statusCode).toBe(200);
+      expect(listing.json()).toEqual(routeService.machineListingResponse);
+      expect(asks.statusCode).toBe(200);
+      expect(asks.json()).toEqual(routeService.asksCatalogResponse);
+      expect(routeService.machineListingCalls).toBe(1);
+      expect(routeService.asksCatalogCalls).toBe(1);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
+  it("reports machine listing failures with the existing listing-route error contract", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    routeService.machineListingError = new Error("session scan failed");
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const response = await routeApp.inject({ method: "GET", url: "/sessions/all" });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: "session scan failed" });
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("returns notification catalog and selected-inbox snapshots with required cwd context", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1027,6 +1069,11 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly notificationInboxCalls: SessionRef[] = [];
   readonly acknowledgeUnreadCalls: { sessionId: string; request: SessionUnreadAcknowledgeRequest }[] = [];
   readonly unreadCatalogResponse: SessionUnreadCatalogSnapshot = { catalogId: "catalog-test", catalogRevision: 1, sessions: [] };
+  readonly machineListingResponse = { sessions: [], statuses: [] };
+  readonly asksCatalogResponse = { sessions: [] };
+  machineListingCalls = 0;
+  asksCatalogCalls = 0;
+  machineListingError: Error | undefined;
   readonly dismissNotificationCalls: { ref: SessionRef; request: Omit<SessionNotificationDismissRequest, "cwd"> }[] = [];
   readonly dismissAllNotificationCalls: { ref: SessionRef; request: Omit<SessionNotificationDismissAllRequest, "cwd"> }[] = [];
   dismissWarningError: Error | undefined;
@@ -1107,6 +1154,17 @@ class CapturingRouteSessionService implements SessionRouteService {
 
   notificationCatalog() {
     return { daemonInstanceId: "daemon-test", catalogRevision: 0, sessions: [] };
+  }
+
+  machineListing() {
+    this.machineListingCalls += 1;
+    if (this.machineListingError !== undefined) return Promise.reject(this.machineListingError);
+    return Promise.resolve(this.machineListingResponse);
+  }
+
+  asksCatalog() {
+    this.asksCatalogCalls += 1;
+    return this.asksCatalogResponse;
   }
 
   unreadCatalog(): Promise<SessionUnreadCatalogSnapshot> {

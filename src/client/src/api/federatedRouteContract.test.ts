@@ -71,6 +71,13 @@ describe("federated route contract", () => {
     expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("unread"))).toBe(false);
   });
 
+  it("allowlists machine session and asks catalogs as static routes", () => {
+    expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path === "/sessions/all" || route.path === "/sessions/asks")).toEqual([
+      { method: "GET", path: "/sessions/all" },
+      { method: "GET", path: "/sessions/asks" },
+    ]);
+  });
+
   it("allowlists session tree mutations with long model-operation timeouts and no new WebSocket", () => {
     expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === "/sessions/:sessionId/tree/navigate")).toEqual({
       method: "POST",
@@ -117,6 +124,8 @@ describe("federated route contract", () => {
       ignoreParseFailure(gitApi.gitStatus("p 1", "w 1", machineId)),
       ignoreParseFailure(gitApi.gitDiff("p 1", "w 1", { path: "README.md", staged: true }, machineId)),
       ignoreParseFailure(sessionsApi.sessions("/repo", machineId)),
+      ignoreParseFailure(sessionsApi.machineListing(machineId)),
+      ignoreParseFailure(sessionsApi.asksCatalog(machineId)),
       ignoreParseFailure(sessionsApi.unreadCatalog(machineId)),
       ignoreParseFailure(sessionsApi.acknowledgeUnread(session, "catalog-a", 7, machineId)),
       ignoreParseFailure(sessionsApi.startSession("/repo", machineId)),

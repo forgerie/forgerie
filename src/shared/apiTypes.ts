@@ -367,6 +367,13 @@ export interface SessionInfo extends SessionRef {
   archivedAt?: string;
 }
 
+export interface MachineSessionListingSnapshot {
+  /** Full machine inventory, including archived sessions. */
+  sessions: SessionInfo[];
+  /** Statuses for runtimes that were already live when this snapshot was taken. */
+  statuses: SessionStatus[];
+}
+
 export interface ArchiveSessionsResponse {
   archived: true;
   sessionIds?: string[];
@@ -881,6 +888,21 @@ export interface SessionWarning {
   source?: string;
   path?: string;
   dismiss?: { id: string };
+}
+
+export interface SessionAskCatalogEntry extends SessionRef {
+  pendingAsk?: PendingAskUser;
+  pendingDialogs?: PendingExtensionDialog[];
+}
+
+/**
+ * Daemon-lifetime catalog of sessions blocked on user input.
+ *
+ * A sessiond restart clears the underlying in-memory asks and dialogs. Clients
+ * reconcile that reset by replacing their catalog from a fresh snapshot.
+ */
+export interface SessionAskCatalogSnapshot {
+  sessions: SessionAskCatalogEntry[];
 }
 
 export interface SessionStatus {

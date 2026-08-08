@@ -43,7 +43,9 @@ import type {
   ExtensionDialogCloseResponse,
   ExtensionDialogKind,
   ExtensionDialogOutcome,
+  MachineSessionListingSnapshot,
   SavedPromptAttachment,
+  SessionAskCatalogSnapshot,
   SessionBulkArchiveResponse,
   SessionBulkDeleteArchivedResponse,
   SessionBulkFailure,
@@ -995,6 +997,30 @@ export class PiSessionService implements SessionRouteService {
     return this.notificationStore.catalogSnapshot();
   }
 
+  asksCatalog(): SessionAskCatalogSnapshot {
+    const reachableSessions = new Map<string, PiAgentSession>();
+    for (const active of new Set(this.active.values())) {
+      const session = active.runtime.session;
+      reachableSessions.set(sessionCatalogIdentity(session), session);
+    }
+    for (const session of this.startupSessions.values()) {
+      reachableSessions.set(sessionCatalogIdentity(session), session);
+    }
+
+    const sessions = [...reachableSessions.values()].flatMap((session) => {
+      const pendingAsk = this.pendingAskStore.pendingAsk(session.sessionId);
+      const pendingDialogs = this.pendingExtensionDialogStore.pendingDialogs(session.sessionId);
+      if (pendingAsk === undefined && pendingDialogs.length === 0) return [];
+      return [{
+        id: session.sessionId,
+        cwd: canonicalizeStoredCwd(session.sessionManager.getCwd()),
+        ...(pendingAsk === undefined ? {} : { pendingAsk }),
+        ...(pendingDialogs.length === 0 ? {} : { pendingDialogs }),
+      }];
+    });
+    return { sessions };
+  }
+
   async unreadCatalog(): Promise<SessionUnreadCatalogSnapshot> {
     await this.publishUnreadMutations([]);
     return this.unreadStore.durableCatalogSnapshot();
@@ -1130,6 +1156,50 @@ export class PiSessionService implements SessionRouteService {
       }
     }));
     await this.publishUnreadMutations([]);
+  }
+
+  async machineListing(): Promise<MachineSessionListingSnapshot> {
+    const [listedSessions, archivedRecords] = await Promise.all([
+      this.sessionManager.listAll(),
+      this.archiveStore.list(),
+    ]);
+    const listedById = new Map(listedSessions.map((session) => [session.id, session]));
+    const archivedById = new Map(archivedRecords.map((record) => [record.sessionId, record]));
+
+    for (const record of archivedRecords) {
+      this.publishNotificationMutations(this.notificationStore.clearSession(record.sessionId, "archive-reconcile"));
+    }
+
+    const unarchivedSessions = listedSessions
+      .filter((session) => !archivedById.has(session.id))
+      .map(clientSessionFromListEntry);
+    const archivedSessions = [...archivedRecords]
+      .sort(compareArchivedRecords)
+      .map((record) => clientSessionFromArchivedRecord(record, listedById.get(record.sessionId)))
+      .filter(isDefined);
+    const sessions = withMachineSessionRelationships([...unarchivedSessions, ...archivedSessions]);
+
+    const cwds = new Set([
+      ...listedSessions.map((session) => session.cwd),
+      ...archivedRecords.map((record) => record.cwd),
+    ]);
+    for (const cwd of cwds) {
+      const archivedForCwd = new Map(
+        archivedRecords
+          .filter((record) => cwdPathsEqual(record.cwd, cwd))
+          .map((record) => [record.sessionId, record]),
+      );
+      const listedSessionIds = unarchivedSessions
+        .filter((session) => cwdPathsEqual(session.cwd, cwd))
+        .map((session) => session.id);
+      const reconcilableSessionIds = this.reconcilableSessionIds(cwd, listedSessionIds, archivedForCwd);
+      this.workspaceActivity?.reconcileSessionActivity(cwd, reconcilableSessionIds);
+      await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
+    }
+
+    const statuses = [...new Set(this.active.values())]
+      .map((active) => this.statusFromSession(active.runtime.session));
+    return { sessions, statuses };
   }
 
   async list(cwd: string): Promise<ClientSession[]> {
@@ -3852,6 +3922,13 @@ function notificationIdentityForSession(session: PiAgentSession): { sessionId: s
   };
 }
 
+function sessionCatalogIdentity(session: PiAgentSession): string {
+  return JSON.stringify([
+    canonicalizeStoredCwd(session.sessionManager.getCwd()),
+    session.sessionId,
+  ]);
+}
+
 function clientSessionFromListEntry(session: PiSessionListEntry): ClientSession {
   return {
     id: session.id,
@@ -3865,6 +3942,37 @@ function clientSessionFromListEntry(session: PiSessionListEntry): ClientSession 
     firstMessage: session.firstMessage,
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
   };
+}
+
+function withMachineSessionRelationships(sessions: readonly ClientSession[]): ClientSession[] {
+  const sessionsByPath = new Map(sessions.map((session) => [session.path, session]));
+  const childCounts = new Map<string, number>();
+
+  for (const session of sessions) {
+    if (session.parentSessionPath === undefined) continue;
+    const parent = sessionsByPath.get(session.parentSessionPath);
+    if (parent === undefined || cwdPathsEqual(parent.cwd, session.cwd)) continue;
+    childCounts.set(parent.path, (childCounts.get(parent.path) ?? 0) + 1);
+  }
+
+  return sessions.map((session) => {
+    const parent = session.parentSessionPath === undefined
+      ? undefined
+      : sessionsByPath.get(session.parentSessionPath);
+    const crossWorkspaceParent = parent !== undefined && !cwdPathsEqual(parent.cwd, session.cwd)
+      ? parent
+      : undefined;
+    const childSessionsElsewhere = childCounts.get(session.path);
+    if (crossWorkspaceParent === undefined && childSessionsElsewhere === undefined) return session;
+    return {
+      ...session,
+      ...(crossWorkspaceParent === undefined ? {} : {
+        parentSessionId: crossWorkspaceParent.id,
+        parentSessionCwd: crossWorkspaceParent.cwd,
+      }),
+      ...(childSessionsElsewhere === undefined ? {} : { childSessionsElsewhere }),
+    };
+  });
 }
 
 function archiveInputFromListEntry(session: PiSessionListEntry): ArchiveSessionInput {

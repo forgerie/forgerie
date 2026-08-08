@@ -56,6 +56,24 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
+  // Keep machine catalogs above all `:sessionId` routes. Static registration
+  // avoids treating "all" or "asks" as session ids in proxy/server routers.
+  app.get(`${prefix}/sessions/all`, async (_request, reply) => {
+    try {
+      return await sessions.machineListing();
+    } catch (error) {
+      return reply.code(400).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.get(`${prefix}/sessions/asks`, async (_request, reply) => {
+    try {
+      return await sessions.asksCatalog();
+    } catch (error) {
+      return reply.code(400).send({ error: errorMessage(error) });
+    }
+  });
+
   app.get(`${prefix}/sessions/notifications`, async (_request, reply) => {
     try {
       return await sessions.notificationCatalog();

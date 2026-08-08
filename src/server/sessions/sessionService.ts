@@ -3,7 +3,9 @@ import type {
   AskUserSubmission,
   ExtensionDialogAnswer,
   ExtensionDialogCloseResponse,
+  MachineSessionListingSnapshot,
   SavedPromptAttachment,
+  SessionAskCatalogSnapshot,
   SessionBulkArchiveResponse,
   SessionBulkDeleteArchivedResponse,
   SessionBulkMutationRef,
@@ -45,6 +47,8 @@ export type SessionRouteRef = ClientSessionRef;
  */
 export interface SessionRouteService {
   list(cwd: string): Promise<ClientSession[]>;
+  machineListing(): Promise<MachineSessionListingSnapshot>;
+  asksCatalog(): SessionAskCatalogSnapshot | Promise<SessionAskCatalogSnapshot>;
   /**
    * Create a session. `startupToken` is an opaque label the caller supplies so
    * it can recognise this construction's startup progress reports; the service
