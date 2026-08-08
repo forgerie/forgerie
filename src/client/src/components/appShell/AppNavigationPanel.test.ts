@@ -1,12 +1,18 @@
 // @vitest-environment happy-dom
 
+/**
+ * Tests for AppNavigationPanel.
+ *
+ * The panel now hosts the session inbox instead of the four-section funnel.
+ * Tests verify: the machine switcher is still wired up with unread presence,
+ * `shouldShowMachinesSection` logic, and the inbox panel is rendered.
+ */
+
 import { afterEach, describe, expect, it } from "vitest";
-import type { Machine, Project, Workspace } from "../../api";
+import type { Machine } from "../../api";
 import type { UnreadPresence } from "../../unreadPresence";
 import { MachineList } from "../MachineList";
 import { MachineSwitcher } from "../MachineSwitcher";
-import { ProjectList } from "../ProjectList";
-import { WorkspaceList } from "../WorkspaceList";
 import { AppNavigationPanel, shouldShowMachinesSection } from "./AppNavigationPanel";
 
 afterEach(() => {
@@ -24,8 +30,8 @@ describe("shouldShowMachinesSection", () => {
   });
 });
 
-describe("unread presence wiring", () => {
-  it("feeds each unread presence slice to the matching navigation section", async () => {
+describe("machine unread presence wiring", () => {
+  it("feeds the machine unread slice to the machine-switcher and machine-list", async () => {
     const unreadPresence: UnreadPresence = {
       machines: new Set(["remote-a"]),
       projects: new Set(["project-1"]),
@@ -35,25 +41,27 @@ describe("unread presence wiring", () => {
     panel.compact = true;
     panel.machines = [machine("local"), machine("remote-a")];
     panel.selectedMachine = machine("local");
-    panel.projects = [project("project-1")];
-    panel.workspaces = [workspace("ws-1", "project-1")];
     panel.unreadPresence = unreadPresence;
     document.body.append(panel);
     await panel.updateComplete;
 
     const switcher = panel.shadowRoot?.querySelector("machine-switcher");
     const machineList = panel.shadowRoot?.querySelector("machine-list");
-    const projectList = panel.shadowRoot?.querySelector("project-list");
-    const workspaceList = panel.shadowRoot?.querySelector("workspace-list");
-    if (!(switcher instanceof MachineSwitcher)) throw new Error("Expected machine-switcher section");
-    if (!(machineList instanceof MachineList)) throw new Error("Expected machine-list section");
-    if (!(projectList instanceof ProjectList)) throw new Error("Expected project-list section");
-    if (!(workspaceList instanceof WorkspaceList)) throw new Error("Expected workspace-list section");
+    if (!(switcher instanceof MachineSwitcher)) throw new Error("Expected machine-switcher");
+    if (!(machineList instanceof MachineList)) throw new Error("Expected machine-list");
 
     expect(switcher.unreadMachineIds).toBe(unreadPresence.machines);
     expect(machineList.unreadMachineIds).toBe(unreadPresence.machines);
-    expect(projectList.unreadProjectIds).toBe(unreadPresence.projects);
-    expect(workspaceList.unreadWorkspaceIds).toBe(unreadPresence.workspaces);
+  });
+
+  it("renders session-inbox-panel as the primary navigation content", async () => {
+    const panel = new AppNavigationPanel();
+    panel.machines = [machine("local")];
+    document.body.append(panel);
+    await panel.updateComplete;
+
+    const inbox = panel.shadowRoot?.querySelector("session-inbox-panel");
+    expect(inbox).not.toBeNull();
   });
 });
 
@@ -65,12 +73,4 @@ function machine(id: string): Machine {
     createdAt: "2026-06-04T00:00:00.000Z",
     updatedAt: "2026-06-04T00:00:00.000Z",
   };
-}
-
-function project(id: string): Project {
-  return { id, name: id, path: `/repo/${id}`, createdAt: "2026-06-04T00:00:00.000Z" };
-}
-
-function workspace(id: string, projectId: string): Workspace {
-  return { id, projectId, path: `/repo/${id}`, label: id, isMain: true, isGitRepo: true, isGitWorktree: false, effectiveConfig: {} };
 }

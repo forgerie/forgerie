@@ -48,16 +48,17 @@ export class WorkspaceController {
     try {
       const workspaces = await this.api.workspaces(project.id, machineId);
       if (selectedMachineId(this.getState()) !== machineId || this.getState().selectedProject?.id !== project.id) return;
+      if (target?.isCurrent !== undefined && !target.isCurrent()) return;
       this.setState({ workspaces, workspacesByProjectId: { ...this.getState().workspacesByProjectId, [project.id]: workspaces }, isLoadingWorkspaces: false });
       const workspace = selectPreferredWorkspace(workspaces, { targetWorkspaceId: target?.workspaceId, latestWorkspaceId: this.workspaceSelection.latestWorkspaceId(machineProjectKey(machineId, project.id)) });
-      if (workspace) await this.selectWorkspace(workspace, { sessionId: target?.sessionId, updateUrl: target?.updateUrl });
+      if (workspace) await this.selectWorkspace(workspace, { sessionId: target?.sessionId, updateUrl: target?.updateUrl, isCurrent: target?.isCurrent });
       else if (target?.updateUrl !== false) this.updateUrl();
     } catch (error) {
       if (selectedMachineId(this.getState()) === machineId && this.getState().selectedProject?.id === project.id) this.setState({ error: String(error), isLoadingWorkspaces: false });
     }
   }
 
-  async selectWorkspace(workspace: Workspace, target?: { sessionId?: string | undefined; updateUrl?: boolean | undefined }) {
+  async selectWorkspace(workspace: Workspace, target?: { sessionId?: string | undefined; updateUrl?: boolean | undefined; isCurrent?: (() => boolean) | undefined }) {
     const machineId = selectedMachineId(this.getState());
     this.workspaceSelection.rememberWorkspace({ ...workspace, projectId: machineProjectKey(machineId, workspace.projectId) });
     this.sessions.clearActiveSession();
@@ -65,6 +66,7 @@ export class WorkspaceController {
     try {
       const sessions = mergeCachedNewSessions(workspace.path, await this.api.sessions(workspace.path, machineId), machineId);
       if (selectedMachineId(this.getState()) !== machineId || this.getState().selectedWorkspace?.id !== workspace.id || this.getState().selectedProject?.id !== workspace.projectId) return;
+      if (target?.isCurrent !== undefined && !target.isCurrent()) return;
       this.setState({ sessions });
       const session = this.sessions.preferredSession(workspace.path, sessions, target?.sessionId);
       if (session) await this.sessions.selectSession(session, { updateUrl: target?.updateUrl });

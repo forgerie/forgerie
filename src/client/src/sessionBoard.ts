@@ -48,6 +48,12 @@ export interface SessionBoardSessionInput {
   readonly modified: string;
   readonly archived?: boolean;
   readonly archivedAt?: string;
+  /**
+   * Working directory of the session (workspace path). Present on every
+   * `SessionInfo`; included here so `locationOf` callbacks can look up
+   * the workspace without additional type wrangling.
+   */
+  readonly cwd?: string;
 }
 
 /** Location metadata for one session row, derived by the caller from their own data. */

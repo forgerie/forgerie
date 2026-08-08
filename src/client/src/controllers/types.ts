@@ -13,4 +13,10 @@ export interface RouteTarget {
   workspaceId?: string | undefined;
   sessionId?: string | undefined;
   updateUrl?: boolean | undefined;
+  /**
+   * Optional guard injected by the inbox navigation helper. When provided,
+   * `WorkspaceController.selectProject` / `selectWorkspace` check it after
+   * every await so a superseded navigation never applies its final state.
+   */
+  isCurrent?: (() => boolean) | undefined;
 }

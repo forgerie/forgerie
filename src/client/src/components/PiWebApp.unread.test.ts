@@ -186,8 +186,12 @@ describe("PiWebApp session unread wiring", () => {
     expect(navigationUnreadSessionIds(app).size).toBe(0);
   });
 
-  it("acknowledges a session explicitly marked as read from navigation", async () => {
-    const fetchMock = stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
+  it("passes unreadSessionIds to the navigation panel so the inbox board classifies unread sessions", () => {
+    // The old explicit mark-read buttons in SessionList are replaced by the inbox
+    // board. Unread acknowledgement now happens automatically when a session is
+    // selected (isSessionSeen gate). This test guards that the unread session ids
+    // flow into the navigation panel so the board can colour rows correctly.
+    stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
     const app = createApp();
     enableUnread(app);
     const selected = session("selected");
@@ -195,41 +199,55 @@ describe("PiWebApp session unread wiring", () => {
     setAppState(app, { ...initialAppState(), sessions: [selected, alpha], selectedSession: selected, mainView: "chat" });
 
     handleRealtimeEvent(app, unreadEvent(1, unreadSummary(alpha, 1)));
-    expect([...navigationUnreadSessionIds(app)]).toEqual([alpha.id]);
-    expect(fetchMock).not.toHaveBeenCalled();
 
-    navigationMarkSessionRead(app)(alpha);
-    await vi.waitFor(() => { expect(fetchMock).toHaveBeenCalledOnce(); });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://pi.example.test/api/machines/local/sessions/alpha/unread/acknowledge");
-    const init = fetchMock.mock.calls[0]?.[1];
-    expect(JSON.parse(typeof init?.body === "string" ? init.body : "{}")).toEqual({
-      cwd: "/repo",
-      catalogId: "catalog-a",
-      throughCompletionOrder: 1,
-    });
-    await vi.waitFor(() => { expect(navigationUnreadSessionIds(app).size).toBe(0); });
+    // The unread ids must flow into the navigation panel's inbox.
+    const ids = navigationUnreadSessionIds(app);
+    expect(ids.has(alpha.id)).toBe(true);
   });
 
-  it("acknowledges every session in a bulk mark-read request from navigation", async () => {
-    const fetchMock = stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
+  it("classifies unread sessions from workspaces other than the currently selected one", () => {
+    // Gap U6/#1: syncUnreadSessionIds must use globalSessions.sessions, not
+    // the workspace-scoped state.sessions. A session in /other-workspace is
+    // unread but its cwd is not in state.sessions (which only holds
+    // sessions for the selected /repo workspace).
+    stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
     const app = createApp();
     enableUnread(app);
+    const selected = session("selected"); // cwd: /repo, in selected workspace
+    const background = { ...session("background"), cwd: "/other-workspace" }; // different workspace
+    // state.sessions only contains the selected workspace's sessions.
+    // globalSessions contains all machine sessions.
+    setAppState(app, {
+      ...initialAppState(),
+      sessions: [selected],
+      globalSessions: {
+        machineId: "local",
+        status: "fresh",
+        sessions: [selected, background],
+        statuses: {},
+      },
+      selectedSession: selected,
+      mainView: "chat",
+    });
+
+    handleRealtimeEvent(app, unreadEvent(1, unreadSummary(background, 1)));
+
+    // background is in a different workspace but must appear as unread.
+    const ids = navigationUnreadSessionIds(app);
+    expect(ids.has(background.id)).toBe(true);
+  });
+
+  it("passes onSelectSession to the navigation panel so inbox row clicks enter the selection cascade", () => {
+    // The old onMarkSessionRead/onMarkSessionsRead callbacks are gone because
+    // unread is acknowledged implicitly when the session is opened and seen.
+    // This guards that the navigation panel receives an onSelectSession callback.
+    stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
+    const app = createApp();
     const selected = session("selected");
-    const alpha = session("alpha");
-    const beta = session("beta");
-    setAppState(app, { ...initialAppState(), sessions: [selected, alpha, beta], selectedSession: selected, mainView: "chat" });
+    setAppState(app, { ...initialAppState(), sessions: [selected], selectedSession: selected, mainView: "chat" });
 
-    handleRealtimeEvent(app, unreadEvent(1, unreadSummary(alpha, 1)));
-    handleRealtimeEvent(app, unreadEvent(2, unreadSummary(beta, 2)));
-    expect([...navigationUnreadSessionIds(app)]).toEqual([alpha.id, beta.id]);
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    navigationMarkSessionsRead(app)([alpha, beta]);
-    await vi.waitFor(() => { expect(fetchMock).toHaveBeenCalledTimes(2); });
-    const requests = fetchMock.mock.calls.map((call) => call[0]);
-    expect(requests).toContain("https://pi.example.test/api/machines/local/sessions/alpha/unread/acknowledge");
-    expect(requests).toContain("https://pi.example.test/api/machines/local/sessions/beta/unread/acknowledge");
-    await vi.waitFor(() => { expect(navigationUnreadSessionIds(app).size).toBe(0); });
+    const onSelectSession = navigationPanelValue(app, ".onSelectSession=");
+    expect(typeof onSelectSession).toBe("function");
   });
 
   it("derives bubble-up unread presence for selected and background machines", () => {
@@ -321,8 +339,6 @@ type MobileMainTabs = (this: PiWebApp) => AppMobileMainTab[];
 type UpdatedHook = (this: PiWebApp) => void;
 type DisconnectedHook = (this: PiWebApp) => void;
 type RefreshUnread = (machineId: string) => Promise<void>;
-type MarkSessionRead = (session: SessionInfo) => void;
-type MarkSessionsRead = (sessions: SessionInfo[]) => void;
 
 function createApp(storedValues: Record<string, string> = {}, mobileNavigation = false): PiWebApp {
   const values = new Map(Object.entries(storedValues));
@@ -440,17 +456,9 @@ function navigationUnreadSessionIds(app: PiWebApp): ReadonlySet<string> {
   return value;
 }
 
-function navigationMarkSessionRead(app: PiWebApp): MarkSessionRead {
-  const value = navigationPanelValue(app, ".onMarkSessionRead=");
-  if (!isMarkSessionRead(value)) throw new Error("Expected mark-session-read callback in navigation");
-  return value;
-}
-
-function navigationMarkSessionsRead(app: PiWebApp): MarkSessionsRead {
-  const value = navigationPanelValue(app, ".onMarkSessionsRead=");
-  if (!isMarkSessionsRead(value)) throw new Error("Expected mark-sessions-read callback in navigation");
-  return value;
-}
+// navigationMarkSessionRead and navigationMarkSessionsRead removed:
+// the inbox board acknowledges unread implicitly via session selection,
+// so explicit mark-read callbacks are no longer wired to the nav panel.
 
 function navigationPanelValue(app: PiWebApp, marker: string): unknown {
   const method: unknown = Reflect.get(app, "renderNavigationPanel");
@@ -579,13 +587,5 @@ function isDisconnectedHook(value: unknown): value is DisconnectedHook {
 }
 
 function isRefreshUnread(value: unknown): value is RefreshUnread {
-  return typeof value === "function";
-}
-
-function isMarkSessionRead(value: unknown): value is MarkSessionRead {
-  return typeof value === "function";
-}
-
-function isMarkSessionsRead(value: unknown): value is MarkSessionsRead {
   return typeof value === "function";
 }

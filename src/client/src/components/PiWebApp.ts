@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
-import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
+import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
 import { isSessionActive } from "../../../shared/activity";
@@ -52,7 +52,7 @@ import { readRoute, writeRoute, type AppRoute } from "../route";
 import { readSettingsSection, writeSettingsSection, type SettingsSection } from "../settingsRoute";
 import { applyActiveShortcutPreferences } from "../shortcutPreferences";
 import { createTerminalCommandRunsRuntime } from "../runtime/terminalRuntime";
-import { isWorkspaceDeletionPending, isWorkspaceDeletionRunPending, latestWorkspaceDeletionRuns, pendingWorkspaceDeletionIds, targetWorkspaceIdForRun, workspaceDeletionRunFilter } from "../workspaceDeletion";
+import { isWorkspaceDeletionPending, isWorkspaceDeletionRunPending, latestWorkspaceDeletionRuns, targetWorkspaceIdForRun, workspaceDeletionRunFilter } from "../workspaceDeletion";
 import "./MachineList";
 import "./ProjectList";
 import "./WorkspaceList";
@@ -77,7 +77,9 @@ import type { WorkspacePanelEmptyState } from "./WorkspacePanel";
 import "./appShell/AppContextBar";
 import "./appShell/AppMobileMainTabs";
 import type { AppMobileMainTab, AppMobileMainTabIcon } from "./appShell/AppMobileMainTabs";
-import { shouldShowMachinesSection, type AppNavigationPanel, type NavigationFocusTarget } from "./appShell/AppNavigationPanel";
+import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/AppNavigationPanel";
+import "./SessionInboxPanel";
+import { navigateToInboxSession } from "../controllers/inboxNavigation";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
 import { appStyles } from "./shared";
@@ -96,6 +98,9 @@ const TERMINAL_ROUTE_NAMESPACE = queryNamespace("core:workspace.terminal");
 const MIN_RESIZABLE_CHAT_WIDTH_PX = 320;
 const PANEL_EDGE_COLUMNS_WIDTH_PX = 2;
 const DESKTOP_SIDE_BY_SIDE_MEDIA_QUERY = "(min-width: 1181px)";
+
+/** PiWebApp-internal focus target type. Kept separate from AppNavigationPanel's export. */
+type NavigationFocusTarget = NavigationSection | "chat";
 
 interface SessionCleanupDialogState {
   preview?: SessionCleanupPreviewResponse | undefined;
@@ -273,6 +278,12 @@ export class PiWebApp extends LitElement {
   private themePreference: ThemePreference = readStoredThemePreference() ?? DEFAULT_THEME_PREFERENCE;
   @state() private activeThemeId: QualifiedContributionId = CLASSIC_THEME_ID;
   @state() private isRefreshingApp = false;
+  /**
+   * Cwds confirmed to have no matching workspace after lazy loading all
+   * projects. Passed to SessionInboxPanel so the row renders as disabled.
+   * Cleared when navigation succeeds or machine/topology refreshes.
+   */
+  @state() private unavailableCwds: ReadonlySet<string> = new Set();
   @state() private sessionCleanupDialog: SessionCleanupDialogState | undefined;
   @state() private settingsSection: SettingsSection | undefined = readSettingsSection();
   @state() private shortcutConfig: PiWebShortcutConfig = {};
@@ -346,7 +357,11 @@ export class PiWebApp extends LitElement {
   }
 
   private syncUnreadSessionIds(): void {
-    const next = this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), this.state.sessions);
+    // Use the machine-global session list so unread sessions in workspaces
+    // other than the currently selected one are included. Fall back to the
+    // workspace-scoped list when the global store is not yet populated.
+    const sessions = this.state.globalSessions?.sessions ?? this.state.sessions;
+    const next = this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), sessions);
     if (!sameStringSet(next, this.unreadSessionIds)) this.unreadSessionIds = next;
   }
 
@@ -477,6 +492,8 @@ export class PiWebApp extends LitElement {
       this.refreshWorkspaceDeletionRuns(),
       this.workspaces.refreshSelectedProjectTopology(),
     ]);
+    // Topology refresh may have resolved previously-unavailable cwds.
+    this.unavailableCwds = new Set();
   }
 
   private schedulePiWebStatusRefresh(delayMs = PI_WEB_STATUS_DEFER_MS): void {
@@ -1119,6 +1136,8 @@ export class PiWebApp extends LitElement {
     void this.inbox.refresh(selectedMachineId(next));
     this.activeTerminalIds.clear();
     this.sessionCleanupDialog = undefined;
+    // Machine switch invalidates all unavailable-cwd marks from the previous machine.
+    this.unavailableCwds = new Set();
     this.setState({ piWebStatus: undefined });
     this.git.updatePolling();
     void this.loadPluginsForSelectedMachine();
@@ -1294,62 +1313,117 @@ export class PiWebApp extends LitElement {
         .selectedMachine=${this.state.selectedMachine}
         .machineStatuses=${this.state.machineStatuses}
         .machineActivities=${this.state.machineActivities}
-        .machinesCollapsed=${this.navigationSections.isCollapsed("machines")}
-        .onToggleMachines=${() => { this.navigationSections.toggle("machines"); }}
-        .onSelectMachine=${(machine: Machine) => this.selectNavigationItem("machines", "projects", () => this.selectMachineWithMemory(machine))}
-        .onRemoveMachine=${(machine: Machine) => { void this.removeMachine(machine); }}
-        .projects=${this.state.projects}
-        .selectedProject=${this.state.selectedProject}
-        .workspaceActivities=${this.state.workspaceActivities}
-        .workspacesByProjectId=${this.state.workspacesByProjectId}
-        .workspaces=${this.state.workspaces}
-        .selectedWorkspace=${this.state.selectedWorkspace}
-        .deletingWorkspaceIds=${pendingWorkspaceDeletionIds(this.state.workspaceDeletionRuns)}
-        .sessions=${this.state.sessions}
+        .unreadPresence=${this.unreadPresence}
+        .globalSessions=${this.state.globalSessions}
+        .selectedSession=${this.state.selectedSession}
         .sessionStatuses=${this.state.sessionStatuses}
         .sessionActivities=${this.state.sessionActivities}
-        .sendingPrompts=${this.state.sendingPrompts}
         .unreadSessionIds=${this.unreadSessionIds}
-        .unreadPresence=${this.unreadPresence}
-        .selectedSession=${this.state.selectedSession}
-        .startingSessionCount=${this.state.startingSessionCount}
-        .canStartSession=${!!this.state.selectedWorkspace}
+        .unreadCompletedAt=${this.inboxUnreadCompletedAt()}
+        .projects=${this.state.projects}
+        .workspacesByProjectId=${this.state.workspacesByProjectId}
         .collapsible=${true}
         .compact=${this.appShell.isMobileNavigationLayout}
-        .projectsCollapsed=${this.navigationSections.isCollapsed("projects")}
-        .workspacesCollapsed=${this.navigationSections.isCollapsed("workspaces")}
-        .sessionsCollapsed=${this.navigationSections.isCollapsed("sessions")}
-        .workspaceLabelItems=${(workspace: Workspace) => this.workspaceLabelItems(workspace)}
         .refreshControl=${this.appShell.shouldShowAppRefreshInHeader() ? this.renderAppRefresh() : undefined}
         .onShowActions=${() => { this.setState({ actionPaletteOpen: true }); }}
-        .onToggleProjects=${() => { this.navigationSections.toggle("projects"); }}
-        .onToggleWorkspaces=${() => { this.navigationSections.toggle("workspaces"); }}
-        .onToggleSessions=${() => { this.navigationSections.toggle("sessions"); }}
-        .onSelectProject=${(project: Project) => this.selectNavigationItem("projects", "workspaces", () => this.workspaces.selectProject(project))}
-        .onCloseProject=${(project: Project) => this.projects.closeProject(project.id)}
-        .onSelectWorkspace=${(workspace: Workspace) => this.selectNavigationItem("workspaces", "sessions", () => this.workspaces.selectWorkspace(workspace))}
-        .onDeleteWorkspace=${(workspace: Workspace) => { void this.deleteWorkspace(workspace); }}
-        .onArchivedCollapsed=${() => { this.sessions.clearSelectionAfterArchivedCollapse(); }}
-        .onStartSession=${() => this.startSessionFromNavigation()}
-        .onSelectSession=${(session: SessionInfo) => this.selectNavigationItem("sessions", "chat", () => this.sessions.selectSession(session))}
-        .onMarkSessionRead=${(session: SessionInfo) => { this.markSessionsRead([session]); }}
-        .onMarkSessionsRead=${(sessions: SessionInfo[]) => { this.markSessionsRead(sessions); }}
+        .onSelectMachine=${(machine: Machine) => this.selectNavigationItem("machines", "chat", () => this.selectMachineWithMemory(machine))}
+        .onRemoveMachine=${(machine: Machine) => { void this.removeMachine(machine); }}
+        .onSelectSession=${(session: SessionInfo) => { void this.selectInboxSession(session); }}
         .onArchiveSession=${(session: SessionInfo) => this.sessions.archiveSession(session)}
-        .onArchiveSessionWithDescendants=${(session: SessionInfo) => this.sessions.archiveSessionWithDescendants(session)}
-        .onArchiveSessions=${(sessions: SessionInfo[]) => this.sessions.archiveSessions(sessions)}
-        .onRestoreSession=${(session: SessionInfo) => this.selectNavigationItem("sessions", "chat", () => this.sessions.restoreSession(session))}
-        .onDeleteCachedNewSession=${(session: SessionInfo) => this.sessions.deleteCachedNewSession(session)}
-        .onDeleteArchivedSession=${(session: SessionInfo) => this.sessions.deleteArchivedSessions([session])}
-        .onDeleteArchivedSessions=${(sessions: SessionInfo[]) => this.sessions.deleteArchivedSessions(sessions)}
-        .onDetachParentSession=${(session: SessionInfo) => this.sessions.detachParent(session)}
-        .parentSessionLocation=${this.parentSessionLocationFor}
-        .onGoToParentSession=${(session: SessionInfo, location: ParentSessionLocation) => this.goToParentSession(location)}
-        .onReloadSession=${(session: SessionInfo) => this.sessions.reloadSession(session)}
-        .onCleanupSessions=${() => { this.openSessionCleanupDialog(); }}
-        .onFocusNavigationTarget=${(target: NavigationFocusTarget) => { void this.focusNavigationTarget(target); }}
+        .onRestoreSession=${(session: SessionInfo) => { void this.restoreInboxSession(session); }}
+        .onNewSession=${() => { void this.startSessionFromNavigation(); }}
         .onCancelKeyboardNavigation=${() => { void this.focusChatComposer(); }}
+        .unavailableCwds=${this.unavailableCwds}
       ></app-navigation-panel>
     `;
+  }
+
+  /**
+   * Derive the `completedAt` timestamps for unread sessions so the inbox
+   * board can pass them to `sessionBoardState` (shows when the session
+   * completed while you were away).
+   */
+  private inboxUnreadCompletedAt(): Readonly<Record<string, string>> {
+    const machineId = selectedMachineId(this.state);
+    const projection = this.sessionUnread.projection(machineId);
+    if (projection === undefined) return {};
+    const result: Record<string, string> = {};
+    for (const summary of projection.sessions) {
+      result[summary.sessionId] = summary.completedAt;
+    }
+    return result;
+  }
+
+  /**
+   * Inbox session selection: routes through the existing cascade for
+   * cross-workspace navigation, or selects directly for same-workspace.
+   *
+   * Uses a monotonically increasing token (`navigationSelectionSeq`) so rapid
+   * selections always apply the latest one and discard stale in-flight results.
+   */
+  private async selectInboxSession(session: SessionInfo): Promise<void> {
+    const seq = ++this.navigationSelectionSeq;
+    const isCurrentToken = () => seq === this.navigationSelectionSeq;
+
+    const result = await navigateToInboxSession(
+      session,
+      {
+        getSelectedWorkspacePath: () => this.state.selectedWorkspace?.path,
+        getSelectedProjectId: () => this.state.selectedProject?.id,
+        allWorkspaces: () => {
+          // Flatten all workspaces from workspacesByProjectId.
+          return Object.values(this.state.workspacesByProjectId).flat();
+        },
+        allProjects: () => this.state.projects,
+        loadProjectWorkspaces: async (project) => {
+          // Refresh without selection teardown; updates workspacesByProjectId.
+          return this.workspaces.refreshProjectWorkspaces(project.id);
+        },
+        selectSession: async (s) => {
+          if (!isCurrentToken()) return;
+          await this.sessions.selectSession(s);
+        },
+        selectWorkspace: async (ws, opts) => {
+          if (!isCurrentToken()) return;
+          await this.workspaces.selectWorkspace(ws, { ...opts, isCurrent: isCurrentToken });
+        },
+        selectProject: async (project, opts) => {
+          if (!isCurrentToken()) return;
+          await this.workspaces.selectProject(project, { ...opts, isCurrent: isCurrentToken });
+        },
+      },
+      { token: seq, isCurrentToken },
+    );
+
+    if (!isCurrentToken()) return;
+
+    if (result === "selected" || result === "workspace-switch" || result === "project-switch") {
+      // Successful resolution: clear any stale unavailable mark for this cwd.
+      if (this.unavailableCwds.has(session.cwd)) {
+        const next = new Set(this.unavailableCwds);
+        next.delete(session.cwd);
+        this.unavailableCwds = next;
+      }
+      await this.focusChatComposer();
+    } else if (result === "unavailable") {
+      // All projects exhausted with no match: mark the cwd unavailable so the
+      // row renders as disabled in the inbox panel.
+      if (!this.unavailableCwds.has(session.cwd)) {
+        this.unavailableCwds = new Set([...this.unavailableCwds, session.cwd]);
+      }
+    }
+    // "discarded": a later selection took over — leave unavailableCwds as-is.
+  }
+
+  /**
+   * Restore a session from the inbox and navigate to it.
+   * Like `selectNavigationItem` for restores: select session, then focus chat.
+   */
+  private async restoreInboxSession(session: SessionInfo): Promise<void> {
+    const seq = ++this.navigationSelectionSeq;
+    const isCurrentToken = () => seq === this.navigationSelectionSeq;
+    await this.sessions.restoreSession(session);
+    if (isCurrentToken()) await this.focusChatComposer();
   }
 
   private openNavigationSection(section: NavigationSection): void {
@@ -1426,16 +1500,22 @@ export class PiWebApp extends LitElement {
   }
 
   private async focusNavigationSection(section: NavigationSection): Promise<void> {
-    if (section === "machines" && !shouldShowMachinesSection(this.state.machines)) {
-      await this.focusNavigationSection("projects");
-      return;
-    }
     this.panelCollapse.expandNavigationPanel();
     if (this.appShell.isMobileNavigationLayout) this.selectMainView("navigation");
-    this.navigationSections.expand(section);
-    await this.updateComplete;
-    await nextFrame();
-    await this.navigationPanel?.focusSection(section);
+    // The navigation panel now hosts the inbox; non-machine sections map to
+    // focusing the inbox panel itself.
+    if (section === "machines" && shouldShowMachinesSection(this.state.machines)) {
+      this.navigationSections.expand(section);
+      await this.updateComplete;
+      await nextFrame();
+      // MachineSwitcher is still in the panel header; focus it.
+      const switcher = this.navigationPanel?.shadowRoot?.querySelector("machine-switcher");
+      if (switcher instanceof HTMLElement) switcher.focus();
+    } else {
+      await this.updateComplete;
+      await nextFrame();
+      await this.navigationPanel?.focusInbox();
+    }
   }
 
   private async focusChatComposer(): Promise<void> {
