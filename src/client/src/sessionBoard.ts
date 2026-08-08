@@ -256,6 +256,31 @@ export interface SessionBoardInput<S extends SessionBoardSessionInput> {
  * caller decides what to do with an empty group rather than guessing why it
  * is missing.
  */
+export interface SessionInboxProjection<S extends SessionBoardSessionInput> {
+  readonly sessions: readonly S[];
+  readonly statuses: Readonly<Record<string, SessionBoardStatusInput>>;
+  readonly activities: Readonly<Record<string, SessionBoardActivityInput>>;
+}
+
+export interface SessionInboxBoardInput<S extends SessionBoardSessionInput>
+  extends Omit<SessionBoardInput<S>, "sessions" | "statuses" | "activities"> {
+  readonly projection: SessionInboxProjection<S>;
+}
+
+/** Canonical inbox projection from machine state plus browser-local unread/location state. */
+export function deriveSessionInboxBoard<S extends SessionBoardSessionInput>(
+  input: SessionInboxBoardInput<S>,
+): SessionBoard<S> {
+  return deriveSessionBoard({
+    sessions: input.projection.sessions,
+    statuses: input.projection.statuses,
+    activities: input.projection.activities,
+    ...(input.unreadSessionIds === undefined ? {} : { unreadSessionIds: input.unreadSessionIds }),
+    ...(input.unreadCompletedAt === undefined ? {} : { unreadCompletedAt: input.unreadCompletedAt }),
+    locationOf: input.locationOf,
+  });
+}
+
 export function deriveSessionBoard<S extends SessionBoardSessionInput>(
   input: SessionBoardInput<S>,
 ): SessionBoard<S> {

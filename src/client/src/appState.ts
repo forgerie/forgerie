@@ -29,6 +29,12 @@ export interface GlobalSessionsState {
    * dialogs from the asks catalog that are not in the listing statuses.
    */
   readonly statuses: Readonly<Record<string, SessionStatus>>;
+  /**
+   * Last live activity keyed by sessionId. The machine listing replaces this
+   * map atomically on initial load and reconnect; activity.update events keep
+   * it current between snapshots.
+   */
+  readonly activities: Readonly<Record<string, SessionActivity>>;
 }
 
 export interface AppState {

@@ -16,7 +16,7 @@
  */
 
 import { sessionsApi } from "../api";
-import type { SessionInfo, SessionStatus } from "../api";
+import type { SessionActivity, SessionInfo, SessionStatus } from "../api";
 import type {
   MachineSessionListingSnapshot,
   SessionAskCatalogEntry,
@@ -58,15 +58,8 @@ export interface SessionInboxBridge {
    */
   applyGlobalEvent(machineId: string, event: GlobalSessionEvent): void;
 
-  /**
-   * Apply all buffered status updates to globalSessions in one setState write.
-   *
-   * Called by SessionController.flushPendingUpdates so that the rAF batch
-   * covers both the selected-session and the machine-global projection.
-   * Multiple status.update events in one rAF frame collapse to last-write-wins
-   * per session — only one globalSessions write results.
-   */
-  flushPendingStatusesToGlobal(): void;
+  /** Apply buffered status and activity deltas in one machine projection write. */
+  flushPendingSessionStateToGlobal(): void;
 
   /** The selected-workspace archive path succeeded; update the global store. */
   notifyArchived(machineId: string, sessionId: string, archivedAt: string): void;
@@ -100,6 +93,10 @@ export interface SessionInboxBridge {
 
 export interface SessionInboxControllerOptions {
   api?: SessionInboxApi | undefined;
+  /** Bound each catalog request so reconnect cannot remain stale forever. */
+  snapshotTimeoutMs?: number | undefined;
+  /** Delay before retrying a partial or failed snapshot. */
+  retryDelayMs?: number | undefined;
   onBackgroundError?:
     | ((
         operation: "listing" | "asks",
@@ -153,7 +150,10 @@ export interface ArchiveAndNextDeps extends ArchiveWithUndoDeps {
    * Navigate to the given session (e.g. `selectInboxSession`). Called after
    * archive succeeds and a next session is found in the triage queue.
    */
-  navigateTo: (session: SessionInfo) => Promise<void>;
+  navigateTo: (
+    session: SessionInfo,
+    options: { readonly preserveUndoToast: true },
+  ) => Promise<void>;
   /**
    * Called when the triage queue is empty after the archive. The caller
    * is responsible for returning focus to a real board element or the all-clear.
@@ -204,6 +204,8 @@ export class SessionInboxController implements SessionInboxBridge {
     machineId: string,
     error: unknown,
   ) => void;
+  private readonly snapshotTimeoutMs: number;
+  private readonly retryDelayMs: number;
 
   private currentMachineId: string | undefined;
   /**
@@ -215,6 +217,7 @@ export class SessionInboxController implements SessionInboxBridge {
   private generation = 0;
   private refreshPromise: Promise<void> | undefined;
   private refreshQueued = false;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
   // U8: undo toast state
@@ -232,11 +235,12 @@ export class SessionInboxController implements SessionInboxBridge {
   /**
    * Status updates buffered between rAF frames.
    * Populated by applyEventToState for status.update events (instead of an
-   * immediate setState). Flushed by flushPendingStatusesToGlobal, which
+   * immediate setState). Flushed by flushPendingSessionStateToGlobal, which
    * SessionController.flushPendingUpdates calls so all session-state writes
    * in one rAF frame coalesce into a single globalSessions update.
    */
   private pendingStatusBySession = new Map<string, SessionStatus>();
+  private pendingActivityBySession = new Map<string, SessionActivity>();
 
   constructor(
     private readonly getState: GetState,
@@ -244,6 +248,8 @@ export class SessionInboxController implements SessionInboxBridge {
     options: SessionInboxControllerOptions = {},
   ) {
     this.api = options.api ?? defaultApi;
+    this.snapshotTimeoutMs = options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS;
+    this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     this.onBackgroundError =
       options.onBackgroundError ??
       ((operation, machineId, error) => {
@@ -262,6 +268,8 @@ export class SessionInboxController implements SessionInboxBridge {
     this.refreshQueued = false;
     this.inflightBuffer = undefined;
     this.pendingStatusBySession.clear();
+    this.pendingActivityBySession.clear();
+    this.clearRetryTimer();
     this.clearUndoTimer();
     // Clear the toast from AppState on dispose so it does not outlive the
     // controller's lifetime (e.g. unmount, machine switch with full teardown).
@@ -292,15 +300,22 @@ export class SessionInboxController implements SessionInboxBridge {
       this.refreshQueued = false;
       this.inflightBuffer = undefined;
       this.pendingStatusBySession.clear();
+      this.pendingActivityBySession.clear();
+      this.clearRetryTimer();
+      this.clearUndoTimer();
       this.setState({
+        inboxUndoToast: undefined,
         globalSessions: {
           machineId,
           status: "loading",
           sessions: [],
           statuses: {},
+          activities: {},
         },
       });
     }
+
+    this.clearRetryTimer();
 
     // Coalesce concurrent calls: queue a trailing refresh if one is in flight.
     if (this.refreshPromise !== undefined) {
@@ -312,6 +327,10 @@ export class SessionInboxController implements SessionInboxBridge {
     // is in flight are held and replayed on top of the snapshot rather than
     // being silently overwritten when the snapshot is applied.
     this.inflightBuffer = [];
+    // The replacement snapshot starts after these queued deltas. It supersedes
+    // them; only events received from this point onward need replay.
+    this.pendingStatusBySession.clear();
+    this.pendingActivityBySession.clear();
     const generation = this.generation;
     const promise = this.runRefresh(machineId, generation).finally(() => {
       if (this.generation === generation && this.refreshPromise === promise) {
@@ -359,11 +378,9 @@ export class SessionInboxController implements SessionInboxBridge {
     } else if (event.type === "session.name") {
       this.applySessionName(current, event.sessionId, event.name);
     } else if (event.type === "status.update") {
-      // Buffer status updates; SessionController.flushPendingUpdates applies them
-      // to globalSessions in one write per rAF frame via flushPendingStatusesToGlobal.
-      // Replay from replayInflightBuffer also accumulates here and is flushed at
-      // replay end, preserving snapshot semantics.
       this.pendingStatusBySession.set(event.status.sessionId, event.status);
+    } else if (event.type === "activity.update") {
+      this.pendingActivityBySession.set(event.activity.sessionId, event.activity);
     }
   }
 
@@ -407,7 +424,11 @@ export class SessionInboxController implements SessionInboxBridge {
     for (const [id, s] of Object.entries(current.statuses)) {
       if (!deletedSet.has(id)) statuses[id] = s;
     }
-    this.setState({ globalSessions: { ...current, sessions, statuses } });
+    const activities: Record<string, SessionActivity> = {};
+    for (const [id, activity] of Object.entries(current.activities)) {
+      if (!deletedSet.has(id)) activities[id] = activity;
+    }
+    this.setState({ globalSessions: { ...current, sessions, statuses, activities } });
   }
 
   notifySessionUpdated(machineId: string, session: SessionInfo): void {
@@ -423,25 +444,27 @@ export class SessionInboxController implements SessionInboxBridge {
   // U8: Archive workflow — undo orchestration
   // -------------------------------------------------------------------------
 
-  /**
-   * Apply all buffered status updates to globalSessions in one setState write.
-   *
-   * Called by SessionController.flushPendingUpdates so that the rAF batch
-   * covers both the selected-session and the machine-global projection.
-   * Multiple status.update events in one rAF frame collapse to last-write-wins
-   * per session — only one globalSessions write results.
-   */
-  flushPendingStatusesToGlobal(): void {
-    if (this.disposed || this.pendingStatusBySession.size === 0) return;
+  /** Apply last-write-wins status and activity deltas in one projection write. */
+  flushPendingSessionStateToGlobal(): void {
+    if (this.disposed || (this.pendingStatusBySession.size === 0 && this.pendingActivityBySession.size === 0)) return;
     const current = this.getState().globalSessions;
     if (current === undefined || current.machineId !== this.currentMachineId) {
       this.pendingStatusBySession.clear();
+      this.pendingActivityBySession.clear();
       return;
     }
+    const knownSessionIds = new Set(current.sessions.map((session) => session.id));
     const statuses = { ...current.statuses };
-    for (const [sessionId, s] of this.pendingStatusBySession) statuses[sessionId] = s;
+    for (const [sessionId, status] of this.pendingStatusBySession) {
+      if (knownSessionIds.has(sessionId)) statuses[sessionId] = status;
+    }
+    const activities = { ...current.activities };
+    for (const [sessionId, activity] of this.pendingActivityBySession) {
+      if (knownSessionIds.has(sessionId)) activities[sessionId] = activity;
+    }
     this.pendingStatusBySession.clear();
-    this.setState({ globalSessions: { ...current, statuses } });
+    this.pendingActivityBySession.clear();
+    this.setState({ globalSessions: { ...current, statuses, activities } });
   }
 
   /**
@@ -460,13 +483,15 @@ export class SessionInboxController implements SessionInboxBridge {
    * archive fails, leaving the session in place with no toast.
    */
   async archiveWithUndo(session: SessionInfo, deps: ArchiveWithUndoDeps): Promise<boolean> {
-    if (this.disposed) return false;
+    if (this.disposed || this.currentMachineId !== deps.machineId) return false;
+    const generation = this.generation;
 
     // Working session check: use the board state classifier against the
     // global statuses map. Blocked sessions skip confirmation.
-    const statuses = this.getState().globalSessions?.statuses ?? {};
-    const status = statuses[session.id];
-    const boardState = sessionBoardState(session, { status });
+    const projection = this.getState().globalSessions;
+    const status = projection?.statuses[session.id];
+    const activity = projection?.activities[session.id];
+    const boardState = sessionBoardState(session, { status, activity });
 
     if (boardState.kind === "working") {
       const confirmFn = deps.confirm ?? defaultConfirm;
@@ -478,6 +503,7 @@ export class SessionInboxController implements SessionInboxBridge {
 
     // Server-first archive: throws on failure (caller handles the error).
     await deps.archiveSession(session);
+    if (this.generation !== generation || this.currentMachineId !== deps.machineId) return false;
 
     // Server confirmed; update the global store.
     const archivedAt = new Date().toISOString();
@@ -502,7 +528,12 @@ export class SessionInboxController implements SessionInboxBridge {
     if (this.disposed) return;
     if (this.undoState.kind !== "active") return;
 
-    const { session } = this.undoState;
+    const { session, machineId } = this.undoState;
+    if (this.currentMachineId !== machineId) {
+      this.dismissUndoToast();
+      return;
+    }
+    const generation = this.generation;
 
     // Cancel the timer first so it does not clear the toast out from under
     // the restore call.
@@ -512,6 +543,7 @@ export class SessionInboxController implements SessionInboxBridge {
     try {
       await deps.restoreSession(session);
     } catch (error: unknown) {
+      if (this.generation !== generation || this.currentMachineId !== machineId) return;
       const message = String(error);
       if (isNotFoundError(message)) {
         this.setState({ error: "Session was already deleted" });
@@ -566,7 +598,9 @@ export class SessionInboxController implements SessionInboxBridge {
       deps.onAllClear();
     } else {
       const nextRow = queueAfter[0];
-      if (nextRow !== undefined) await deps.navigateTo(nextRow.session);
+      if (nextRow !== undefined) {
+        await deps.navigateTo(nextRow.session, { preserveUndoToast: true });
+      }
     }
   }
 
@@ -582,48 +616,61 @@ export class SessionInboxController implements SessionInboxBridge {
       this.setState({ globalSessions: { ...before, status: "stale" } });
     }
 
-    try {
-      // Fetch in parallel; both must succeed for a fresh snapshot.
-      const [listing, asks] = await Promise.all([
-        this.api.machineListing(machineId),
-        this.api.asksCatalog(machineId),
-      ]);
+    const [listingResult, asksResult] = await Promise.allSettled([
+      withTimeout(this.api.machineListing(machineId), this.snapshotTimeoutMs, "session listing"),
+      withTimeout(this.api.asksCatalog(machineId), this.snapshotTimeoutMs, "session asks"),
+    ]);
 
-      if (this.disposed || this.generation !== generation) return;
+    if (this.disposed || this.generation !== generation) return;
 
-      const statuses = buildStatuses(listing, asks);
-
-      this.setState({
-        globalSessions: {
-          machineId,
-          status: "fresh",
-          sessions: listing.sessions,
-          statuses,
-        },
-      });
-      this.replayInflightBuffer(machineId, generation);
-    } catch (error: unknown) {
-      if (this.disposed || this.generation !== generation) return;
-
+    if (listingResult.status === "rejected") {
       const stale = this.getState().globalSessions;
       if (stale?.machineId === machineId) {
-        if (stale.status !== "stale") {
-          this.setState({ globalSessions: { ...stale, status: "stale" } });
-        }
+        if (stale.status !== "stale") this.setState({ globalSessions: { ...stale, status: "stale" } });
       } else {
-        // No prior data for this machine: install an empty stale projection.
         this.setState({
           globalSessions: {
             machineId,
             status: "stale",
             sessions: [],
             statuses: {},
+            activities: {},
           },
         });
       }
-
       this.replayInflightBuffer(machineId, generation);
-      this.onBackgroundError("listing", machineId, error);
+      this.onBackgroundError("listing", machineId, listingResult.reason);
+      if (asksResult.status === "rejected") this.onBackgroundError("asks", machineId, asksResult.reason);
+      this.scheduleRetry(machineId, generation);
+      return;
+    }
+
+    const listing = listingResult.value;
+    const asksFailed = asksResult.status === "rejected";
+    const asks = asksFailed
+      ? asksCatalogFromProjection(before, listing.sessions)
+      : asksResult.value;
+    const statuses = buildStatuses(listing, asks);
+    const activities = Object.fromEntries(
+      listing.activities.map((activity) => [activity.sessionId, activity]),
+    );
+
+    this.setState({
+      globalSessions: {
+        machineId,
+        status: asksFailed ? "stale" : "fresh",
+        sessions: listing.sessions,
+        statuses,
+        activities,
+      },
+    });
+    this.replayInflightBuffer(machineId, generation);
+
+    if (asksFailed) {
+      this.onBackgroundError("asks", machineId, asksResult.reason);
+      this.scheduleRetry(machineId, generation);
+    } else {
+      this.clearRetryTimer();
     }
   }
 
@@ -645,9 +692,23 @@ export class SessionInboxController implements SessionInboxBridge {
       if (current?.machineId !== machineId) return;
       this.applyEventToState(current, event);
     }
-    // Apply any buffered statuses accumulated during replay in one write,
-    // preserving HTTP snapshot semantics: snapshot lands first, then events.
-    this.flushPendingStatusesToGlobal();
+    // Apply buffered runtime state in one write after the snapshot.
+    this.flushPendingSessionStateToGlobal();
+  }
+
+  private scheduleRetry(machineId: string, generation: number): void {
+    this.clearRetryTimer();
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      if (this.disposed || this.generation !== generation || this.currentMachineId !== machineId) return;
+      void this.refresh(machineId);
+    }, this.retryDelayMs);
+  }
+
+  private clearRetryTimer(): void {
+    if (this.retryTimer === undefined) return;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
   }
 
   private applyCreatedSession(
@@ -676,18 +737,6 @@ export class SessionInboxController implements SessionInboxBridge {
       return next;
     });
     this.setState({ globalSessions: { ...current, sessions } });
-  }
-
-  private applyStatusUpdate(
-    current: GlobalSessionsState,
-    status: SessionStatus,
-  ): void {
-    this.setState({
-      globalSessions: {
-        ...current,
-        statuses: { ...current.statuses, [status.sessionId]: status },
-      },
-    });
   }
 
   // U8: undo timer management
@@ -727,6 +776,40 @@ export class SessionInboxController implements SessionInboxBridge {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_UNDO_TIMER_MS = 5000;
+const DEFAULT_SNAPSHOT_TIMEOUT_MS = 10_000;
+const DEFAULT_RETRY_DELAY_MS = 2_000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => { reject(new Error(`${label} timed out`)); }, timeoutMs);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
+function asksCatalogFromProjection(
+  projection: GlobalSessionsState | undefined,
+  sessions: readonly SessionInfo[],
+): SessionAskCatalogSnapshot {
+  if (projection === undefined) return { sessions: [] };
+  const entries: SessionAskCatalogEntry[] = [];
+  for (const session of sessions) {
+    const status = projection.statuses[session.id];
+    if (status === undefined || (status.pendingAsk === undefined && (status.pendingDialogs?.length ?? 0) === 0)) continue;
+    entries.push({
+      id: session.id,
+      cwd: session.cwd,
+      ...(status.pendingAsk === undefined ? {} : { pendingAsk: status.pendingAsk }),
+      ...(status.pendingDialogs === undefined ? {} : { pendingDialogs: status.pendingDialogs }),
+    });
+  }
+  return { sessions: entries };
+}
 
 /**
  * Detect whether an error message indicates the session no longer exists.

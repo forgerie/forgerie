@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
-import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
+import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
 import { isSessionActive } from "../../../shared/activity";
@@ -80,8 +80,8 @@ import type { AppMobileMainTab, AppMobileMainTabIcon } from "./appShell/AppMobil
 import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import "./SessionInboxPanel";
 import "./SessionInboxNewSessionDialog";
-import { navigateToInboxSession } from "../controllers/inboxNavigation";
-import { deriveSessionBoard } from "../sessionBoard";
+import { navigateToInboxSession, type InboxNavigationResult } from "../controllers/inboxNavigation";
+import { deriveSessionInboxBoard } from "../sessionBoard";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
 import { appStyles } from "./shared";
@@ -1338,8 +1338,6 @@ export class PiWebApp extends LitElement {
         .unreadPresence=${this.unreadPresence}
         .globalSessions=${this.state.globalSessions}
         .selectedSession=${this.state.selectedSession}
-        .sessionStatuses=${this.state.sessionStatuses}
-        .sessionActivities=${this.state.sessionActivities}
         .unreadSessionIds=${this.unreadSessionIds}
         .unreadCompletedAt=${this.cachedUnreadCompletedAt}
         .projects=${this.state.projects}
@@ -1388,42 +1386,53 @@ export class PiWebApp extends LitElement {
    * Uses a monotonically increasing token (`navigationSelectionSeq`) so rapid
    * selections always apply the latest one and discard stale in-flight results.
    */
-  private async selectInboxSession(session: SessionInfo): Promise<void> {
+  private async selectInboxSession(
+    session: SessionInfo,
+    options: { readonly preserveUndoToast?: boolean } = {},
+  ): Promise<void> {
     const seq = ++this.navigationSelectionSeq;
-    const isCurrentToken = () => seq === this.navigationSelectionSeq;
+    const machineId = selectedMachineId(this.state);
+    const isCurrentToken = () =>
+      seq === this.navigationSelectionSeq && selectedMachineId(this.state) === machineId;
 
-    // Navigation dismisses the undo toast (archive stands).
-    this.inbox.dismissUndoToast();
+    // Independent navigation dismisses undo; Archive & next explicitly preserves it.
+    if (options.preserveUndoToast !== true) this.inbox.dismissUndoToast();
 
-    const result = await navigateToInboxSession(
-      session,
-      {
-        getSelectedWorkspacePath: () => this.state.selectedWorkspace?.path,
-        getSelectedProjectId: () => this.state.selectedProject?.id,
-        allWorkspaces: () => {
-          // Flatten all workspaces from workspacesByProjectId.
-          return Object.values(this.state.workspacesByProjectId).flat();
+    let result: InboxNavigationResult;
+    try {
+      result = await navigateToInboxSession(
+        session,
+        {
+          getSelectedWorkspacePath: () => this.state.selectedWorkspace?.path,
+          getSelectedProjectId: () => this.state.selectedProject?.id,
+          allWorkspaces: () => {
+            // Flatten all workspaces from workspacesByProjectId.
+            return Object.values(this.state.workspacesByProjectId).flat();
+          },
+          allProjects: () => this.state.projects,
+          loadProjectWorkspaces: async (project) => {
+            // Refresh without selection teardown; updates workspacesByProjectId.
+            return this.workspaces.refreshProjectWorkspaces(project.id);
+          },
+          selectSession: async (s) => {
+            if (!isCurrentToken()) return;
+            await this.sessions.selectSession(s);
+          },
+          selectWorkspace: async (ws, opts) => {
+            if (!isCurrentToken()) return;
+            await this.workspaces.selectWorkspace(ws, { ...opts, isCurrent: isCurrentToken });
+          },
+          selectProject: async (project, opts) => {
+            if (!isCurrentToken()) return;
+            await this.workspaces.selectProject(project, { ...opts, isCurrent: isCurrentToken });
+          },
         },
-        allProjects: () => this.state.projects,
-        loadProjectWorkspaces: async (project) => {
-          // Refresh without selection teardown; updates workspacesByProjectId.
-          return this.workspaces.refreshProjectWorkspaces(project.id);
-        },
-        selectSession: async (s) => {
-          if (!isCurrentToken()) return;
-          await this.sessions.selectSession(s);
-        },
-        selectWorkspace: async (ws, opts) => {
-          if (!isCurrentToken()) return;
-          await this.workspaces.selectWorkspace(ws, { ...opts, isCurrent: isCurrentToken });
-        },
-        selectProject: async (project, opts) => {
-          if (!isCurrentToken()) return;
-          await this.workspaces.selectProject(project, { ...opts, isCurrent: isCurrentToken });
-        },
-      },
-      { token: seq, isCurrentToken },
-    );
+        { token: seq, isCurrentToken },
+      );
+    } catch (error: unknown) {
+      if (isCurrentToken()) this.setState({ error: `Unable to open workspace: ${String(error)}` });
+      return;
+    }
 
     if (!isCurrentToken()) return;
 
@@ -1451,7 +1460,9 @@ export class PiWebApp extends LitElement {
    */
   private async restoreInboxSession(session: SessionInfo): Promise<void> {
     const seq = ++this.navigationSelectionSeq;
-    const isCurrentToken = () => seq === this.navigationSelectionSeq;
+    const machineId = selectedMachineId(this.state);
+    const isCurrentToken = () =>
+      seq === this.navigationSelectionSeq && selectedMachineId(this.state) === machineId;
     await this.sessions.restoreSession(session);
     if (isCurrentToken()) await this.focusChatComposer();
   }
@@ -1466,16 +1477,17 @@ export class PiWebApp extends LitElement {
    *   - Archive failure surfaces via AppState.error; no toast is set.
    */
   private async archiveInboxSession(session: SessionInfo): Promise<void> {
+    const machineId = selectedMachineId(this.state);
     try {
       await this.inbox.archiveWithUndo(session, {
-        machineId: selectedMachineId(this.state),
+        machineId,
         // archiveSessionThrowing propagates API errors so archiveWithUndo can
         // abort before updating the global store or installing the undo toast.
         // It does not call inbox.notifyArchived — archiveWithUndo handles that.
         archiveSession: (s) => this.sessions.archiveSessionThrowing(s),
       });
     } catch (error: unknown) {
-      this.setState({ error: String(error) });
+      if (selectedMachineId(this.state) === machineId) this.setState({ error: String(error) });
     }
   }
 
@@ -1502,13 +1514,18 @@ export class PiWebApp extends LitElement {
     if (gs === undefined) return;
 
     // Build a board from the current global sessions so triageQueue works.
-    const board = buildInboxBoard(this.state);
+    const board = buildInboxBoard(
+      this.state,
+      this.unreadSessionIds,
+      this.cachedUnreadCompletedAt,
+    );
 
+    const machineId = selectedMachineId(this.state);
     try {
       await this.inbox.archiveAndNext(session, board, {
-        machineId: selectedMachineId(this.state),
+        machineId,
         archiveSession: (s) => this.sessions.archiveSessionThrowing(s),
-        navigateTo: (next) => this.selectInboxSession(next),
+        navigateTo: (next, options) => this.selectInboxSession(next, options),
         onAllClear: () => {
           // Focus the navigation panel (inbox board) so keyboard users land
           // on a real board element in the all-clear state.
@@ -1516,7 +1533,7 @@ export class PiWebApp extends LitElement {
         },
       });
     } catch (error: unknown) {
-      this.setState({ error: String(error) });
+      if (selectedMachineId(this.state) === machineId) this.setState({ error: String(error) });
     }
   }
 
@@ -2673,16 +2690,15 @@ function thinkingDescription(level: string): string | undefined {
  * state classification (session + statuses + activities + unread).
  */
 function buildInboxBoard(
-  state: Pick<AppState, "globalSessions" | "sessionActivities" | "sessionStatuses">,
+  state: Pick<AppState, "globalSessions">,
+  unreadSessionIds: ReadonlySet<string>,
+  unreadCompletedAt: Readonly<Record<string, string>>,
 ) {
-  const gs = state.globalSessions;
-  const sessions = gs?.sessions ?? [];
-  const statuses: Record<string, SessionStatus> = { ...(gs?.statuses ?? {}), ...state.sessionStatuses };
-  const activities = state.sessionActivities;
-  return deriveSessionBoard({
-    sessions,
-    statuses,
-    activities,
+  const projection = state.globalSessions ?? { sessions: [], statuses: {}, activities: {} };
+  return deriveSessionInboxBoard({
+    projection,
+    unreadSessionIds,
+    unreadCompletedAt,
     locationOf: (s) => ({
       projectId: s.cwd,
       projectName: s.cwd,

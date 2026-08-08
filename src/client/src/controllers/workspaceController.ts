@@ -78,10 +78,15 @@ export class WorkspaceController {
 
 
   async refreshProjectWorkspaces(projectId: string): Promise<Workspace[]> {
-    const project = this.getState().projects.find((candidate) => candidate.id === projectId);
+    const state = this.getState();
+    const project = state.projects.find((candidate) => candidate.id === projectId);
     if (project === undefined) throw new Error("Project not found");
-    const workspaces = await this.api.workspaces(project.id, selectedMachineId(this.getState()));
-    this.applyProjectWorkspaces(project.id, workspaces);
+    const machineId = selectedMachineId(state);
+    const workspaces = await this.api.workspaces(project.id, machineId);
+    const current = this.getState();
+    if (selectedMachineId(current) === machineId && current.projects.some((candidate) => candidate.id === project.id)) {
+      this.applyProjectWorkspaces(project.id, workspaces);
+    }
     return workspaces;
   }
 

@@ -15,7 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialAppState, type AppState } from "../appState";
-import type { SessionInfo, SessionStatus } from "../api";
+import type { SessionActivity, SessionInfo, SessionStatus } from "../api";
 import type {
   MachineSessionListingSnapshot,
   SessionAskCatalogSnapshot,
@@ -66,8 +66,9 @@ function makeStatus(
 function makeListing(
   sessions: SessionInfo[],
   statuses: SessionStatus[] = [],
+  activities: SessionActivity[] = [],
 ): MachineSessionListingSnapshot {
-  return { sessions, statuses };
+  return { sessions, statuses, activities };
 }
 
 function makeAskCatalog(): SessionAskCatalogSnapshot {
@@ -202,6 +203,24 @@ describe("archiveWithUndo — happy path", () => {
     expect(archiveSession).toHaveBeenCalledWith(session);
   });
 });
+
+  it("ignores a completed archive after the selected machine changes", async () => {
+    const session = makeSession("s1");
+    const harness = createHarness([session]);
+    await harness.seed("local");
+    let finishArchive!: () => void;
+    const archiveSession = vi.fn(() => new Promise<void>((resolve) => { finishArchive = resolve; }));
+
+    const archive = harness.controller.archiveWithUndo(session, makeArchiveDeps({ archiveSession }));
+    await Promise.resolve();
+    await harness.controller.refresh("remote");
+    finishArchive();
+
+    await expect(archive).resolves.toBe(false);
+    expect(harness.state.globalSessions?.machineId).toBe("remote");
+    expect(harness.state.globalSessions?.sessions[0]?.archived).not.toBe(true);
+    expect(harness.state.inboxUndoToast).toBeUndefined();
+  });
 
 // ---------------------------------------------------------------------------
 // archiveWithUndo — replacement toast (second archive forfeits first undo)
@@ -442,6 +461,25 @@ describe("undoArchive — stale undo race", () => {
     expect(harness.state.inboxUndoToast).toBeUndefined();
     expect(harness.state.error).toContain("Internal server error");
   });
+
+  it("does not surface a stale restore failure after a machine switch", async () => {
+    const session = makeSession("s1");
+    const harness = createHarness([session]);
+    await harness.seed("local");
+    await harness.controller.archiveWithUndo(session, makeArchiveDeps({ timerMs: 5000 }));
+    let rejectRestore!: (error: unknown) => void;
+    const restoreSession = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectRestore = reject; }));
+
+    const undo = harness.controller.undoArchive(makeUndoDeps({ restoreSession }));
+    await Promise.resolve();
+    await harness.controller.refresh("remote");
+    rejectRestore(new Error("old machine failed"));
+    await undo;
+
+    expect(harness.state.globalSessions?.machineId).toBe("remote");
+    expect(harness.state.error).toBe("");
+    expect(harness.state.inboxUndoToast).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -460,7 +498,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const archiveSession = vi.fn(() => Promise.resolve());
     const deps = makeArchiveDeps({
@@ -483,7 +521,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const result = await harness.controller.archiveWithUndo(session, makeArchiveDeps({ confirm: () => false }));
 
@@ -506,7 +544,7 @@ describe("Working session confirmation", () => {
         },
       }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const confirm = vi.fn(() => false); // Would block if called
     const archiveSession = vi.fn(() => Promise.resolve());
@@ -540,7 +578,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const archiveSession = vi.fn(() => Promise.resolve());
     const deps = makeArchiveDeps({
@@ -563,7 +601,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const capturedMessages: string[] = [];
     const deps = makeArchiveDeps({
@@ -591,7 +629,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const capturedMessages: string[] = [];
     const deps = makeArchiveDeps({
@@ -639,30 +677,31 @@ describe("archiveAndNext", () => {
     };
   }
 
-  it("archives the current session and navigates to the triageQueue head", async () => {
-    const current = makeSession("current", { modified: "2026-08-01T01:00:00.000Z" });
-    // blocked session is next in triage queue
-    const nextSession = makeSession("next-blocked", { modified: "2026-08-01T00:00:00.000Z" });
-    const blockedStatus = makeStatus("next-blocked", {
+  it("archives the current session and navigates to the most urgent queue head", async () => {
+    const current = makeSession("current", { modified: "2026-08-01T02:00:00.000Z" });
+    const blocked = makeSession("blocked", { modified: "2026-08-01T01:00:00.000Z" });
+    const unread = makeSession("unread", { modified: "2026-08-01T00:00:00.000Z" });
+    const blockedStatus = makeStatus("blocked", {
       pendingAsk: {
         askId: "ask-1",
         askedAt: "2026-08-07T10:00:00.000Z",
         questions: [{ id: "q1", question: "Proceed?", options: [] }],
       },
     });
-
-    const harness = createHarness([current, nextSession]);
+    const harness = createHarness([current, blocked, unread]);
     await harness.seed();
-    harness.controller.applyGlobalEvent("local", { type: "status.update", status: blockedStatus });
-
-    const board = makeBoard([current, nextSession], { "next-blocked": blockedStatus });
+    const board = deriveSessionBoard({
+      sessions: [current, blocked, unread],
+      statuses: { blocked: blockedStatus },
+      unreadSessionIds: new Set(["unread"]),
+      locationOf: () => ({ projectId: "p1", projectName: "Project", projectPath: "/repo" }),
+    });
     const navigateTo = vi.fn(() => Promise.resolve());
-    const deps = makeNextDeps({ navigateTo });
 
-    await harness.controller.archiveAndNext(current, board, deps);
+    await harness.controller.archiveAndNext(current, board, makeNextDeps({ navigateTo }));
 
-    expect(deps.archiveSession).toHaveBeenCalledWith(current);
-    expect(navigateTo).toHaveBeenCalledWith(nextSession);
+    expect(navigateTo).toHaveBeenCalledWith(blocked, { preserveUndoToast: true });
+    expect(navigateTo).not.toHaveBeenCalledWith(unread, expect.anything());
   });
 
   it("when no next in triage queue, calls onAllClear and does not navigate", async () => {
@@ -703,8 +742,8 @@ describe("archiveAndNext", () => {
 
     await harness.controller.archiveAndNext(current, board, deps);
 
-    expect(navigateTo).toHaveBeenCalledWith(otherSession);
-    expect(navigateTo).not.toHaveBeenCalledWith(current);
+    expect(navigateTo).toHaveBeenCalledWith(otherSession, { preserveUndoToast: true });
+    expect(navigateTo).not.toHaveBeenCalledWith(current, expect.anything());
   });
 
   it("navigates cross-workspace when the next session has a different cwd", async () => {
@@ -733,7 +772,38 @@ describe("archiveAndNext", () => {
     await harness.controller.archiveAndNext(current, board, deps);
 
     // navigateTo called with the cross-workspace next session
-    expect(navigateTo).toHaveBeenCalledWith(nextSession);
+    expect(navigateTo).toHaveBeenCalledWith(nextSession, { preserveUndoToast: true });
+  });
+
+  it("activity-only Working session in archiveAndNext requires confirmation", async () => {
+    const current = makeSession("activity-working");
+    const activity: SessionActivity = {
+      sessionId: current.id,
+      phase: "active",
+      label: "running tool",
+      at: "2026-08-08T10:00:00.000Z",
+    };
+    const harness = createHarness([current], {
+      apiOverrides: {
+        machineListing: vi.fn(() => Promise.resolve(makeListing([current], [], [activity]))),
+      },
+    });
+    await harness.seed();
+    const archiveSession = vi.fn(() => Promise.resolve());
+    const confirm = vi.fn(() => false);
+
+    await harness.controller.archiveAndNext(
+      current,
+      deriveSessionBoard({
+        sessions: [current],
+        activities: { [current.id]: activity },
+        locationOf: () => ({ projectId: "p1", projectName: "Project", projectPath: "/repo" }),
+      }),
+      makeNextDeps({ archiveSession, confirm }),
+    );
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(archiveSession).not.toHaveBeenCalled();
   });
 
   it("Working session in archiveAndNext requires confirmation", async () => {
@@ -745,7 +815,7 @@ describe("archiveAndNext", () => {
       type: "status.update",
       status: makeStatus("current", { isStreaming: true }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const board = makeBoard([current], { current: makeStatus("current", { isStreaming: true }) });
     const archiveSession = vi.fn(() => Promise.resolve());
@@ -777,7 +847,7 @@ describe("archiveAndNext", () => {
       type: "status.update",
       status: makeStatus("current", { isStreaming: true }),
     });
-    harness.controller.flushPendingStatusesToGlobal();
+    harness.controller.flushPendingSessionStateToGlobal();
 
     const board = deriveSessionBoard({
       sessions: [current, nextSession],
@@ -813,6 +883,24 @@ describe("archiveAndNext", () => {
     await harness.controller.archiveAndNext(current, board, deps);
 
     expect(harness.state.inboxUndoToast?.session.id).toBe("current");
+  });
+
+  it("requests internal navigation that preserves the archive undo toast", async () => {
+    const current = makeSession("current");
+    const unread = makeSession("unread");
+    const harness = createHarness([current, unread]);
+    await harness.seed();
+    const board = deriveSessionBoard({
+      sessions: [current, unread],
+      unreadSessionIds: new Set([unread.id]),
+      locationOf: () => ({ projectId: "p1", projectName: "Project", projectPath: "/repo" }),
+    });
+    const navigateTo = vi.fn(() => Promise.resolve());
+
+    await harness.controller.archiveAndNext(current, board, makeNextDeps({ navigateTo }));
+
+    expect(navigateTo).toHaveBeenCalledWith(unread, { preserveUndoToast: true });
+    expect(harness.state.inboxUndoToast?.session.id).toBe(current.id);
   });
 });
 

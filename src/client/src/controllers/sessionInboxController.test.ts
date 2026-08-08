@@ -3,10 +3,11 @@ import { initialAppState, resetWorkspaceScopedState, type AppState } from "../ap
 import type {
   MachineSessionListingSnapshot,
   SessionAskCatalogSnapshot,
+  SessionActivity,
   SessionInfo,
   SessionStatus,
 } from "../../../shared/apiTypes";
-import { SessionInboxController, type SessionInboxApi } from "./sessionInboxController";
+import { SessionInboxController, type SessionInboxApi, type SessionInboxControllerOptions } from "./sessionInboxController";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -42,8 +43,9 @@ function makeStatus(sessionId: string, overrides: Partial<SessionStatus> = {}): 
 function makeListing(
   sessions: SessionInfo[] = [],
   statuses: SessionStatus[] = [],
+  activities: SessionActivity[] = [],
 ): MachineSessionListingSnapshot {
-  return { sessions, statuses };
+  return { sessions, statuses, activities };
 }
 
 function makeAskCatalog(
@@ -75,6 +77,7 @@ function deferred<T>(): Deferred<T> {
 function createHarness(
   overrides: Partial<SessionInboxApi> = {},
   initialState?: Partial<AppState>,
+  controllerOptions: Omit<SessionInboxControllerOptions, "api"> = {},
 ) {
   const s1 = makeSessionInfo({ id: "s1", cwd: "/workspace-1" });
   const s2 = makeSessionInfo({ id: "s2", cwd: "/workspace-2" });
@@ -93,7 +96,7 @@ function createHarness(
   const controller = new SessionInboxController(
     () => state,
     (patch) => { state = { ...state, ...patch }; },
-    { api },
+    { ...controllerOptions, api },
   );
 
   return {
@@ -148,6 +151,55 @@ describe("SessionInboxController", () => {
         sessionId: "s1",
         isStreaming: true,
       });
+    });
+
+    it("atomically seeds page-load activities with statuses", async () => {
+      const s1 = makeSessionInfo({ id: "s1", cwd: "/w1" });
+      const activity: SessionActivity = {
+        sessionId: "s1",
+        phase: "error",
+        label: "tool failed",
+        detail: "read failed",
+        at: "2026-08-08T10:00:00.000Z",
+      };
+      const harness = createHarness({
+        machineListing: vi.fn(() => Promise.resolve(makeListing([s1], [makeStatus("s1")], [activity]))),
+        asksCatalog: vi.fn(() => Promise.resolve(makeAskCatalog())),
+      });
+
+      await harness.controller.refresh("local");
+
+      expect(harness.state.globalSessions).toMatchObject({
+        status: "fresh",
+        statuses: { s1: { sessionId: "s1" } },
+        activities: { s1: activity },
+      });
+    });
+
+    it("reconnect atomically removes activities absent from the replacement snapshot", async () => {
+      const s1 = makeSessionInfo({ id: "s1", cwd: "/w1" });
+      const staleActivity: SessionActivity = {
+        sessionId: "s1",
+        phase: "active",
+        label: "running tool",
+        at: "2026-08-08T10:00:00.000Z",
+      };
+      let calls = 0;
+      const harness = createHarness({
+        machineListing: vi.fn(() => {
+          calls += 1;
+          return Promise.resolve(calls === 1
+            ? makeListing([s1], [makeStatus("s1", { isStreaming: true })], [staleActivity])
+            : makeListing([s1]));
+        }),
+        asksCatalog: vi.fn(() => Promise.resolve(makeAskCatalog())),
+      });
+
+      await harness.controller.refresh("local");
+      await harness.controller.refresh("local");
+
+      expect(harness.state.globalSessions?.statuses).toEqual({});
+      expect(harness.state.globalSessions?.activities).toEqual({});
     });
 
     it("marks the projection as loading then fresh on a successful fetch", async () => {
@@ -206,6 +258,73 @@ describe("SessionInboxController", () => {
 
       expect(harness.state.globalSessions?.status).toBe("stale");
       expect(harness.state.globalSessions?.sessions).toHaveLength(0);
+    });
+
+    it("keeps the machine listing usable when the asks catalog fails", async () => {
+      const session = makeSessionInfo({ id: "s1", cwd: "/w1" });
+      const onBackgroundError = vi.fn();
+      const harness = createHarness({
+        machineListing: vi.fn(() => Promise.resolve(makeListing([session]))),
+        asksCatalog: vi.fn(() => Promise.reject(new Error("asks unavailable"))),
+      }, undefined, { onBackgroundError, retryDelayMs: 60_000 });
+
+      await harness.controller.refresh("local");
+
+      expect(harness.state.globalSessions).toMatchObject({
+        machineId: "local",
+        status: "stale",
+        sessions: [{ id: "s1" }],
+      });
+      expect(onBackgroundError).toHaveBeenCalledWith("asks", "local", expect.any(Error));
+      harness.controller.dispose();
+    });
+
+    it("retries a partial asks snapshot and returns to fresh", async () => {
+      vi.useFakeTimers();
+      try {
+        const session = makeSessionInfo({ id: "s1", cwd: "/w1" });
+        let asksCalls = 0;
+        const harness = createHarness({
+          machineListing: vi.fn(() => Promise.resolve(makeListing([session]))),
+          asksCatalog: vi.fn(() => {
+            asksCalls += 1;
+            return asksCalls === 1
+              ? Promise.reject(new Error("asks unavailable"))
+              : Promise.resolve(makeAskCatalog());
+          }),
+        }, undefined, { retryDelayMs: 5, snapshotTimeoutMs: 100 });
+
+        await harness.controller.refresh("local");
+        expect(harness.state.globalSessions?.status).toBe("stale");
+
+        await vi.advanceTimersByTimeAsync(5);
+        expect(asksCalls).toBe(2);
+        expect(harness.state.globalSessions?.status).toBe("fresh");
+        harness.controller.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("bounds a hung listing request and leaves a retryable stale projection", async () => {
+      vi.useFakeTimers();
+      try {
+        const onBackgroundError = vi.fn();
+        const harness = createHarness({
+          machineListing: vi.fn(() => new Promise<MachineSessionListingSnapshot>(() => undefined)),
+          asksCatalog: vi.fn(() => Promise.resolve(makeAskCatalog())),
+        }, undefined, { onBackgroundError, snapshotTimeoutMs: 5, retryDelayMs: 60_000 });
+
+        const refresh = harness.controller.refresh("local");
+        await vi.advanceTimersByTimeAsync(5);
+        await refresh;
+
+        expect(harness.state.globalSessions).toMatchObject({ status: "stale", sessions: [] });
+        expect(onBackgroundError).toHaveBeenCalledWith("listing", "local", expect.objectContaining({ message: "session listing timed out" }));
+        harness.controller.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("merges asks catalog entries as synthetic statuses for sessions not in the listing statuses", async () => {
@@ -420,12 +539,30 @@ describe("SessionInboxController", () => {
         status: updatedStatus,
       });
       // status.update is buffered; flush to apply it to globalSessions in one write.
-      harness.controller.flushPendingStatusesToGlobal();
+      harness.controller.flushPendingSessionStateToGlobal();
 
       expect(harness.state.globalSessions?.statuses["s1"]).toMatchObject({
         sessionId: "s1",
         isStreaming: true,
       });
+    });
+
+    it("drops runtime deltas for sessions absent from the machine inventory", async () => {
+      const harness = createHarness();
+      await harness.controller.refresh("local");
+      const activity: SessionActivity = {
+        sessionId: "missing",
+        phase: "active",
+        label: "orphan",
+        at: "2026-08-08T10:00:00.000Z",
+      };
+
+      harness.controller.applyGlobalEvent("local", { type: "status.update", status: makeStatus("missing", { isStreaming: true }) });
+      harness.controller.applyGlobalEvent("local", { type: "activity.update", activity });
+      harness.controller.flushPendingSessionStateToGlobal();
+
+      expect(harness.state.globalSessions?.statuses["missing"]).toBeUndefined();
+      expect(harness.state.globalSessions?.activities["missing"]).toBeUndefined();
     });
 
     it("ignores global events for a different machine", async () => {
@@ -695,6 +832,27 @@ describe("SessionInboxController", () => {
       expect(s1State?.name).toBe("Renamed During Snapshot");
     });
 
+    it("buffers activity.update events during a re-snapshot so they survive the snapshot", async () => {
+      const s1 = makeSessionInfo({ id: "s1", cwd: "/w1" });
+      const { api, pending } = makeStalledResnapshot(s1);
+      const harness = createHarness(api);
+
+      await harness.controller.refresh("local");
+      const refreshPromise = harness.controller.refresh("local");
+      const activity: SessionActivity = {
+        sessionId: "s1",
+        phase: "active",
+        label: "running tool",
+        at: "2026-08-08T10:00:00.000Z",
+      };
+      harness.controller.applyGlobalEvent("local", { type: "activity.update", activity });
+
+      pending.resolve(makeListing([s1]));
+      await refreshPromise;
+
+      expect(harness.state.globalSessions?.activities["s1"]).toEqual(activity);
+    });
+
     it("buffers status.update events during a re-snapshot so they survive the snapshot", async () => {
       const s1 = makeSessionInfo({ id: "s1", cwd: "/w1" });
       const { api, pending } = makeStalledResnapshot(s1);
@@ -716,6 +874,30 @@ describe("SessionInboxController", () => {
       await refreshPromise;
 
       // The live status update must survive on top of the snapshot.
+      expect(harness.state.globalSessions?.statuses["s1"]?.isStreaming).toBe(true);
+    });
+
+    it("batches live activity and status deltas into one global projection write", async () => {
+      const harness = createHarness();
+      await harness.controller.refresh("local");
+      const before = harness.state.globalSessions;
+      const activity: SessionActivity = {
+        sessionId: "s1",
+        phase: "active",
+        label: "running tool",
+        at: "2026-08-08T10:00:00.000Z",
+      };
+
+      harness.controller.applyGlobalEvent("local", { type: "activity.update", activity });
+      harness.controller.applyGlobalEvent("local", {
+        type: "status.update",
+        status: makeStatus("s1", { isStreaming: true }),
+      });
+      expect(harness.state.globalSessions).toBe(before);
+
+      harness.controller.flushPendingSessionStateToGlobal();
+
+      expect(harness.state.globalSessions?.activities["s1"]).toEqual(activity);
       expect(harness.state.globalSessions?.statuses["s1"]?.isStreaming).toBe(true);
     });
   });

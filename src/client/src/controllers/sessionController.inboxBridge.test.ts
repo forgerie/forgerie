@@ -52,7 +52,7 @@ class RecordingInboxBridge implements SessionInboxBridge {
   applyGlobalEvent(machineId: string, event: GlobalSessionEvent): void {
     this.globalEvents.push({ machineId, event });
   }
-  flushPendingStatusesToGlobal(): void { /* recording bridge: no-op */ }
+  flushPendingSessionStateToGlobal(): void { /* recording bridge: no-op */ }
   notifyArchived(machineId: string, sessionId: string, archivedAt: string): void {
     this.archivedCalls.push({ machineId, sessionId, archivedAt });
   }
@@ -385,7 +385,7 @@ describe("SessionController inbox bridge wiring", () => {
 function makeInboxApi(sessions: SessionInfo[] = []): SessionInboxApi {
   return {
     machineListing: (): Promise<MachineSessionListingSnapshot> =>
-      Promise.resolve({ sessions, statuses: [] }),
+      Promise.resolve({ sessions, statuses: [], activities: [] }),
     asksCatalog: (): Promise<SessionAskCatalogSnapshot> =>
       Promise.resolve({ sessions: [] }),
   };
@@ -655,7 +655,7 @@ function makeStatusBatchHarness(initialSessions: SessionInfo[]) {
 
   const inboxController = new SessionInboxController(getState, setState, {
     api: {
-      machineListing: () => Promise.resolve({ sessions: initialSessions, statuses: [] }),
+      machineListing: () => Promise.resolve({ sessions: initialSessions, statuses: [], activities: [] }),
       asksCatalog: () => Promise.resolve({ sessions: [] }),
     },
   });

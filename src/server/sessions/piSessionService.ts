@@ -1197,9 +1197,14 @@ export class PiSessionService implements SessionRouteService {
       await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
     }
 
-    const statuses = [...new Set(this.active.values())]
-      .map((active) => this.statusFromSession(active.runtime.session));
-    return { sessions, statuses };
+    const activeSessions = [...new Set(this.active.values())];
+    const statuses = activeSessions.map((active) => this.statusFromSession(active.runtime.session));
+    const activities = activeSessions.flatMap((active) => {
+      const sessionId = active.runtime.session.sessionId;
+      const activity = this.activities.get(sessionId);
+      return activity === undefined ? [] : [{ sessionId, ...activity }];
+    });
+    return { sessions, statuses, activities };
   }
 
   async list(cwd: string): Promise<ClientSession[]> {

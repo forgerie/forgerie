@@ -10,7 +10,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { Project, SessionInfo, SessionStatus, Workspace } from "../api";
+import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
 import { SessionInboxPanel } from "./SessionInboxPanel";
 
@@ -58,6 +58,7 @@ function mkGlobalSessions(
     status: "fresh",
     sessions,
     statuses: {},
+    activities: {},
     ...overrides,
   };
 }
@@ -374,20 +375,62 @@ describe("selected session group auto-expand", () => {
     expect(openGroup?.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("expands the destination group when selectedSession changes groups via live update", async () => {
+  it("expands the destination group when the same selected id moves via live activity", async () => {
     const session = mkSession("moving-one");
-    const gs = mkGlobalSessions([session]);
+    localStorage.setItem("forgerie:inbox:local:collapsed", JSON.stringify(["open", "working"]));
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      selectedSession: session,
+    });
+    const activity: SessionActivity = {
+      sessionId: session.id,
+      phase: "active",
+      label: "running tool",
+      at: "2026-08-08T10:00:00.000Z",
+    };
 
-    // Initially open, no selection.
-    const panel = await mountPanel({ globalSessions: gs });
-
-    // Now select the session (it's in 'open', which is collapsed by default).
-    panel.selectedSession = session;
+    panel.globalSessions = mkGlobalSessions([session], { activities: { [session.id]: activity } });
     await panel.updateComplete;
     await panel.updateComplete;
 
-    const openGroup = shadowRoot(panel).querySelector("[data-group='open']");
-    expect(openGroup?.getAttribute("aria-expanded")).toBe("true");
+    const workingGroup = shadowRoot(panel).querySelector("[data-group='working']");
+    expect(workingGroup?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("uses projectId to expand a collapsed project containing the selected session", async () => {
+    const session = mkSession("project-selected");
+    localStorage.setItem("forgerie:inbox:local:groupBy", "project");
+    localStorage.setItem("forgerie:inbox:local:collapsed", JSON.stringify(["proj-1"]));
+
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      selectedSession: session,
+    });
+
+    expect(shadowRoot(panel).querySelector("[data-group='proj-1']")?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("re-expands the selected destination after the grouping mode changes", async () => {
+    const session = mkSession("mode-selected");
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      selectedSession: session,
+    });
+    const root = shadowRoot(panel);
+
+    clickSelector(root, "[data-group-by='project']");
+    await panel.updateComplete;
+    clickSelector(root, "[data-group='proj-1'] > button");
+    await panel.updateComplete;
+    expect(root.querySelector("[data-group='proj-1']")?.getAttribute("aria-expanded")).toBe("false");
+
+    clickSelector(root, "[data-group-by='state']");
+    await panel.updateComplete;
+    clickSelector(root, "[data-group-by='project']");
+    await panel.updateComplete;
+    await panel.updateComplete;
+
+    expect(root.querySelector("[data-group='proj-1']")?.getAttribute("aria-expanded")).toBe("true");
   });
 });
 

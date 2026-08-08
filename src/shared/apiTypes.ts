@@ -372,6 +372,8 @@ export interface MachineSessionListingSnapshot {
   sessions: SessionInfo[];
   /** Statuses for runtimes that were already live when this snapshot was taken. */
   statuses: SessionStatus[];
+  /** Last activities for runtimes that were already live when this snapshot was taken. */
+  activities: SessionActivity[];
 }
 
 export interface ArchiveSessionsResponse {

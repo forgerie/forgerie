@@ -57,6 +57,27 @@ function harness(initial: Partial<AppState>, loadWorkspaces: LoadWorkspaces): Ha
   return { controller, state: () => state, clearActiveSession, updateUrl, backgroundErrors, setState };
 }
 
+describe("WorkspaceController.refreshProjectWorkspaces", () => {
+  it("does not cache a lazy workspace response after the machine changes", async () => {
+    const repo = project("p1", "/repo");
+    let resolveWorkspaces!: (workspaces: Workspace[]) => void;
+    const loadWorkspaces = vi.fn().mockReturnValue(new Promise<Workspace[]>((resolve) => { resolveWorkspaces = resolve; }));
+    const test = harness({
+      selectedMachine: machine("local"),
+      projects: [repo],
+      workspacesByProjectId: {},
+    }, loadWorkspaces);
+
+    const pending = test.controller.refreshProjectWorkspaces(repo.id);
+    test.setState({ selectedMachine: machine("remote"), projects: [] });
+    resolveWorkspaces([workspace(repo.id, "/repo-feature")]);
+    await pending;
+
+    expect(loadWorkspaces).toHaveBeenCalledWith(repo.id, "local");
+    expect(test.state().workspacesByProjectId[repo.id]).toBeUndefined();
+  });
+});
+
 describe("WorkspaceController.refreshSelectedProjectTopology", () => {
   it("surfaces a worktree created outside Forgerie in both the selected list and the per-project cache", async () => {
     const repo = project("p1", "/repo");

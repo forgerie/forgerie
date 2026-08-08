@@ -17,11 +17,11 @@
 
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import type { Project, SessionActivity, SessionInfo, Workspace } from "../api";
+import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
 import {
   attentionCount,
-  deriveSessionBoard,
+  deriveSessionInboxBoard,
   groupSessionsByProject,
   relativeTime,
   type BoardGroupKind,
@@ -104,7 +104,6 @@ export class SessionInboxPanel extends LitElement {
 
   @property({ attribute: false }) globalSessions: GlobalSessionsState | undefined;
   @property({ attribute: false }) selectedSession: SessionInfo | undefined;
-  @property({ attribute: false }) sessionActivities: Record<string, SessionActivity> = {};
   @property({ attribute: false }) unreadSessionIds: ReadonlySet<string> = new Set();
   @property({ attribute: false }) unreadCompletedAt: Readonly<Record<string, string>> = {};
   @property({ attribute: false }) projects: Project[] = [];
@@ -151,35 +150,41 @@ export class SessionInboxPanel extends LitElement {
 
   /** Previous machine id — used to detect machine switches and reload prefs. */
   private loadedMachineId: string | undefined;
-  /** Previous selected session id — used to detect selection moves to trigger auto-expand. */
-  private prevSelectedId: string | undefined;
+  /** Last visible group of the selected row, including the grouping mode. */
+  private previousSelectedGroupKey: string | undefined;
 
   // -------------------------------------------------------------------------
   // Lifecycle
   // -------------------------------------------------------------------------
 
-  override updated(): void {
+  override willUpdate(): void {
     // Re-load prefs when the machine changes.
     const machineId = this.globalSessions?.machineId;
     if (machineId !== undefined && machineId !== this.loadedMachineId) {
       this.loadedMachineId = machineId;
       this.groupBy = readGroupBy(machineId);
       this.collapsedGroups = readCollapsedGroups(machineId);
+      this.previousSelectedGroupKey = undefined;
     }
 
-    // Auto-expand the group containing the selected session.
+    // Auto-expand whenever the selected row's visible destination changes.
+    // This covers live state moves with the same id and state/project mode changes.
     const selectedId = this.selectedSession?.id;
-    if (selectedId !== undefined && selectedId !== this.prevSelectedId) {
-      this.prevSelectedId = selectedId;
-      const board = this.deriveBoard(this.buildLocationMap());
-      if (board !== undefined) {
-        const row = board.rows.find((r) => r.session.id === selectedId);
-        if (row !== undefined && this.collapsedGroups.has(row.state.kind)) {
-          const next = new Set(this.collapsedGroups);
-          next.delete(row.state.kind);
-          this.collapsedGroups = next;
-          if (machineId !== undefined) writeCollapsedGroups(machineId, next);
-        }
+    const board = selectedId === undefined ? undefined : this.deriveBoard(this.buildLocationMap());
+    const row = board?.rows.find((candidate) => candidate.session.id === selectedId);
+    const groupKind = row === undefined
+      ? undefined
+      : this.groupBy === "project"
+        ? row.location.projectId
+        : row.state.kind;
+    const selectedGroupKey = groupKind === undefined ? undefined : `${this.groupBy}:${groupKind}`;
+    if (selectedGroupKey !== this.previousSelectedGroupKey) {
+      this.previousSelectedGroupKey = selectedGroupKey;
+      if (groupKind !== undefined && this.collapsedGroups.has(groupKind)) {
+        const next = new Set(this.collapsedGroups);
+        next.delete(groupKind);
+        this.collapsedGroups = next;
+        if (machineId !== undefined) writeCollapsedGroups(machineId, next);
       }
     }
   }
@@ -208,10 +213,8 @@ export class SessionInboxPanel extends LitElement {
   private deriveBoard(locationMap: Map<string, InboxLocation>): SessionBoard<SessionInfo> | undefined {
     const gs = this.globalSessions;
     if (gs === undefined || gs.sessions.length === 0) return undefined;
-    return deriveSessionBoard<SessionInfo>({
-      sessions: gs.sessions,
-      statuses: gs.statuses,
-      activities: this.sessionActivities,
+    return deriveSessionInboxBoard<SessionInfo>({
+      projection: gs,
       unreadSessionIds: this.unreadSessionIds,
       unreadCompletedAt: this.unreadCompletedAt,
       locationOf: (session) => {

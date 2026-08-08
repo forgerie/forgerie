@@ -2013,14 +2013,19 @@ function optionalField(key: string, value: unknown): object {
 
 /**
  * Parse the machine-scoped session listing snapshot returned by `GET /sessions/all`.
- * Statuses cover only runtimes that were already live at snapshot time; sessions
- * without a live runtime have no status entry.
+ * Statuses and activities cover only runtimes that were already live at snapshot
+ * time; sessions without a live runtime have no runtime-state entries.
  */
 export function parseMachineSessionListingSnapshot(value: unknown): MachineSessionListingSnapshot {
   const record = requireRecord(value);
   return {
     sessions: arrayOf(parseSessionInfo)(record["sessions"]),
     statuses: arrayOf(parseSessionStatus)(record["statuses"]),
+    // Older sessiond versions predate activity snapshots. Treat omission as an
+    // empty live-activity set so a rolling local restart keeps the inbox usable.
+    activities: record["activities"] === undefined
+      ? []
+      : arrayOf(parseSessionActivity)(record["activities"]),
   };
 }
 

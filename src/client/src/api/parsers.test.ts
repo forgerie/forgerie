@@ -431,10 +431,19 @@ describe("API parsers", () => {
     };
     const status = statusWire();
 
-    expect(parseMachineSessionListingSnapshot({ sessions: [session], statuses: [status] })).toEqual({
+    const activity = {
+      sessionId: "session-1",
+      phase: "active",
+      label: "running tool",
+      detail: "read",
+      at: "2026-08-08T10:00:00.000Z",
+    };
+    expect(parseMachineSessionListingSnapshot({ sessions: [session], statuses: [status], activities: [activity] })).toEqual({
       sessions: [session],
       statuses: [parseSessionStatus(status)],
+      activities: [activity],
     });
+    expect(parseMachineSessionListingSnapshot({ sessions: [session], statuses: [status] }).activities).toEqual([]);
     expect(() => parseMachineSessionListingSnapshot({ sessions: [session], statuses: "live" })).toThrow("Expected array");
   });
 

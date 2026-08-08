@@ -791,7 +791,8 @@ export class SessionController {
    * the bridge should be notified by the caller.
    */
   async archiveSessionThrowing(session: SessionInfo): Promise<void> {
-    await this.archiveSessionCore(session);
+    const archivedAt = await this.archiveSessionCore(session);
+    if (archivedAt === undefined) throw new Error("Session cannot be archived");
     // inbox?.notifyArchived intentionally omitted: archiveWithUndo calls
     // notifyArchived itself after this method returns.
   }
@@ -1135,8 +1136,17 @@ export class SessionController {
     await this.api.archive(session, machineId);
     const archivedAt = new Date().toISOString();
     const state = this.getState();
+    // The server mutation belongs to the captured machine/workspace. Never
+    // project its completion into a machine or workspace selected meanwhile.
+    if (selectedMachineId(state) !== machineId || !optionalSessionPathEquals(state.selectedWorkspace?.path, session.cwd)) {
+      return archivedAt;
+    }
     const sessions = markSessionArchived(state.sessions, session.id, archivedAt);
-    const selectionChange = selectionAfterArchivingSession(sessions, state.selectedSession?.id, session.id);
+    const selectedSessionId = state.selectedSession?.id === session.id
+      && sessionPathsEqual(state.selectedSession.cwd, session.cwd)
+      ? state.selectedSession.id
+      : undefined;
+    const selectionChange = selectionAfterArchivingSession(sessions, selectedSessionId, session.id);
     this.setState({ sessions });
     if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
     else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
@@ -1151,12 +1161,14 @@ export class SessionController {
   private async restoreSessionCore(session: SessionInfo): Promise<void> {
     const machineId = selectedMachineId(this.getState());
     await this.api.restore(session, machineId);
+    if (selectedMachineId(this.getState()) !== machineId) return;
     const restored = { ...session };
     delete restored.archived;
     delete restored.archivedAt;
-    this.replaceSession(restored);
+    if (optionalSessionPathEquals(this.getState().selectedWorkspace?.path, restored.cwd)) this.replaceSession(restored);
     this.inbox?.notifyRestored(machineId, restored);
-    if (this.getState().selectedSession?.id === restored.id) await this.selectSession(restored);
+    const selected = this.getState().selectedSession;
+    if (selected?.id === restored.id && sessionPathsEqual(selected.cwd, restored.cwd)) await this.selectSession(restored);
   }
 
   private sessionCacheKey(sessionId: string): string {
@@ -1740,9 +1752,8 @@ export class SessionController {
       this.pendingStatusBySession.clear();
       for (const status of statuses) this.applyStatus(status);
     }
-    // Apply buffered global statuses in one globalSessions write, coalescing
-    // all status.update events from this rAF frame into last-write-wins per session.
-    this.inbox?.flushPendingStatusesToGlobal();
+    // Apply buffered machine-global status and activity deltas in one write.
+    this.inbox?.flushPendingSessionStateToGlobal();
   }
 
   private clearPendingUpdates(): void {
@@ -1890,6 +1901,10 @@ function bulkFailureMessages(failures: readonly SessionBulkFailure[]): string[] 
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function optionalSessionPathEquals(path: string | undefined, expected: string): boolean {
+  return path !== undefined && sessionPathsEqual(path, expected);
 }
 
 /**

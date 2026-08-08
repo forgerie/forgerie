@@ -225,6 +225,7 @@ describe("PiWebApp session unread wiring", () => {
         status: "fresh",
         sessions: [selected, background],
         statuses: {},
+        activities: {},
       },
       selectedSession: selected,
       mainView: "chat",

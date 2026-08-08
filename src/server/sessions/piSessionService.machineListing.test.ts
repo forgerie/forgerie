@@ -92,6 +92,7 @@ describe("PiSessionService machine listing", () => {
 
     try {
       await service.status({ id: "session-main", cwd: "/projects/repo" });
+      live.emit({ type: "tool_execution_start", toolName: "read" });
       pendingAsks.open({
         sessionId: "session-main",
         questions: [{ id: "approve", question: "Approve?", options: [] }],
@@ -113,6 +114,9 @@ describe("PiSessionService machine listing", () => {
       expect(snapshot.statuses).toHaveLength(1);
       expect(snapshot.statuses[0]).toMatchObject({ sessionId: "session-main", isStreaming: true });
       expect(snapshot.statuses[0]?.pendingAsk?.askId).toBe("ask-main");
+      expect(snapshot.activities).toMatchObject([
+        { sessionId: "session-main", phase: "active", label: "running tool", detail: "read" },
+      ]);
       expect(calls).toEqual({ list: 0, listAll: 1, createRuntime: 1 });
     } finally {
       await service.dispose();
@@ -148,7 +152,7 @@ describe("PiSessionService machine listing", () => {
     });
 
     try {
-      await expect(service.machineListing()).resolves.toEqual({ sessions: [], statuses: [] });
+      await expect(service.machineListing()).resolves.toEqual({ sessions: [], statuses: [], activities: [] });
       expect(runtimeCreations).toBe(0);
     } finally {
       await service.dispose();

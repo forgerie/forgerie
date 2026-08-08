@@ -1069,7 +1069,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly notificationInboxCalls: SessionRef[] = [];
   readonly acknowledgeUnreadCalls: { sessionId: string; request: SessionUnreadAcknowledgeRequest }[] = [];
   readonly unreadCatalogResponse: SessionUnreadCatalogSnapshot = { catalogId: "catalog-test", catalogRevision: 1, sessions: [] };
-  readonly machineListingResponse = { sessions: [], statuses: [] };
+  readonly machineListingResponse = { sessions: [], statuses: [], activities: [] };
   readonly asksCatalogResponse = { sessions: [] };
   machineListingCalls = 0;
   asksCatalogCalls = 0;
