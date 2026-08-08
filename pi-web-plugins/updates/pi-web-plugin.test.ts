@@ -1,6 +1,6 @@
 import { html, svg } from "lit";
 import { describe, expect, it, vi } from "vitest";
-import type { PluginRuntimeContext } from "@jmfederico/pi-web/plugin-api";
+import type { PluginRuntimeContext } from "forgerie/plugin-api";
 import plugin from "./pi-web-plugin.js";
 
 describe("Updates plugin actions", () => {
@@ -22,7 +22,7 @@ describe("Updates plugin actions", () => {
     const context = runtimeContext();
 
     expect(action.enabled?.(context)).toBe(false);
-    expect(action.disabledReason?.(context)).toContain("newer PI WEB gateway");
+    expect(action.disabledReason?.(context)).toContain("newer Forgerie gateway");
   });
 });
 

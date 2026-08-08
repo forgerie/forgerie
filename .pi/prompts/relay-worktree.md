@@ -1,5 +1,5 @@
 ---
-description: Plan a PI WEB Relay in a fresh worktree and dispatch its setup leg
+description: Plan a Forgerie Relay in a fresh worktree and dispatch its setup leg
 argument-hint: "<what the relay should achieve>"
 ---
 

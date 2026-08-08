@@ -83,7 +83,7 @@ describe("buildApp project routes", () => {
     expect(workspacesResponse.json<Workspace[]>()).toEqual([
       expect.objectContaining({
         projectId: project.id,
-        effectiveConfig: { uploads: { defaultFolder: ".pi-web/uploads" } },
+        effectiveConfig: { uploads: { defaultFolder: ".forgerie/uploads" } },
       }),
     ]);
   });
@@ -96,8 +96,8 @@ describe("buildApp project routes", () => {
       payload: { name: "Project Upload Defaults", path: appTestContext.projectDir, create: true },
     });
     const project = addResponse.json<Project>();
-    await mkdir(join(appTestContext.projectDir, ".pi-web"), { recursive: true });
-    await writeFile(join(appTestContext.projectDir, ".pi-web", "config.json"), `${JSON.stringify({ version: 1, uploads: { defaultFolder: "project-uploads" } }, null, 2)}\n`);
+    await mkdir(join(appTestContext.projectDir, ".forgerie"), { recursive: true });
+    await writeFile(join(appTestContext.projectDir, ".forgerie", "config.json"), `${JSON.stringify({ version: 1, uploads: { defaultFolder: "project-uploads" } }, null, 2)}\n`);
 
     const workspacesResponse = await appTestContext.app.inject({ method: "GET", url: `/api/projects/${project.id}/workspaces` });
 

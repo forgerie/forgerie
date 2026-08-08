@@ -6,21 +6,21 @@ log() {
 }
 
 die() {
-  log "pi-web-docker: $*"
+  log "forgerie-docker: $*"
   exit 1
 }
 
 usage() {
   cat <<'EOF'
-Usage: pi-web-docker [--dev] [--allow-root] <command> [args...]
+Usage: forgerie-docker [--dev] [--allow-root] <command> [args...]
 
 Runtime/production mode is the default. Development mode must be selected
 explicitly with --dev.
 
 Commands:
   install                 Run the production one-line/bootstrap installer
-  start                   Start the PI WEB Docker stack
-  stop                    Stop the PI WEB Docker stack without deleting data
+  start                   Start the Forgerie Docker stack
+  stop                    Stop the Forgerie Docker stack without deleting data
   restart                 Restart web and sessiond
   restart-web             Restart only the web service
   restart-sessiond        Restart only the session daemon
@@ -31,9 +31,9 @@ Commands:
                           Follow Docker Compose logs
   shell [web|sessiond]    Open a shell in a service container
   doctor                  Print static Docker command diagnostics
-  cli <pi-web args...>    Run the pi-web CLI in the web container
+  cli <forgerie args...>    Run the forgerie CLI in the web container
 
-Update and restart commands launched inside a PI WEB Docker container start an
+Update and restart commands launched inside a Forgerie Docker container start an
 independent helper container first, then stream the helper logs inline. The
 helper continues running if the terminal or web/sessiond exits.
 EOF
@@ -192,9 +192,9 @@ runtime_root() {
   fi
   case "$root" in
     /*) ;;
-    *) die "PI WEB Docker runtime root must be an absolute path: $root" ;;
+    *) die "Forgerie Docker runtime root must be an absolute path: $root" ;;
   esac
-  [ -d "$root" ] || die "PI WEB Docker runtime root does not exist: $root"
+  [ -d "$root" ] || die "Forgerie Docker runtime root does not exist: $root"
   printf '%s\n' "$root"
 }
 
@@ -207,12 +207,12 @@ dev_root() {
       root=$ENTRYPOINT_DIR
     fi
   fi
-  [ -n "$root" ] || die "PI_WEB_DOCKER_DEV_REPO_ROOT must be set or pi-web-docker must run from this checkout's docker/ directory"
+  [ -n "$root" ] || die "PI_WEB_DOCKER_DEV_REPO_ROOT must be set or forgerie-docker must run from this checkout's docker/ directory"
   case "$root" in
     /*) ;;
-    *) die "PI WEB Docker development repo root must be an absolute path: $root" ;;
+    *) die "Forgerie Docker development repo root must be an absolute path: $root" ;;
   esac
-  [ -d "$root" ] || die "PI WEB Docker development repo root does not exist: $root"
+  [ -d "$root" ] || die "Forgerie Docker development repo root does not exist: $root"
   printf '%s\n' "$root"
 }
 
@@ -268,22 +268,22 @@ require_clean_dev_update_checkout() {
 
   operation=$(dev_git_operation "$git_dir" 2>/dev/null || true)
   if [ -n "$operation" ]; then
-    log "pi-web-docker: refusing to update the Docker development stack while a Git $operation is in progress: $root"
+    log "forgerie-docker: refusing to update the Docker development stack while a Git $operation is in progress: $root"
     checkout_status=$(git -C "$root" status --porcelain=v1 --untracked-files=all 2>/dev/null || true)
     if [ -n "$checkout_status" ]; then
       log "Checkout status:"
       printf '%s\n' "$checkout_status" >&2
     fi
-    die "resolve or abort the Git $operation before rerunning pi-web-docker --dev update"
+    die "resolve or abort the Git $operation before rerunning forgerie-docker --dev update"
   fi
 
   checkout_status=$(git -C "$root" status --porcelain=v1 --untracked-files=all) \
     || die "could not inspect Git checkout status at $root"
   if [ -n "$checkout_status" ]; then
-    log "pi-web-docker: refusing to update the Docker development stack because the checkout has uncommitted changes: $root"
+    log "forgerie-docker: refusing to update the Docker development stack because the checkout has uncommitted changes: $root"
     log "Checkout status:"
     printf '%s\n' "$checkout_status" >&2
-    die "commit, stash, or remove these changes before rerunning pi-web-docker --dev update; no files were changed"
+    die "commit, stash, or remove these changes before rerunning forgerie-docker --dev update; no files were changed"
   fi
 }
 
@@ -293,10 +293,10 @@ enforce_container_mode_match() {
   [ -n "$runtime_mode" ] || return 0
   case "$runtime_mode" in
     runtime|dev) ;;
-    *) die "unsupported PI_WEB_DOCKER_MODE inside PI WEB Docker runtime: $runtime_mode" ;;
+    *) die "unsupported PI_WEB_DOCKER_MODE inside Forgerie Docker runtime: $runtime_mode" ;;
   esac
   selected_mode=$(docker_mode)
-  [ "$runtime_mode" = "$selected_mode" ] || die "this PI WEB Docker container is in $runtime_mode mode; rerun pi-web-docker with the matching mode flag"
+  [ "$runtime_mode" = "$selected_mode" ] || die "this Forgerie Docker container is in $runtime_mode mode; rerun forgerie-docker with the matching mode flag"
 }
 
 docker_compose() {
@@ -314,7 +314,7 @@ is_checkout_runtime_default_root() {
   [ -z "${PI_WEB_DOCKER_INSTALL_DIR:-}" ] || return 1
   [ -f "$root/compose.dev.yml" ] || return 1
   [ -f "$root/../package.json" ] || return 1
-  [ -f "$root/pi-web-docker" ] || return 1
+  [ -f "$root/forgerie-docker" ] || return 1
 }
 
 runtime_command_hint() {
@@ -324,11 +324,11 @@ runtime_command_hint() {
 
 default_runtime_entrypoint_hint() {
   if [ -n "${XDG_DATA_HOME:-}" ]; then
-    printf '%s\n' "$XDG_DATA_HOME/pi-web-docker/pi-web-docker"
+    printf '%s\n' "$XDG_DATA_HOME/forgerie-docker/forgerie-docker"
   elif [ -n "${HOME:-}" ]; then
-    printf '%s\n' "$HOME/.local/share/pi-web-docker/pi-web-docker"
+    printf '%s\n' "$HOME/.local/share/forgerie-docker/forgerie-docker"
   else
-    printf '%s\n' '~/.local/share/pi-web-docker/pi-web-docker'
+    printf '%s\n' '~/.local/share/forgerie-docker/forgerie-docker'
   fi
 }
 
@@ -338,13 +338,13 @@ die_missing_runtime_asset() {
   if is_checkout_runtime_default_root "$root"; then
     command_hint=$(runtime_command_hint)
     runtime_entrypoint=$(default_runtime_entrypoint_hint)
-    log "pi-web-docker: runtime install assets were not found in $root."
+    log "forgerie-docker: runtime install assets were not found in $root."
     log "Missing generated asset: $missing_path"
     log ""
     log "You appear to be running this checkout's Docker command in runtime mode."
     log "For development, use:"
     log ""
-    log "  ./docker/pi-web-docker --dev $command_hint"
+    log "  ./docker/forgerie-docker --dev $command_hint"
     log ""
     log "For an installed runtime, use the installed command, usually:"
     log ""
@@ -354,7 +354,7 @@ die_missing_runtime_asset() {
     exit 1
   fi
 
-  die "runtime install asset not found at $missing_path; run pi-web-docker install first"
+  die "runtime install asset not found at $missing_path; run forgerie-docker install first"
 }
 
 require_runtime_compose_assets() {
@@ -400,7 +400,7 @@ entrypoint_installer() {
 runtime_installer() {
   root=$1
   installer=$root/install.sh
-  [ -x "$installer" ] || die "runtime installer not found or not executable at $installer; run pi-web-docker install first"
+  [ -x "$installer" ] || die "runtime installer not found or not executable at $installer; run forgerie-docker install first"
   printf '%s\n' "$installer"
 }
 
@@ -444,7 +444,7 @@ run_restart_sessiond() {
 run_restart_all() {
   assert_no_args restart "$@"
   # Restart web first to mirror native service commands. Detached helpers keep
-  # running after sessiond restarts, so this is safe when launched from PI WEB.
+  # running after sessiond restarts, so this is safe when launched from Forgerie.
   compose_for_install restart web sessiond
 }
 
@@ -465,16 +465,16 @@ run_update() {
       if ! is_truthy "${PI_WEB_DOCKER_RUNTIME:-}"; then
         run_runtime_host_update
       fi
-      cache_bust=${CACHE_BUST:-pi-web-docker-$(date -u +%Y%m%dT%H%M%SZ)}
-      log "Building PI WEB runtime image with CACHE_BUST=$cache_bust ..."
+      cache_bust=${CACHE_BUST:-forgerie-docker-$(date -u +%Y%m%dT%H%M%SZ)}
+      log "Building Forgerie runtime image with CACHE_BUST=$cache_bust ..."
       CACHE_BUST=$cache_bust runtime_compose build --pull --no-cache
-      log "Recreating PI WEB runtime services ..."
+      log "Recreating Forgerie runtime services ..."
       runtime_compose up -d --force-recreate --remove-orphans
       ;;
     dev)
-      log "Rebuilding PI WEB development image ..."
+      log "Rebuilding Forgerie development image ..."
       dev_compose build --pull
-      log "Recreating PI WEB development services ..."
+      log "Recreating Forgerie development services ..."
       dev_compose up -d --force-recreate --remove-orphans
       ;;
   esac
@@ -522,8 +522,8 @@ run_shell() {
 run_doctor() {
   assert_no_args doctor "$@"
   root=$(control_root)
-  printf 'PI WEB Docker mode: %s\n' "$(docker_mode)"
-  printf 'PI WEB Docker root: %s\n' "$root"
+  printf 'Forgerie Docker mode: %s\n' "$(docker_mode)"
+  printf 'Forgerie Docker root: %s\n' "$root"
   case "$(docker_mode)" in
     runtime)
       [ -f "$root/.env" ] && printf 'Runtime env: %s\n' "$root/.env" || printf 'Runtime env: missing (%s/.env)\n' "$root"
@@ -532,9 +532,9 @@ run_doctor() {
       [ -x "$root/install.sh" ] && printf 'Runtime installer: %s\n' "$root/install.sh" || printf 'Runtime installer: missing or not executable (%s/install.sh)\n' "$root"
       ;;
     dev)
-      dev_config=$root/.pi-web/docker-compose-dev.local.env
-      dev_env=$root/.pi-web/docker-compose-dev.generated.env
-      dev_override=$root/.pi-web/docker-compose-dev.host.generated.yml
+      dev_config=$root/.forgerie/docker-compose-dev.local.env
+      dev_env=$root/.forgerie/docker-compose-dev.generated.env
+      dev_override=$root/.forgerie/docker-compose-dev.host.generated.yml
       dev_compose_file=$root/docker/compose.dev.yml
       dev_wrapper=$root/docker/internal/dev/compose
       [ -f "$dev_config" ] && printf 'Dev config: %s\n' "$dev_config" || printf 'Dev config: missing (%s)\n' "$dev_config"
@@ -565,9 +565,9 @@ run_doctor() {
 }
 
 run_cli() {
-  [ "$#" -gt 0 ] || die "cli requires pi-web arguments"
+  [ "$#" -gt 0 ] || die "cli requires forgerie arguments"
   require_command docker
-  compose_for_install exec web pi-web "$@"
+  compose_for_install exec web forgerie "$@"
 }
 
 current_container_ref() {
@@ -618,9 +618,9 @@ control_env_file() {
   root=$1
   case "$(docker_mode)" in
     runtime) candidate=$root/.env ;;
-    dev) candidate=$root/.pi-web/docker-compose-dev.generated.env ;;
+    dev) candidate=$root/.forgerie/docker-compose-dev.generated.env ;;
   esac
-  [ -f "$candidate" ] || die "generated $(docker_mode) Docker env not found at $candidate; run pi-web-docker $(mode_flag || true) status or start from the host first"
+  [ -f "$candidate" ] || die "generated $(docker_mode) Docker env not found at $candidate; run forgerie-docker $(mode_flag || true) status or start from the host first"
   printf '%s\n' "$candidate"
 }
 
@@ -642,15 +642,15 @@ required_env_file_value() {
 cleanup_old_helpers() {
   root=${1:-}
   project_name=${2:-}
-  base_filters="label=pi-web.docker-helper=true"
+  base_filters="label=forgerie.docker-helper=true"
   if [ -n "$root" ] && [ -n "$project_name" ]; then
-    ids=$(docker ps -aq --filter "$base_filters" --filter "label=pi-web.docker-helper.root=$root" --filter "label=pi-web.docker-helper.project=$project_name" --filter status=exited 2>/dev/null || true)
+    ids=$(docker ps -aq --filter "$base_filters" --filter "label=forgerie.docker-helper.root=$root" --filter "label=forgerie.docker-helper.project=$project_name" --filter status=exited 2>/dev/null || true)
   elif [ -n "$root" ]; then
-    ids=$(docker ps -aq --filter "$base_filters" --filter "label=pi-web.docker-helper.root=$root" --filter status=exited 2>/dev/null || true)
+    ids=$(docker ps -aq --filter "$base_filters" --filter "label=forgerie.docker-helper.root=$root" --filter status=exited 2>/dev/null || true)
   else
     ids=$(docker ps -aq --filter "$base_filters" --filter status=exited 2>/dev/null || true)
   fi
-  old_ids=$(docker ps -aq --filter label=pi-web.docker-control=true --filter status=exited 2>/dev/null || true)
+  old_ids=$(docker ps -aq --filter label=forgerie.docker-control=true --filter status=exited 2>/dev/null || true)
   ids="$ids $old_ids"
   for id in $ids; do
     [ -n "$id" ] || continue
@@ -661,7 +661,7 @@ cleanup_old_helpers() {
 stream_detached_helper_logs() {
   helper_name=$1
   printf '\n'
-  printf 'Streaming detached PI WEB Docker helper logs inline.\n'
+  printf 'Streaming detached Forgerie Docker helper logs inline.\n'
   printf 'If this terminal disconnects, the helper keeps running.\n'
   printf 'Reconnect with: docker logs -f %s\n' "$helper_name"
   printf '\n'
@@ -673,14 +673,14 @@ stream_detached_helper_logs() {
   fi
 
   if [ "$logs_status" -ne 0 ]; then
-    log "pi-web-docker: detached helper log streaming stopped with status $logs_status"
-    log "pi-web-docker: reconnect with: docker logs -f $helper_name"
+    log "forgerie-docker: detached helper log streaming stopped with status $logs_status"
+    log "forgerie-docker: reconnect with: docker logs -f $helper_name"
     return "$logs_status"
   fi
 
   helper_status=$(docker inspect --format '{{.State.ExitCode}}' "$helper_name" 2>/dev/null || true)
   if is_unsigned_int "$helper_status" && [ "$helper_status" -ne 0 ]; then
-    log "pi-web-docker: detached helper exited with status $helper_status"
+    log "forgerie-docker: detached helper exited with status $helper_status"
     return "$helper_status"
   fi
 
@@ -689,7 +689,7 @@ stream_detached_helper_logs() {
 
 start_detached_helper() {
   action=$1
-  is_truthy "${PI_WEB_DOCKER_RUNTIME:-}" || die "detached helpers are only available inside the PI WEB Docker runtime"
+  is_truthy "${PI_WEB_DOCKER_RUNTIME:-}" || die "detached helpers are only available inside the Forgerie Docker runtime"
   require_command docker
   selected_mode=$(docker_mode)
   root=$(control_root)
@@ -714,17 +714,17 @@ start_detached_helper() {
   cleanup_old_helpers "$root" "$project_name"
 
   timestamp=$(date -u +%Y%m%d%H%M%S)
-  helper_name=pi-web-docker-$action-$timestamp-$$
+  helper_name=forgerie-docker-$action-$timestamp-$$
   generated_env_keys="PI_WEB_UID PI_WEB_GID DOCKER_GID PI_WEB_DOCKER_HOST_PROFILE HOSTEXEC_MODE PI_WEB_DOCKER_EXTRA_HOST_PATHS PI_WEB_DOCKER_DATA_DIR PI_WEB_DOCKER_INSTALL_DIR PI_WEB_DOCKER_DEV_REPO_ROOT PI_WEB_DOCKER_REF PI_WEB_BIND_ADDR PI_WEB_PORT PI_WEB_DEV_API_BIND_ADDR PI_WEB_DEV_BIND_ADDR PI_WEB_DEV_API_PORT PI_WEB_DEV_PORT PI_WEB_DEV_SESSIOND_SOCKET PI_WEB_VERSION PI_WEB_OPENSUSE_IMAGE PI_WEB_NODEJS_MAJOR PI_WEB_NODEJS_REPO PI_WEB_EXTRA_ZYPPER_PACKAGES PI_WEB_IMAGE PI_WEB_DEV_IMAGE COMPOSE_PROJECT_NAME HOSTEXEC_IMAGE PI_WEB_MAX_UPLOAD_BYTES"
 
   set -- run -d \
     --env-file "$env_file" \
     --name "$helper_name" \
-    --label pi-web.docker-helper=true \
-    --label "pi-web.docker-helper.action=$action" \
-    --label "pi-web.docker-helper.mode=$selected_mode" \
-    --label "pi-web.docker-helper.root=$root" \
-    --label "pi-web.docker-helper.project=$project_name" \
+    --label forgerie.docker-helper=true \
+    --label "forgerie.docker-helper.action=$action" \
+    --label "forgerie.docker-helper.mode=$selected_mode" \
+    --label "forgerie.docker-helper.root=$root" \
+    --label "forgerie.docker-helper.project=$project_name" \
     --group-add "$helper_group_add" \
     --user "$helper_user" \
     --volumes-from "$container_ref" \
@@ -750,7 +750,7 @@ start_detached_helper() {
   if [ "${CACHE_BUST+x}" = x ]; then
     set -- "$@" --env "CACHE_BUST=$CACHE_BUST"
   fi
-  set -- "$@" "$image" pi-web-docker
+  set -- "$@" "$image" forgerie-docker
 
   flag=$(mode_flag || true)
   if [ -n "$flag" ]; then
@@ -762,7 +762,7 @@ start_detached_helper() {
   set -- "$@" __run-detached "$action"
 
   container_id=$(docker "$@") || die "could not start detached Docker helper"
-  printf 'Started detached PI WEB Docker helper: %s\n' "$helper_name"
+  printf 'Started detached Forgerie Docker helper: %s\n' "$helper_name"
   printf 'Container ID: %s\n' "$container_id"
   stream_detached_helper_logs "$helper_name"
 }
@@ -770,9 +770,9 @@ start_detached_helper() {
 run_detached_action() {
   action=${1:-}
   [ "$#" -eq 1 ] || die "__run-detached requires exactly one action"
-  is_truthy "${PI_WEB_DOCKER_RUNTIME:-}" || die "detached actions only run inside the PI WEB Docker runtime"
+  is_truthy "${PI_WEB_DOCKER_RUNTIME:-}" || die "detached actions only run inside the Forgerie Docker runtime"
   require_command docker
-  log "PI WEB Docker helper running action: $action"
+  log "Forgerie Docker helper running action: $action"
   case "$action" in
     update) run_update ;;
     restart) run_restart_all ;;
@@ -780,7 +780,7 @@ run_detached_action() {
     restart-sessiond) run_restart_sessiond ;;
     *) die "unsupported detached action: $action" ;;
   esac
-  log "PI WEB Docker helper completed action: $action"
+  log "Forgerie Docker helper completed action: $action"
 }
 
 run_restart_or_update() {

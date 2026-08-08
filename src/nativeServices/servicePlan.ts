@@ -215,21 +215,21 @@ export function nativeServicePrerequisiteNeedsPathAdvice(prerequisite: NativeSer
 
 export const nativeServiceManagerRefs: Readonly<Record<NativeServiceId, NativeServiceManagerRef>> = {
   sessiond: {
-    systemdName: "pi-web-sessiond.service",
-    launchdLabel: "com.pi-web.sessiond",
-    launchdPlistName: "com.pi-web.sessiond.plist",
+    systemdName: "forgerie-sessiond.service",
+    launchdLabel: "com.forgerie.sessiond",
+    launchdPlistName: "com.forgerie.sessiond.plist",
     logName: "sessiond.log",
   },
   web: {
-    systemdName: "pi-web.service",
-    launchdLabel: "com.pi-web.web",
-    launchdPlistName: "com.pi-web.web.plist",
+    systemdName: "forgerie-web.service",
+    launchdLabel: "com.forgerie.web",
+    launchdPlistName: "com.forgerie.web.plist",
     logName: "web.log",
   },
   uiDev: {
-    systemdName: "pi-web-ui-dev.service",
-    launchdLabel: "com.pi-web.ui-dev",
-    launchdPlistName: "com.pi-web.ui-dev.plist",
+    systemdName: "forgerie-ui-dev.service",
+    launchdLabel: "com.forgerie.ui-dev",
+    launchdPlistName: "com.forgerie.ui-dev.plist",
     logName: "ui-dev.log",
   },
 };
@@ -354,7 +354,7 @@ export function createDevelopmentNativeServicePlan(input: DevelopmentNativeServi
       {
         id: "sessiond",
         manager: nativeServiceManagerRefs.sessiond,
-        description: "PI WEB session daemon (dev)",
+        description: "Forgerie session daemon (dev)",
         shellCommand: "exec npm run start:sessiond",
         strategy: { kind: "development-npm-script", script: "start:sessiond" },
         restart: "never",
@@ -371,7 +371,7 @@ export function createDevelopmentNativeServicePlan(input: DevelopmentNativeServi
       {
         id: "uiDev",
         manager: nativeServiceManagerRefs.uiDev,
-        description: "PI WEB UI dev server",
+        description: "Forgerie UI dev server",
         shellCommand: `exec /usr/bin/env bash -c ${shellSingleQuote(input.shell.name, uiDevCommand)}`,
         strategy: { kind: "development-npm-script-group", scripts: uiDevScripts, interpreter: "bash" },
         restart: "never",
@@ -459,7 +459,7 @@ function productionService(
   return {
     id: serviceId,
     manager: nativeServiceManagerRefs[serviceId],
-    description: isWeb ? "PI WEB server" : "PI WEB session daemon",
+    description: isWeb ? "Forgerie server" : "Forgerie session daemon",
     shellCommand: `exec ${strategyCommand(input.shell, strategy)}`,
     strategy,
     restart: "on-failure",

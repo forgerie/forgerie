@@ -10,7 +10,7 @@ import { ensureInside, isNodeErrorWithCode, resolveParentInsideWorkspace } from 
  * Default workspace-relative folder used when saving pasted/dropped
  * attachments for the agent to read with its own tools.
  */
-export const DEFAULT_ATTACHMENT_FOLDER = ".pi-web/attachments";
+export const DEFAULT_ATTACHMENT_FOLDER = ".forgerie/attachments";
 
 export interface InlineImage {
   image: ImageContent;
@@ -42,7 +42,7 @@ export async function attachmentsToInlineImages(attachments: PromptImageAttachme
 }
 
 export interface SaveAttachmentsOptions {
-  /** Workspace-relative folder to write into. Defaults to `.pi-web/attachments`. */
+  /** Workspace-relative folder to write into. Defaults to `.forgerie/attachments`. */
   folder?: string;
   /** Clock injection for deterministic tests. */
   now?: () => Date;

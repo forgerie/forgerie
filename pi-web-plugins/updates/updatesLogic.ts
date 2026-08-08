@@ -1,4 +1,4 @@
-import type { PiWebDockerMode, PiWebInstallationInfo, PiWebStatusMessage, PiWebStatusResponse, PluginRuntimeState } from "@jmfederico/pi-web/plugin-api";
+import type { PiWebDockerMode, PiWebInstallationInfo, PiWebStatusMessage, PiWebStatusResponse, PluginRuntimeState } from "forgerie/plugin-api";
 
 export interface CommandEntry {
   label: string;
@@ -64,16 +64,16 @@ export function shouldShowUpdatesPanel(state: PluginRuntimeState | undefined, hi
 
 export function fallbackDockerStatus(hint: UpdatesRuntimeHint, generatedAt = "federated status unavailable"): PiWebStatusResponse | undefined {
   if (hint.dockerMode === undefined) return undefined;
-  const commandPrefix = hint.dockerMode === "dev" ? "pi-web-docker --dev" : "pi-web-docker";
+  const commandPrefix = hint.dockerMode === "dev" ? "forgerie-docker --dev" : "forgerie-docker";
   const installation: PiWebInstallationInfo = { kind: "docker", dockerMode: hint.dockerMode };
   return {
-    packageName: "@jmfederico/pi-web",
+    packageName: "forgerie",
     generatedAt,
     components: {
       web: { component: "web", label: "Web/UI", stale: false, available: true, installation },
       sessiond: { component: "sessiond", label: "Session daemon", stale: false, available: true, installation },
     },
-    release: { packageName: "@jmfederico/pi-web", updateAvailable: false, skipped: true },
+    release: { packageName: "forgerie", updateAvailable: false, skipped: true },
     commands: {
       update: `${commandPrefix} update`,
       restart: `${commandPrefix} restart`,
@@ -85,7 +85,7 @@ export function fallbackDockerStatus(hint: UpdatesRuntimeHint, generatedAt = "fe
       id: "docker-status-compatibility",
       severity: "info",
       title: "Docker update commands available",
-      body: "This Updates plugin was loaded from a Docker PI WEB runtime, but the gateway has not provided Docker-aware status details yet. The Docker maintenance commands below are still available.",
+      body: "This Updates plugin was loaded from a Docker Forgerie runtime, but the gateway has not provided Docker-aware status details yet. The Docker maintenance commands below are still available.",
     }],
   };
 }

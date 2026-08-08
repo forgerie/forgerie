@@ -5,14 +5,14 @@ import { describe, expect, it } from "vitest";
 import { PI_WEB_DOCKER_USER_COMMANDS } from "./piWebDockerCommandPlan.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const dockerOneLine = "curl -fsSL https://raw.githubusercontent.com/jmfederico/pi-web/main/docker/install.sh | sh";
+const staleDockerOneLine = "curl -fsSL https://raw.githubusercontent.com/jmfederico/forgerie/main/docker/install.sh | sh";
 
-describe("pi-web-docker documentation", () => {
-  it("documents the Docker one-line install in the Docker guide", async () => {
+describe("forgerie-docker documentation", () => {
+  it("marks production Docker distribution local-only", async () => {
     const dockerReadme = await readRepoFile("docker/README.md");
 
-    expect(dockerReadme).toContain(dockerOneLine);
-    expect(dockerReadme).toContain("does not require Node.js or npm on the host");
+    expect(dockerReadme).toContain("The checked-in Docker support is retained from upstream for future adaptation");
+    expect(dockerReadme).not.toContain(staleDockerOneLine);
   });
 
   it("keeps Docker setup documentation scoped to the Docker folder", async () => {
@@ -24,8 +24,8 @@ describe("pi-web-docker documentation", () => {
     ]);
 
     for (const content of nonDockerDocs) {
-      expect(content).not.toContain(dockerOneLine);
-      expect(content).not.toContain("pi-web-docker");
+      expect(content).not.toContain(staleDockerOneLine);
+      expect(content).not.toContain("forgerie-docker");
       expect(content).not.toContain("Docker beta");
       expect(content).not.toContain("Docker guide");
     }
@@ -34,15 +34,15 @@ describe("pi-web-docker documentation", () => {
   it("keeps the Docker command matrix aligned with the canonical user command surface", async () => {
     const [dockerReadme, dockerEntrypoint] = await Promise.all([
       readRepoFile("docker/README.md"),
-      readRepoFile("docker/pi-web-docker"),
+      readRepoFile("docker/forgerie-docker"),
     ]);
 
     expect(readDockerCommandMatrix(dockerReadme)).toEqual([...PI_WEB_DOCKER_USER_COMMANDS]);
     expect(readEntrypointCommandCases(dockerEntrypoint)).toEqual(new Set(PI_WEB_DOCKER_USER_COMMANDS));
 
-    expect(dockerReadme).toContain("`pi-web-docker --dev status`");
-    expect(dockerReadme).toContain("`./docker/pi-web-docker --dev start`");
-    expect(dockerReadme).not.toContain("pi-web-docker-control");
+    expect(dockerReadme).toContain("`forgerie-docker --dev status`");
+    expect(dockerReadme).toContain("`./docker/forgerie-docker --dev start`");
+    expect(dockerReadme).not.toContain("forgerie-docker-control");
     expect(dockerReadme).not.toContain("docker/scripts/docker-compose-dev");
   });
 });

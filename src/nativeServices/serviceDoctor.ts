@@ -181,7 +181,7 @@ export function formatNativeServiceDoctorResult(result: NativeServiceDoctorResul
       failureKind: "inspection",
       lines: [
         `✗ Installed native-service plan could not be inspected: ${result.message}`,
-        "  Run `pi-web install` or `pi-web install --dev` to replace mixed, partial, or outdated service definitions.",
+        "  Run `forgerie install` or `forgerie install --dev` to replace mixed, partial, or outdated service definitions.",
       ],
       plan: null,
       adviceShell: null,

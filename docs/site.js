@@ -146,7 +146,7 @@ function setupScreenshotCarousel(carousel) {
     const captionParts = Array.from(figure?.querySelectorAll("figcaption strong, figcaption span") ?? [])
       .map((node) => node.textContent?.trim())
       .filter(Boolean);
-    const caption = captionParts.length > 0 ? captionParts.join(" — ") : "PI WEB screenshot";
+    const caption = captionParts.length > 0 ? captionParts.join(" — ") : "Forgerie screenshot";
 
     lightboxImage.src = image.currentSrc || image.src;
     lightboxImage.alt = image.alt;

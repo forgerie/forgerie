@@ -14,19 +14,23 @@ afterEach(async () => {
   tempRoots.length = 0;
 });
 
-describe.skipIf(process.platform === "win32")("global install script", () => {
-  it("scopes script approval to node-pty before installing services", async () => {
+describe.skipIf(process.platform === "win32")("local install script", () => {
+  it("installs, builds, links, and installs development services from the checkout", async () => {
     const fixture = await createFixture();
 
     await execUtf8("sh", [installerPath], fixture.env);
 
     expect((await readFile(fixture.npmArgsPath, "utf8")).trim().split("\n")).toEqual([
+      "npm",
       "install",
-      "-g",
-      "@jmfederico/pi-web",
-      "--allow-scripts=node-pty",
+      "npm",
+      "run",
+      "npm",
+      "build",
+      "npm",
+      "link",
     ]);
-    expect((await readFile(fixture.piWebArgsPath, "utf8")).trim().split("\n")).toEqual(["install"]);
+    expect((await readFile(fixture.piWebArgsPath, "utf8")).trim().split("\n")).toEqual(["install", "--dev"]);
   });
 });
 
@@ -35,14 +39,14 @@ async function createFixture(): Promise<{
   npmArgsPath: string;
   piWebArgsPath: string;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "pi-web-install-script-"));
+  const root = await mkdtemp(join(tmpdir(), "forgerie-install-script-"));
   tempRoots.push(root);
   const npmArgsPath = join(root, "npm-args");
-  const piWebArgsPath = join(root, "pi-web-args");
+  const piWebArgsPath = join(root, "forgerie-args");
   const npmPath = join(root, "npm");
-  const piWebPath = join(root, "pi-web");
+  const piWebPath = join(root, "forgerie");
   await Promise.all([
-    writeFile(npmPath, "#!/usr/bin/env sh\nprintf '%s\\n' \"$@\" > \"$FAKE_NPM_ARGS\"\n"),
+    writeFile(npmPath, "#!/usr/bin/env sh\nprintf 'npm\\n%s\\n' \"$@\" >> \"$FAKE_NPM_ARGS\"\n"),
     writeFile(piWebPath, "#!/usr/bin/env sh\nprintf '%s\\n' \"$@\" > \"$FAKE_PI_WEB_ARGS\"\n"),
   ]);
   await Promise.all([chmod(npmPath, 0o755), chmod(piWebPath, 0o755)]);

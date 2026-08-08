@@ -1,45 +1,45 @@
-# PI WEB plugin API
+# Forgerie plugin API
 
-PI WEB plugins are trusted browser-side ES modules that extend the PI WEB UI. They are intended for personal, team, and project-local customization, and simple enough for an LLM to create or modify directly.
+Forgerie plugins are trusted browser-side ES modules that extend the Forgerie UI. They are intended for personal, team, and project-local customization, and simple enough for an LLM to create or modify directly.
 
 Plugins can currently:
 
 - add action-palette commands;
 - add workspace tools/panels next to Files, Git, and Terminal;
 - add compact workspace-label items in the workspace list, panel header, and status bar;
-- call browser APIs and documented PI WEB plugin context helpers;
+- call browser APIs and documented Forgerie plugin context helpers;
 - read workspace files and start workspace terminal commands through documented helpers;
 - serve their own static assets from the plugin directory.
 
 They do **not** run in the session daemon, do not get a server-side hook API, and are not sandboxed.
 
-## Pi packages, Pi extensions, and PI WEB plugins
+## Pi packages, Pi extensions, and Forgerie plugins
 
-**Pi packages** are distribution bundles managed by Pi (`pi install`, `pi remove`, `pi update`). A Pi package can provide Pi extensions, skills, prompt templates, themes, context/system prompt files, and/or PI WEB browser plugins. Many Pi packages do not include a PI WEB plugin.
+**Pi packages** are distribution bundles managed by Pi (`pi install`, `pi remove`, `pi update`). A Pi package can provide Pi extensions, skills, prompt templates, themes, context/system prompt files, and/or Forgerie browser plugins. Many Pi packages do not include a Forgerie plugin.
 
-**Pi extensions** are runtime modules loaded by the session daemon. They can register Pi tools, hooks, commands, and model providers. They are not PI WEB plugins.
+**Pi extensions** are runtime modules loaded by the session daemon. They can register Pi tools, hooks, commands, and model providers. They are not Forgerie plugins.
 
-**PI WEB plugins** are browser-side UI modules discovered from bundled, local, dev, and installed Pi-package sources. They cannot register model providers or server-side hooks. Enabling or disabling a PI WEB plugin is a PI WEB config task; installing, removing, or updating a Pi package is a separate Pi package-manager task.
+**Forgerie plugins** are browser-side UI modules discovered from bundled, local, dev, and installed Pi-package sources. They cannot register model providers or server-side hooks. Enabling or disabling a Forgerie plugin is a Forgerie config task; installing, removing, or updating a Pi package is a separate Pi package-manager task.
 
-Use **Settings → Pi packages** to view configured Pi packages or install/remove/update a package. Enter only the package source, such as `npm:@scope/package`, a git/URL source, or a local path. PI WEB uses Pi's default package location, equivalent to `pi install <source>`, and does not ask for an install location.
+Use **Settings → Pi packages** to view configured Pi packages or install/remove/update a package. Enter only the package source, such as `npm:@scope/package`, a git/URL source, or a local path. Forgerie uses Pi's default package location, equivalent to `pi install <source>`, and does not ask for an install location.
 
-When machine federation is enabled, **Settings → Pi packages** targets the currently selected machine. The panel labels whether changes will run on the local/gateway machine or on a selected remote PI WEB machine.
+When machine federation is enabled, **Settings → Pi packages** targets the currently selected machine. The panel labels whether changes will run on the local/gateway machine or on a selected remote Forgerie machine.
 
-Use **Settings → PI WEB plugins** to enable or disable discovered PI WEB browser plugins before the browser imports them. In a federated setup, this plugin enablement surface targets the currently selected machine and labels where changes are saved.
+Use **Settings → Forgerie plugins** to enable or disable discovered Forgerie browser plugins before the browser imports them. In a federated setup, this plugin enablement surface targets the currently selected machine and labels where changes are saved.
 
-After installing, removing, or updating a Pi package, type `/reload` in each idle PI WEB session on the target machine to refresh ordinary Pi resources such as extensions, skills, prompt templates, themes, and context/system prompt files. Reload the browser page separately for newly discovered or changed PI WEB browser plugins. A provider-registering Pi extension follows a separate daemon-start policy; see [Pi extension provider baseline](https://pi-web.dev/config#pi-extension-provider-baseline).
+After installing, removing, or updating a Pi package, type `/reload` in each idle Forgerie session on the target machine to refresh ordinary Pi resources such as extensions, skills, prompt templates, themes, and context/system prompt files. Reload the browser page separately for newly discovered or changed Forgerie browser plugins. A provider-registering Pi extension follows a separate daemon-start policy; see [Pi extension provider baseline](config.md#pi-extension-provider-baseline).
 
-## Pi extension dialogs in PI WEB
+## Pi extension dialogs in Forgerie
 
-Pi extensions running under PI WEB's session daemon can ask the user questions with `ctx.ui.confirm()`, `ctx.ui.select()`, and `ctx.ui.input()`. PI WEB reports `ctx.hasUI === true`, and for these three dialog methods that is true in fact: the call renders a dialog card inline in the session transcript and the returned Promise resolves with the user's actual answer — a boolean for confirm, the chosen option for select, the typed text for input.
+Pi extensions running under Forgerie's session daemon can ask the user questions with `ctx.ui.confirm()`, `ctx.ui.select()`, and `ctx.ui.input()`. Forgerie reports `ctx.hasUI === true`, and for these three dialog methods that is true in fact: the call renders a dialog card inline in the session transcript and the returned Promise resolves with the user's actual answer — a boolean for confirm, the chosen option for select, the typed text for input.
 
 - **Works from hooks, without the prompt queue.** Answers travel over a dedicated session-daemon channel, so a dialog opened inside an in-flight `tool_call` hook parks safely — the agent loop waits for the hook and the run continues with the answer. Consent-gating a tool from a `tool_call` hook is a supported pattern.
 - **`session_start` dialogs are reachable.** A dialog opened from a `session_start` hook is answerable while the session is still starting, both when creating a session and when opening an existing one; startup completes once the dialog settles.
 - **Survives browser reloads; first answer wins.** Reloading the browser re-renders open dialogs from the session status. With several tabs on the same session, the first answer settles the dialog and the other tabs re-render the settled card.
 - **Settled cards stay until dismissed.** An answered or closed dialog leaves its outcome card in the transcript so the user can see what became of it — answers travel to the extension alone, so the card is the only record of the exchange. The card is browser-local: only a browser that saw the dialog open renders it, and switching sessions or reloading drops it.
-- **Timeouts.** The extension's own `timeout` option applies, and the daemon adds an unattended-dialog safety valve, `extensionDialogsTimeoutMs` (default 5 minutes, `0` waits forever — see [Extension dialogs](https://pi-web.dev/config#extension-dialogs)). The effective deadline is the sooner of the two. A dialog that closes without an answer resolves with its kind's cancel value: `false` for confirm, `undefined` for select and input.
+- **Timeouts.** The extension's own `timeout` option applies, and the daemon adds an unattended-dialog safety valve, `extensionDialogsTimeoutMs` (default 5 minutes, `0` waits forever — see [Extension dialogs](config.md#extension-dialogs)). The effective deadline is the sooner of the two. A dialog that closes without an answer resolves with its kind's cancel value: `false` for confirm, `undefined` for select and input.
 - **Abort and runtime replacement.** Aborting the current run settles a dialog opened during that run immediately, at abort-request time, with its cancel value. Replacing the session runtime (`/reload`, session disposal) settles any still-open dialog the same way; hooks on the new runtime open fresh dialogs. The extension's own `AbortSignal` is honored: aborting it dismisses the dialog and resolves with the cancel value.
-- **Other UI surfaces are still no-ops.** `ExtensionUIContext` methods beyond the three dialogs (widgets, status, editor, `custom`) remain unimplemented under PI WEB even though `hasUI` is `true`; do not rely on `hasUI` alone to detect them.
+- **Other UI surfaces are still no-ops.** `ExtensionUIContext` methods beyond the three dialogs (widgets, status, editor, `custom`) remain unimplemented under Forgerie even though `hasUI` is `true`; do not rely on `hasUI` alone to detect them.
 
 One browser-local caveat: reloading the browser while a new session is still being created loses the browser-local pending-start row, so the dialog card disappears from view. The daemon-side dialog still settles at its deadline and the session appears in the sidebar once creation completes.
 
@@ -52,7 +52,7 @@ Plugins run as JavaScript in the browser app. Treat them as trusted code:
 - they can render arbitrary Lit templates/custom elements in plugin contribution areas;
 - they should not be installed from untrusted sources.
 
-PI WEB's `/api/...` HTTP and WebSocket endpoints are internal implementation details. Plugin code should use the documented context helpers instead. Daring plugins can still reach private routes or runtime objects because they run in the browser, but those private surfaces are experimental: they may graduate into stable helpers, change shape, or disappear.
+Forgerie's `/api/...` HTTP and WebSocket endpoints are internal implementation details. Plugin code should use the documented context helpers instead. Daring plugins can still reach private routes or runtime objects because they run in the browser, but those private surfaces are experimental: they may graduate into stable helpers, change shape, or disappear.
 
 ## What to ask AI to build
 
@@ -69,35 +69,29 @@ Good plugin requests:
 Copy-paste prompt for creating a plugin:
 
 ```text
-Build a PI WEB plugin for this project.
+Build a Forgerie plugin for this project.
 Goal: <describe the UI behavior>.
-Before coding, read the PI WEB plugin docs:
-https://pi-web.dev/plugins
-Full API reference:
-https://pi-web.dev/plugins.md
-Create it as a local plugin under ~/.pi-web/plugins/<plugin-id>.
+Before coding, read docs/plugins.md in the local Forgerie checkout.
+Create it as a local plugin under ~/.forgerie/plugins/<plugin-id>.
 Use the appropriate extension points from the docs.
 Validate by checking /pi-web-plugins/manifest.json and explain how to reload/debug it.
-Do not modify PI WEB itself.
+Do not modify Forgerie itself.
 ```
 
 Copy-paste prompt for modifying a plugin:
 
 ```text
-Improve the PI WEB plugin at <path>.
-Before coding, read the PI WEB plugin docs:
-https://pi-web.dev/plugins
-Full API reference:
-https://pi-web.dev/plugins.md
+Improve the Forgerie plugin at <path>.
+Before coding, read docs/plugins.md in the local Forgerie checkout.
 Keep the plugin compatible with the documented v1 API.
 After editing, check the manifest endpoint and browser-console failure cases.
 ```
 
 ## Canonical example: bundled Info plugin
 
-PI WEB ships a real bundled `info` plugin. Use it as the reference example because it is intentionally small while still exercising all core contribution types: an action, a workspace label, and a workspace panel.
+Forgerie ships a real bundled `info` plugin. Use it as the reference example because it is intentionally small while still exercising all core contribution types: an action, a workspace label, and a workspace panel.
 
-Bundled PI WEB plugins are developed as TypeScript in the repository, but their `package.json` metadata still points at built JavaScript because plugins are loaded by the browser as JS ES modules. `npm run dev:web` watches and rebuilds bundled plugin TS into `dist/pi-web-plugins/` during development, and `npm run build` emits the JS before packaging a release.
+Bundled Forgerie plugins are developed as TypeScript in the repository, but their `package.json` metadata still points at built JavaScript because plugins are loaded by the browser as JS ES modules. `npm run dev:web` watches and rebuilds bundled plugin TS into `dist/pi-web-plugins/` during development, and `npm run build` emits the JS before packaging a release.
 
 Source files:
 
@@ -147,40 +141,40 @@ export default {
 
 When copying the Info plugin, choose a new plugin id so it does not conflict with the bundled `info` plugin.
 
-The Info panel doubles as an always-available PI WEB status view: it renders the host-provided `context.state.piWebStatus` (versions, installation, release state, machine, and workspace details) without issuing its own requests, and its action copies a plain-text diagnostics summary suitable for bug reports.
+The Info panel doubles as an always-available Forgerie status view: it renders the host-provided `context.state.piWebStatus` (versions, installation, release state, machine, and workspace details) without issuing its own requests, and its action copies a plain-text diagnostics summary suitable for bug reports.
 
-PI WEB also ships an `updates` plugin that demonstrates dynamic `visible` and `badge` callbacks for tabs that only appear when the host has status messages or needs extra install visibility.
+Forgerie also ships an `updates` plugin that demonstrates dynamic `visible` and `badge` callbacks for tabs that only appear when the host has status messages or needs extra install visibility.
 
 ## Local plugin usage
 
-This works with the production native-service install. PI WEB discovers plugins from `~/.pi-web/plugins/<plugin-package>/` on the web/API side; no PI WEB rebuild or session-daemon restart is required. If `PI_WEB_DATA_DIR` is set, use `$PI_WEB_DATA_DIR/plugins` instead.
+This works with the production native-service install. Forgerie discovers plugins from `~/.forgerie/plugins/<plugin-package>/` on the web/API side; no Forgerie rebuild or session-daemon restart is required. If `PI_WEB_DATA_DIR` is set, use `$PI_WEB_DATA_DIR/plugins` instead.
 
-Symlink a plugin folder into PI WEB's local plugin directory:
+Symlink a plugin folder into Forgerie's local plugin directory:
 
 ```bash
-mkdir -p ~/.pi-web/plugins
-ln -s /path/to/plugin-folder ~/.pi-web/plugins/plugin-id
+mkdir -p ~/.forgerie/plugins
+ln -s /path/to/plugin-folder ~/.forgerie/plugins/plugin-id
 ```
 
-Reload the PI WEB browser tab. PI WEB serves plugin modules with an mtime-based `?v=` cache buster. After editing a plugin, hard reload the browser if you do not see changes.
+Reload the Forgerie browser tab. Forgerie serves plugin modules with an mtime-based `?v=` cache buster. After editing a plugin, hard reload the browser if you do not see changes.
 
 ## Remote machine plugins
 
-When [machine federation](https://pi-web.dev/machines) is enabled, PI WEB also loads discovered plugins from the selected remote machine. Remote plugins are trusted browser-side code like local plugins, but their contributions are machine-scoped:
+When [machine federation](machines.html) is enabled, Forgerie also loads discovered plugins from the selected remote machine. Remote plugins are trusted browser-side code like local plugins, but their contributions are machine-scoped:
 
 - actions, workspace panels, and workspace labels only appear while that machine is selected;
 - plugin file and terminal helpers run against that machine;
 - plugin code is loaded best-effort through the current gateway and cached for the browser page lifetime;
 - if the gateway and remote machine both have an enabled plugin with the same original id, `machineSpecific` metadata decides whether the gateway copy is reused or only the selected machine's copy can appear;
 - remote theme contributions are ignored for now because themes are app-wide;
-- mixed PI WEB versions across federated machines are best-effort and not guaranteed compatible.
+- mixed Forgerie versions across federated machines are best-effort and not guaranteed compatible.
 
-Remote plugin enablement is controlled by the remote machine's PI WEB plugin config. To edit or disable a remote machine plugin, select that machine and use **Settings → PI WEB plugins**, or open that machine directly/update its config file.
+Remote plugin enablement is controlled by the remote machine's Forgerie plugin config. To edit or disable a remote machine plugin, select that machine and use **Settings → Forgerie plugins**, or open that machine directly/update its config file.
 
-Plugin package metadata may set `machineSpecific: true` when the plugin's meaning is tied to the selected PI WEB machine:
+Plugin package metadata may set `machineSpecific: true` when the plugin's meaning is tied to the selected Forgerie machine:
 
 - Omitted or `false`: use the gateway copy when the same plugin id is also present on a remote machine. This is best for portable UI plugins whose helpers already route through the selected machine.
-- `true`: the gateway copy only appears for the local machine. When a remote machine is selected, only that remote machine's copy can appear; if the remote machine does not expose the plugin, the plugin is hidden. This is best for plugins that report machine-local PI WEB status or depend on machine-local plugin code.
+- `true`: the gateway copy only appears for the local machine. When a remote machine is selected, only that remote machine's copy can appear; if the remote machine does not expose the plugin, the plugin is hidden. This is best for plugins that report machine-local Forgerie status or depend on machine-local plugin code.
 
 For portable plugin assets, prefer URLs relative to the plugin module, for example:
 
@@ -188,15 +182,15 @@ For portable plugin assets, prefer URLs relative to the plugin module, for examp
 const url = new URL("./asset.json", import.meta.url);
 ```
 
-If a remote plugin constructs absolute asset URLs, it should use the `pluginId` from `activate()` because PI WEB gives remote plugins a gateway-scoped runtime id. Hard-coded `/pi-web-plugins/<original-id>/...` URLs may point at the gateway instead of the remote machine.
+If a remote plugin constructs absolute asset URLs, it should use the `pluginId` from `activate()` because Forgerie gives remote plugins a gateway-scoped runtime id. Hard-coded `/pi-web-plugins/<original-id>/...` URLs may point at the gateway instead of the remote machine.
 
-## Manage PI WEB plugins
+## Manage Forgerie plugins
 
-Open **Settings → PI WEB plugins** to review discovered bundled, local, dev, and Pi-package-supplied PI WEB plugins for the selected PI WEB machine. When the local machine is selected, this is the gateway plugin list; when a remote machine is selected, the list comes from that remote PI WEB server and includes disabled discovered plugins it exposes. PI WEB can disable any discovered selected-machine plugin before the browser imports it. Core app contributions such as the built-in command palette, base workspace tools, and themes are not managed through this plugin list.
+Open **Settings → Forgerie plugins** to review discovered bundled, local, dev, and Pi-package-supplied Forgerie plugins for the selected Forgerie machine. When the local machine is selected, this is the gateway plugin list; when a remote machine is selected, the list comes from that remote Forgerie server and includes disabled discovered plugins it exposes. Forgerie can disable any discovered selected-machine plugin before the browser imports it. Core app contributions such as the built-in command palette, base workspace tools, and themes are not managed through this plugin list.
 
-This surface is only for PI WEB plugin enablement. To install, remove, or update Pi packages that may provide PI WEB plugins or other Pi resources, use **Settings → Pi packages**. In a federated setup, both the Pi packages panel and the PI WEB plugins panel target the selected machine; plugin enablement still writes the PI WEB `plugins` config key rather than changing Pi package-manager settings.
+This surface is only for Forgerie plugin enablement. To install, remove, or update Pi packages that may provide Forgerie plugins or other Pi resources, use **Settings → Pi packages**. In a federated setup, both the Pi packages panel and the Forgerie plugins panel target the selected machine; plugin enablement still writes the Forgerie `plugins` config key rather than changing Pi package-manager settings.
 
-Plugin preferences are stored under the top-level `plugins` config key in the PI WEB config file:
+Plugin preferences are stored under the top-level `plugins` config key in the Forgerie config file:
 
 ```json
 {
@@ -214,22 +208,22 @@ Plugin preferences are stored under the top-level `plugins` config key in the PI
 
 Plugins are enabled by default. Set `enabled` to `false` to remove a plugin from `/pi-web-plugins/manifest.json` so the browser will not import or activate it on the next page load. The optional `settings` object is reserved for plugin-specific settings.
 
-After changing plugin enablement, reload the PI WEB browser tab. Already-loaded plugin JavaScript is not unloaded from the current page.
+After changing plugin enablement, reload the Forgerie browser tab. Already-loaded plugin JavaScript is not unloaded from the current page.
 
 ## Built-in plugins
 
-PI WEB ships core, discoverable plugins in the main `@jmfederico/pi-web` npm package. No separate `pi install` step is required: update PI WEB, reload the browser tab, and the bundled plugins appear in `/pi-web-plugins/manifest.json`.
+Forgerie ships core, discoverable plugins in the main `forgerie` npm package. No separate `pi install` step is required: update Forgerie, reload the browser tab, and the bundled plugins appear in `/pi-web-plugins/manifest.json`.
 
-Built-in plugins can be managed from **Settings → PI WEB plugins** or with the top-level `plugins` config key.
+Built-in plugins can be managed from **Settings → Forgerie plugins** or with the top-level `plugins` config key.
 
 ### Updates
 
 **Plugin id:** `updates`
-**What it does:** adds a conditional **Updates** workspace tab with PI WEB update, restart, and installed-service guidance, plus a **Check for PI WEB Updates** action for the selected machine.
+**What it does:** adds a conditional **Updates** workspace tab with Forgerie update, restart, and installed-service guidance, plus a **Check for Forgerie Updates** action for the selected machine.
 
-While a browser tab is connected, PI WEB refreshes the selected machine's status every 15 minutes. npm release lookups are cached on that machine for six hours, so the automatic refresh normally contacts npm at most once in that window. Run **Check for PI WEB Updates** from the action palette to bypass both caches and check immediately. Operator settings that skip remote version checks, such as `PI_WEB_OFFLINE`, are still respected.
+While a browser tab is connected, Forgerie refreshes the selected machine's status every 15 minutes. npm release lookups are cached on that machine for six hours, so the automatic refresh normally contacts npm at most once in that window. Run **Check for Forgerie Updates** from the action palette to bypass both caches and check immediately. Operator settings that skip remote version checks, such as `PI_WEB_OFFLINE`, are still respected.
 
-Updates is enabled by default. It declares `machineSpecific: true` so the gateway Updates tab and action only appear for the local machine; while a remote machine is selected, that remote machine's Updates plugin is used if available. To hide it, disable `updates` in **Settings → PI WEB plugins** or set:
+Updates is enabled by default. It declares `machineSpecific: true` so the gateway Updates tab and action only appear for the local machine; while a remote machine is selected, that remote machine's Updates plugin is used if available. To hide it, disable `updates` in **Settings → Forgerie plugins** or set:
 
 ```json
 {
@@ -242,10 +236,10 @@ Updates is enabled by default. It declares `machineSpecific: true` so the gatewa
 ### Workspace Tasks
 
 **Plugin id:** `workspace-tasks`
-**Config file:** `.pi-web/tasks.json`
-**What it does:** adds a **Tasks** workspace tab for running configured shell commands in dedicated PI WEB terminals.
+**Config file:** `.forgerie/tasks.json`
+**What it does:** adds a **Tasks** workspace tab for running configured shell commands in dedicated Forgerie terminals.
 
-Workspace Tasks is enabled by default. To hide it, disable `workspace-tasks` in **Settings → PI WEB plugins** or set:
+Workspace Tasks is enabled by default. To hide it, disable `workspace-tasks` in **Settings → Forgerie plugins** or set:
 
 ```json
 {
@@ -255,7 +249,7 @@ Workspace Tasks is enabled by default. To hide it, disable `workspace-tasks` in 
 }
 ```
 
-Configure workspace tasks in `.pi-web/tasks.json`:
+Configure workspace tasks in `.forgerie/tasks.json`:
 
 ```json
 {
@@ -279,7 +273,7 @@ Configure workspace tasks in `.pi-web/tasks.json`:
 }
 ```
 
-Open a workspace, choose the **Tasks** tab, and click **Run** next to a task. Commands run in the workspace root because PI WEB creates the terminal for that workspace.
+Open a workspace, choose the **Tasks** tab, and click **Run** next to a task. Commands run in the workspace root because Forgerie creates the terminal for that workspace.
 
 Task fields:
 
@@ -299,13 +293,13 @@ Review task configs before running them, especially in shared projects. Workspac
 **Plugin id:** `relays`
 **What it does:** adds a read-only **Relays** workspace tab for browsing the workspace's relays, plus an **Open Workspace Relays** action for the selected workspace that opens the same tab.
 
-A relay is a directory of markdown notes under `.pi-web/relays/<name>/` in the workspace root — the convention used by the Relay method for chaining agent sessions. The tab lists each relay's documents with `status.md`, `charter.md`, and `log.md` first (in that order), followed by any other files alphabetically, and opens `status.md` by default. Markdown documents render as sanitized HTML; other files render as preformatted text, and binary files have no preview. Truncated documents show a notice, and **Refresh** re-scans the workspace and reloads the open document.
+A relay is a directory of markdown notes under `.forgerie/relays/<name>/` in the workspace root — the convention used by the Relay method for chaining agent sessions. The tab lists each relay's documents with `status.md`, `charter.md`, and `log.md` first (in that order), followed by any other files alphabetically, and opens `status.md` by default. Markdown documents render as sanitized HTML; other files render as preformatted text, and binary files have no preview. Truncated documents show a notice, and **Refresh** re-scans the workspace and reloads the open document.
 
 Documents in subfolders are listed too. Folders appear as chips in the document strip, and expanding one inserts its files inline right after it — accordion-style, so expanding a folder collapses its siblings on the same level. An expanded folder wraps its chip and documents in a group bubble, so nested entries stay visually contained. Collapsing the folder that holds the open document keeps the selection and highlights the folder instead. Relay trees deeper than five levels, larger than 200 documents, or with more than 50 folders are listed partially, with a notice.
 
-With several relays, a picker pre-selects the most recently modified one; a single relay opens directly. A workspace without `.pi-web/relays/` shows an empty state explaining the convention. The tab never creates, edits, or deletes relay files.
+With several relays, a picker pre-selects the most recently modified one; a single relay opens directly. A workspace without `.forgerie/relays/` shows an empty state explaining the convention. The tab never creates, edits, or deletes relay files.
 
-Relays is enabled by default. To hide it, disable `relays` in **Settings → PI WEB plugins** or set:
+Relays is enabled by default. To hide it, disable `relays` in **Settings → Forgerie plugins** or set:
 
 ```json
 {
@@ -317,9 +311,9 @@ Relays is enabled by default. To hide it, disable `relays` in **Settings → PI 
 
 ## Discovery and packaging
 
-PI WEB builds the gateway `/pi-web-plugins/manifest.json` from these sources:
+Forgerie builds the gateway `/pi-web-plugins/manifest.json` from these sources:
 
-1. Bundled plugins in the PI WEB package:
+1. Bundled plugins in the Forgerie package:
 
    ```text
    pi-web-plugins/<plugin-package>/
@@ -328,12 +322,12 @@ PI WEB builds the gateway `/pi-web-plugins/manifest.json` from these sources:
 2. User-local plugins:
 
    ```text
-   ~/.pi-web/plugins/<plugin-package>/
+   ~/.forgerie/plugins/<plugin-package>/
    ```
 
    Entries may be real directories or symlinks. This is the recommended development workflow.
 
-3. Installed Pi packages that expose PI WEB plugin metadata. Pi packages may be user or project scoped. Installing/removing/updating Pi packages is done from **Settings → Pi packages** (or Pi's package manager), not from the PI WEB plugin enable/disable list.
+3. Installed Pi packages that expose Forgerie plugin metadata. Pi packages may be user or project scoped. Installing/removing/updating Pi packages is done from **Settings → Pi packages** (or Pi's package manager), not from the Forgerie plugin enable/disable list.
 
 Remote machines expose their own manifests through the gateway at `/api/machines/<machine-id>/pi-web-plugins/manifest.json`. Those plugin modules are rewritten to gateway-scoped asset URLs and registered under machine-scoped runtime ids so duplicate plugin ids on different machines do not collide.
 
@@ -343,7 +337,7 @@ Plugin package directory names and plugin ids must be valid identifiers:
 ^[a-z][a-z0-9.-]*$
 ```
 
-A package can expose one or more PI WEB plugin modules. There is exactly one supported `package.json` metadata shape:
+A package can expose one or more Forgerie plugin modules. There is exactly one supported `package.json` metadata shape:
 
 ```json
 {
@@ -369,7 +363,7 @@ Rules:
 
 ### Manifest and assets
 
-The manifest contains each discovered plugin module. Current PI WEB releases emit `module` as a leading application-root reference:
+The manifest contains each discovered plugin module. Current Forgerie releases emit `module` as a leading application-root reference:
 
 ```json
 {
@@ -385,7 +379,7 @@ The manifest contains each discovered plugin module. Current PI WEB releases emi
 }
 ```
 
-The browser maps leading application-root references into the current application base, so the same manifest works at the origin root or under a reverse-proxy path prefix. Keeping this output format also lets gateways from existing PI WEB releases consume plugins from an upgraded remote machine. For compatibility, federated gateways additionally accept explicit manifest-relative references such as `./my-plugin/pi-web-plugin.js` and legacy plugin-root-relative references such as `nested/pi-web-plugin.js`; all accepted forms are rewritten to deployment-portable, gateway-relative references.
+The browser maps leading application-root references into the current application base, so the same manifest works at the origin root or under a reverse-proxy path prefix. Keeping this output format also lets gateways from existing Forgerie releases consume plugins from an upgraded remote machine. For compatibility, federated gateways additionally accept explicit manifest-relative references such as `./my-plugin/pi-web-plugin.js` and legacy plugin-root-relative references such as `nested/pi-web-plugin.js`; all accepted forms are rewritten to deployment-portable, gateway-relative references.
 
 `source` describes where the plugin came from (`bundled`, `local`, or the Pi package source). `scope` is `bundled`, `local`, `user`, or `project`. `machineSpecific` controls whether the gateway copy is valid for remote machines or only each selected machine's own copy can appear.
 
@@ -401,9 +395,9 @@ Prefer module-relative asset URLs so they also work for remote machine plugins. 
 const iconUrl = new URL("./assets/icon.svg", import.meta.url);
 ```
 
-The final installed plugin package must contain `assets/icon.svg` at that path relative to the final built module. PI WEB serves files that already exist in the package; it does not copy a source `public/` directory or apply Vite-style public-directory semantics. Configure the plugin build and package contents to emit or copy the asset into its final module-relative location.
+The final installed plugin package must contain `assets/icon.svg` at that path relative to the final built module. Forgerie serves files that already exist in the package; it does not copy a source `public/` directory or apply Vite-style public-directory semantics. Configure the plugin build and package contents to emit or copy the asset into its final module-relative location.
 
-PI WEB prevents asset path traversal outside the plugin root. JavaScript, JSON, CSS, HTML, and SVG files get appropriate content types; unknown file types are served as octet-stream.
+Forgerie prevents asset path traversal outside the plugin root. JavaScript, JSON, CSS, HTML, and SVG files get appropriate content types; unknown file types are served as octet-stream.
 
 ## Plugin module shape
 
@@ -446,7 +440,7 @@ export default {
 
 `activate()` is called once when the UI loads the plugin. Keep it cheap: define contributions there, but move expensive or async work into actions, custom elements, or explicit user interactions.
 
-The plugin id comes from `package.json`, not from the JavaScript module. Contribution ids are local to the plugin and PI WEB qualifies them internally as:
+The plugin id comes from `package.json`, not from the JavaScript module. Contribution ids are local to the plugin and Forgerie qualifies them internally as:
 
 ```text
 <plugin-id>:<local-contribution-id>
@@ -474,12 +468,12 @@ Actions appear in the action palette. They can inspect app state and call UI/run
 actions: [
   {
     id: "copy-diagnostics",
-    title: "Copy PI WEB Diagnostics",
+    title: "Copy Forgerie Diagnostics",
     description: "Copy version, installation, and status details for this machine",
     group: "Info",
     run: async (context) => {
       const version = context.state.piWebStatus?.components.web.runtimeVersion ?? "unknown";
-      await navigator.clipboard.writeText(`PI WEB ${version}`);
+      await navigator.clipboard.writeText(`Forgerie ${version}`);
     },
   },
 ]
@@ -500,7 +494,7 @@ interface PluginAction {
 }
 ```
 
-If an action is disabled and returns `disabledReason`, PI WEB can keep it visible in the action palette with that explanation instead of hiding it.
+If an action is disabled and returns `disabledReason`, Forgerie can keep it visible in the action palette with that explanation instead of hiding it.
 
 Stable runtime context fields:
 
@@ -532,12 +526,12 @@ interface PluginRuntimeContext {
 Notes:
 
 - `state` is a snapshot of current UI state when actions are built.
-- The stable state fields are `state.selectedMachine`, `state.selectedWorkspace`, `state.selectedSession`, and `state.piWebStatus`. `state.selectedMachine` identifies the currently selected machine. `state.piWebStatus` describes the currently selected machine's PI WEB runtime, or the gateway/local runtime when the local machine is selected.
-- Other `state` fields may exist at runtime, but they are private PI WEB internals that may graduate into stable helpers, change shape, or disappear.
+- The stable state fields are `state.selectedMachine`, `state.selectedWorkspace`, `state.selectedSession`, and `state.piWebStatus`. `state.selectedMachine` identifies the currently selected machine. `state.piWebStatus` describes the currently selected machine's Forgerie runtime, or the gateway/local runtime when the local machine is selected.
+- Other `state` fields may exist at runtime, but they are private Forgerie internals that may graduate into stable helpers, change shape, or disappear.
 - `enabled` is evaluated when the action palette asks for actions.
 - `selectWorkspaceTool()` expects a qualified panel id such as `my-plugin:workspace.info`.
 - `openTerminal()` switches to the built-in terminal panel. Pass `{ terminalId }` to deep-link to a specific terminal.
-- `checkForPiWebUpdates()` forces a fresh update check on the selected machine and refreshes `state.piWebStatus`. It is optional so plugins remain compatible with older PI WEB hosts.
+- `checkForPiWebUpdates()` forces a fresh update check on the selected machine and refreshes `state.piWebStatus`. It is optional so plugins remain compatible with older Forgerie hosts.
 - Only fields documented here and declared in `plugin-api.d.ts` are stable public plugin API. Anything else is experimental: it may become public API later, change shape, or disappear.
 
 ### Prompt editor API
@@ -565,10 +559,10 @@ Use `focusPrompt()` on `PluginRuntimeContext` to move focus to the prompt editor
 
 #### Keyboard shortcuts
 
-- App-level keyboard shortcuts must be attached to actions. PI WEB does not support standalone plugin keyboard commands; contribute an action first, then add a `shortcut` if it needs a keybinding.
+- App-level keyboard shortcuts must be attached to actions. Forgerie does not support standalone plugin keyboard commands; contribute an action first, then add a `shortcut` if it needs a keybinding.
 - `shortcut` is the action's default keybinding. It is displayed in the action palette and handled by the global shortcut dispatcher when the action is enabled.
 - Use modified shortcuts such as `mod+shift+p`; plain letter shortcuts are intentionally ignored so normal typing is never captured.
-- Future PI WEB versions may allow users to override or disable action shortcuts by action id, so plugins should treat `shortcut` as a default rather than a guaranteed final binding.
+- Future Forgerie versions may allow users to override or disable action shortcuts by action id, so plugins should treat `shortcut` as a default rather than a guaranteed final binding.
 - Choose shortcuts carefully to avoid conflicts. There is no user-facing shortcut override or conflict resolver yet.
 - Local text input, terminal input, list navigation, and dialog keys such as Enter, Escape, and arrow keys do not need to be plugin actions unless they are app-level commands.
 
@@ -641,11 +635,11 @@ interface WorkspacePanelContext {
 }
 ```
 
-`icon` is optional and is used in the compact mobile tab bar. Prefer an SVG rendered with the `svg` helper from `PluginActivationContext`; use `currentColor` so PI WEB themes can style it. If `icon` is omitted, mobile tabs fall back to initials from the panel title, or to the full title when initials collide.
+`icon` is optional and is used in the compact mobile tab bar. Prefer an SVG rendered with the `svg` helper from `PluginActivationContext`; use `currentColor` so Forgerie themes can style it. If `icon` is omitted, mobile tabs fall back to initials from the panel title, or to the full title when initials collide.
 
-`machine`, `workspace`, `files`, `prompt`, `terminal`, and `host` are documented as stable for panel callbacks. The `files` helper supports `readFile`, `listFiles`, `writeFile`, `deleteFile`, and `moveFile` — see [Reading workspace files](#reading-workspace-files), [Listing workspace files](#listing-workspace-files), and [Writing workspace files](#writing-workspace-files). The `prompt` helper supports panel interactions that insert workspace context into the current prompt — see [Prompt editor API](#prompt-editor-api). Use `terminal.open()` to switch to the built-in terminal panel; pass `{ terminalId }` to deep-link to a specific terminal. Call `host.requestRender()` when async plugin-owned state changes should make PI WEB re-evaluate panel callbacks such as `badge`, `visible`, or `render`.
+`machine`, `workspace`, `files`, `prompt`, `terminal`, and `host` are documented as stable for panel callbacks. The `files` helper supports `readFile`, `listFiles`, `writeFile`, `deleteFile`, and `moveFile` — see [Reading workspace files](#reading-workspace-files), [Listing workspace files](#listing-workspace-files), and [Writing workspace files](#writing-workspace-files). The `prompt` helper supports panel interactions that insert workspace context into the current prompt — see [Prompt editor API](#prompt-editor-api). Use `terminal.open()` to switch to the built-in terminal panel; pass `{ terminalId }` to deep-link to a specific terminal. Call `host.requestRender()` when async plugin-owned state changes should make Forgerie re-evaluate panel callbacks such as `badge`, `visible`, or `render`.
 
-For compatibility, PI WEB still provides the old `context.openTerminal()` workspace-panel helper at runtime. It is deprecated, intentionally omitted from the public TypeScript declarations, and planned for removal in v2. Existing JavaScript plugins keep working, while typed plugins should migrate to `context.terminal.open()`.
+For compatibility, Forgerie still provides the old `context.openTerminal()` workspace-panel helper at runtime. It is deprecated, intentionally omitted from the public TypeScript declarations, and planned for removal in v2. Existing JavaScript plugins keep working, while typed plugins should migrate to `context.terminal.open()`.
 
 Useful workspace and machine shapes:
 
@@ -674,7 +668,7 @@ Use existing classes such as `toolbar`, `viewer`, `empty`, and `muted` for panel
 
 ### Workspace labels
 
-Workspace labels add compact inline metadata wherever PI WEB displays a workspace label: workspace list, workspace panel header, and status bar.
+Workspace labels add compact inline metadata wherever Forgerie displays a workspace label: workspace list, workspace panel header, and status bar.
 
 Use them for short facts like project environment, local URL, branch status, container name, or health state.
 
@@ -722,7 +716,7 @@ interface WorkspaceLabelContext {
 }
 ```
 
-`machine`, `workspace`, `files`, and `host` are documented as stable for label callbacks. The `files` helper supports `readFile`, `listFiles`, `writeFile`, `deleteFile`, and `moveFile` — see [Reading workspace files](#reading-workspace-files), [Listing workspace files](#listing-workspace-files), and [Writing workspace files](#writing-workspace-files). Include `machine.id` in any label caches that depend on workspace data. Call `host.requestRender()` when async plugin-owned state changes should make PI WEB re-evaluate label `visible` or `items` callbacks.
+`machine`, `workspace`, `files`, and `host` are documented as stable for label callbacks. The `files` helper supports `readFile`, `listFiles`, `writeFile`, `deleteFile`, and `moveFile` — see [Reading workspace files](#reading-workspace-files), [Listing workspace files](#listing-workspace-files), and [Writing workspace files](#writing-workspace-files). Include `machine.id` in any label caches that depend on workspace data. Call `host.requestRender()` when async plugin-owned state changes should make Forgerie re-evaluate label `visible` or `items` callbacks.
 
 Items are sorted by `order` and then id. Return an empty array to render nothing. Keep callbacks synchronous and lightweight; start async work from the callback, return cached items, then call `host.requestRender()` when the cache changes.
 
@@ -744,7 +738,7 @@ Items are sorted by `order` and then id. Return an empty array to render nothing
 }
 ```
 
-PI WEB renders the anchor and adds safe defaults such as `rel="noopener noreferrer"` for `_blank` links. `javascript:` and `data:` links are rendered as plain text instead of links.
+Forgerie renders the anchor and adds safe defaults such as `rel="noopener noreferrer"` for `_blank` links. `javascript:` and `data:` links are rendered as plain text instead of links.
 
 #### Render items
 
@@ -784,7 +778,7 @@ export default {
 
 ## Reading workspace files
 
-Workspace panels and workspace labels can read files through the documented `files` helper. PI WEB binds this helper to the callback's machine and workspace, so it works the same for local and federated machines.
+Workspace panels and workspace labels can read files through the documented `files` helper. Forgerie binds this helper to the callback's machine and workspace, so it works the same for local and federated machines.
 
 ```js
 workspacePanels: [
@@ -863,7 +857,7 @@ The file response includes fields such as `path`, `content`, `truncated`, and `b
 
 ## Listing workspace files
 
-`files.listFiles(path)` lists the entries of a workspace directory. Pass `""` for the workspace root. Like `readFile`, PI WEB binds the call to the callback's machine and workspace, so it works the same for local and federated machines.
+`files.listFiles(path)` lists the entries of a workspace directory. Pass `""` for the workspace root. Like `readFile`, Forgerie binds the call to the callback's machine and workspace, so it works the same for local and federated machines.
 
 ```js
 const listing = await context.files.listFiles("src");
@@ -889,7 +883,7 @@ async function listSubdirectoryNames(context, path) {
 
 ## Writing, deleting, and moving workspace files
 
-Workspace panels and workspace labels can write, delete, and move files through the documented `files` helper. Like `readFile`, PI WEB binds these helpers to the callback's machine and workspace, so they work the same for local and federated machines.
+Workspace panels and workspace labels can write, delete, and move files through the documented `files` helper. Like `readFile`, Forgerie binds these helpers to the callback's machine and workspace, so they work the same for local and federated machines.
 
 ### Writing files
 
@@ -994,15 +988,15 @@ render: ({ terminal }) => html`
 
 Review command strings carefully. They are trusted shell commands executed in the workspace terminal.
 
-## Private and experimental PI WEB APIs
+## Private and experimental Forgerie APIs
 
-PI WEB's `/api/...` HTTP and WebSocket routes and runtime-only fields are private implementation details. They exist because plugins are trusted browser code, and because some capabilities may be evaluated there before they are designed as stable helpers.
+Forgerie's `/api/...` HTTP and WebSocket routes and runtime-only fields are private implementation details. They exist because plugins are trusted browser code, and because some capabilities may be evaluated there before they are designed as stable helpers.
 
-That is allowed, but outside the v1 compatibility promise: URLs, response shapes, runtime fields, and machine-federation routing may graduate into stable APIs, change shape, or disappear. The stable public plugin API is only the documented helpers and declarations in `plugin-api.d.ts`. Prefer those whenever they exist; if you rely on private surfaces, keep the dependency local to the plugin and expect to revisit it after PI WEB upgrades.
+That is allowed, but outside the v1 compatibility promise: URLs, response shapes, runtime fields, and machine-federation routing may graduate into stable APIs, change shape, or disappear. The stable public plugin API is only the documented helpers and declarations in `plugin-api.d.ts`. Prefer those whenever they exist; if you rely on private surfaces, keep the dependency local to the plugin and expect to revisit it after Forgerie upgrades.
 
 ## Async data and caching
 
-PI WEB does not provide a plugin cache/invalidation framework. Keep host callbacks cheap:
+Forgerie does not provide a plugin cache/invalidation framework. Keep host callbacks cheap:
 
 - simple contributions should be synchronous and cheap;
 - expensive or async work should live inside the plugin;
@@ -1012,7 +1006,7 @@ PI WEB does not provide a plugin cache/invalidation framework. Keep host callbac
 
 ## Agent implementation checklist
 
-If you are an AI agent building or editing a PI WEB plugin, follow this checklist:
+If you are an AI agent building or editing a Forgerie plugin, follow this checklist:
 
 1. Create or update a plugin folder with `package.json` and a JavaScript module such as `pi-web-plugin.js`.
 2. Use the single supported package metadata shape: `piWeb.plugins` array with `{ id, module, machineSpecific? }` entries.
@@ -1026,7 +1020,7 @@ If you are an AI agent building or editing a PI WEB plugin, follow this checklis
 10. Add workspace labels for compact inline metadata.
 11. Return arrays from workspace label `items()`; return an empty array to render nothing.
 12. Use documented context helpers first: `files`, `terminal`, `host.requestRender`, `workspace`, `machine`, `state.selectedMachine`, `state.selectedWorkspace`, `state.selectedSession`, `state.piWebStatus`, and `prompt`.
-13. Do not fetch PI WEB `/api/...` endpoints directly unless you intentionally accept private API churn; prefer documented helpers.
+13. Do not fetch Forgerie `/api/...` endpoints directly unless you intentionally accept private API churn; prefer documented helpers.
 14. Treat plugins as trusted code and avoid reading or displaying secrets unless intentional.
 15. After local edits, tell the user to hard reload the browser and check the console for plugin errors.
 
@@ -1054,5 +1048,5 @@ Common issues:
 - duplicate plugin ids; later duplicates are skipped rather than renamed;
 - entry module path points outside the plugin root or file does not exist;
 - browser cache not refreshed after editing;
-- plugin directory is not under `~/.pi-web/plugins` or symlinked there;
+- plugin directory is not under `~/.forgerie/plugins` or symlinked there;
 - plugin throws during module import, `activate()`, `visible()`, `enabled()`, `items()`, or `render()`; check the browser console.

@@ -44,8 +44,8 @@ const SpawnSessionParams = Type.Object({
 });
 
 /**
- * Custom tool that lets the LLM start a new, independent pi-web session and
- * deliver an initial prompt to it. The spawned session is a normal pi-web session
+ * Custom tool that lets the LLM start a new, independent Forgerie session and
+ * deliver an initial prompt to it. The spawned session is a normal Forgerie session
  * a human can open and interact with. The tool is constructed per-session, so it
  * carries the spawning session's cwd for project-scope validation.
  */

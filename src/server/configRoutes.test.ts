@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 describe("config routes", () => {
-  it("returns the PI WEB config contract", async () => {
+  it("returns the Forgerie config contract", async () => {
     const response = await app.inject({ method: "GET", url: "/api/config" });
 
     expect(response.statusCode).toBe(200);
@@ -224,7 +224,7 @@ describe("config routes", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json<{ error: string }>().error).toContain("PI WEB selected-machine config key is not allowed: host");
+    expect(response.json<{ error: string }>().error).toContain("Forgerie selected-machine config key is not allowed: host");
     expect(savedConfig).toEqual(fullConfig());
     expect(service.write).not.toHaveBeenCalled();
   });
@@ -237,7 +237,7 @@ describe("config routes", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json<{ error: string }>().error).toContain("PI WEB selected-machine config spawnSessions must be a boolean");
+    expect(response.json<{ error: string }>().error).toContain("Forgerie selected-machine config spawnSessions must be a boolean");
     expect(service.write).not.toHaveBeenCalled();
   });
 });

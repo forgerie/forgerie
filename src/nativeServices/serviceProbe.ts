@@ -62,7 +62,7 @@ export class SystemdNativeServiceProbe implements NativeServiceAuthoritativeProb
     }
 
     const uniqueId = safeUniqueId(this.dependencies.createUniqueId());
-    const unitName = `pi-web-authoritative-probe-${uniqueId}.service`;
+    const unitName = `forgerie-authoritative-probe-${uniqueId}.service`;
     const outputPrefix = `PI_WEB_PROBE_${uniqueId}`;
     const command = prerequisiteProbeCommand(request.shell.name, request.prerequisites, outputPrefix);
     const args = systemdRunArguments(request, unitName, command);
@@ -118,7 +118,7 @@ export class LaunchdNativeServiceProbe implements NativeServiceAuthoritativeProb
     }
 
     const uniqueId = safeUniqueId(this.dependencies.createUniqueId());
-    const label = `com.pi-web.authoritative-probe.${String(this.dependencies.uid)}.${uniqueId}`;
+    const label = `com.forgerie.authoritative-probe.${String(this.dependencies.uid)}.${uniqueId}`;
     const domain = `gui/${String(this.dependencies.uid)}`;
     const target = `${domain}/${label}`;
     const outputPrefix = `PI_WEB_PROBE_${uniqueId}`;
@@ -128,7 +128,7 @@ export class LaunchdNativeServiceProbe implements NativeServiceAuthoritativeProb
 
     try {
       directory = await this.dependencies.fileSystem.createTemporaryDirectory(
-        posixPath.join(tmpdir(), "pi-web-launchd-probe-"),
+        posixPath.join(tmpdir(), "forgerie-launchd-probe-"),
       );
       const plistPath = posixPath.join(directory, "probe.plist");
       const stdoutPath = posixPath.join(directory, "stdout.log");

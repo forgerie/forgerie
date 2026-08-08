@@ -3,29 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PI WEB FAQ — Pi web UI troubleshooting</title>
+    <title>Forgerie FAQ — Pi web UI troubleshooting</title>
     <meta
       name="description"
-      content="Troubleshoot PI WEB, the web UI for Pi Coding Agent, including install, PATH, services, remote access, and runtime issues."
+      content="Troubleshoot Forgerie, the web UI for Pi Coding Agent, including install, PATH, services, remote access, and runtime issues."
     />
-    <link rel="canonical" href="https://pi-web.dev/faq" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="PI WEB" />
-    <meta property="og:title" content="PI WEB FAQ — Pi web UI troubleshooting" />
+    <meta property="og:site_name" content="Forgerie" />
+    <meta property="og:title" content="Forgerie FAQ — Pi web UI troubleshooting" />
     <meta
       property="og:description"
-      content="Fix common PI WEB install, service, PATH, remote access, and session issues."
+      content="Fix common Forgerie install, service, PATH, remote access, and session issues."
     />
-    <meta property="og:url" content="https://pi-web.dev/faq" />
-    <meta property="og:image" content="https://pi-web.dev/assets/pi-web-banner.png" />
-    <meta property="og:image:alt" content="PI WEB browser UI for persistent Pi Coding Agent sessions" />
+    <meta property="og:image:alt" content="Forgerie browser UI for persistent Pi Coding Agent sessions" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PI WEB FAQ — Pi web UI troubleshooting" />
+    <meta name="twitter:title" content="Forgerie FAQ — Pi web UI troubleshooting" />
     <meta
       name="twitter:description"
-      content="Fix common PI WEB install, service, PATH, remote access, and session issues."
+      content="Fix common Forgerie install, service, PATH, remote access, and session issues."
     />
-    <meta name="twitter:image" content="https://pi-web.dev/assets/pi-web-banner.png" />
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
     <script>
       (() => {
@@ -44,7 +40,7 @@
   <body>
     <header class="site-header">
       <nav class="container nav" aria-label="Main navigation">
-        <a class="brand" href="./" aria-label="PI WEB home">PI WEB</a>
+        <a class="brand" href="./" aria-label="Forgerie home">Forgerie</a>
         <div class="nav-links">
           <div class="nav-pages">
             <a href="remote-first">Remote-first</a>
@@ -55,7 +51,7 @@
             <a href="faq" aria-current="page">FAQ</a>
           </div>
           <div class="nav-actions">
-            <a class="github-link" href="https://github.com/jmfederico/pi-web" aria-label="PI WEB on GitHub">
+            <a class="github-link" href="https://github.com/jmfederico/pi-web" aria-label="Upstream PI WEB on GitHub">
               <svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true">
                 <path
                   fill="currentColor"
@@ -79,7 +75,7 @@
           <p class="eyebrow"><span class="pulse"></span> FAQ & troubleshooting</p>
           <h1>Fix the things that usually go wrong first.</h1>
           <p>
-            Most PI WEB install issues are environment issues: native service manager availability, PATH setup, Node
+            Most Forgerie install issues are environment issues: native service manager availability, PATH setup, Node
             version managers, or remote access expectations.
           </p>
         </div>
@@ -90,7 +86,7 @@
           <aside class="toc" aria-label="FAQ contents">
             <strong>Questions</strong>
             <a href="#is-this-linux-only">What platforms are supported?</a>
-            <a href="#is-pi-web-a-web-ui">Is PI WEB a Pi web UI?</a>
+            <a href="#is-pi-web-a-web-ui">Is Forgerie a Pi web UI?</a>
             <a href="#tools-are-not-found">Tools are failing / node not found</a>
             <a href="#doctor-fails">What does doctor check?</a>
             <a href="#nvm-fnm-asdf">nvm, fnm, or asdf issues</a>
@@ -111,21 +107,21 @@
             <article id="is-this-linux-only" class="faq-item">
               <h2>What platforms are supported?</h2>
               <p>
-                PI WEB can run anywhere its runtime dependencies work. The automatic <code>pi-web install</code> command uses
+                Forgerie can run anywhere its runtime dependencies work. The automatic <code>forgerie install --dev</code> command uses
                 a supported per-user service manager when one is available.
               </p>
               <ul>
-                <li><strong>User-service install:</strong> use <code>npm install -g @jmfederico/pi-web --allow-scripts=node-pty</code> and <code>pi-web install</code>.</li>
+                <li><strong>User-service install:</strong> use <code>npm install &amp;&amp; npm run build &amp;&amp; npm link</code> and <code>forgerie install --dev</code>.</li>
                 <li><strong>WSL:</strong> if your distro has systemd enabled, the installer may work; otherwise use the manual run path.</li>
                 <li><strong>Native Windows:</strong> outside WSL is not the recommended path today.</li>
               </ul>
             </article>
 
             <article id="is-pi-web-a-web-ui" class="faq-item">
-              <h2>Is PI WEB a Pi web UI?</h2>
+              <h2>Is Forgerie a Pi web UI?</h2>
               <p>
-                Yes. PI WEB is a web UI for Pi Coding Agent that runs and supervises persistent sessions from a browser.
-                Unlike simple session viewers, PI WEB is built around real server-side workspaces, long-running session
+                Yes. Forgerie is a web UI for Pi Coding Agent that runs and supervises persistent sessions from a browser.
+                Unlike simple session viewers, Forgerie is built around real server-side workspaces, long-running session
                 daemons, git worktrees, remote machines, terminals, files, and multi-device supervision.
               </p>
             </article>
@@ -133,8 +129,8 @@
             <article id="tools-are-not-found" class="faq-item">
               <h2>Tools are failing, node is not found, or Pi cannot find commands</h2>
               <p>
-                The shell environment needs to be set up so login shells have the required PATH entries for PI WEB, Pi,
-                and any tools your agents need. PI WEB services run commands through a non-interactive login shell owned
+                The shell environment needs to be set up so login shells have the required PATH entries for Forgerie, Pi,
+                and any tools your agents need. Forgerie services run commands through a non-interactive login shell owned
                 by systemd or launchd, so an interactive terminal—or even a caller-invoked login shell—can work while the
                 native service fails.
               </p>
@@ -143,7 +139,7 @@
                   <strong>Run diagnostics</strong>
                   <button class="copy-button" data-copy="#doctor-command">Copy</button>
                 </div>
-                <pre id="doctor-command"><code><span class="prompt">$</span> pi-web doctor</code></pre>
+                <pre id="doctor-command"><code><span class="prompt">$</span> forgerie doctor</code></pre>
               </div>
               <ul>
                 <li><strong>bash:</strong> put PATH setup in <code>~/.bash_profile</code> or <code>~/.profile</code>. If <code>~/.bash_profile</code> exists, source <code>~/.profile</code> from it if needed.</li>
@@ -158,7 +154,7 @@
             </article>
 
             <article id="doctor-fails" class="faq-item">
-              <h2>What does <code>pi-web doctor</code> check?</h2>
+              <h2>What does <code>forgerie doctor</code> check?</h2>
               <p>
                 It keeps two kinds of checks separate. General login-shell readiness covers Node 22.19.0 or newer, npm, Pi, and optional
                 ripgrep. Native-service diagnostics validate only the exact prerequisites of the selected service plan in
@@ -170,7 +166,7 @@
                 Missing plan requirements fail doctor and include login-file guidance. Manager, timeout, malformed-output,
                 and cleanup failures are reported as probe infrastructure problems rather than being mislabeled as PATH
                 drift. On unsupported/manual-only platforms, native-service drift checks are skipped. Doctor also checks
-                that the <code>node-pty</code> native module can load, prints installed and running PI WEB versions, and reports
+                that the <code>node-pty</code> native module can load, prints installed and running Forgerie versions, and reports
                 systemd lingering when relevant.
               </p>
             </article>
@@ -186,27 +182,27 @@
                 <li>Prefer version-manager shims when available; for <code>mise</code>, use shims or enable its shim setup rather than relying only on shell activation.</li>
                 <li>Move any required version-manager initialization to your login shell file.</li>
                 <li>Make sure <code>node --version</code> is at least <code>v22.19.0</code> from <code>bash -lc</code>, <code>zsh -lc</code>, or your detected shell.</li>
-                <li>Run <code>pi-web doctor</code> again after changing shell files.</li>
+                <li>Run <code>forgerie doctor</code> again after changing shell files.</li>
               </ul>
             </article>
 
             <article id="node-pty-native-module" class="faq-item">
-              <h2><code>pi-web-sessiond</code> cannot load <code>pty.node</code></h2>
+              <h2><code>forgerie-sessiond</code> cannot load <code>pty.node</code></h2>
               <p>
-                npm 12 blocks dependency installation scripts unless they are explicitly approved. If PI WEB was installed
+                npm 12 blocks dependency installation scripts unless they are explicitly approved. If Forgerie was installed
                 without approving <code>node-pty</code>, its required native module can be missing even though npm reported a
                 successful installation.
               </p>
-              <p>Reinstall PI WEB with approval limited to <code>node-pty</code>:</p>
+              <p>Reinstall Forgerie with approval limited to <code>node-pty</code>:</p>
               <div class="code-card">
                 <div class="copy-row">
                   <strong>Allow the node-pty installation scripts</strong>
                   <button class="copy-button" data-copy="#node-pty-install">Copy</button>
                 </div>
-                <pre id="node-pty-install"><code><span class="prompt">$</span> npm install -g @jmfederico/pi-web --allow-scripts=node-pty</code></pre>
+                <pre id="node-pty-install"><code><span class="prompt">$</span> npm rebuild node-pty</code></pre>
               </div>
               <p>
-                Then run <code>pi-web install</code> again, or restart <code>pi-web-sessiond</code> if you run PI WEB manually.
+                Then run <code>forgerie install --dev</code> again, or restart <code>forgerie-sessiond</code> if you run Forgerie manually.
                 The flag does not enable installation scripts for other dependencies.
               </p>
             </article>
@@ -222,26 +218,26 @@
                   <strong>Manual run</strong>
                   <button class="copy-button" data-copy="#manual-faq">Copy</button>
                 </div>
-                <pre id="manual-faq"><code><span class="prompt">$</span> pi-web-sessiond
+                <pre id="manual-faq"><code><span class="prompt">$</span> forgerie-sessiond
 <span class="comment"># in another terminal</span>
-<span class="prompt">$</span> PI_WEB_PORT=8504 pi-web-server</code></pre>
+<span class="prompt">$</span> PI_WEB_PORT=8504 forgerie-server</code></pre>
               </div>
             </article>
 
             <article id="cannot-open" class="faq-item">
               <h2>I cannot open the web UI</h2>
               <ul>
-                <li>Check <code>pi-web status</code>.</li>
-                <li>Check logs with <code>pi-web logs</code>.</li>
+                <li>Check <code>forgerie status</code>.</li>
+                <li>Check logs with <code>forgerie logs</code>.</li>
                 <li>Make sure port <code>8504</code> is not already in use.</li>
                 <li>On a remote server, use an SSH tunnel: <code>ssh -L 8504:127.0.0.1:8504 user@server</code>.</li>
               </ul>
             </article>
 
             <article id="public-internet" class="faq-item">
-              <h2>Can I expose PI WEB to the public internet?</h2>
+              <h2>Can I expose Forgerie to the public internet?</h2>
               <p>
-                Do not expose it directly to the public internet. PI WEB assumes trusted users and trusted server paths.
+                Do not expose it directly to the public internet. Forgerie assumes trusted users and trusted server paths.
                 For remote access, bind only to an interface that is already private and controlled: for example the
                 server's VPN IP, a private LAN IP, or localhost behind an SSH tunnel.
               </p>
@@ -255,16 +251,16 @@
             </article>
 
             <article id="remote-machines" class="faq-item">
-              <h2>How do I connect another PI WEB machine?</h2>
+              <h2>How do I connect another Forgerie machine?</h2>
               <p>
-                Install and run PI WEB on the target machine, make its PI WEB URL reachable from the gateway through a
+                Install and run Forgerie on the target machine, make its Forgerie URL reachable from the gateway through a
                 trusted path, then open the gateway and choose <strong>Actions → Add Machine</strong>. The browser keeps
                 talking to the gateway while projects, sessions, files, and terminals run on the selected remote runtime.
               </p>
               <ul>
                 <li>Use NetBird, Tailscale, WireGuard, private LAN, SSH tunnel, or an authenticated reverse proxy.</li>
                 <li>Remote Pi auth, OAuth state, sessions, terminals, repositories, and plugins stay on the target machine.</li>
-                <li>API-key provider configuration can be proxied, but OAuth login should be completed by opening the remote PI WEB directly.</li>
+                <li>API-key provider configuration can be proxied, but OAuth login should be completed by opening the remote Forgerie directly.</li>
                 <li>Remote plugins are trusted browser code and only appear while that machine is selected.</li>
                 <li>If the remote reports offline, check that the gateway server can reach the remote URL and try <strong>Actions → Refresh Selected Machine</strong>.</li>
               </ul>
@@ -272,9 +268,9 @@
             </article>
 
             <article id="laptop-or-server" class="faq-item">
-              <h2>Should I run PI WEB on my laptop or a server?</h2>
+              <h2>Should I run Forgerie on my laptop or a server?</h2>
               <p>
-                You can run it locally, but PI WEB is most useful on a machine that stays on. A remote dev box, home
+                You can run it locally, but Forgerie is most useful on a machine that stays on. A remote dev box, home
                 server, cloud VM, or workstation gives agents a stable place to keep working while your laptop becomes
                 just a client.
               </p>
@@ -286,9 +282,9 @@
             </article>
 
             <article id="plugins" class="faq-item">
-              <h2>Can I use local plugins with production PI WEB?</h2>
+              <h2>Can I use local plugins with production Forgerie?</h2>
               <p>
-                Yes. Put trusted browser-side plugins in <code>~/.pi-web/plugins/&lt;plugin-id&gt;/</code>, or symlink a
+                Yes. Put trusted browser-side plugins in <code>~/.forgerie/plugins/&lt;plugin-id&gt;/</code>, or symlink a
                 development folder there. Reload the browser tab after edits. If <code>PI_WEB_DATA_DIR</code> is set, use
                 <code>$PI_WEB_DATA_DIR/plugins</code> instead.
               </p>
@@ -296,15 +292,15 @@
             </article>
 
             <article id="worktree-list-out-of-date" class="faq-item">
-              <h2>A worktree I created or deleted outside PI WEB is missing or still listed</h2>
+              <h2>A worktree I created or deleted outside Forgerie is missing or still listed</h2>
               <p>
-                PI WEB does not register worktrees. It lists the git worktrees of the selected project on demand, so
+                Forgerie does not register worktrees. It lists the git worktrees of the selected project on demand, so
                 worktrees you create or delete with <code>git worktree</code>, a terminal, or another tool are picked up
                 without any adopt or import step. This works the same way on remote machines.
               </p>
               <p>
-                The workspace list is re-read when the PI WEB tab regains focus or becomes visible again, not
-                continuously. If a worktree appeared while you were already looking at PI WEB, switch to another window
+                The workspace list is re-read when the Forgerie tab regains focus or becomes visible again, not
+                continuously. If a worktree appeared while you were already looking at Forgerie, switch to another window
                 or tab and back, and the list updates. Your selected workspace, session, and scroll position are kept.
               </p>
               <p>
@@ -325,8 +321,8 @@
                   <strong>Session daemon logs</strong>
                   <button class="copy-button" data-copy="#session-logs">Copy</button>
                 </div>
-                <pre id="session-logs"><code><span class="prompt">$</span> pi-web status
-<span class="prompt">$</span> pi-web logs</code></pre>
+                <pre id="session-logs"><code><span class="prompt">$</span> forgerie status
+<span class="prompt">$</span> forgerie logs</code></pre>
               </div>
             </article>
 
@@ -359,7 +355,7 @@
                   <strong>Restart the session daemon</strong>
                   <button class="copy-button" data-copy="#http-idle-timeout-restart">Copy</button>
                 </div>
-                <pre id="http-idle-timeout-restart"><code><span class="prompt">$</span> systemctl --user restart pi-web-sessiond</code></pre>
+                <pre id="http-idle-timeout-restart"><code><span class="prompt">$</span> systemctl --user restart forgerie-sessiond</code></pre>
               </div>
             </article>
 
@@ -371,7 +367,7 @@
                   <strong>Logs</strong>
                   <button class="copy-button" data-copy="#logs-command">Copy</button>
                 </div>
-                <pre id="logs-command"><code><span class="prompt">$</span> pi-web logs</code></pre>
+                <pre id="logs-command"><code><span class="prompt">$</span> forgerie logs</code></pre>
               </div>
             </article>
           </div>
@@ -381,7 +377,7 @@
 
     <footer class="site-footer">
       <div class="container footer-inner">
-        <span>PI WEB FAQ</span>
+        <span>Forgerie FAQ</span>
         <div class="footer-links">
           <a href="./">Home</a>
           <a href="remote-first">Remote-first</a>
@@ -389,10 +385,9 @@
           <a href="install">Install</a>
           <a href="config">Config</a>
           <a href="plugins">Plugins</a>
-          <a href="https://github.com/jmfederico/pi-web/issues">Issues</a>
+          <a href="https://github.com/jmfederico/pi-web/issues">Upstream issues</a>
           <span class="version-switcher" role="group" aria-label="Documentation version">
-            <a class="version-switcher-option" data-version-option="stable" href="https://pi-web.dev/faq" aria-current="true">Stable</a>
-            <a class="version-switcher-option" data-version-option="dev" href="https://pi-web.dev/dev/faq">Dev</a>
+            <a class="version-switcher-option" data-version-option="stable" href="faq.html" aria-current="true">Stable</a>
           </span>
         </div>
       </div>

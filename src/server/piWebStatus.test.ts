@@ -28,7 +28,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("PI WEB status", () => {
+describe("Forgerie status", () => {
   it("compares semver-shaped CalVer versions", () => {
     expect(comparePackageVersions("1.202605.9", "1.202605.8")).toBeGreaterThan(0);
     expect(comparePackageVersions("1.202605.8", "1.202605.8")).toBe(0);
@@ -40,7 +40,7 @@ describe("PI WEB status", () => {
 
     const status = await getPiWebVersionStatus(daemon);
 
-    expect(status.packageName).toBe("@jmfederico/pi-web");
+    expect(status.packageName).toBe("forgerie");
     expect(status.components.web.component).toBe("web");
     expect(status.components.sessiond.runtimeVersion).toBe("1.202605.7");
     expect(status).not.toHaveProperty("release");
@@ -123,23 +123,15 @@ describe("PI WEB status", () => {
     expect(runtime.components.web.activeAgentProfile).toBeUndefined();
   });
 
-  it("bypasses cached npm release data for a forced check", async () => {
+  it("skips public release lookups while Forgerie remains local-only", async () => {
     Reflect.deleteProperty(process.env, "PI_WEB_SKIP_VERSION_CHECK");
-    process.env["PI_WEB_DOCKER_RUNTIME"] = "1";
-    process.env["PI_WEB_DOCKER_MODE"] = "runtime";
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(npmVersionResponse("1.202607.1"))
-      .mockResolvedValueOnce(npmVersionResponse("1.202607.2"));
+    const fetchMock = vi.spyOn(globalThis, "fetch");
     const daemon = daemonWithRuntime(runningSessiondRuntime("1.202607.0"));
 
-    const first = await getPiWebStatus(daemon, { forceReleaseCheck: true });
-    const cached = await getPiWebStatus(daemon);
-    const forced = await getPiWebStatus(daemon, { forceReleaseCheck: true });
+    const status = await getPiWebStatus(daemon, { forceReleaseCheck: true });
 
-    expect(first.release.latestVersion).toBe("1.202607.1");
-    expect(cached.release.latestVersion).toBe("1.202607.1");
-    expect(forced.release.latestVersion).toBe("1.202607.2");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(status.release).toMatchObject({ packageName: "forgerie", updateAvailable: false, skipped: true });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("marks the session daemon unavailable without falling back to the legacy health payload", async () => {
@@ -220,9 +212,9 @@ describe("PI WEB status", () => {
     const hasCommand = vi.fn(() => Promise.resolve(true));
 
     const updateCommand = await updateCommandFor(
-      { kind: "pi-package", source: "npm:@jmfederico/pi-web", scope: "user", path: "/tmp/pi-web" },
-      "pi-web restart",
-      { activeAgentProfile: undefined, hasCommand },
+      { kind: "pi-package", source: "npm:forgerie", scope: "user", path: "/tmp/forgerie" },
+      "forgerie restart",
+      { activeAgentProfile: undefined, hasCommand, publicDistribution: true },
     );
 
     expect(updateCommand).toBeUndefined();
@@ -233,32 +225,33 @@ describe("PI WEB status", () => {
     const command = "/tmp/agent's/pi";
     const dir = "/tmp/profile's/state";
     const updateCommand = await updateCommandFor(
-      { kind: "pi-package", source: "npm:@jmfederico/pi-web", scope: "user", path: "/tmp/pi-web" },
-      "pi-web restart",
+      { kind: "pi-package", source: "npm:forgerie", scope: "user", path: "/tmp/forgerie" },
+      "forgerie restart",
       {
         activeAgentProfile: activeProfile("a", command, dir),
         hasCommand: (candidate) => Promise.resolve(candidate === command),
+        publicDistribution: true,
       },
     );
 
-    expect(updateCommand).toBe("PI_CODING_AGENT_DIR='/tmp/profile'\\''s/state' '/tmp/agent'\\''s/pi' update 'npm:@jmfederico/pi-web' && pi-web restart");
+    expect(updateCommand).toBe("PI_CODING_AGENT_DIR='/tmp/profile'\\''s/state' '/tmp/agent'\\''s/pi' update 'npm:forgerie' && forgerie restart");
   });
 
   it("scopes node-pty script approval in npm-global update commands", async () => {
     const updateCommand = await updateCommandFor(
-      { kind: "npm-global", path: "/opt/npm/@jmfederico/pi-web" },
-      "pi-web restart",
-      { activeAgentProfile: undefined, hasCommand: () => Promise.resolve(true) },
+      { kind: "npm-global", path: "/opt/npm/forgerie" },
+      "forgerie restart",
+      { activeAgentProfile: undefined, hasCommand: () => Promise.resolve(true), publicDistribution: true },
     );
 
-    expect(updateCommand).toBe("npm install -g @jmfederico/pi-web --allow-scripts=node-pty && pi-web restart");
+    expect(updateCommand).toBe("npm install -g forgerie --allow-scripts=node-pty && forgerie restart");
   });
 
   it("suppresses npm-global update commands when npm is unavailable", async () => {
     const updateCommand = await updateCommandFor(
-      { kind: "npm-global", path: "/opt/npm/@jmfederico/pi-web" },
-      "pi-web restart",
-      { activeAgentProfile: undefined, hasCommand: () => Promise.resolve(false) },
+      { kind: "npm-global", path: "/opt/npm/forgerie" },
+      "forgerie restart",
+      { activeAgentProfile: undefined, hasCommand: () => Promise.resolve(false), publicDistribution: true },
     );
 
     expect(updateCommand).toBeUndefined();
@@ -271,9 +264,9 @@ describe("PI WEB status", () => {
     const hasCommand = vi.fn(() => Promise.resolve(true));
 
     const updateCommand = await updateCommandFor(
-      { kind: "pi-package", source: "npm:@jmfederico/pi-web", scope: "user", path: "/tmp/pi-web" },
-      "pi-web restart",
-      { activeAgentProfile: profile, hasCommand },
+      { kind: "pi-package", source: "npm:forgerie", scope: "user", path: "/tmp/forgerie" },
+      "forgerie restart",
+      { activeAgentProfile: profile, hasCommand, publicDistribution: true },
     );
 
     expect(updateCommand).toBeUndefined();
@@ -289,15 +282,15 @@ describe("PI WEB status", () => {
       process.env["HOME"] = home;
       await installExecutable(binDir, "systemctl");
       process.env["PATH"] = `${binDir}:${process.env["PATH"] ?? ""}`;
-      await installSystemdServiceFiles(home, ["pi-web-sessiond.service", "pi-web-ui-dev.service"]);
+      await installSystemdServiceFiles(home, ["forgerie-sessiond.service", "forgerie-ui-dev.service"]);
       const daemon = daemonWithRuntime(runningSessiondRuntime());
 
       const status = await getPiWebStatus(daemon);
 
-      expect(status.commands.restart).toBe("systemd-run --user --collect --unit=pi-web-restart -- systemctl --user restart pi-web-ui-dev.service pi-web-sessiond.service");
-      expect(status.commands.restartWeb).toBe("systemd-run --user --collect --unit=pi-web-restart-web -- systemctl --user restart pi-web-ui-dev.service");
-      expect(status.commands.restartSessiond).toBe("systemd-run --user --collect --unit=pi-web-restart-sessiond -- systemctl --user restart pi-web-sessiond.service");
-      expect(status.messages.find((message) => message.id === "sessiond-stale")?.command).toBe("systemd-run --user --collect --unit=pi-web-restart-sessiond -- systemctl --user restart pi-web-sessiond.service");
+      expect(status.commands.restart).toBe("systemd-run --user --collect --unit=forgerie-restart -- systemctl --user restart forgerie-ui-dev.service forgerie-sessiond.service");
+      expect(status.commands.restartWeb).toBe("systemd-run --user --collect --unit=forgerie-restart-web -- systemctl --user restart forgerie-ui-dev.service");
+      expect(status.commands.restartSessiond).toBe("systemd-run --user --collect --unit=forgerie-restart-sessiond -- systemctl --user restart forgerie-sessiond.service");
+      expect(status.messages.find((message) => message.id === "sessiond-stale")?.command).toBe("systemd-run --user --collect --unit=forgerie-restart-sessiond -- systemctl --user restart forgerie-sessiond.service");
     } finally {
       await Promise.all([
         rm(home, { recursive: true, force: true }),
@@ -310,40 +303,40 @@ describe("PI WEB status", () => {
     process.env["PI_WEB_SKIP_VERSION_CHECK"] = "1";
     process.env["PI_WEB_DOCKER_RUNTIME"] = "1";
     process.env["PI_WEB_DOCKER_MODE"] = "runtime";
-    process.env["PI_WEB_DOCKER_INSTALL_DIR"] = "/srv/pi-web-docker";
+    process.env["PI_WEB_DOCKER_INSTALL_DIR"] = "/srv/forgerie-docker";
     process.env["PATH"] = "";
     const daemon = daemonWithRuntime(runningSessiondRuntime());
 
     const status = await getPiWebStatus(daemon);
 
-    expect(status.components.web.installation).toEqual({ kind: "docker", path: "/srv/pi-web-docker", dockerMode: "runtime" });
+    expect(status.components.web.installation).toEqual({ kind: "docker", path: "/srv/forgerie-docker", dockerMode: "runtime" });
     expect(status.commands).toEqual({
-      update: "pi-web-docker update",
-      restart: "pi-web-docker restart",
-      restartWeb: "pi-web-docker restart-web",
-      restartSessiond: "pi-web-docker restart-sessiond",
-      status: "pi-web-docker status",
+      update: "forgerie-docker update",
+      restart: "forgerie-docker restart",
+      restartWeb: "forgerie-docker restart-web",
+      restartSessiond: "forgerie-docker restart-sessiond",
+      status: "forgerie-docker status",
     });
     expect(JSON.stringify(status)).not.toContain("npm install -g");
-    expect(JSON.stringify(status)).not.toContain("pi-web restart");
+    expect(JSON.stringify(status)).not.toContain("forgerie restart");
   });
 
   it("suggests explicit Docker development commands when running inside the Docker dev runtime", async () => {
     process.env["PI_WEB_SKIP_VERSION_CHECK"] = "1";
     process.env["PI_WEB_DOCKER_RUNTIME"] = "1";
     process.env["PI_WEB_DOCKER_MODE"] = "dev";
-    process.env["PI_WEB_DOCKER_DEV_REPO_ROOT"] = "/workspace/pi-web";
+    process.env["PI_WEB_DOCKER_DEV_REPO_ROOT"] = "/workspace/forgerie";
     process.env["PATH"] = "";
     const daemon = daemonWithRuntime(runningSessiondRuntime());
 
     const status = await getPiWebStatus(daemon);
 
     expect(status.commands).toEqual({
-      update: "pi-web-docker --dev update",
-      restart: "pi-web-docker --dev restart",
-      restartWeb: "pi-web-docker --dev restart-web",
-      restartSessiond: "pi-web-docker --dev restart-sessiond",
-      status: "pi-web-docker --dev status",
+      update: "forgerie-docker --dev update",
+      restart: "forgerie-docker --dev restart",
+      restartWeb: "forgerie-docker --dev restart-web",
+      restartSessiond: "forgerie-docker --dev restart-sessiond",
+      status: "forgerie-docker --dev status",
     });
   });
 
@@ -351,15 +344,15 @@ describe("PI WEB status", () => {
     process.env["PI_WEB_SKIP_VERSION_CHECK"] = "1";
     process.env["PI_WEB_DOCKER_RUNTIME"] = "1";
     Reflect.deleteProperty(process.env, "PI_WEB_DOCKER_MODE");
-    process.env["PI_WEB_DOCKER_DEV_REPO_ROOT"] = "/workspace/pi-web";
+    process.env["PI_WEB_DOCKER_DEV_REPO_ROOT"] = "/workspace/forgerie";
     process.env["PATH"] = "";
     const daemon = daemonWithRuntime(runningSessiondRuntime());
 
     const status = await getPiWebStatus(daemon);
 
-    expect(status.components.web.installation).toEqual({ kind: "docker", path: "/workspace/pi-web", dockerMode: "dev" });
-    expect(status.commands.update).toBe("pi-web-docker --dev update");
-    expect(status.commands.status).toBe("pi-web-docker --dev status");
+    expect(status.components.web.installation).toEqual({ kind: "docker", path: "/workspace/forgerie", dockerMode: "dev" });
+    expect(status.commands.update).toBe("forgerie-docker --dev update");
+    expect(status.commands.status).toBe("forgerie-docker --dev status");
   });
 
   it("omits local restart commands when no native service command is known", async () => {
@@ -374,7 +367,7 @@ describe("PI WEB status", () => {
 
       expect(status.commands.restart).toBeUndefined();
       expect(status.messages.some((message) => message.id === "sessiond-stale")).toBe(false);
-      expect(JSON.stringify(status)).not.toContain("pi-web restart");
+      expect(JSON.stringify(status)).not.toContain("forgerie restart");
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -389,10 +382,6 @@ function activeProfile(revisionCharacter: string, command: string, dir: string) 
     dir,
     sessionDirEnvKeys: ["PI_WEB_AGENT_SESSION_DIR"],
   };
-}
-
-function npmVersionResponse(version: string): Response {
-  return new Response(JSON.stringify({ version }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
 function runningSessiondRuntime(runtimeVersion = "1.202605.7"): PiWebRuntimeComponent {
@@ -429,7 +418,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function tempHome(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "pi-web-status-"));
+  return await mkdtemp(join(tmpdir(), "forgerie-status-"));
 }
 
 async function installSystemdServiceFiles(home: string, names: string[]): Promise<void> {

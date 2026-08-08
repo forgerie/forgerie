@@ -62,7 +62,7 @@ export async function proxyMachinePluginAsset(machines: MachinePluginProxyMachin
 
   const requestPath = remotePluginAssetRequestPath(remotePlugin, assetPath, requestUrl);
   if (requestPath === undefined) {
-    await reply.code(400).send({ error: "Invalid remote PI WEB plugin asset path" });
+    await reply.code(400).send({ error: "Invalid remote Forgerie plugin asset path" });
     return true;
   }
 
@@ -151,11 +151,11 @@ function hasControlCharacter(value: string): boolean {
 }
 
 function parseRemoteManifest(value: unknown): RemotePluginManifest {
-  if (!isRecord(value) || !Array.isArray(value["plugins"])) throw new Error("Invalid remote PI WEB plugin manifest");
+  if (!isRecord(value) || !Array.isArray(value["plugins"])) throw new Error("Invalid remote Forgerie plugin manifest");
   return {
     plugins: value["plugins"].map((entry) => {
       if (!isRecord(entry) || typeof entry["id"] !== "string" || !isPiWebPluginId(entry["id"]) || typeof entry["module"] !== "string" || entry["module"] === "") {
-        throw new Error("Invalid remote PI WEB plugin manifest entry");
+        throw new Error("Invalid remote Forgerie plugin manifest entry");
       }
       return {
         id: entry["id"],
@@ -170,7 +170,7 @@ function parseRemoteManifest(value: unknown): RemotePluginManifest {
 
 function parseRemoteMachineSpecific(value: unknown): { machineSpecific?: boolean } {
   if (value === undefined) return {};
-  if (typeof value !== "boolean") throw new Error("Invalid remote PI WEB plugin manifest entry");
+  if (typeof value !== "boolean") throw new Error("Invalid remote Forgerie plugin manifest entry");
   return { machineSpecific: value };
 }
 

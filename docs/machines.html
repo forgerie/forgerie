@@ -3,29 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PI WEB fleet — remote Pi web UI machines</title>
+    <title>Forgerie fleet — remote Pi web UI machines</title>
     <meta
       name="description"
-      content="Connect trusted PI WEB runtimes through machine federation so one web UI can supervise local and remote projects, sessions, files, git state, terminals, Pi packages, and plugins."
+      content="Connect trusted Forgerie runtimes through machine federation so one web UI can supervise local and remote projects, sessions, files, git state, terminals, Pi packages, and plugins."
     />
-    <link rel="canonical" href="https://pi-web.dev/machines" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="PI WEB" />
-    <meta property="og:title" content="PI WEB fleet — remote Pi web UI machines" />
+    <meta property="og:site_name" content="Forgerie" />
+    <meta property="og:title" content="Forgerie fleet — remote Pi web UI machines" />
     <meta
       property="og:description"
-      content="Use one PI WEB instance to reach trusted local and remote Pi Coding Agent machines."
+      content="Use one Forgerie instance to reach trusted local and remote Pi Coding Agent machines."
     />
-    <meta property="og:url" content="https://pi-web.dev/machines" />
-    <meta property="og:image" content="https://pi-web.dev/assets/pi-web-banner.png" />
-    <meta property="og:image:alt" content="PI WEB browser UI for persistent Pi Coding Agent sessions" />
+    <meta property="og:image:alt" content="Forgerie browser UI for persistent Pi Coding Agent sessions" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PI WEB fleet — remote Pi web UI machines" />
+    <meta name="twitter:title" content="Forgerie fleet — remote Pi web UI machines" />
     <meta
       name="twitter:description"
-      content="Use one PI WEB instance to reach trusted local and remote Pi Coding Agent machines."
+      content="Use one Forgerie instance to reach trusted local and remote Pi Coding Agent machines."
     />
-    <meta name="twitter:image" content="https://pi-web.dev/assets/pi-web-banner.png" />
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
     <script>
       (() => {
@@ -44,7 +40,7 @@
   <body>
     <header class="site-header">
       <nav class="container nav" aria-label="Main navigation">
-        <a class="brand" href="./" aria-label="PI WEB home">PI WEB</a>
+        <a class="brand" href="./" aria-label="Forgerie home">Forgerie</a>
         <div class="nav-links">
           <div class="nav-pages">
             <a href="remote-first">Remote-first</a>
@@ -55,7 +51,7 @@
             <a href="faq">FAQ</a>
           </div>
           <div class="nav-actions">
-            <a class="github-link" href="https://github.com/jmfederico/pi-web" aria-label="PI WEB on GitHub">
+            <a class="github-link" href="https://github.com/jmfederico/pi-web" aria-label="Upstream PI WEB on GitHub">
               <svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true">
                 <path
                   fill="currentColor"
@@ -76,10 +72,10 @@
     <main>
       <section class="page-hero">
         <div class="container">
-          <p class="eyebrow"><span class="pulse"></span> PI WEB fleet</p>
-          <h1>Connect trusted PI WEB runtimes when one machine is not enough.</h1>
+          <p class="eyebrow"><span class="pulse"></span> Forgerie fleet</p>
+          <h1>Connect trusted Forgerie runtimes when one machine is not enough.</h1>
           <p>
-            Most PI WEB setups only need one runtime. When you do have more than one, machine federation lets the PI WEB
+            Most Forgerie setups only need one runtime. When you do have more than one, machine federation lets the Forgerie
             instance you opened act as a gateway to other trusted runtimes while each machine keeps its own repositories,
             credentials, sessions, Pi package settings, and plugins.
           </p>
@@ -105,12 +101,12 @@
             <section id="what-it-is">
               <h2>What Fleet does</h2>
               <p>
-                A machine is a PI WEB runtime endpoint. The local machine is synthesized automatically. Remote machines
-                are opt-in PI WEB runtimes that you register with a base URL and, optionally, a bearer token.
+                A machine is a Forgerie runtime endpoint. The local machine is synthesized automatically. Remote machines
+                are opt-in Forgerie runtimes that you register with a base URL and, optionally, a bearer token.
               </p>
               <p>
-                After registration, the browser keeps talking to the current PI WEB origin. The gateway contacts the
-                selected remote PI WEB server and routes that machine's projects, workspaces, sessions, files, git state,
+                After registration, the browser keeps talking to the current Forgerie origin. The gateway contacts the
+                selected remote Forgerie server and routes that machine's projects, workspaces, sessions, files, git state,
                 activity, terminals, and Pi package-management operations to the browser UI.
               </p>
               <div class="code-card">
@@ -120,14 +116,14 @@
                 </div>
                 <pre id="federated-shape"><code>Browser
   ↓
-PI WEB gateway you opened
+Forgerie gateway you opened
   ├─ [ Local runtime ]
   │
-  ├─ [ Remote PI WEB runtime A ]
+  ├─ [ Remote Forgerie runtime A ]
   │     ↓ selected machine
   │     projects, workspaces, sessions, terminals, Pi packages, plugins
   │
-  └─ [ Remote PI WEB runtime B ]</code></pre>
+  └─ [ Remote Forgerie runtime B ]</code></pre>
               </div>
             </section>
 
@@ -146,7 +142,7 @@ PI WEB gateway you opened
                 <article class="card">
                   <div class="card-icon">⇄</div>
                   <h3>One gateway</h3>
-                  <p>Open one trusted PI WEB URL and switch machines instead of juggling browser tabs and tunnels.</p>
+                  <p>Open one trusted Forgerie URL and switch machines instead of juggling browser tabs and tunnels.</p>
                 </article>
                 <article class="card">
                   <div class="card-icon">⌁</div>
@@ -159,7 +155,7 @@ PI WEB gateway you opened
             <section id="prepare-machines">
               <h2>Set up another runtime</h2>
               <p>
-                Install and run PI WEB on every machine you want to register. The remote URL must be reachable from the
+                Install and run Forgerie on every machine you want to register. The remote URL must be reachable from the
                 gateway server, not just from your browser.
               </p>
               <div class="code-card">
@@ -167,9 +163,9 @@ PI WEB gateway you opened
                   <strong>Install on each target</strong>
                   <button class="copy-button" data-copy="#target-install">Copy</button>
                 </div>
-                <pre id="target-install"><code><span class="prompt">$</span> npm install -g @jmfederico/pi-web --allow-scripts=node-pty
-<span class="prompt">$</span> pi-web install
-<span class="prompt">$</span> pi-web doctor</code></pre>
+                <pre id="target-install"><code><span class="prompt">$</span> npm install &amp;&amp; npm run build &amp;&amp; npm link
+<span class="prompt">$</span> forgerie install --dev
+<span class="prompt">$</span> forgerie doctor</code></pre>
               </div>
               <p>
                 Prefer a private path such as NetBird, Tailscale, WireGuard, private LAN, SSH tunnel, or an authenticated reverse
@@ -179,7 +175,7 @@ PI WEB gateway you opened
                 URL and configure the proxy to redirect the slashless form.
               </p>
               <div class="callout danger">
-                Do not expose PI WEB directly to the public internet. Register machines only over trusted network paths
+                Do not expose Forgerie directly to the public internet. Register machines only over trusted network paths
                 and only when you trust the endpoint.
               </div>
             </section>
@@ -187,9 +183,9 @@ PI WEB gateway you opened
             <section id="add-machine">
               <h2>Add a machine</h2>
               <ol>
-                <li>Open the PI WEB instance you want to use as the gateway.</li>
+                <li>Open the Forgerie instance you want to use as the gateway.</li>
                 <li>Open <strong>Actions → Add Machine</strong>.</li>
-                <li>Enter the remote PI WEB base URL, including <code>http://</code> or <code>https://</code>.</li>
+                <li>Enter the remote Forgerie base URL, including <code>http://</code> or <code>https://</code>.</li>
                 <li>Accept the suggested name or enter a friendlier sidebar label.</li>
                 <li>Paste an optional bearer token if the remote endpoint requires one.</li>
               </ol>
@@ -198,7 +194,7 @@ PI WEB gateway you opened
                 workspaces, and sessions on that selected machine.
               </p>
               <div class="callout">
-                Removing a remote machine only removes it from this gateway's registry. It does not stop the remote PI WEB
+                Removing a remote machine only removes it from this gateway's registry. It does not stop the remote Forgerie
                 service or delete projects, workspaces, sessions, or credentials on the target machine.
               </div>
             </section>
@@ -207,7 +203,7 @@ PI WEB gateway you opened
               <h2>What works remotely</h2>
               <p>
                 After you select a machine, the rest of the app works in that machine's scope. The gateway routes the
-                selected-machine work to the target PI WEB runtime.
+                selected-machine work to the target Forgerie runtime.
               </p>
               <ul>
                 <li>Projects and workspaces.</li>
@@ -215,7 +211,7 @@ PI WEB gateway you opened
                 <li>Pi sessions, transcripts, prompts, model controls, and commands.</li>
                 <li>Activity indicators and realtime updates.</li>
                 <li>Terminals and terminal command runs.</li>
-                <li>Pi package listing, install, remove, and update from <strong>Settings → Pi packages</strong> when supported by the target PI WEB runtime.</li>
+                <li>Pi package listing, install, remove, and update from <strong>Settings → Pi packages</strong> when supported by the target Forgerie runtime.</li>
                 <li>Remote plugins from the selected machine.</li>
               </ul>
             </section>
@@ -229,11 +225,11 @@ PI WEB gateway you opened
               </p>
               <ul>
                 <li>API-key provider configuration can be proxied through the gateway.</li>
-                <li>OAuth login should be completed by opening the remote PI WEB directly.</li>
+                <li>OAuth login should be completed by opening the remote Forgerie directly.</li>
                 <li>The optional machine bearer token is stored by the gateway and sent to the remote while proxying requests.</li>
               </ul>
               <p>
-                Use <strong>Actions → Open Selected Machine PI WEB</strong> when you need to authenticate directly on a
+                Use <strong>Actions → Open Selected Machine Forgerie</strong> when you need to authenticate directly on a
                 remote machine or inspect it outside the gateway.
               </p>
             </section>
@@ -241,12 +237,12 @@ PI WEB gateway you opened
             <section id="plugins">
               <h2>Plugins follow the selected machine</h2>
               <p>
-                When you select a remote machine, PI WEB tries to load that machine's discovered plugins through the
+                When you select a remote machine, Forgerie tries to load that machine's discovered plugins through the
                 gateway. Remote plugin actions, workspace panels, and workspace labels only appear while that machine is
                 selected, and documented file and terminal helpers run against that machine.
               </p>
               <p>
-                Remote plugins are still trusted browser-side code. Only federate machines whose PI WEB plugins you are
+                Remote plugins are still trusted browser-side code. Only federate machines whose Forgerie plugins you are
                 comfortable loading in the browser.
               </p>
               <p><a href="plugins#remote-machine-plugins">Read the remote machine plugin notes →</a></p>
@@ -255,8 +251,8 @@ PI WEB gateway you opened
             <section id="trust-model">
               <h2>Trust boundaries</h2>
               <p>
-                Machine federation is for trusted users, trusted PI WEB servers, and trusted network paths. Adding a
-                machine gives the gateway permission to contact that URL and forward user-initiated PI WEB traffic to it.
+                Machine federation is for trusted users, trusted Forgerie servers, and trusted network paths. Adding a
+                machine gives the gateway permission to contact that URL and forward user-initiated Forgerie traffic to it.
               </p>
               <ul>
                 <li>Use private networking, an SSH tunnel, or an authenticated reverse proxy.</li>
@@ -268,14 +264,14 @@ PI WEB gateway you opened
             <section id="storage-troubleshooting">
               <h2>Troubleshooting</h2>
               <p>
-                Remote machine records are stored on the gateway in <code>~/.pi-web/machines.json</code>. If
+                Remote machine records are stored on the gateway in <code>~/.forgerie/machines.json</code>. If
                 <code>PI_WEB_DATA_DIR</code> is set, they live under <code>$PI_WEB_DATA_DIR/machines.json</code>.
               </p>
               <ul>
                 <li>Use <strong>Actions → Refresh Selected Machine</strong> to re-check health.</li>
                 <li>Make sure the remote URL is reachable from the gateway server.</li>
-                <li>Open the remote PI WEB directly to verify it is running and to complete provider login flows.</li>
-                <li>Check gateway logs with <code>pi-web logs</code> for proxy timeouts or upstream errors.</li>
+                <li>Open the remote Forgerie directly to verify it is running and to complete provider login flows.</li>
+                <li>Check gateway logs with <code>forgerie logs</code> for proxy timeouts or upstream errors.</li>
               </ul>
               <div class="doc-actions">
                 <a class="button primary" href="install#remote-access">Review remote access setup</a>
@@ -289,7 +285,7 @@ PI WEB gateway you opened
 
     <footer class="site-footer">
       <div class="container footer-inner">
-        <span>PI WEB fleet</span>
+        <span>Forgerie fleet</span>
         <div class="footer-links">
           <a href="./">Home</a>
           <a href="remote-first">Remote-first</a>
@@ -297,10 +293,9 @@ PI WEB gateway you opened
           <a href="config">Config</a>
           <a href="plugins">Plugins</a>
           <a href="faq">FAQ</a>
-          <a href="https://github.com/jmfederico/pi-web">GitHub</a>
+          <a href="https://github.com/jmfederico/pi-web">Upstream</a>
           <span class="version-switcher" role="group" aria-label="Documentation version">
-            <a class="version-switcher-option" data-version-option="stable" href="https://pi-web.dev/machines" aria-current="true">Stable</a>
-            <a class="version-switcher-option" data-version-option="dev" href="https://pi-web.dev/dev/machines">Dev</a>
+            <a class="version-switcher-option" data-version-option="stable" href="machines.html" aria-current="true">Stable</a>
           </span>
         </div>
       </div>

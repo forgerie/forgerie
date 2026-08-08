@@ -4,7 +4,7 @@
     "src/cli.ts",
     "src/plugin-api.ts",
     "src/plugin-api/unstable.ts",
-    "extensions/pi-web.ts",
+    "extensions/forgerie.ts",
     "pi-web-plugins/**/pi-web-plugin.ts",
     "scripts/*.mjs"
   ],

@@ -64,8 +64,8 @@ describe("PiWebStatusController", () => {
   });
 
   it.each([
-    [{ error: "registry unavailable" }, "PI WEB update check failed: registry unavailable"],
-    [{ skipped: true }, "PI WEB update check was skipped"],
+    [{ error: "registry unavailable" }, "Forgerie update check failed: registry unavailable"],
+    [{ skipped: true }, "Forgerie update check was skipped"],
   ] as const)("applies status and rejects an unsuccessful manual check", async (release, message) => {
     const harness = createHarness();
     harness.checkForUpdates.mockResolvedValue(status("checked", release));
@@ -122,13 +122,13 @@ function machine(id: string): Machine {
 
 function status(generatedAt: string, release: Partial<PiWebReleaseStatus> = {}): PiWebStatusResponse {
   return {
-    packageName: "@jmfederico/pi-web",
+    packageName: "forgerie",
     generatedAt,
     components: {
       web: { component: "web", label: "Web/UI", stale: false, available: true },
       sessiond: { component: "sessiond", label: "Session daemon", stale: false, available: true },
     },
-    release: { packageName: "@jmfederico/pi-web", updateAvailable: false, ...release },
+    release: { packageName: "forgerie", updateAvailable: false, ...release },
     commands: {},
     messages: [],
   };

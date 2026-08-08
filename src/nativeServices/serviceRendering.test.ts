@@ -32,8 +32,8 @@ describe("native service rendering", () => {
     const plan = developmentPlan("systemd");
     const unit = renderSystemdUnit(plan, planService(plan, 1));
 
-    expect(unit).toContain("Description=PI WEB UI dev server");
-    expect(unit).toContain("After=pi-web-sessiond.service\nWants=pi-web-sessiond.service");
+    expect(unit).toContain("Description=Forgerie UI dev server");
+    expect(unit).toContain("After=forgerie-sessiond.service\nWants=forgerie-sessiond.service");
     expect(unit).toContain("WorkingDirectory=/checkout\\x20with\\x20space");
     expect(unit).toContain('Environment="PI_WEB_CONFIG=/home/user/config with \\"quote\\".json"');
     expect(unit).toContain('ExecStart=/usr/bin/env "/bin/zsh" -lc "exec /usr/bin/env bash -c \'trap \\"kill 0\\" EXIT;');
@@ -65,7 +65,7 @@ describe("native service rendering", () => {
     const plan = developmentPlan("launchd");
     const plist = renderLaunchdPlist(plan, planService(plan, 0), "/logs");
 
-    expect(plist).toContain("<string>com.pi-web.sessiond</string>");
+    expect(plist).toContain("<string>com.forgerie.sessiond</string>");
     expect(plist).toContain("<string>/bin/zsh</string>");
     expect(plist).toContain("<string>exec npm run start:sessiond</string>");
     expect(plist).toContain("<key>WorkingDirectory</key>\n  <string>/checkout with space</string>");

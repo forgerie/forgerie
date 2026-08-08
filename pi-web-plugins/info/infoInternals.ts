@@ -6,7 +6,7 @@
 // lives in pi-web-plugin.ts.
 
 import type { TemplateResult } from "lit";
-import type { HtmlTemplateTag, MachineKind, PiWebComponentStatus, PiWebInstallationInfo, PiWebReleaseStatus, PiWebStatusResponse, PluginMachine, PluginRuntimeContext, Workspace, WorkspacePanelContext } from "@jmfederico/pi-web/plugin-api";
+import type { HtmlTemplateTag, MachineKind, PiWebComponentStatus, PiWebInstallationInfo, PiWebReleaseStatus, PiWebStatusResponse, PluginMachine, PluginRuntimeContext, Workspace, WorkspacePanelContext } from "forgerie/plugin-api";
 
 export type ComponentHealth = "current" | "restart needed" | "unavailable";
 
@@ -77,7 +77,7 @@ export interface DiagnosticsInput {
 
 /** Plain-text status block suitable for pasting into a bug report. */
 export function diagnosticsSummary({ status, machine, workspace }: DiagnosticsInput): string {
-  const lines: string[] = ["PI WEB diagnostics"];
+  const lines: string[] = ["Forgerie diagnostics"];
   if (status === undefined) {
     lines.push("Status: unavailable");
   } else {
@@ -122,8 +122,8 @@ function renderStatusSection(html: HtmlTemplateTag, status: PiWebStatusResponse 
   if (status === undefined) {
     return html`
       <section>
-        <strong>PI WEB</strong>
-        <p class="muted">PI WEB status is not available yet. It refreshes automatically in the background.</p>
+        <strong>Forgerie</strong>
+        <p class="muted">Forgerie status is not available yet. It refreshes automatically in the background.</p>
       </section>
     `;
   }
@@ -131,7 +131,7 @@ function renderStatusSection(html: HtmlTemplateTag, status: PiWebStatusResponse 
   const messageCount = status.messages.length;
   return html`
     <section>
-      <strong>PI WEB</strong>
+      <strong>Forgerie</strong>
       <div class="info-row">
         <span>Version</span>
         <span>${formatVersion(web.runtimeVersion)}</span>

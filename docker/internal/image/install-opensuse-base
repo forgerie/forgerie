@@ -45,8 +45,8 @@ add_nodejs_repo() {
       ;;
   esac
 
-  zypper --non-interactive removerepo pi-web-nodejs >/dev/null 2>&1 || true
-  zypper --non-interactive addrepo --refresh "$repo_url" pi-web-nodejs
+  zypper --non-interactive removerepo forgerie-nodejs >/dev/null 2>&1 || true
+  zypper --non-interactive addrepo --refresh "$repo_url" forgerie-nodejs
 }
 
 # The codec repository is not needed for this image and can make noninteractive
@@ -144,10 +144,10 @@ case "$runtime_gid" in
     ;;
 esac
 
-runtime_user=pi-web
-runtime_group=pi-web
+runtime_user=forgerie
+runtime_group=forgerie
 runtime_home=/data/home
-mkdir -p "$runtime_home" /data/config /data/npm-cache /data/pi-web /data/pi-agent /workspace
+mkdir -p "$runtime_home" /data/config /data/npm-cache /data/forgerie /data/pi-agent /workspace
 
 if getent group "$runtime_gid" >/dev/null 2>&1; then
   runtime_group=$(getent group "$runtime_gid" | cut -d: -f1)

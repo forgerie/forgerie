@@ -22,7 +22,7 @@ describe("production build contents", () => {
   });
 
   it("keeps test-support artifacts out of the npm tarball", async () => {
-    const fixtureRoot = await mkdtemp(join(tmpdir(), "pi-web-package-contents-"));
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "forgerie-package-contents-"));
     try {
       const fixtureDist = join(fixtureRoot, "dist", "server");
       await mkdir(fixtureDist, { recursive: true });

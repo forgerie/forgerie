@@ -843,7 +843,7 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
 
     await expect(service.runCommand(sessionRef("runtime-reload-session"), "/reload")).resolves.toEqual({
       type: "done",
-      message: "Session runtime resources reloaded. Extensions, skills, prompt templates, themes, and context/system prompt files are refreshed for this session. Reload the browser page separately for PI WEB browser plugin changes.",
+      message: "Session runtime resources reloaded. Extensions, skills, prompt templates, themes, and context/system prompt files are refreshed for this session. Reload the browser page separately for Forgerie browser plugin changes.",
     });
 
     expect(fake.calls.reload).toBe(1);

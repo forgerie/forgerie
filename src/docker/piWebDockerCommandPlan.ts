@@ -78,7 +78,7 @@ const logsTargets: ReadonlySet<string> = new Set(["web", "sessiond", "data-init"
 const shellTargets: ReadonlySet<string> = new Set(["web", "sessiond"]);
 
 export function piWebDockerCommandPrefix(mode: PiWebDockerMode | undefined): string {
-  return mode === "dev" ? "pi-web-docker --dev" : "pi-web-docker";
+  return mode === "dev" ? "forgerie-docker --dev" : "forgerie-docker";
 }
 
 export function piWebDockerCommand(mode: PiWebDockerMode | undefined, command: Exclude<PiWebDockerCommand, "help">): string {
@@ -110,7 +110,7 @@ export function planPiWebDockerRuntimeHostCommand(plan: PiWebDockerCommandPlan):
     case "shell":
       return composeHostPlan("exec", plan.target ?? "web", "bash");
     case "cli":
-      return { kind: "compose", args: ["exec", "web", "pi-web", ...plan.args] };
+      return { kind: "compose", args: ["exec", "web", "forgerie", ...plan.args] };
     case "doctor":
       return { kind: "diagnostics" };
     case "help":
@@ -150,7 +150,7 @@ export function planPiWebDockerDevHostCommand(plan: PiWebDockerCommandPlan): PiW
     case "shell":
       return devComposeHostPlan("exec", plan.target ?? "web", "bash");
     case "cli":
-      return { kind: "compose", args: ["exec", "web", "pi-web", ...plan.args], usesGeneratedEnv: true };
+      return { kind: "compose", args: ["exec", "web", "forgerie", ...plan.args], usesGeneratedEnv: true };
     case "doctor":
       return { kind: "diagnostics", usesGeneratedEnv: true };
     case "help":
@@ -235,7 +235,7 @@ function validatePlan(plan: PiWebDockerCommandPlan): PiWebDockerParseResult {
   }
 
   if (plan.command === "cli" && plan.args.length === 0) {
-    errors.push("cli requires pi-web arguments");
+    errors.push("cli requires forgerie arguments");
   }
 
   if (errors.length > 0) return { ok: false, errors };

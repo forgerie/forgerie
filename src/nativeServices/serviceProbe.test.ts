@@ -77,7 +77,7 @@ describe("systemd authoritative native-service probe", () => {
       "--collect",
       "--pipe",
       "--quiet",
-      "--unit=pi-web-authoritative-probe-fixed.service",
+      "--unit=forgerie-authoritative-probe-fixed.service",
       "--property=RuntimeMaxSec=15s",
       "--property=TimeoutStopSec=5s",
       "--setenv=PI_WEB_CONFIG=/home/user/config with space.json",
@@ -144,8 +144,8 @@ describe("systemd authoritative native-service probe", () => {
     expect(result.kind === "infrastructure-failure" && result.message).toContain("unit still loaded");
     expect(runner.calls.map(({ command, args }) => [command, ...args.slice(0, 3)])).toEqual([
       ["systemd-run", "--user", "--wait", "--collect"],
-      ["systemctl", "--user", "stop", "pi-web-authoritative-probe-fixed.service"],
-      ["systemctl", "--user", "show", "pi-web-authoritative-probe-fixed.service"],
+      ["systemctl", "--user", "stop", "forgerie-authoritative-probe-fixed.service"],
+      ["systemctl", "--user", "show", "forgerie-authoritative-probe-fixed.service"],
     ]);
   });
 });
@@ -199,7 +199,7 @@ describe("launchd authoritative native-service probe", () => {
     await expect(probe.run(request("launchd"))).resolves.toMatchObject({ kind: "completed" });
     expect(runner.calls.map(({ command, args }) => [command, ...args])).toEqual([
       ["launchctl", "bootstrap", "gui/501", "/tmp/probe/probe.plist"],
-      ["launchctl", "bootout", "gui/501/com.pi-web.authoritative-probe.501.fixed"],
+      ["launchctl", "bootout", "gui/501/com.forgerie.authoritative-probe.501.fixed"],
     ]);
     expect(fileSystem.writeFile).toHaveBeenCalledWith(
       "/tmp/probe/probe.plist",
@@ -241,7 +241,7 @@ describe("launchd authoritative native-service probe", () => {
     });
     expect(runner.calls.at(-1)).toMatchObject({
       command: "launchctl",
-      args: ["bootout", "gui/502/com.pi-web.authoritative-probe.502.fixed"],
+      args: ["bootout", "gui/502/com.forgerie.authoritative-probe.502.fixed"],
     });
     expect(fileSystem.removeDirectory).toHaveBeenCalledWith("/tmp/probe");
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { effectivePiWebCapabilities, isPiWebCapability, PI_WEB_CAPABILITIES, SESSIOND_RUNTIME_CAPABILITIES, WEB_RUNTIME_CAPABILITIES, parseKnownPiWebCapabilities } from "./capabilities";
 
-describe("PI WEB capabilities", () => {
+describe("Forgerie capabilities", () => {
   it("advertises no capabilities while the registry has no entries", () => {
     expect(PI_WEB_CAPABILITIES).toEqual({});
     expect(WEB_RUNTIME_CAPABILITIES).toEqual([]);

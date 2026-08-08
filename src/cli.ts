@@ -42,7 +42,7 @@ import {
 } from "./nativeServices/serviceProbe.js";
 import { renderLaunchdPlist, renderSystemdUnit } from "./nativeServices/serviceRendering.js";
 
-const PI_WEB_PACKAGE_NAME = "@jmfederico/pi-web";
+const PI_WEB_PACKAGE_NAME = "forgerie";
 
 const systemdServiceDir = join(homedir(), ".config", "systemd", "user");
 const launchdServiceDir = join(homedir(), "Library", "LaunchAgents");
@@ -84,7 +84,7 @@ const serviceRefs: Record<ServiceId, ServiceRef> = {
 const productionServiceIds: ServiceId[] = [...productionNativeServiceIds];
 const startServiceOrder: ServiceId[] = ["sessiond", "web", "uiDev"];
 const stopServiceOrder: ServiceId[] = ["web", "uiDev", "sessiond"];
-// Restart web/UI before sessiond: when `pi-web restart` runs in a pi-web
+// Restart web/UI before sessiond: when `forgerie restart` runs in a forgerie
 // terminal (owned by sessiond), restarting sessiond kills the command, so any
 // services handled after it would never be restarted.
 const restartServiceOrder: ServiceId[] = ["web", "uiDev", "sessiond"];
@@ -118,7 +118,7 @@ function supportsSystemdUserServices(): boolean {
 
 function manualRunAdvice(): string {
   return [
-    "Run PI WEB manually from a checkout:",
+    "Run Forgerie manually from a checkout:",
     "  npm run start:sessiond",
     "  PI_WEB_PORT=8504 npm start",
     "",
@@ -197,7 +197,7 @@ function parseInstallOptions(args: string[]): InstallOptions {
     } else if (arg === "--dev") {
       options.mode = "dev";
     } else if (arg === "--user-systemd") {
-      // Accepted for backwards-compatible readability; PI WEB chooses the native user service backend automatically.
+      // Accepted for backwards-compatible readability; Forgerie chooses the native user service backend automatically.
     } else {
       throw new Error(`Unknown install option: ${arg}`);
     }
@@ -260,7 +260,7 @@ function describeServiceShell(): string {
   if (shell.source === "fallback") {
     return shell.detectedExecutable === null
       ? "could not detect a supported login shell; using bash"
-      : `detected ${shell.detectedExecutable}; using bash because PI WEB currently supports bash, zsh, and fish`;
+      : `detected ${shell.detectedExecutable}; using bash because Forgerie currently supports bash, zsh, and fish`;
   }
   return shell.detectedExecutable === null ? shell.name : `${shell.name} (${shell.detectedExecutable})`;
 }
@@ -308,12 +308,12 @@ function devRootPath(): string {
 function validateDevCheckout(root: string): void {
   const packageJsonPath = join(root, "package.json");
   if (!existsSync(packageJsonPath)) {
-    throw new Error(`Development mode must be installed from a PI WEB checkout. Missing package.json: ${packageJsonPath}`);
+    throw new Error(`Development mode must be installed from a Forgerie checkout. Missing package.json: ${packageJsonPath}`);
   }
 
   const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
   if (!isRecord(parsed) || parsed["name"] !== PI_WEB_PACKAGE_NAME) {
-    throw new Error(`Development mode must be installed from a PI WEB checkout. ${packageJsonPath} is not ${PI_WEB_PACKAGE_NAME}.`);
+    throw new Error(`Development mode must be installed from a Forgerie checkout. ${packageJsonPath} is not ${PI_WEB_PACKAGE_NAME}.`);
   }
 }
 
@@ -559,16 +559,16 @@ function printServiceStatus(status: ServiceRuntimeStatus): void {
 
 function printServiceStatusReport(backend: ServiceBackend): boolean {
   const refs = statusServiceRefs(backend);
-  console.log(`PI WEB services: ${serviceInstallMode(backend)} (${backend.label})`);
+  console.log(`Forgerie services: ${serviceInstallMode(backend)} (${backend.label})`);
   if (refs.length === 0) {
-    console.log("✗ no PI WEB service files found");
-    console.log("  Run `pi-web install` or `pi-web install --dev`.");
+    console.log("✗ no Forgerie service files found");
+    console.log("  Run `forgerie install` or `forgerie install --dev`.");
     return false;
   }
 
   const statuses = refs.map((ref) => runtimeStatus(backend, ref));
   for (const status of statuses) printServiceStatus(status);
-  console.log("\nUse `pi-web logs` for service logs.");
+  console.log("\nUse `forgerie logs` for service logs.");
   return statuses.every((status) => status.health === "running");
 }
 
@@ -589,12 +589,12 @@ function productionNativeServicePlanInput(
     executables: {
       sessiond: {
         configuredCommand: configuredServiceCommand("PI_WEB_SESSIOND_EXEC"),
-        namedCommand: "pi-web-sessiond",
+        namedCommand: "forgerie-sessiond",
         bundledEntrypointPath: packageEntrypointPath("sessiond"),
       },
       web: {
         configuredCommand: configuredServiceCommand("PI_WEB_SERVER_EXEC"),
-        namedCommand: "pi-web-server",
+        namedCommand: "forgerie-server",
         bundledEntrypointPath: packageEntrypointPath("server"),
       },
     },
@@ -655,18 +655,18 @@ function printNativeServiceInstallFailure(failure: NativeServiceInstallFailure):
 }
 
 async function install(args: string[]): Promise<void> {
-  const backend = requireServiceBackend("pi-web install");
+  const backend = requireServiceBackend("forgerie install");
   const options = parseInstallOptions(args);
   const devRoot = options.mode === "dev" ? devRootPath() : undefined;
   if (devRoot !== undefined) validateDevCheckout(devRoot);
   const configPath = installConfigPath(options);
   const candidate = nativeServiceInstallCandidate(options, backend, configPath, devRoot);
 
-  console.log(`Running PI WEB ${options.mode} install preflight checks...`);
+  console.log(`Running Forgerie ${options.mode} install preflight checks...`);
   console.log(`Service backend: ${backend.label}`);
   console.log(`Service shell: ${describeServiceShell()}`);
   if (!printNodePtyNativeModuleCheck()) {
-    throw new Error("Install preflight checks failed without changing config or services. Fix the failure above, then run `pi-web doctor` for more detail.");
+    throw new Error("Install preflight checks failed without changing config or services. Fix the failure above, then run `forgerie doctor` for more detail.");
   }
   const result = await installNativeServiceCandidate(candidate, {
     probe: createNativeServiceAuthoritativeProbe(),
@@ -677,13 +677,13 @@ async function install(args: string[]): Promise<void> {
   if (!result.ok) {
     printNativeServiceInstallFailure(result.failure);
     if (nativeServiceInstallFailureNeedsPathAdvice(result.failure)) printPathSetupAdvice();
-    throw new Error("Install preflight checks failed without changing config or services. Fix the failure above, then run `pi-web doctor` for more detail.");
+    throw new Error("Install preflight checks failed without changing config or services. Fix the failure above, then run `forgerie doctor` for more detail.");
   }
   for (const service of result.plan.services.filter((item) => item.strategy.kind === "configured-override")) {
     console.log(`! ${service.description} uses a configured command override; preflight did not execute that arbitrary command.`);
   }
 
-  console.log(`\nPI WEB ${options.mode} services are installed and starting.`);
+  console.log(`\nForgerie ${options.mode} services are installed and starting.`);
   console.log(`Config: ${configPath}`);
   if (options.mode === "dev") {
     console.log("Open: http://127.0.0.1:8505");
@@ -703,15 +703,15 @@ async function install(args: string[]): Promise<void> {
   }
 
   console.log("\nUseful commands:");
-  console.log("  pi-web status");
-  console.log("  pi-web logs");
-  console.log("  pi-web restart");
+  console.log("  forgerie status");
+  console.log("  forgerie logs");
+  console.log("  forgerie restart");
 }
 
 async function uninstall(): Promise<void> {
-  const backend = requireServiceBackend("pi-web uninstall");
+  const backend = requireServiceBackend("forgerie uninstall");
   await uninstallNativeServices(backend);
-  console.log(`PI WEB ${backend.label} removed. Production and development service files were removed; config and data were left in place.`);
+  console.log(`Forgerie ${backend.label} removed. Production and development service files were removed; config and data were left in place.`);
 }
 
 function systemdServiceAction(action: "start" | "stop" | "restart", refs: ServiceRef[]): void {
@@ -739,7 +739,7 @@ function launchdServiceAction(action: "start" | "stop" | "restart", refs: Servic
 }
 
 function serviceAction(action: "start" | "stop" | "restart" | "status"): void {
-  const backend = requireServiceBackend(`pi-web ${action}`);
+  const backend = requireServiceBackend(`forgerie ${action}`);
   if (action === "status") {
     if (!printServiceStatusReport(backend)) process.exitCode = 1;
     return;
@@ -751,7 +751,7 @@ function serviceAction(action: "start" | "stop" | "restart" | "status"): void {
 }
 
 function logs(): void {
-  const backend = requireServiceBackend("pi-web logs");
+  const backend = requireServiceBackend("forgerie logs");
   const refs = installedServiceRefs(backend);
   if (backend.kind === "systemd") {
     run("journalctl", ["--user", ...refs.flatMap((ref) => ["-u", ref.systemdName]), "-f"]);
@@ -841,7 +841,7 @@ function printOptionalDoctorChecks(): void {
   }
   if (missingOptionalTool) {
     console.log("  Install ripgrep, or make rg visible to the service shell, for faster all-file @ suggestions.");
-    console.log("  PI WEB falls back to a bounded filesystem scan when rg is unavailable.");
+    console.log("  Forgerie falls back to a bounded filesystem scan when rg is unavailable.");
   }
 }
 
@@ -961,10 +961,10 @@ function printPathSetupAdvice(shell: NativeServiceShell = detectServiceShell()):
     console.log("  Do not rely only on ~/.bashrc or prompt hooks for tools needed by services or agents.");
   } else if (shell.name === "zsh") {
     console.log("  Detected zsh. Put PATH setup for node/version managers/tools in ~/.zprofile, not only ~/.zshrc.");
-    console.log("  Avoid relying on prompt hooks; PI WEB services run non-interactive login shells.");
+    console.log("  Avoid relying on prompt hooks; Forgerie services run non-interactive login shells.");
   } else {
     console.log("  Detected fish. Prefer universal PATH setup such as `fish_add_path -U ...` for tools needed by services or agents.");
-    console.log("  Avoid relying on prompt hooks; PI WEB services run non-interactive login shells.");
+    console.log("  Avoid relying on prompt hooks; Forgerie services run non-interactive login shells.");
   }
 }
 
@@ -1052,21 +1052,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function help(): void {
-  console.log(`PI WEB
+  console.log(`Forgerie
 
 Usage:
-  pi-web install [--dev] [--host 127.0.0.1] [--port 8504] [--config ~/.config/pi-web/config.json]
-  pi-web uninstall
-  pi-web start|stop|restart|status|logs
-  pi-web doctor
-  pi-web version
+  forgerie install [--dev] [--host 127.0.0.1] [--port 8504] [--config ~/.config/forgerie/config.json]
+  forgerie uninstall
+  forgerie start|stop|restart|status|logs
+  forgerie doctor
+  forgerie version
 
-Recommended install:
-  npm install -g @jmfederico/pi-web --allow-scripts=node-pty
-  pi-web install
-
-Development service install from a checkout:
-  pi-web install --dev
+Local checkout install:
+  npm install
+  npm run build
+  npm link
+  forgerie install --dev
 `);
 }
 

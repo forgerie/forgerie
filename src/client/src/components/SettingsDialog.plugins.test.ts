@@ -38,7 +38,7 @@ describe("settings-dialog plugin settings machine targeting", () => {
 
     expect(getDialogProperty(dialog, "selectedPluginConfigResponse")).toBe(config);
     expect(getDialogProperty(dialog, "selectedPluginsResponse")).toBeUndefined();
-    expect(getDialogProperty(dialog, "pluginError")).toBe("Failed to load PI WEB plugin settings from Lab Mac (remote machine): PI WEB plugins: route GET:/api/plugins not found");
+    expect(getDialogProperty(dialog, "pluginError")).toBe("Failed to load Forgerie plugin settings from Lab Mac (remote machine): Forgerie plugins: route GET:/api/plugins not found");
     expect(getDialogProperty(dialog, "pluginLoading")).toBe(false);
   });
 

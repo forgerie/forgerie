@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PiWebComponentStatus, PiWebReleaseStatus, PiWebStatusResponse, PluginMachine, Workspace } from "@jmfederico/pi-web/plugin-api";
+import type { PiWebComponentStatus, PiWebReleaseStatus, PiWebStatusResponse, PluginMachine, Workspace } from "forgerie/plugin-api";
 import { componentDetails, componentHealth, diagnosticsSummary, formatVersion, installationLabel, machineKindLabel, releaseSummary, workspaceFlags } from "./infoInternals.js";
 
 describe("componentHealth", () => {
@@ -52,8 +52,8 @@ describe("diagnosticsSummary", () => {
     const summary = diagnosticsSummary({ status: statusResponse(), machine: machineFixture(), workspace: workspaceFixture() });
 
     expect(summary).toBe([
-      "PI WEB diagnostics",
-      "Package: @jmfederico/pi-web",
+      "Forgerie diagnostics",
+      "Package: forgerie",
       "Web/UI: running 1.0.0 · installed 1.0.1 · restart needed · global npm package · /usr/lib/node_modules",
       "Session daemon: running 1.0.0 · installed 1.0.0 · current · local checkout · /srv/dev/pi-web",
       "Release: Update available: 1.1.0 (checked 2025-01-02T03:04:05Z)",
@@ -67,7 +67,7 @@ describe("diagnosticsSummary", () => {
     const summary = diagnosticsSummary({ status: undefined });
 
     expect(summary).toBe([
-      "PI WEB diagnostics",
+      "Forgerie diagnostics",
       "Status: unavailable",
       "Workspace: none selected",
     ].join("\n"));
@@ -122,7 +122,7 @@ function componentStatus(patch: Partial<PiWebComponentStatus> = {}): PiWebCompon
 
 function release(patch: Partial<PiWebReleaseStatus> = {}): PiWebReleaseStatus {
   return {
-    packageName: "@jmfederico/pi-web",
+    packageName: "forgerie",
     updateAvailable: false,
     checkedAt: "2025-01-02T03:04:05Z",
     ...patch,
@@ -131,7 +131,7 @@ function release(patch: Partial<PiWebReleaseStatus> = {}): PiWebReleaseStatus {
 
 function statusResponse(): PiWebStatusResponse {
   return {
-    packageName: "@jmfederico/pi-web",
+    packageName: "forgerie",
     generatedAt: "2025-01-02T03:04:06Z",
     components: {
       web: componentStatus({ installedVersion: "1.0.1", stale: true }),

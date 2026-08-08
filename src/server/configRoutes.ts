@@ -85,9 +85,9 @@ export function registerLocalMachineConfigRoutes(app: FastifyInstance, service: 
 }
 
 export function parseSelectedMachineConfigRequest(value: unknown, agentPathHost: AgentPathHost = "current"): PiWebConfig {
-  if (!isRecord(value)) throw new Error("PI WEB selected-machine config update must include a config object");
+  if (!isRecord(value)) throw new Error("Forgerie selected-machine config update must include a config object");
   for (const key of Object.keys(value)) {
-    if (!SELECTED_MACHINE_CONFIG_KEY_SET.has(key)) throw new Error(`PI WEB selected-machine config key is not allowed: ${key}`);
+    if (!SELECTED_MACHINE_CONFIG_KEY_SET.has(key)) throw new Error(`Forgerie selected-machine config key is not allowed: ${key}`);
   }
   try {
     return pickSelectedMachineConfig(parseConfigRequest(value, agentPathHost));
@@ -108,7 +108,7 @@ export function selectedMachineConfigResponse(response: PiWebConfigResponse): Pi
   };
 }
 
-export function parsePiWebConfigResponseBody(value: unknown, source = "PI WEB config response"): PiWebConfigResponse {
+export function parsePiWebConfigResponseBody(value: unknown, source = "Forgerie config response"): PiWebConfigResponse {
   const record = requireResponseRecord(value, source);
   return {
     path: requireResponseString(record, "path", source),
@@ -120,7 +120,7 @@ export function parsePiWebConfigResponseBody(value: unknown, source = "PI WEB co
 }
 
 function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "current"): PiWebConfig {
-  if (!isRecord(value)) throw new Error("PI WEB config update must include a config object");
+  if (!isRecord(value)) throw new Error("Forgerie config update must include a config object");
   const config: PiWebConfig = {};
   const host = value["host"];
   const port = value["port"];
@@ -135,11 +135,11 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
   const askUser = value["askUser"];
   const agent = value["agent"];
   if (host !== undefined) {
-    if (typeof host !== "string") throw new Error("PI WEB config host must be a string");
+    if (typeof host !== "string") throw new Error("Forgerie config host must be a string");
     config.host = host;
   }
   if (port !== undefined) {
-    if (typeof port !== "number") throw new Error("PI WEB config port must be a number");
+    if (typeof port !== "number") throw new Error("Forgerie config port must be a number");
     config.port = port;
   }
   if (allowedHosts !== undefined) config.allowedHosts = parseAllowedHostsRequest(allowedHosts);
@@ -149,15 +149,15 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
   if (uploads !== undefined) config.uploads = parseUploadsConfig(uploads, "request");
   if (maxUploadBytes !== undefined) config.maxUploadBytes = parseMaxUploadBytesRequest(maxUploadBytes);
   if (spawnSessions !== undefined) {
-    if (typeof spawnSessions !== "boolean") throw new Error("PI WEB config spawnSessions must be a boolean");
+    if (typeof spawnSessions !== "boolean") throw new Error("Forgerie config spawnSessions must be a boolean");
     config.spawnSessions = spawnSessions;
   }
   if (subsessions !== undefined) {
-    if (typeof subsessions !== "boolean") throw new Error("PI WEB config subsessions must be a boolean");
+    if (typeof subsessions !== "boolean") throw new Error("Forgerie config subsessions must be a boolean");
     config.subsessions = subsessions;
   }
   if (askUser !== undefined) {
-    if (typeof askUser !== "boolean") throw new Error("PI WEB config askUser must be a boolean");
+    if (typeof askUser !== "boolean") throw new Error("Forgerie config askUser must be a boolean");
     config.askUser = askUser;
   }
   if (agent !== undefined) config.agent = parseAgentRequest(agent, agentPathHost);
@@ -179,28 +179,28 @@ function pickSelectedMachineConfig(config: PiWebConfigValues): PiWebConfig {
 
 function selectedMachineConfigErrorMessage(error: unknown): string {
   const message = errorMessage(error);
-  if (message.startsWith("PI WEB config ")) return `PI WEB selected-machine config ${message.slice("PI WEB config ".length)}`;
-  return `PI WEB selected-machine config ${message}`;
+  if (message.startsWith("Forgerie config ")) return `Forgerie selected-machine config ${message.slice("Forgerie config ".length)}`;
+  return `Forgerie selected-machine config ${message}`;
 }
 
 function parseAllowedHostsRequest(value: unknown): string[] | true {
   if (value === true) return true;
   if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new Error("PI WEB config allowedHosts must be true or an array of strings");
+    throw new Error("Forgerie config allowedHosts must be true or an array of strings");
   }
   return value;
 }
 
 function parseShortcutsRequest(value: unknown): Record<string, string | null> {
-  if (!isRecord(value)) throw new Error("PI WEB config shortcuts must be an object");
+  if (!isRecord(value)) throw new Error("Forgerie config shortcuts must be an object");
   return Object.fromEntries(Object.entries(value).map(([actionId, shortcut]) => {
-    if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) throw new Error("PI WEB config shortcut values must be non-empty strings or null");
+    if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) throw new Error("Forgerie config shortcut values must be non-empty strings or null");
     return [actionId, shortcut];
   }));
 }
 
 function parsePathAccessRequest(value: unknown): NonNullable<PiWebConfig["pathAccess"]> {
-  if (!isRecord(value)) throw new Error("PI WEB config pathAccess must be an object");
+  if (!isRecord(value)) throw new Error("Forgerie config pathAccess must be an object");
   const allowedPaths = value["allowedPaths"];
   return {
     ...(allowedPaths === undefined ? {} : { allowedPaths: parseAllowedPathsRequest(allowedPaths) }),
@@ -209,7 +209,7 @@ function parsePathAccessRequest(value: unknown): NonNullable<PiWebConfig["pathAc
 
 function parseAllowedPathsRequest(value: unknown): string[] {
   if (!isNonEmptyStringArray(value)) {
-    throw new Error("PI WEB config pathAccess.allowedPaths must be an array of non-empty strings");
+    throw new Error("Forgerie config pathAccess.allowedPaths must be an array of non-empty strings");
   }
   return value;
 }
@@ -219,7 +219,7 @@ function isNonEmptyStringArray(value: unknown): value is string[] {
 }
 
 function parseMaxUploadBytesRequest(value: unknown): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) throw new Error("PI WEB config maxUploadBytes must be a positive integer");
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) throw new Error("Forgerie config maxUploadBytes must be a positive integer");
   return value;
 }
 
@@ -228,14 +228,14 @@ function parseAgentRequest(value: unknown, pathHost: AgentPathHost): NonNullable
 }
 
 function parsePluginsRequest(value: unknown): NonNullable<PiWebConfig["plugins"]> {
-  if (!isRecord(value) || Array.isArray(value)) throw new Error("PI WEB config plugins must be an object");
+  if (!isRecord(value) || Array.isArray(value)) throw new Error("Forgerie config plugins must be an object");
   return Object.fromEntries(Object.entries(value).map(([pluginId, config]) => {
-    if (!isPiWebPluginId(pluginId)) throw new Error("PI WEB config plugin ids are invalid");
-    if (!isRecord(config) || Array.isArray(config)) throw new Error("PI WEB config plugin entries must be objects");
+    if (!isPiWebPluginId(pluginId)) throw new Error("Forgerie config plugin ids are invalid");
+    if (!isRecord(config) || Array.isArray(config)) throw new Error("Forgerie config plugin entries must be objects");
     const enabled = config["enabled"];
-    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error("PI WEB config plugin enabled values must be booleans");
+    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error("Forgerie config plugin enabled values must be booleans");
     const settings = config["settings"];
-    if (settings !== undefined && (!isRecord(settings) || Array.isArray(settings))) throw new Error("PI WEB config plugin settings must be objects");
+    if (settings !== undefined && (!isRecord(settings) || Array.isArray(settings))) throw new Error("Forgerie config plugin settings must be objects");
     return [pluginId, config];
   }));
 }
@@ -302,7 +302,7 @@ function isEnvSet(value: string | undefined): boolean {
 }
 
 function isConfigValidationError(error: unknown): boolean {
-  return error instanceof Error && (error.message.startsWith("PI WEB config") || error.message.startsWith("PI WEB selected-machine config"));
+  return error instanceof Error && (error.message.startsWith("Forgerie config") || error.message.startsWith("Forgerie selected-machine config"));
 }
 
 function errorMessage(error: unknown): string {

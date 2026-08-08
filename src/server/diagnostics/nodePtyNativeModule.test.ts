@@ -28,7 +28,7 @@ describe("node-pty native module diagnostics", () => {
     const formatted = formatNodePtyNativeModuleCheck(check);
     expect(formatted.ok).toBe(false);
     expect(formatted.lines).toContain(`    ${NODE_PTY_GLOBAL_REINSTALL_COMMAND}`);
-    expect(formatted.lines).toContain("  Then run `pi-web doctor` again.");
+    expect(formatted.lines).toContain("  Then run `forgerie doctor` again.");
     expect(formatted.lines.join("\n")).not.toContain("dangerously-allow-all-scripts");
   });
 });

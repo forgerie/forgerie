@@ -51,7 +51,7 @@ const MAX_CLASSIFIED_TYPE_LENGTH = 64;
  *   Session files are append-only, so the mtime is a faithful "last activity"
  *   for listing order, the only thing `modified` is used for.
  * - `allMessagesText` is always empty. Building it required parsing every
- *   message body — the cost this scanner exists to remove — and PI WEB never
+ *   message body — the cost this scanner exists to remove — and Forgerie never
  *   consumes it.
  * - `messageCount` can transiently include a final write read mid-flight: a
  *   message-shaped line that ends with `}` counts even though its JSON is
@@ -132,7 +132,7 @@ export interface SessionSummaryScannerOptions {
  * The one thing the key cannot detect is an in-place rewrite that keeps the
  * inode and never shrinks the file — including the equal-size rewrite served
  * by the stat-only fast path. The SDK never rewrites session files, but
- * PI WEB's detach does (it clears the header), so callers that rewrite a file
+ * Forgerie's detach does (it clears the header), so callers that rewrite a file
  * in place must call {@link invalidate} for it; {@link clear} remains the
  * escape hatch for unknown external rewrites.
  */

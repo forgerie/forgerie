@@ -4,7 +4,7 @@ import { createCoreWorkspacePanels } from "./panels";
 
 export const corePlugin: PiWebPlugin = {
   apiVersion: 1,
-  name: "PI WEB Core",
+  name: "Forgerie Core",
   activate: () => ({
     contributions: {
       actions: createCoreActions(),

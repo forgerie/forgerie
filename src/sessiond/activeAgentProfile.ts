@@ -8,7 +8,7 @@ export function createActiveAgentProfileDescriptor(agent: EffectivePiWebAgentCon
     throw new Error("Active agent profile command and directory must be valid for this host");
   }
   if (!hasValidSessionDirEnvKeys(agent.sessionDirEnvKeys)) {
-    throw new Error("Active agent profile session directory environment keys must use the explicit PI WEB policy");
+    throw new Error("Active agent profile session directory environment keys must use the explicit Forgerie policy");
   }
   const sessionDirEnvKeys = Object.freeze([...agent.sessionDirEnvKeys]);
   const revisionInput = JSON.stringify({

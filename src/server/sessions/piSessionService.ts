@@ -95,7 +95,7 @@ export interface PiSessionLogger {
 const noopLogger: PiSessionLogger = { info() { /* no-op */ } };
 const DEFAULT_UNREAD_PUBLICATION_RETRY_MS = 1_000;
 /**
- * User-facing names for the two phases of session startup PI WEB can prove it
+ * User-facing names for the two phases of session startup Forgerie can prove it
  * is inside: it awaits exactly one call for each, so the phase is a fact rather
  * than a guess. Deliberately free of internal symbol names and file paths.
  */
@@ -104,7 +104,7 @@ const STARTUP_PHASE_EXTENSIONS = "Loading session extensions";
 /**
  * Appended to whichever phase is running when a background provider catalog
  * refresh happens to be in flight. It is stated as a concurrent fact, never as
- * the cause: PI WEB can verify that a refresh is running, but not that this
+ * the cause: Forgerie can verify that a refresh is running, but not that this
  * particular startup is waiting on it.
  */
 const STARTUP_CONCURRENT_CATALOG_REFRESH = "provider model lists are refreshing";
@@ -3121,7 +3121,7 @@ export class PiSessionService implements SessionRouteService {
       const added = this.notificationStore.addNotification(generation, message, type);
       this.publishNotificationMutations(added.mutations);
     };
-    // PI WEB owns the browser-facing dialog, notification, and text-formatting
+    // Forgerie owns the browser-facing dialog, notification, and text-formatting
     // boundaries: the three dialog primitives park daemon-held Promises that
     // the browser answers, while every other UI method delegates to Pi's
     // headless defaults so unsupported surfaces cancel safely instead of

@@ -11,7 +11,7 @@ import { isNodeErrorWithCode } from "./pathSafety.js";
 import type { WorkspaceService } from "./workspaceService.js";
 
 /** Relative path, from a workspace root, of the optional repo-provided hook that runs before `git worktree remove`. */
-export const WORKTREE_PRE_REMOVE_HOOK_RELATIVE_PATH = ".pi-web/hooks/worktree-pre-remove";
+export const WORKTREE_PRE_REMOVE_HOOK_RELATIVE_PATH = ".forgerie/hooks/worktree-pre-remove";
 
 /** Executability probe for the pre-remove hook; injectable so deletion stays testable without a real filesystem. */
 export interface WorktreePreRemoveHookProbe {

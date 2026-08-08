@@ -26,8 +26,8 @@
       "node"
     ],
     "paths": {
-      "@jmfederico/pi-web/plugin-api": ["./src/plugin-api.ts"],
-      "@jmfederico/pi-web/plugin-api/unstable": ["./src/plugin-api/unstable.ts"]
+      "forgerie/plugin-api": ["./src/plugin-api.ts"],
+      "forgerie/plugin-api/unstable": ["./src/plugin-api/unstable.ts"]
     }
   },
   "include": [

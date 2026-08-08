@@ -5,7 +5,11 @@ description: Use this skill whenever the user asks for a new npm version, npm re
 
 # Publish npm packages via GitHub Actions
 
-The user explicitly does **not** want local npm publishing. For release requests, route publishing through the repository's GitHub Actions workflow, usually triggered by a published GitHub Release.
+## Forgerie local-only guard
+
+Forgerie is currently private and has no public repository or publish workflow. If the user requests a release, stop and explain that they must first choose a repository and npm package destination, remove `private: true`, and add a reviewed GitHub Actions publish workflow. Never publish from the local machine.
+
+After the user deliberately enables public distribution, route publishing through the repository's GitHub Actions workflow, usually triggered by a published GitHub Release.
 
 This project also uses Changesets for changelog generation. Release prep should consume `.changeset/*.md` fragments into `CHANGELOG.md` before the GitHub Release is created.
 
@@ -47,7 +51,7 @@ on:
   workflow_dispatch:
 ```
 
-For the `pi-web` repository, the expected workflow is `.github/workflows/publish.yml`; it publishes with `npm publish --access public --provenance` from GitHub Actions. Use the GitHub Release path by default.
+Forgerie intentionally has no `.github/workflows/publish.yml` while it remains local-only. Do not recreate one unless the user explicitly enables public distribution and chooses a destination.
 
 If there is no GitHub Actions publish workflow, stop and explain that one must be added or fixed. Do not fall back to local `npm publish`.
 

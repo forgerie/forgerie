@@ -35,7 +35,7 @@ describe("active agent profile descriptor", () => {
   it("rejects profile fields outside the host and explicit environment policy", () => {
     expect(() => createActiveAgentProfileDescriptor({ ...baseAgent, command: "./acme-agent" })).toThrow("must be valid for this host");
     expect(() => createActiveAgentProfileDescriptor({ ...baseAgent, dir: "relative/state" })).toThrow("must be valid for this host");
-    expect(() => createActiveAgentProfileDescriptor({ ...baseAgent, sessionDirEnvKeys: ["ARBITRARY_AGENT_SESSION_DIR"] })).toThrow("explicit PI WEB policy");
+    expect(() => createActiveAgentProfileDescriptor({ ...baseAgent, sessionDirEnvKeys: ["ARBITRARY_AGENT_SESSION_DIR"] })).toThrow("explicit Forgerie policy");
   });
 
   it("copies only the secret-free descriptor fields", () => {

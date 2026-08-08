@@ -32,10 +32,10 @@ describe("Docker development dependency synchronization", () => {
     const first = await runSync(fixture);
 
     expect(first.exitCode).toBe(0);
-    expect(first.stderr).toContain("Synchronizing PI WEB Docker dev dependencies");
+    expect(first.stderr).toContain("Synchronizing Forgerie Docker dev dependencies");
     expect(await readFile(join(fixture.targetDir, "fresh", "version.txt"), "utf8")).toBe("0.80.6\n");
     expect(await readlink(join(fixture.targetDir, ".bin", "fresh"))).toBe("../fresh/version.txt");
-    expect(await readFile(join(fixture.targetDir, ".pi-web-dev-dependency-generation"), "utf8")).toBe("image-generation-2\n");
+    expect(await readFile(join(fixture.targetDir, ".forgerie-dev-dependency-generation"), "utf8")).toBe("image-generation-2\n");
     await expect(readFile(join(fixture.targetDir, "stale.txt"), "utf8")).rejects.toThrow();
 
     await writeFile(join(fixture.targetDir, "keep-on-current-generation.txt"), "kept\n", "utf8");
@@ -78,7 +78,7 @@ async function createSyncFixture(): Promise<SyncFixture> {
     writeFile(join(seedDir, "generation"), "image-generation-2\n", "utf8"),
     writeFile(join(seedDir, "node_modules", "fresh", "version.txt"), "0.80.6\n", "utf8"),
     writeFile(join(targetDir, "stale.txt"), "stale\n", "utf8"),
-    writeFile(join(targetDir, ".pi-web-dev-dependency-generation"), "image-generation-1\n", "utf8"),
+    writeFile(join(targetDir, ".forgerie-dev-dependency-generation"), "image-generation-1\n", "utf8"),
   ]);
   await symlink("../fresh/version.txt", join(seedDir, "node_modules", ".bin", "fresh"));
 
@@ -93,6 +93,7 @@ function runSync(fixture: SyncFixture): Promise<{ stdout: string; stderr: string
         ...process.env,
         PI_WEB_DEV_WORKSPACE_DIR: fixture.workspaceDir,
         PI_WEB_DEV_DEPENDENCY_SEED_DIR: fixture.seedDir,
+        PI_WEB_DOCKER_SYNC_PATH: process.env["PATH"] ?? "",
       },
     }, (error, stdout, stderr) => {
       const exitCode = typeof error === "object" && error !== null && "code" in error && typeof error.code === "number" ? error.code : 0;

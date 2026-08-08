@@ -241,7 +241,7 @@ describe("bootstrapAndFreezeGlobalExtensionProviders", () => {
     expect(baselineRegisteredIds).toEqual(["global-config", "global-native"]);
     expect(baselineProviderIds).toEqual(expect.arrayContaining(["global-config", "global-native", TEST_MODEL_PROVIDER]));
 
-    // Pi 0.82 rebuilds every provider inside refresh(), and PI WEB's background
+    // Pi 0.82 rebuilds every provider inside refresh(), and Forgerie's background
     // refresher calls it hourly, so ignored mutations must stay ignored across it.
     registerProjectConfigProvider(runtime);
     runtime.registerNativeProvider(nativeProvider("project-native"));

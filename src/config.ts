@@ -35,11 +35,11 @@ export interface LoadOptions {
 
 export function defaultPiWebConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   const xdgConfigHome = env["XDG_CONFIG_HOME"];
-  return join(xdgConfigHome !== undefined && xdgConfigHome !== "" ? xdgConfigHome : join(homedir(), ".config"), "pi-web", "config.json");
+  return join(xdgConfigHome !== undefined && xdgConfigHome !== "" ? xdgConfigHome : join(homedir(), ".config"), "forgerie", "config.json");
 }
 
 export function defaultPiWebDataDir(): string {
-  return join(homedir(), ".pi-web");
+  return join(homedir(), ".forgerie");
 }
 
 /**
@@ -49,7 +49,7 @@ export function defaultPiWebDataDir(): string {
  */
 export const DEFAULT_MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 
-export const DEFAULT_UPLOADS_FOLDER = ".pi-web/uploads";
+export const DEFAULT_UPLOADS_FOLDER = ".forgerie/uploads";
 
 /**
  * Default auto-cancel delay for extension dialogs whose extension set no
@@ -136,7 +136,7 @@ export function loadPiWebConfig(options: LoadOptions = {}): LoadedPiWebConfig {
   if (!existsSync(path)) return { path, exists: false, config: {} };
 
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (!isRecord(parsed)) throw new Error(`PI WEB config must be a JSON object: ${path}`);
+  if (!isRecord(parsed)) throw new Error(`Forgerie config must be a JSON object: ${path}`);
 
   return { path, exists: true, config: parsePiWebConfig(parsed, path) };
 }
@@ -203,7 +203,7 @@ export function savePiWebConfig(config: PiWebConfig, options: LoadOptions = {}):
 function readExistingConfigObject(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (!isRecord(parsed)) throw new Error(`PI WEB config must be a JSON object: ${path}`);
+  if (!isRecord(parsed)) throw new Error(`Forgerie config must be a JSON object: ${path}`);
   return parsed;
 }
 
@@ -244,12 +244,12 @@ function parsePiWebConfig(value: Record<string, unknown>, path: string): PiWebCo
 
 function parseMaxUploadBytes(value: unknown, key: string, path = "environment"): number {
   const bytes = typeof value === "number" ? value : typeof value === "string" && value !== "" ? Number(value) : NaN;
-  if (!Number.isInteger(bytes) || bytes < 1) throw new Error(`PI WEB config ${key} must be a positive integer: ${path}`);
+  if (!Number.isInteger(bytes) || bytes < 1) throw new Error(`Forgerie config ${key} must be a positive integer: ${path}`);
   return bytes;
 }
 
 function parseSpawnSessions(value: unknown, path: string): boolean {
-  if (typeof value !== "boolean") throw new Error(`PI WEB config spawnSessions must be a boolean: ${path}`);
+  if (typeof value !== "boolean") throw new Error(`Forgerie config spawnSessions must be a boolean: ${path}`);
   return value;
 }
 
@@ -266,7 +266,7 @@ export function spawnSessionsEnabled(env: NodeJS.ProcessEnv = process.env, confi
 }
 
 function parseSubsessions(value: unknown, path: string): boolean {
-  if (typeof value !== "boolean") throw new Error(`PI WEB config subsessions must be a boolean: ${path}`);
+  if (typeof value !== "boolean") throw new Error(`Forgerie config subsessions must be a boolean: ${path}`);
   return value;
 }
 
@@ -285,13 +285,13 @@ export function subsessionsEnabled(env: NodeJS.ProcessEnv = process.env, config:
 }
 
 function parseAskUser(value: unknown, path: string): boolean {
-  if (typeof value !== "boolean") throw new Error(`PI WEB config askUser must be a boolean: ${path}`);
+  if (typeof value !== "boolean") throw new Error(`Forgerie config askUser must be a boolean: ${path}`);
   return value;
 }
 
 function parseExtensionDialogsTimeoutMs(value: unknown, path: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new Error(`PI WEB config extensionDialogsTimeoutMs must be a non-negative integer: ${path}`);
+    throw new Error(`Forgerie config extensionDialogsTimeoutMs must be a non-negative integer: ${path}`);
   }
   return value;
 }
@@ -312,7 +312,7 @@ export function askUserEnabled(env: NodeJS.ProcessEnv = process.env, config: PiW
 const OFFLINE_ENV_KEYS = ["PI_WEB_OFFLINE", "PI_OFFLINE"] as const;
 
 /**
- * Whether the operator asked PI WEB (or pi itself) to stay offline, meaning
+ * Whether the operator asked Forgerie (or pi itself) to stay offline, meaning
  * background network access must be skipped. Matches the "set and non-empty"
  * semantics used for the other runtime-only env switches.
  *
@@ -325,7 +325,7 @@ export function offlineModeEnabled(env: NodeJS.ProcessEnv = process.env): boolea
 }
 
 function parseString(value: unknown, key: string, path: string): string {
-  if (typeof value !== "string" || value === "") throw new Error(`PI WEB config ${key} must be a non-empty string: ${path}`);
+  if (typeof value !== "string" || value === "") throw new Error(`Forgerie config ${key} must be a non-empty string: ${path}`);
   return value;
 }
 
@@ -335,9 +335,9 @@ const SAFE_BARE_AGENT_COMMAND_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._+-]*$/u;
 export type AgentPathHost = "current" | "portable";
 
 export function parseAgentConfig(value: unknown, path: string, pathHost: AgentPathHost = "current"): NonNullable<PiWebConfig["agent"]> {
-  if (!isRecord(value)) throw new Error(`PI WEB config agent must be an object: ${path}`);
+  if (!isRecord(value)) throw new Error(`Forgerie config agent must be an object: ${path}`);
   const unknownKey = Object.keys(value).find((key) => !AGENT_CONFIG_KEYS.has(key));
-  if (unknownKey !== undefined) throw new Error(`PI WEB config agent contains unknown key ${JSON.stringify(unknownKey)}: ${path}`);
+  if (unknownKey !== undefined) throw new Error(`Forgerie config agent contains unknown key ${JSON.stringify(unknownKey)}: ${path}`);
   const command = value["command"];
   const dir = value["dir"];
   return {
@@ -350,7 +350,7 @@ function parseAgentCommand(value: unknown, key: string, path: string, pathHost: 
   const command = parseString(value, key, path).trim();
   if (!isSafeAgentCommand(command, pathHost)) {
     const absoluteLabel = pathHost === "current" ? "host-absolute" : "absolute";
-    throw new Error(`PI WEB config ${key} must be a safe bare executable name or ${absoluteLabel} executable path: ${path}`);
+    throw new Error(`Forgerie config ${key} must be a safe bare executable name or ${absoluteLabel} executable path: ${path}`);
   }
   return command;
 }
@@ -360,7 +360,7 @@ function parseAgentDir(value: unknown, key: string, path: string, pathHost: Agen
   const isAbsoluteDir = pathHost === "current" ? isHostAbsoluteAgentDir(dir) : isPortableAbsoluteAgentPath(dir);
   if (!isAbsoluteDir && !isHomePath(dir, pathHost)) {
     const absoluteLabel = pathHost === "current" ? "a host-absolute" : "an absolute";
-    throw new Error(`PI WEB config ${key} must be ${absoluteLabel} path or start with ~: ${path}`);
+    throw new Error(`Forgerie config ${key} must be ${absoluteLabel} path or start with ~: ${path}`);
   }
   return dir;
 }
@@ -369,7 +369,7 @@ function resolveAgentDirPath(value: string, env: NodeJS.ProcessEnv, key: string,
   const parsed = parseAgentDir(value, key, path, "current");
   const expanded = expandHomePath(parsed, env);
   if (!isHostAbsoluteAgentDir(expanded)) {
-    throw new Error(`PI WEB config ${key} must resolve to a host-absolute path: ${path}`);
+    throw new Error(`Forgerie config ${key} must resolve to a host-absolute path: ${path}`);
   }
   return normalize(expanded);
 }
@@ -399,14 +399,14 @@ function isSafeAgentDirPath(value: string): boolean {
 
 function parsePort(value: unknown, key: string, path = "environment"): number {
   const port = typeof value === "number" ? value : typeof value === "string" && value !== "" ? Number(value) : NaN;
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`PI WEB config ${key} must be an integer from 1 to 65535: ${path}`);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Forgerie config ${key} must be an integer from 1 to 65535: ${path}`);
   return port;
 }
 
 function parseAllowedHosts(value: unknown, path: string): string[] | true {
   if (value === true) return true;
   if (!isNonEmptyStringArray(value)) {
-    throw new Error(`PI WEB config allowedHosts must be true or an array of non-empty strings: ${path}`);
+    throw new Error(`Forgerie config allowedHosts must be true or an array of non-empty strings: ${path}`);
   }
   return value;
 }
@@ -417,7 +417,7 @@ function parseAllowedHostsEnv(value: string): string[] | true {
 }
 
 export function parsePathAccessConfig(value: unknown, path: string): NonNullable<PiWebConfigValues["pathAccess"]> {
-  if (!isRecord(value)) throw new Error(`PI WEB config pathAccess must be an object: ${path}`);
+  if (!isRecord(value)) throw new Error(`Forgerie config pathAccess must be an object: ${path}`);
   const allowedPaths = value["allowedPaths"];
   return {
     ...(allowedPaths !== undefined ? { allowedPaths: parseAllowedPaths(allowedPaths, path) } : {}),
@@ -425,12 +425,12 @@ export function parsePathAccessConfig(value: unknown, path: string): NonNullable
 }
 
 function parseAllowedPaths(value: unknown, path: string): string[] {
-  if (!isNonEmptyStringArray(value)) throw new Error(`PI WEB config pathAccess.allowedPaths must be an array of non-empty strings: ${path}`);
+  if (!isNonEmptyStringArray(value)) throw new Error(`Forgerie config pathAccess.allowedPaths must be an array of non-empty strings: ${path}`);
   return value;
 }
 
 export function parseUploadsConfig(value: unknown, path: string): NonNullable<PiWebConfigValues["uploads"]> {
-  if (!isRecord(value)) throw new Error(`PI WEB config uploads must be an object: ${path}`);
+  if (!isRecord(value)) throw new Error(`Forgerie config uploads must be an object: ${path}`);
   const defaultFolder = value["defaultFolder"];
   return {
     ...(defaultFolder !== undefined ? { defaultFolder: parseWorkspaceRelativeFolder(defaultFolder, "uploads.defaultFolder", path) } : {}),
@@ -438,11 +438,11 @@ export function parseUploadsConfig(value: unknown, path: string): NonNullable<Pi
 }
 
 function parseWorkspaceRelativeFolder(value: unknown, key: string, path: string): string {
-  if (typeof value !== "string" || value.trim() === "") throw new Error(`PI WEB config ${key} must be a non-empty workspace-relative path: ${path}`);
-  if (isAbsoluteLike(value)) throw new Error(`PI WEB config ${key} must be workspace-relative: ${path}`);
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`Forgerie config ${key} must be a non-empty workspace-relative path: ${path}`);
+  if (isAbsoluteLike(value)) throw new Error(`Forgerie config ${key} must be workspace-relative: ${path}`);
   const parts = value.split(/[\\/]+/).filter((part) => part !== "" && part !== ".");
-  if (parts.length === 0) throw new Error(`PI WEB config ${key} must be a non-empty workspace-relative path: ${path}`);
-  if (parts.some((part) => part === "..")) throw new Error(`PI WEB config ${key} must not contain path traversal: ${path}`);
+  if (parts.length === 0) throw new Error(`Forgerie config ${key} must be a non-empty workspace-relative path: ${path}`);
+  if (parts.some((part) => part === "..")) throw new Error(`Forgerie config ${key} must not contain path traversal: ${path}`);
   return parts.join("/");
 }
 
@@ -460,7 +460,7 @@ function expandHomePath(value: string, env: NodeJS.ProcessEnv): string {
 
 function defaultAgentDirForCommand(command: string, env: NodeJS.ProcessEnv): string {
   if (usesPiCodingAgentStateCompatibility(command)) return expandHomePath("~/.pi/agent", env);
-  throw new Error(`PI WEB config agent.dir or ${PI_WEB_AGENT_DIR_ENV} is required when agent.command is ${JSON.stringify(command)}`);
+  throw new Error(`Forgerie config agent.dir or ${PI_WEB_AGENT_DIR_ENV} is required when agent.command is ${JSON.stringify(command)}`);
 }
 
 function envValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -490,24 +490,24 @@ function isAbsoluteLike(value: string): boolean {
 }
 
 function parseShortcuts(value: unknown, path: string): Record<string, string | null> {
-  if (!isRecord(value)) throw new Error(`PI WEB config shortcuts must be an object: ${path}`);
+  if (!isRecord(value)) throw new Error(`Forgerie config shortcuts must be an object: ${path}`);
   return Object.fromEntries(Object.entries(value).map(([actionId, shortcut]) => {
     if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) {
-      throw new Error(`PI WEB config shortcut values must be non-empty strings or null: ${path}`);
+      throw new Error(`Forgerie config shortcut values must be non-empty strings or null: ${path}`);
     }
     return [actionId, shortcut];
   }));
 }
 
 function parsePlugins(value: unknown, path: string): NonNullable<PiWebConfigValues["plugins"]> {
-  if (!isRecord(value) || Array.isArray(value)) throw new Error(`PI WEB config plugins must be an object: ${path}`);
+  if (!isRecord(value) || Array.isArray(value)) throw new Error(`Forgerie config plugins must be an object: ${path}`);
   return Object.fromEntries(Object.entries(value).map(([pluginId, config]) => {
-    if (!isPiWebPluginId(pluginId)) throw new Error(`PI WEB config plugin ids must match ${piWebPluginIdPattern.source}: ${path}`);
-    if (!isRecord(config) || Array.isArray(config)) throw new Error(`PI WEB config plugin entries must be objects: ${path}`);
+    if (!isPiWebPluginId(pluginId)) throw new Error(`Forgerie config plugin ids must match ${piWebPluginIdPattern.source}: ${path}`);
+    if (!isRecord(config) || Array.isArray(config)) throw new Error(`Forgerie config plugin entries must be objects: ${path}`);
     const enabled = config["enabled"];
-    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error(`PI WEB config plugin enabled values must be booleans: ${path}`);
+    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error(`Forgerie config plugin enabled values must be booleans: ${path}`);
     const settings = config["settings"];
-    if (settings !== undefined && (!isRecord(settings) || Array.isArray(settings))) throw new Error(`PI WEB config plugin settings must be objects: ${path}`);
+    if (settings !== undefined && (!isRecord(settings) || Array.isArray(settings))) throw new Error(`Forgerie config plugin settings must be objects: ${path}`);
     return [pluginId, config];
   }));
 }

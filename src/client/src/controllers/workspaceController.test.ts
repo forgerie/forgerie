@@ -58,7 +58,7 @@ function harness(initial: Partial<AppState>, loadWorkspaces: LoadWorkspaces): Ha
 }
 
 describe("WorkspaceController.refreshSelectedProjectTopology", () => {
-  it("surfaces a worktree created outside PI WEB in both the selected list and the per-project cache", async () => {
+  it("surfaces a worktree created outside Forgerie in both the selected list and the per-project cache", async () => {
     const repo = project("p1", "/repo");
     const main = workspace(repo.id, repo.path, { isMain: true });
     const created = workspace(repo.id, "/repo-feature");
@@ -220,7 +220,7 @@ describe("WorkspaceController.refreshSelectedProjectTopology", () => {
     expect(test.backgroundErrors).toEqual([{ message: `Failed to refresh workspaces for project ${repo.id} on local`, error: failure }]);
   });
 
-  it("re-points the selected workspace at refreshed metadata when its branch changed outside PI WEB", async () => {
+  it("re-points the selected workspace at refreshed metadata when its branch changed outside Forgerie", async () => {
     const repo = project("p1", "/repo");
     const main = workspace(repo.id, repo.path, { isMain: true });
     const selected = { ...workspace(repo.id, "/repo-feature"), label: "feature-a", branch: "feature-a" };

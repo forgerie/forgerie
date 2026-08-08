@@ -85,7 +85,7 @@ export class WorkspaceController {
 
   /**
    * Re-lists the selected project's workspaces so worktrees created or removed outside
-   * PI WEB become visible, without disturbing the current selection.
+   * Forgerie become visible, without disturbing the current selection.
    *
    * Deliberately never routes through `selectWorkspace`: that has no already-selected
    * guard, so re-picking the same workspace would still call `clearActiveSession()` and
@@ -138,7 +138,7 @@ export class WorkspaceController {
   }
 
   /**
-   * Re-points `selectedWorkspace` at its refreshed entry when metadata changed outside PI WEB
+   * Re-points `selectedWorkspace` at its refreshed entry when metadata changed outside Forgerie
    * (a branch switched in the worktree, say), so the workspace list and the surfaces that read
    * the selected workspace cannot disagree. Keyed by id, which is derived from the path, so
    * this never changes *which* workspace is selected and never triggers the session/terminal

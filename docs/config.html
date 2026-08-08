@@ -3,29 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Configure PI WEB — config files, uploads, paths, and session tools</title>
+    <title>Configure Forgerie — config files, uploads, paths, and session tools</title>
     <meta
       name="description"
-      content="Configure PI WEB config files, external path access, manual upload defaults, session daemon tools, plugins, shortcuts, and runtime environment variables."
+      content="Configure Forgerie config files, external path access, manual upload defaults, session daemon tools, plugins, shortcuts, and runtime environment variables."
     />
-    <link rel="canonical" href="https://pi-web.dev/config" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="PI WEB" />
-    <meta property="og:title" content="Configure PI WEB" />
+    <meta property="og:site_name" content="Forgerie" />
+    <meta property="og:title" content="Configure Forgerie" />
     <meta
       property="og:description"
-      content="Reference for PI WEB config files, path access allowlists, manual upload defaults, session daemon options, plugins, shortcuts, and environment variables."
+      content="Reference for Forgerie config files, path access allowlists, manual upload defaults, session daemon options, plugins, shortcuts, and environment variables."
     />
-    <meta property="og:url" content="https://pi-web.dev/config" />
-    <meta property="og:image" content="https://pi-web.dev/assets/pi-web-banner.png" />
-    <meta property="og:image:alt" content="PI WEB browser UI for persistent Pi Coding Agent sessions" />
+    <meta property="og:image:alt" content="Forgerie browser UI for persistent Pi Coding Agent sessions" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Configure PI WEB" />
+    <meta name="twitter:title" content="Configure Forgerie" />
     <meta
       name="twitter:description"
-      content="Reference for PI WEB config files, path access allowlists, manual upload defaults, session daemon options, plugins, shortcuts, and environment variables."
+      content="Reference for Forgerie config files, path access allowlists, manual upload defaults, session daemon options, plugins, shortcuts, and environment variables."
     />
-    <meta name="twitter:image" content="https://pi-web.dev/assets/pi-web-banner.png" />
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
     <script>
       (() => {
@@ -44,7 +40,7 @@
   <body>
     <header class="site-header">
       <nav class="container nav" aria-label="Main navigation">
-        <a class="brand" href="./" aria-label="PI WEB home">PI WEB</a>
+        <a class="brand" href="./" aria-label="Forgerie home">Forgerie</a>
         <div class="nav-links">
           <div class="nav-pages">
             <a href="remote-first">Remote-first</a>
@@ -55,7 +51,7 @@
             <a href="faq">FAQ</a>
           </div>
           <div class="nav-actions">
-            <a class="github-link" href="https://github.com/jmfederico/pi-web" aria-label="PI WEB on GitHub">
+            <a class="github-link" href="https://github.com/jmfederico/pi-web" aria-label="Upstream PI WEB on GitHub">
               <svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true">
                 <path
                   fill="currentColor"
@@ -77,10 +73,10 @@
       <section class="page-hero">
         <div class="container">
           <p class="eyebrow"><span class="pulse"></span> Configuration reference</p>
-          <h1>Configure PI WEB where your agents work.</h1>
+          <h1>Configure Forgerie where your agents work.</h1>
           <p>
-            PI WEB configuration covers the machine-local and project-local settings you usually need: bind address,
-            trusted development-host settings, UI preferences, PI WEB plugin enablement, file-explorer path access,
+            Forgerie configuration covers the machine-local and project-local settings you usually need: bind address,
+            trusted development-host settings, UI preferences, Forgerie plugin enablement, file-explorer path access,
             manual upload defaults, upload limits, Pi-compatible agent profiles and companion CLIs, and session-daemon tools.
           </p>
         </div>
@@ -111,28 +107,28 @@
           <div class="doc-content">
             <section id="files">
               <h2>Config files</h2>
-              <p>PI WEB uses a global config file for machine-local settings and a project-local file for repository settings.</p>
+              <p>Forgerie uses a global config file for machine-local settings and a project-local file for repository settings.</p>
               <ul>
-                <li><strong>Global config:</strong> <code>$PI_WEB_CONFIG</code>, or <code>$XDG_CONFIG_HOME/pi-web/config.json</code>, or <code>~/.config/pi-web/config.json</code>.</li>
+                <li><strong>Global config:</strong> <code>$PI_WEB_CONFIG</code>, or <code>$XDG_CONFIG_HOME/forgerie/config.json</code>, or <code>~/.config/forgerie/config.json</code>.</li>
                 <li><strong>Project config:</strong> <code>&lt;project&gt;/.pi-web/config.json</code> for commit-able project settings.</li>
               </ul>
               <p>
-                Each PI WEB machine has its own config. When using Fleet/machine federation, Settings uses the selected
+                Each Forgerie machine has its own config. When using Fleet/machine federation, Settings uses the selected
                 machine for config that affects work running there: the Pi-compatible agent profile and companion CLI,
-                session daemon tools, PI WEB plugin enablement, external path access, and upload defaults. Gateway/browser-only settings stay local to the gateway:
+                session daemon tools, Forgerie plugin enablement, external path access, and upload defaults. Gateway/browser-only settings stay local to the gateway:
                 keyboard shortcuts, remote machine registry/tokens, and gateway host/port/allowed-hosts.
               </p>
               <p>
-                Pi package settings are separate from PI WEB config. They live in Pi's package-manager settings on the
+                Pi package settings are separate from Forgerie config. They live in Pi's package-manager settings on the
                 target machine and are managed by Pi (<code>pi install</code>, <code>pi remove</code>, <code>pi update</code>) or
                 <strong>Settings → Pi packages</strong>. In a federated setup, <strong>Settings → Pi packages</strong>
-                targets the currently selected machine. The PI WEB <code>plugins</code> config key only enables or
-                disables discovered PI WEB browser plugins on the machine whose config you are editing; it does not
+                targets the currently selected machine. The Forgerie <code>plugins</code> config key only enables or
+                disables discovered Forgerie browser plugins on the machine whose config you are editing; it does not
                 install, remove, or update Pi packages.
               </p>
               <p>
                 If you installed services with a custom config path, rerun
-                <code>pi-web install --config /path/to/config.json</code> after changing that path or after upgrading from
+                <code>forgerie install --dev --config /path/to/config.json</code> after changing that path or after upgrading from
                 a version that only applied the custom path to the web service. This regenerates service files so the
                 web/API and session daemon use the same <code>PI_WEB_CONFIG</code>.
               </p>
@@ -141,13 +137,13 @@
             <section id="deployment-paths">
               <h2>Reverse-proxy deployment paths</h2>
               <p>
-                The deployment path is not a PI WEB config-file key or environment setting. The published client is
+                The deployment path is not a Forgerie config-file key or environment setting. The published client is
                 portable: one build works at <code>/</code> and at canonical trailing-slash prefixes such as
                 <code>/ai/</code> or <code>/test/ai/</code>.
               </p>
               <p>
                 For a nested deployment, redirect the slashless prefix to the trailing-slash URL, strip the prefix
-                before forwarding to PI WEB, and proxy authenticated HTTP and WebSocket traffic through the same
+                before forwarding to Forgerie, and proxy authenticated HTTP and WebSocket traffic through the same
                 location. Relative browser and PWA URLs then stay within that prefix. See the
                 <a href="install#reverse-proxy-prefix">reverse proxy deployment example</a> for complete Nginx
                 configuration.
@@ -177,8 +173,8 @@
                 <li><code>agent.command</code> / <code>agent.dir</code> / <code>spawnSessions</code> / <code>subsessions</code> / <code>askUser</code> / <code>extensionDialogsTimeoutMs</code>: restart the session daemon on that machine.</li>
                 <li><code>pathAccess</code>: applies on the next request; existing file views may need a browser refresh.</li>
                 <li><code>uploads.defaultFolder</code>: applies to newly opened Files upload dialogs and new direct drag/drop batches after config/workspace refresh.</li>
-                <li><code>plugins</code>: reload the browser tab after changing PI WEB plugin enablement.</li>
-                <li>Pi package install/remove/update: not a PI WEB config key; after a mutation, type <code>/reload</code> in each idle PI WEB session on the target machine to refresh ordinary Pi resources such as extensions, skills, prompt templates, themes, and context/system prompt files. Reload the browser page separately for PI WEB browser plugin changes. If a global Pi extension adds or removes a provider, or changes a provider's connection settings, manually restart <code>pi-web-sessiond.service</code>; <code>/reload</code> cannot change the startup provider baseline. A known provider refreshing only its own model list is applied without a restart. See <a href="#pi-extension-provider-baseline">Pi extension provider baseline</a>.</li>
+                <li><code>plugins</code>: reload the browser tab after changing Forgerie plugin enablement.</li>
+                <li>Pi package install/remove/update: not a Forgerie config key; after a mutation, type <code>/reload</code> in each idle Forgerie session on the target machine to refresh ordinary Pi resources such as extensions, skills, prompt templates, themes, and context/system prompt files. Reload the browser page separately for Forgerie browser plugin changes. If a global Pi extension adds or removes a provider, or changes a provider's connection settings, manually restart <code>forgerie-sessiond.service</code>; <code>/reload</code> cannot change the startup provider baseline. A known provider refreshing only its own model list is applied without a restart. See <a href="#pi-extension-provider-baseline">Pi extension provider baseline</a>.</li>
                 <li><code>shortcuts</code>: saved settings apply in the browser after config refresh/save.</li>
               </ul>
             </section>
@@ -186,8 +182,8 @@
             <section id="global-config">
               <h2>Global config example</h2>
               <p>
-                <code>pi-web install</code> creates the initial file. You can also save PI WEB config settings from
-                <strong>Settings → General</strong>, <strong>Settings → PI WEB plugins</strong>,
+                <code>forgerie install --dev</code> creates the initial file. You can also save Forgerie config settings from
+                <strong>Settings → General</strong>, <strong>Settings → Forgerie plugins</strong>,
                 <strong>Settings → Keyboard</strong>, and <strong>Settings → Session daemon</strong>. Machine-affecting
                 Settings fields target the selected machine; gateway host/port/allowed-hosts and keyboard shortcuts stay
                 local. Pi package operations live separately under <strong>Settings → Pi packages</strong>.
@@ -204,7 +200,7 @@
     "allowedPaths": ["~/SDKs", "/opt/reference"]
   },
   "uploads": {
-    "defaultFolder": ".pi-web/uploads"
+    "defaultFolder": ".forgerie/uploads"
   },
   "maxUploadBytes": 67108864,
   "agent": {
@@ -255,27 +251,27 @@
               </p>
               <p>
                 Project-local <code>uploads.defaultFolder</code> overrides the global upload destination for workspaces in
-                that project. PI WEB servers always include this workspace-effective value on local and federated
+                that project. Forgerie servers always include this workspace-effective value on local and federated
                 workspace responses.
               </p>
               <p>
-                Plugins may own separate project files, such as <code>.pi-web/tasks.json</code> for the built-in Workspace
+                Plugins may own separate project files, such as <code>.forgerie/tasks.json</code> for the built-in Workspace
                 Tasks plugin.
               </p>
-              <p>PI WEB also honors one optional project hook; see <a href="#worktree-pre-remove-hook">Worktree pre-remove hook</a>.</p>
+              <p>Forgerie also honors one optional project hook; see <a href="#worktree-pre-remove-hook">Worktree pre-remove hook</a>.</p>
             </section>
 
             <section id="worktree-pre-remove-hook">
               <h2>Worktree pre-remove hook</h2>
               <p>
-                Before PI WEB deletes a workspace (a secondary Git worktree), it gives the repository one chance to tear
+                Before Forgerie deletes a workspace (a secondary Git worktree), it gives the repository one chance to tear
                 down project-owned infrastructure tied to that worktree. To use the hook, provide an executable script at
-                <code>.pi-web/hooks/worktree-pre-remove</code> relative to the workspace where the deletion command runs.
-                PI WEB runs the deletion command from the project's main workspace when it exists, so commit the hook
+                <code>.forgerie/hooks/worktree-pre-remove</code> relative to the workspace where the deletion command runs.
+                Forgerie runs the deletion command from the project's main workspace when it exists, so commit the hook
                 there and it follows the repository.
               </p>
               <p>
-                When the hook is present and executable, PI WEB dispatches the hook and the removal as one composed
+                When the hook is present and executable, Forgerie dispatches the hook and the removal as one composed
                 terminal command:
               </p>
               <div class="code-card">
@@ -293,13 +289,13 @@
                 </li>
                 <li>
                   <strong>Absent hook:</strong> a missing file, or a file without the executable bit (for example after a
-                  checkout that lost it), is treated as no hook; PI WEB then runs a plain <code>git worktree remove</code>.
+                  checkout that lost it), is treated as no hook; Forgerie then runs a plain <code>git worktree remove</code>.
                 </li>
               </ul>
               <p>
                 The composed command is dispatched like any other workspace deletion — same
                 <code>Delete workspace: &lt;branch&gt;</code> terminal title — so hook output and failures are visible in
-                the terminal run. If PI WEB cannot probe the hook path because of an unexpected filesystem error, the
+                the terminal run. If Forgerie cannot probe the hook path because of an unexpected filesystem error, the
                 deletion request fails before any workspace terminals are closed.
               </p>
               <p>
@@ -309,11 +305,11 @@
               </p>
               <div class="code-card">
                 <div class="copy-row">
-                  <strong>.pi-web/hooks/worktree-pre-remove</strong>
+                  <strong>.forgerie/hooks/worktree-pre-remove</strong>
                   <button class="copy-button" data-copy="#worktree-pre-remove-hook-example">Copy</button>
                 </div>
                 <pre id="worktree-pre-remove-hook-example"><code>#!/bin/sh
-# .pi-web/hooks/worktree-pre-remove
+# .forgerie/hooks/worktree-pre-remove
 set -eu
 
 worktree_path="$1"
@@ -335,7 +331,7 @@ worktree_path="$1"
                 are edited for the selected machine; gateway host/port/allowed-hosts, keyboard shortcuts, and machine
                 registry/tokens stay local.
               </p>
-              <div class="table-scroll" role="region" aria-label="PI WEB configuration matrix" tabindex="0">
+              <div class="table-scroll" role="region" aria-label="Forgerie configuration matrix" tabindex="0">
                 <table class="config-matrix">
                   <thead>
                     <tr>
@@ -411,7 +407,7 @@ worktree_path="$1"
                       <td><code>PI_WEB_AGENT_DIR</code> (<code>PI_CODING_AGENT_DIR</code> for Pi compatibility)</td>
                       <td>Global/session daemon</td>
                       <td>Not supported locally</td>
-                      <td>Restart session daemon on that machine; affects auth, models, settings, sessions, Pi packages, and Pi-package-backed PI WEB plugins</td>
+                      <td>Restart session daemon on that machine; affects auth, models, settings, sessions, Pi packages, and Pi-package-backed Forgerie plugins</td>
                     </tr>
                     <tr>
                       <td>Agent can spawn sessions</td>
@@ -446,7 +442,7 @@ worktree_path="$1"
                       <td>Restart session daemon on that machine</td>
                     </tr>
                     <tr>
-                      <td>PI WEB plugin enablement/settings</td>
+                      <td>Forgerie plugin enablement/settings</td>
                       <td><code>plugins.&lt;id&gt;.enabled</code>, <code>plugins.&lt;id&gt;.settings</code></td>
                       <td>—</td>
                       <td>Global</td>
@@ -584,7 +580,7 @@ worktree_path="$1"
             <section id="path-access">
               <h2>External path access</h2>
               <p>
-                <code>pathAccess.allowedPaths</code> grants PI WEB's file explorer and absolute <code>@</code> path
+                <code>pathAccess.allowedPaths</code> grants Forgerie's file explorer and absolute <code>@</code> path
                 completions access to specific filesystem roots outside the current workspace. By default,
                 workspace-relative file reads stay inside the workspace and absolute paths are denied.
               </p>
@@ -595,7 +591,7 @@ worktree_path="$1"
                 <li>Windows absolute paths on Windows hosts, for example <code>C:\Users\dev\SDKs</code>.</li>
               </ul>
               <p>
-                When an absolute request is served, PI WEB expands <code>~</code>, canonicalizes configured roots with
+                When an absolute request is served, Forgerie expands <code>~</code>, canonicalizes configured roots with
                 <code>realpath</code>, requires roots to be existing directories, and rejects symlink escapes outside the
                 allowed roots.
               </p>
@@ -604,8 +600,8 @@ worktree_path="$1"
                 Gateway host, port, and allowed-hosts fields stay on the gateway config.
               </p>
               <div class="callout warning">
-                This is not a sandbox for the underlying Pi Coding Agent or your OS user. It only controls PI WEB UI/API
-                file exposure outside a workspace. Add only roots you trust PI WEB to list and read through the browser UI.
+                This is not a sandbox for the underlying Pi Coding Agent or your OS user. It only controls Forgerie UI/API
+                file exposure outside a workspace. Add only roots you trust Forgerie to list and read through the browser UI.
               </div>
             </section>
 
@@ -614,11 +610,11 @@ worktree_path="$1"
               <p>
                 The Files panel can upload files by dropping them onto the panel or by using the toolbar
                 <strong>Upload</strong> button. <code>uploads.defaultFolder</code> sets the workspace-effective default
-                destination. The built-in default is <code>.pi-web/uploads</code>; a project-local value overrides the
+                destination. The built-in default is <code>.forgerie/uploads</code>; a project-local value overrides the
                 global value for workspaces in that project.
               </p>
               <p>
-                The value must be a non-empty workspace-relative folder. PI WEB normalizes repeated separators and
+                The value must be a non-empty workspace-relative folder. Forgerie normalizes repeated separators and
                 backslashes to <code>/</code>, and rejects absolute paths or <code>..</code> traversal. In the upload
                 dialog only, clearing the destination field uploads that batch to the workspace root.
               </p>
@@ -629,7 +625,7 @@ worktree_path="$1"
               </p>
               <p>
                 For machine federation, Settings saves the global upload default on the selected machine. Remote
-                PI WEB servers always return workspace-effective upload defaults on workspace responses, and the Files
+                Forgerie servers always return workspace-effective upload defaults on workspace responses, and the Files
                 panel uses them as the default upload destination.
               </p>
             </section>
@@ -637,17 +633,17 @@ worktree_path="$1"
             <section id="agent-runtime">
               <h2>Pi-compatible agent profile and companion CLI</h2>
               <p>
-                <code>agent.command</code> selects the Pi-compatible companion CLI used by <code>pi-web doctor</code> and,
+                <code>agent.command</code> selects the Pi-compatible companion CLI used by <code>forgerie doctor</code> and,
                 when it can be generated safely, package-managed update commands. It defaults to <code>pi</code>. This
-                setting does <strong>not</strong> replace the embedded runtime: every session continues to use PI WEB's
+                setting does <strong>not</strong> replace the embedded runtime: every session continues to use Forgerie's
                 bundled Pi SDK.
               </p>
               <p>
                 <code>agent.dir</code> selects the Pi-compatible state profile used for auth providers, models, settings,
-                sessions, Pi packages, and Pi-package-backed PI WEB plugin discovery. It defaults to
+                sessions, Pi packages, and Pi-package-backed Forgerie plugin discovery. It defaults to
                 <code>~/.pi/agent</code> only for a canonical Pi companion command. The directory must use the data layout
-                supported by the bundled Pi SDK; PI WEB does not load or convert incompatible fork formats, migrate
-                profile data, or repartition PI WEB-managed archives when the profile changes.
+                supported by the bundled Pi SDK; Forgerie does not load or convert incompatible fork formats, migrate
+                profile data, or repartition Forgerie-managed archives when the profile changes.
               </p>
               <div class="code-card">
                 <pre><code>{
@@ -670,7 +666,7 @@ worktree_path="$1"
                 companion CLI, <code>PI_WEB_AGENT_DIR</code> sets the profile state directory, and
                 <code>PI_WEB_AGENT_SESSION_DIR</code> overrides session storage separately from <code>agent.dir</code>. The
                 legacy <code>PI_CODING_AGENT_DIR</code> and <code>PI_CODING_AGENT_SESSION_DIR</code> names apply only to a
-                canonical Pi companion command; PI WEB never derives ambient environment-variable names from an arbitrary
+                canonical Pi companion command; Forgerie never derives ambient environment-variable names from an arbitrary
                 command. Use the explicit <code>PI_WEB_AGENT_*</code> names for alternate commands.
                 <code>PI_WEB_AGENT_DIR</code> is an unconditional override, while a legacy
                 <code>PI_CODING_AGENT_DIR</code> override stops applying when Settings selects an alternate command so the
@@ -681,14 +677,14 @@ worktree_path="$1"
                 secret-free active profile stays fixed for the daemon lifetime. <strong>Settings → Session daemon</strong>
                 saves command and directory together as desired configuration and shows whether the profile is active,
                 needs a restart, or cannot be compared. Until the daemon restarts, sessions, Pi package operations,
-                Pi-package-backed PI WEB plugin discovery, status/install detection, and update planning continue to use
+                Pi-package-backed Forgerie plugin discovery, status/install detection, and update planning continue to use
                 the daemon-owned active profile; a web/API restart recovers that same active profile instead of applying
                 the newly saved values.
               </p>
               <div class="callout warning">
-                If the session daemon cannot report a valid active profile, profile-dependent Pi package and PI WEB plugin
+                If the session daemon cannot report a valid active profile, profile-dependent Pi package and Forgerie plugin
                 operations report unavailable instead of falling back to independently resolved config. A package-managed
-                update command is shown only when PI WEB can preserve the active profile with a recognized, safe Pi
+                update command is shown only when Forgerie can preserve the active profile with a recognized, safe Pi
                 companion CLI; otherwise the command is omitted. Restart the session daemon on the selected machine to
                 establish the next active profile.
               </div>
@@ -697,16 +693,16 @@ worktree_path="$1"
             <section id="pi-extension-provider-baseline">
               <h2>Pi extension provider baseline</h2>
               <p>
-                This policy applies to <strong>Pi runtime extensions</strong>, not PI WEB browser plugins. Pi extensions
+                This policy applies to <strong>Pi runtime extensions</strong>, not Forgerie browser plugins. Pi extensions
                 are runtime modules loaded by the session daemon and can call <code>pi.registerProvider(...)</code>;
-                PI WEB plugins are browser-side UI modules and never run in the session daemon.
+                Forgerie plugins are browser-side UI modules and never run in the session daemon.
               </p>
               <p>
-                PI WEB shares one model runtime across all sessions. When the session daemon starts, before any project
+                Forgerie shares one model runtime across all sessions. When the session daemon starts, before any project
                 resources load, it initializes global Pi extensions from the active agent profile
                 (<code>agent.dir</code>), including extensions supplied by globally configured Pi packages. Provider
                 registrations made by synchronous or awaited asynchronous extension factories during this bootstrap join
-                the shared baseline. PI WEB captures both config-form registrations
+                the shared baseline. Forgerie captures both config-form registrations
                 (<code>pi.registerProvider("id", config)</code>) and native-provider registrations
                 (<code>pi.registerProvider(provider)</code>), alongside Pi built-ins, environment credentials, and
                 providers from the active agent directory's <code>models.json</code>.
@@ -723,7 +719,7 @@ worktree_path="$1"
               <p>
                 One narrow update is applied after startup: a provider captured in the baseline may refresh
                 <strong>its own model list</strong>. Extensions that fetch an updated catalog typically re-send their
-                complete provider configuration, so PI WEB compares the incoming registration against the recorded
+                complete provider configuration, so Forgerie compares the incoming registration against the recorded
                 baseline and applies it only when both hold:
               </p>
               <ul>
@@ -760,7 +756,7 @@ worktree_path="$1"
                 Ignored mutations are written to the session-daemon log once per operation and provider ID, so a
                 replaying extension cannot flood the log. Applied model list refreshes are logged every time, with the
                 resulting model count, because each one changes shared runtime state. Neither entry contains provider
-                configuration or credentials, and PI WEB does not show a session warning or notification.
+                configuration or credentials, and Forgerie does not show a session warning or notification.
               </p>
               <p>
                 This prevents accidental provider, configuration, or credential contamination between projects; it is
@@ -769,12 +765,12 @@ worktree_path="$1"
               <p>
                 Configure providers before the daemon starts: use the active agent directory's
                 <code>models.json</code>, or install the Pi extension globally in that agent profile. Project Pi extensions
-                and project-level <code>models.json</code> files cannot add providers to PI WEB's shared baseline.
+                and project-level <code>models.json</code> files cannot add providers to Forgerie's shared baseline.
               </p>
               <div class="callout warning">
-                <strong>Restart required:</strong> after updating PI WEB—or after installing, removing, or updating a
-                global Pi extension that registers providers—manually restart <code>pi-web-sessiond.service</code>
-                (<code>systemctl --user restart pi-web-sessiond</code>). Restarting only the web/API service and running
+                <strong>Restart required:</strong> after updating Forgerie—or after installing, removing, or updating a
+                global Pi extension that registers providers—manually restart <code>forgerie-sessiond.service</code>
+                (<code>systemctl --user restart forgerie-sessiond</code>). Restarting only the web/API service and running
                 <code>/reload</code> do not rebuild the baseline.
               </div>
             </section>
@@ -782,14 +778,14 @@ worktree_path="$1"
             <section id="catalog-refresh">
               <h2>Background model catalog refresh</h2>
               <p>
-                PI WEB shares one model runtime across all sessions, and provider model catalogs are refreshed over the
+                Forgerie shares one model runtime across all sessions, and provider model catalogs are refreshed over the
                 network only on the session daemon's own background schedule. Requests never start a catalog fetch of
                 their own, so a slow or unreachable provider cannot stall opening the model selector, starting a session,
                 or the auth dialogs on its own account.
               </p>
               <p>
                 A refresh that is <em>already</em> in flight can still briefly delay starting or opening a session,
-                because the shared runtime is read while that refresh is running. PI WEB says so while you wait: the
+                because the shared runtime is read while that refresh is running. Forgerie says so while you wait: the
                 session's activity line names the startup step it is on and adds
                 <code>provider model lists are refreshing</code> when a background refresh is running at the same time.
                 That note reports what is happening concurrently, not a proven cause.
@@ -819,10 +815,10 @@ worktree_path="$1"
               </p>
               <p>
                 To turn the background refresh off entirely, set <code>PI_WEB_OFFLINE</code> or <code>PI_OFFLINE</code> in
-                the session daemon's environment and restart it. In offline mode PI WEB performs no provider catalog
+                the session daemon's environment and restart it. In offline mode Forgerie performs no provider catalog
                 network requests, including after logins, and sessions use the catalogs already stored in the agent
                 profile. The <code>PI_WEB_SKIP_VERSION_CHECK</code> and <code>PI_SKIP_VERSION_CHECK</code> keys do
-                <strong>not</strong> affect this refresh; they only suppress PI WEB release checks.
+                <strong>not</strong> affect this refresh; they only suppress Forgerie release checks.
               </p>
             </section>
 
@@ -831,7 +827,7 @@ worktree_path="$1"
               <h3><code>spawnSessions</code></h3>
               <p>
                 Boolean. Controls whether agents receive the <code>spawn_session</code> tool. Defaults to
-                <code>true</code>. Set it to <code>false</code> if you do not want an agent to start independent PI WEB sessions.
+                <code>true</code>. Set it to <code>false</code> if you do not want an agent to start independent Forgerie sessions.
               </p>
               <p>Environment override: <code>PI_WEB_SPAWN_SESSIONS=0|1|true|false</code>.</p>
 
@@ -858,7 +854,7 @@ worktree_path="$1"
                 A completion notice wakes an idle parent or queues behind in-flight work. Each notice lists any other
                 tracked children still working, so the parent can continue work or call
                 <code>yield_to_subsessions</code> again at the next join point. Further notices arrive automatically; do
-                not poll. The notice includes the child's final output when it fits. If that output is too long, PI WEB
+                not poll. The notice includes the child's final output when it fits. If that output is too long, Forgerie
                 omits it entirely instead of adding a truncated duplicate to the parent's context and directs the parent
                 to retrieve it with <code>check_subsession</code>.
               </p>
@@ -868,7 +864,7 @@ worktree_path="$1"
                 child works, agent-facing <code>check_subsession</code> and <code>read_subsession</code> withhold partial
                 output and direct the parent to continue independent work or yield at the join point. Output becomes
                 available when the child stops. Included output and transcripts follow a labeled marker and come last,
-                after PI WEB guidance.
+                after Forgerie guidance.
               </p>
               <p>
                 Both <code>spawn_session</code> and <code>spawn_subsession</code> accept an optional
@@ -911,7 +907,7 @@ worktree_path="$1"
                 option values or free text, or explicitly as unanswered.
               </p>
               <p>
-                PI WEB confirms a partial submission before sending it and names the unanswered questions. Only one ask
+                Forgerie confirms a partial submission before sending it and names the unanswered questions. Only one ask
                 can be open per session: a later <code>ask_user</code> call supersedes the earlier one, reports that fact
                 and its unanswered questions to the model, and turns the earlier card into a read-only transcript record.
                 Submitted and cancelled asks likewise remain readable in the transcript.
@@ -922,8 +918,8 @@ worktree_path="$1"
               </p>
               <div class="callout warning">
                 <strong>Restart required:</strong> restart the session daemon after changing <code>askUser</code> or after
-                upgrading PI WEB to a version that introduces this tool. For the systemd user service, run
-                <code>systemctl --user restart pi-web-sessiond</code>.
+                upgrading Forgerie to a version that introduces this tool. For the systemd user service, run
+                <code>systemctl --user restart forgerie-sessiond</code>.
               </div>
             </section>
 
@@ -932,11 +928,11 @@ worktree_path="$1"
               <p>
                 Pi extensions can ask the user questions from <code>ctx.ui.confirm()</code>,
                 <code>ctx.ui.select()</code>, and <code>ctx.ui.input()</code> — including from
-                <code>session_start</code> hooks and in-flight <code>tool_call</code> hooks. PI WEB renders these dialogs
+                <code>session_start</code> hooks and in-flight <code>tool_call</code> hooks. Forgerie renders these dialogs
                 inline in the session transcript and answers them through a dedicated session-daemon channel, never the
                 prompt queue, so a dialog parked inside a <code>tool_call</code> hook cannot deadlock the run. Dialog
                 support is always on; there is no enable flag. See
-                <a href="plugins#pi-extension-dialogs">Pi extension dialogs in PI WEB</a> for behavior details and author
+                <a href="plugins#pi-extension-dialogs">Pi extension dialogs in Forgerie</a> for behavior details and author
                 guidance.
               </p>
               <p>
@@ -949,7 +945,7 @@ worktree_path="$1"
               <div class="callout warning">
                 <strong>Restart required:</strong> <code>extensionDialogsTimeoutMs</code> is edited directly in the global
                 config file. Restart the session daemon after changing it — for the systemd user service, run
-                <code>systemctl --user restart pi-web-sessiond</code>.
+                <code>systemctl --user restart forgerie-sessiond</code>.
               </div>
             </section>
 
@@ -977,7 +973,7 @@ worktree_path="$1"
               <h2>Optional completion tools</h2>
               <p>
                 File and path <code>@</code> completions work without extra tools. If <code>fzf</code> is available on the
-                PI WEB server's <code>PATH</code>, PI WEB uses it to improve completion filtering and ranking; otherwise it
+                Forgerie server's <code>PATH</code>, Forgerie uses it to improve completion filtering and ranking; otherwise it
                 falls back to built-in ranking.
               </p>
               <div class="doc-actions">
@@ -992,7 +988,7 @@ worktree_path="$1"
 
     <footer class="site-footer">
       <div class="container footer-inner">
-        <span>PI WEB docs</span>
+        <span>Forgerie docs</span>
         <div class="footer-links">
           <a href="./">Home</a>
           <a href="remote-first">Remote-first</a>
@@ -1001,10 +997,9 @@ worktree_path="$1"
           <a href="config">Config</a>
           <a href="plugins">Plugins</a>
           <a href="faq">FAQ</a>
-          <a href="https://github.com/jmfederico/pi-web">GitHub</a>
+          <a href="https://github.com/jmfederico/pi-web">Upstream</a>
           <span class="version-switcher" role="group" aria-label="Documentation version">
-            <a class="version-switcher-option" data-version-option="stable" href="https://pi-web.dev/config" aria-current="true">Stable</a>
-            <a class="version-switcher-option" data-version-option="dev" href="https://pi-web.dev/dev/config">Dev</a>
+            <a class="version-switcher-option" data-version-option="stable" href="config.html" aria-current="true">Stable</a>
           </span>
         </div>
       </div>

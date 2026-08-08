@@ -22,7 +22,7 @@ afterEach(() => {
 
 describe("workspace upload helpers", () => {
   it("resolves effective upload defaults and workspace-relative paths", () => {
-    expect(effectiveWorkspaceUploadFolder(undefined)).toBe(".pi-web/uploads");
+    expect(effectiveWorkspaceUploadFolder(undefined)).toBe(".forgerie/uploads");
     expect(effectiveWorkspaceUploadFolder({ uploads: { defaultFolder: "manual/uploads" } })).toBe("manual/uploads");
     expect(workspaceEffectiveUploadFolder({ uploads: { defaultFolder: "project/uploads" } }, "global/uploads")).toBe("project/uploads");
     expect(workspaceEffectiveUploadFolder({}, "global/uploads")).toBe("global/uploads");

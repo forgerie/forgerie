@@ -9,12 +9,12 @@ import { describe, expect, it } from "vitest";
 const execFile = promisify(execFileCallback);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-describe("pi-web-docker entrypoint", () => {
+describe("forgerie-docker entrypoint", () => {
   // The entrypoint intentionally supports POSIX hosts, so Windows CI cannot execute it directly.
   const posixHostIt = it.skipIf(process.platform === "win32");
 
   posixHostIt("streams detached helper logs inline after scheduling runtime updates", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "pi-web-docker-entrypoint-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "forgerie-docker-entrypoint-"));
     try {
       const runtimeRoot = join(tempDir, "runtime");
       const binDir = join(tempDir, "bin");
@@ -23,11 +23,11 @@ describe("pi-web-docker entrypoint", () => {
       await mkdir(binDir);
       await writeFile(join(runtimeRoot, ".env"), [
         `PI_WEB_DOCKER_INSTALL_DIR=${runtimeRoot}`,
-        "COMPOSE_PROJECT_NAME=pi-web-test",
+        "COMPOSE_PROJECT_NAME=forgerie-test",
         "PI_WEB_UID=1000",
         "PI_WEB_GID=1000",
         "DOCKER_GID=998",
-        "PI_WEB_IMAGE=pi-web:test",
+        "PI_WEB_IMAGE=forgerie:test",
         "",
       ].join("\n"));
 
@@ -35,7 +35,7 @@ describe("pi-web-docker entrypoint", () => {
       await writeFile(fakeDockerPath, fakeDockerScript(dockerCallsPath));
       await chmod(fakeDockerPath, 0o755);
 
-      const { stdout, stderr } = await execFile(join(repoRoot, "docker/pi-web-docker"), ["update"], {
+      const { stdout, stderr } = await execFile(join(repoRoot, "docker/forgerie-docker"), ["update"], {
         env: {
           ...process.env,
           PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
@@ -47,15 +47,15 @@ describe("pi-web-docker entrypoint", () => {
       });
 
       const output = `${stdout}${stderr}`;
-      expect(output).toContain("Started detached PI WEB Docker helper: pi-web-docker-update-");
-      expect(output).toContain("Streaming detached PI WEB Docker helper logs inline.");
-      expect(output).toContain("Reconnect with: docker logs -f pi-web-docker-update-");
+      expect(output).toContain("Started detached Forgerie Docker helper: forgerie-docker-update-");
+      expect(output).toContain("Streaming detached Forgerie Docker helper logs inline.");
+      expect(output).toContain("Reconnect with: docker logs -f forgerie-docker-update-");
       expect(output).toContain("helper log: update in progress");
       expect(output).not.toContain("Follow progress with:");
 
       const dockerCalls = await readFile(dockerCallsPath, "utf8");
       expect(dockerCalls).toContain("__run-detached update");
-      expect(dockerCalls).toMatch(/(?:^|\n)logs -f pi-web-docker-update-\d{14}-\d+(?:\n|$)/);
+      expect(dockerCalls).toMatch(/(?:^|\n)logs -f forgerie-docker-update-\d{14}-\d+(?:\n|$)/);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

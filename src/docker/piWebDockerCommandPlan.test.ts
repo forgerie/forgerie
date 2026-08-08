@@ -9,7 +9,7 @@ import {
   validatePiWebDockerDevRootSafety,
 } from "./piWebDockerCommandPlan.js";
 
-describe("pi-web-docker command planning", () => {
+describe("forgerie-docker command planning", () => {
   it("plans runtime commands by default", () => {
     expect(parsePiWebDockerArgs(["status"])).toEqual({
       ok: true,
@@ -22,18 +22,18 @@ describe("pi-web-docker command planning", () => {
       ok: true,
       plan: { mode: "dev", command: "restart-sessiond", allowRoot: false, args: [] },
     });
-    expect(piWebDockerCommandPrefix(undefined)).toBe("pi-web-docker");
-    expect(piWebDockerCommandPrefix("runtime")).toBe("pi-web-docker");
-    expect(piWebDockerCommandPrefix("dev")).toBe("pi-web-docker --dev");
-    expect(piWebDockerCommand(undefined, "status")).toBe("pi-web-docker status");
-    expect(piWebDockerCommand("runtime", "update")).toBe("pi-web-docker update");
-    expect(piWebDockerCommand("dev", "status")).toBe("pi-web-docker --dev status");
+    expect(piWebDockerCommandPrefix(undefined)).toBe("forgerie-docker");
+    expect(piWebDockerCommandPrefix("runtime")).toBe("forgerie-docker");
+    expect(piWebDockerCommandPrefix("dev")).toBe("forgerie-docker --dev");
+    expect(piWebDockerCommand(undefined, "status")).toBe("forgerie-docker status");
+    expect(piWebDockerCommand("runtime", "update")).toBe("forgerie-docker update");
+    expect(piWebDockerCommand("dev", "status")).toBe("forgerie-docker --dev status");
   });
 
   it("keeps production install out of development mode", () => {
-    expect(parsePiWebDockerArgs(["install", "--install-dir", "/srv/pi-web-docker"])).toEqual({
+    expect(parsePiWebDockerArgs(["install", "--install-dir", "/srv/forgerie-docker"])).toEqual({
       ok: true,
-      plan: { mode: "runtime", command: "install", allowRoot: false, args: ["--install-dir", "/srv/pi-web-docker"] },
+      plan: { mode: "runtime", command: "install", allowRoot: false, args: ["--install-dir", "/srv/forgerie-docker"] },
     });
     expect(parsePiWebDockerArgs(["--dev", "install"])).toEqual({
       ok: false,
@@ -60,12 +60,12 @@ describe("pi-web-docker command planning", () => {
     });
   });
 
-  it("treats cli as the pi-web escape hatch", () => {
+  it("treats cli as the forgerie escape hatch", () => {
     expect(parsePiWebDockerArgs(["cli", "config", "show"])).toEqual({
       ok: true,
       plan: { mode: "runtime", command: "cli", allowRoot: false, args: ["config", "show"] },
     });
-    expect(parsePiWebDockerArgs(["cli"])).toEqual({ ok: false, errors: ["cli requires pi-web arguments"] });
+    expect(parsePiWebDockerArgs(["cli"])).toEqual({ ok: false, errors: ["cli requires forgerie arguments"] });
   });
 
   it("keeps the canonical user command surface parseable", () => {
@@ -110,7 +110,7 @@ describe("pi-web-docker command planning", () => {
     expect(runtimeHostPlan(["status"])).toEqual({ kind: "compose", args: ["ps"] });
     expect(runtimeHostPlan(["logs", "web"])).toEqual({ kind: "compose", args: ["logs", "-f", "web"] });
     expect(runtimeHostPlan(["shell"])).toEqual({ kind: "compose", args: ["exec", "web", "bash"] });
-    expect(runtimeHostPlan(["cli", "config", "show"])).toEqual({ kind: "compose", args: ["exec", "web", "pi-web", "config", "show"] });
+    expect(runtimeHostPlan(["cli", "config", "show"])).toEqual({ kind: "compose", args: ["exec", "web", "forgerie", "config", "show"] });
   });
 
   it("plans development host commands through the generated dev Compose environment", () => {
@@ -118,7 +118,7 @@ describe("pi-web-docker command planning", () => {
     expect(devHostPlan(["--dev", "status"])).toEqual({ kind: "compose", args: ["ps"], usesGeneratedEnv: true });
     expect(devHostPlan(["--dev", "logs", "data-init"])).toEqual({ kind: "compose", args: ["logs", "-f", "data-init"], usesGeneratedEnv: true });
     expect(devHostPlan(["--dev", "shell"])).toEqual({ kind: "compose", args: ["exec", "web", "bash"], usesGeneratedEnv: true });
-    expect(devHostPlan(["--dev", "cli", "config", "show"])).toEqual({ kind: "compose", args: ["exec", "web", "pi-web", "config", "show"], usesGeneratedEnv: true });
+    expect(devHostPlan(["--dev", "cli", "config", "show"])).toEqual({ kind: "compose", args: ["exec", "web", "forgerie", "config", "show"], usesGeneratedEnv: true });
     expect(devHostPlan(["--dev", "update"])).toEqual({
       kind: "composeSequence",
       usesGeneratedEnv: true,

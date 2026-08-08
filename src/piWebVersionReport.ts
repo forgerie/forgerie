@@ -6,7 +6,7 @@ import { SessionDaemonClient } from "./sessiond/sessionDaemonClient.js";
 import type { PiWebComponentStatus, PiWebInstallationInfo, PiWebVersionResponse } from "./shared/apiTypes.js";
 import { parsePiWebComponentStatus, parsePiWebVersionResponse } from "./shared/piWebStatusParsing.js";
 
-const PI_WEB_PACKAGE_NAME = "@jmfederico/pi-web";
+const PI_WEB_PACKAGE_NAME = "forgerie";
 const PI_WEB_VERSION_TIMEOUT_MS = 2000;
 const PI_WEB_VERSION_ENDPOINT_PATH = "/api/pi-web/version";
 const PI_WEB_STATUS_ENDPOINT_PATH = "/api/pi-web/status";
@@ -31,7 +31,7 @@ export function packageVersion(): string {
 }
 
 export async function printPiWebVersionReport(): Promise<void> {
-  console.log("PI WEB version");
+  console.log("Forgerie version");
   printInstalledPackageVersions();
   printRunningVersionInfo(await collectRunningVersionInfo());
 }
@@ -68,7 +68,7 @@ function webVersionEndpoint(): { endpoint?: string; error?: string } {
     const port = config.port ?? 8504;
     return { endpoint: `http://${urlHost(host)}:${String(port)}${PI_WEB_VERSION_ENDPOINT_PATH}` };
   } catch (error) {
-    return { error: `could not read PI WEB config: ${errorMessage(error)}` };
+    return { error: `could not read Forgerie config: ${errorMessage(error)}` };
   }
 }
 
@@ -96,7 +96,7 @@ async function fetchPiWebVersionResponse(endpoint: string): Promise<PiWebVersion
   if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
   const parsed: unknown = await response.json();
   const status = parsePiWebVersionResponse(parsed);
-  if (status === undefined) throw new Error("response did not include PI WEB version information");
+  if (status === undefined) throw new Error("response did not include Forgerie version information");
   return status;
 }
 

@@ -17,7 +17,7 @@ describe("Pi package settings helpers", () => {
   it("formats package metadata with Pi package terminology", () => {
     expect(piPackageScopeLabel(userPackage)).toBe("User scope");
     expect(piPackageScopeLabel(projectPackage)).toBe("Project scope");
-    expect(piPackageFilteredLabel(userPackage)).toBe("Available in this PI WEB process");
+    expect(piPackageFilteredLabel(userPackage)).toBe("Available in this Forgerie process");
     expect(piPackageFilteredLabel(projectPackage)).toBe("Filtered by current Pi package settings");
   });
 
@@ -47,9 +47,9 @@ describe("Pi package settings helpers", () => {
   it("describes the browser and session reload follow-up without requiring sessiond restarts", () => {
     const message = piPackageMutationFollowUpMessage("install");
 
-    expect(message).toContain("Type /reload in each idle PI WEB session");
+    expect(message).toContain("Type /reload in each idle Forgerie session");
     expect(message).toContain("extensions, skills, prompt templates, themes, and context/system prompt files");
-    expect(message).toContain("Reload the browser page separately for PI WEB browser plugin changes");
+    expect(message).toContain("Reload the browser page separately for Forgerie browser plugin changes");
     expect(message).not.toContain("session daemon");
     expect(message).not.toContain("sessiond");
   });
@@ -58,8 +58,8 @@ describe("Pi package settings helpers", () => {
     const message = piPackageMutationFollowUpMessage("update", remoteTarget);
 
     expect(message).toContain("Pi package updated on Lab Mac");
-    expect(message).toContain("each idle PI WEB session on Lab Mac");
-    expect(message).toContain("PI WEB browser plugin changes served by Lab Mac");
+    expect(message).toContain("each idle Forgerie session on Lab Mac");
+    expect(message).toContain("Forgerie browser plugin changes served by Lab Mac");
   });
 
   it("turns remote transport failures into package-management guidance", () => {

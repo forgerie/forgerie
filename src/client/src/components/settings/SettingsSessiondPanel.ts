@@ -83,7 +83,7 @@ export class SettingsSessiondPanel extends LitElement {
                 ?disabled=${this.loading || this.saving || agentCommandOverridden}
                 @input=${(event: Event) => { this.updateAgentDraft({ command: inputValue(event) }); }}
               >
-              <small>Set the Pi-compatible companion CLI used for doctor and update checks. The embedded session runtime remains PI WEB's bundled Pi SDK.</small>
+              <small>Set the Pi-compatible companion CLI used for doctor and update checks. The embedded session runtime remains Forgerie's bundled Pi SDK.</small>
             </label>
             <label class="field">
               <span class="field-heading">
@@ -100,7 +100,7 @@ export class SettingsSessiondPanel extends LitElement {
                 ?disabled=${this.loading || this.saving || agentDirLocked}
                 @input=${(event: Event) => { this.updateAgentDraft({ dir: inputValue(event) }); }}
               >
-              <small>Choose the Pi-compatible auth, models, settings, and sessions PI WEB reads. An alternate command and its required state directory are saved together.</small>
+              <small>Choose the Pi-compatible auth, models, settings, and sessions Forgerie reads. An alternate command and its required state directory are saved together.</small>
             </label>
             <footer class="form-actions">
               <button class="primary" type="submit" ?disabled=${this.loading || this.saving || (agentCommandOverridden && agentDirLocked)}>${this.saving ? "Saving…" : "Save agent profile"}</button>
@@ -309,13 +309,13 @@ export function sessiondPanelNotices(
     notices.push({
       type: "warning",
       title: `Pi-compatible agent profile restart required on ${context.targetLabel}`,
-      content: html`The desired profile differs from the active session-daemon profile. Run <code>pi-web restart</code> on that machine (or restart its session daemon service) to apply the command and state directory together.`,
+      content: html`The desired profile differs from the active session-daemon profile. Run <code>forgerie restart</code> on that machine (or restart its session daemon service) to apply the command and state directory together.`,
     });
   } else if (config !== undefined && activation === "unavailable") {
     notices.push({
       type: "info",
       title: `Active Pi-compatible agent profile unavailable on ${context.targetLabel}`,
-      content: "PI WEB cannot compare the desired profile with the running session daemon. Reload after the daemon is available.",
+      content: "Forgerie cannot compare the desired profile with the running session daemon. Reload after the daemon is available.",
     });
   }
   return notices;

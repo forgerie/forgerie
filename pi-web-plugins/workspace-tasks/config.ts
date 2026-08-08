@@ -1,4 +1,4 @@
-export const TASKS_CONFIG_PATH = ".pi-web/tasks.json";
+export const TASKS_CONFIG_PATH = ".forgerie/tasks.json";
 export const TASKS_CONFIG_VERSION = 1;
 
 const taskIdPattern = /^[a-z][a-z0-9.-]*$/u;

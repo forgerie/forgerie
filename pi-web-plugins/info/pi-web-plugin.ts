@@ -1,11 +1,11 @@
-// Skeleton of a PI WEB plugin: metadata plus contribution definitions.
+// Skeleton of a Forgerie plugin: metadata plus contribution definitions.
 //
 // Everything the bundled Info panel and action actually render lives in
 // infoInternals.ts. That file is replaceable implementation detail — when
 // copying this plugin as a starting point, keep this file's shape and swap
 // the internals for your own.
 
-import type { PiWebPlugin } from "@jmfederico/pi-web/plugin-api";
+import type { PiWebPlugin } from "forgerie/plugin-api";
 import { copyDiagnostics, renderInfoPanel } from "./infoInternals.js";
 
 const plugin: PiWebPlugin = {
@@ -16,7 +16,7 @@ const plugin: PiWebPlugin = {
       actions: [
         {
           id: "copy-diagnostics",
-          title: "Copy PI WEB Diagnostics",
+          title: "Copy Forgerie Diagnostics",
           description: "Copy version, installation, and status details for this machine, ready to paste into a bug report",
           group: "Info",
           run: (context) => copyDiagnostics(context),

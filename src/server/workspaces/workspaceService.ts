@@ -40,7 +40,7 @@ export class WorkspaceService {
   }
 
   /**
-   * Git keeps listing a linked worktree after its checkout directory is deleted outside PI WEB,
+   * Git keeps listing a linked worktree after its checkout directory is deleted outside Forgerie,
    * marking it `prunable`. Such an entry is not a usable workspace, so it is hidden rather than
    * offered as a selectable ghost. Listing stays read-only: we never run `git worktree prune`.
    * The project's own path is always kept so a project cannot end up with no workspace at all.

@@ -1,5 +1,10 @@
 #!/usr/bin/env sh
 set -eu
 
-npm install -g @jmfederico/pi-web --allow-scripts=node-pty
-pi-web install
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$repo_root"
+
+npm install
+npm run build
+npm link
+forgerie install --dev

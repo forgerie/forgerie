@@ -18,6 +18,7 @@ describe("production client build contents", () => {
       });
 
       const html = await readFile(join(outDir, "index.html"), "utf8");
+      expect(html).toContain("<title>Forgerie</title>");
       expect(html).toContain("interactive-widget=resizes-content");
       const references = htmlAssetReferences(html);
       expect(references).toContain("./favicon.svg");
@@ -28,6 +29,8 @@ describe("production client build contents", () => {
 
       const manifest: unknown = JSON.parse(await readFile(join(outDir, "manifest.webmanifest"), "utf8"));
       expect(manifest).toMatchObject({
+        name: "Forgerie",
+        short_name: "Forgerie",
         start_url: "./",
         scope: "./",
         icons: [

@@ -10,16 +10,16 @@ describe("settings-plugins-panel layout", () => {
     panel.targetLabel = "Lab Mac (remote machine)";
     panel.configResponse = configResponse({ plugins: { "remote-enabled": { enabled: true } } });
     panel.pluginsResponse = { plugins: [pluginInfo("remote-enabled", true)] };
-    panel.error = "Failed to load PI WEB plugin settings from Lab Mac: PI WEB plugins: timed out.";
+    panel.error = "Failed to load Forgerie plugin settings from Lab Mac: Forgerie plugins: timed out.";
     panel.savedMessage = "Config saved.";
 
     const rendered = flattenTemplateContent(panel.render());
 
     expectTextOrder(rendered, [
-      "PI WEB plugins",
-      "Enable or disable discovered PI WEB browser plugins on ",
+      "Forgerie plugins",
+      "Enable or disable discovered Forgerie browser plugins on ",
       "Lab Mac (remote machine)",
-      "Failed to load PI WEB plugin settings from Lab Mac: PI WEB plugins: timed out.",
+      "Failed to load Forgerie plugin settings from Lab Mac: Forgerie plugins: timed out.",
       "Config saved. Reload the browser tab to apply plugin changes.",
       "Trusted code warning:",
       "Config key on Lab Mac (remote machine):",
@@ -33,8 +33,8 @@ describe("settings-plugins-panel layout", () => {
 
     const rendered = flattenTemplateContent(panel.render());
 
-    expect(rendered).toContain("PI WEB plugin list unavailable for Lab Mac (remote machine). Use Reload to try again.");
-    expect(rendered).not.toContain("No PI WEB browser plugins discovered");
+    expect(rendered).toContain("Forgerie plugin list unavailable for Lab Mac (remote machine). Use Reload to try again.");
+    expect(rendered).not.toContain("No Forgerie browser plugins discovered");
     expect(rendered).not.toContain("Trusted code warning");
   });
 
@@ -45,8 +45,8 @@ describe("settings-plugins-panel layout", () => {
 
     const rendered = flattenTemplateContent(panel.render());
 
-    expect(rendered).toContain("No PI WEB browser plugins discovered on Lab Mac (remote machine).");
-    expect(rendered).not.toContain("PI WEB plugin list unavailable");
+    expect(rendered).toContain("No Forgerie browser plugins discovered on Lab Mac (remote machine).");
+    expect(rendered).not.toContain("Forgerie plugin list unavailable");
     expect(rendered).not.toContain("Trusted code warning");
   });
 

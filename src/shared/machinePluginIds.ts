@@ -9,7 +9,7 @@ export interface MachineScopedPluginIdParts {
 
 export function machineScopedPluginId(machineId: string, pluginId: string): string {
   if (machineId === "") throw new Error("Machine id is required");
-  if (!isPiWebPluginId(pluginId)) throw new Error(`Invalid PI WEB plugin id: ${pluginId}`);
+  if (!isPiWebPluginId(pluginId)) throw new Error(`Invalid Forgerie plugin id: ${pluginId}`);
   return `${MACHINE_PLUGIN_ID_PREFIX}${stringToHex(machineId)}.${pluginId}`;
 }
 

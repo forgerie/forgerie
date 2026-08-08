@@ -216,7 +216,7 @@ export class AuthController {
   private rejectRemoteOAuth(action: "login" | "logout", provider: AuthProviderOption): boolean {
     const machine = this.getState().selectedMachine;
     if (provider.authType !== "oauth" || machine?.kind !== "remote") return false;
-    const where = machine.baseUrl ?? "that remote PI WEB instance";
+    const where = machine.baseUrl ?? "that remote Forgerie instance";
     this.setState({ error: `OAuth ${action} for remote machines must be configured directly on ${where}.` });
     return true;
   }

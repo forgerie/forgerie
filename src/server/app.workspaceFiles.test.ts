@@ -57,8 +57,8 @@ describe("buildApp workspace file routes", () => {
     const workspace = workspacesResponse.json<Workspace[]>()[0];
     if (workspace === undefined) throw new Error("Expected workspace");
 
-    await mkdir(join(appTestContext.projectDir, ".pi-web"), { recursive: true });
-    await writeFile(join(appTestContext.projectDir, ".pi-web", "config.json"), `${JSON.stringify({ version: 1, pathAccess: { allowedPaths: [""] } }, null, 2)}\n`);
+    await mkdir(join(appTestContext.projectDir, ".forgerie"), { recursive: true });
+    await writeFile(join(appTestContext.projectDir, ".forgerie", "config.json"), `${JSON.stringify({ version: 1, pathAccess: { allowedPaths: [""] } }, null, 2)}\n`);
 
     const response = await appTestContext.app.inject({ method: "GET", url: `/api/projects/${project.id}/workspaces/${workspace.id}/files?q=sdk&scope=all` });
 
@@ -78,8 +78,8 @@ describe("buildApp workspace file routes", () => {
     await mkdir(externalDir);
     await writeFile(join(externalDir, "sdk.md"), "external sdk\n");
     await writeFile(deniedFile, "secret\n");
-    await mkdir(join(appTestContext.projectDir, ".pi-web"), { recursive: true });
-    await writeFile(join(appTestContext.projectDir, ".pi-web", "config.json"), `${JSON.stringify({ version: 1, pathAccess: { allowedPaths: [externalDir] } }, null, 2)}\n`);
+    await mkdir(join(appTestContext.projectDir, ".forgerie"), { recursive: true });
+    await writeFile(join(appTestContext.projectDir, ".forgerie", "config.json"), `${JSON.stringify({ version: 1, pathAccess: { allowedPaths: [externalDir] } }, null, 2)}\n`);
 
     const workspacesResponse = await appTestContext.app.inject({ method: "GET", url: `/api/projects/${project.id}/workspaces` });
     const workspace = workspacesResponse.json<Workspace[]>()[0];

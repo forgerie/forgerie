@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PiWebComponentStatus, PiWebStatusMessage, PiWebStatusResponse, PluginRuntimeState } from "@jmfederico/pi-web/plugin-api";
+import type { PiWebComponentStatus, PiWebStatusMessage, PiWebStatusResponse, PluginRuntimeState } from "forgerie/plugin-api";
 import { additionalCommands, fallbackDockerStatus, formatVersion, installationLabel, messageCount, recommendedCommand, shouldShowUpdatesPanel } from "./updatesLogic";
 
 function component(overrides: Partial<PiWebComponentStatus> = {}): PiWebComponentStatus {
@@ -16,13 +16,13 @@ function component(overrides: Partial<PiWebComponentStatus> = {}): PiWebComponen
 
 function status(overrides: Partial<PiWebStatusResponse> = {}): PiWebStatusResponse {
   return {
-    packageName: "@jmfederico/pi-web",
+    packageName: "forgerie",
     generatedAt: "2026-06-14T00:00:00.000Z",
     components: {
       web: component({ component: "web", label: "Web/UI" }),
       sessiond: component({ component: "sessiond", label: "Session daemon" }),
     },
-    release: { packageName: "@jmfederico/pi-web", updateAvailable: false },
+    release: { packageName: "forgerie", updateAvailable: false },
     commands: {},
     messages: [],
     ...overrides,
@@ -36,22 +36,22 @@ function stateWith(value: PiWebStatusResponse | undefined): PluginRuntimeState {
 describe("recommendedCommand", () => {
   it("recommends update & restart when an update is available", () => {
     const result = recommendedCommand(status({
-      release: { packageName: "@jmfederico/pi-web", updateAvailable: true },
-      commands: { update: "pi-web update && pi-web restart", restart: "pi-web restart" },
+      release: { packageName: "forgerie", updateAvailable: true },
+      commands: { update: "forgerie update && forgerie restart", restart: "forgerie restart" },
     }));
-    expect(result).toEqual({ label: "Update & restart everything", command: "pi-web update && pi-web restart" });
+    expect(result).toEqual({ label: "Update & restart everything", command: "forgerie update && forgerie restart" });
   });
 
   it("falls through to restart when an update is available but the update command is empty", () => {
     const result = recommendedCommand(status({
-      release: { packageName: "@jmfederico/pi-web", updateAvailable: true },
+      release: { packageName: "forgerie", updateAvailable: true },
       components: {
         web: component({ stale: true }),
         sessiond: component({ component: "sessiond", label: "Session daemon" }),
       },
-      commands: { update: "", restart: "pi-web restart" },
+      commands: { update: "", restart: "forgerie restart" },
     }));
-    expect(result).toEqual({ label: "Restart everything", command: "pi-web restart" });
+    expect(result).toEqual({ label: "Restart everything", command: "forgerie restart" });
   });
 
   it("recommends restart when the web component is stale", () => {
@@ -60,9 +60,9 @@ describe("recommendedCommand", () => {
         web: component({ stale: true }),
         sessiond: component({ component: "sessiond", label: "Session daemon" }),
       },
-      commands: { restart: "pi-web restart" },
+      commands: { restart: "forgerie restart" },
     }));
-    expect(result).toEqual({ label: "Restart everything", command: "pi-web restart" });
+    expect(result).toEqual({ label: "Restart everything", command: "forgerie restart" });
   });
 
   it("recommends restart when the session daemon is unavailable", () => {
@@ -71,9 +71,9 @@ describe("recommendedCommand", () => {
         web: component(),
         sessiond: component({ component: "sessiond", label: "Session daemon", available: false }),
       },
-      commands: { restart: "pi-web restart" },
+      commands: { restart: "forgerie restart" },
     }));
-    expect(result).toEqual({ label: "Restart everything", command: "pi-web restart" });
+    expect(result).toEqual({ label: "Restart everything", command: "forgerie restart" });
   });
 
   it("recommends restart when the session daemon is stale", () => {
@@ -82,27 +82,27 @@ describe("recommendedCommand", () => {
         web: component(),
         sessiond: component({ component: "sessiond", label: "Session daemon", stale: true }),
       },
-      commands: { restart: "pi-web restart" },
+      commands: { restart: "forgerie restart" },
     }));
-    expect(result).toEqual({ label: "Restart everything", command: "pi-web restart" });
+    expect(result).toEqual({ label: "Restart everything", command: "forgerie restart" });
   });
 
   it("returns nothing when everything is current and available", () => {
-    expect(recommendedCommand(status({ commands: { restart: "pi-web restart" } }))).toBeUndefined();
+    expect(recommendedCommand(status({ commands: { restart: "forgerie restart" } }))).toBeUndefined();
   });
 
   it("preserves explicit Docker command text", () => {
     expect(recommendedCommand(status({
-      release: { packageName: "@jmfederico/pi-web", updateAvailable: true },
-      commands: { update: "pi-web-docker update", restart: "pi-web-docker restart" },
-    }))).toEqual({ label: "Update & restart everything", command: "pi-web-docker update" });
+      release: { packageName: "forgerie", updateAvailable: true },
+      commands: { update: "forgerie-docker update", restart: "forgerie-docker restart" },
+    }))).toEqual({ label: "Update & restart everything", command: "forgerie-docker update" });
     expect(recommendedCommand(status({
       components: {
         web: component({ stale: true, installation: { kind: "docker", dockerMode: "dev" } }),
         sessiond: component({ component: "sessiond", label: "Session daemon", installation: { kind: "docker", dockerMode: "dev" } }),
       },
-      commands: { restart: "pi-web-docker --dev restart" },
-    }))).toEqual({ label: "Restart everything", command: "pi-web-docker --dev restart" });
+      commands: { restart: "forgerie-docker --dev restart" },
+    }))).toEqual({ label: "Restart everything", command: "forgerie-docker --dev restart" });
   });
 
   it("does not fabricate a restart command when one is not configured", () => {
@@ -121,59 +121,59 @@ describe("additionalCommands", () => {
   it("drops empty commands and the recommended command, preserving order", () => {
     const value = status({
       commands: {
-        update: "pi-web update",
-        restart: "pi-web restart",
+        update: "forgerie update",
+        restart: "forgerie restart",
         restartWeb: "",
-        restartSessiond: "pi-web restart sessiond",
-        status: "pi-web status",
+        restartSessiond: "forgerie restart sessiond",
+        status: "forgerie status",
       },
     });
-    const result = additionalCommands(value, { label: "Restart everything", command: "pi-web restart" });
+    const result = additionalCommands(value, { label: "Restart everything", command: "forgerie restart" });
     expect(result).toEqual([
-      { label: "Update", command: "pi-web update" },
-      { label: "Restart session daemon", command: "pi-web restart sessiond" },
-      { label: "Status", command: "pi-web status" },
+      { label: "Update", command: "forgerie update" },
+      { label: "Restart session daemon", command: "forgerie restart sessiond" },
+      { label: "Status", command: "forgerie status" },
     ]);
   });
 
   it("keeps all commands when there is no recommended command", () => {
-    const value = status({ commands: { update: "pi-web update", status: "pi-web status" } });
+    const value = status({ commands: { update: "forgerie update", status: "forgerie status" } });
     expect(additionalCommands(value, undefined)).toEqual([
-      { label: "Update", command: "pi-web update" },
-      { label: "Status", command: "pi-web status" },
+      { label: "Update", command: "forgerie update" },
+      { label: "Status", command: "forgerie status" },
     ]);
   });
 
   it("presents Docker runtime and development commands exactly as reported", () => {
     expect(additionalCommands(status({
       commands: {
-        update: "pi-web-docker update",
-        restart: "pi-web-docker restart",
-        restartWeb: "pi-web-docker restart-web",
-        restartSessiond: "pi-web-docker restart-sessiond",
-        status: "pi-web-docker status",
+        update: "forgerie-docker update",
+        restart: "forgerie-docker restart",
+        restartWeb: "forgerie-docker restart-web",
+        restartSessiond: "forgerie-docker restart-sessiond",
+        status: "forgerie-docker status",
       },
     }), undefined)).toEqual([
-      { label: "Update", command: "pi-web-docker update" },
-      { label: "Restart all", command: "pi-web-docker restart" },
-      { label: "Restart Web/UI", command: "pi-web-docker restart-web" },
-      { label: "Restart session daemon", command: "pi-web-docker restart-sessiond" },
-      { label: "Status", command: "pi-web-docker status" },
+      { label: "Update", command: "forgerie-docker update" },
+      { label: "Restart all", command: "forgerie-docker restart" },
+      { label: "Restart Web/UI", command: "forgerie-docker restart-web" },
+      { label: "Restart session daemon", command: "forgerie-docker restart-sessiond" },
+      { label: "Status", command: "forgerie-docker status" },
     ]);
 
     expect(additionalCommands(status({
       commands: {
-        update: "pi-web-docker --dev update",
-        restart: "pi-web-docker --dev restart",
-        restartWeb: "pi-web-docker --dev restart-web",
-        restartSessiond: "pi-web-docker --dev restart-sessiond",
-        status: "pi-web-docker --dev status",
+        update: "forgerie-docker --dev update",
+        restart: "forgerie-docker --dev restart",
+        restartWeb: "forgerie-docker --dev restart-web",
+        restartSessiond: "forgerie-docker --dev restart-sessiond",
+        status: "forgerie-docker --dev status",
       },
-    }), { label: "Update & restart everything", command: "pi-web-docker --dev update" })).toEqual([
-      { label: "Restart all", command: "pi-web-docker --dev restart" },
-      { label: "Restart Web/UI", command: "pi-web-docker --dev restart-web" },
-      { label: "Restart session daemon", command: "pi-web-docker --dev restart-sessiond" },
-      { label: "Status", command: "pi-web-docker --dev status" },
+    }), { label: "Update & restart everything", command: "forgerie-docker --dev update" })).toEqual([
+      { label: "Restart all", command: "forgerie-docker --dev restart" },
+      { label: "Restart Web/UI", command: "forgerie-docker --dev restart-web" },
+      { label: "Restart session daemon", command: "forgerie-docker --dev restart-sessiond" },
+      { label: "Status", command: "forgerie-docker --dev status" },
     ]);
   });
 });
@@ -245,11 +245,11 @@ describe("fallbackDockerStatus", () => {
     expect(fallback?.generatedAt).toBe("generated");
     expect(fallback?.components.web.installation).toEqual({ kind: "docker", dockerMode: "dev" });
     expect(fallback?.commands).toEqual({
-      update: "pi-web-docker --dev update",
-      restart: "pi-web-docker --dev restart",
-      restartWeb: "pi-web-docker --dev restart-web",
-      restartSessiond: "pi-web-docker --dev restart-sessiond",
-      status: "pi-web-docker --dev status",
+      update: "forgerie-docker --dev update",
+      restart: "forgerie-docker --dev restart",
+      restartWeb: "forgerie-docker --dev restart-web",
+      restartSessiond: "forgerie-docker --dev restart-sessiond",
+      status: "forgerie-docker --dev status",
     });
     expect(fallback?.messages[0]?.id).toBe("docker-status-compatibility");
   });
@@ -258,11 +258,11 @@ describe("fallbackDockerStatus", () => {
     const fallback = fallbackDockerStatus({ dockerMode: "runtime" });
     expect(fallback?.components.sessiond.installation).toEqual({ kind: "docker", dockerMode: "runtime" });
     expect(fallback?.commands).toEqual({
-      update: "pi-web-docker update",
-      restart: "pi-web-docker restart",
-      restartWeb: "pi-web-docker restart-web",
-      restartSessiond: "pi-web-docker restart-sessiond",
-      status: "pi-web-docker status",
+      update: "forgerie-docker update",
+      restart: "forgerie-docker restart",
+      restartWeb: "forgerie-docker restart-web",
+      restartSessiond: "forgerie-docker restart-sessiond",
+      status: "forgerie-docker status",
     });
   });
 
@@ -298,8 +298,8 @@ describe("installationLabel", () => {
   });
 
   it("includes source and scope for pi-package installs", () => {
-    expect(installationLabel({ kind: "pi-package", source: "npm:@jmfederico/pi-web", scope: "user" }))
-      .toBe("npm:@jmfederico/pi-web · user");
+    expect(installationLabel({ kind: "pi-package", source: "npm:forgerie", scope: "user" }))
+      .toBe("npm:forgerie · user");
   });
 
   it("defaults the source and omits scope when absent", () => {

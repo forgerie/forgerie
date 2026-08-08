@@ -369,7 +369,7 @@ describe("PluginRegistry", () => {
     expect(new Set(shortcuts.map(([, shortcut]) => shortcut)).size).toBe(shortcuts.length);
   });
 
-  it("collects built-in PI WEB themes from an in-app plugin", () => {
+  it("collects built-in Forgerie themes from an in-app plugin", () => {
     const registry = new PluginRegistry();
     registry.register({ id: "themes", plugin: themePackPlugin });
 
@@ -694,7 +694,7 @@ function createWorkspacePanelContext(machineId: string, prompt: WorkspacePanelCo
     activeTerminalCount: 0,
     selectedTerminalId: undefined,
     terminalAutoStart: false,
-    workspaceUploadDefaultFolder: ".pi-web/uploads",
+    workspaceUploadDefaultFolder: ".forgerie/uploads",
     onRefreshFiles: vi.fn(),
     onExpandDir: vi.fn(),
     onSelectFile: vi.fn(),
@@ -733,7 +733,7 @@ function testStatus(patch: Partial<SessionStatus> = {}): SessionStatus {
   };
 }
 
-function testFileTreeResponse(path = ".pi-web/relays"): FileTreeResponse {
+function testFileTreeResponse(path = ".forgerie/relays"): FileTreeResponse {
   return {
     path,
     entries: [],

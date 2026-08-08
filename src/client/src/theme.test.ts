@@ -41,9 +41,9 @@ const tokens = {
 } satisfies ThemeTokens;
 
 const themes = [
-  theme("pi-web-dark", "PI WEB Dark", "dark"),
-  theme("pi-web-light", "PI WEB Light", "light"),
-  theme("classic", "PI WEB Classic", "dark"),
+  theme("pi-web-dark", "Forgerie Dark", "dark"),
+  theme("pi-web-light", "Forgerie Light", "light"),
+  theme("classic", "Forgerie Classic", "dark"),
 ];
 
 const themePairs: QualifiedThemePairContribution[] = [
@@ -51,7 +51,7 @@ const themePairs: QualifiedThemePairContribution[] = [
     id: "themes:pi-web",
     pluginId: "themes",
     localId: "pi-web",
-    name: "PI WEB",
+    name: "Forgerie",
     light: "themes:pi-web-light",
     dark: "themes:pi-web-dark",
   },

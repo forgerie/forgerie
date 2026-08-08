@@ -88,7 +88,7 @@ export class SettingsGeneralPanel extends LitElement {
                 ${this.renderOverrideBadge("host")}
               </span>
               <input .value=${this.gatewayDraft.host} placeholder="127.0.0.1" autocomplete="off" spellcheck="false" @input=${(event: Event) => { this.updateGatewayDraft({ host: inputValue(event) }); }}>
-              <small>Address the web server should bind to. Leave empty to use PI WEB's default.</small>
+              <small>Address the web server should bind to. Leave empty to use Forgerie's default.</small>
             </label>
 
             <label class="field">
@@ -97,7 +97,7 @@ export class SettingsGeneralPanel extends LitElement {
                 ${this.renderOverrideBadge("port")}
               </span>
               <input .value=${this.gatewayDraft.port} inputmode="numeric" pattern="[0-9]*" placeholder="8504" autocomplete="off" @input=${(event: Event) => { this.updateGatewayDraft({ port: inputValue(event) }); }}>
-              <small>TCP port from 1 to 65535. Leave empty to use PI WEB's default.</small>
+              <small>TCP port from 1 to 65535. Leave empty to use Forgerie's default.</small>
             </label>
 
             <div class="field">
@@ -153,7 +153,7 @@ export class SettingsGeneralPanel extends LitElement {
                 <span>Default upload folder</span>
               </span>
               <input .value=${this.machineDraft.uploadDefaultFolder} placeholder=${DEFAULT_WORKSPACE_UPLOADS_FOLDER} autocomplete="off" spellcheck="false" @input=${(event: Event) => { this.updateMachineDraft({ uploadDefaultFolder: inputValue(event) }); }}>
-              <small>Workspace-relative folder for manual file uploads on ${this.targetLabel}. Leave empty to use PI WEB's default <code>${DEFAULT_WORKSPACE_UPLOADS_FOLDER}</code>.</small>
+              <small>Workspace-relative folder for manual file uploads on ${this.targetLabel}. Leave empty to use Forgerie's default <code>${DEFAULT_WORKSPACE_UPLOADS_FOLDER}</code>.</small>
             </label>
 
             ${this.renderMachineEffectiveConfig()}

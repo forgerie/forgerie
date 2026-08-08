@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const NPM_VERSION = "12.0.1";
-const MARKER = "pi-web-package-pty-ok";
+const MARKER = "forgerie-package-pty-ok";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -20,7 +20,7 @@ if (npmExecPath === undefined || npmExecPath === "") {
   throw new Error("npm_execpath is required; run this check through `npm run smoke:package-install`");
 }
 
-const root = await mkdtemp(join(tmpdir(), "pi-web-package-install-"));
+const root = await mkdtemp(join(tmpdir(), "forgerie-package-install-"));
 try {
   const packDir = join(root, "pack");
   const npmToolDir = join(root, "npm-tool");
@@ -57,7 +57,7 @@ try {
     "--no-fund",
   ], root);
 
-  const packageRoot = join(globalPrefix, "lib", "node_modules", "@jmfederico", "pi-web");
+  const packageRoot = join(globalPrefix, "lib", "node_modules", "forgerie");
   await smokeInstalledTerminalService(packageRoot);
   console.log(`Installed-package PTY smoke test passed with npm ${NPM_VERSION}.`);
 } finally {
@@ -75,7 +75,9 @@ async function runNpm(npmCliPath, args, cwd) {
 }
 
 function packageTarballFilename(output) {
-  const parsed = JSON.parse(output);
+  const json = output.match(/(?:^|\n)(\[[\s\S]*\])\s*$/)?.[1];
+  if (json === undefined) throw new Error("npm pack did not return JSON");
+  const parsed = JSON.parse(json);
   if (!Array.isArray(parsed) || parsed.length !== 1 || typeof parsed[0]?.filename !== "string") {
     throw new Error("npm pack returned an unexpected result");
   }

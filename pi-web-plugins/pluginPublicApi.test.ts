@@ -5,20 +5,20 @@ import { describe, expect, it } from "vitest";
 const pluginRoot = "pi-web-plugins";
 const forbiddenPatterns = [
   { pattern: /\bfetch\s*\(/u, message: "direct browser fetch" },
-  { pattern: /["'`][^"'`]*\/api\//u, message: "direct PI WEB /api URL" },
+  { pattern: /["'`][^"'`]*\/api\//u, message: "direct Forgerie /api URL" },
   { pattern: /piWebInternal/u, message: "legacy internal plugin context" },
-  { pattern: /(?:\.\.\/)+src\//u, message: "imports from PI WEB source internals" },
+  { pattern: /(?:\.\.\/)+src\//u, message: "imports from Forgerie source internals" },
 ];
 
-describe("bundled PI WEB plugins", () => {
-  it("use public plugin APIs instead of direct PI WEB internals", async () => {
+describe("bundled Forgerie plugins", () => {
+  it("use public plugin APIs instead of direct Forgerie internals", async () => {
     const violations: string[] = [];
     for (const file of await pluginSourceFiles(pluginRoot)) {
       const content = await readFile(file, "utf8");
       for (const { pattern, message } of forbiddenPatterns) {
         if (pattern.test(content)) violations.push(`${file}: ${message}`);
       }
-      if (content.includes("piWebUnstable") && !content.includes("@jmfederico/pi-web/plugin-api/unstable")) {
+      if (content.includes("piWebUnstable") && !content.includes("forgerie/plugin-api/unstable")) {
         violations.push(`${file}: piWebUnstable use without explicit unstable type import`);
       }
     }

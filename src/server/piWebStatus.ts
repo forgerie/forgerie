@@ -14,7 +14,8 @@ import { SessionDaemonClient } from "../sessiond/sessionDaemonClient.js";
 import { isHostAbsoluteAgentDir, isPiCompanionCommand, isSafeAgentCommandForHost, PI_CODING_AGENT_DIR_ENV } from "../config.js";
 import { createPiWebReleaseLookupCache, type PiWebReleaseLookup } from "./piWebReleaseLookupCache.js";
 
-const PI_WEB_PACKAGE_NAME = "@jmfederico/pi-web";
+const PI_WEB_PACKAGE_NAME = "forgerie";
+const FORGERIE_PUBLIC_DISTRIBUTION = process.env["FORGERIE_PUBLIC_DISTRIBUTION"] === "1";
 const PI_WEB_NPM_SOURCE = `npm:${PI_WEB_PACKAGE_NAME}`;
 const DEFAULT_VERSION = "0.0.0-dev";
 const VERSION_CHECK_TIMEOUT_MS = 5000;
@@ -41,26 +42,26 @@ const execFileAsync = promisify(execFile);
 const serviceRefs: Record<ServiceId, NativeServiceRef> = {
   sessiond: {
     id: "sessiond",
-    systemdName: "pi-web-sessiond.service",
-    launchdLabel: "com.pi-web.sessiond",
-    launchdPlistName: "com.pi-web.sessiond.plist",
+    systemdName: "forgerie-sessiond.service",
+    launchdLabel: "com.forgerie.sessiond",
+    launchdPlistName: "com.forgerie.sessiond.plist",
   },
   web: {
     id: "web",
-    systemdName: "pi-web.service",
-    launchdLabel: "com.pi-web.web",
-    launchdPlistName: "com.pi-web.web.plist",
+    systemdName: "forgerie-web.service",
+    launchdLabel: "com.forgerie.web",
+    launchdPlistName: "com.forgerie.web.plist",
   },
   uiDev: {
     id: "uiDev",
-    systemdName: "pi-web-ui-dev.service",
-    launchdLabel: "com.pi-web.ui-dev",
-    launchdPlistName: "com.pi-web.ui-dev.plist",
+    systemdName: "forgerie-ui-dev.service",
+    launchdLabel: "com.forgerie.ui-dev",
+    launchdPlistName: "com.forgerie.ui-dev.plist",
   },
 };
 
 const startServiceOrder: ServiceId[] = ["sessiond", "web", "uiDev"];
-// Restart web/UI before sessiond: when the restart command runs in a pi-web
+// Restart web/UI before sessiond: when the restart command runs in a forgerie
 // terminal (owned by sessiond), restarting sessiond kills the command, so any
 // services listed after it would never be restarted.
 const restartServiceOrder: ServiceId[] = ["web", "uiDev", "sessiond"];
@@ -362,7 +363,7 @@ function unavailableSessiond(error: string): PiWebComponentStatus {
 
 async function getLatestReleaseStatus(currentVersion: string, force: boolean): Promise<PiWebReleaseStatus> {
   const checkedAtMs = Date.now();
-  if (skipVersionCheck()) {
+  if (!FORGERIE_PUBLIC_DISTRIBUTION || skipVersionCheck()) {
     return { packageName: PI_WEB_PACKAGE_NAME, updateAvailable: false, checkedAt: new Date(checkedAtMs).toISOString(), skipped: true };
   }
 
@@ -409,7 +410,9 @@ async function commandsFor(components: PiWebStatusResponse["components"], option
   const restartWeb = serviceCommands.restartWeb ?? cliCommands.restart;
   const restartSessiond = serviceCommands.restartSessiond ?? cliCommands.restart;
   const status = serviceCommands.status ?? cliCommands.status;
-  const update = await updateCommandFor(installation, restart, options);
+  const update = FORGERIE_PUBLIC_DISTRIBUTION
+    ? await updateCommandFor(installation, restart, options)
+    : undefined;
 
   return {
     ...(update === undefined ? {} : { update }),
@@ -439,8 +442,8 @@ function dockerCommands(installation: PiWebInstallationInfo): PiWebStatusRespons
 }
 
 async function piWebCliCommands(installation: PiWebInstallationInfo | undefined): Promise<NativeServiceCommands> {
-  if (installation?.kind !== "npm-global" || !(await hasCommand("pi-web"))) return {};
-  return { restart: "pi-web restart", status: "pi-web status" };
+  if (installation?.kind !== "npm-global" || !(await hasCommand("forgerie"))) return {};
+  return { restart: "forgerie restart", status: "forgerie status" };
 }
 
 function restartCommandFor(installation: PiWebInstallationInfo | undefined, serviceCommands: NativeServiceCommands, cliCommands: NativeServiceCommands): string | undefined {
@@ -451,8 +454,9 @@ function restartCommandFor(installation: PiWebInstallationInfo | undefined, serv
 export async function updateCommandFor(installation: PiWebInstallationInfo | undefined, restartCommand: string | undefined, options: {
   activeAgentProfile: ActiveAgentProfileDescriptor | undefined;
   hasCommand: (command: string) => Promise<boolean>;
+  publicDistribution?: boolean;
 }): Promise<string | undefined> {
-  if (restartCommand === undefined) return undefined;
+  if (options.publicDistribution !== true || restartCommand === undefined) return undefined;
   if (installation?.kind === "pi-package") {
     const profile = options.activeAgentProfile;
     if (profile === undefined || !isSafeAgentCommandForHost(profile.command) || !isHostAbsoluteAgentDir(profile.dir) || !isPiCompanionCommand(profile.command)) return undefined;
@@ -477,9 +481,9 @@ async function nativeServiceCommands(): Promise<NativeServiceCommands> {
   const restartable = web.length === 0 ? [] : installedServiceRefs(installed, restartServiceOrder, restartServiceOrder);
   const status = installedServiceRefs(installed);
   return {
-    ...(restartable.length === 0 ? {} : { restart: restartNativeServicesCommand(backend, restartable, "pi-web-restart") }),
-    ...(web.length === 0 ? {} : { restartWeb: restartNativeServicesCommand(backend, web, "pi-web-restart-web") }),
-    ...(sessiond.length === 0 ? {} : { restartSessiond: restartNativeServicesCommand(backend, sessiond, "pi-web-restart-sessiond") }),
+    ...(restartable.length === 0 ? {} : { restart: restartNativeServicesCommand(backend, restartable, "forgerie-restart") }),
+    ...(web.length === 0 ? {} : { restartWeb: restartNativeServicesCommand(backend, web, "forgerie-restart-web") }),
+    ...(sessiond.length === 0 ? {} : { restartSessiond: restartNativeServicesCommand(backend, sessiond, "forgerie-restart-sessiond") }),
     ...(status.length === 0 ? {} : { status: statusNativeServicesCommand(backend, status) }),
   };
 }
@@ -515,7 +519,7 @@ function restartNativeServicesCommand(backend: NativeServiceBackendKind, refs: N
   // (the default `systemd-run` mode, not `--scope`). A scope would stay a child
   // of the calling shell and die with the terminal; a transient service is
   // reparented to the user service manager, so the restart finishes even when
-  // restarting the session daemon kills the pi-web terminal that launched it.
+  // restarting the session daemon kills the forgerie terminal that launched it.
   // `--collect` cleans the unit up afterwards, and the fixed `--unit` name makes
   // logs easy to find with `journalctl --user -u <unit>`.
   if (backend === "systemd") {
@@ -561,10 +565,10 @@ function buildMessages(components: PiWebStatusResponse["components"], release: P
     messages.push({
       id: "update-available",
       severity: "info",
-      title: "PI WEB update available",
+      title: "Forgerie update available",
       body: commands.update === undefined
-        ? `PI WEB ${release.latestVersion} is available${installedVersion === undefined ? "" : `; installed version is ${installedVersion}`}. Update PI WEB, then restart the services or processes for this installation.`
-        : `PI WEB ${release.latestVersion} is available${installedVersion === undefined ? "" : `; installed version is ${installedVersion}`}. Run the update command to update PI WEB and restart its services.`,
+        ? `Forgerie ${release.latestVersion} is available${installedVersion === undefined ? "" : `; installed version is ${installedVersion}`}. Update Forgerie, then restart the services or processes for this installation.`
+        : `Forgerie ${release.latestVersion} is available${installedVersion === undefined ? "" : `; installed version is ${installedVersion}`}. Run the update command to update Forgerie and restart its services.`,
       ...optionalMessageCommand(commands.update),
     });
   }
@@ -588,8 +592,8 @@ function buildMessages(components: PiWebStatusResponse["components"], release: P
       severity: "warning",
       title: "Session daemon version unavailable",
       body: commands.status === undefined
-        ? `PI WEB could not check the session daemon version${components.sessiond.error === undefined ? "." : `: ${components.sessiond.error}`}. Check the session daemon service or process that runs this installation.`
-        : `PI WEB could not check the session daemon version${components.sessiond.error === undefined ? "." : `: ${components.sessiond.error}`}`,
+        ? `Forgerie could not check the session daemon version${components.sessiond.error === undefined ? "." : `: ${components.sessiond.error}`}. Check the session daemon service or process that runs this installation.`
+        : `Forgerie could not check the session daemon version${components.sessiond.error === undefined ? "." : `: ${components.sessiond.error}`}`,
       ...optionalMessageCommand(commands.status),
     });
   } else if (components.sessiond.stale) {

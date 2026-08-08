@@ -379,7 +379,7 @@ function workspacePanelContext(patch: Partial<WorkspacePanelContext> = {}): Work
     activeTerminalCount: patch.activeTerminalCount ?? 0,
     selectedTerminalId: patch.selectedTerminalId,
     terminalAutoStart: patch.terminalAutoStart ?? false,
-    workspaceUploadDefaultFolder: patch.workspaceUploadDefaultFolder ?? ".pi-web/uploads",
+    workspaceUploadDefaultFolder: patch.workspaceUploadDefaultFolder ?? ".forgerie/uploads",
     onRefreshFiles: patch.onRefreshFiles ?? vi.fn<WorkspacePanelContext["onRefreshFiles"]>(),
     onExpandDir: patch.onExpandDir ?? vi.fn<WorkspacePanelContext["onExpandDir"]>(),
     onSelectFile: patch.onSelectFile ?? vi.fn<WorkspacePanelContext["onSelectFile"]>(),

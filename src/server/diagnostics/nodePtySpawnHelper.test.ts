@@ -40,9 +40,9 @@ describe("node-pty macOS spawn-helper diagnostics", () => {
 
     const formatted = formatNodePtyDarwinSpawnHelperCheck(check);
     expect(formatted.ok).toBe(false);
-    expect(formatted.lines).toContain(`  PI WEB tracking issue: ${PI_WEB_SPAWN_HELPER_ISSUE_URL}`);
+    expect(formatted.lines).toContain(`  Forgerie tracking issue: ${PI_WEB_SPAWN_HELPER_ISSUE_URL}`);
     expect(formatted.lines).toContain(`    chmod +x '${fixture.helperPath}'`);
-    expect(formatted.lines).toContain("  Then run `pi-web doctor` again and retry opening a terminal.");
+    expect(formatted.lines).toContain("  Then run `forgerie doctor` again and retry opening a terminal.");
     expect(formatted.lines.join("\n")).not.toContain("restart");
   });
 

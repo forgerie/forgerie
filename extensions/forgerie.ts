@@ -7,8 +7,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliPath = join(packageRoot, "dist", "cli.js");
-const serviceNames = ["pi-web-sessiond.service", "pi-web.service", "pi-web-ui-dev.service"];
-const macLogPaths = ["sessiond.log", "web.log", "ui-dev.log"].map((name) => join(homedir(), ".pi-web", "logs", name));
+const serviceNames = ["forgerie-sessiond.service", "forgerie-web.service", "forgerie-ui-dev.service"];
+const macLogPaths = ["sessiond.log", "web.log", "ui-dev.log"].map((name) => join(homedir(), ".forgerie", "logs", name));
 
 const subcommands = [
   "install",
@@ -66,7 +66,7 @@ async function runPiWeb(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ 
   if (existsSync(cliPath)) {
     return run(process.execPath, [cliPath, ...args], env);
   }
-  return run("pi-web", args, env);
+  return run("forgerie", args, env);
 }
 
 function showResult(ctx: { ui: { notify(message: string, type?: "info" | "warning" | "error" | "success"): void } }, title: string, result: { code: number; output: string }): void {
@@ -81,15 +81,15 @@ function isSubcommand(value: string): value is Subcommand {
 async function boundedLogs(): Promise<{ code: number; output: string }> {
   if (process.platform === "darwin") {
     const existingLogs = macLogPaths.filter((path) => existsSync(path));
-    if (existingLogs.length === 0) return { code: 1, output: "No PI WEB log files found in ~/.pi-web/logs." };
+    if (existingLogs.length === 0) return { code: 1, output: "No Forgerie log files found in ~/.forgerie/logs." };
     return run("tail", ["-n", "100", ...existingLogs]);
   }
   return run("journalctl", ["--user", ...serviceNames.flatMap((serviceName) => ["-u", serviceName]), "-n", "100", "--no-pager"]);
 }
 
 export default function piWebExtension(pi: ExtensionAPI): void {
-  pi.registerCommand("pi-web", {
-    description: "Manage PI WEB services: install, status, logs, restart, start, stop, doctor, version, open",
+  pi.registerCommand("forgerie", {
+    description: "Manage Forgerie services: install, status, logs, restart, start, stop, doctor, version, open",
     getArgumentCompletions(prefix: string): { value: string; label: string }[] | null {
       const [first = ""] = parseArgs(prefix);
       const items = subcommands
@@ -103,31 +103,31 @@ export default function piWebExtension(pi: ExtensionAPI): void {
       const rest = parsedArgs.slice(1);
 
       if (subcommand === "help") {
-        ctx.ui.notify(`PI WEB commands:\n\n${subcommands.map((command) => `/pi-web ${command}`).join("\n")}\n\nLogs are bounded to the last 100 service log lines in the Pi command. Use \`pi-web logs\` in a shell to follow logs.`, "info");
+        ctx.ui.notify(`Forgerie commands:\n\n${subcommands.map((command) => `/forgerie ${command}`).join("\n")}\n\nLogs are bounded to the last 100 service log lines in the Pi command. Use \`forgerie logs\` in a shell to follow logs.`, "info");
         return;
       }
 
       if (subcommand === "open") {
-        ctx.ui.notify("PI WEB default URL: http://127.0.0.1:8504", "info");
+        ctx.ui.notify("Forgerie default URL: http://127.0.0.1:8504", "info");
         return;
       }
 
       if (!isSubcommand(subcommand)) {
-        ctx.ui.notify(`Unknown pi-web command: ${subcommand}. Try /pi-web help.`, "error");
+        ctx.ui.notify(`Unknown forgerie command: ${subcommand}. Try /forgerie help.`, "error");
         return;
       }
 
       if (subcommand === "stop" || subcommand === "uninstall") {
-        const ok = await ctx.ui.confirm(`pi-web ${subcommand}`, `Run pi-web ${subcommand}?`);
+        const ok = await ctx.ui.confirm(`forgerie ${subcommand}`, `Run forgerie ${subcommand}?`);
         if (!ok) return;
       }
 
       if (subcommand === "logs") {
-        showResult(ctx, "pi-web logs", await boundedLogs());
+        showResult(ctx, "forgerie logs", await boundedLogs());
         return;
       }
 
-      showResult(ctx, `pi-web ${subcommand}`, await runPiWeb([subcommand, ...rest]));
+      showResult(ctx, `forgerie ${subcommand}`, await runPiWeb([subcommand, ...rest]));
     },
   });
 }

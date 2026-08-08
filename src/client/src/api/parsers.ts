@@ -1382,7 +1382,7 @@ function parsePiWebConfigValues(value: unknown): PiWebConfigValues {
 
 function optionalAgent(value: unknown): PiWebConfigValues["agent"] | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid PI WEB agent field");
+  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid Forgerie agent field");
   return {
     ...optionalField("command", optionalString(value, "command")),
     ...optionalField("dir", optionalString(value, "dir")),
@@ -1393,12 +1393,12 @@ function optionalAllowedHosts(value: unknown): PiWebConfigValues["allowedHosts"]
   if (value === undefined) return undefined;
   if (value === true) return true;
   if (isStringArray(value)) return value;
-  throw new Error("Invalid PI WEB allowedHosts field");
+  throw new Error("Invalid Forgerie allowedHosts field");
 }
 
 function optionalPathAccess(value: unknown): PiWebConfigValues["pathAccess"] | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value)) throw new Error("Invalid PI WEB pathAccess field");
+  if (!isRecord(value)) throw new Error("Invalid Forgerie pathAccess field");
   const allowedPaths = value["allowedPaths"];
   return {
     ...optionalField("allowedPaths", optionalStringArray(allowedPaths, "pathAccess.allowedPaths")),
@@ -1408,12 +1408,12 @@ function optionalPathAccess(value: unknown): PiWebConfigValues["pathAccess"] | u
 function optionalStringArray(value: unknown, field: string): string[] | undefined {
   if (value === undefined) return undefined;
   if (isNonEmptyStringArray(value)) return value;
-  throw new Error(`Invalid PI WEB ${field} field`);
+  throw new Error(`Invalid Forgerie ${field} field`);
 }
 
 function optionalUploads(value: unknown): PiWebConfigValues["uploads"] | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid PI WEB uploads field");
+  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid Forgerie uploads field");
   return {
     ...optionalField("defaultFolder", optionalString(value, "defaultFolder")),
   };
@@ -1429,22 +1429,22 @@ function isNonEmptyStringArray(value: unknown): value is string[] {
 
 function optionalShortcuts(value: unknown): PiWebShortcutConfig | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid PI WEB shortcuts field");
+  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid Forgerie shortcuts field");
   return Object.fromEntries(Object.entries(value).map(([actionId, shortcut]) => {
-    if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) throw new Error("Invalid PI WEB shortcut field");
+    if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) throw new Error("Invalid Forgerie shortcut field");
     return [actionId, shortcut];
   }));
 }
 
 function optionalPlugins(value: unknown): PiWebPluginConfigMap | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid PI WEB plugins field");
+  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid Forgerie plugins field");
   return Object.fromEntries(Object.entries(value).map(([pluginId, config]) => {
-    if (!isRecord(config) || Array.isArray(config)) throw new Error("Invalid PI WEB plugin config field");
+    if (!isRecord(config) || Array.isArray(config)) throw new Error("Invalid Forgerie plugin config field");
     const enabled = config["enabled"];
-    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error("Invalid PI WEB plugin enabled field");
+    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error("Invalid Forgerie plugin enabled field");
     const settings = config["settings"];
-    if (settings !== undefined && (!isRecord(settings) || Array.isArray(settings))) throw new Error("Invalid PI WEB plugin settings field");
+    if (settings !== undefined && (!isRecord(settings) || Array.isArray(settings))) throw new Error("Invalid Forgerie plugin settings field");
     return [pluginId, config];
   }));
 }
@@ -1468,7 +1468,7 @@ function parsePiWebConfigEnvOverrides(value: unknown): PiWebConfigEnvOverrides {
 function optionalAgentDirSource(record: Record<string, unknown>): { agentDirSource?: PiWebAgentDirEnvSource } {
   const value = record["agentDirSource"];
   if (value === undefined) return {};
-  if (value !== "pi-web" && value !== "pi-compatibility") throw new Error("Invalid PI WEB agentDirSource field");
+  if (value !== "pi-web" && value !== "pi-compatibility") throw new Error("Invalid Forgerie agentDirSource field");
   return { agentDirSource: value };
 }
 
@@ -1529,7 +1529,7 @@ function parsePiWebPluginInfo(value: unknown): PiWebPluginInfo {
 }
 
 function parsePiWebPluginScope(value: unknown): PiWebPluginScope {
-  if (value !== "bundled" && value !== "local" && value !== "user" && value !== "project") throw new Error("Invalid PI WEB plugin scope");
+  if (value !== "bundled" && value !== "local" && value !== "user" && value !== "project") throw new Error("Invalid Forgerie plugin scope");
   return value;
 }
 
@@ -1613,11 +1613,11 @@ function optionalPiWebInstallationInfo(value: unknown): PiWebInstallationInfo | 
   if (value === undefined) return undefined;
   const record = requireRecord(value);
   const kind = requireString(record, "kind");
-  if (kind !== "pi-package" && kind !== "npm-global" && kind !== "local" && kind !== "docker" && kind !== "unknown") throw new Error("Invalid PI WEB installation kind");
+  if (kind !== "pi-package" && kind !== "npm-global" && kind !== "local" && kind !== "docker" && kind !== "unknown") throw new Error("Invalid Forgerie installation kind");
   const scope = record["scope"];
-  if (scope !== undefined && scope !== "user" && scope !== "project") throw new Error("Invalid PI WEB installation scope");
+  if (scope !== undefined && scope !== "user" && scope !== "project") throw new Error("Invalid Forgerie installation scope");
   const dockerMode = record["dockerMode"];
-  if (dockerMode !== undefined && dockerMode !== "runtime" && dockerMode !== "dev") throw new Error("Invalid PI WEB Docker mode");
+  if (dockerMode !== undefined && dockerMode !== "runtime" && dockerMode !== "dev") throw new Error("Invalid Forgerie Docker mode");
   return {
     kind,
     ...optionalField("path", optionalString(record, "path")),
@@ -1663,18 +1663,18 @@ function parsePiWebStatusMessage(value: unknown): PiWebStatusMessage {
 }
 
 function parsePiWebServiceComponent(value: unknown): PiWebServiceComponent {
-  if (value !== "web" && value !== "sessiond") throw new Error("Invalid PI WEB service component");
+  if (value !== "web" && value !== "sessiond") throw new Error("Invalid Forgerie service component");
   return value;
 }
 
 function parsePiWebCapabilities(value: unknown): PiWebCapability[] {
   const capabilities = parseKnownPiWebCapabilities(value);
-  if (capabilities === undefined) throw new Error("Invalid PI WEB capabilities");
+  if (capabilities === undefined) throw new Error("Invalid Forgerie capabilities");
   return capabilities;
 }
 
 function parsePiWebStatusSeverity(value: unknown): PiWebStatusSeverity {
-  if (value !== "info" && value !== "warning" && value !== "error") throw new Error("Invalid PI WEB status severity");
+  if (value !== "info" && value !== "warning" && value !== "error") throw new Error("Invalid Forgerie status severity");
   return value;
 }
 
@@ -1865,7 +1865,7 @@ export function parseReloaded(value: unknown): { reloaded: true } {
 function optionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
   const value = record[key];
   if (value === undefined) return undefined;
-  if (typeof value !== "boolean") throw new Error(`Invalid PI WEB ${key} field`);
+  if (typeof value !== "boolean") throw new Error(`Invalid Forgerie ${key} field`);
   return value;
 }
 

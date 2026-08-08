@@ -31,12 +31,12 @@ function productionInput(configured = false): ProductionNativeServicePlanInput {
     executables: {
       sessiond: {
         configuredCommand: configured ? "custom sessiond --flag" : undefined,
-        namedCommand: "pi-web-sessiond",
+        namedCommand: "forgerie-sessiond",
         bundledEntrypointPath: "/package/sessiond.js",
       },
       web: {
         configuredCommand: configured ? "custom web --flag" : undefined,
-        namedCommand: "pi-web-server",
+        namedCommand: "forgerie-server",
         bundledEntrypointPath: "/package/server.js",
       },
     },
@@ -183,7 +183,7 @@ describe("installed native-service mode and definition inspection", () => {
 
   it.each([
     'Environment="PI_WEB_CONFIG=/config" "PATH=/broken"',
-    "EnvironmentFile=/tmp/pi-web.env",
+    "EnvironmentFile=/tmp/forgerie.env",
   ])("rejects noncanonical systemd environment context: %s", (directive) => {
     const plan = developmentPlan("systemd");
     const definitions = renderedDefinitions(plan).map((definition) => ({
@@ -277,7 +277,7 @@ describe("native-service doctor planning and reporting", () => {
     expect(report.ok).toBe(true);
     expect(report.lines).toContain("Installed development native-service plan:");
     expect(report.plan?.services.flatMap((service) => service.prerequisites)).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ command: "pi-web-server" })]),
+      expect.arrayContaining([expect.objectContaining({ command: "forgerie-server" })]),
     );
   });
 

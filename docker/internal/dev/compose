@@ -6,15 +6,15 @@ log() {
 }
 
 die() {
-  log "pi-web Docker dev compose: $*"
+  log "forgerie Docker dev compose: $*"
   exit 1
 }
 
 script_dir=$(unset CDPATH; cd "$(dirname "$0")" && pwd -P)
 repo_root=$(unset CDPATH; cd "$script_dir/../../.." && pwd -P)
-dev_config_file=$repo_root/.pi-web/docker-compose-dev.local.env
-legacy_dev_env_file=$repo_root/.pi-web/docker-compose-dev.env
-generated_env_file=$repo_root/.pi-web/docker-compose-dev.generated.env
+dev_config_file=$repo_root/.forgerie/docker-compose-dev.local.env
+legacy_dev_env_file=$repo_root/.forgerie/docker-compose-dev.env
+generated_env_file=$repo_root/.forgerie/docker-compose-dev.generated.env
 
 # shellcheck source=../host-profile.sh
 # shellcheck disable=SC1091
@@ -85,20 +85,20 @@ write_initial_dev_config() {
   previous_umask=$(umask)
   umask 077
   cat >"$temp_config" <<'EOF'
-# PI WEB Docker dev settings. Safe to edit.
+# Forgerie Docker dev settings. Safe to edit.
 #
-# docker/pi-web-docker --dev creates this file once and does not
+# docker/forgerie-docker --dev creates this file once and does not
 # overwrite it. Put persistent dev Docker settings here.
 #
-# Precedence for values used by docker/pi-web-docker --dev:
+# Precedence for values used by docker/forgerie-docker --dev:
 #   1. this file
 #   2. previous generated values, when present
 #   3. current shell environment, on first generation only
-#   4. runtime installer env, usually ~/.local/share/pi-web-docker/.env
+#   4. runtime installer env, usually ~/.local/share/forgerie-docker/.env
 #   5. built-in defaults
 #
 # Generated effective values are written to:
-#   .pi-web/docker-compose-dev.generated.env
+#   .forgerie/docker-compose-dev.generated.env
 #
 # Bind addresses:
 # - 127.0.0.1 exposes only to this machine.
@@ -111,13 +111,13 @@ write_initial_dev_config() {
 # PI_WEB_DEV_API_PORT=8504
 # PI_WEB_DEV_PORT=8505
 #
-# PI_WEB_DEV_SESSIOND_SOCKET defaults to /data/pi-web/sessiond-dev.sock so the
+# PI_WEB_DEV_SESSIOND_SOCKET defaults to /data/forgerie/sessiond-dev.sock so the
 # dev session daemon does not collide with a runtime stack sharing the same
 # data directory. Override only if you intentionally want a different path.
-# PI_WEB_DEV_SESSIOND_SOCKET=/data/pi-web/sessiond-dev.sock
+# PI_WEB_DEV_SESSIOND_SOCKET=/data/forgerie/sessiond-dev.sock
 #
 # Shared Docker/runtime-style defaults may also be set here:
-# PI_WEB_DOCKER_DATA_DIR=/absolute/path/to/pi-web-docker/data
+# PI_WEB_DOCKER_DATA_DIR=/absolute/path/to/forgerie-docker/data
 # PI_WEB_DOCKER_EXTRA_HOST_PATHS="/absolute/path/one /absolute/path/two"
 #
 # PI_WEB_UID and PI_WEB_GID default to the current host user so
@@ -216,10 +216,10 @@ fi
 
 runtime_env_file=${PI_WEB_DOCKER_RUNTIME_ENV_FILE:-}
 if [ -z "$runtime_env_file" ] && [ -n "${HOME:-}" ]; then
-  runtime_env_file=$HOME/.local/share/pi-web-docker/.env
+  runtime_env_file=$HOME/.local/share/forgerie-docker/.env
 fi
 
-mkdir -p "$repo_root/.pi-web" || die "could not create .pi-web directory"
+mkdir -p "$repo_root/.forgerie" || die "could not create .forgerie directory"
 write_initial_dev_config
 
 host_uid=$(id -u 2>/dev/null || printf '0')
@@ -227,15 +227,15 @@ host_gid=$(id -g 2>/dev/null || printf '0')
 pi_web_uid=$(value_from_config_or_generated_or_env_or_default PI_WEB_UID "$host_uid")
 pi_web_gid=$(value_from_config_or_generated_or_env_or_default PI_WEB_GID "$host_gid")
 docker_gid=$(value_from_config_or_generated_or_env_or_runtime_or_default DOCKER_GID "$(pi_web_docker_host_detect_docker_gid)")
-default_data_dir=${HOME:-$repo_root/.pi-web}/.local/share/pi-web-docker/data
+default_data_dir=${HOME:-$repo_root/.forgerie}/.local/share/forgerie-docker/data
 pi_web_data_dir=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_DOCKER_DATA_DIR "$default_data_dir")
 pi_web_extra_host_paths=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_DOCKER_EXTRA_HOST_PATHS "")
 pi_web_opensuse_image=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_OPENSUSE_IMAGE opensuse/tumbleweed)
 pi_web_nodejs_major=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_NODEJS_MAJOR 22)
 pi_web_nodejs_repo=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_NODEJS_REPO auto)
 pi_web_extra_zypper_packages=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_EXTRA_ZYPPER_PACKAGES "")
-pi_web_dev_image=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_DEV_IMAGE pi-web:dev)
-compose_project_name=$(value_from_config_or_generated_or_env_or_default COMPOSE_PROJECT_NAME pi-web-dev)
+pi_web_dev_image=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_DEV_IMAGE forgerie:dev)
+compose_project_name=$(value_from_config_or_generated_or_env_or_default COMPOSE_PROJECT_NAME forgerie-dev)
 hostexec_image=$(value_from_config_or_generated_or_env_or_runtime_or_default HOSTEXEC_IMAGE alpine:3.22)
 pi_web_max_upload_bytes=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_MAX_UPLOAD_BYTES 67108864)
 default_dev_bind_addr=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_BIND_ADDR 127.0.0.1)
@@ -243,7 +243,7 @@ pi_web_dev_api_bind_addr=$(value_from_config_or_generated_or_env_or_runtime_or_d
 pi_web_dev_bind_addr=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_DEV_BIND_ADDR "$default_dev_bind_addr")
 pi_web_dev_api_port=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_DEV_API_PORT 8504)
 pi_web_dev_port=$(value_from_config_or_generated_or_env_or_runtime_or_default PI_WEB_DEV_PORT 8505)
-pi_web_dev_sessiond_socket=$(value_from_config_or_generated_or_env_or_default PI_WEB_DEV_SESSIOND_SOCKET /data/pi-web/sessiond-dev.sock)
+pi_web_dev_sessiond_socket=$(value_from_config_or_generated_or_env_or_default PI_WEB_DEV_SESSIOND_SOCKET /data/forgerie/sessiond-dev.sock)
 
 require_unsigned_int PI_WEB_UID "$pi_web_uid"
 require_unsigned_int PI_WEB_GID "$pi_web_gid"
@@ -258,7 +258,7 @@ esac
 mkdir -p "$pi_web_data_dir" || die "could not create data directory: $pi_web_data_dir"
 
 env_file=$generated_env_file
-override_file=$repo_root/.pi-web/docker-compose-dev.host.generated.yml
+override_file=$repo_root/.forgerie/docker-compose-dev.host.generated.yml
 
 if ! pi_web_docker_host_write_compose_override "$override_file" "$PI_WEB_DETECTED_DOCKER_HOST_PROFILE" "$pi_web_extra_host_paths" "$repo_root"; then
   die "could not write host-specific Compose override"
@@ -267,7 +267,7 @@ fi
 umask 077
 temp_env=$env_file.$$
 cat >"$temp_env" <<EOF
-# Generated by docker/pi-web-docker --dev. Do not edit by hand.
+# Generated by docker/forgerie-docker --dev. Do not edit by hand.
 PI_WEB_UID=$pi_web_uid
 PI_WEB_GID=$pi_web_gid
 DOCKER_GID=$docker_gid
@@ -292,7 +292,7 @@ PI_WEB_DEV_SESSIOND_SOCKET=$pi_web_dev_sessiond_socket
 EOF
 mv "$temp_env" "$env_file"
 
-log "Selected PI WEB Docker host profile: $PI_WEB_DETECTED_DOCKER_HOST_PROFILE"
+log "Selected Forgerie Docker host profile: $PI_WEB_DETECTED_DOCKER_HOST_PROFILE"
 if [ -f "$runtime_env_file" ]; then
   log "Reused runtime Docker environment defaults from: $runtime_env_file"
 fi

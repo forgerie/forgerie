@@ -8,7 +8,7 @@ import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { sanitizedGitEnv } from "./git/gitEnv.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const dockerEntrypoint = join(repoRoot, "docker", "pi-web-docker");
+const dockerEntrypoint = join(repoRoot, "docker", "forgerie-docker");
 
 let tempDir = "";
 
@@ -23,7 +23,7 @@ interface FakeDocker {
 }
 
 beforeEach(async () => {
-  tempDir = await mkdtemp(join(tmpdir(), "pi-web-docker-test-"));
+  tempDir = await mkdtemp(join(tmpdir(), "forgerie-docker-test-"));
 });
 
 afterEach(async () => {
@@ -56,27 +56,29 @@ describe("Docker command assets", () => {
       readRepoFile("docker/internal/dev/sync-node-modules"),
       readRepoFile("docker/.dockerignore"),
     ]);
-    const customImageHooksIndex = devDockerfile.indexOf("for script in /tmp/pi-web-custom-image.d/*.sh");
-    const dependencyGenerationIndex = devDockerfile.indexOf("/opt/pi-web-dev-dependencies/generation");
+    const customImageHooksIndex = devDockerfile.indexOf("for script in /tmp/forgerie-custom-image.d/*.sh");
+    const dependencyGenerationIndex = devDockerfile.indexOf("/opt/forgerie-dev-dependencies/generation");
 
-    expect(dockerfile).toContain("COPY pi-web-docker /usr/local/bin/pi-web-docker");
+    expect(dockerfile).toContain("COPY forgerie-docker /usr/local/bin/forgerie-docker");
     expect(dockerfile).toContain("COPY internal/bin/hostexec /usr/local/bin/hostexec");
-    expect(dockerfile).toContain("COPY internal/image/install-opensuse-base /usr/local/sbin/install-pi-web-opensuse-base");
+    expect(dockerfile).toContain("COPY internal/image/install-opensuse-base /usr/local/sbin/install-forgerie-opensuse-base");
     expect(dockerfile).toContain("--include=peer");
-    expect(dockerfile).toContain('"@jmfederico/pi-web@${PI_WEB_VERSION}" --allow-scripts=node-pty');
-    expect(dockerfile).toContain('peer_pi_bin="${global_root}/@jmfederico/pi-web/node_modules/.bin/pi"');
+    expect(dockerfile).toContain('test -n "${FORGERIE_PACKAGE_SPEC}"');
+    expect(dockerfile).toContain('"${FORGERIE_PACKAGE_SPEC}" --allow-scripts=node-pty');
+    expect(dockerfile).not.toContain('"forgerie@${PI_WEB_VERSION}"');
+    expect(dockerfile).toContain('peer_pi_bin="${global_root}/forgerie/node_modules/.bin/pi"');
     expect(dockerfile).not.toContain("@earendil-works/pi-coding-agent@");
-    expect(devDockerfile).toContain("COPY docker/pi-web-docker /usr/local/bin/pi-web-docker");
+    expect(devDockerfile).toContain("COPY docker/forgerie-docker /usr/local/bin/forgerie-docker");
     expect(devDockerfile).toContain("COPY docker/internal/bin/hostexec /usr/local/bin/hostexec");
-    expect(devDockerfile).toContain("COPY --chmod=0755 docker/internal/dev/sync-node-modules /usr/local/sbin/pi-web-dev-sync-node-modules");
-    expect(devDockerfile).toContain("/opt/pi-web-dev-dependencies/node_modules");
+    expect(devDockerfile).toContain("COPY --chmod=0755 docker/internal/dev/sync-node-modules /usr/local/sbin/forgerie-dev-sync-node-modules");
+    expect(devDockerfile).toContain("/opt/forgerie-dev-dependencies/node_modules");
     // Hooks can mutate the dependency seed, so its cache generation must be finalized afterward.
     expect(customImageHooksIndex).toBeGreaterThanOrEqual(0);
     expect(dependencyGenerationIndex).toBeGreaterThan(customImageHooksIndex);
-    expect(dependencySync).toContain(".pi-web-dev-dependency-generation");
-    expect(dockerignore).toContain("!pi-web-docker");
+    expect(dependencySync).toContain(".forgerie-dev-dependency-generation");
+    expect(dockerignore).toContain("!forgerie-docker");
     expect(dockerignore).toContain("!internal/bin/hostexec");
-    expect(installer).toContain("write_asset pi-web-docker 0755");
+    expect(installer).toContain("write_asset forgerie-docker 0755");
     expect(installer).toContain("write_asset internal/host-profile.sh 0644");
     expect(installer).toContain("compose_cmd --project-name \"$compose_project_name\"");
     expect(installer).toContain("PI_WEB_DOCKER_INSTALL_DIR=$install_dir");
@@ -89,14 +91,14 @@ describe("Docker command assets", () => {
     expect(runtimeCompose).toContain("PI_WEB_DOCKER_RUNTIME: \"1\"");
     expect(runtimeCompose).toContain("PI_WEB_DOCKER_MODE: runtime");
     expect(runtimeCompose).toContain("PI_WEB_DOCKER_INSTALL_DIR: ${PI_WEB_DOCKER_INSTALL_DIR:?set by docker/install.sh}");
-    expect(runtimeCompose).toContain("PI_WEB_DOCKER_HELPER_IMAGE: ${PI_WEB_IMAGE:-pi-web:local}");
+    expect(runtimeCompose).toContain("PI_WEB_DOCKER_HELPER_IMAGE: ${PI_WEB_IMAGE:-forgerie:local}");
     expect(runtimeCompose).not.toContain("COMPOSE_PROJECT_NAME:");
     expect(devCompose).toContain("PI_WEB_DOCKER_MODE: dev");
-    expect(devCompose).toContain("PI_WEB_DOCKER_DEV_REPO_ROOT: ${PI_WEB_DOCKER_DEV_REPO_ROOT:?set by docker/pi-web-docker --dev}");
-    expect(devCompose).toContain("PI_WEB_DOCKER_HELPER_IMAGE: ${PI_WEB_DEV_IMAGE:-pi-web:dev}");
+    expect(devCompose).toContain("PI_WEB_DOCKER_DEV_REPO_ROOT: ${PI_WEB_DOCKER_DEV_REPO_ROOT:?set by docker/forgerie-docker --dev}");
+    expect(devCompose).toContain("PI_WEB_DOCKER_HELPER_IMAGE: ${PI_WEB_DEV_IMAGE:-forgerie:dev}");
     expect(devCompose).not.toContain("COMPOSE_PROJECT_NAME:");
-    expect(devCompose).toContain("/usr/local/sbin/pi-web-dev-sync-node-modules");
-    expect(devCompose.match(/volumes: \*pi-web-dev-volumes/g)).toHaveLength(3);
+    expect(devCompose).toContain("/usr/local/sbin/forgerie-dev-sync-node-modules");
+    expect(devCompose.match(/volumes: \*forgerie-dev-volumes/g)).toHaveLength(3);
   });
 
   dockerCommandIt("fetches remote installer assets without clobbering the write target", async () => {
@@ -123,8 +125,8 @@ describe("Docker command assets", () => {
       });
     });
 
-    expect(await readFile(join(installDir, "Dockerfile"), "utf8")).toContain("COPY pi-web-docker /usr/local/bin/pi-web-docker");
-    expect(await readFile(join(installDir, "pi-web-docker"), "utf8")).toContain("Usage: pi-web-docker");
+    expect(await readFile(join(installDir, "Dockerfile"), "utf8")).toContain("COPY forgerie-docker /usr/local/bin/forgerie-docker");
+    expect(await readFile(join(installDir, "forgerie-docker"), "utf8")).toContain("Usage: forgerie-docker");
     const env = await readFile(join(installDir, ".env"), "utf8");
     expect(env).toContain(`PI_WEB_DOCKER_INSTALL_DIR=${installDir}`);
     expect(env).toContain("PI_WEB_DOCKER_REF=test-assets");
@@ -136,10 +138,10 @@ describe("Docker command assets", () => {
 
     const result = await runDockerCommand(["status"], runtimeEnv(fakeDocker, installDir));
 
-    expect(result.stdout).toContain("fake docker compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml ps");
+    expect(result.stdout).toContain("fake docker compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml ps");
     const log = await readFile(fakeDocker.logPath, "utf8");
     expect(log).toContain("compose version");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml ps");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml ps");
     expect(log).not.toContain("run -d");
   });
 
@@ -156,12 +158,12 @@ describe("Docker command assets", () => {
     await runDockerCommand(["cli", "config", "show"], env);
 
     const log = await readFile(fakeDocker.logPath, "utf8");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml up -d");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml down");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml restart sessiond");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml logs -f web");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml exec sessiond bash");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml exec web pi-web config show");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml up -d");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml down");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml restart sessiond");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml logs -f web");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml exec sessiond bash");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml exec web forgerie config show");
     expect(log).not.toContain("run -d");
   });
 
@@ -175,7 +177,7 @@ describe("Docker command assets", () => {
     });
 
     const log = await readFile(fakeDocker.logPath, "utf8");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml ps");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml ps");
     expect(log).not.toContain("--project-name ambient-project");
   });
 
@@ -201,14 +203,14 @@ describe("Docker command assets", () => {
       await runDockerCommand(["--dev", "status"], devHostEnv(fakeDocker, devRoot, home, { PI_WEB_DOCKER_RUNTIME_ENV_FILE: runtimeEnvFile }));
     });
 
-    const generatedEnvPath = join(devRoot, ".pi-web", "docker-compose-dev.generated.env");
+    const generatedEnvPath = join(devRoot, ".forgerie", "docker-compose-dev.generated.env");
     const generatedEnv = await readFile(generatedEnvPath, "utf8");
     expect(generatedEnv).toContain("PI_WEB_UID=1234\n");
     expect(generatedEnv).toContain("PI_WEB_GID=2345\n");
     expect(generatedEnv).toContain("DOCKER_GID=0\n");
     expect(generatedEnv).toContain(`PI_WEB_DOCKER_DATA_DIR=${runtimeDataDir}\n`);
     expect(generatedEnv).toContain(`PI_WEB_DOCKER_DEV_REPO_ROOT=${devRoot}\n`);
-    expect(generatedEnv).toContain("COMPOSE_PROJECT_NAME=pi-web-dev\n");
+    expect(generatedEnv).toContain("COMPOSE_PROJECT_NAME=forgerie-dev\n");
     expect(generatedEnv).toContain("PI_WEB_DEV_API_BIND_ADDR=0.0.0.0\n");
     expect(generatedEnv).not.toContain("COMPOSE_PROJECT_NAME=runtime-project");
 
@@ -219,18 +221,18 @@ describe("Docker command assets", () => {
       }));
     });
     const regeneratedEnv = await readFile(generatedEnvPath, "utf8");
-    expect(regeneratedEnv).toContain("COMPOSE_PROJECT_NAME=pi-web-dev\n");
+    expect(regeneratedEnv).toContain("COMPOSE_PROJECT_NAME=forgerie-dev\n");
     expect(regeneratedEnv).toContain(`PI_WEB_DOCKER_DATA_DIR=${runtimeDataDir}\n`);
     expect(regeneratedEnv).not.toContain("COMPOSE_PROJECT_NAME=ambient-dev-project");
 
-    const localConfig = await readFile(join(devRoot, ".pi-web", "docker-compose-dev.local.env"), "utf8");
-    expect(localConfig).toContain("docker/pi-web-docker --dev creates this file once");
+    const localConfig = await readFile(join(devRoot, ".forgerie", "docker-compose-dev.local.env"), "utf8");
+    expect(localConfig).toContain("docker/forgerie-docker --dev creates this file once");
     expect(localConfig).toContain("PI_WEB_UID and PI_WEB_GID default to the current host user");
-    const override = await readFile(join(devRoot, ".pi-web", "docker-compose-dev.host.generated.yml"), "utf8");
+    const override = await readFile(join(devRoot, ".forgerie", "docker-compose-dev.host.generated.yml"), "utf8");
     expect(override).toContain(socketPath);
     expect(override).toContain(devRoot);
     const log = await readFile(fakeDocker.logPath, "utf8");
-    expect(log).toContain(`compose --project-name pi-web-dev --env-file ${generatedEnvPath} -f ${devRoot}/docker/compose.dev.yml -f ${devRoot}/.pi-web/docker-compose-dev.host.generated.yml ps`);
+    expect(log).toContain(`compose --project-name forgerie-dev --env-file ${generatedEnvPath} -f ${devRoot}/docker/compose.dev.yml -f ${devRoot}/.forgerie/docker-compose-dev.host.generated.yml ps`);
   });
 
   dockerCommandIt("rejects development commands as root unless explicitly allowed", async () => {
@@ -296,7 +298,7 @@ describe("Docker command assets", () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("checkout has uncommitted changes");
-    expect(result.stdout).not.toContain("Started detached PI WEB Docker helper");
+    expect(result.stdout).not.toContain("Started detached Forgerie Docker helper");
     await expect(readFile(fakeDocker.logPath, "utf8")).rejects.toThrow();
     await expect(readFile(helperLog, "utf8")).rejects.toThrow();
   });
@@ -362,16 +364,16 @@ describe("Docker command assets", () => {
     await runDockerCommand(["--dev", "restart-sessiond"], devRuntimeEnv(fakeDocker, devRoot));
 
     const log = await readFile(fakeDocker.logPath, "utf8");
-    expect(log).toContain(`--env-file ${devRoot}/.pi-web/docker-compose-dev.generated.env`);
+    expect(log).toContain(`--env-file ${devRoot}/.forgerie/docker-compose-dev.generated.env`);
     expect(log).toContain("--group-add 3456");
     expect(log).toContain("--user 1234:2345");
     expect(log).toContain("PI_WEB_DOCKER_MODE=dev");
     expect(log).toContain("PI_WEB_DOCKER_ALLOW_ROOT=0");
-    expect(log).toContain("PI_WEB_DOCKER_HELPER_IMAGE=pi-web:test");
+    expect(log).toContain("PI_WEB_DOCKER_HELPER_IMAGE=forgerie:test");
     expect(log).toContain(`PI_WEB_DOCKER_DEV_REPO_ROOT=${devRoot}`);
-    expect(log).toContain("COMPOSE_PROJECT_NAME=pi-web-dev-test");
-    expect(log).toContain("pi-web.docker-helper.mode=dev");
-    expect(log).toContain("pi-web:test pi-web-docker --dev __run-detached restart-sessiond");
+    expect(log).toContain("COMPOSE_PROJECT_NAME=forgerie-dev-test");
+    expect(log).toContain("forgerie.docker-helper.mode=dev");
+    expect(log).toContain("forgerie:test forgerie-docker --dev __run-detached restart-sessiond");
     expect(log).not.toContain("--user 0:0");
   });
 
@@ -383,7 +385,7 @@ describe("Docker command assets", () => {
     });
 
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("this PI WEB Docker container is in dev mode");
+    expect(result.stderr).toContain("this Forgerie Docker container is in dev mode");
   });
 
   dockerCommandIt("routes production install to the bootstrap installer", async () => {
@@ -398,14 +400,14 @@ describe("Docker command assets", () => {
     const result = await runDockerCommandAllowFailure(["start"], {
       ...cleanProcessEnv(),
       PATH: `${fakeDocker.binDir}:${process.env["PATH"] ?? ""}`,
-      HOME: "/home/pi-web-test",
+      HOME: "/home/forgerie-test",
     });
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("runtime install assets were not found");
     expect(result.stderr).toContain("running this checkout's Docker command in runtime mode");
-    expect(result.stderr).toContain("./docker/pi-web-docker --dev start");
-    expect(result.stderr).toContain("/home/pi-web-test/.local/share/pi-web-docker/pi-web-docker start");
+    expect(result.stderr).toContain("./docker/forgerie-docker --dev start");
+    expect(result.stderr).toContain("/home/forgerie-test/.local/share/forgerie-docker/forgerie-docker start");
     expect(result.stderr).toContain("PI_WEB_DOCKER_INSTALL_DIR");
   });
 
@@ -415,9 +417,9 @@ describe("Docker command assets", () => {
 
     const result = await runDockerCommand(["restart-sessiond"], runtimeEnv(fakeDocker, installDir));
 
-    expect(result.stdout).toContain("Started detached PI WEB Docker helper");
-    expect(result.stdout).toContain("Streaming detached PI WEB Docker helper logs inline.");
-    expect(result.stdout).toContain("Reconnect with: docker logs -f pi-web-docker-restart-sessiond-");
+    expect(result.stdout).toContain("Started detached Forgerie Docker helper");
+    expect(result.stdout).toContain("Streaming detached Forgerie Docker helper logs inline.");
+    expect(result.stdout).toContain("Reconnect with: docker logs -f forgerie-docker-restart-sessiond-");
     expect(result.stdout).toContain("fake helper log");
     const log = await readFile(fakeDocker.logPath, "utf8");
     expect(log).toContain("container inspect");
@@ -430,15 +432,15 @@ describe("Docker command assets", () => {
     expect(log).toContain(`PI_WEB_DOCKER_INSTALL_DIR=${installDir}`);
     expect(log).toContain(`PI_WEB_DOCKER_DATA_DIR=${join(installDir, "data")}`);
     expect(log).toContain("PI_WEB_PORT=12345");
-    expect(log).toContain("PI_WEB_DOCKER_EXTRA_HOST_PATHS=/srv/pi-web-extra /opt/pi-web-extra");
+    expect(log).toContain("PI_WEB_DOCKER_EXTRA_HOST_PATHS=/srv/forgerie-extra /opt/forgerie-extra");
     expect(log).toContain("PI_WEB_EXTRA_ZYPPER_PACKAGES=git-lfs jq");
     expect(log).not.toContain('PI_WEB_EXTRA_ZYPPER_PACKAGES="git-lfs jq"');
-    expect(log).toContain("PI_WEB_DOCKER_HELPER_IMAGE=pi-web:test");
-    expect(log).toContain("COMPOSE_PROJECT_NAME=pi-web-test");
-    expect(log).toContain("pi-web.docker-helper.mode=runtime");
-    expect(log).toContain("pi-web.docker-helper.root=");
-    expect(log).toContain("pi-web.docker-helper.project=pi-web-test");
-    expect(log).toContain("pi-web:test pi-web-docker __run-detached restart-sessiond");
+    expect(log).toContain("PI_WEB_DOCKER_HELPER_IMAGE=forgerie:test");
+    expect(log).toContain("COMPOSE_PROJECT_NAME=forgerie-test");
+    expect(log).toContain("forgerie.docker-helper.mode=runtime");
+    expect(log).toContain("forgerie.docker-helper.root=");
+    expect(log).toContain("forgerie.docker-helper.project=forgerie-test");
+    expect(log).toContain("forgerie:test forgerie-docker __run-detached restart-sessiond");
     expect(log).not.toContain("--user 0:0");
     expect(log).not.toContain("compose -f compose.yml -f compose.override.yml restart sessiond");
   });
@@ -450,7 +452,7 @@ describe("Docker command assets", () => {
     await runDockerCommand(["__run-detached", "restart-sessiond"], runtimeEnv(fakeDocker, installDir));
 
     const log = await readFile(fakeDocker.logPath, "utf8");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml restart sessiond");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml restart sessiond");
     expect(log).not.toContain("run -d");
   });
 
@@ -461,8 +463,8 @@ describe("Docker command assets", () => {
     await runDockerCommand(["__run-detached", "update"], runtimeEnv(fakeDocker, installDir));
 
     const log = await readFile(fakeDocker.logPath, "utf8");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml build --pull --no-cache");
-    expect(log).toContain("compose --project-name pi-web-test --env-file .env -f compose.yml -f compose.override.yml up -d --force-recreate --remove-orphans");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml build --pull --no-cache");
+    expect(log).toContain("compose --project-name forgerie-test --env-file .env -f compose.yml -f compose.override.yml up -d --force-recreate --remove-orphans");
     expect(log).not.toContain("run -d");
   });
 });
@@ -509,15 +511,15 @@ async function createRuntimeInstall(): Promise<string> {
     "DOCKER_GID=3456",
     `PI_WEB_DOCKER_DATA_DIR=${join(installDir, "data")}`,
     `PI_WEB_DOCKER_INSTALL_DIR=${installDir}`,
-    "PI_WEB_DOCKER_EXTRA_HOST_PATHS=\"/srv/pi-web-extra /opt/pi-web-extra\"",
+    "PI_WEB_DOCKER_EXTRA_HOST_PATHS=\"/srv/forgerie-extra /opt/forgerie-extra\"",
     "PI_WEB_BIND_ADDR=127.0.0.1",
     "PI_WEB_PORT=12345",
     "PI_WEB_EXTRA_ZYPPER_PACKAGES=\"git-lfs jq\"",
-    "PI_WEB_IMAGE=pi-web:test",
-    "COMPOSE_PROJECT_NAME=pi-web-test",
+    "PI_WEB_IMAGE=forgerie:test",
+    "COMPOSE_PROJECT_NAME=forgerie-test",
     "",
   ].join("\n"), "utf8");
-  await writeFile(join(installDir, "compose.yml"), "name: pi-web\nservices: {}\n", "utf8");
+  await writeFile(join(installDir, "compose.yml"), "name: forgerie\nservices: {}\n", "utf8");
   await writeFile(join(installDir, "compose.override.yml"), "services: {}\n", "utf8");
   return installDir;
 }
@@ -528,7 +530,7 @@ async function createDevRepoFixture(): Promise<string> {
   await copyFile(join(repoRoot, "docker", "internal", "dev", "compose"), join(devRoot, "docker", "internal", "dev", "compose"));
   await chmod(join(devRoot, "docker", "internal", "dev", "compose"), 0o755);
   await copyFile(join(repoRoot, "docker", "internal", "host-profile.sh"), join(devRoot, "docker", "internal", "host-profile.sh"));
-  await writeFile(join(devRoot, "docker", "compose.dev.yml"), "name: pi-web-dev\nservices: {}\n", "utf8");
+  await writeFile(join(devRoot, "docker", "compose.dev.yml"), "name: forgerie-dev\nservices: {}\n", "utf8");
   return devRoot;
 }
 
@@ -555,8 +557,8 @@ async function createCleanDevGitRepoWithFakeHelper(logPath: string): Promise<str
   await execUtf8("git", ["-C", devRoot, "add", "."], env);
   await execUtf8("git", [
     "-C", devRoot,
-    "-c", "user.name=PI WEB Test",
-    "-c", "user.email=pi-web-test@example.invalid",
+    "-c", "user.name=Forgerie Test",
+    "-c", "user.email=forgerie-test@example.invalid",
     "-c", "core.hooksPath=/dev/null",
     "commit", "--quiet", "--no-gpg-sign", "-m", "test fixture",
   ], env);
@@ -565,8 +567,8 @@ async function createCleanDevGitRepoWithFakeHelper(logPath: string): Promise<str
 
 async function createDevGeneratedEnv(ids: { uid: number; gid: number; dockerGid: number }): Promise<string> {
   const devRoot = join(tempDir, "dev-runtime");
-  await mkdir(join(devRoot, ".pi-web"), { recursive: true });
-  await writeFile(join(devRoot, ".pi-web", "docker-compose-dev.generated.env"), [
+  await mkdir(join(devRoot, ".forgerie"), { recursive: true });
+  await writeFile(join(devRoot, ".forgerie", "docker-compose-dev.generated.env"), [
     `PI_WEB_UID=${String(ids.uid)}`,
     `PI_WEB_GID=${String(ids.gid)}`,
     `DOCKER_GID=${String(ids.dockerGid)}`,
@@ -576,8 +578,8 @@ async function createDevGeneratedEnv(ids: { uid: number; gid: number; dockerGid:
     "PI_WEB_DEV_BIND_ADDR=127.0.0.1",
     "PI_WEB_DEV_API_PORT=8504",
     "PI_WEB_DEV_PORT=8505",
-    "PI_WEB_DEV_IMAGE=pi-web:test",
-    "COMPOSE_PROJECT_NAME=pi-web-dev-test",
+    "PI_WEB_DEV_IMAGE=forgerie:test",
+    "COMPOSE_PROJECT_NAME=forgerie-dev-test",
     "",
   ].join("\n"), "utf8");
   return devRoot;
@@ -631,7 +633,7 @@ case "\${1:-}" in
     if [ "\${2:-}" = inspect ]; then
       for arg in "$@"; do
         if [ "$arg" = --format ]; then
-          printf 'pi-web:test\n'
+          printf 'forgerie:test\n'
           exit 0
         fi
       done

@@ -69,7 +69,7 @@ describe("SessionController send queue", () => {
     const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
     const api: typeof defaultApi = {
       ...defaultApi,
-      saveAttachments: (_session, sent) => { savedCalledWith = sent; return Promise.resolve([{ path: ".pi-web/attachments/shot.png", mimeType: "image/png", size: 3 }]); },
+      saveAttachments: (_session, sent) => { savedCalledWith = sent; return Promise.resolve([{ path: ".forgerie/attachments/shot.png", mimeType: "image/png", size: 3 }]); },
       prompt: (_session, text, _behavior, _machineId, sentAttachments) => { promptText = text; promptAttachments = sentAttachments; return Promise.resolve({ accepted: true }); },
     };
     const controller = new SessionController(
@@ -83,7 +83,7 @@ describe("SessionController send queue", () => {
     await controller.send("check this", undefined, attachments, "folder");
 
     expect(savedCalledWith).toEqual(attachments);
-    expect(promptText).toBe("check this\n\n@.pi-web/attachments/shot.png");
+    expect(promptText).toBe("check this\n\n@.forgerie/attachments/shot.png");
     expect(promptAttachments).toBeUndefined();
     expect(state.sendingPrompts).toEqual({});
   });
@@ -210,7 +210,7 @@ describe("SessionController send queue", () => {
       },
       saveAttachments: (session, sentAttachments) => {
         calls.push(`save:${sessionLookupId(session)}:${sentAttachments[0]?.name ?? ""}`);
-        return Promise.resolve([{ path: ".pi-web/attachments/shot.png", mimeType: "image/png", size: 3 }]);
+        return Promise.resolve([{ path: ".forgerie/attachments/shot.png", mimeType: "image/png", size: 3 }]);
       },
       prompt: (session, text, _behavior, _machineId, sentAttachments) => {
         calls.push(`prompt:${sessionLookupId(session)}:${text}`);
@@ -251,11 +251,11 @@ describe("SessionController send queue", () => {
       `shell:${started.id}:!pwd`,
       `prompt:${started.id}:look`,
       `save:${started.id}:shot.png`,
-      `prompt:${started.id}:save\n\n@.pi-web/attachments/shot.png`,
+      `prompt:${started.id}:save\n\n@.forgerie/attachments/shot.png`,
     ]);
     expect(promptCalls).toEqual([
       { text: "look", attachments },
-      { text: "save\n\n@.pi-web/attachments/shot.png" },
+      { text: "save\n\n@.forgerie/attachments/shot.png" },
     ]);
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
   });

@@ -1,6 +1,6 @@
 import { html, svg } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PluginRuntimeContext } from "@jmfederico/pi-web/plugin-api";
+import type { PluginRuntimeContext } from "forgerie/plugin-api";
 import plugin from "./pi-web-plugin.js";
 
 describe("Info plugin copy-diagnostics action", () => {
@@ -32,7 +32,7 @@ describe("Info plugin copy-diagnostics action", () => {
 
     expect(writeText).toHaveBeenCalledOnce();
     const summary = writeText.mock.calls[0]?.[0];
-    expect(summary).toContain("PI WEB diagnostics");
+    expect(summary).toContain("Forgerie diagnostics");
     expect(summary).toContain("Status: unavailable");
     expect(summary).toContain("Machine: devbox (local machine)");
     expect(summary).toContain("Workspace: pi-web — /srv/dev/pi-web (branch main, git repo, main workspace)");

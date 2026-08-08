@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { parsePiWebComponentStatus, parsePiWebInstallationInfo, parsePiWebRuntimeResponse, parsePiWebVersionResponse } from "./piWebStatusParsing";
 
-describe("PI WEB status parsing", () => {
+describe("Forgerie status parsing", () => {
   it("drops every advertised capability string while the registry is empty", () => {
     expect(parsePiWebRuntimeResponse({
-      packageName: "@jmfederico/pi-web",
+      packageName: "forgerie",
       generatedAt: "now",
       components: {
         web: { component: "web", label: "Web/UI", runtimeVersion: "1.0.0", available: true, capabilities: ["piPackages.manage", "future.capability"] },
@@ -22,7 +22,7 @@ describe("PI WEB status parsing", () => {
 
   it("rejects runtime responses with malformed component capability arrays", () => {
     expect(parsePiWebRuntimeResponse({
-      packageName: "@jmfederico/pi-web",
+      packageName: "forgerie",
       generatedAt: "now",
       components: {
         web: { component: "web", label: "Web/UI", available: true, capabilities: ["piPackages.manage", 1] },
@@ -34,7 +34,7 @@ describe("PI WEB status parsing", () => {
 
   it("parses and freezes a session daemon active agent profile", () => {
     const parsed = parsePiWebRuntimeResponse({
-      packageName: "@jmfederico/pi-web",
+      packageName: "forgerie",
       generatedAt: "now",
       components: {
         web: { component: "web", label: "Web/UI", available: true, capabilities: [] },
@@ -69,7 +69,7 @@ describe("PI WEB status parsing", () => {
       sessionDirEnvKeys: ["PI_WEB_AGENT_SESSION_DIR"],
     };
     const responseFor = (webProfile: unknown, sessiondProfile: unknown) => ({
-      packageName: "@jmfederico/pi-web",
+      packageName: "forgerie",
       generatedAt: "now",
       components: {
         web: { component: "web", label: "Web/UI", available: true, capabilities: [], ...(webProfile === undefined ? {} : { activeAgentProfile: webProfile }) },
@@ -111,7 +111,7 @@ describe("PI WEB status parsing", () => {
 
   it("parses version responses that include Docker runtime and development components", () => {
     const parsed = parsePiWebVersionResponse({
-      packageName: "@jmfederico/pi-web",
+      packageName: "forgerie",
       generatedAt: "now",
       components: {
         web: { component: "web", label: "Web/UI", runtimeVersion: "1.0.0", stale: false, available: true, installation: { kind: "docker", path: "/srv/pi-web-docker", dockerMode: "runtime" } },

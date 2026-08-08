@@ -94,11 +94,11 @@ export function registerAppTestHooks(): void {
         },
         now: () => new Date("2026-05-25T00:00:00.000Z"),
         localRuntime: () => Promise.resolve({
-          packageName: "@jmfederico/pi-web",
+          packageName: "forgerie",
           generatedAt: "2026-05-25T00:00:00.000Z",
           components: {
-            web: { component: "web", label: "PI WEB", available: true, capabilities: [] },
-            sessiond: { component: "sessiond", label: "PI WEB Session Daemon", available: true, capabilities: [] },
+            web: { component: "web", label: "Forgerie", available: true, capabilities: [] },
+            sessiond: { component: "sessiond", label: "Forgerie Session Daemon", available: true, capabilities: [] },
           },
           capabilities: [],
         }),

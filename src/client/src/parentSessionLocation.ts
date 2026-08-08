@@ -5,7 +5,7 @@ import { normalizeSessionPath } from "./sessionPaths";
  * Where a session's parent lives, when the parent is not in the current
  * workspace's session list.
  *
- * - `workspace`: the parent's cwd matches a workspace PI WEB knows about, so the
+ * - `workspace`: the parent's cwd matches a workspace Forgerie knows about, so the
  *   browser can both name it and navigate to it.
  * - `path`: the parent's cwd is known but belongs to no loaded workspace (for
  *   example a project that is not open); it can be named but not navigated to.

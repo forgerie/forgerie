@@ -45,9 +45,9 @@ let offlineRuntimeCreations: Promise<unknown> = Promise.resolve();
  * with `allowNetwork: modelNetworkEnabled` by default, and `login()`/`logout()`
  * accept no abort signal. With the default (`PI_OFFLINE` unset) a single stalled
  * provider-catalog fetch can block those call paths for minutes — and, because
- * pi-web shares one runtime and pi coalesces per-provider refreshes, session
+ * Forgerie shares one runtime and pi coalesces per-provider refreshes, session
  * creation joins the same stalled fetch. Forcing `PI_OFFLINE` during construction makes every runtime-driven
- * refresh local-only; pi-web performs its own bounded catalog refreshes in the
+ * refresh local-only; Forgerie performs its own bounded catalog refreshes in the
  * background instead (see modelCatalogRefresher.ts).
  *
  * `modelNetworkEnabled` is computed once from the environment inside
@@ -67,7 +67,7 @@ function createOfflineModelRuntime(options: CreateModelRuntimeOptions): Promise<
  * `process.env` is process-wide, so this window is a real global side effect:
  * anything reading `PI_OFFLINE` while `create` awaits observes offline mode,
  * including upstream's package manager, tools manager, and version check. That
- * is acceptable because pi-web only builds runtimes during daemon startup and in
+ * is acceptable because Forgerie only builds runtimes during daemon startup and in
  * tests, and the window is one `ModelRuntime.create()` call — but it is why
  * callers must stay serialized rather than run concurrently.
  */

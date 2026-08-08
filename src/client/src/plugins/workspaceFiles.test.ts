@@ -10,15 +10,15 @@ describe("createWorkspaceFiles", () => {
     const workspaceTree = vi.fn<WorkspaceFilesApi["workspaceTree"]>(() => Promise.resolve(tree));
     const files = createWorkspaceFiles(fakeApi({ workspaceTree }), workspace, "remote-1");
 
-    await expect(files.listFiles(".pi-web/relays")).resolves.toBe(tree);
-    expect(workspaceTree).toHaveBeenCalledWith("p-1", "w-1", ".pi-web/relays", "remote-1");
+    await expect(files.listFiles(".forgerie/relays")).resolves.toBe(tree);
+    expect(workspaceTree).toHaveBeenCalledWith("p-1", "w-1", ".forgerie/relays", "remote-1");
   });
 
   it("listFiles rejects when the directory is missing, matching readFile error behavior", async () => {
-    const workspaceTree = vi.fn<WorkspaceFilesApi["workspaceTree"]>(() => Promise.reject(new Error("Path not found: .pi-web/relays")));
+    const workspaceTree = vi.fn<WorkspaceFilesApi["workspaceTree"]>(() => Promise.reject(new Error("Path not found: .forgerie/relays")));
     const files = createWorkspaceFiles(fakeApi({ workspaceTree }), workspace, "local");
 
-    await expect(files.listFiles(".pi-web/relays")).rejects.toThrow("Path not found: .pi-web/relays");
+    await expect(files.listFiles(".forgerie/relays")).rejects.toThrow("Path not found: .forgerie/relays");
   });
 
   it("readFile reads through the bound workspace and machine", async () => {
@@ -76,7 +76,7 @@ function fakeApi(overrides: Partial<WorkspaceFilesApi> = {}): WorkspaceFilesApi 
   };
 }
 
-function testFileTreeResponse(path = ".pi-web/relays"): FileTreeResponse {
+function testFileTreeResponse(path = ".forgerie/relays"): FileTreeResponse {
   return {
     path,
     entries: [{ name: "relays-panel-plugin", path: `${path}/relays-panel-plugin`, type: "directory", modifiedAt: "2026-06-14T10:00:00.000Z" }],

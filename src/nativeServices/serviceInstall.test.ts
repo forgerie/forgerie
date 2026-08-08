@@ -22,12 +22,12 @@ const productionInput: ProductionNativeServicePlanInput = {
   executables: {
     sessiond: {
       configuredCommand: undefined,
-      namedCommand: "pi-web-sessiond",
+      namedCommand: "forgerie-sessiond",
       bundledEntrypointPath: "/package/sessiond.js",
     },
     web: {
       configuredCommand: undefined,
-      namedCommand: "pi-web-server",
+      namedCommand: "forgerie-server",
       bundledEntrypointPath: "/package/server.js",
     },
   },

@@ -101,7 +101,7 @@ export interface PluginRuntimeContext {
   refreshFiles: () => void | Promise<void>;
   refreshGit: () => void | Promise<void>;
   refreshAppData: () => void | Promise<void>;
-  /** Force a fresh PI WEB release check on the selected machine. Optional for compatibility with older hosts. */
+  /** Force a fresh Forgerie release check on the selected machine. Optional for compatibility with older hosts. */
   checkForPiWebUpdates?: () => void | Promise<void>;
   reloadPage: () => void;
   startSession: () => void | Promise<void>;

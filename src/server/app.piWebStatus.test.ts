@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PiWebStatusResponse } from "../shared/apiTypes.js";
 import { buildApp } from "./app.js";
 
-describe("PI WEB status routes", () => {
+describe("Forgerie status routes", () => {
   it("forces a fresh status load when refresh is requested", async () => {
     const get = vi.fn(() => Promise.resolve(status("cached")));
     const refresh = vi.fn(() => Promise.resolve(status("forced")));
@@ -26,13 +26,13 @@ describe("PI WEB status routes", () => {
 
 function status(generatedAt: string): PiWebStatusResponse {
   return {
-    packageName: "@jmfederico/pi-web",
+    packageName: "forgerie",
     generatedAt,
     components: {
       web: { component: "web", label: "Web/UI", stale: false, available: true },
       sessiond: { component: "sessiond", label: "Session daemon", stale: false, available: true },
     },
-    release: { packageName: "@jmfederico/pi-web", updateAvailable: false },
+    release: { packageName: "forgerie", updateAvailable: false },
     commands: {},
     messages: [],
   };

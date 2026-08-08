@@ -73,7 +73,7 @@ describe("nodeVersionCheck", () => {
 
 describe("agentCommandForChecks", () => {
   it("reads the configured agent command for doctor checks", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-web-cli-test-"));
+    const dir = mkdtempSync(join(tmpdir(), "forgerie-cli-test-"));
     try {
       const configPath = join(dir, "config.json");
       writeFileSync(configPath, `${JSON.stringify({ agent: { command: "acme-agent", dir: "/opt/acme-agent/state" } })}\n`);
@@ -107,7 +107,7 @@ describe("native-service doctor CLI contracts", () => {
   });
 
   it("accepts only regular files as bundled entrypoints", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-web-entrypoint-test-"));
+    const dir = mkdtempSync(join(tmpdir(), "forgerie-entrypoint-test-"));
     try {
       const file = join(dir, "entrypoint.js");
       writeFileSync(file, "export {};\n");
@@ -130,14 +130,14 @@ describe("native-service doctor CLI contracts", () => {
 
 describe("isCliEntrypoint", () => {
   it("matches direct execution paths", () => {
-    expect(isCliEntrypoint("/tmp/pi-web-cli.js", "/tmp/pi-web-cli.js")).toBe(true);
+    expect(isCliEntrypoint("/tmp/forgerie-cli.js", "/tmp/forgerie-cli.js")).toBe(true);
   });
 
   it("matches npm-style symlinked bin entrypoints", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-web-cli-test-"));
+    const dir = mkdtempSync(join(tmpdir(), "forgerie-cli-test-"));
     try {
       const target = join(dir, "dist", "cli.js");
-      const symlink = join(dir, "bin", "pi-web");
+      const symlink = join(dir, "bin", "forgerie");
       mkdirSync(join(dir, "dist"));
       mkdirSync(join(dir, "bin"));
       writeFileSync(target, "#!/usr/bin/env node\n", { mode: 0o755 });
@@ -150,6 +150,6 @@ describe("isCliEntrypoint", () => {
   });
 
   it("does not match unrelated paths", () => {
-    expect(isCliEntrypoint("/tmp/pi-web", "/tmp/other-pi-web")).toBe(false);
+    expect(isCliEntrypoint("/tmp/forgerie", "/tmp/other-forgerie")).toBe(false);
   });
 });

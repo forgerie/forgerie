@@ -1,5 +1,5 @@
 import type { TemplateResult } from "lit";
-import type { HtmlTemplateTag, PiWebComponentStatus, PiWebPlugin, PiWebStatusResponse, PluginRuntimeState, WorkspacePanelTerminal } from "@jmfederico/pi-web/plugin-api";
+import type { HtmlTemplateTag, PiWebComponentStatus, PiWebPlugin, PiWebStatusResponse, PluginRuntimeState, WorkspacePanelTerminal } from "forgerie/plugin-api";
 import { additionalCommands, fallbackDockerStatus, formatVersion, installationLabel, messageCount, recommendedCommand, shouldShowUpdatesPanel, statusFor, type UpdatesRuntimeHint } from "./updatesLogic.js";
 
 function runCommandInTerminal(terminal: WorkspacePanelTerminal, label: string, command: string): void {
@@ -86,7 +86,7 @@ function renderUpdatesPanel(html: HtmlTemplateTag, terminal: WorkspacePanelTermi
   if (status === undefined) {
     return html`
       <section class="toolbar"><strong>Updates</strong></section>
-      <section class="viewer"><p class="muted">Checking PI WEB update status…</p></section>
+      <section class="viewer"><p class="muted">Checking Forgerie update status…</p></section>
     `;
   }
 
@@ -118,7 +118,7 @@ function renderUpdatesPanel(html: HtmlTemplateTag, terminal: WorkspacePanelTermi
     <section class="toolbar"><strong>Updates</strong>${messages.length > 0 ? html`<span class="stale">${String(messages.length)}</span>` : null}</section>
     <section class="viewer updates-status">
       <section>
-        ${messages.length === 0 ? html`<p class="muted">No PI WEB update or restart messages.</p>` : messages.map((message) => html`
+        ${messages.length === 0 ? html`<p class="muted">No Forgerie update or restart messages.</p>` : messages.map((message) => html`
           <article class=${`updates-message ${message.severity}`}>
             <div class="updates-message-title"><strong>${message.title}</strong><span>${message.severity}</span></div>
             <p>${message.body}</p>
@@ -159,11 +159,11 @@ const plugin: PiWebPlugin = {
       actions: [
         {
           id: "check",
-          title: "Check for PI WEB Updates",
+          title: "Check for Forgerie Updates",
           description: "Bypass cached release data and check the selected machine now",
           group: "Updates",
           enabled: (context) => context.checkForPiWebUpdates !== undefined,
-          disabledReason: () => "Update checks require a newer PI WEB gateway",
+          disabledReason: () => "Update checks require a newer Forgerie gateway",
           run: (context) => context.checkForPiWebUpdates?.(),
         },
       ],

@@ -19,7 +19,7 @@ function serviceFor(worktrees: GitWorktreeInfo[], isGitRepo = true): WorkspaceSe
 }
 
 describe("WorkspaceService.list", () => {
-  it("hides a linked worktree whose checkout directory was removed outside PI WEB", async () => {
+  it("hides a linked worktree whose checkout directory was removed outside Forgerie", async () => {
     const service = serviceFor([
       { path: "/repo", branch: "main" },
       { path: "/repo-worktrees/gone", branch: "gone", prunable: true },

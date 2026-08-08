@@ -5,10 +5,10 @@ import { isMarkdownDocumentPath, renderRelayDocumentHtml } from "./markdownDocum
 
 describe("isMarkdownDocumentPath", () => {
   it("matches .md documents case-insensitively", () => {
-    expect(isMarkdownDocumentPath(".pi-web/relays/r/status.md")).toBe(true);
+    expect(isMarkdownDocumentPath(".forgerie/relays/r/status.md")).toBe(true);
     expect(isMarkdownDocumentPath("NOTES.MD")).toBe(true);
-    expect(isMarkdownDocumentPath(".pi-web/relays/r/data.json")).toBe(false);
-    expect(isMarkdownDocumentPath(".pi-web/relays/r/markdown.txt")).toBe(false);
+    expect(isMarkdownDocumentPath(".forgerie/relays/r/data.json")).toBe(false);
+    expect(isMarkdownDocumentPath(".forgerie/relays/r/markdown.txt")).toBe(false);
   });
 });
 

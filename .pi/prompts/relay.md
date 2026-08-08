@@ -1,5 +1,5 @@
 ---
-description: Plan a PI WEB Relay and dispatch leg 1
+description: Plan a Forgerie Relay and dispatch leg 1
 argument-hint: "<what the relay should achieve>"
 ---
 
@@ -7,7 +7,7 @@ Plan and dispatch a Relay for the task described at the end of this prompt.
 
 If the task description is empty, ask what the relay should achieve before doing anything else.
 
-Load the `relay` skill first. It owns the Relay method, packet roles and defaults, document authority, context discipline, and handoff protocol. This prompt adds PI WEB's repository-specific operating instructions.
+Load the `relay` skill first. It owns the Relay method, packet roles and defaults, document authority, context discipline, and handoff protocol. This prompt adds Forgerie's repository-specific operating instructions.
 
 ## Canonical repository instructions
 
@@ -57,11 +57,11 @@ In in-place mode, leg 1 is the first substantive leg.
 In addition to the charter required by the `relay` skill, require that:
 
 - every leg that changes tracked files commits those changes before handoff, following `.agents/skills/changeset-changelog/SKILL.md` for commit and changeset policy;
-- the charter includes the Relay method's intervention requirements and any additional trigger explicitly supplied for this relay. Its additional PI WEB triggers are limited to an unusable environment, destructive-data ambiguity, a business decision outside the charter, a knowingly weakened invariant or security/authorization boundary, unexpected unrelated branch changes, push or pull-request authentication failure, or an infeasible finish line. Ordinary implementation defects and review findings go through remediation legs.
+- the charter includes the Relay method's intervention requirements and any additional trigger explicitly supplied for this relay. Its additional Forgerie triggers are limited to an unusable environment, destructive-data ambiguity, a business decision outside the charter, a knowingly weakened invariant or security/authorization boundary, unexpected unrelated branch changes, push or pull-request authentication failure, or an infeasible finish line. Ordinary implementation defects and review findings go through remediation legs.
 
 ## Before dispatching
 
-For PI WEB relays, infer the finish line, leg sizing, task-selection policy, and initial sequence when the task provides enough information. Use `ask_user` only when an answer materially changes the goal, target, mode (in-place vs worktree), destructive-data choice, or non-obvious base. Ask at most three questions in one call and include confirmation before dispatch when questions are necessary. Otherwise, write the packet and dispatch leg 1 with one `spawn_session`.
+For Forgerie relays, infer the finish line, leg sizing, task-selection policy, and initial sequence when the task provides enough information. Use `ask_user` only when an answer materially changes the goal, target, mode (in-place vs worktree), destructive-data choice, or non-obvious base. Ask at most three questions in one call and include confirmation before dispatch when questions are necessary. Otherwise, write the packet and dispatch leg 1 with one `spawn_session`.
 
 ## Report back
 

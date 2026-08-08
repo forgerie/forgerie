@@ -21,16 +21,16 @@ function productionInput(): ProductionNativeServicePlanInput {
   return {
     backend,
     shell,
-    environment: { PI_WEB_CONFIG: "/home/user/.config/pi-web/config.json" },
+    environment: { PI_WEB_CONFIG: "/home/user/.config/forgerie/config.json" },
     executables: {
       sessiond: {
         configuredCommand: undefined,
-        namedCommand: "pi-web-sessiond",
+        namedCommand: "forgerie-sessiond",
         bundledEntrypointPath: "/package/dist/server/sessiond.js",
       },
       web: {
         configuredCommand: undefined,
-        namedCommand: "pi-web-server",
+        namedCommand: "forgerie-server",
         bundledEntrypointPath: "/package/dist/server/index.js",
       },
     },
@@ -73,11 +73,11 @@ describe("production native service planning", () => {
         purpose: "executable-selection",
         backend,
         shell,
-        environment: { PI_WEB_CONFIG: "/home/user/.config/pi-web/config.json" },
+        environment: { PI_WEB_CONFIG: "/home/user/.config/forgerie/config.json" },
         workingDirectory: null,
         prerequisites: [
-          expect.objectContaining({ id: "sessiond.command.pi-web-sessiond", kind: "command-available", command: "pi-web-sessiond" }),
-          expect.objectContaining({ id: "web.command.pi-web-server", kind: "command-available", command: "pi-web-server" }),
+          expect.objectContaining({ id: "sessiond.command.forgerie-sessiond", kind: "command-available", command: "forgerie-sessiond" }),
+          expect.objectContaining({ id: "web.command.forgerie-server", kind: "command-available", command: "forgerie-server" }),
         ],
       },
     ]);
@@ -91,26 +91,26 @@ describe("production native service planning", () => {
       services: [
         {
           id: "sessiond",
-          manager: { systemdName: "pi-web-sessiond.service", launchdLabel: "com.pi-web.sessiond" },
-          shellCommand: "exec pi-web-sessiond",
-          strategy: { kind: "named-command", command: "pi-web-sessiond", selectedBy: "authoritative-backend-probe" },
-          environment: { PI_WEB_CONFIG: "/home/user/.config/pi-web/config.json" },
+          manager: { systemdName: "forgerie-sessiond.service", launchdLabel: "com.forgerie.sessiond" },
+          shellCommand: "exec forgerie-sessiond",
+          strategy: { kind: "named-command", command: "forgerie-sessiond", selectedBy: "authoritative-backend-probe" },
+          environment: { PI_WEB_CONFIG: "/home/user/.config/forgerie/config.json" },
           workingDirectory: null,
           after: [],
           wants: [],
           prerequisites: [
-            { id: "sessiond.command.pi-web-sessiond", kind: "command-available", command: "pi-web-sessiond" },
+            { id: "sessiond.command.forgerie-sessiond", kind: "command-available", command: "forgerie-sessiond" },
             { id: "sessiond.node", kind: "node-version", command: "node", minimumVersion: "22.19.0" },
           ],
         },
         {
           id: "web",
-          shellCommand: "exec pi-web-server",
-          strategy: { kind: "named-command", command: "pi-web-server" },
+          shellCommand: "exec forgerie-server",
+          strategy: { kind: "named-command", command: "forgerie-server" },
           after: ["sessiond"],
           wants: ["sessiond"],
           prerequisites: [
-            { id: "web.command.pi-web-server", kind: "command-available", command: "pi-web-server" },
+            { id: "web.command.forgerie-server", kind: "command-available", command: "forgerie-server" },
             { id: "web.node", kind: "node-version", command: "node", minimumVersion: "22.19.0" },
           ],
         },
@@ -124,9 +124,9 @@ describe("production native service planning", () => {
         shell,
         workingDirectory: null,
         prerequisites: [
-          { id: "sessiond.command.pi-web-sessiond" },
+          { id: "sessiond.command.forgerie-sessiond" },
           { id: "sessiond.node" },
-          { id: "web.command.pi-web-server" },
+          { id: "web.command.forgerie-server" },
           { id: "web.node" },
         ],
       },
@@ -168,7 +168,7 @@ describe("production native service planning", () => {
       purpose: "plan-validation",
       backend,
       shell,
-      environment: { PI_WEB_CONFIG: "/home/user/.config/pi-web/config.json" },
+      environment: { PI_WEB_CONFIG: "/home/user/.config/forgerie/config.json" },
       workingDirectory: null,
       prerequisites: [],
     }]);
@@ -192,7 +192,7 @@ describe("production native service planning", () => {
       strategy: {
         kind: "bundled-entrypoint",
         command: "node",
-        namedCommand: "pi-web-sessiond",
+        namedCommand: "forgerie-sessiond",
         namedCommandFailure: "command not found",
       },
       prerequisites: [
@@ -213,14 +213,14 @@ describe("production native service planning", () => {
           requests.push(request);
           return Promise.resolve({
             kind: "completed",
-            outcomes: [{ prerequisiteId: "web.command.pi-web-server", status: "unsatisfied", detail: null }],
+            outcomes: [{ prerequisiteId: "web.command.forgerie-server", status: "unsatisfied", detail: null }],
           });
         },
       },
       fileExists: () => true,
     });
 
-    expect(requests[0]?.prerequisites).toMatchObject([{ id: "web.command.pi-web-server", command: "pi-web-server" }]);
+    expect(requests[0]?.prerequisites).toMatchObject([{ id: "web.command.forgerie-server", command: "forgerie-server" }]);
     expect(resolution.ok).toBe(true);
     if (resolution.ok) {
       expect(resolution.plan.services.map((service) => service.strategy.kind)).toEqual(["configured-override", "bundled-entrypoint"]);
@@ -239,14 +239,14 @@ describe("production native service planning", () => {
         {
           kind: "executable-unavailable",
           serviceId: "sessiond",
-          namedCommand: "pi-web-sessiond",
+          namedCommand: "forgerie-sessiond",
           namedCommandFailure: "not found in service PATH",
           bundledEntrypointPath: "/package/dist/server/sessiond.js",
         },
         {
           kind: "executable-unavailable",
           serviceId: "web",
-          namedCommand: "pi-web-server",
+          namedCommand: "forgerie-server",
           namedCommandFailure: "not found in service PATH",
           bundledEntrypointPath: "/package/dist/server/index.js",
         },
@@ -289,14 +289,14 @@ describe("production native service planning", () => {
       probe: {
         run: () => Promise.resolve({
           kind: "completed",
-          outcomes: [{ prerequisiteId: "sessiond.command.pi-web-sessiond", status: "satisfied", detail: null }],
+          outcomes: [{ prerequisiteId: "sessiond.command.forgerie-sessiond", status: "satisfied", detail: null }],
         }),
       },
       fileExists: () => true,
     });
     expect(malformed).toMatchObject({
       ok: false,
-      failures: [{ kind: "probe-infrastructure", reason: "malformed-output", message: "Authoritative probe returned no outcome for web.command.pi-web-server." }],
+      failures: [{ kind: "probe-infrastructure", reason: "malformed-output", message: "Authoritative probe returned no outcome for web.command.forgerie-server." }],
     });
   });
 });
@@ -351,8 +351,8 @@ describe("development native service planning", () => {
       .filter((prerequisite) => prerequisite.kind === "command-available")
       .map((prerequisite) => prerequisite.command);
     expect(serviceCommandRequirements).toEqual(["npm", "npm", "bash"]);
-    expect(serviceCommandRequirements).not.toContain("pi-web-server");
-    expect(serviceCommandRequirements).not.toContain("pi-web-sessiond");
+    expect(serviceCommandRequirements).not.toContain("forgerie-server");
+    expect(serviceCommandRequirements).not.toContain("forgerie-sessiond");
 
     expect(planValidationProbeRequests(plan)).toMatchObject([
       {

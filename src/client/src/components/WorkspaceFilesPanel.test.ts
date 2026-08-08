@@ -277,11 +277,11 @@ describe("workspaceUploadReviewError", () => {
     expect(workspaceUploadReviewError([
       new File(["a"], "a.txt"),
       new File(["b"], "b.txt"),
-    ], ".pi-web/uploads")).toBeUndefined();
+    ], ".forgerie/uploads")).toBeUndefined();
   });
 
   it("rejects empty selections and unsafe destinations before starting an upload", () => {
-    expect(workspaceUploadReviewError([], ".pi-web/uploads")).toBe("Choose at least one file to upload.");
+    expect(workspaceUploadReviewError([], ".forgerie/uploads")).toBe("Choose at least one file to upload.");
     expect(workspaceUploadReviewError([new File(["a"], "a.txt")], "../outside")).toContain("path traversal");
   });
 });
@@ -408,7 +408,7 @@ function workspacePanelContext(patch: Partial<WorkspacePanelContext> = {}): Work
     activeTerminalCount: patch.activeTerminalCount ?? 0,
     selectedTerminalId: patch.selectedTerminalId,
     terminalAutoStart: patch.terminalAutoStart ?? false,
-    workspaceUploadDefaultFolder: patch.workspaceUploadDefaultFolder ?? ".pi-web/uploads",
+    workspaceUploadDefaultFolder: patch.workspaceUploadDefaultFolder ?? ".forgerie/uploads",
     onRefreshFiles: patch.onRefreshFiles ?? vi.fn<WorkspacePanelContext["onRefreshFiles"]>(),
     onExpandDir: patch.onExpandDir ?? vi.fn<WorkspacePanelContext["onExpandDir"]>(),
     onSelectFile: patch.onSelectFile ?? vi.fn<WorkspacePanelContext["onSelectFile"]>(),
@@ -427,7 +427,7 @@ function uploadBatch(patch: Partial<WorkspaceUploadBatchState> = {}): WorkspaceU
     projectId: patch.projectId ?? "project-1",
     workspaceId: patch.workspaceId ?? "workspace-1",
     machineId: patch.machineId ?? "local",
-    destinationFolder: patch.destinationFolder ?? ".pi-web/uploads",
+    destinationFolder: patch.destinationFolder ?? ".forgerie/uploads",
     overwrite: patch.overwrite ?? true,
     createDirs: patch.createDirs ?? true,
     files: patch.files ?? [],

@@ -5,7 +5,7 @@ import { appTestContext, fakeRemoteClient, registerAppTestHooks } from "./app.te
 
 registerAppTestHooks();
 
-describe("buildApp PI WEB plugin routes", () => {
+describe("buildApp Forgerie plugin routes", () => {
   it("serves application-root plugin modules through the manifest and plugin-list APIs", async () => {
     const manifestResponse = await appTestContext.app.inject({ method: "GET", url: "/pi-web-plugins/manifest.json" });
     expect(manifestResponse.statusCode).toBe(200);
@@ -128,7 +128,7 @@ describe("buildApp PI WEB plugin routes", () => {
     const response = await appTestContext.app.inject({ method: "GET", url: `/pi-web-plugins/${scopedPluginId}/..%2F..%2Fapi%2Fconfig` });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Invalid remote PI WEB plugin asset path" });
+    expect(response.json()).toEqual({ error: "Invalid remote Forgerie plugin asset path" });
     expect(request).not.toHaveBeenCalled();
   });
 });

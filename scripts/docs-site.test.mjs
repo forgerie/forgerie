@@ -6,7 +6,7 @@ const siteScript = readFileSync(new URL("../docs/site.js", import.meta.url), "ut
 const siteStyles = readFileSync(new URL("../docs/styles.css", import.meta.url), "utf8");
 
 function createAnimatedHomePage(initialScrollY = 0) {
-  const window = new Window({ url: "https://pi-web.dev/" });
+  const window = new Window({ url: "http://127.0.0.1/" });
   const style = window.document.createElement("style");
   style.textContent = siteStyles;
   window.document.head.append(style);
@@ -15,7 +15,7 @@ function createAnimatedHomePage(initialScrollY = 0) {
     <header class="site-header"></header>
     <main>
       <section class="hero"><span class="intro-word">Pi</span></section>
-      <section class="section">More PI WEB content</section>
+      <section class="section">More Forgerie content</section>
     </main>
   `;
   window.scrollTo(0, initialScrollY);
@@ -30,7 +30,7 @@ function animationState(window, selector) {
   return { animation: style.animation, opacity: style.opacity, transform: style.transform };
 }
 
-describe("PI WEB docs homepage intro", () => {
+describe("Forgerie docs homepage intro", () => {
   it("finishes every intro animation as soon as the page scrolls", () => {
     const window = createAnimatedHomePage();
     try {

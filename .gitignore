@@ -13,10 +13,8 @@ dist/
 !/docker/custom-image.d/.gitkeep
 
 # Local runtime attachment uploads (created by the chat composer "save to folder" mode).
+.forgerie/
 .pi-web/
-
-# Dev docs site staging output (scripts/build-docs-dev.mjs).
-/docs/.deploy/
 
 # Machine-local agent instructions
 AGENTS.local.md

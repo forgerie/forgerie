@@ -12,8 +12,8 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const DEFAULT_OUTPUT_DIR = join(REPO_ROOT, "docs", "assets");
 const SESSION_ID = "019ef4c0-0000-7000-8000-000000000001";
-const DEMO_FILE = "docs/assets/pi-web-dev-screenshot.png";
-const DEFAULT_SITE_URL = "https://pi-web.dev/";
+const DEMO_FILE = "docs/assets/forgerie-dev-screenshot.png";
+const DEFAULT_SITE_URL = "http://127.0.0.1:8504/";
 const VIEWPORTS = {
   desktop: { width: 1440, height: 900, mobile: false },
   tablet: { width: 1024, height: 768, mobile: false },
@@ -93,7 +93,7 @@ async function main() {
   assertExecutable(tsxBin, "Run npm install before capturing screenshots.");
   assertExecutable(viteBin, "Run npm install before capturing screenshots.");
 
-  console.log("Starting isolated PI WEB session daemon, API server, and Vite client…");
+  console.log("Starting isolated Forgerie session daemon, API server, and Vite client…");
   startChild("sessiond", tsxBin, ["src/server/sessiond.ts"], { env, cwd: REPO_ROOT, logsDir });
   await waitForFile(socketPath, 10_000);
   startChild("api", tsxBin, ["src/server/index.ts"], { env, cwd: REPO_ROOT, logsDir });
@@ -171,7 +171,7 @@ async function selectPreviewImage(cdp) {
     const app = document.querySelector("pi-web-app");
     if (!app) throw new Error("pi-web-app not found");
     if (typeof app.openWorkspaceTool !== "function" || app.files === undefined) {
-      throw new Error("PI WEB app internals needed for deterministic screenshot setup were not available");
+      throw new Error("Forgerie app internals needed for deterministic screenshot setup were not available");
     }
     app.openWorkspaceTool("core:workspace.files");
     await app.updateComplete;
@@ -214,7 +214,7 @@ async function waitForApp(cdp) {
         return;
       }
       if (Date.now() - start > 15000) {
-        reject(new Error("PI WEB app did not restore the seeded session in time. Visible text: " + visibleText()));
+        reject(new Error("Forgerie app did not restore the seeded session in time. Visible text: " + visibleText()));
         return;
       }
       setTimeout(check, 100);
@@ -284,11 +284,11 @@ async function writeDemoSession(sessionDir, cwd) {
       timestamp: iso(ms + 1000),
       message: {
         role: "user",
-        content: [{ type: "text", text: "Take a screenshot of https://pi-web.dev, save it under docs/assets, and tell me where I can preview it." }],
+        content: [{ type: "text", text: "Take a screenshot of the local Forgerie site, save it under docs/assets, and tell me where I can preview it." }],
         timestamp: ms + 1000,
       },
     },
-    { type: "session_info", id: "10000004", parentId: "10000003", timestamp: iso(ms + 1100), name: "Screenshot pi-web.dev" },
+    { type: "session_info", id: "10000004", parentId: "10000003", timestamp: iso(ms + 1100), name: "Screenshot local Forgerie" },
     {
       type: "message",
       id: "10000005",
@@ -300,7 +300,7 @@ async function writeDemoSession(sessionDir, cwd) {
           type: "toolCall",
           id: "call_demo_screenshot",
           name: "bash",
-          arguments: { command: `capture-browser-screenshot https://pi-web.dev ${DEMO_FILE}` },
+          arguments: { command: `capture-browser-screenshot http://127.0.0.1:8504 ${DEMO_FILE}` },
         }],
         api: "openai-codex-responses",
         provider: "openai-codex",
@@ -349,7 +349,7 @@ function fallbackWebsiteHtml(url) {
     body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#07121f,#2b174c);color:#f8fafc;font:24px system-ui,sans-serif}
     main{width:min(900px,calc(100vw - 80px));padding:56px;border:1px solid rgba(255,255,255,.22);border-radius:28px;background:rgba(10,16,32,.72);box-shadow:0 24px 80px rgba(0,0,0,.35)}
     h1{margin:0 0 14px;font-size:64px;letter-spacing:-.06em}.eyebrow{color:#c084fc;text-transform:uppercase;letter-spacing:.16em;font-size:14px;font-weight:700}p{line-height:1.5;color:#dbeafe}
-  </style></head><body><main><div class="eyebrow">PI WEB</div><h1>pi-web.dev</h1><p>Fallback screenshot for ${escapeHtml(url)}.</p></main></body></html>`;
+  </style></head><body><main><div class="eyebrow">Forgerie</div><h1>Local Forgerie</h1><p>Fallback screenshot for ${escapeHtml(url)}.</p></main></body></html>`;
 }
 
 function startChild(name, command, childArgs, { env, cwd, logsDir }) {
@@ -453,7 +453,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
-      console.log(`Usage: node scripts/capture-screenshots.mjs [--output-dir docs/assets] [--site-url https://pi-web.dev/] [--keep-temp] [--chrome-bin /path/to/chrome]\n\nCaptures desktop, tablet, and mobile PI WEB screenshots from an isolated temporary instance.`);
+      console.log(`Usage: node scripts/capture-screenshots.mjs [--output-dir docs/assets] [--site-url http://127.0.0.1:8504/] [--keep-temp] [--chrome-bin /path/to/chrome]\n\nCaptures desktop, tablet, and mobile Forgerie screenshots from an isolated temporary instance.`);
       process.exit(0);
     }
     if (arg === "--keep-temp") {

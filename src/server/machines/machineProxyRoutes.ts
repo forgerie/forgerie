@@ -156,7 +156,7 @@ function applySafeHeaders(reply: FastifyReply, headers: Record<string, string | 
 }
 
 function isSelectedMachineConfigRequestError(error: unknown): boolean {
-  return error instanceof Error && error.message.startsWith("PI WEB selected-machine config");
+  return error instanceof Error && error.message.startsWith("Forgerie selected-machine config");
 }
 
 function errorMessage(error: unknown): string {
