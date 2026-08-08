@@ -37,6 +37,16 @@ describe("federated route contract", () => {
     expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("notifications"))).toBe(false);
   });
 
+  it("allowlists managed process controls on the existing session WebSocket", () => {
+    expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path.includes("/processes"))).toEqual([
+      { method: "GET", path: "/sessions/:sessionId/processes" },
+      { method: "GET", path: "/sessions/:sessionId/processes/:processId/output" },
+      { method: "POST", path: "/sessions/:sessionId/processes/:processId/kill" },
+      { method: "POST", path: "/sessions/:sessionId/processes/:processId/write" },
+    ]);
+    expect(FEDERATED_WEBSOCKET_ROUTES.filter((path) => path.includes("processes"))).toEqual([]);
+  });
+
   it("allowlists both ask routes without adding an ask WebSocket", () => {
     expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path.includes("/ask/"))).toEqual([
       { method: "POST", path: "/sessions/:sessionId/ask/submit" },
