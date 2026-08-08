@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ASK_USER_ANSWERS_CUSTOM_TYPE, type AskUserOutcome } from "../../shared/apiTypes";
+import { AD_PROCESS_NOTIFICATION_CUSTOM_TYPE, ASK_USER_ANSWERS_CUSTOM_TYPE, type AskUserOutcome } from "../../shared/apiTypes";
 import { groupChatMessages } from "./chatGroups";
 import { appendText, appendThinking, normalizeMessage, normalizeMessages, textMessage } from "./chatMessages";
 
@@ -179,6 +179,125 @@ describe("chat message normalization", () => {
     })).toEqual([
       textMessage("bash", "excluded from context\n\n$ npm test\n\nok\n\nexit 0\n\noutput truncated\n\nfull output: /tmp/out.log"),
     ]);
+  });
+});
+
+
+describe("process notification projection", () => {
+  // Surveyed installed extension sources before pinning this projection. Only
+  // pi-processes currently emits a displayed custom message type that needs a
+  // browser renderer: \`ad-process:notification\` (v0.10.4).
+  const details = {
+    kind: "crash",
+    processId: "process-1",
+    processName: "web-server",
+    command: "node server.js",
+    timestamp: 1_722_960_000_000,
+    summary: "Process crashed with exit code 1",
+    status: "exited",
+    exitCode: 1,
+    endReason: "exit",
+    signal: null,
+    attention: "turn",
+  };
+
+  it("projects a process notification into a readable transcript part", () => {
+    const rawContent = '<process_notification kind="crash">verbose XML</process_notification>';
+    const normalized = normalizeMessage({
+      role: "custom",
+      customType: AD_PROCESS_NOTIFICATION_CUSTOM_TYPE,
+      content: rawContent,
+      details,
+    });
+    const recordLine = {
+      role: "system" as const,
+      parts: [{
+        type: "processNotification" as const,
+        kind: "crash",
+        processName: "web-server",
+        summary: "Process crashed with exit code 1",
+        status: "exited",
+        exitCode: 1,
+        rawContent,
+      }],
+    };
+
+    expect(normalized).toEqual([recordLine]);
+    expect(groupChatMessages(normalized)).toEqual([{ kind: "message", index: 0, message: recordLine }]);
+  });
+
+  it("accepts a log-match notification without lifecycle fields", () => {
+    const normalized = normalizeMessage({
+      role: "custom",
+      customType: AD_PROCESS_NOTIFICATION_CUSTOM_TYPE,
+      content: "raw",
+      details: {
+        kind: "log_match",
+        processId: "process-2",
+        processName: "dev-server",
+        command: "npm run dev",
+        timestamp: 1_722_960_000_000,
+        summary: "Server listening on port 3000",
+        attention: "context",
+      },
+    });
+
+    expect(normalized[0]?.parts[0]).toEqual({
+      type: "processNotification",
+      kind: "log_match",
+      processName: "dev-server",
+      summary: "Server listening on port 3000",
+      rawContent: "raw",
+    });
+  });
+
+  it("normalizes a null exit code to an omitted display field", () => {
+    const normalized = normalizeMessage({
+      role: "custom",
+      customType: AD_PROCESS_NOTIFICATION_CUSTOM_TYPE,
+      content: "raw",
+      details: { ...details, exitCode: null },
+    });
+
+    expect(normalized[0]?.parts[0]).not.toHaveProperty("exitCode");
+  });
+
+  it("accepts suppressed log-match summaries", () => {
+    const normalized = normalizeMessage({
+      role: "custom",
+      customType: AD_PROCESS_NOTIFICATION_CUSTOM_TYPE,
+      content: "raw",
+      details: { ...details, kind: "log_match_suppressed" },
+    });
+
+    expect(normalized[0]?.parts[0]).toMatchObject({
+      type: "processNotification",
+      kind: "log_match_suppressed",
+    });
+  });
+
+  it.each([
+    null,
+    {},
+    { ...details, summary: "" },
+    { ...details, kind: "unknown" },
+    { ...details, exitCode: "1" },
+  ])("falls back to raw text for malformed details %#", (malformedDetails) => {
+    expect(normalizeMessage({
+      role: "custom",
+      customType: AD_PROCESS_NOTIFICATION_CUSTOM_TYPE,
+      content: "raw process notification",
+      details: malformedDetails,
+    })).toEqual([textMessage("system", "raw process notification")]);
+  });
+
+  it("does not project an unknown custom message type by details shape", () => {
+    expect(normalizeMessage({
+      role: "custom",
+      customType: "another-extension:notification",
+      content: "raw custom message",
+      details,
+    })).toEqual([textMessage("system", "raw custom message")]);
   });
 });
 

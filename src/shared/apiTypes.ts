@@ -467,6 +467,49 @@ export interface QueuedSessionMessage {
  */
 export const ASK_USER_ANSWERS_CUSTOM_TYPE = "pi-web.ask.answers";
 
+/**
+ * `customType` of process lifecycle and log-match notifications emitted by
+ * `@aliou/pi-processes` (v0.10.4). Its `details` are a
+ * {@link ProcessNotificationDetails}. Pinned from
+ * `extensions/processes/constants.ts` and
+ * `src/protocol/notifications.ts::ProcessProtocolNotificationPayload` in the
+ * installed extension.
+ */
+export const AD_PROCESS_NOTIFICATION_CUSTOM_TYPE = "ad-process:notification";
+
+export const PROCESS_NOTIFICATION_KINDS = ["success", "failure", "crash", "killed", "log_match", "log_match_suppressed"] as const;
+export const PROCESS_NOTIFICATION_STATUSES = ["running", "terminating", "terminate_timeout", "exited", "killed"] as const;
+export type ProcessNotificationKind = (typeof PROCESS_NOTIFICATION_KINDS)[number];
+export type ProcessNotificationStatus = (typeof PROCESS_NOTIFICATION_STATUSES)[number];
+
+/**
+ * Notification payload emitted by pi-processes, carrying process lifecycle
+ * events (success, failure, crash, killed) and log-match triggers. All fields
+ * beyond `kind`, `processId`, `processName`, `command`, `timestamp`, `summary`,
+ * and `attention` are optional — log-match notifications typically lack status
+ * and exit codes.
+ */
+export interface ProcessNotificationDetails {
+  kind: ProcessNotificationKind;
+  processId: string;
+  processName: string;
+  command: string;
+  timestamp: number;
+  summary: string;
+  status?: ProcessNotificationStatus;
+  exitCode?: number | null;
+  endReason?: "exit" | "signal" | "spawn_error" | "missing_pid" | "kill_timeout" | "lost" | null;
+  signal?: { name: string; number: number | null; description: string } | null;
+  logMatch?: {
+    pattern: string;
+    mode: "literal" | "regex";
+    stream: "stdout" | "stderr";
+    line: string;
+    matcherIndex: number;
+  };
+  attention: "turn" | "context" | "ignore";
+}
+
 /** Largest question set one `ask_user` call may post. */
 export const ASK_USER_QUESTION_LIMIT = 20;
 /** Largest option list one question may offer. */

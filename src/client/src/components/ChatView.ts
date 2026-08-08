@@ -93,6 +93,14 @@ export function chatQueuedMessageSections(clientQueued: QueuedSessionMessage[], 
 }
 
 export type ChatImagePart = Extract<ChatPart, { type: "image" }>;
+type ProcessNotificationPart = Extract<ChatPart, { type: "processNotification" }>;
+
+function processNotificationPresentation(kind: ProcessNotificationPart["kind"]): { symbol: string; className: string; label: string } {
+  if (kind === "success") return { symbol: "✓", className: "success", label: "Process succeeded" };
+  if (kind === "failure" || kind === "crash") return { symbol: "✖", className: "error", label: "Process failed" };
+  if (kind === "killed") return { symbol: "⏹", className: "", label: "Process stopped" };
+  return { symbol: "ℹ", className: "", label: "Process update" };
+}
 
 /** Derive the `<img>` source URL and alt text for a rendered image part. */
 export function chatImagePartSource(part: ChatImagePart): { src: string; alt: string } {
@@ -945,6 +953,23 @@ export class ChatView extends LitElement {
         .draftSessionId=${this.askDraftSessionId}
       ></ask-user-card>
     `;
+    if (part.type === "processNotification") {
+      const presentation = processNotificationPresentation(part.kind);
+      return html`
+        <div class="part process-notification ${presentation.className}">
+          <div class="process-notification-header">
+            <span class="status-affordance" aria-label=${presentation.label} title=${presentation.label}>${presentation.symbol}</span>
+            <strong>${part.processName}</strong>
+            <span class="summary">${part.summary}</span>
+            ${part.exitCode !== undefined ? html`<span class="exit-code">exit ${part.exitCode}</span>` : null}
+          </div>
+          <details class="raw-disclosure">
+            <summary>raw content</summary>
+            <pre class="raw-content">${part.rawContent}</pre>
+          </details>
+        </div>
+      `;
+    }
     if (part.type === "image") {
       const { src, alt } = chatImagePartSource(part);
       return html`<img class="part chat-image" src=${src} alt=${alt} loading="lazy" role="button" tabindex="0" title="Click to enlarge" @load=${this.onImageLoad} @click=${() => { this.openImageZoom(src, alt); }} @keydown=${(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.openImageZoom(src, alt); } }} />`;

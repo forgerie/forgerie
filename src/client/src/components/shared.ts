@@ -1,5 +1,5 @@
 import { css, svg, type TemplateResult } from "lit";
-import type { AskUserOutcome } from "../../../shared/apiTypes";
+import type { AskUserOutcome, ProcessNotificationDetails } from "../../../shared/apiTypes";
 import type { SessionWarningSeverity } from "../api";
 
 export function renderSessionWarningIcon(severity: SessionWarningSeverity, className: string): TemplateResult {
@@ -56,6 +56,7 @@ export type ChatPart =
   | { type: "skillInvocation"; name: string; location: string; content: string }
   | { type: "skillRead"; name: string; path: string; toolCallId?: string }
   | { type: "askUserRecord"; outcome: AskUserOutcome }
+  | { type: "processNotification"; kind: ProcessNotificationDetails["kind"]; processName: string; summary: string; status?: ProcessNotificationDetails["status"]; exitCode?: number; rawContent: string }
   | { type: "toolCall"; toolCallId?: string; toolName: string; summary: string; args?: unknown }
   | ToolExecutionPart
   | { type: "toolResult"; toolCallId?: string; toolName: string; text: string; isError: boolean; content?: unknown; details?: unknown }
@@ -473,6 +474,17 @@ export const chatStyles = css`
   summary { cursor: pointer; color: var(--pi-muted); }
   pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; direction: ltr; text-align: left; unicode-bidi: isolate; }
   .shell-output { color: var(--pi-text); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.45; direction: ltr; text-align: left; unicode-bidi: isolate; }
+  .process-notification { padding: 8px 10px; border: 1px solid var(--pi-border-muted); border-radius: 8px; background: var(--pi-surface); }
+  .process-notification.success { border-color: var(--pi-success-border); background: var(--pi-success-bg); }
+  .process-notification.error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-surface)); }
+  .process-notification-header { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; line-height: 1.4; }
+  .process-notification-header .status-affordance { flex: 0 0 auto; font-size: 15px; }
+  .process-notification-header strong { flex: 0 0 auto; font-weight: 600; }
+  .process-notification-header .summary { flex: 1 1 auto; min-width: 0; color: var(--pi-text); font-weight: normal; overflow-wrap: anywhere; }
+  .process-notification-header .exit-code { flex: 0 0 auto; margin-left: auto; color: var(--pi-muted); font-size: 12px; font-family: var(--pi-mono, ui-monospace, monospace); }
+  .process-notification .raw-disclosure { margin-top: 8px; border-top: 1px solid var(--pi-border-muted); padding-top: 6px; }
+  .process-notification .raw-disclosure summary { cursor: pointer; color: var(--pi-muted); font-size: 12px; }
+  .process-notification .raw-content { margin: 6px 0 0; padding: 8px; max-height: 180px; overflow: auto; border: 1px solid var(--pi-border-muted); border-radius: 6px; background: var(--pi-bg); color: var(--pi-text); font: 11px var(--pi-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
   @keyframes pulse { 0%, 100% { transform: scale(.75); opacity: .55; } 50% { transform: scale(1.2); opacity: 1; } }
 `;
 

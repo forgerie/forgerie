@@ -1,4 +1,11 @@
-import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes";
+import {
+  AD_PROCESS_NOTIFICATION_CUSTOM_TYPE,
+  ASK_USER_ANSWERS_CUSTOM_TYPE,
+  PROCESS_NOTIFICATION_KINDS,
+  PROCESS_NOTIFICATION_STATUSES,
+  type ProcessNotificationKind,
+  type ProcessNotificationStatus,
+} from "../../shared/apiTypes";
 import { parseAskUserOutcome } from "./api/parsers";
 import type { ChatLine, ChatPart, ToolExecutionPart, ToolPreview } from "./components/shared";
 
@@ -162,6 +169,8 @@ function normalizeRole(role: unknown): ChatLine["role"] {
 function normalizeContent(content: unknown, message: unknown): ChatPart[] {
   const askUserRecord = askUserRecordPart(message);
   if (askUserRecord !== undefined) return [askUserRecord];
+  const processNotification = processNotificationPart(message);
+  if (processNotification !== undefined) return [processNotification];
   if (typeof content === "string") return content !== "" ? [{ type: "text", text: content }] : [];
   if (!Array.isArray(content)) return objectFallback(content);
 
@@ -212,6 +221,48 @@ function parsedAskUserRecord(value: unknown): Extract<ChatPart, { type: "askUser
     // Fall back to its model-facing text through the ordinary normalizer.
     return undefined;
   }
+}
+
+function processNotificationPart(message: unknown): Extract<ChatPart, { type: "processNotification" }> | undefined {
+  if (getString(message, "role") !== "custom" || getString(message, "customType") !== AD_PROCESS_NOTIFICATION_CUSTOM_TYPE) return undefined;
+  const rawContent = getString(message, "content") ?? "";
+  return parsedProcessNotification(getProperty(message, "details"), rawContent);
+}
+
+const PROCESS_NOTIFICATION_KIND_SET: ReadonlySet<string> = new Set(PROCESS_NOTIFICATION_KINDS);
+const PROCESS_NOTIFICATION_STATUS_SET: ReadonlySet<string> = new Set(PROCESS_NOTIFICATION_STATUSES);
+
+function isProcessNotificationKind(value: string | undefined): value is ProcessNotificationKind {
+  return value !== undefined && PROCESS_NOTIFICATION_KIND_SET.has(value);
+}
+
+function isProcessNotificationStatus(value: string | undefined): value is ProcessNotificationStatus | undefined {
+  return value === undefined || PROCESS_NOTIFICATION_STATUS_SET.has(value);
+}
+
+function parsedProcessNotification(details: unknown, rawContent: string): Extract<ChatPart, { type: "processNotification" }> | undefined {
+  if (details == null || typeof details !== "object") return undefined;
+  const kind = getString(details, "kind");
+  const processName = getString(details, "processName");
+  const summary = getString(details, "summary");
+  if (!isProcessNotificationKind(kind)) return undefined;
+  if (processName === undefined || processName.trim() === "") return undefined;
+  if (summary === undefined || summary.trim() === "") return undefined;
+
+  const status = getString(details, "status");
+  if (!isProcessNotificationStatus(status)) return undefined;
+  const exitCode = getProperty(details, "exitCode");
+  if (exitCode !== undefined && exitCode !== null && typeof exitCode !== "number") return undefined;
+
+  return {
+    type: "processNotification",
+    kind,
+    processName,
+    summary,
+    ...(status === undefined ? {} : { status }),
+    ...(typeof exitCode === "number" ? { exitCode } : {}),
+    rawContent,
+  };
 }
 
 function toolResultPartFromText(text: string, message: unknown): Extract<ChatPart, { type: "toolResult" }> {
