@@ -109,6 +109,16 @@ Repeat for all four viewports. The agent must **look at** the captures (Read
 the PNGs) and judge them — capturing without reviewing does not count as
 validation.
 
+### Additional acceptance device
+
+- **Samsung Tab Ultra 11**: 2960 × 1848 px, 14.6-inch panel.
+
+Its CSS viewport and device pixel ratio have not been measured. Do not derive
+them from the physical resolution. Once measured on the real device, record
+portrait and landscape CSS viewports here and include both orientations in
+user-facing visual validation. No Tab Ultra 11 validation was required when
+this device entry was added.
+
 ### Seamlessness requirement
 
 The UX must be seamless across all four postures and the transitions between
