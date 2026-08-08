@@ -26,6 +26,11 @@ import type { GlobalSessionEvent } from "../sessionSocket";
 import { markSessionArchived, markSessionsArchived } from "./sessionSelection";
 import type { GetState, SetState } from "./types";
 import type { GlobalSessionsState } from "../appState";
+import {
+  sessionBoardState,
+  triageQueue,
+  type SessionBoard,
+} from "../sessionBoard";
 
 // ---------------------------------------------------------------------------
 // Public API interface (injectable for tests)
@@ -95,6 +100,75 @@ export interface SessionInboxControllerOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Archive workflow types (U8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Dependencies injected into {@link SessionInboxController.archiveWithUndo}.
+ *
+ * Separating concerns allows tests to inject controllable fakes for the
+ * server boundary (archiveSession), the confirm dialog, and the timer duration.
+ */
+export interface ArchiveWithUndoDeps {
+  /** The machine this archive is targeting (for undo toast ownership). */
+  machineId: string;
+  /** Server-side archive call (e.g. `() => sessions.archiveSession(session)`). */
+  archiveSession: (session: SessionInfo) => Promise<void>;
+  /**
+   * Confirmation dialog for Working sessions. Returns true to proceed, false
+   * to abort. Defaults to `window.confirm` in production; injected in tests.
+   * Not called for Blocked sessions (archiving a Blocked session is safe and
+   * does not require confirmation).
+   */
+  confirm?: (message: string) => boolean;
+  /** Undo window duration in milliseconds. Defaults to 5000. */
+  timerMs?: number;
+}
+
+/**
+ * Dependencies injected into {@link SessionInboxController.undoArchive}.
+ */
+export interface UndoArchiveDeps {
+  /** Server-side restore call (e.g. `() => sessions.restoreSession(session)`). */
+  restoreSession: (session: SessionInfo) => Promise<void>;
+}
+
+/**
+ * Dependencies injected into {@link SessionInboxController.archiveAndNext}.
+ *
+ * Extends {@link ArchiveWithUndoDeps} with queue-advance semantics.
+ */
+export interface ArchiveAndNextDeps extends ArchiveWithUndoDeps {
+  /**
+   * Navigate to the given session (e.g. `selectInboxSession`). Called after
+   * archive succeeds and a next session is found in the triage queue.
+   */
+  navigateTo: (session: SessionInfo) => Promise<void>;
+  /**
+   * Called when the triage queue is empty after the archive. The caller
+   * is responsible for returning focus to a real board element or the all-clear.
+   */
+  onAllClear: () => void;
+}
+
+/** Private tagged union for undo timer ownership. */
+type InboxUndoState =
+  | { readonly kind: "idle" }
+  | {
+      readonly kind: "active";
+      readonly session: SessionInfo;
+      readonly machineId: string;
+      /**
+       * A unique tag incremented whenever a new undo is installed or the
+       * existing one is cancelled. The timer callback checks this tag against
+       * the value it captured at install time; if they differ, the timer is
+       * stale and must not clear the toast.
+       */
+      readonly tag: number;
+      readonly timerId: ReturnType<typeof setTimeout>;
+    };
+
+// ---------------------------------------------------------------------------
 // Private state
 // ---------------------------------------------------------------------------
 
@@ -132,6 +206,11 @@ export class SessionInboxController implements SessionInboxBridge {
   private refreshPromise: Promise<void> | undefined;
   private refreshQueued = false;
   private disposed = false;
+
+  // U8: undo toast state
+  private undoState: InboxUndoState = { kind: "idle" };
+  /** Incremented whenever a new undo is installed; used to tag timer callbacks so stale ones are ignored. */
+  private undoTag = 0;
   /**
    * Events buffered while a snapshot fetch is in flight.
    * Set to an array at the start of each `runRefresh`; reset to `undefined`
@@ -164,6 +243,10 @@ export class SessionInboxController implements SessionInboxBridge {
     this.refreshPromise = undefined;
     this.refreshQueued = false;
     this.inflightBuffer = undefined;
+    this.clearUndoTimer();
+    // Clear the toast from AppState on dispose so it does not outlive the
+    // controller's lifetime (e.g. unmount, machine switch with full teardown).
+    this.setState({ inboxUndoToast: undefined });
   }
 
   /**
@@ -313,6 +396,138 @@ export class SessionInboxController implements SessionInboxBridge {
   }
 
   // -------------------------------------------------------------------------
+  // U8: Archive workflow — undo orchestration
+  // -------------------------------------------------------------------------
+
+  /**
+   * Archive a session server-first, then present a 5-second undo toast.
+   *
+   * Working sessions (classified via the board's statuses) require a
+   * confirmation dialog before archiving. Blocked sessions archive without
+   * confirmation.
+   *
+   * If a previous undo is active, its timer is cancelled and the toast is
+   * replaced with the new one (single-undo model).
+   *
+   * Returns `true` when the server confirmed the archive and the undo toast
+   * is installed. Returns `false` when the controller is disposed or the
+   * user declines the Working-session confirmation. Throws if the server
+   * archive fails, leaving the session in place with no toast.
+   */
+  async archiveWithUndo(session: SessionInfo, deps: ArchiveWithUndoDeps): Promise<boolean> {
+    if (this.disposed) return false;
+
+    // Working session check: use the board state classifier against the
+    // global statuses map. Blocked sessions skip confirmation.
+    const statuses = this.getState().globalSessions?.statuses ?? {};
+    const status = statuses[session.id];
+    const boardState = sessionBoardState(session, { status });
+
+    if (boardState.kind === "working") {
+      const confirmFn = deps.confirm ?? defaultConfirm;
+      const message =
+        "This session is active. Archive it anyway?\n\n" +
+        "Archiving an active session may interrupt work in progress.";
+      if (!confirmFn(message)) return false; // User declined
+    }
+
+    // Server-first archive: throws on failure (caller handles the error).
+    await deps.archiveSession(session);
+
+    // Server confirmed; update the global store.
+    const archivedAt = new Date().toISOString();
+    this.notifyArchived(deps.machineId, session.id, archivedAt);
+
+    // Replace any existing undo toast.
+    this.clearUndoTimer();
+    this.installUndoToast(session, deps.machineId, deps.timerMs ?? DEFAULT_UNDO_TIMER_MS);
+
+    return true;
+  }
+
+  /**
+   * Execute the undo (restore) for the active undo toast.
+   *
+   * No-ops if no undo is active. On "not found" errors (session was
+   * permanently deleted between archive and undo), dismisses the toast and
+   * surfaces an explicit "Session was already deleted" error instead of the
+   * raw server error.
+   */
+  async undoArchive(deps: UndoArchiveDeps): Promise<void> {
+    if (this.disposed) return;
+    if (this.undoState.kind !== "active") return;
+
+    const { session } = this.undoState;
+
+    // Cancel the timer first so it does not clear the toast out from under
+    // the restore call.
+    this.clearUndoTimer();
+    this.setState({ inboxUndoToast: undefined });
+
+    try {
+      await deps.restoreSession(session);
+    } catch (error: unknown) {
+      const message = String(error);
+      if (isNotFoundError(message)) {
+        this.setState({ error: "Session was already deleted" });
+      } else {
+        this.setState({ error: message });
+      }
+    }
+  }
+
+  /**
+   * Dismiss the active undo toast without restoring (navigation path).
+   *
+   * The archive stands. The timer is cancelled so it does not fire later.
+   */
+  dismissUndoToast(): void {
+    if (this.disposed) return;
+    this.clearUndoTimer();
+    this.setState({ inboxUndoToast: undefined });
+  }
+
+  /**
+   * Archive the current session and advance to the next in the triage queue.
+   *
+   * After a successful archive the triage queue is recomputed from the board
+   * (minus the just-archived session). If a next session exists, navigateTo
+   * is called; if the queue is empty, onAllClear is called instead.
+   *
+   * Stops completely (no navigation, no all-clear) when {@link archiveWithUndo}
+   * returns `false` — i.e. when the controller is disposed or the user
+   * declines the Working-session confirmation.
+   *
+   * The undo toast is set the same as {@link archiveWithUndo}: the caller
+   * can offer undo for the current archive while already viewing the next
+   * session.
+   */
+  async archiveAndNext(
+    current: SessionInfo,
+    board: SessionBoard<SessionInfo>,
+    deps: ArchiveAndNextDeps,
+  ): Promise<void> {
+    if (this.disposed) return;
+
+    // Archive current session (with confirm if Working).
+    // Stop completely on false — user declined or controller disposed.
+    const archived = await this.archiveWithUndo(current, deps);
+    if (!archived) return;
+
+    // Recompute triage queue excluding the just-archived session.
+    const queueAfter = triageQueue(board).filter((row) => row.session.id !== current.id);
+
+    if (queueAfter.length === 0) {
+      deps.onAllClear();
+    } else {
+      const nextRow = queueAfter[0];
+      if (nextRow !== undefined) {
+        await deps.navigateTo(nextRow.session);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
 
@@ -428,6 +643,62 @@ export class SessionInboxController implements SessionInboxBridge {
       },
     });
   }
+
+  // U8: undo timer management
+
+  /**
+   * Cancel the active undo timer, if any, and transition to idle.
+   * Does NOT clear AppState.inboxUndoToast — callers do that explicitly.
+   */
+  private clearUndoTimer(): void {
+    if (this.undoState.kind === "active") {
+      clearTimeout(this.undoState.timerId);
+      this.undoState = { kind: "idle" };
+    }
+  }
+
+  /**
+   * Install a new undo toast for the given session. Increments the tag so
+   * any stale timer from a previous undo cannot clear this toast.
+   */
+  private installUndoToast(session: SessionInfo, machineId: string, timerMs: number): void {
+    this.undoTag += 1;
+    const tag = this.undoTag;
+    const timerId = setTimeout(() => {
+      // Only clear if this timer is still the active one.
+      if (this.undoState.kind === "active" && this.undoState.tag === tag) {
+        this.undoState = { kind: "idle" };
+        this.setState({ inboxUndoToast: undefined });
+      }
+    }, timerMs);
+    this.undoState = { kind: "active", session, machineId, tag, timerId };
+    this.setState({ inboxUndoToast: { session, machineId } });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Module-level constants and helpers
+// ---------------------------------------------------------------------------
+
+const DEFAULT_UNDO_TIMER_MS = 5000;
+
+/**
+ * Detect whether an error message indicates the session no longer exists.
+ * Matches HTTP 404 patterns and common "not found" / "missing" messages.
+ */
+function isNotFoundError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("404") ||
+    lower.includes("not found") ||
+    lower.includes("missing") ||
+    lower.includes("already deleted")
+  );
+}
+
+/** Production default confirm: delegates to window.confirm. */
+function defaultConfirm(message: string): boolean {
+  return window.confirm(message);
 }
 
 // ---------------------------------------------------------------------------

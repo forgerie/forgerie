@@ -189,6 +189,36 @@ export const appStyles = css`
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   .empty { margin: auto; color: var(--pi-muted); }
   .error { padding: 10px 16px; border-bottom: 1px solid var(--pi-border); color: var(--pi-danger); }
+
+  /* Thread header: rendered above the chat view for session-level actions. */
+  .thread-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--pi-border-muted, #1b2340);
+    background: var(--pi-surface, #101527);
+  }
+  .thread-header-actions { display: flex; align-items: center; gap: 6px; }
+  .thread-action {
+    display: inline-grid;
+    place-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    font: inherit;
+    font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+    color: var(--pi-muted, #aaa4bd);
+    background: var(--pi-surface, #101527);
+    border: 1px solid var(--pi-border, #26304f);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .thread-action:hover {
+    color: var(--pi-text-bright, #fff);
+    background: var(--pi-surface-hover, #151b31);
+  }
 `;
 
 export const workspacePanelStyles = css`

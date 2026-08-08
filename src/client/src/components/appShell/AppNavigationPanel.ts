@@ -41,6 +41,9 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) onSelectSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onArchiveSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onRestoreSession?: (session: SessionInfo) => void | Promise<void>;
+  @property({ attribute: false }) undoToast?: { readonly session: SessionInfo; readonly machineId?: string };
+  @property({ attribute: false }) onUndoArchive?: () => void | Promise<void>;
+  @property({ attribute: false }) onDismissUndoToast?: () => void | Promise<void>;
   /**
    * Entry point for U7 (new session from workspace picker).
    * Fires when the inbox new-session button is clicked.
@@ -120,6 +123,9 @@ export class AppNavigationPanel extends LitElement {
         .onRestoreSession=${this.onRestoreSession === undefined ? undefined : (s: SessionInfo) => this.onRestoreSession?.(s)}
         .onNewSession=${this.onNewSession === undefined ? undefined : () => this.onNewSession?.()}
         .onManageWorkspaces=${this.onManageWorkspaces === undefined ? undefined : () => this.onManageWorkspaces?.()}
+        .undoToast=${this.undoToast}
+        .onUndoArchive=${this.onUndoArchive === undefined ? undefined : () => this.onUndoArchive?.()}
+        .onDismissUndoToast=${this.onDismissUndoToast === undefined ? undefined : () => this.onDismissUndoToast?.()}
         .unavailableCwds=${this.unavailableCwds}
         data-machine=${machineId ?? ""}
       ></session-inbox-panel>

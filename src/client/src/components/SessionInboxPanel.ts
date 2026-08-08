@@ -119,6 +119,22 @@ export class SessionInboxPanel extends LitElement {
   @property({ attribute: false }) onRestoreSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onNewSession?: () => void;
   /**
+   * Active undo toast state. Set by the controller after a successful archive.
+   * Cleared by the controller's 5-second timer, by explicit dismissal, or on
+   * navigation / dispose. When `undefined`, no toast is shown.
+   */
+  @property({ attribute: false }) undoToast?: { readonly session: SessionInfo; readonly machineId?: string };
+  /**
+   * Execute the undo (restore) for the active undo toast.
+   * Called when the user clicks the Undo button in the toast.
+   */
+  @property({ attribute: false }) onUndoArchive?: () => void;
+  /**
+   * Dismiss the undo toast without restoring (e.g. the user explicitly closes
+   * it). The archive stands; the controller cancels the expiry timer.
+   */
+  @property({ attribute: false }) onDismissUndoToast?: () => void;
+  /**
    * Opens the workspace management picker (manage mode). Fires when the
    * persistent 'Workspaces' entry in the inbox header is clicked.
    */
@@ -342,6 +358,31 @@ export class SessionInboxPanel extends LitElement {
     return html`
       <div class="board-scroll" role="listbox" aria-label="Sessions">
         ${visibleGroups.map((group) => this.renderGroup(group, locationMap))}
+      </div>
+      ${this.renderUndoToast()}
+    `;
+  }
+
+  private renderUndoToast(): TemplateResult | typeof nothing {
+    const toast = this.undoToast;
+    if (toast === undefined) return nothing;
+    const title = toast.session.name ?? (toast.session.firstMessage || toast.session.id);
+    return html`
+      <div class="undo-toast" role="status" aria-live="polite" data-undo-toast>
+        <span class="undo-label">Archived: <em>${title}</em></span>
+        <div class="undo-actions">
+          <button
+            class="undo-btn"
+            data-action="undo-archive"
+            @click=${() => { this.onUndoArchive?.(); }}
+          >Undo</button>
+          <button
+            class="undo-dismiss"
+            data-action="dismiss-undo"
+            aria-label="Dismiss"
+            @click=${() => { this.onDismissUndoToast?.(); }}
+          >×</button>
+        </div>
       </div>
     `;
   }
@@ -895,6 +936,85 @@ export class SessionInboxPanel extends LitElement {
       outline: 2px solid var(--pi-accent, #7c3cff);
       outline-offset: 2px;
       border-radius: 6px;
+    }
+
+    /* ---- undo toast ---- */
+
+    .undo-toast {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px;
+      background: var(--pi-surface, #101527);
+      border-top: 1px solid var(--pi-border, #26304f);
+      animation: toast-slide-up 200ms ease;
+    }
+
+    @keyframes toast-slide-up {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .undo-label {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      color: var(--pi-text, #f7f4ff);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .undo-label em {
+      font-style: normal;
+      color: var(--pi-muted, #aaa4bd);
+    }
+
+    .undo-actions {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .undo-btn {
+      display: inline-grid;
+      place-items: center;
+      min-height: 44px;
+      padding: 0 12px;
+      font: inherit;
+      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      font-weight: 600;
+      color: var(--pi-accent, #7c3cff);
+      background: color-mix(in srgb, var(--pi-accent, #7c3cff) 12%, transparent);
+      border: 1px solid var(--pi-accent-border, #5a47b0);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .undo-btn:hover {
+      background: color-mix(in srgb, var(--pi-accent, #7c3cff) 22%, transparent);
+    }
+
+    .undo-dismiss {
+      display: inline-grid;
+      place-items: center;
+      min-width: 44px;
+      min-height: 44px;
+      padding: 0;
+      font: inherit;
+      color: var(--pi-dim, #817a99);
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .undo-dismiss:hover {
+      color: var(--pi-text, #f7f4ff);
+      border-color: var(--pi-border-muted, #1b2340);
     }
   `;
 }

@@ -800,6 +800,61 @@ export class SessionController {
     }
   }
 
+  /**
+   * Archive a session, updating the workspace session list and handling
+   * selection changes. Propagates API errors to the caller.
+   *
+   * Intentionally does NOT notify the inbox bridge — callers that route
+   * through {@link SessionInboxController.archiveWithUndo} rely on that
+   * controller notifying the global store itself after this method returns,
+   * so invoking the bridge here would produce a duplicate notification.
+   *
+   * Use {@link archiveSession} for direct (non-inbox) archive paths where
+   * the bridge should be notified by the caller.
+   */
+  async archiveSessionThrowing(session: SessionInfo): Promise<void> {
+    const status = this.statusForSession(session);
+    if (isTransientNewSessionInfo(session, status)) {
+      await this.deleteCachedNewSession(session);
+      return;
+    }
+    if (!isArchivableSessionInfo(session, status)) return;
+    const machineId = selectedMachineId(this.getState());
+    // Throws on API error — caller is responsible for error handling.
+    await this.api.archive(session, machineId);
+    const archivedAt = new Date().toISOString();
+    const state = this.getState();
+    const sessions = markSessionArchived(state.sessions, session.id, archivedAt);
+    const selectionChange = selectionAfterArchivingSession(sessions, state.selectedSession?.id, session.id);
+    this.setState({ sessions });
+    // inbox?.notifyArchived intentionally omitted: archiveWithUndo calls
+    // notifyArchived itself after this method returns.
+
+    if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
+    else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
+  }
+
+  /**
+   * Restore a session from the archive, updating the workspace session list,
+   * notifying the inbox bridge, and re-selecting the session if it is the
+   * currently selected one. Propagates API errors to the caller.
+   *
+   * Designed for injection into {@link SessionInboxController.undoArchive},
+   * which needs error propagation to detect "Session not found" and surface
+   * a user-readable message.
+   */
+  async restoreSessionThrowing(session: SessionInfo): Promise<void> {
+    const machineId = selectedMachineId(this.getState());
+    // Throws on API error — caller is responsible for error handling.
+    await this.api.restore(session, machineId);
+    const restored = { ...session };
+    delete restored.archived;
+    delete restored.archivedAt;
+    this.replaceSession(restored);
+    this.inbox?.notifyRestored(machineId, restored);
+    if (this.getState().selectedSession?.id === restored.id) await this.selectSession(restored);
+  }
+
   async reloadSession(session = this.getState().selectedSession) {
     if (session === undefined || !isArchivableSessionInfo(session, this.statusForSession(session))) return;
     const machineId = selectedMachineId(this.getState());

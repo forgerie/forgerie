@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
-import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
+import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
 import { isSessionActive } from "../../../shared/activity";
@@ -81,6 +81,7 @@ import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/A
 import "./SessionInboxPanel";
 import "./SessionInboxNewSessionDialog";
 import { navigateToInboxSession } from "../controllers/inboxNavigation";
+import { deriveSessionBoard } from "../sessionBoard";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
 import { appStyles } from "./shared";
@@ -311,6 +312,24 @@ export class PiWebApp extends LitElement {
     if (this.keyboard.handle(event, this.getDefaultActions(), { shortcuts: this.shortcutConfig })) {
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+    // Keyboard E: archive selected session (same confirm/path as the row action).
+    // Only fires when focus is not in an input, textarea, contenteditable, or editor.
+    if (
+      event.key === "e" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      !isKeyEventInEditableContext(event)
+    ) {
+      const session = this.state.selectedSession;
+      if (session !== undefined && session.archived !== true) {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.archiveInboxSession(session);
+      }
     }
   };
 
@@ -1330,8 +1349,11 @@ export class PiWebApp extends LitElement {
         .onSelectMachine=${(machine: Machine) => this.selectNavigationItem("machines", "chat", () => this.selectMachineWithMemory(machine))}
         .onRemoveMachine=${(machine: Machine) => { void this.removeMachine(machine); }}
         .onSelectSession=${(session: SessionInfo) => { void this.selectInboxSession(session); }}
-        .onArchiveSession=${(session: SessionInfo) => this.sessions.archiveSession(session)}
+        .onArchiveSession=${(session: SessionInfo) => { void this.archiveInboxSession(session); }}
         .onRestoreSession=${(session: SessionInfo) => { void this.restoreInboxSession(session); }}
+        .undoToast=${this.state.inboxUndoToast}
+        .onUndoArchive=${() => { void this.undoInboxArchive(); }}
+        .onDismissUndoToast=${() => { this.inbox.dismissUndoToast(); }}
         .onNewSession=${() => { this.setState({ newSessionDialog: { step: "project", mode: "start" } }); }}
         .onManageWorkspaces=${() => { this.setState({ newSessionDialog: { step: "project", mode: "manage" } }); }}
         .onCancelKeyboardNavigation=${() => { void this.focusChatComposer(); }}
@@ -1366,6 +1388,9 @@ export class PiWebApp extends LitElement {
   private async selectInboxSession(session: SessionInfo): Promise<void> {
     const seq = ++this.navigationSelectionSeq;
     const isCurrentToken = () => seq === this.navigationSelectionSeq;
+
+    // Navigation dismisses the undo toast (archive stands).
+    this.inbox.dismissUndoToast();
 
     const result = await navigateToInboxSession(
       session,
@@ -1426,6 +1451,70 @@ export class PiWebApp extends LitElement {
     const isCurrentToken = () => seq === this.navigationSelectionSeq;
     await this.sessions.restoreSession(session);
     if (isCurrentToken()) await this.focusChatComposer();
+  }
+
+  /**
+   * Archive an inbox session with the undo toast orchestration.
+   *
+   * Routes through `SessionInboxController.archiveWithUndo` so:
+   *   - Working sessions get a confirmation dialog.
+   *   - A 5-second undo toast is set in AppState on success.
+   *   - A second archive before the first undo expires replaces the toast.
+   *   - Archive failure surfaces via AppState.error; no toast is set.
+   */
+  private async archiveInboxSession(session: SessionInfo): Promise<void> {
+    try {
+      await this.inbox.archiveWithUndo(session, {
+        machineId: selectedMachineId(this.state),
+        // archiveSessionThrowing propagates API errors so archiveWithUndo can
+        // abort before updating the global store or installing the undo toast.
+        // It does not call inbox.notifyArchived — archiveWithUndo handles that.
+        archiveSession: (s) => this.sessions.archiveSessionThrowing(s),
+      });
+    } catch (error: unknown) {
+      this.setState({ error: String(error) });
+    }
+  }
+
+  /** Execute the undo for the active inbox archive toast. */
+  private async undoInboxArchive(): Promise<void> {
+    await this.inbox.undoArchive({
+      // restoreSessionThrowing propagates API errors so undoArchive can detect
+      // "Session not found" and surface a user-readable message.
+      restoreSession: (s) => this.sessions.restoreSessionThrowing(s),
+    });
+  }
+
+  /**
+   * Archive the selected session and advance to the next in the triage queue.
+   *
+   * Called by the "Archive & next" button in the thread header.
+   * If the queue is empty after the archive, the focus returns to the board.
+   */
+  private async archiveAndNext(): Promise<void> {
+    const session = this.state.selectedSession;
+    if (session === undefined) return;
+
+    const gs = this.state.globalSessions;
+    if (gs === undefined) return;
+
+    // Build a board from the current global sessions so triageQueue works.
+    const board = buildInboxBoard(this.state);
+
+    try {
+      await this.inbox.archiveAndNext(session, board, {
+        machineId: selectedMachineId(this.state),
+        archiveSession: (s) => this.sessions.archiveSessionThrowing(s),
+        navigateTo: (next) => this.selectInboxSession(next),
+        onAllClear: () => {
+          // Focus the navigation panel (inbox board) so keyboard users land
+          // on a real board element in the all-clear state.
+          void this.focusNavigationSection("sessions");
+        },
+      });
+    } catch (error: unknown) {
+      this.setState({ error: String(error) });
+    }
   }
 
   private openNavigationSection(section: NavigationSection): void {
@@ -1985,7 +2074,10 @@ export class PiWebApp extends LitElement {
       reloadPage: () => { this.hardReloadApp(); },
       deleteWorkspace: (workspace) => this.deleteWorkspace(workspace),
       startSession: () => this.withChatScrollTransition(() => this.startSessionAndOpenChat()),
-      archiveSession: () => this.sessions.archiveSession(),
+      archiveSession: () => {
+        const session = this.state.selectedSession;
+        if (session !== undefined) void this.archiveInboxSession(session);
+      },
       reloadSession: () => this.sessions.reloadSession(),
       deleteCachedNewSession: () => this.sessions.deleteCachedNewSession(),
       stopActiveWork: () => this.sessions.stopActiveWork(),
@@ -2319,6 +2411,34 @@ export class PiWebApp extends LitElement {
     void this.openThinkingDialog();
   };
 
+  /**
+   * Thread header: rendered above the chat view when a session is selected.
+   * Contains the "Archive & next" primary action and any session-level controls
+   * that live in the thread pane rather than the navigation pane.
+   *
+   * Hidden when the session is archived (archive is already done) or when
+   * the navigation panel is in mobile overlay (limited screen space).
+   */
+  private renderThreadHeader(state: AppState, session: SessionInfo) {
+    if (session.archived === true) return null;
+    const canArchiveAndNext = state.globalSessions !== undefined;
+    return html`
+      <div class="thread-header" data-thread-header>
+        <div class="thread-header-actions">
+          ${canArchiveAndNext ? html`
+            <button
+              class="thread-action archive-and-next"
+              data-action="archive-and-next"
+              title="Archive this session and open the next one waiting for you"
+              aria-label="Archive &amp; next"
+              @click=${() => { void this.archiveAndNext(); }}
+            >Archive &amp; next</button>
+          ` : null}
+        </div>
+      </div>
+    `;
+  }
+
   private renderChatView(state: AppState, session: SessionInfo) {
     return html`
       <chat-view .sessionId=${session.id} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .pendingMessageCount=${state.status?.pendingMessageCount ?? 0} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(selectedMachineId(state), session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .onDismissNotification=${this.handleDismissNotification} .onDismissAllNotifications=${this.handleDismissAllNotifications} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())}></chat-view>
@@ -2405,6 +2525,7 @@ export class PiWebApp extends LitElement {
           ${this.renderNavigationScrim(state)}
           <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout ? this.renderNavigationPanel() : null}</div>
           ${state.selectedSession ? html`
+            ${this.renderThreadHeader(state, state.selectedSession)}
             ${this.renderChatView(state, state.selectedSession)}
             <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
             ${this.renderStatusBar(state)}
@@ -2537,4 +2658,42 @@ function thinkingDescription(level: string): string | undefined {
     case "xhigh": return "Maximum reasoning (~32k tokens)";
     default: return undefined; // unknown level from a newer pi: no description
   }
+}
+
+/**
+ * Build a SessionBoard from the current AppState global sessions for use in
+ * archiveAndNext. Location data is omitted because triageQueue only needs
+ * state classification (session + statuses + activities + unread).
+ */
+function buildInboxBoard(
+  state: Pick<AppState, "globalSessions" | "sessionActivities" | "sessionStatuses">,
+) {
+  const gs = state.globalSessions;
+  const sessions = gs?.sessions ?? [];
+  const statuses: Record<string, SessionStatus> = { ...(gs?.statuses ?? {}), ...state.sessionStatuses };
+  const activities = state.sessionActivities;
+  return deriveSessionBoard({
+    sessions,
+    statuses,
+    activities,
+    locationOf: (s) => ({
+      projectId: s.cwd,
+      projectName: s.cwd,
+      projectPath: s.cwd,
+    }),
+  });
+}
+
+/** Check if a keyboard event originates from an editable/input context. */
+function isKeyEventInEditableContext(event: KeyboardEvent): boolean {
+  return event.composedPath().some((target) => {
+    if (target instanceof HTMLInputElement) return true;
+    if (target instanceof HTMLTextAreaElement) return true;
+    if (target instanceof HTMLElement) {
+      if (target.isContentEditable) return true;
+      // CodeMirror editors have role="textbox" or a cm-editor class.
+      if (target.getAttribute("role") === "textbox") return true;
+    }
+    return false;
+  });
 }

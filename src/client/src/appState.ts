@@ -92,6 +92,15 @@ export interface AppState {
    * Owned by {@link SessionInboxController}.
    */
   globalSessions: GlobalSessionsState | undefined;
+  /**
+   * Active inbox archive undo toast. Set by SessionInboxController after a
+   * successful server-side archive. Cleared by the controller's timer, by
+   * explicit dismissal (navigation), or by dispose.
+   *
+   * Not workspace-scoped; survives workspace switches.
+   * Owned by SessionInboxController.
+   */
+  inboxUndoToast: { readonly session: SessionInfo; readonly machineId: string } | undefined;
   workspacesByProjectId: Record<string, Workspace[]>;
   workspaceDeletionRuns: Record<string, TerminalCommandRun>;
   commandDialog: Extract<CommandResult, { type: "select" }> | undefined;
@@ -241,6 +250,7 @@ export function initialAppState(): AppState {
     machineActivities: {},
     selectedNotificationInbox: undefined,
     globalSessions: undefined,
+    inboxUndoToast: undefined,
     workspacesByProjectId: {},
     workspaceDeletionRuns: {},
     commandDialog: undefined,

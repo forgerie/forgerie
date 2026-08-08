@@ -623,6 +623,98 @@ describe("location chip", () => {
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Undo toast
+// ---------------------------------------------------------------------------
+
+describe("undo toast", () => {
+  it("is not rendered when undoToast prop is undefined", async () => {
+    const sessions = [mkSession("open-one")];
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    const root = shadowRoot(panel);
+
+    const toast = root.querySelector("[data-undo-toast]");
+    expect(toast).toBeNull();
+  });
+
+  it("renders the undo toast when undoToast prop is set", async () => {
+    const session = mkSession("archived-one");
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      undoToast: { session },
+    });
+    const root = shadowRoot(panel);
+
+    const toast = root.querySelector("[data-undo-toast]");
+    expect(toast).not.toBeNull();
+  });
+
+  it("clicking Undo fires onUndoArchive", async () => {
+    const session = mkSession("archived-one");
+    let undoCalled = false;
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      undoToast: { session },
+      onUndoArchive: () => { undoCalled = true; },
+    });
+    const root = shadowRoot(panel);
+
+    const undoBtn = root.querySelector("[data-action='undo-archive']");
+    expect(undoBtn).not.toBeNull();
+    if (undoBtn instanceof HTMLElement) undoBtn.click();
+    await panel.updateComplete;
+
+    expect(undoCalled).toBe(true);
+  });
+
+  it("clicking Dismiss fires onDismissUndoToast", async () => {
+    const session = mkSession("archived-one");
+    let dismissCalled = false;
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      undoToast: { session },
+      onDismissUndoToast: () => { dismissCalled = true; },
+    });
+    const root = shadowRoot(panel);
+
+    const dismissBtn = root.querySelector("[data-action='dismiss-undo']");
+    expect(dismissBtn).not.toBeNull();
+    if (dismissBtn instanceof HTMLElement) dismissBtn.click();
+    await panel.updateComplete;
+
+    expect(dismissCalled).toBe(true);
+  });
+
+  it("toast shows the session title", async () => {
+    const session = mkSession("archived-one", { firstMessage: "My important task" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      undoToast: { session },
+    });
+    const root = shadowRoot(panel);
+
+    const toast = root.querySelector("[data-undo-toast]");
+    expect(toast?.textContent).toContain("My important task");
+  });
+
+  it("toast disappears when undoToast prop is set to undefined", async () => {
+    const session = mkSession("archived-one");
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      undoToast: { session },
+    });
+    const root = shadowRoot(panel);
+    expect(root.querySelector("[data-undo-toast]")).not.toBeNull();
+
+    // Use Reflect.set to assign undefined with exactOptionalPropertyTypes.
+    Reflect.set(panel, "undoToast", undefined);
+    await panel.updateComplete;
+
+    expect(root.querySelector("[data-undo-toast]")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // New session callback
 // ---------------------------------------------------------------------------
 
