@@ -14,6 +14,7 @@ import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
+import type { SessionInboxBridge } from "./sessionInboxController";
 import { sessionPathsEqual } from "../sessionPaths";
 import { TrailingRefreshCoordinator } from "./trailingRefreshCoordinator";
 
@@ -54,6 +55,8 @@ export interface SessionControllerDependencies {
   socket?: SessionEventSocket;
   transcripts?: ChatTranscriptStore;
   notifications?: SessionNotificationSessionBridge;
+  /** Bridge to the machine-scoped inbox store for archive/restore notifications. */
+  inbox?: SessionInboxBridge;
   replacePromptEditorText?: (replacement: PromptEditorTextReplacement) => void | Promise<void>;
   onSelectedSessionReady?: (selection: SelectedSessionReady) => void;
   onManagedProcessesEvent?: (event: Extract<SharedSessionUiEvent, { type: "processes.update" | "processes.output" }> | { type: "processes.refresh" }) => void;
@@ -107,6 +110,7 @@ export class SessionController {
   private readonly api: typeof defaultApi;
   private readonly transcripts: ChatTranscriptStore;
   private readonly notifications: SessionNotificationSessionBridge | undefined;
+  private readonly inbox: SessionInboxBridge | undefined;
   private readonly replacePromptEditorText: SessionControllerDependencies["replacePromptEditorText"];
   private readonly onSelectedSessionReady: SessionControllerDependencies["onSelectedSessionReady"];
   private readonly onManagedProcessesEvent: SessionControllerDependencies["onManagedProcessesEvent"];
@@ -139,12 +143,17 @@ export class SessionController {
     this.api = deps.api ?? defaultApi;
     this.transcripts = deps.transcripts ?? new ChatTranscriptStore();
     this.notifications = deps.notifications;
+    this.inbox = deps.inbox;
     this.replacePromptEditorText = deps.replacePromptEditorText;
     this.onSelectedSessionReady = deps.onSelectedSessionReady;
     this.onManagedProcessesEvent = deps.onManagedProcessesEvent;
   }
 
   applyGlobalEvent(event: GlobalSessionEvent): void {
+    // Route all session events to the inbox controller so its statuses map
+    // stays current alongside the workspace-scoped session list.
+    const machineId = selectedMachineId(this.getState());
+    this.inbox?.applyGlobalEvent(machineId, event);
     if (event.type === "status.update") this.queueStatusUpdate(event.status);
     else if (event.type === "activity.update") this.queueActivityUpdate(event.activity);
     else if (event.type === "session.created") this.applyCreatedSession(event.session);
@@ -589,12 +598,15 @@ export class SessionController {
       return;
     }
     if (!isArchivableSessionInfo(session, status)) return;
+    const machineId = selectedMachineId(this.getState());
     try {
-      await this.api.archive(session, selectedMachineId(this.getState()));
+      await this.api.archive(session, machineId);
+      const archivedAt = new Date().toISOString();
       const state = this.getState();
-      const sessions = markSessionArchived(state.sessions, session.id, new Date().toISOString());
+      const sessions = markSessionArchived(state.sessions, session.id, archivedAt);
       const selectionChange = selectionAfterArchivingSession(sessions, state.selectedSession?.id, session.id);
       this.setState({ sessions });
+      this.inbox?.notifyArchived(machineId, session.id, archivedAt);
 
       if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
       else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
@@ -605,13 +617,16 @@ export class SessionController {
 
   async archiveSessionWithDescendants(session = this.getState().selectedSession) {
     if (session === undefined || !isArchivableSessionInfo(session, this.statusForSession(session))) return;
+    const machineId = selectedMachineId(this.getState());
     try {
-      const response = await this.api.archiveWithDescendants(session, selectedMachineId(this.getState()));
+      const response = await this.api.archiveWithDescendants(session, machineId);
       const archivedIds = response.sessionIds !== undefined && response.sessionIds.length > 0 ? response.sessionIds : [session.id];
+      const archivedAt = new Date().toISOString();
       const state = this.getState();
-      const sessions = markSessionsArchived(state.sessions, archivedIds, new Date().toISOString());
+      const sessions = markSessionsArchived(state.sessions, archivedIds, archivedAt);
       const selectionChange = selectionAfterArchivingSessions(sessions, state.selectedSession?.id, archivedIds);
       this.setState({ sessions });
+      this.inbox?.notifyBulkArchived(machineId, archivedIds, archivedAt);
 
       if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
       else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
@@ -628,10 +643,12 @@ export class SessionController {
       const machineId = selectedMachineId(this.getState());
       const { succeededIds: archivedIds, failures, generatedAt } = await this.archiveSessionBatch(candidates, machineId);
       if (archivedIds.length > 0) {
+        const archivedAt = generatedAt ?? new Date().toISOString();
         const state = this.getState();
-        const nextSessions = markSessionsArchived(state.sessions, archivedIds, generatedAt ?? new Date().toISOString());
+        const nextSessions = markSessionsArchived(state.sessions, archivedIds, archivedAt);
         const selectionChange = selectionAfterArchivingSessions(nextSessions, state.selectedSession?.id, archivedIds);
         this.setState({ sessions: nextSessions });
+        this.inbox?.notifyBulkArchived(machineId, archivedIds, archivedAt);
 
         if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
         else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
@@ -654,6 +671,7 @@ export class SessionController {
         const state = this.getState();
         const nextSessions = state.sessions.filter((session) => !deletedIdSet.has(session.id));
         this.setState({ sessions: nextSessions });
+        this.inbox?.notifyDeleted(machineId, deletedIds);
         if (state.selectedSession !== undefined && deletedIdSet.has(state.selectedSession.id)) {
           const next = nextSessions.find((session) => session.archived !== true) ?? nextSessions[0];
           if (next !== undefined) await this.selectSession(next);
@@ -692,6 +710,8 @@ export class SessionController {
         sessionActivities: omitKeys(state.sessionActivities, affectedIds),
         ...(selectedAffected ? { status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] } : {}),
       });
+      if (archivedIds.length > 0) this.inbox?.notifyBulkArchived(machineId, archivedIds, result.generatedAt);
+      if (deletedIds.length > 0) this.inbox?.notifyDeleted(machineId, deletedIds);
 
       if (state.selectedSession !== undefined && deletedIdSet.has(state.selectedSession.id)) {
         const next = nextSessions.find((session) => session.archived !== true) ?? nextSessions[0];
@@ -732,17 +752,18 @@ export class SessionController {
 
   async deleteCachedNewSession(session = this.getState().selectedSession) {
     if (session === undefined || !isTransientNewSessionInfo(session, this.statusForSession(session))) return;
+    const machineId = selectedMachineId(this.getState());
     const pendingStart = isClientPendingStartSessionInfo(session) ? this.pendingSessionStarts.get(session.id) : undefined;
     if (pendingStart !== undefined) {
       pendingStart.discarded = true;
       pendingStart.queuedSends = [];
     }
     else {
-      void this.api.stop(session, selectedMachineId(this.getState())).catch(() => {
+      void this.api.stop(session, machineId).catch(() => {
         // Best-effort cleanup for transient sessions that may not exist server-side anymore.
       });
     }
-    forgetCachedNewSession(session.id, selectedMachineId(this.getState()));
+    forgetCachedNewSession(session.id, machineId);
     clearDraft(this.sessionCacheKey(session.id));
     const state = this.getState();
     const sessions = state.sessions.filter((candidate) => candidate.id !== session.id);
@@ -753,6 +774,7 @@ export class SessionController {
       sendingPrompts: omitKey(state.sendingPrompts, session.id),
       clientQueuedSessionMessages: omitKey(state.clientQueuedSessionMessages, session.id),
     });
+    this.inbox?.notifyDeleted(machineId, [session.id]);
     if (this.getState().selectedSession?.id !== session.id) return;
     const next = sessions.find((candidate) => candidate.archived !== true) ?? sessions[0];
     if (next !== undefined) await this.selectSession(next);
@@ -764,12 +786,14 @@ export class SessionController {
 
   async restoreSession(session = this.getState().selectedSession) {
     if (!session) return;
+    const machineId = selectedMachineId(this.getState());
     try {
-      await this.api.restore(session, selectedMachineId(this.getState()));
+      await this.api.restore(session, machineId);
       const restored = { ...session };
       delete restored.archived;
       delete restored.archivedAt;
       this.replaceSession(restored);
+      this.inbox?.notifyRestored(machineId, restored);
       if (this.getState().selectedSession?.id === restored.id) await this.selectSession(restored);
     } catch (error) {
       this.setState({ error: String(error) });
@@ -792,11 +816,13 @@ export class SessionController {
 
   async detachParent(session = this.getState().selectedSession) {
     if (session?.parentSessionPath === undefined) return;
+    const machineId = selectedMachineId(this.getState());
     try {
-      await this.api.detachParent(session, selectedMachineId(this.getState()));
+      await this.api.detachParent(session, machineId);
       const detached = { ...session };
       delete detached.parentSessionPath;
       this.replaceSession(detached);
+      this.inbox?.notifySessionUpdated(machineId, detached);
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -1328,6 +1354,7 @@ export class SessionController {
 
   private applyCreatedSession(session: SessionInfo) {
     const state = this.getState();
+    const machineId = selectedMachineId(state);
     // A session created in another workspace is not listed here, but it may be a
     // child of one that is: keep that parent's cross-workspace child count live
     // instead of leaving it stale until the next listing.
@@ -1337,7 +1364,6 @@ export class SessionController {
       return;
     }
     if (state.sessions.some((candidate) => candidate.id === session.id)) return;
-    const machineId = selectedMachineId(state);
     if (this.hasPendingStartFor(session.cwd, machineId)) {
       this.suppressedCreatedSessions.set(session.id, { session, machineId });
       return;

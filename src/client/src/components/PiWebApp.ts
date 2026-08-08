@@ -14,6 +14,7 @@ import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
 import { SessionController } from "../controllers/sessionController";
+import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
 import { WorkspaceController, canDeleteWorkspace } from "../controllers/workspaceController";
 import { emptyMachineNavigationSnapshot, machineNavigationSnapshotFromState, routeFromMachineNavigationSnapshot, SessionStorageMachineNavigationMemory, type MachineNavigationSnapshot, type WorkspaceRouteSurface } from "../controllers/machineNavigationMemory";
@@ -138,6 +139,15 @@ export class PiWebApp extends LitElement {
     (patch) => { this.setState(patch); },
     { onBackgroundError: (message, error) => { console.warn(message, error); } },
   );
+  private readonly inbox = new SessionInboxController(
+    () => this.state,
+    (patch) => { this.setState(patch); },
+    {
+      onBackgroundError: (operation, machineId, error) => {
+        console.warn(`SessionInboxController: ${operation} snapshot failed for ${machineId}`, error);
+      },
+    },
+  );
   private readonly sessions = new SessionController(
     () => this.state,
     (patch) => { this.setState(patch); },
@@ -152,6 +162,7 @@ export class PiWebApp extends LitElement {
         for (const listener of this.managedProcessesListeners) listener(event);
         this.requestUpdate();
       },
+      inbox: this.inbox,
       onSelectedSessionReady: ({ machineId, session }) => {
         void this.commitReadyChatAfterRender(machineId, session);
       },
@@ -382,6 +393,7 @@ export class PiWebApp extends LitElement {
     this.applyPreferredTheme(false);
     this.connectRealtime();
     this.syncSessionUnreadMachines();
+    void this.inbox.refresh(selectedMachineId(this.state));
     this.piWebStatusTimer = window.setInterval(() => { this.schedulePiWebStatusRefresh(); }, PI_WEB_STATUS_REFRESH_MS);
     void this.refreshWorkspaceActivity();
     void this.loadClientConfig();
@@ -403,6 +415,7 @@ export class PiWebApp extends LitElement {
     this.auth.dispose();
     this.sessions.dispose();
     this.notifications.dispose();
+    this.inbox.dispose();
     this.realtime.close();
     this.closeMachineActivitySockets();
     this.git.dispose();
@@ -994,6 +1007,10 @@ export class PiWebApp extends LitElement {
       (event) => { this.handleRealtimeEvent(machineId, event); },
       () => {
         void this.sessionUnread.refresh(machineId);
+        // Re-snapshot the inbox on reconnect: corrects stale Blocked/Working
+        // classifications that accumulated while the socket was disconnected
+        // (e.g. after a sessiond restart clears in-memory pending asks).
+        void this.inbox.refresh(machineId);
         const workspace = this.state.selectedWorkspace;
         if (workspace !== undefined) void this.refreshActiveTerminals(workspace);
         void this.refreshWorkspaceActivity(machineId);
@@ -1097,6 +1114,9 @@ export class PiWebApp extends LitElement {
     this.sessions.clearActiveSession();
     this.realtime.close();
     this.connectRealtime();
+    // Refresh the inbox for the new machine; the controller's generation guard
+    // discards any in-flight response from the previous machine.
+    void this.inbox.refresh(selectedMachineId(next));
     this.activeTerminalIds.clear();
     this.sessionCleanupDialog = undefined;
     this.setState({ piWebStatus: undefined });

@@ -4,6 +4,33 @@ import type { QualifiedContributionId } from "./plugins/ids";
 import type { SelectedSessionNotificationInbox } from "./sessionNotifications";
 import type { WorkspaceUploadBatchState } from "./workspaceUploadState";
 
+// ---------------------------------------------------------------------------
+// Machine-scoped global session inbox
+// ---------------------------------------------------------------------------
+
+export type GlobalSessionsProjectionStatus = "loading" | "fresh" | "stale";
+
+/**
+ * Machine-scoped projection of every session on the machine, owned by
+ * {@link SessionInboxController}.
+ *
+ * IMPORTANT: never add this to {@link WorkspaceScopedStateReset}. The inbox
+ * must survive workspace switches — that is its whole purpose. A regression
+ * test in `sessionInboxController.test.ts` guards this invariant.
+ */
+export interface GlobalSessionsState {
+  readonly machineId: string;
+  readonly status: GlobalSessionsProjectionStatus;
+  readonly sessions: readonly SessionInfo[];
+  /**
+   * Per-session statuses keyed by sessionId.
+   * Seeded from the machine listing snapshot; updated by live status.update
+   * events. Includes synthetic entries for sessions with pending asks or
+   * dialogs from the asks catalog that are not in the listing statuses.
+   */
+  readonly statuses: Readonly<Record<string, SessionStatus>>;
+}
+
 export interface AppState {
   machines: Machine[];
   selectedMachine: Machine | undefined;
@@ -59,6 +86,12 @@ export interface AppState {
   machineActivities: Record<string, Record<string, WorkspaceActivity>>;
   /** Authoritative projection plus browser-local optimistic overlays for the selected inbox. */
   selectedNotificationInbox: SelectedSessionNotificationInbox | undefined;
+  /**
+   * Machine-scoped session listing for the global inbox.
+   * Not workspace-scoped: workspace switches must not clear this field.
+   * Owned by {@link SessionInboxController}.
+   */
+  globalSessions: GlobalSessionsState | undefined;
   workspacesByProjectId: Record<string, Workspace[]>;
   workspaceDeletionRuns: Record<string, TerminalCommandRun>;
   commandDialog: Extract<CommandResult, { type: "select" }> | undefined;
@@ -180,6 +213,7 @@ export function initialAppState(): AppState {
     workspaceActivities: {},
     machineActivities: {},
     selectedNotificationInbox: undefined,
+    globalSessions: undefined,
     workspacesByProjectId: {},
     workspaceDeletionRuns: {},
     commandDialog: undefined,
