@@ -218,6 +218,9 @@ describe("socket stream validation", () => {
       { type: "session.name", sessionId: "session-1", name: "rename" },
       { type: "session.created", session: sessionInfoWire() },
       { type: "pi.event", eventType: "turn_start" },
+      { type: "processes.update", snapshot: { available: false, writeSupported: false, processes: [] } },
+      { type: "processes.update", snapshot: { available: true, writeSupported: true, processes: [{ id: "process-1", name: "dev", pid: 123, command: "node server.js", cwd: "/repo", startTime: 1000, endTime: null, status: "running", exitCode: null, success: null, endReason: null, signal: null, errorMessage: null }] } },
+      { type: "processes.output", id: "process-1", lines: [{ type: "stdout", text: "ready\n" }], droppedLines: 0 },
     ];
     for (const frame of validFrames) expect(parseSessionSocketEvent(frame)).toEqual(frame);
   });
@@ -241,6 +244,10 @@ describe("socket stream validation", () => {
     expect(parseSessionSocketEvent({ type: "session.name", sessionId: "" })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "session.created", session: { id: "session-1" } })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "pi.event", eventType: 9 })).toBeUndefined();
+    expect(parseSessionSocketEvent({ type: "processes.update", snapshot: { available: true, writeSupported: true, processes: [{ id: 123 }] } })).toBeUndefined();
+    expect(parseSessionSocketEvent({ type: "processes.update", snapshot: { available: false, writeSupported: true, processes: [] } })).toBeUndefined();
+    expect(parseSessionSocketEvent({ type: "processes.output", id: "process-1", lines: [{ type: "other", text: "bad" }], droppedLines: 0 })).toBeUndefined();
+    expect(parseSessionSocketEvent({ type: "processes.output", id: "process-1", lines: [], droppedLines: -1 })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "status.update", status: { sessionId: "session-1" } })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "activity.update", activity: { ...activityWire(), phase: "waiting" } })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "session.startup", activity: activityWire() })).toBeUndefined();

@@ -13,6 +13,7 @@ import { ModelCatalogRefresher } from "./sessions/modelCatalogRefresher.js";
 import { PiSessionService } from "./sessions/piSessionService.js";
 import { createPiSessionManagerGateway } from "./sessions/piSessionManagerGateway.js";
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
+import { registerProcessRoutes } from "./sessions/processRoutes.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
 import { SessionArchiveStore, defaultSessionArchiveFilePath } from "./sessions/sessionArchiveStore.js";
 import { FileSessionUnreadPersistence, SessionUnreadStore, defaultSessionUnreadFilePath } from "./sessions/sessionUnreadStore.js";
@@ -131,6 +132,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessio
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
   registerSessionRoutes(app, sessions, eventHub);
+  registerProcessRoutes(app, sessions);
   registerTerminalRoutes(app, terminals);
 
   app.get("/health", () => ({

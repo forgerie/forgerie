@@ -1286,6 +1286,55 @@ export type CommandResult =
   | { type: "tree"; tree: SessionTreeSnapshot }
   | { type: "unsupported"; message: string };
 
+export type ManagedProcessStatus = "running" | "terminating" | "terminate_timeout" | "exited" | "killed";
+export type ManagedProcessEndReason = "exit" | "signal" | "spawn_error" | "missing_pid" | "kill_timeout" | "lost";
+
+export interface ManagedProcessSignal {
+  name: string;
+  number: number | null;
+  description: string;
+}
+
+export interface ManagedProcessLogLine {
+  type: "stdout" | "stderr";
+  text: string;
+}
+
+/** Browser-safe pi-processes state; daemon log-file paths stay private. */
+export interface ManagedProcessInfo {
+  id: string;
+  name: string;
+  pid: number;
+  command: string;
+  cwd: string;
+  startTime: number;
+  endTime: number | null;
+  status: ManagedProcessStatus;
+  exitCode: number | null;
+  success: boolean | null;
+  endReason: ManagedProcessEndReason | null;
+  signal: ManagedProcessSignal | null;
+  errorMessage: string | null;
+}
+
+export interface ManagedProcessesSnapshot {
+  available: boolean;
+  writeSupported: boolean;
+  processes: ManagedProcessInfo[];
+}
+
+export type ManagedProcessOutputResult =
+  | { ok: true; lines: ManagedProcessLogLine[] }
+  | { ok: false; reason: "unavailable" | "not_found" | "invalid_response" };
+
+export type ManagedProcessKillResult =
+  | { ok: true; process: ManagedProcessInfo }
+  | { ok: false; reason: "unavailable" | "not_found" | "timeout" | "error"; process?: ManagedProcessInfo };
+
+export type ManagedProcessWriteResult =
+  | { ok: true }
+  | { ok: false; reason: "unavailable" | "unsupported" | "not_found" | "process_exited" | "stdin_closed" | "write_error" };
+
 /**
  * Transport-level per-session sequence stamp. `SessionEventHub.publish` assigns a
  * monotonic `seq` to every per-session event as it is serialized to the socket.
@@ -1318,7 +1367,9 @@ type SessionUiEventBody =
   | { type: "dialog.closed"; dialogId: string; reason: ExtensionDialogCloseReason; answer?: ExtensionDialogAnswer }
   | { type: "session.name"; sessionId: string; name?: string }
   | { type: "session.created"; session: SessionInfo }
-  | { type: "pi.event"; eventType: string };
+  | { type: "pi.event"; eventType: string }
+  | { type: "processes.update"; snapshot: ManagedProcessesSnapshot }
+  | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
 
 export type GlobalSessionEvent =
   | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.created" }>

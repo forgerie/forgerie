@@ -56,8 +56,13 @@ import type {
   SessionUnreadAcknowledgeRequest,
   SessionUnreadCatalogSnapshot,
   SessionWarning,
+  ManagedProcessKillResult,
+  ManagedProcessOutputResult,
+  ManagedProcessesSnapshot,
+  ManagedProcessWriteResult,
 } from "../../shared/apiTypes.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
+import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
 
 import { type AuthChange } from "./authService.js";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
@@ -446,6 +451,8 @@ export interface PiAgentSession {
   agent: { streamFunction: StreamFn };
 }
 
+type PiWebAgentSessionServices = AgentSessionServices & { processBridgeSlot?: ProcessBridgeSlot };
+
 export interface PiSessionRuntime {
   readonly cwd: string;
   readonly session: PiAgentSession;
@@ -457,7 +464,7 @@ export interface PiSessionRuntime {
    * services; callers must treat missing sources as "no warnings".
    */
   readonly diagnostics?: readonly AgentSessionRuntimeDiagnostic[];
-  readonly services?: AgentSessionServices;
+  readonly services?: PiWebAgentSessionServices;
   setRebindSession(rebindSession?: (session: PiAgentSession) => Promise<void>): void;
   fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ cancelled: boolean; selectedText?: string }>;
   dispose(): Promise<void>;
@@ -716,7 +723,16 @@ function createDefaultRuntimeFactory(
   askUser?: AskUserToolDeps,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled }) => {
-    const services: AgentSessionServices = await createAgentSessionServices({ cwd, agentDir, modelRuntime });
+    const processBridgeSlot = createProcessBridgeSlot();
+    const baseServices = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      modelRuntime,
+      resourceLoaderOptions: {
+        extensionFactories: [createProcessBridgeExtension(processBridgeSlot)],
+      },
+    });
+    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser);
@@ -1955,6 +1971,26 @@ export class PiSessionService implements SessionRouteService {
     return this.statusFromSession(await this.sessionForStatusOrDialogClose(ref));
   }
 
+  async processes(ref: PiSessionRef): Promise<ManagedProcessesSnapshot> {
+    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
+    return bridge?.snapshot() ?? { available: false, writeSupported: false, processes: [] };
+  }
+
+  async processOutput(ref: PiSessionRef, id: string, tailLines?: number): Promise<ManagedProcessOutputResult> {
+    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
+    return bridge?.output(id, tailLines) ?? { ok: false, reason: "unavailable" };
+  }
+
+  async killProcess(ref: PiSessionRef, id: string): Promise<ManagedProcessKillResult> {
+    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
+    return bridge?.kill(id) ?? { ok: false, reason: "unavailable" };
+  }
+
+  async writeProcess(ref: PiSessionRef, id: string, input: string, end?: boolean): Promise<ManagedProcessWriteResult> {
+    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
+    return bridge?.write(id, input, end === undefined ? undefined : { end }) ?? { ok: false, reason: "unavailable" };
+  }
+
   /**
    * Join-time snapshot of the in-flight assistant stream. The `seq` watermark and
    * the partial are read together in one synchronous tick (no await between the
@@ -2787,6 +2823,7 @@ export class PiSessionService implements SessionRouteService {
     try {
       await this.abortSessionOperations(active.runtime.session);
     } finally {
+      active.runtime.services?.processBridgeSlot?.dispose();
       await active.runtime.dispose();
     }
   }
@@ -2964,6 +3001,7 @@ export class PiSessionService implements SessionRouteService {
       ...(options.initialThinkingLevel === undefined ? {} : { initialThinkingLevel: options.initialThinkingLevel }),
     });
     const active: ActiveSession<PiSessionRuntime> = { runtime, unsubscribe: noop };
+    this.bindProcessBridge(runtime, runtime.session);
     let boundSession = runtime.session;
     let notificationGeneration = options.notificationGeneration;
     let notificationOwnership: "disabled" | "external" | "registered" | "replacement" = options.notifications === "disabled"
@@ -3014,6 +3052,7 @@ export class PiSessionService implements SessionRouteService {
             candidateGeneration = this.notificationStore.beginReplacement(priorGeneration, notificationIdentityForSession(session));
             this.notificationGenerationBySession.set(session, candidateGeneration);
           }
+          this.bindProcessBridge(runtime, session);
           this.bindRuntime(active, session);
           // The runtime being replaced parked every dialog the store still
           // holds for this session; settle those waits before the new
@@ -3069,6 +3108,7 @@ export class PiSessionService implements SessionRouteService {
       try {
         await runtime.session.abort();
       } finally {
+        runtime.services?.processBridgeSlot?.dispose();
         await runtime.dispose();
       }
       throw error;
@@ -3280,6 +3320,12 @@ export class PiSessionService implements SessionRouteService {
     if (this.unreadPublicationRetryTimer !== undefined) clearTimeout(this.unreadPublicationRetryTimer);
     this.unreadPublicationRetryTimer = undefined;
     this.unreadPublicationRetryDelayMs = this.unreadPublicationRetryInitialMs;
+  }
+
+  private bindProcessBridge(runtime: PiSessionRuntime, session: PiAgentSession): void {
+    runtime.services?.processBridgeSlot?.setPublisher((event) => {
+      this.events.publish(session.sessionId, event);
+    });
   }
 
   private bindRuntime(active: ActiveSession<PiSessionRuntime>, session: PiAgentSession = active.runtime.session): void {

@@ -1,5 +1,5 @@
 import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, EXTENSION_DIALOG_OPTION_LIMIT, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_COMPLETED_AT_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_LIMIT, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type ArchiveSessionsResponse, type AskUserCloseReason, type AskUserCloseResponse, type AskUserOutcome, type AskUserQuestion, type AskUserQuestionOption, type AskUserQuestionRecord, type PendingAskUser, type PendingExtensionDialog, type AuthProviderOption, type AuthProviderStatus, type AuthProvidersResponse, type AuthStatusSource, type AuthType, type CommandOption, type CommandResult, type DeleteWorkspaceFileResponse, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogKind, type ExtensionDialogOutcome, type FileContentResponse, type FileSuggestion, type FileTreeEntry, type FileTreeResponse, type GitDiffResponse, type GitFileState, type GitStatusFile, type GitStatusResponse, type GlobalSessionEvent, type Machine, type MachineHealth, type MachineKind, type MachineRuntime, type MachineStatus, type MessagePage, type ModelSelectionResponse, type MoveWorkspaceFileResponse, type OAuthFlowState, type PiWebAgentDirEnvSource, type PiWebCapability, type PiWebComponentStatus, type PiWebConfigEnvOverrides, type PiWebConfigResponse, type PiWebConfigValues, type PiWebInstallationInfo, type PiWebPluginConfigMap, type PiWebPluginInfo, type PiWebPluginsResponse, type PiWebPluginScope, type PiWebReleaseStatus, type PiWebRuntimeComponent, type PiWebRuntimeResponse, type PiWebServiceComponent, type PiWebShortcutConfig, type PiWebStatusMessage, type PiWebStatusResponse, type PiWebStatusSeverity, type Project, type QueuedSessionMessage, type SavedPromptAttachment, type SessionBulkArchiveResponse, type SessionBulkDeleteArchivedResponse, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupProjectSummary, type SessionCleanupThresholds, type SessionCleanupTotals, type SessionInfo, type SessionModel, type SessionNotification, type SessionNotificationClearReason, type SessionNotificationDismissThrough, type SessionNotificationInboxDelta, type SessionNotificationInboxEvent, type SessionNotificationInboxSnapshot, type SessionNotificationSeverity, type SessionNotificationSummary, type SessionStatus, type SessionStreamSnapshot, type SessionUiEvent, type SessionUnreadCatalogSnapshot, type SessionUnreadEvent, type SessionUnreadSummary, type SessionWarning, type SessionWarningSeverity, type SlashCommand, type TerminalCommandRun, type TerminalCommandRunStatus, type TerminalInfo, type TerminalUiEvent, type ThinkingLevelsResponse, type WriteWorkspaceFileResponse, type Workspace, type WorkspaceEffectiveConfig, type WorkspaceActivity, type WorkspaceActivityUiEvent, type WorkspaceActivityResponse } from "../../../shared/apiTypes";
-import type { PiPackageInfo, PiPackageMutationAction, PiPackageMutationResponse, PiPackageScope, PiPackagesResponse, SessionActivity, SessionStartupProgressEvent, SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeNode, SessionTreeNodeKind, SessionTreeSnapshot } from "../../../shared/apiTypes";
+import type { ManagedProcessEndReason, ManagedProcessInfo, ManagedProcessLogLine, ManagedProcessesSnapshot, ManagedProcessSignal, ManagedProcessStatus, PiPackageInfo, PiPackageMutationAction, PiPackageMutationResponse, PiPackageScope, PiPackagesResponse, SessionActivity, SessionStartupProgressEvent, SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeNode, SessionTreeNodeKind, SessionTreeSnapshot } from "../../../shared/apiTypes";
 import { parseActiveAgentProfileDescriptor } from "../../../shared/activeAgentProfile";
 import { parseKnownPiWebCapabilities } from "../../../shared/capabilities";
 
@@ -649,6 +649,10 @@ export function parseSessionStreamEvent(value: unknown): SessionUiEvent {
       return { type: "session.created", session: parseSessionInfo(record["session"]) };
     case "pi.event":
       return { type: "pi.event", eventType: requireString(record, "eventType") };
+    case "processes.update":
+      return { type: "processes.update", snapshot: parseManagedProcessesSnapshot(record["snapshot"]) };
+    case "processes.output":
+      return parseManagedProcessOutputEvent(record);
     default:
       throw new Error("Unsupported session stream event type");
   }
@@ -699,6 +703,100 @@ function optionalNumberOrNull(record: Record<string, unknown>, key: string): num
   if (value === null) return null;
   if (typeof value !== "number") throw new Error(`Expected optional number|null field: ${key}`);
   return value;
+}
+
+function parseManagedProcessesSnapshot(value: unknown): ManagedProcessesSnapshot {
+  const record = requireRecord(value);
+  const snapshot = {
+    available: requireBoolean(record, "available"),
+    writeSupported: requireBoolean(record, "writeSupported"),
+    processes: arrayOf(parseManagedProcessInfo)(record["processes"]),
+  };
+  if (!snapshot.available && (snapshot.writeSupported || snapshot.processes.length > 0)) throw new Error("Unavailable process snapshots must be empty");
+  return snapshot;
+}
+
+function parseManagedProcessInfo(value: unknown): ManagedProcessInfo {
+  const record = requireRecord(value);
+  const status = parseManagedProcessStatus(record["status"]);
+  const endTime = requireNumberOrNull(record, "endTime");
+  const exitCode = requireNumberOrNull(record, "exitCode");
+  const success = requireBooleanOrNull(record, "success");
+  const endReason = parseManagedProcessEndReason(record["endReason"]);
+  const signal = parseManagedProcessSignal(record["signal"]);
+  const errorMessage = requireStringOrNull(record, "errorMessage");
+  return {
+    id: requireString(record, "id"),
+    name: requireString(record, "name"),
+    pid: requireNumber(record, "pid"),
+    command: requireString(record, "command"),
+    cwd: requireString(record, "cwd"),
+    startTime: requireNumber(record, "startTime"),
+    endTime,
+    status,
+    exitCode,
+    success,
+    endReason,
+    signal,
+    errorMessage,
+  };
+}
+
+function parseManagedProcessOutputEvent(record: Record<string, unknown>): Extract<SessionUiEvent, { type: "processes.output" }> {
+  const droppedLines = requireNumber(record, "droppedLines");
+  if (!Number.isSafeInteger(droppedLines) || droppedLines < 0) throw new Error("Invalid processes.output droppedLines field");
+  return {
+    type: "processes.output",
+    id: requireString(record, "id"),
+    lines: arrayOf(parseManagedProcessLogLine)(record["lines"]),
+    droppedLines,
+  };
+}
+
+function parseManagedProcessLogLine(value: unknown): ManagedProcessLogLine {
+  const record = requireRecord(value);
+  const type = requireString(record, "type");
+  if (type !== "stdout" && type !== "stderr") throw new Error("Invalid managed process log line type");
+  return { type, text: requireString(record, "text") };
+}
+
+function parseManagedProcessStatus(value: unknown): ManagedProcessStatus {
+  if (value === "running" || value === "terminating" || value === "terminate_timeout" || value === "exited" || value === "killed") return value;
+  throw new Error("Invalid managed process status");
+}
+
+function parseManagedProcessEndReason(value: unknown): ManagedProcessEndReason | null {
+  if (value === null) return null;
+  if (value === "exit" || value === "signal" || value === "spawn_error" || value === "missing_pid" || value === "kill_timeout" || value === "lost") return value;
+  throw new Error("Invalid managed process end reason");
+}
+
+function parseManagedProcessSignal(value: unknown): ManagedProcessSignal | null {
+  if (value === null) return null;
+  const record = requireRecord(value);
+  return {
+    name: requireString(record, "name"),
+    number: requireNumberOrNull(record, "number"),
+    description: requireString(record, "description"),
+  };
+}
+
+function requireNumberOrNull(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key];
+  if (value === null || (typeof value === "number" && Number.isFinite(value))) return value;
+  throw new Error(`Expected number|null field: ${key}`);
+}
+
+function requireBooleanOrNull(record: Record<string, unknown>, key: string): boolean | null {
+  const value = record[key];
+  if (value === null || typeof value === "boolean") return value;
+  throw new Error(`Expected boolean|null field: ${key}`);
+}
+
+function requireStringOrNull(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  if (value === null || typeof value === "string") return value;
+  throw new Error(`Expected string|null field: ${key}`);
 }
 
 function parseCommandOutputEvent(record: Record<string, unknown>): Extract<SessionUiEvent, { type: "command.output" }> {
