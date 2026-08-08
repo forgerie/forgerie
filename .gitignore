@@ -18,3 +18,4 @@ dist/
 
 # Machine-local agent instructions
 AGENTS.local.md
+.worktrees
