@@ -45,6 +45,7 @@ describe("managed processes panel", () => {
     expect(cards?.[0]?.textContent).toContain("npm run dev");
     expect(cards?.[0]?.textContent).toContain("/repo/app");
     expect(cards?.[0]?.textContent).toContain("PID 11");
+    expect(cards?.[0]?.querySelector(".meta")?.textContent).toMatch(/\d+h \d+m/u);
   });
 
   it("loads interleaved output when a process is expanded", async () => {
@@ -198,6 +199,7 @@ describe("managed processes panel", () => {
     expect(processesPanelBadge(createContext(undefined))).toBe("!");
     expect(processesPanelBadge(createContext(createRuntime({ selected: false })))).toBe("!");
     expect(processesPanelBadge(createContext(createRuntime()))).toBeUndefined();
+    expect(processesPanelBadge(createContext(createRuntime({ snapshot: createSnapshot([processInfo(), processInfo({ id: "process-2" })]) })))).toBe(2);
   });
 });
 
@@ -225,6 +227,7 @@ function createContext(runtime: ManagedProcessesRuntime | undefined): WorkspaceP
 function createRuntime(options: { selected?: boolean; sessionId?: string; snapshot?: ManagedProcessesSnapshot } = {}): ManagedProcessesRuntime {
   return {
     selectedSession: options.selected === false ? undefined : { machineId: "local", id: options.sessionId ?? "session-1", cwd: "/repo" },
+    currentSnapshot: vi.fn(() => options.snapshot),
     snapshot: vi.fn(() => Promise.resolve(options.snapshot ?? createSnapshot())),
     output: vi.fn(() => Promise.resolve({ ok: true as const, lines: [] })),
     kill: vi.fn(() => Promise.resolve({ ok: false as const, reason: "not_found" as const })),

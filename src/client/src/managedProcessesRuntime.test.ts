@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method -- API methods are Vitest function mocks in this file. */
 import { describe, expect, it, vi } from "vitest";
+import type { ManagedProcessesSnapshot } from "../../shared/apiTypes";
 import { createManagedProcessesRuntime, type ManagedProcessesApi } from "./managedProcessesRuntime";
 
 function api(): ManagedProcessesApi {
@@ -42,6 +43,20 @@ describe("managed processes runtime", () => {
     await expect(runtime.write("process-1", "input")).resolves.toEqual({ ok: false, reason: "unavailable" });
     const processes = vi.mocked(client.processes);
     expect(processes).not.toHaveBeenCalled();
+  });
+
+  it("keeps the latest authoritative snapshot available synchronously", async () => {
+    let cached: ManagedProcessesSnapshot | undefined;
+    const runtime = createManagedProcessesRuntime(
+      { machineId: "local", id: "session-1", cwd: "/repo" },
+      api(),
+      () => vi.fn(),
+      { read: () => cached, write: (snapshot) => { cached = snapshot; } },
+    );
+
+    expect(runtime.currentSnapshot()).toBeUndefined();
+    const snapshot = await runtime.snapshot();
+    expect(runtime.currentSnapshot()).toEqual(snapshot);
   });
 
   it("delegates subscriptions", () => {

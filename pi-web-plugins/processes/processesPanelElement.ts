@@ -33,8 +33,13 @@ export function defineProcessesPanelElement(): void {
   if (!customElements.get(processesPanelTagName)) customElements.define(processesPanelTagName, PiWebProcessesPanel);
 }
 
-export function processesPanelBadge(context: WorkspacePanelContext): string | undefined {
-  return managedProcessesRuntime(context)?.selectedSession === undefined ? "!" : undefined;
+export function processesPanelBadge(context: WorkspacePanelContext): string | number | undefined {
+  const runtime = managedProcessesRuntime(context);
+  if (runtime?.selectedSession === undefined) return "!";
+  const snapshot = runtime.currentSnapshot();
+  if (snapshot?.available === false) return "!";
+  const running = snapshot?.processes.filter((process) => process.status === "running" || process.status === "terminating").length ?? 0;
+  return running > 0 ? running : undefined;
 }
 
 class PiWebProcessesPanel extends HTMLElement {
@@ -191,7 +196,7 @@ class PiWebProcessesPanel extends HTMLElement {
         <span class="status ${statusClass(process.status)}">${escapeHtml(process.status.replaceAll("_", " "))}</span>
         ${process.status === "running" ? `<button class="danger" data-stop="${escapeAttr(process.id)}">Stop</button>` : ""}
       </header>
-      <div class="meta"><span>PID ${String(process.pid)}</span><span title="${escapeAttr(process.cwd)}">${escapeHtml(process.cwd)}</span>${detail === undefined ? "" : `<span>${escapeHtml(detail)}</span>`}</div>
+      <div class="meta"><span>PID ${String(process.pid)}</span><span>${escapeHtml(formatDuration((process.endTime ?? Date.now()) - process.startTime))}</span><span title="${escapeAttr(process.cwd)}">${escapeHtml(process.cwd)}</span>${detail === undefined ? "" : `<span>${escapeHtml(detail)}</span>`}</div>
       ${ui.expanded ? this.renderDetails(process, ui, active && writeSupported) : ""}
     </article>`;
   }
@@ -320,6 +325,15 @@ function statusClass(status: ManagedProcessInfo["status"]): string {
   return status === "terminating" ? "terminating" : "failed";
 }
 
+function formatDuration(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  if (seconds < 60) return `${String(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${String(minutes)}m ${String(seconds % 60)}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${String(hours)}h ${String(minutes % 60)}m`;
+}
+
 function processFailure(reason: string): string {
   return `Process operation failed: ${reason.replaceAll("_", " ")}.`;
 }
@@ -338,8 +352,8 @@ function styles(): string {
     .viewer { box-sizing:border-box; min-height:0; overflow:auto; padding:12px; }
     .processes { display:grid; gap:10px; }
     .process-card { border:1px solid var(--pi-border); border-radius:10px; background:var(--pi-surface); padding:10px; }
-    header { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; align-items:start; gap:8px; }
-    .identity { display:grid; min-width:0; gap:4px; }
+    header { display:flex; flex-wrap:wrap; align-items:start; gap:8px; }
+    .identity { display:grid; flex:1 1 220px; min-width:0; gap:4px; }
     code,.logs { font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
     code { overflow:hidden; color:var(--pi-text-secondary); text-overflow:ellipsis; white-space:nowrap; }
     .status { border-radius:999px; padding:3px 7px; font-size:11px; text-transform:capitalize; }
@@ -353,7 +367,7 @@ function styles(): string {
     .logs { box-sizing:border-box; max-height:320px; margin:0; overflow:auto; border:1px solid var(--pi-border-muted); border-radius:7px; background:var(--pi-bg); padding:9px; white-space:pre-wrap; overflow-wrap:anywhere; }
     .logs span { display:inline; }.logs .stderr { color:var(--pi-danger); }
     .dropped { margin:0; color:var(--pi-warning); font-size:12px; }
-    .stdin { display:flex; align-items:end; gap:8px; }.stdin label { display:grid; flex:1; gap:4px; color:var(--pi-muted); font-size:12px; }
+    .stdin { display:flex; flex-wrap:wrap; align-items:end; gap:8px; }.stdin label { display:grid; flex:1 1 260px; gap:4px; color:var(--pi-muted); font-size:12px; }
     input { min-width:0; border:1px solid var(--pi-border); border-radius:7px; background:var(--pi-bg); color:var(--pi-text); padding:7px 8px; font:inherit; }
     button { border:1px solid var(--pi-accent-border); border-radius:7px; background:var(--pi-accent); color:var(--pi-bg); cursor:pointer; padding:6px 10px; font:inherit; }
     button.secondary { border-color:var(--pi-border); background:var(--pi-surface); color:var(--pi-text); }
@@ -362,7 +376,6 @@ function styles(): string {
     .notice,.empty-state { margin:12px 12px 0; border:1px solid var(--pi-border); border-radius:8px; padding:10px; }
     .notice.success { border-color:var(--pi-success-border); color:var(--pi-success); }.notice.error { border-color:var(--pi-danger); color:var(--pi-danger); }
     .empty-state { margin:0; border-style:dashed; color:var(--pi-muted); }.empty-state p { margin:5px 0 0; }
-    @media(max-width:600px) { header { grid-template-columns:auto minmax(0,1fr) auto; }.status { grid-column:2; justify-self:start; }.danger { grid-column:3; grid-row:1; }.meta,.details { margin-left:0; }.stdin { align-items:stretch; flex-direction:column; }.stdin button { align-self:start; } }
   </style>`;
 }
 

@@ -4,6 +4,7 @@ import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, w
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
 import { isSessionActive } from "../../../shared/activity";
+import type { ManagedProcessesSnapshot } from "../../../shared/apiTypes";
 import { ActivityController } from "../controllers/activityController";
 import { AuthController } from "../controllers/authController";
 import { FileExplorerController } from "../controllers/fileExplorerController";
@@ -130,6 +131,7 @@ export class PiWebApp extends LitElement {
   private committedChatIdentity: string | undefined;
   private readyChatIdentity: string | undefined;
   private readonly managedProcessesListeners = new Set<(event: ManagedProcessesBrowserEvent) => void>();
+  private readonly managedProcessesSnapshots = new Map<string, ManagedProcessesSnapshot>();
 
   private readonly notifications = new SessionNotificationController(
     () => this.state,
@@ -144,7 +146,11 @@ export class PiWebApp extends LitElement {
     {
       notifications: this.notifications,
       onManagedProcessesEvent: (event) => {
+        const key = this.selectedManagedProcessesKey(selectedMachineId(this.state));
+        if (key !== undefined && event.type === "processes.update") this.managedProcessesSnapshots.set(key, event.snapshot);
+        if (key !== undefined && event.type === "processes.refresh") this.managedProcessesSnapshots.delete(key);
         for (const listener of this.managedProcessesListeners) listener(event);
+        this.requestUpdate();
       },
       onSelectedSessionReady: ({ machineId, session }) => {
         void this.commitReadyChatAfterRender(machineId, session);
@@ -857,6 +863,7 @@ export class PiWebApp extends LitElement {
 
   private managedProcessesRuntime(machineId: string): ManagedProcessesRuntime {
     const selected = this.state.selectedSession;
+    const key = this.selectedManagedProcessesKey(machineId);
     return createManagedProcessesRuntime(
       selected === undefined ? undefined : { machineId, id: selected.id, cwd: selected.cwd },
       sessionsApi,
@@ -864,7 +871,19 @@ export class PiWebApp extends LitElement {
         this.managedProcessesListeners.add(listener);
         return () => { this.managedProcessesListeners.delete(listener); };
       },
+      key === undefined ? undefined : {
+        read: () => this.managedProcessesSnapshots.get(key),
+        write: (snapshot) => {
+          this.managedProcessesSnapshots.set(key, snapshot);
+          this.requestUpdate();
+        },
+      },
     );
+  }
+
+  private selectedManagedProcessesKey(machineId: string): string | undefined {
+    const selected = this.state.selectedSession;
+    return selected === undefined ? undefined : `${machineId}:${selected.id}:${selected.cwd}`;
   }
 
   private async openRuntimeTerminal(machineId: string, workspace: Workspace | undefined, options?: { terminalId?: string | undefined }): Promise<void> {

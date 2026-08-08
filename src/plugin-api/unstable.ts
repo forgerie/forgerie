@@ -38,6 +38,7 @@ export type ManagedProcessesBrowserEvent = Extract<SessionUiEvent, { type: "proc
 
 export interface ManagedProcessesRuntime {
   readonly selectedSession: ManagedProcessesSession | undefined;
+  currentSnapshot(): ManagedProcessesSnapshot | undefined;
   snapshot(): Promise<ManagedProcessesSnapshot>;
   output(id: string, tailLines?: number): Promise<ManagedProcessOutputResult>;
   kill(id: string): Promise<ManagedProcessKillResult>;

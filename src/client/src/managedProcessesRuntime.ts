@@ -10,18 +10,29 @@ export interface ManagedProcessesApi {
 
 export type ManagedProcessesSubscribe = (listener: (event: ManagedProcessesBrowserEvent) => void) => () => void;
 
+export interface ManagedProcessesSnapshotCache {
+  read(): ManagedProcessesSnapshot | undefined;
+  write(snapshot: ManagedProcessesSnapshot): void;
+}
+
 export function createManagedProcessesRuntime(
   selectedSession: ManagedProcessesSession | undefined,
   api: ManagedProcessesApi,
   subscribe: ManagedProcessesSubscribe,
+  cache?: ManagedProcessesSnapshotCache,
 ): ManagedProcessesRuntime {
   const session = selectedSession === undefined ? undefined : { id: selectedSession.id, cwd: selectedSession.cwd };
   const machineId = selectedSession?.machineId;
   return {
     selectedSession,
-    snapshot: () => session === undefined
-      ? Promise.resolve({ available: false, writeSupported: false, processes: [] })
-      : api.processes(session, machineId),
+    currentSnapshot: () => cache?.read(),
+    snapshot: async () => {
+      const snapshot = session === undefined
+        ? { available: false, writeSupported: false, processes: [] }
+        : await api.processes(session, machineId);
+      cache?.write(snapshot);
+      return snapshot;
+    },
     output: (id, tailLines) => session === undefined
       ? Promise.resolve({ ok: false, reason: "unavailable" })
       : api.processOutput(session, id, tailLines, machineId),
