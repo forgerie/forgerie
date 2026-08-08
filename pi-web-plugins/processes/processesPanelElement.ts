@@ -365,7 +365,7 @@ function styles(): string {
     .meta span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .details { display:grid; gap:8px; margin:10px 0 0 34px; }
     .logs { box-sizing:border-box; max-height:320px; margin:0; overflow:auto; border:1px solid var(--pi-border-muted); border-radius:7px; background:var(--pi-bg); padding:9px; white-space:pre-wrap; overflow-wrap:anywhere; }
-    .logs span { display:inline; }.logs .stderr { color:var(--pi-danger); }
+    .logs span { display:block; }.logs .stderr { color:var(--pi-danger); }
     .dropped { margin:0; color:var(--pi-warning); font-size:12px; }
     .stdin { display:flex; flex-wrap:wrap; align-items:end; gap:8px; }.stdin label { display:grid; flex:1 1 260px; gap:4px; color:var(--pi-muted); font-size:12px; }
     input { min-width:0; border:1px solid var(--pi-border); border-radius:7px; background:var(--pi-bg); color:var(--pi-text); padding:7px 8px; font:inherit; }
