@@ -454,11 +454,13 @@ describe("Working session confirmation", () => {
     const harness = createHarness([session]);
     await harness.seed();
 
-    // Seed a Working status into the global store
+    // Seed a Working status into the global store.
+    // status.update is buffered; flush so archiveWithUndo sees it in globalSessions.statuses.
     harness.controller.applyGlobalEvent("local", {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const archiveSession = vi.fn(() => Promise.resolve());
     const deps = makeArchiveDeps({
@@ -481,6 +483,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const result = await harness.controller.archiveWithUndo(session, makeArchiveDeps({ confirm: () => false }));
 
@@ -492,7 +495,7 @@ describe("Working session confirmation", () => {
     const harness = createHarness([session]);
     await harness.seed();
 
-    // Seed a Blocked status
+    // Seed a Blocked status; flush so archiveWithUndo sees it in globalSessions.statuses.
     harness.controller.applyGlobalEvent("local", {
       type: "status.update",
       status: makeStatus("s1", {
@@ -503,6 +506,7 @@ describe("Working session confirmation", () => {
         },
       }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const confirm = vi.fn(() => false); // Would block if called
     const archiveSession = vi.fn(() => Promise.resolve());
@@ -536,6 +540,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const archiveSession = vi.fn(() => Promise.resolve());
     const deps = makeArchiveDeps({
@@ -558,6 +563,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const capturedMessages: string[] = [];
     const deps = makeArchiveDeps({
@@ -585,6 +591,7 @@ describe("Working session confirmation", () => {
       type: "status.update",
       status: makeStatus("s1", { isStreaming: true }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const capturedMessages: string[] = [];
     const deps = makeArchiveDeps({
@@ -738,6 +745,7 @@ describe("archiveAndNext", () => {
       type: "status.update",
       status: makeStatus("current", { isStreaming: true }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const board = makeBoard([current], { current: makeStatus("current", { isStreaming: true }) });
     const archiveSession = vi.fn(() => Promise.resolve());
@@ -764,11 +772,12 @@ describe("archiveAndNext", () => {
     const harness = createHarness([current, nextSession]);
     await harness.seed();
 
-    // Make current Working
+    // Make current Working; flush so archiveWithUndo sees it in globalSessions.statuses.
     harness.controller.applyGlobalEvent("local", {
       type: "status.update",
       status: makeStatus("current", { isStreaming: true }),
     });
+    harness.controller.flushPendingStatusesToGlobal();
 
     const board = deriveSessionBoard({
       sessions: [current, nextSession],

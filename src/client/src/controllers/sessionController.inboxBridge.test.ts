@@ -27,6 +27,7 @@ import {
   sessionLookupId,
   status,
   workspace,
+  runPendingAnimationFrames,
   type AppState,
 } from "./sessionController.testSupport";
 import type { SessionInboxBridge, SessionInboxApi } from "./sessionInboxController";
@@ -51,6 +52,7 @@ class RecordingInboxBridge implements SessionInboxBridge {
   applyGlobalEvent(machineId: string, event: GlobalSessionEvent): void {
     this.globalEvents.push({ machineId, event });
   }
+  flushPendingStatusesToGlobal(): void { /* recording bridge: no-op */ }
   notifyArchived(machineId: string, sessionId: string, archivedAt: string): void {
     this.archivedCalls.push({ machineId, sessionId, archivedAt });
   }
@@ -626,5 +628,141 @@ describe("restoreSessionThrowing — integration with SessionInboxController.und
 
     // notifyRestored called exactly once (from restoreSessionThrowing, not twice)
     expect(notifyRestoredCalls).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch bridge: status.update coalesces into one globalSessions write per rAF
+// ---------------------------------------------------------------------------
+
+/**
+ * Harness for batch-bridge tests. Wires SessionController → SessionInboxController
+ * with globalSessions pre-seeded so the inbox accepts live events immediately
+ * without an async HTTP snapshot.
+ */
+function makeStatusBatchHarness(initialSessions: SessionInfo[]) {
+  let globalSessionsWriteCount = 0;
+  let state: AppState = {
+    ...initialAppState(),
+    selectedWorkspace: workspace,
+    sessions: initialSessions,
+  };
+  const getState = () => state;
+  const setState = (patch: Partial<AppState>) => {
+    if ("globalSessions" in patch) globalSessionsWriteCount += 1;
+    state = { ...state, ...patch };
+  };
+
+  const inboxController = new SessionInboxController(getState, setState, {
+    api: {
+      machineListing: () => Promise.resolve({ sessions: initialSessions, statuses: [] }),
+      asksCatalog: () => Promise.resolve({ sessions: [] }),
+    },
+  });
+
+  const sessionController = new SessionController(
+    getState,
+    setState,
+    () => undefined,
+    new InMemorySessionSelectionMemory(),
+    { api: { ...defaultApi }, socket: new FakeSocket(), inbox: inboxController },
+  );
+
+  return {
+    get state() { return state; },
+    get globalSessionsWriteCount() { return globalSessionsWriteCount; },
+    inboxController,
+    sessionController,
+    async seedInbox(machineId = "local") {
+      await inboxController.refresh(machineId);
+    },
+  };
+}
+
+describe("status.update inbox batch bridge", () => {
+  it("several status.update events in one rAF frame produce exactly one globalSessions write", async () => {
+    const session = { ...oldSession };
+    const harness = makeStatusBatchHarness([session]);
+    await harness.seedInbox();
+
+    const writeCountAfterSeed = harness.globalSessionsWriteCount;
+
+    // Three status ticks — none should write globalSessions synchronously.
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 1 },
+    });
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 2 },
+    });
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 3, isStreaming: true },
+    });
+
+    // Buffered — no globalSessions write yet.
+    expect(harness.globalSessionsWriteCount).toBe(writeCountAfterSeed);
+
+    // Flush (same as rAF callback firing).
+    harness.sessionController.flushPendingUpdates();
+
+    // Exactly one write coalescing all three ticks.
+    expect(harness.globalSessionsWriteCount).toBe(writeCountAfterSeed + 1);
+  });
+
+  it("last status wins when multiple status.update events arrive before flush", async () => {
+    const session = { ...oldSession };
+    const harness = makeStatusBatchHarness([session]);
+    await harness.seedInbox();
+
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 10, isStreaming: false },
+    });
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 20, isStreaming: false },
+    });
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 99, isStreaming: true },
+    });
+
+    harness.sessionController.flushPendingUpdates();
+
+    // Only the last status is reflected in globalSessions.
+    const gs = harness.state.globalSessions;
+    expect(gs?.statuses[session.id]).toMatchObject({
+      sessionId: session.id,
+      pendingMessageCount: 99,
+      isStreaming: true,
+    });
+  });
+
+  it("runPendingAnimationFrames triggers flushPendingUpdates and writes globalSessions once", async () => {
+    const session = { ...oldSession };
+    const harness = makeStatusBatchHarness([session]);
+    await harness.seedInbox();
+
+    const writeCountAfterSeed = harness.globalSessionsWriteCount;
+
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 5 },
+    });
+    harness.sessionController.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(session.id), pendingMessageCount: 7 },
+    });
+
+    // Nothing written until the rAF fires.
+    expect(harness.globalSessionsWriteCount).toBe(writeCountAfterSeed);
+
+    runPendingAnimationFrames();
+
+    expect(harness.globalSessionsWriteCount).toBe(writeCountAfterSeed + 1);
+    const gs = harness.state.globalSessions;
+    expect(gs?.statuses[session.id]).toMatchObject({ pendingMessageCount: 7 });
   });
 });

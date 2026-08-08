@@ -58,6 +58,16 @@ export interface SessionInboxBridge {
    */
   applyGlobalEvent(machineId: string, event: GlobalSessionEvent): void;
 
+  /**
+   * Apply all buffered status updates to globalSessions in one setState write.
+   *
+   * Called by SessionController.flushPendingUpdates so that the rAF batch
+   * covers both the selected-session and the machine-global projection.
+   * Multiple status.update events in one rAF frame collapse to last-write-wins
+   * per session — only one globalSessions write results.
+   */
+  flushPendingStatusesToGlobal(): void;
+
   /** The selected-workspace archive path succeeded; update the global store. */
   notifyArchived(machineId: string, sessionId: string, archivedAt: string): void;
 
@@ -219,6 +229,14 @@ export class SessionInboxController implements SessionInboxBridge {
    * buffer is active, so the later snapshot cannot overwrite the events.
    */
   private inflightBuffer: GlobalSessionEvent[] | undefined;
+  /**
+   * Status updates buffered between rAF frames.
+   * Populated by applyEventToState for status.update events (instead of an
+   * immediate setState). Flushed by flushPendingStatusesToGlobal, which
+   * SessionController.flushPendingUpdates calls so all session-state writes
+   * in one rAF frame coalesce into a single globalSessions update.
+   */
+  private pendingStatusBySession = new Map<string, SessionStatus>();
 
   constructor(
     private readonly getState: GetState,
@@ -243,6 +261,7 @@ export class SessionInboxController implements SessionInboxBridge {
     this.refreshPromise = undefined;
     this.refreshQueued = false;
     this.inflightBuffer = undefined;
+    this.pendingStatusBySession.clear();
     this.clearUndoTimer();
     // Clear the toast from AppState on dispose so it does not outlive the
     // controller's lifetime (e.g. unmount, machine switch with full teardown).
@@ -272,6 +291,7 @@ export class SessionInboxController implements SessionInboxBridge {
       this.refreshPromise = undefined;
       this.refreshQueued = false;
       this.inflightBuffer = undefined;
+      this.pendingStatusBySession.clear();
       this.setState({
         globalSessions: {
           machineId,
@@ -339,7 +359,11 @@ export class SessionInboxController implements SessionInboxBridge {
     } else if (event.type === "session.name") {
       this.applySessionName(current, event.sessionId, event.name);
     } else if (event.type === "status.update") {
-      this.applyStatusUpdate(current, event.status);
+      // Buffer status updates; SessionController.flushPendingUpdates applies them
+      // to globalSessions in one write per rAF frame via flushPendingStatusesToGlobal.
+      // Replay from replayInflightBuffer also accumulates here and is flushed at
+      // replay end, preserving snapshot semantics.
+      this.pendingStatusBySession.set(event.status.sessionId, event.status);
     }
   }
 
@@ -398,6 +422,27 @@ export class SessionInboxController implements SessionInboxBridge {
   // -------------------------------------------------------------------------
   // U8: Archive workflow — undo orchestration
   // -------------------------------------------------------------------------
+
+  /**
+   * Apply all buffered status updates to globalSessions in one setState write.
+   *
+   * Called by SessionController.flushPendingUpdates so that the rAF batch
+   * covers both the selected-session and the machine-global projection.
+   * Multiple status.update events in one rAF frame collapse to last-write-wins
+   * per session — only one globalSessions write results.
+   */
+  flushPendingStatusesToGlobal(): void {
+    if (this.disposed || this.pendingStatusBySession.size === 0) return;
+    const current = this.getState().globalSessions;
+    if (current === undefined || current.machineId !== this.currentMachineId) {
+      this.pendingStatusBySession.clear();
+      return;
+    }
+    const statuses = { ...current.statuses };
+    for (const [sessionId, s] of this.pendingStatusBySession) statuses[sessionId] = s;
+    this.pendingStatusBySession.clear();
+    this.setState({ globalSessions: { ...current, statuses } });
+  }
 
   /**
    * Archive a session server-first, then present a 5-second undo toast.
@@ -521,9 +566,7 @@ export class SessionInboxController implements SessionInboxBridge {
       deps.onAllClear();
     } else {
       const nextRow = queueAfter[0];
-      if (nextRow !== undefined) {
-        await deps.navigateTo(nextRow.session);
-      }
+      if (nextRow !== undefined) await deps.navigateTo(nextRow.session);
     }
   }
 
@@ -602,6 +645,9 @@ export class SessionInboxController implements SessionInboxBridge {
       if (current?.machineId !== machineId) return;
       this.applyEventToState(current, event);
     }
+    // Apply any buffered statuses accumulated during replay in one write,
+    // preserving HTTP snapshot semantics: snapshot lands first, then events.
+    this.flushPendingStatusesToGlobal();
   }
 
   private applyCreatedSession(

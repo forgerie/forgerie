@@ -419,6 +419,8 @@ describe("SessionInboxController", () => {
         type: "status.update",
         status: updatedStatus,
       });
+      // status.update is buffered; flush to apply it to globalSessions in one write.
+      harness.controller.flushPendingStatusesToGlobal();
 
       expect(harness.state.globalSessions?.statuses["s1"]).toMatchObject({
         sessionId: "s1",

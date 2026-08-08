@@ -118,14 +118,14 @@ export class AppNavigationPanel extends LitElement {
         .unreadCompletedAt=${this.unreadCompletedAt}
         .projects=${this.projects}
         .workspacesByProjectId=${this.workspacesByProjectId}
-        .onSelectSession=${this.onSelectSession === undefined ? undefined : (s: SessionInfo) => this.onSelectSession?.(s)}
-        .onArchiveSession=${this.onArchiveSession === undefined ? undefined : (s: SessionInfo) => this.onArchiveSession?.(s)}
-        .onRestoreSession=${this.onRestoreSession === undefined ? undefined : (s: SessionInfo) => this.onRestoreSession?.(s)}
-        .onNewSession=${this.onNewSession === undefined ? undefined : () => this.onNewSession?.()}
-        .onManageWorkspaces=${this.onManageWorkspaces === undefined ? undefined : () => this.onManageWorkspaces?.()}
+        .onSelectSession=${this.onSelectSession}
+        .onArchiveSession=${this.onArchiveSession}
+        .onRestoreSession=${this.onRestoreSession}
+        .onNewSession=${this.onNewSession}
+        .onManageWorkspaces=${this.onManageWorkspaces}
         .undoToast=${this.undoToast}
-        .onUndoArchive=${this.onUndoArchive === undefined ? undefined : () => this.onUndoArchive?.()}
-        .onDismissUndoToast=${this.onDismissUndoToast === undefined ? undefined : () => this.onDismissUndoToast?.()}
+        .onUndoArchive=${this.onUndoArchive}
+        .onDismissUndoToast=${this.onDismissUndoToast}
         .unavailableCwds=${this.unavailableCwds}
         data-machine=${machineId ?? ""}
       ></session-inbox-panel>

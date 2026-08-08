@@ -128,6 +128,7 @@ export class PiWebApp extends LitElement {
       if (selectedMachineId(this.state) !== machineId) return;
       this.syncUnreadSessionIds();
       this.syncSelectedSessionReadState();
+      this.syncUnreadCompletedAt();
     },
     onBackgroundError: (operation, machineId, error) => {
       console.warn(`Failed to ${operation} session unread state for ${machineId}`, error);
@@ -135,6 +136,7 @@ export class PiWebApp extends LitElement {
   });
   @state() private unreadSessionIds: ReadonlySet<string> = this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), this.state.sessions);
   @state() private unreadPresence: UnreadPresence = EMPTY_UNREAD_PRESENCE;
+  @state() private cachedUnreadCompletedAt: Readonly<Record<string, string>> = {};
   private unreadConnected = false;
   private committedChatIdentity: string | undefined;
   private readyChatIdentity: string | undefined;
@@ -1339,7 +1341,7 @@ export class PiWebApp extends LitElement {
         .sessionStatuses=${this.state.sessionStatuses}
         .sessionActivities=${this.state.sessionActivities}
         .unreadSessionIds=${this.unreadSessionIds}
-        .unreadCompletedAt=${this.inboxUnreadCompletedAt()}
+        .unreadCompletedAt=${this.cachedUnreadCompletedAt}
         .projects=${this.state.projects}
         .workspacesByProjectId=${this.state.workspacesByProjectId}
         .collapsible=${true}
@@ -1363,19 +1365,20 @@ export class PiWebApp extends LitElement {
   }
 
   /**
-   * Derive the `completedAt` timestamps for unread sessions so the inbox
-   * board can pass them to `sessionBoardState` (shows when the session
-   * completed while you were away).
+   * Sync the `completedAt` timestamps for unread sessions so the inbox
+   * board can pass them to `sessionBoardState`. Uses content equality to
+   * avoid creating a new object on every render when the data has not changed.
    */
-  private inboxUnreadCompletedAt(): Readonly<Record<string, string>> {
+  private syncUnreadCompletedAt(): void {
     const machineId = selectedMachineId(this.state);
     const projection = this.sessionUnread.projection(machineId);
-    if (projection === undefined) return {};
-    const result: Record<string, string> = {};
-    for (const summary of projection.sessions) {
-      result[summary.sessionId] = summary.completedAt;
+    if (projection === undefined) {
+      if (Object.keys(this.cachedUnreadCompletedAt).length > 0) this.cachedUnreadCompletedAt = {};
+      return;
     }
-    return result;
+    const next: Record<string, string> = {};
+    for (const summary of projection.sessions) next[summary.sessionId] = summary.completedAt;
+    if (!sameCompletedAtRecord(next, this.cachedUnreadCompletedAt)) this.cachedUnreadCompletedAt = next;
   }
 
   /**
@@ -2416,24 +2419,22 @@ export class PiWebApp extends LitElement {
    * Contains the "Archive & next" primary action and any session-level controls
    * that live in the thread pane rather than the navigation pane.
    *
-   * Hidden when the session is archived (archive is already done) or when
-   * the navigation panel is in mobile overlay (limited screen space).
+   * Hidden when the session is archived, or when the inbox global store has
+   * not yet loaded (no actions to offer without the triage queue).
    */
   private renderThreadHeader(state: AppState, session: SessionInfo) {
     if (session.archived === true) return null;
-    const canArchiveAndNext = state.globalSessions !== undefined;
+    if (state.globalSessions === undefined) return null;
     return html`
       <div class="thread-header" data-thread-header>
         <div class="thread-header-actions">
-          ${canArchiveAndNext ? html`
-            <button
-              class="thread-action archive-and-next"
-              data-action="archive-and-next"
-              title="Archive this session and open the next one waiting for you"
-              aria-label="Archive &amp; next"
-              @click=${() => { void this.archiveAndNext(); }}
-            >Archive &amp; next</button>
-          ` : null}
+          <button
+            class="thread-action archive-and-next"
+            data-action="archive-and-next"
+            title="Archive this session and open the next one waiting for you"
+            aria-label="Archive &amp; next"
+            @click=${() => { void this.archiveAndNext(); }}
+          >Archive &amp; next</button>
         </div>
       </div>
     `;
@@ -2613,6 +2614,12 @@ function patchChangesState(state: AppState, patch: Partial<AppState>): boolean {
 
 function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
   return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
+function sameCompletedAtRecord(a: Record<string, string>, b: Readonly<Record<string, string>>): boolean {
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length) return false;
+  return keysA.every((k) => a[k] === b[k]);
 }
 
 function isActive(state: Pick<AppState, "status" | "activity">): boolean {

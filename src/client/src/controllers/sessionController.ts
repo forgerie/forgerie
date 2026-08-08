@@ -592,24 +592,10 @@ export class SessionController {
 
   async archiveSession(session = this.getState().selectedSession) {
     if (!session) return;
-    const status = this.statusForSession(session);
-    if (isTransientNewSessionInfo(session, status)) {
-      await this.deleteCachedNewSession(session);
-      return;
-    }
-    if (!isArchivableSessionInfo(session, status)) return;
     const machineId = selectedMachineId(this.getState());
     try {
-      await this.api.archive(session, machineId);
-      const archivedAt = new Date().toISOString();
-      const state = this.getState();
-      const sessions = markSessionArchived(state.sessions, session.id, archivedAt);
-      const selectionChange = selectionAfterArchivingSession(sessions, state.selectedSession?.id, session.id);
-      this.setState({ sessions });
-      this.inbox?.notifyArchived(machineId, session.id, archivedAt);
-
-      if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
-      else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
+      const archivedAt = await this.archiveSessionCore(session);
+      if (archivedAt !== undefined) this.inbox?.notifyArchived(machineId, session.id, archivedAt);
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -786,23 +772,15 @@ export class SessionController {
 
   async restoreSession(session = this.getState().selectedSession) {
     if (!session) return;
-    const machineId = selectedMachineId(this.getState());
     try {
-      await this.api.restore(session, machineId);
-      const restored = { ...session };
-      delete restored.archived;
-      delete restored.archivedAt;
-      this.replaceSession(restored);
-      this.inbox?.notifyRestored(machineId, restored);
-      if (this.getState().selectedSession?.id === restored.id) await this.selectSession(restored);
+      await this.restoreSessionCore(session);
     } catch (error) {
       this.setState({ error: String(error) });
     }
   }
 
   /**
-   * Archive a session, updating the workspace session list and handling
-   * selection changes. Propagates API errors to the caller.
+   * Archive a session, propagating API errors to the caller.
    *
    * Intentionally does NOT notify the inbox bridge — callers that route
    * through {@link SessionInboxController.archiveWithUndo} rely on that
@@ -813,46 +791,20 @@ export class SessionController {
    * the bridge should be notified by the caller.
    */
   async archiveSessionThrowing(session: SessionInfo): Promise<void> {
-    const status = this.statusForSession(session);
-    if (isTransientNewSessionInfo(session, status)) {
-      await this.deleteCachedNewSession(session);
-      return;
-    }
-    if (!isArchivableSessionInfo(session, status)) return;
-    const machineId = selectedMachineId(this.getState());
-    // Throws on API error — caller is responsible for error handling.
-    await this.api.archive(session, machineId);
-    const archivedAt = new Date().toISOString();
-    const state = this.getState();
-    const sessions = markSessionArchived(state.sessions, session.id, archivedAt);
-    const selectionChange = selectionAfterArchivingSession(sessions, state.selectedSession?.id, session.id);
-    this.setState({ sessions });
+    await this.archiveSessionCore(session);
     // inbox?.notifyArchived intentionally omitted: archiveWithUndo calls
     // notifyArchived itself after this method returns.
-
-    if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
-    else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
   }
 
   /**
-   * Restore a session from the archive, updating the workspace session list,
-   * notifying the inbox bridge, and re-selecting the session if it is the
-   * currently selected one. Propagates API errors to the caller.
+   * Restore a session from the archive. Propagates API errors to the caller.
    *
    * Designed for injection into {@link SessionInboxController.undoArchive},
    * which needs error propagation to detect "Session not found" and surface
    * a user-readable message.
    */
   async restoreSessionThrowing(session: SessionInfo): Promise<void> {
-    const machineId = selectedMachineId(this.getState());
-    // Throws on API error — caller is responsible for error handling.
-    await this.api.restore(session, machineId);
-    const restored = { ...session };
-    delete restored.archived;
-    delete restored.archivedAt;
-    this.replaceSession(restored);
-    this.inbox?.notifyRestored(machineId, restored);
-    if (this.getState().selectedSession?.id === restored.id) await this.selectSession(restored);
+    await this.restoreSessionCore(session);
   }
 
   async reloadSession(session = this.getState().selectedSession) {
@@ -1161,6 +1113,50 @@ export class SessionController {
   private applyBulkSessionFailures(action: string, failures: readonly string[]): void {
     if (failures.length === 0) return;
     this.setState({ error: `${action} failed for ${String(failures.length)} session${failures.length === 1 ? "" : "s"}: ${failures.join("; ")}` });
+  }
+
+  /**
+   * Core archive logic shared by archiveSession and archiveSessionThrowing.
+   * Handles transient sessions, archivability checks, the API call, state
+   * update, and selection-change navigation. Throws on API error.
+   *
+   * Returns the archivedAt ISO timestamp on a successful archive, or
+   * undefined when no archive was performed (transient session deleted or
+   * not archivable). Does NOT call inbox.notifyArchived — callers decide.
+   */
+  private async archiveSessionCore(session: SessionInfo): Promise<string | undefined> {
+    const status = this.statusForSession(session);
+    if (isTransientNewSessionInfo(session, status)) {
+      await this.deleteCachedNewSession(session);
+      return undefined;
+    }
+    if (!isArchivableSessionInfo(session, status)) return undefined;
+    const machineId = selectedMachineId(this.getState());
+    await this.api.archive(session, machineId);
+    const archivedAt = new Date().toISOString();
+    const state = this.getState();
+    const sessions = markSessionArchived(state.sessions, session.id, archivedAt);
+    const selectionChange = selectionAfterArchivingSession(sessions, state.selectedSession?.id, session.id);
+    this.setState({ sessions });
+    if (selectionChange.type === "select") await this.selectSession(selectionChange.session);
+    else if (selectionChange.type === "clear") this.deselectSession({ forgetRememberedSelection: true });
+    return archivedAt;
+  }
+
+  /**
+   * Core restore logic shared by restoreSession and restoreSessionThrowing.
+   * Handles the API call, state update, inbox notification, and re-selection
+   * when the restored session is currently selected. Throws on API error.
+   */
+  private async restoreSessionCore(session: SessionInfo): Promise<void> {
+    const machineId = selectedMachineId(this.getState());
+    await this.api.restore(session, machineId);
+    const restored = { ...session };
+    delete restored.archived;
+    delete restored.archivedAt;
+    this.replaceSession(restored);
+    this.inbox?.notifyRestored(machineId, restored);
+    if (this.getState().selectedSession?.id === restored.id) await this.selectSession(restored);
   }
 
   private sessionCacheKey(sessionId: string): string {
@@ -1744,6 +1740,9 @@ export class SessionController {
       this.pendingStatusBySession.clear();
       for (const status of statuses) this.applyStatus(status);
     }
+    // Apply buffered global statuses in one globalSessions write, coalescing
+    // all status.update events from this rAF frame into last-write-wins per session.
+    this.inbox?.flushPendingStatusesToGlobal();
   }
 
   private clearPendingUpdates(): void {

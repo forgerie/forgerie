@@ -48,45 +48,40 @@ function storageKey(machineId: string, suffix: string): string {
   return `forgerie:inbox:${machineId}:${suffix}`;
 }
 
-function readGroupBy(machineId: string): "state" | "project" {
+/** Returns localStorage when available, or undefined in environments that lack it. */
+function browserStorage(): Storage | undefined {
   try {
-    const raw = localStorage.getItem(storageKey(machineId, "groupBy"));
-    if (raw === "project") return "project";
+    return typeof localStorage !== "undefined" ? localStorage : undefined;
   } catch {
-    // localStorage unavailable (e.g., privacy mode).
+    return undefined;
   }
+}
+
+function readGroupBy(machineId: string): "state" | "project" {
+  const raw = browserStorage()?.getItem(storageKey(machineId, "groupBy"));
+  if (raw === "project") return "project";
   return "state";
 }
 
 function writeGroupBy(machineId: string, groupBy: "state" | "project"): void {
-  try {
-    localStorage.setItem(storageKey(machineId, "groupBy"), groupBy);
-  } catch {
-    // Ignore.
-  }
+  browserStorage()?.setItem(storageKey(machineId, "groupBy"), groupBy);
 }
 
 const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["open", "archived"]);
 
 function readCollapsedGroups(machineId: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(storageKey(machineId, "collapsed"));
-    if (raw !== null) {
+  const raw = browserStorage()?.getItem(storageKey(machineId, "collapsed"));
+  if (raw !== null && raw !== undefined) {
+    try {
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed)) return new Set(parsed.filter((v) => typeof v === "string"));
-    }
-  } catch {
-    // Ignore.
+    } catch { /* corrupt data — fall through to default */ }
   }
   return new Set(DEFAULT_COLLAPSED);
 }
 
 function writeCollapsedGroups(machineId: string, collapsed: ReadonlySet<string>): void {
-  try {
-    localStorage.setItem(storageKey(machineId, "collapsed"), JSON.stringify([...collapsed]));
-  } catch {
-    // Ignore.
-  }
+  browserStorage()?.setItem(storageKey(machineId, "collapsed"), JSON.stringify([...collapsed]));
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +171,7 @@ export class SessionInboxPanel extends LitElement {
     const selectedId = this.selectedSession?.id;
     if (selectedId !== undefined && selectedId !== this.prevSelectedId) {
       this.prevSelectedId = selectedId;
-      const board = this.deriveBoard();
+      const board = this.deriveBoard(this.buildLocationMap());
       if (board !== undefined) {
         const row = board.rows.find((r) => r.session.id === selectedId);
         if (row !== undefined && this.collapsedGroups.has(row.state.kind)) {
@@ -210,12 +205,9 @@ export class SessionInboxPanel extends LitElement {
     return map;
   }
 
-  private deriveBoard(): SessionBoard<SessionInfo> | undefined {
+  private deriveBoard(locationMap: Map<string, InboxLocation>): SessionBoard<SessionInfo> | undefined {
     const gs = this.globalSessions;
     if (gs === undefined || gs.sessions.length === 0) return undefined;
-
-    const locationMap = this.buildLocationMap();
-
     return deriveSessionBoard<SessionInfo>({
       sessions: gs.sessions,
       statuses: gs.statuses,
@@ -242,7 +234,7 @@ export class SessionInboxPanel extends LitElement {
   override render() {
     const gs = this.globalSessions;
 
-    // Loading state.
+    // Loading state — skip locationMap: no rows to render yet.
     if (gs === undefined || gs.status === "loading") {
       return html`
         <div class="board-header">
@@ -254,7 +246,10 @@ export class SessionInboxPanel extends LitElement {
       `;
     }
 
-    const board = this.deriveBoard();
+    // Compute once per render; passed to deriveBoard and renderBoardScroll so
+    // neither rebuilds the map independently.
+    const locationMap = this.buildLocationMap();
+    const board = this.deriveBoard(locationMap);
 
     // Empty machine (no sessions at all).
     if (board === undefined) {
@@ -288,7 +283,7 @@ export class SessionInboxPanel extends LitElement {
         <div class="board-state" data-state="all-clear">
           <p>All clear — nothing waiting for you.</p>
         </div>
-        ${this.renderBoardScroll(board)}
+        ${this.renderBoardScroll(board, locationMap)}
       `;
     }
 
@@ -297,7 +292,7 @@ export class SessionInboxPanel extends LitElement {
         ${this.renderHeader(board)}
       </div>
       ${gs.status === "stale" ? html`<div class="stale-notice" data-state="stale" role="status">Reconnecting…</div>` : nothing}
-      ${this.renderBoardScroll(board)}
+      ${this.renderBoardScroll(board, locationMap)}
     `;
   }
 
@@ -345,8 +340,9 @@ export class SessionInboxPanel extends LitElement {
     `;
   }
 
-  private renderBoardScroll(board: SessionBoard<SessionInfo>): TemplateResult {
-    const locationMap = this.buildLocationMap();
+  private renderBoardScroll(board: SessionBoard<SessionInfo>, locationMap: Map<string, InboxLocation>): TemplateResult {
+    // Compute once per render so every row in this frame shares the same timestamp.
+    const now = Date.now();
 
     const stateGroups: readonly SessionBoardGroup<SessionInfo>[] = board.groups;
     const projectGroups: readonly { kind: string; label: string; tone: string; rows: readonly SessionBoardRow<SessionInfo>[] }[] =
@@ -357,7 +353,7 @@ export class SessionInboxPanel extends LitElement {
 
     return html`
       <div class="board-scroll" role="listbox" aria-label="Sessions">
-        ${visibleGroups.map((group) => this.renderGroup(group, locationMap))}
+        ${visibleGroups.map((group) => this.renderGroup(group, locationMap, now))}
       </div>
       ${this.renderUndoToast()}
     `;
@@ -387,7 +383,7 @@ export class SessionInboxPanel extends LitElement {
     `;
   }
 
-  private renderGroup(group: InboxGroup, locationMap: Map<string, InboxLocation>): TemplateResult {
+  private renderGroup(group: InboxGroup, locationMap: Map<string, InboxLocation>, now: number): TemplateResult {
     const kind = group.kind;
     const collapsed = this.collapsedGroups.has(kind);
     const tone = this.groupBy === "project"
@@ -419,7 +415,7 @@ export class SessionInboxPanel extends LitElement {
           aria-label=${group.label}
           ?hidden=${collapsed}
         >
-          ${collapsed ? nothing : group.rows.map((row) => this.renderRow(row, locationMap))}
+          ${collapsed ? nothing : group.rows.map((row) => this.renderRow(row, locationMap, now))}
         </div>
       </section>
     `;
@@ -428,6 +424,7 @@ export class SessionInboxPanel extends LitElement {
   private renderRow(
     row: SessionBoardRow<SessionInfo>,
     locationMap: Map<string, InboxLocation>,
+    now: number,
   ): TemplateResult {
     const session = row.session;
     const kind: BoardGroupKind = row.state.kind;
@@ -436,7 +433,6 @@ export class SessionInboxPanel extends LitElement {
     // An uncached workspace is still resolvable on demand. Only disable the
     // row after navigation has exhausted every project and confirmed removal.
     const isDeleted = this.unavailableCwds.has(session.cwd);
-    const now = Date.now();
 
     // State detail label.
     let detail: string | undefined;
