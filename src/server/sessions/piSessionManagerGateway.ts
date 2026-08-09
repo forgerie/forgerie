@@ -6,6 +6,7 @@ import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
 import type { SessionHeaderSummary } from "./sessionFileHeader.js";
 import type { SessionHeaderReader } from "./parentSessionLocator.js";
+import { SessionCatalogScanner } from "./sessionCatalogScanner.js";
 import { SessionSummaryScanner } from "./sessionSummaryScanner.js";
 import type { PiSessionListEntry, PiSessionManager, PiSessionManagerGateway, ResolvedSessionFile } from "./piSessionService.js";
 
@@ -84,6 +85,7 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
    * for in-place rewrites and a `clear()` escape hatch.
    */
   private readonly summaryScanner = new SessionSummaryScanner();
+  private readonly catalogScanner = new SessionCatalogScanner();
 
   constructor(private readonly resolver: SessionDirResolver) {}
 
@@ -131,6 +133,14 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
     return uniqueSessionsByPath([...defaultSessions, ...envSessions]);
   }
 
+  async listCatalog(): Promise<PiSessionListEntry[]> {
+    const defaultDirs = await listDefaultPiSessionDirs(this.resolver.defaultSessionsRoot());
+    const envSessionDir = this.resolver.globalEnvSessionDir();
+    const dirs = envSessionDir === undefined ? defaultDirs : [...defaultDirs, envSessionDir];
+    const sessions = await this.catalogScanner.scanDirectories(dirs);
+    return sessions.map((session) => ({ ...session, cwd: canonicalizeStoredCwd(session.cwd) }));
+  }
+
   open(path: string): PiSessionManager {
     return SessionManager.open(path, dirname(path));
   }
@@ -147,16 +157,19 @@ export async function listSessionsInDir(sessionDir: string): Promise<PiSessionLi
 }
 
 export async function listSessionsInDefaultPiStore(storeRoot: string): Promise<PiSessionListEntry[]> {
+  const sessionDirs = await listDefaultPiSessionDirs(storeRoot);
+  const sessions = (await Promise.all(sessionDirs.map((dir) => listSessionsInDir(dir)))).flat();
+  return sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+}
+
+async function listDefaultPiSessionDirs(storeRoot: string): Promise<string[]> {
   let entries: Dirent[];
   try {
     entries = await readdir(storeRoot, { withFileTypes: true });
   } catch {
     return [];
   }
-
-  const sessionDirs = entries.filter((entry) => entry.isDirectory()).map((entry) => join(storeRoot, entry.name));
-  const sessions = (await Promise.all(sessionDirs.map((dir) => listSessionsInDir(dir)))).flat();
-  return sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => join(storeRoot, entry.name));
 }
 
 export function filterSessionsForCwd(sessions: readonly PiSessionListEntry[], cwd: string): PiSessionListEntry[] {

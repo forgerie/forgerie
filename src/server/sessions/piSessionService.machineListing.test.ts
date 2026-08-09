@@ -40,11 +40,12 @@ describe("PiSessionService machine listing", () => {
         archivedAt: "2026-08-01T13:00:00.000Z",
       },
     ];
-    const calls = { list: 0, listAll: 0, createRuntime: 0 };
+    const calls = { list: 0, listAll: 0, listCatalog: 0, createRuntime: 0 };
     const manager = {
       create: (cwd: string) => fakeSessionManager(cwd),
       list: () => { calls.list += 1; return Promise.resolve([]); },
-      listAll: () => { calls.listAll += 1; return Promise.resolve(records); },
+      listAll: () => { calls.listAll += 1; return Promise.reject(new Error("full transcript scan should not be called")); },
+      listCatalog: () => { calls.listCatalog += 1; return Promise.resolve(records); },
       listParentSessionPaths: () => Promise.resolve([]),
       invalidateSessionFile: () => undefined,
       resolveSessionFile: (cwd: string, sessionId: string) => {
@@ -117,7 +118,7 @@ describe("PiSessionService machine listing", () => {
       expect(snapshot.activities).toMatchObject([
         { sessionId: "session-main", phase: "active", label: "running tool", detail: "read" },
       ]);
-      expect(calls).toEqual({ list: 0, listAll: 1, createRuntime: 1 });
+      expect(calls).toEqual({ list: 0, listAll: 0, listCatalog: 1, createRuntime: 1 });
     } finally {
       await service.dispose();
     }

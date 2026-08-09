@@ -365,6 +365,13 @@ export interface PiSessionManagerGateway {
    * per-session lookups use the cwd-scoped `list` instead.
    */
   listAll(): Promise<PiSessionListEntry[]>;
+  /**
+   * Bounded metadata listing for machine-wide navigation. Unlike `listAll`,
+   * this must never parse entire transcripts: machines can retain tens of
+   * gigabytes of history. Optional only for test/custom gateways; production
+   * provides it and machine listing falls back to `listAll` for compatibility.
+   */
+  listCatalog?(): Promise<PiSessionListEntry[]>;
   open(path: string): PiSessionManager;
 }
 
@@ -1160,7 +1167,7 @@ export class PiSessionService implements SessionRouteService {
 
   async machineListing(): Promise<MachineSessionListingSnapshot> {
     const [listedSessions, archivedRecords] = await Promise.all([
-      this.sessionManager.listAll(),
+      this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(),
       this.archiveStore.list(),
     ]);
     const listedById = new Map(listedSessions.map((session) => [session.id, session]));
