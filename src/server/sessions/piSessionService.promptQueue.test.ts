@@ -126,6 +126,58 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await service.dispose();
   });
 
+  it("generates a session name when startup extensions already injected custom context", async () => {
+    const model = testModel();
+    const fake = fakeRuntime("custom-context-name-session", {
+      messages: [{ role: "custom", customType: "bedrock-context", content: "Engineering guidance", display: false }],
+      model,
+      agent: { streamFunction: () => {
+        const stream = createAssistantMessageEventStream();
+        const message: AssistantMessage = {
+          role: "assistant",
+          content: [{ type: "text", text: "Architecture Improvement" }],
+          api: "anthropic-messages",
+          provider: "anthropic",
+          model: model.id,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: "stop",
+          timestamp: Date.now(),
+        };
+        stream.push({ type: "done", reason: "stop", message });
+        stream.end(message);
+        return stream;
+      } },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("custom-context-name-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.prompt(sessionRef("custom-context-name-session"), "/skill:se-architecture-improvement");
+    await vi.waitFor(() => { expect(fake.session.sessionName).toBe("Architecture Improvement"); });
+
+    await service.dispose();
+  });
+
+  it("uses the deterministic fallback when the first prompt has no selected model", async () => {
+    const fake = fakeRuntime("model-less-name-session");
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("model-less-name-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.prompt(sessionRef("model-less-name-session"), "Please investigate Forgerie session naming");
+
+    expect(fake.session.sessionName).toBe("Forgerie session naming");
+    await service.dispose();
+  });
+
   it("keeps a manual /name set while automatic naming is still in flight", async () => {
     const model = testModel();
     const titleStream = createAssistantMessageEventStream();

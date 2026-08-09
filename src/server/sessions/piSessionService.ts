@@ -3494,7 +3494,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private maybeGenerateSessionName(session: PiAgentSession, firstMessage: string): void {
-    if (session.sessionName !== undefined || session.messages.length !== 0 || session.isStreaming || session.isCompacting) return;
+    if (session.sessionName !== undefined || hasUserMessage(session.messages) || session.isStreaming || session.isCompacting) return;
 
     const deterministicName = deterministicSessionName(firstMessage);
     if (deterministicName !== undefined) {
@@ -3503,7 +3503,10 @@ export class PiSessionService implements SessionRouteService {
     }
 
     const model = session.model;
-    if (model === undefined) return;
+    if (model === undefined) {
+      this.applyGeneratedSessionName(session, fallbackSessionName(firstMessage));
+      return;
+    }
 
     void generateShortSessionName(session.agent.streamFunction, model, firstMessage).then((name) => {
       this.applyGeneratedSessionName(session, name ?? fallbackSessionName(firstMessage));
@@ -4327,6 +4330,10 @@ function queuedMessagesFromSession(session: PiAgentSession, extraQueuedMessages:
     ...session.getFollowUpMessages().map((text) => ({ kind: "followUp" as const, text })),
     ...extraQueuedMessages,
   ];
+}
+
+function hasUserMessage(messages: readonly unknown[]): boolean {
+  return messages.some((message) => getString(message, "role") === "user");
 }
 
 function userTextMessage(text: string): { role: "user"; content: string } {
