@@ -21,7 +21,7 @@ describe("SessionCatalogScanner", () => {
     const sessionFile = join(sessionDir, "2026-08-08T12-00-00-000Z_session-a.jsonl");
     const lines = [
       JSON.stringify({ type: "session", version: 3, id: "session-a", timestamp: "2026-08-08T12:00:00.000Z", cwd: "/projects/repo", parentSession: "/sessions/parent.jsonl" }),
-      JSON.stringify({ type: "message", id: "user-1", message: { role: "user", content: [{ type: "text", text: "Build the session inbox" }] } }),
+      JSON.stringify({ type: "message", id: "user-1", message: { role: "user", content: [{ type: "text", text: `Build the session inbox ${"x".repeat(600)}` }] } }),
       JSON.stringify({ type: "custom", customType: "large-context", data: "x".repeat(80 * 1024) }),
       JSON.stringify({ type: "session_info", name: "Renamed from the transcript tail" }),
       "",
@@ -35,10 +35,11 @@ describe("SessionCatalogScanner", () => {
       id: "session-a",
       cwd: "/projects/repo",
       path: sessionFile,
-      firstMessage: "Build the session inbox",
       name: "Renamed from the transcript tail",
       parentSessionPath: "/sessions/parent.jsonl",
     });
+    expect(entry?.firstMessage.startsWith("Build the session inbox ")).toBe(true);
+    expect(Array.from(entry?.firstMessage ?? "")).toHaveLength(500);
     expect(entry?.created.toISOString()).toBe("2026-08-08T12:00:00.000Z");
     expect(entry?.messageCount).toBeGreaterThanOrEqual(1);
   });

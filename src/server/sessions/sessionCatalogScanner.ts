@@ -4,6 +4,7 @@ import { join, sep } from "node:path";
 import type { PiSessionListEntry } from "./piSessionService.js";
 
 const CATALOG_WINDOW_BYTES = 64 * 1024;
+const CATALOG_FIRST_MESSAGE_MAX_CHARS = 500;
 const MAX_CONCURRENT_CATALOG_READS = 32;
 
 interface CachedCatalogEntry {
@@ -24,7 +25,9 @@ interface CachedCatalogEntry {
  * result by file identity/size/mtime. The prefix contains the immutable session
  * header and normally the first user prompt; the suffix captures later renames.
  * `messageCount` is therefore an occupancy marker/lower bound in this catalog,
- * not the transcript's exact count. No inbox behavior depends on that count.
+ * not the transcript's exact count. First-message text is capped because it is
+ * used only as a row title and historical prompts can contain megabytes of
+ * injected context. No inbox behavior depends on the complete values.
  */
 export class SessionCatalogScanner {
   private readonly memo = new Map<string, CachedCatalogEntry>();
@@ -188,17 +191,19 @@ function parseMetadataLines(lines: readonly string[]): { firstMessage: string; n
 }
 
 function messageText(content: unknown): string {
-  if (typeof content === "string") return content.trim();
-  if (!Array.isArray(content)) return "";
-  return content
-    .flatMap((part) => {
-      if (typeof part === "string") return [part];
-      if (!isUnknownRecord(part)) return [];
-      const text = part["text"];
-      return typeof text === "string" ? [text] : [];
-    })
-    .join("\n")
-    .trim();
+  const text = typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content
+        .flatMap((part) => {
+          if (typeof part === "string") return [part];
+          if (!isUnknownRecord(part)) return [];
+          const value = part["text"];
+          return typeof value === "string" ? [value] : [];
+        })
+        .join("\n")
+      : "";
+  return Array.from(text.trim()).slice(0, CATALOG_FIRST_MESSAGE_MAX_CHARS).join("");
 }
 
 function completeLines(buffer: Buffer, endsAtEof: boolean): string[] {
