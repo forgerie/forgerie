@@ -71,8 +71,8 @@ describe("SessionCommandService", () => {
     expect(prompt).toHaveBeenNthCalledWith(3, "s1", "/skill:skill-a arg");
   });
 
-  it("renames sessions, publishes the name update, and returns updated client session metadata", async () => {
-    const active = activeSession();
+  it("replaces an existing generated name whenever the user runs /name", async () => {
+    const active = activeSession({ sessionName: "Forgerie Title Ownership" });
     const events = eventPublisher();
     const service = new SessionCommandService(() => getActive(active), vi.fn(), events);
 

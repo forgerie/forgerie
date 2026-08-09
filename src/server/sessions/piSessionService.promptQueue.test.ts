@@ -126,6 +126,58 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await service.dispose();
   });
 
+  it("keeps a manual /name set while automatic naming is still in flight", async () => {
+    const model = testModel();
+    const titleStream = createAssistantMessageEventStream();
+    const fake = fakeRuntime("manual-name-session", {
+      model,
+      agent: { streamFunction: () => titleStream },
+    });
+    const hub = new CapturingSessionEventHub();
+    const service = new PiSessionService(hub, {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("manual-name-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.prompt(sessionRef("manual-name-session"), "Explain the session title mechanism");
+    await expect(service.runCommand(sessionRef("manual-name-session"), "/name My Title"))
+      .resolves.toMatchObject({ type: "done", session: { name: "My Title" } });
+
+    let currentName = fake.session.sessionName;
+    let resolveGeneratedNameCheck: (() => void) | undefined;
+    const generatedNameChecked = new Promise<void>((resolve) => { resolveGeneratedNameCheck = resolve; });
+    Object.defineProperty(fake.session, "sessionName", {
+      configurable: true,
+      get: () => {
+        resolveGeneratedNameCheck?.();
+        return currentName;
+      },
+      set: (name: string | undefined) => { currentName = name; },
+    });
+
+    const generatedMessage: AssistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "Session Title Mechanism" }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
+    titleStream.push({ type: "done", reason: "stop", message: generatedMessage });
+    titleStream.end(generatedMessage);
+
+    await generatedNameChecked;
+    expect(currentName).toBe("My Title");
+    const publishedNames = hub.sessionEvents.flatMap(({ event }) => event.type === "session.name" ? [event.name] : []);
+    expect(publishedNames).toEqual(["My Title"]);
+    await service.dispose();
+  });
+
   it("includes queued message details in session status", async () => {
     const fake = fakeRuntime("status-session", {
       messages: [{ role: "user", content: "hello" }, { role: "assistant", content: "hi" }],

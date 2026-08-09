@@ -43,18 +43,21 @@ function streamThatErrors(): StreamFn {
 }
 
 describe("sessionNameGenerator", () => {
-  it("generates a session name by calling the injected streamFn", async () => {
-    const calls: unknown[] = [];
-    const stream = streamThatCompletes('Title: "Fix the bug"');
+  it("asks for a short, distinctive retrieval label instead of a generic summary", async () => {
+    let requestedContext: Parameters<StreamFn>[1] | undefined;
+    const stream = streamThatCompletes("Forgerie Title Ownership");
     const streamFn: StreamFn = (model, context, options) => {
-      calls.push({ model, context, options });
+      requestedContext = context;
       return stream(model, context, options);
     };
 
-    const name = await generateShortSessionName(streamFn, fakeModel(), "Please fix the login bug");
+    const request = "Can you help me understand whether Forgerie or my Pi profile generates session titles?";
+    const name = await generateShortSessionName(streamFn, fakeModel(), request);
 
-    expect(name).toBe("Fix the bug");
-    expect(calls).toHaveLength(1);
+    expect(name).toBe("Forgerie Title Ownership");
+    expect(requestedContext?.systemPrompt).toContain("2-4 word retrieval label");
+    expect(requestedContext?.messages).toHaveLength(1);
+    expect(requestedContext?.messages[0]?.content).toContain("Prefer specific names and compact noun phrases");
   });
 
   it("returns undefined when the stream reports an error", async () => {
@@ -67,6 +70,11 @@ describe("sessionNameGenerator", () => {
 
   it("cleans model-generated titles", () => {
     expect(cleanSessionName('Title: "Fix Session Naming."\nextra')).toBe("Fix Session Naming");
+  });
+
+  it("rejects generated titles longer than four words before character truncation", () => {
+    expect(cleanSessionName("Generic Session Title With Filler")).toBeUndefined();
+    expect(cleanSessionName(`${"x".repeat(50)} two three four five`)).toBeUndefined();
   });
 
   it("builds deterministic names for relay handoff prompts", () => {
@@ -84,14 +92,14 @@ describe("sessionNameGenerator", () => {
       .toBeUndefined();
   });
 
-  it("builds a concise fallback from the first request", () => {
-    expect(fallbackSessionName("Seems like auto name for sessions is not working, I still get the first message as a name."))
-      .toBe("Seems like auto name for sessions");
+  it("builds a four-word, signal-dense fallback from the first request", () => {
+    expect(fallbackSessionName("Please help me understand Forgerie session title ownership?"))
+      .toBe("Forgerie session title ownership");
   });
 
-  it("ignores skill blocks in fallback names", () => {
-    expect(fallbackSessionName('<skill name="x" location="/x">\nDo x\n</skill>\n\nCheck the UI now'))
-      .toBe("Check the UI now");
+  it("ignores skill blocks and filler words in fallback names", () => {
+    expect(fallbackSessionName('<skill name="x" location="/x">\nDo x\n</skill>\n\nPlease help me check the Forgerie UI now'))
+      .toBe("Forgerie UI");
   });
 
   it("skips fallback names when the first request is missing", () => {

@@ -4,7 +4,10 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 const SESSION_NAME_TIMEOUT_MS = 10_000;
 const SESSION_NAME_MAX_INPUT_CHARS = 4_000;
 const SESSION_NAME_MAX_LENGTH = 60;
-const FALLBACK_SESSION_NAME_MAX_WORDS = 6;
+const SESSION_NAME_MAX_WORDS = 4;
+const FALLBACK_FILLER_WORDS = new Set([
+  "a", "an", "about", "can", "check", "could", "explore", "fix", "help", "i", "implement", "investigate", "me", "my", "now", "our", "please", "the", "to", "understand", "update", "we", "with", "would", "you", "your",
+]);
 const RELAY_HANDOFF_FIRST_LINE = /^Relay\s+"([^"\n]+)"\s+leg\s+(\d+)\s+begins now\.?\s*(?:\n|$)/;
 
 export function deterministicSessionName(firstMessage: unknown): string | undefined {
@@ -17,10 +20,10 @@ export async function generateShortSessionName<TApi extends Api>(streamFn: Strea
   const stream = await streamFn(
     model,
     {
-      systemPrompt: "Generate a concise title for a coding-agent chat session. Return only the title, with no quotes or punctuation wrapper.",
+      systemPrompt: "Generate a 2-4 word retrieval label for a coding-agent chat session. Maximize signal per word. Return only the label, with no quotes or punctuation wrapper.",
       messages: [{
         role: "user",
-        content: `Create a 2-6 word title for this request:\n\n${truncateInput(firstMessage)}`,
+        content: `Label this request for recognition in a session list. Prefer specific names and compact noun phrases. Keep products, components, files, errors, or decisions that distinguish it. Omit framing and generic task verbs such as understand, explore, investigate, help, fix, update, and implement. Prefer 2-3 words when they remain clear; use 4 only when needed.\n\nRequest:\n${truncateInput(firstMessage)}`,
         timestamp: Date.now(),
       }],
     },
@@ -50,8 +53,9 @@ export function fallbackSessionName(firstMessage: unknown): string | undefined {
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/[`*_#[\](){}<>]/g, " ")
     .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, FALLBACK_SESSION_NAME_MAX_WORDS)
+    .map((word) => word.replace(/^[,;:!?\x27"“”‘’]+|[,;:!?\x27"“”‘’]+$/g, ""))
+    .filter((word) => word !== "" && !FALLBACK_FILLER_WORDS.has(word.toLocaleLowerCase("en-US")))
+    .slice(0, SESSION_NAME_MAX_WORDS)
     .join(" "));
 }
 
@@ -60,10 +64,9 @@ export function cleanSessionName(value: string): string | undefined {
     .replace(/^\s*(title|session title)\s*:\s*/i, "")
     .replace(/^\s*["'`]+|["'`.]+\s*$/g, "")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, SESSION_NAME_MAX_LENGTH)
     .trim();
-  return title === "" ? undefined : title;
+  if (title === "" || title.split(" ").length > SESSION_NAME_MAX_WORDS) return undefined;
+  return title.slice(0, SESSION_NAME_MAX_LENGTH).trim();
 }
 
 function relayHandoffSessionName(firstMessage: string): string | undefined {
