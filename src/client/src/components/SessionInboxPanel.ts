@@ -585,13 +585,11 @@ export class SessionInboxPanel extends LitElement {
               : html`<span class="chip" data-location-chip title=${session.cwd}>${unknownLocationLabel(session.cwd)}</span>`}
           ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
         </div>
-        <div class="row-aside">
-          <span class="row-time">${relativeTime(session.modified, now)}</span>
-          <div class="row-actions">
-            ${kind === "archived"
-              ? html`<button class="row-action" data-action="restore" title="Restore" aria-label="Restore session" @click=${handleRestore}>↩</button>`
-              : html`<button class="row-action" data-action="archive" title="Archive" aria-label="Archive session" @click=${handleArchive}>✓</button>`}
-          </div>
+        <span class="row-time">${relativeTime(session.modified, now)}</span>
+        <div class="row-actions">
+          ${kind === "archived"
+            ? html`<button class="row-action" data-action="restore" title="Restore" aria-label="Restore session" @click=${handleRestore}>↩</button>`
+            : html`<button class="row-action" data-action="archive" title="Archive" aria-label="Archive session" @click=${handleArchive}>✓</button>`}
         </div>
       </div>
     `;
@@ -1040,24 +1038,15 @@ export class SessionInboxPanel extends LitElement {
     .row[data-state="errored"] .row-detail { color: var(--pi-danger, #ff4f7b); }
 
     /*
-     * Time and action sit side by side, not stacked: the 44px touch target is
-     * non-negotiable, and stacking it under the timestamp would spend that
-     * height twice and halve how many sessions a fold-sized screen can show.
+     * The right column mirrors the left's two-line rhythm: when on the title's
+     * line, act on the location's line. Sharing baselines is what makes the
+     * timestamp read as part of the session rather than as a label on a button.
      */
-    .row-aside {
-      grid-column: 3;
-      grid-row: 1 / span 2;
-      display: flex;
-      align-items: flex-start;
-      justify-content: flex-end;
-      gap: 6px;
-      /* The target keeps its 44px; the row does not grow to frame it. */
-      margin-block: -6px;
-    }
-
     .row-time {
-      /* Sits on the title's own line, where a scanning eye already is. */
-      padding-block-start: 8px;
+      grid-column: 3;
+      grid-row: 1;
+      justify-self: end;
+      align-self: baseline;
       font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
       font-variant-numeric: tabular-nums;
       color: var(--pi-dim, #817a99);
@@ -1065,8 +1054,14 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .row-actions {
+      grid-column: 3;
+      grid-row: 2;
+      justify-self: end;
+      align-self: center;
       display: flex;
       gap: 3px;
+      /* Sits with the location line without making the row taller than it. */
+      margin-block-start: -4px;
       opacity: 0;
       transition: opacity 120ms ease;
     }
@@ -1081,20 +1076,39 @@ export class SessionInboxPanel extends LitElement {
     }
 
     /* ≥44px touch target as required by plan. */
+    /*
+     * The control reads as a glyph and only takes on a surface under the
+     * pointer: a bordered box on every row would out-weigh the titles it sits
+     * beside and draw a hard rail down the pane.
+     */
     .row-action {
+      position: relative;
       display: grid;
       place-items: center;
-      min-width: 44px;
-      min-height: 44px;
+      min-width: 28px;
+      min-height: 28px;
       padding: 0;
       font: inherit;
       font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
       line-height: 1;
       color: var(--pi-dim, #817a99);
       background: none;
-      border: 1px solid var(--pi-border-muted, #1b2340);
+      border: 1px solid transparent;
       border-radius: 6px;
       cursor: pointer;
+    }
+
+    /*
+     * The tap target is larger than the glyph, but deliberately stops inside
+     * the row: expanding past it would lose the tap to the next row anyway,
+     * and expanding up would swallow the timestamp above.
+     */
+    .row-action::after {
+      content: "";
+      position: absolute;
+      inset-inline: -8px;
+      inset-block-start: -2px;
+      inset-block-end: -8px;
     }
 
     .row-action:hover {
