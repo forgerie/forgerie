@@ -19,7 +19,7 @@
  *  - No viewport breakpoints; no device or user-agent sniffing.
  */
 
-import { LitElement, css, html, nothing, type TemplateResult } from "lit";
+import { LitElement, css, html, nothing, svg, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
@@ -91,6 +91,13 @@ function writeShowArchived(machineId: string, showArchived: boolean): void {
 // ---------------------------------------------------------------------------
 // Board view types
 // ---------------------------------------------------------------------------
+
+/**
+ * Workspace-management mark: two overlapping panes. Icon-only, because the
+ * word 'Workspaces' cost more header width than the action earns — the label
+ * survives as the button's tooltip and accessible name.
+ */
+const workspacesIcon = svg`<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><rect x="1.6" y="2.6" width="9" height="7" rx="1.6" /><rect x="5.4" y="6.4" width="9" height="7" rx="1.6" /></svg>`;
 
 /** Location shown for a cwd that belongs to no registered project. */
 function unknownLocation(cwd: string): InboxLocation {
@@ -393,6 +400,22 @@ export class SessionInboxPanel extends LitElement {
         <h2 class="board-title">Inbox</h2>
         <span class="board-summary" id="board-summary">${summaryText}</span>
       </div>
+      <div class="board-actions">
+        <button
+          class="icon-btn"
+          data-action="manage-workspaces"
+          title="Manage workspaces"
+          aria-label="Manage workspaces"
+          @click=${() => { this.onManageWorkspaces?.(); }}
+        >${workspacesIcon}</button>
+        <button
+          class="icon-btn"
+          data-action="new-session"
+          title="Start a new session"
+          aria-label="Start a new session"
+          @click=${() => { this.onNewSession?.(); }}
+        >+</button>
+      </div>
       <div class="board-controls">
         <div class="segmented" role="group" aria-label="Group by">
           <button
@@ -413,20 +436,6 @@ export class SessionInboxPanel extends LitElement {
           title="Show archived sessions"
           @click=${() => { this.setShowArchived(!this.showArchived); }}
         ><span class="toggle-dot" aria-hidden="true"></span>Archived</button>
-        <button
-          class="manage-workspaces-btn"
-          data-action="manage-workspaces"
-          title="Manage workspaces"
-          aria-label="Manage workspaces"
-          @click=${() => { this.onManageWorkspaces?.(); }}
-        >Workspaces</button>
-        <button
-          class="new-session-btn"
-          data-action="new-session"
-          title="Start a new session"
-          aria-label="Start a new session"
-          @click=${() => { this.onNewSession?.(); }}
-        >+</button>
       </div>
     `;
   }
@@ -659,21 +668,48 @@ export class SessionInboxPanel extends LitElement {
 
     /* ---- header ---- */
 
+    /*
+     * Two rows when the pane is narrow (title and actions share the first,
+     * view controls take the second), one row once there is width for all
+     * three. The threshold is where the controls stop fitting beside the
+     * title, measured from the pane, not the viewport.
+     */
     .board-header {
       flex: 0 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 12px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "title actions"
+        "controls controls";
+      align-items: center;
+      gap: 8px 12px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--pi-border);
       background: var(--pi-surface, #101527);
     }
 
+    @container (min-width: 520px) {
+      .board-header {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas: "title controls actions";
+      }
+
+      .board-controls { justify-content: flex-end; }
+    }
+
     .board-title-row {
+      grid-area: title;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .board-actions {
+      grid-area: actions;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+      gap: 6px;
     }
 
     .board-title {
@@ -684,6 +720,10 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .board-summary {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
       color: var(--pi-muted, #aaa4bd);
     }
@@ -694,10 +734,11 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .board-controls {
+      grid-area: controls;
       display: flex;
       align-items: center;
       gap: 8px;
-      flex-wrap: wrap;
+      min-width: 0;
     }
 
     .segmented {
@@ -771,44 +812,30 @@ export class SessionInboxPanel extends LitElement {
 
     .overlay-back-btn:hover { color: var(--pi-text, #f7f4ff); }
 
-    .manage-workspaces-btn {
-      box-sizing: border-box;
+    .icon-btn {
       display: inline-grid;
       place-items: center;
-      min-height: 44px;
-      padding: 0 10px;
+      min-width: 40px;
+      min-height: 40px;
+      padding: 0;
       font: inherit;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      font-size: 1rem;
       color: var(--pi-muted, #aaa4bd);
       background: var(--pi-surface, #101527);
       border: 1px solid var(--pi-border, #26304f);
       border-radius: 8px;
       cursor: pointer;
-      margin-left: auto;
     }
 
-    .manage-workspaces-btn:hover {
+    .icon-btn:hover {
       color: var(--pi-text, #f7f4ff);
       background: var(--pi-surface-hover, #151b31);
     }
 
-    .new-session-btn {
-      box-sizing: border-box;
-      display: inline-grid;
-      place-items: center;
-      min-width: 44px;
-      min-height: 44px;
-      padding: 0 9px;
-      font: inherit;
-      color: var(--pi-text);
-      background: var(--pi-surface, #101527);
-      border: 1px solid var(--pi-border, #26304f);
-      border-radius: 8px;
-      cursor: pointer;
-    }
-
-    .new-session-btn:hover {
-      background: var(--pi-surface-hover, #151b31);
+    .icon-btn svg {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.4;
     }
 
     /* ---- states ---- */
