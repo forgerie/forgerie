@@ -2,4 +2,4 @@
 "forgerie": patch
 ---
 
-Add first-class managed process panel and notifications. Process lifecycle events (success, failure, crash, log matches) now appear in the chat, and a new Processes workspace panel lets users view, control, and inspect output from session-managed background processes. Exposes `ManagedProcessesRuntime` in the unstable plugin API for third-party panels.
+Add first-class managed process support without a separate machine package. Forgerie now bundles its compatible process runtime, shows process lifecycle events (success, failure, crash, and log matches) in chat, and adds a Processes workspace panel for viewing status, controlling processes, and inspecting output. Exposes `ManagedProcessesRuntime` in the unstable plugin API for third-party panels.

@@ -9,6 +9,8 @@ verify_command: "npm run verify"
 
 # feat: First-class pi-processes support in Forgerie
 
+> **Architecture correction — 2026-08-08:** The Mountainous/Nix packaging decision in this historical plan was wrong. Forgerie is a self-contained application. It now owns and ships the patched package under `vendor/pi-processes`; U3 and later Mountainous references below describe the superseded implementation, not the current product boundary.
+
 **Target repos:** this repo (`forgerie`) for product work; `mountainous` (the user's NixOS configuration repo at `code/github/simonwjackson/mountainous`) for U3 packaging; a new local fork checkout of `aliou/pi-processes` for U1–U2. Paths below are repo-relative to the repo named in each unit, except explicitly user-local `~` paths in operational units (U4).
 
 ## Summary

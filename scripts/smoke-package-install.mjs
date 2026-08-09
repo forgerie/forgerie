@@ -59,7 +59,8 @@ try {
 
   const packageRoot = join(globalPrefix, "lib", "node_modules", "forgerie");
   await smokeInstalledTerminalService(packageRoot);
-  console.log(`Installed-package PTY smoke test passed with npm ${NPM_VERSION}.`);
+  await smokeInstalledManagedProcesses(packageRoot);
+  console.log(`Installed-package PTY and managed-process smoke tests passed with npm ${NPM_VERSION}.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -82,6 +83,20 @@ function packageTarballFilename(output) {
     throw new Error("npm pack returned an unexpected result");
   }
   return parsed[0].filename;
+}
+
+async function smokeInstalledManagedProcesses(packageRoot) {
+  const packageRootPath = join(packageRoot, "node_modules", "@aliou", "pi-processes");
+  const [executor, channels] = await Promise.all([
+    readFile(join(packageRootPath, "src", "utils", "command-executor.ts"), "utf8"),
+    readFile(join(packageRootPath, "src", "protocol", "channels.ts"), "utf8"),
+  ]);
+  if (!executor.includes('spawn(shellExecutable, ["-c", command]') || executor.includes('spawn(shellExecutable, ["-lc", command]')) {
+    throw new Error("Installed package does not contain Forgerie's non-login managed-process spawn patch");
+  }
+  if (!channels.includes('COMMAND_WRITE: "processes:command:write"')) {
+    throw new Error("Installed package does not contain Forgerie's managed-process stdin protocol patch");
+  }
 }
 
 async function smokeInstalledTerminalService(packageRoot) {

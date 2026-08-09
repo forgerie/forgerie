@@ -1,0 +1,125 @@
+diff --git a/extensions/processes/handlers/commands.ts b/extensions/processes/handlers/commands.ts
+index 3d1895d..0022391 100644
+--- a/extensions/processes/handlers/commands.ts
++++ b/extensions/processes/handlers/commands.ts
+@@ -5,6 +5,7 @@ import {
+   CHANNELS,
+   type CommandClearPayload,
+   type CommandKillPayload,
++  type CommandWritePayload,
+ } from "../../../src/protocol";
+ import type { KillResult } from "../../../src/types";
+ import { isRecord } from "../../../src/utils/is-record";
+@@ -35,6 +36,15 @@ export function registerCommandHandlers(
+ 
+       safeReply(command.reply, manager.clearFinished());
+     }),
++    events.on(CHANNELS.COMMAND_WRITE, (payload) => {
++      const command = payload as CommandWritePayload;
++      if (!isCommandWritePayload(command)) return;
++
++      safeReply(
++        command.reply,
++        manager.writeToStdin(command.id, command.input, { end: command.end }),
++      );
++    }),
+   ];
+ 
+   return () => {
+@@ -60,6 +70,19 @@ function isCommandClearPayload(
+   return isRecord(payload) && isReply(payload);
+ }
+ 
++function isCommandWritePayload(
++  payload: CommandWritePayload,
++): payload is CommandWritePayload {
++  return (
++    isRecord(payload) &&
++    typeof payload.id === "string" &&
++    typeof payload.input === "string" &&
++    (payload.input.length > 0 || payload.end === true) &&
++    (payload.end === undefined || typeof payload.end === "boolean") &&
++    isReply(payload)
++  );
++}
++
+ function isReply(
+   payload: unknown,
+ ): payload is { reply: (...args: never[]) => void } {
+diff --git a/src/protocol/channels.ts b/src/protocol/channels.ts
+index 7520a7b..90819fa 100644
+--- a/src/protocol/channels.ts
++++ b/src/protocol/channels.ts
+@@ -17,6 +17,7 @@ export const CHANNELS = {
+   // Command channels (UI -> core, callback)
+   COMMAND_KILL: "processes:command:kill",
+   COMMAND_CLEAR: "processes:command:clear",
++  COMMAND_WRITE: "processes:command:write",
+   // Pin handled by the dock extension, if loaded.
+   COMMAND_PIN: "processes:command:pin",
+ 
+diff --git a/src/protocol/commands.ts b/src/protocol/commands.ts
+index 8c754bb..e07115a 100644
+--- a/src/protocol/commands.ts
++++ b/src/protocol/commands.ts
+@@ -1,4 +1,4 @@
+-import type { KillResult } from "../types";
++import type { KillResult, WriteResult } from "../types";
+ 
+ // UI emits, core handles then calls reply.
+ 
+@@ -13,6 +13,13 @@ export interface CommandClearPayload {
+   reply: (cleared: number) => void;
+ }
+ 
++export interface CommandWritePayload {
++  id: string;
++  input: string;
++  end?: boolean;
++  reply: (result: WriteResult) => void;
++}
++
+ // UI emits; the dock extension (if loaded) handles it by pinning the process
+ // to the dock. Pass `id: null` to unpin. If the dock extension is not
+ // registered, no listener replies.
+diff --git a/src/protocol/index.ts b/src/protocol/index.ts
+index e330b22..aa383d8 100644
+--- a/src/protocol/index.ts
++++ b/src/protocol/index.ts
+@@ -10,6 +10,7 @@ export type {
+   CommandKillPayload,
+   CommandPinPayload,
+   CommandPinResult,
++  CommandWritePayload,
+ } from "./commands";
+ export type {
+   LogsChunkPayload,
+diff --git a/src/utils/command-executor.ts b/src/utils/command-executor.ts
+index ed82054..3c3b462 100644
+--- a/src/utils/command-executor.ts
++++ b/src/utils/command-executor.ts
+@@ -25,8 +25,13 @@ export function resolveShellExecutable({
+   configuredShell,
+   knownPaths,
+ }: ResolveShellExecutableOptions): string {
+-  if (isExistingAbsolutePath(configuredShell)) {
+-    return configuredShell;
++  if (configuredShell !== undefined) {
++    if (isExistingAbsolutePath(configuredShell)) {
++      return configuredShell;
++    }
++    throw new Error(
++      `Configured shell "${configuredShell}" is not an existing absolute path. Check execution.shellPath.`,
++    );
+   }
+ 
+   for (const path of knownPaths) {
+@@ -50,7 +55,7 @@ export function spawnCommand(
+     knownPaths: DEFAULT_KNOWN_SHELL_PATHS,
+   });
+ 
+-  return spawn(shellExecutable, ["-lc", command], {
++  return spawn(shellExecutable, ["-c", command], {
+     cwd,
+     env: process.env,
+     stdio: ["pipe", "pipe", "pipe"],

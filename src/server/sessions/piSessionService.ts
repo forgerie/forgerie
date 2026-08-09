@@ -65,6 +65,7 @@ import type {
 } from "../../shared/apiTypes.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
+import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 
 import { type AuthChange } from "./authService.js";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
@@ -738,6 +739,7 @@ function createDefaultRuntimeFactory(
       agentDir,
       modelRuntime,
       resourceLoaderOptions: {
+        additionalExtensionPaths: [bundledManagedProcessesPackagePath()],
         extensionFactories: [createProcessBridgeExtension(processBridgeSlot)],
       },
     });

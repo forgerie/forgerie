@@ -77,10 +77,10 @@ tracks `main` without a NixOS rebuild.
   changes need a sessiond restart, not `/reload`.
 - Managed background processes are first-class: `ad-process:notification`
   messages render as chat cards, and the Processes workspace panel exposes the
-  selected session's list, logs, stop, and capability-gated stdin. Runtime
-  reliability depends on the locally patched `pi-processes` package maintained
-  in `mountainous/packages/pi-processes-patched`; keep its fork divergence to
-  the non-login spawn fix and additive stdin-write protocol.
+  selected session's list, logs, stop, and capability-gated stdin. Forgerie
+  bundles its patched `pi-processes` dependency under `vendor/pi-processes` and
+  loads it without machine-configuration support. Keep its divergence to the
+  non-login spawn fix and additive stdin-write protocol.
 
 ## Acceptance device and visual testing
 

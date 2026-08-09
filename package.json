@@ -25,7 +25,11 @@
     "docs/config.md",
     "docs/assets",
     "plugin-api.d.ts",
-    "plugin-api/unstable.d.ts"
+    "plugin-api/unstable.d.ts",
+    "vendor"
+  ],
+  "bundleDependencies": [
+    "@aliou/pi-processes"
   ],
   "scripts": {
     "dev": "bash -c 'trap \"kill 0\" EXIT; npm run dev:sessiond & npm run dev:web & npm run dev:client & wait'",
@@ -57,6 +61,7 @@
     "changelog:status": "changeset status"
   },
   "dependencies": {
+    "@aliou/pi-processes": "file:vendor/pi-processes/aliou-pi-processes-0.10.4-forgerie.1.tgz",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-go": "^6.0.1",
