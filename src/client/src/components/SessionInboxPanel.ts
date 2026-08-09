@@ -916,9 +916,9 @@ export class SessionInboxPanel extends LitElement {
       display: grid;
       grid-template-columns: auto 1fr auto;
       align-items: start;
-      gap: 3px 10px;
+      gap: 2px 10px;
       width: 100%;
-      padding: 10px 12px;
+      padding: 8px 12px;
       text-align: left;
       border-bottom: 1px solid var(--pi-border-muted, #1b2340);
       cursor: pointer;
@@ -1034,19 +1034,29 @@ export class SessionInboxPanel extends LitElement {
 
     .row[data-state="errored"] .row-detail { color: var(--pi-danger, #ff4f7b); }
 
+    /*
+     * Time and action sit side by side, not stacked: the 44px touch target is
+     * non-negotiable, and stacking it under the timestamp would spend that
+     * height twice and halve how many sessions a fold-sized screen can show.
+     */
     .row-aside {
       grid-column: 3;
       grid-row: 1 / span 2;
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 3px;
+      align-items: flex-start;
+      justify-content: flex-end;
+      gap: 6px;
+      /* The target keeps its 44px; the row does not grow to frame it. */
+      margin-block: -6px;
     }
 
     .row-time {
+      /* Sits on the title's own line, where a scanning eye already is. */
+      padding-block-start: 8px;
       font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
       font-variant-numeric: tabular-nums;
       color: var(--pi-dim, #817a99);
+      white-space: nowrap;
     }
 
     .row-actions {
