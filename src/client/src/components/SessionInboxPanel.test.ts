@@ -954,3 +954,34 @@ describe("overlay dismissal", () => {
     expect(closed).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stylesheet integrity
+// ---------------------------------------------------------------------------
+
+describe("stylesheet integrity", () => {
+  it("declares nothing outside a selector block", () => {
+    // A stray top-level declaration is a CSS parse error, and error recovery
+    // swallows the rule that follows it — which silently deleted the whole
+    // `.row` layout once already.
+    const css = SessionInboxPanel.styles.toString().replace(/\/\*[\s\S]*?\*\//gu, "");
+    const strays: string[] = [];
+    let depth = 0;
+    let prelude = "";
+    for (const char of css) {
+      if (char === "{") {
+        if (depth === 0 && prelude.includes(";")) strays.push(prelude.trim());
+        depth += 1;
+        prelude = "";
+        continue;
+      }
+      if (char === "}") {
+        depth = Math.max(depth - 1, 0);
+        continue;
+      }
+      if (depth === 0) prelude += char;
+    }
+
+    expect(strays).toEqual([]);
+  });
+});

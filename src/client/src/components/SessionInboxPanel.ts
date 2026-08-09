@@ -638,6 +638,19 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-text);
       font: 14px system-ui, sans-serif;
       container-type: inline-size;
+
+      /*
+       * One tone per group kind, read by var(--tone-KIND) in group headers and
+       * row markers. These must stay inside a selector block: a stray
+       * top-level declaration is a parse error, and CSS error recovery then
+       * discards the whole rule that follows it.
+       */
+      --tone-blocked: var(--pi-warning, #ffb000);
+      --tone-errored: var(--pi-danger, #ff4f7b);
+      --tone-working: var(--pi-success, #00f0d8);
+      --tone-unread: var(--pi-purple, #b7a2ff);
+      --tone-open: var(--pi-dim, #817a99);
+      --tone-archived: var(--pi-dim, #817a99);
     }
 
     /*
@@ -900,14 +913,6 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .group-spacer { flex: 1 1 auto; }
-
-    /* Tone variables for each group kind. */
-    --tone-blocked: var(--pi-warning, #ffb000);
-    --tone-errored: var(--pi-danger, #ff4f7b);
-    --tone-working: var(--pi-success, #00f0d8);
-    --tone-unread: var(--pi-purple, #b7a2ff);
-    --tone-open: var(--pi-dim, #817a99);
-    --tone-archived: var(--pi-dim, #817a99);
 
     /* ---- rows ---- */
 
