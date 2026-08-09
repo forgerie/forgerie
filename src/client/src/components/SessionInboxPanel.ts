@@ -6,10 +6,14 @@
  * project→workspace→session drill-down as the primary navigation pane content.
  *
  * Design rules (from AGENTS.md + plan):
- *  - Six groups in BOARD_GROUPS order; Open and Archived collapsed by default.
+ *  - Six groups in BOARD_GROUPS order; Open collapsed by default, Archived hidden
+ *    behind its own toggle so the archive is opt-in rather than ambient.
  *  - Archive action ≥44px hit area via min-height.
  *  - Theme tokens only; pane-level container query so rows respond to pane width.
- *  - Group-by and collapsed-groups persisted per machine in localStorage (non-sensitive).
+ *  - Group-by, show-archived, and collapsed-groups persisted per machine in
+ *    localStorage (non-sensitive).
+ *  - Board-local keys mirror the design prototype: J/K move, G group-by,
+ *    A archived, E archive (owned by the shell, which also confirms).
  *  - Selected session's group auto-expands.
  *  - Deleted-workspace rows are disabled with a label; clicks do not fire selection.
  *  - No viewport breakpoints; no device or user-agent sniffing.
@@ -19,6 +23,8 @@ import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
+import { isKeyEventInEditableContext } from "../keyboardContext";
+import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
 import {
   attentionCount,
   deriveSessionInboxBoard,
@@ -27,18 +33,8 @@ import {
   type BoardGroupKind,
   type SessionBoard,
   type SessionBoardGroup,
-  type SessionBoardLocation,
   type SessionBoardRow,
 } from "../sessionBoard";
-
-// ---------------------------------------------------------------------------
-// Internal location type (extends the board's structural location)
-// ---------------------------------------------------------------------------
-
-interface InboxLocation extends SessionBoardLocation {
-  readonly workspaceLabel: string;
-  readonly isMain: boolean;
-}
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
@@ -84,9 +80,37 @@ function writeCollapsedGroups(machineId: string, collapsed: ReadonlySet<string>)
   browserStorage()?.setItem(storageKey(machineId, "collapsed"), JSON.stringify([...collapsed]));
 }
 
+function readShowArchived(machineId: string): boolean {
+  return browserStorage()?.getItem(storageKey(machineId, "showArchived")) === "true";
+}
+
+function writeShowArchived(machineId: string, showArchived: boolean): void {
+  browserStorage()?.setItem(storageKey(machineId, "showArchived"), String(showArchived));
+}
+
 // ---------------------------------------------------------------------------
 // Board view types
 // ---------------------------------------------------------------------------
+
+/** Location shown for a cwd that belongs to no registered project. */
+function unknownLocation(cwd: string): InboxLocation {
+  return {
+    projectId: cwd,
+    projectName: "Unknown workspace",
+    projectPath: cwd,
+    workspaceLabel: unknownLocationLabel(cwd),
+    isMain: false,
+  };
+}
+
+/**
+ * Last path segment of an unregistered cwd. The full path stays available as
+ * the chip's tooltip; the row itself keeps the calm one-token shape.
+ */
+function unknownLocationLabel(cwd: string): string {
+  const segments = cwd.split(/[/\\]/u).filter((segment) => segment !== "");
+  return segments[segments.length - 1] ?? cwd;
+}
 
 type InboxGroup =
   | SessionBoardGroup<SessionInfo>
@@ -134,6 +158,14 @@ export class SessionInboxPanel extends LitElement {
    */
   @property({ attribute: false }) onManageWorkspaces?: () => void;
   /**
+   * True while the panel is summoned as a full-width overlay over the session.
+   * The overlay covers the shell's own tab strip, so the board must carry the
+   * way back; docked mode has no overlay to leave and renders no such control.
+   */
+  @property({ type: Boolean, reflect: true }) compact = false;
+  /** Dismiss the navigation overlay and return to the session underneath. */
+  @property({ attribute: false }) onCloseOverlay?: () => void;
+  /**
    * Cwds confirmed to have no matching workspace after lazy loading all
    * known projects. Rows whose session.cwd is in this set render as disabled
    * with a 'workspace removed' label, identical to unknown-location rows.
@@ -147,15 +179,76 @@ export class SessionInboxPanel extends LitElement {
 
   @state() private groupBy: "state" | "project" = "state";
   @state() private collapsedGroups = new Set<string>(DEFAULT_COLLAPSED);
+  @state() private showArchived = false;
 
   /** Previous machine id — used to detect machine switches and reload prefs. */
   private loadedMachineId: string | undefined;
+  /**
+   * Sessions in rendered order across expanded groups, refreshed every render.
+   * J/K walk this list so keyboard order and visual order cannot diverge.
+   */
+  private navigableSessions: readonly SessionInfo[] = [];
   /** Last visible group of the selected row, including the grouping mode. */
   private previousSelectedGroupKey: string | undefined;
 
   // -------------------------------------------------------------------------
   // Lifecycle
   // -------------------------------------------------------------------------
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    window.addEventListener("keydown", this.onBoardKeyDown);
+  }
+
+  override disconnectedCallback(): void {
+    window.removeEventListener("keydown", this.onBoardKeyDown);
+    super.disconnectedCallback();
+  }
+
+  /**
+   * Board-local shortcuts from the design prototype. `E` (archive) stays with
+   * the shell, which owns the confirm step and the undo toast; these three only
+   * move or reshape the view, so they are safe to own here.
+   */
+  private readonly onBoardKeyDown = (event: KeyboardEvent): void => {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    if (isKeyEventInEditableContext(event)) return;
+    switch (event.key.toLowerCase()) {
+      case "j":
+        event.preventDefault();
+        this.moveSelection(1);
+        return;
+      case "k":
+        event.preventDefault();
+        this.moveSelection(-1);
+        return;
+      case "g":
+        event.preventDefault();
+        this.setGroupBy(this.groupBy === "state" ? "project" : "state");
+        return;
+      case "a":
+        event.preventDefault();
+        this.setShowArchived(!this.showArchived);
+        return;
+      default:
+        return;
+    }
+  };
+
+  /** Step the selection through the rendered rows, clamping at both ends. */
+  private moveSelection(delta: number): void {
+    const sessions = this.navigableSessions;
+    if (sessions.length === 0) return;
+    const currentIndex = sessions.findIndex((session) => session.id === this.selectedSession?.id);
+    // No selection yet: J enters at the top, K at the bottom.
+    const nextIndex = currentIndex === -1
+      ? (delta > 0 ? 0 : sessions.length - 1)
+      : Math.min(Math.max(currentIndex + delta, 0), sessions.length - 1);
+    const next = sessions[nextIndex];
+    if (next === undefined || next.id === this.selectedSession?.id) return;
+    if (this.unavailableCwds.has(next.cwd)) return;
+    this.onSelectSession?.(next);
+  }
 
   override willUpdate(): void {
     // Re-load prefs when the machine changes.
@@ -164,13 +257,14 @@ export class SessionInboxPanel extends LitElement {
       this.loadedMachineId = machineId;
       this.groupBy = readGroupBy(machineId);
       this.collapsedGroups = readCollapsedGroups(machineId);
+      this.showArchived = readShowArchived(machineId);
       this.previousSelectedGroupKey = undefined;
     }
 
     // Auto-expand whenever the selected row's visible destination changes.
     // This covers live state moves with the same id and state/project mode changes.
     const selectedId = this.selectedSession?.id;
-    const board = selectedId === undefined ? undefined : this.deriveBoard(this.buildLocationMap());
+    const board = selectedId === undefined ? undefined : this.deriveBoard(this.buildLocationResolver());
     const row = board?.rows.find((candidate) => candidate.session.id === selectedId);
     const groupKind = row === undefined
       ? undefined
@@ -193,40 +287,18 @@ export class SessionInboxPanel extends LitElement {
   // Board derivation
   // -------------------------------------------------------------------------
 
-  private buildLocationMap(): Map<string, InboxLocation> {
-    const map = new Map<string, InboxLocation>();
-    for (const project of this.projects) {
-      const workspaces = this.workspacesByProjectId[project.id] ?? [];
-      for (const ws of workspaces) {
-        map.set(ws.path, {
-          projectId: project.id,
-          projectName: project.name,
-          projectPath: project.path,
-          workspaceLabel: ws.label,
-          isMain: ws.isMain,
-        });
-      }
-    }
-    return map;
+  private buildLocationResolver(): InboxLocationResolver {
+    return createInboxLocationResolver(this.projects, this.workspacesByProjectId);
   }
 
-  private deriveBoard(locationMap: Map<string, InboxLocation>): SessionBoard<SessionInfo> | undefined {
+  private deriveBoard(resolveLocation: InboxLocationResolver): SessionBoard<SessionInfo> | undefined {
     const gs = this.globalSessions;
     if (gs === undefined || gs.sessions.length === 0) return undefined;
     return deriveSessionInboxBoard<SessionInfo>({
       projection: gs,
       unreadSessionIds: this.unreadSessionIds,
       unreadCompletedAt: this.unreadCompletedAt,
-      locationOf: (session) => {
-        const loc = locationMap.get(session.cwd);
-        return loc ?? {
-          projectId: session.cwd,
-          projectName: "Unknown workspace",
-          projectPath: session.cwd,
-          workspaceLabel: session.cwd,
-          isMain: false,
-        };
-      },
+      locationOf: (session) => resolveLocation(session.cwd) ?? unknownLocation(session.cwd),
     });
   }
 
@@ -237,7 +309,7 @@ export class SessionInboxPanel extends LitElement {
   override render() {
     const gs = this.globalSessions;
 
-    // Loading state — skip locationMap: no rows to render yet.
+    // Loading state — skip location resolution: no rows to render yet.
     if (gs === undefined || gs.status === "loading") {
       return html`
         <div class="board-header">
@@ -250,9 +322,9 @@ export class SessionInboxPanel extends LitElement {
     }
 
     // Compute once per render; passed to deriveBoard and renderBoardScroll so
-    // neither rebuilds the map independently.
-    const locationMap = this.buildLocationMap();
-    const board = this.deriveBoard(locationMap);
+    // neither rebuilds the resolver independently.
+    const resolveLocation = this.buildLocationResolver();
+    const board = this.deriveBoard(resolveLocation);
 
     // Empty machine (no sessions at all).
     if (board === undefined) {
@@ -286,7 +358,7 @@ export class SessionInboxPanel extends LitElement {
         <div class="board-state" data-state="all-clear">
           <p>All clear — nothing waiting for you.</p>
         </div>
-        ${this.renderBoardScroll(board, locationMap)}
+        ${this.renderBoardScroll(board, resolveLocation)}
       `;
     }
 
@@ -295,7 +367,7 @@ export class SessionInboxPanel extends LitElement {
         ${this.renderHeader(board)}
       </div>
       ${gs.status === "stale" ? html`<div class="stale-notice" data-state="stale" role="status">Reconnecting…</div>` : nothing}
-      ${this.renderBoardScroll(board, locationMap)}
+      ${this.renderBoardScroll(board, resolveLocation)}
     `;
   }
 
@@ -309,6 +381,15 @@ export class SessionInboxPanel extends LitElement {
 
     return html`
       <div class="board-title-row">
+        ${this.compact && this.onCloseOverlay !== undefined ? html`
+          <button
+            class="overlay-back-btn"
+            data-action="close-overlay"
+            title="Back to session"
+            aria-label="Back to session"
+            @click=${() => { this.onCloseOverlay?.(); }}
+          >←</button>
+        ` : nothing}
         <h2 class="board-title">Inbox</h2>
         <span class="board-summary" id="board-summary">${summaryText}</span>
       </div>
@@ -325,6 +406,13 @@ export class SessionInboxPanel extends LitElement {
             @click=${() => { this.setGroupBy("project"); }}
           >Project</button>
         </div>
+        <button
+          class="toggle"
+          data-action="toggle-archived"
+          aria-pressed=${String(this.showArchived)}
+          title="Show archived sessions"
+          @click=${() => { this.setShowArchived(!this.showArchived); }}
+        ><span class="toggle-dot" aria-hidden="true"></span>Archived</button>
         <button
           class="manage-workspaces-btn"
           data-action="manage-workspaces"
@@ -343,20 +431,27 @@ export class SessionInboxPanel extends LitElement {
     `;
   }
 
-  private renderBoardScroll(board: SessionBoard<SessionInfo>, locationMap: Map<string, InboxLocation>): TemplateResult {
+  private renderBoardScroll(board: SessionBoard<SessionInfo>, resolveLocation: InboxLocationResolver): TemplateResult {
     // Compute once per render so every row in this frame shares the same timestamp.
     const now = Date.now();
 
-    const stateGroups: readonly SessionBoardGroup<SessionInfo>[] = board.groups;
+    // Archived is opt-in in both grouping modes, so the toggle means the same
+    // thing wherever it is pressed.
+    const stateGroups: readonly SessionBoardGroup<SessionInfo>[] =
+      board.groups.filter((group) => this.showArchived || group.kind !== "archived");
     const projectGroups: readonly { kind: string; label: string; tone: string; rows: readonly SessionBoardRow<SessionInfo>[] }[] =
-      groupSessionsByProject(board, { includeArchived: true }).groups;
+      groupSessionsByProject(board, { includeArchived: this.showArchived }).groups;
     const groups: readonly InboxGroup[] = this.groupBy === "project" ? projectGroups : stateGroups;
 
     const visibleGroups = groups.filter((g) => g.rows.length > 0);
+    // Keyboard J/K walks exactly what the eye can walk: expanded groups only.
+    this.navigableSessions = visibleGroups
+      .filter((group) => !this.collapsedGroups.has(group.kind))
+      .flatMap((group) => group.rows.map((row) => row.session));
 
     return html`
       <div class="board-scroll" role="listbox" aria-label="Sessions">
-        ${visibleGroups.map((group) => this.renderGroup(group, locationMap, now))}
+        ${visibleGroups.map((group) => this.renderGroup(group, resolveLocation, now))}
       </div>
       ${this.renderUndoToast()}
     `;
@@ -386,7 +481,7 @@ export class SessionInboxPanel extends LitElement {
     `;
   }
 
-  private renderGroup(group: InboxGroup, locationMap: Map<string, InboxLocation>, now: number): TemplateResult {
+  private renderGroup(group: InboxGroup, resolveLocation: InboxLocationResolver, now: number): TemplateResult {
     const kind = group.kind;
     const collapsed = this.collapsedGroups.has(kind);
     const tone = this.groupBy === "project"
@@ -418,7 +513,7 @@ export class SessionInboxPanel extends LitElement {
           aria-label=${group.label}
           ?hidden=${collapsed}
         >
-          ${collapsed ? nothing : group.rows.map((row) => this.renderRow(row, locationMap, now))}
+          ${collapsed ? nothing : group.rows.map((row) => this.renderRow(row, resolveLocation, now))}
         </div>
       </section>
     `;
@@ -426,13 +521,13 @@ export class SessionInboxPanel extends LitElement {
 
   private renderRow(
     row: SessionBoardRow<SessionInfo>,
-    locationMap: Map<string, InboxLocation>,
+    resolveLocation: InboxLocationResolver,
     now: number,
   ): TemplateResult {
     const session = row.session;
     const kind: BoardGroupKind = row.state.kind;
     const isSelected = session.id === this.selectedSession?.id;
-    const location = locationMap.get(session.cwd);
+    const location = resolveLocation(session.cwd);
     // An uncached workspace is still resolvable on demand. Only disable the
     // row after navigation has exhausted every project and confirmed removal.
     const isDeleted = this.unavailableCwds.has(session.cwd);
@@ -487,7 +582,7 @@ export class SessionInboxPanel extends LitElement {
                     ${location.projectName}${!location.isMain ? html` · <span class="chip-branch">${location.workspaceLabel}</span>` : nothing}
                   </span>
                 `
-              : html`<span class="chip" data-location-chip>${session.cwd}</span>`}
+              : html`<span class="chip" data-location-chip title=${session.cwd}>${unknownLocationLabel(session.cwd)}</span>`}
           ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
         </div>
         <div class="row-aside">
@@ -505,6 +600,15 @@ export class SessionInboxPanel extends LitElement {
   // -------------------------------------------------------------------------
   // Interaction
   // -------------------------------------------------------------------------
+
+  private setShowArchived(showArchived: boolean): void {
+    this.showArchived = showArchived;
+    const machineId = this.globalSessions?.machineId;
+    if (machineId !== undefined) writeShowArchived(machineId, showArchived);
+    // Revealing the archive should show it: a toggle that uncovers a collapsed
+    // header would need a second click to mean anything.
+    if (showArchived && this.collapsedGroups.has("archived")) this.toggleGroup("archived");
+  }
 
   private toggleGroup(kind: string): void {
     const next = new Set(this.collapsedGroups);
@@ -536,6 +640,12 @@ export class SessionInboxPanel extends LitElement {
       container-type: inline-size;
     }
 
+    /*
+     * Rows and headers are width:100% with padding; without this they overflow
+     * their pane and clip their trailing time and actions.
+     */
+    *, *::before, *::after { box-sizing: border-box; }
+
     /* ---- header ---- */
 
     .board-header {
@@ -550,7 +660,7 @@ export class SessionInboxPanel extends LitElement {
 
     .board-title-row {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       justify-content: space-between;
       gap: 8px;
     }
@@ -604,6 +714,51 @@ export class SessionInboxPanel extends LitElement {
       background: var(--pi-selection-bg, #1d2547);
       color: var(--pi-text-bright, #fff);
     }
+
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 44px;
+      padding: 4px 10px;
+      font: inherit;
+      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      color: var(--pi-muted, #aaa4bd);
+      background: none;
+      border: 1px solid var(--pi-border, #26304f);
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .toggle[aria-pressed="true"] {
+      color: var(--pi-text-bright, #fff);
+      border-color: var(--pi-accent-border, #5a47b0);
+      background: var(--pi-selection-bg, #1d2547);
+    }
+
+    .toggle-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--pi-dim, #817a99);
+    }
+
+    .toggle[aria-pressed="true"] .toggle-dot { background: var(--pi-purple, #b7a2ff); }
+
+    .overlay-back-btn {
+      display: inline-grid;
+      place-items: center;
+      min-width: 44px;
+      min-height: 44px;
+      margin-inline-start: -8px;
+      font: inherit;
+      color: var(--pi-muted, #aaa4bd);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+
+    .overlay-back-btn:hover { color: var(--pi-text, #f7f4ff); }
 
     .manage-workspaces-btn {
       box-sizing: border-box;
@@ -804,6 +959,11 @@ export class SessionInboxPanel extends LitElement {
 
     .row[data-state="working"] .row-marker {
       animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    /* Blocked is the one state that is waiting on the person reading the row. */
+    .row[data-state="blocked"] .row-marker {
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone-blocked, #ffb000) 22%, transparent);
     }
 
     @keyframes pulse {

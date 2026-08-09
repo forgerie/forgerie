@@ -102,6 +102,18 @@ function clickSelector(root: ShadowRoot | Element, selector: string): void {
   if (el instanceof HTMLElement) el.click();
 }
 
+/** Reveal the archive, which is opt-in: the toggle also expands the group. */
+async function revealArchived(panel: SessionInboxPanel): Promise<void> {
+  clickSelector(shadowRoot(panel), "[data-action='toggle-archived']");
+  await panel.updateComplete;
+}
+
+/** Dispatch a board shortcut the way a real key press reaches the window. */
+async function pressKey(panel: SessionInboxPanel, key: string): Promise<void> {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, composed: true }));
+  await panel.updateComplete;
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
@@ -124,6 +136,7 @@ describe("group rendering", () => {
       mkSession("archived-one", { archived: true }),
     ];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    await revealArchived(panel);
     const root = shadowRoot(panel);
 
     const headers = root.querySelectorAll("[data-group]");
@@ -149,6 +162,7 @@ describe("group rendering", () => {
       mkSession("archived-one", { archived: true }),
     ];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    await revealArchived(panel);
     const root = shadowRoot(panel);
 
     const openGroup = root.querySelector("[data-group='open']");
@@ -165,11 +179,10 @@ describe("group rendering", () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    // Expand Open and Archived so rows are visible.
+    // Expand Open and reveal Archived so rows are visible.
     clickSelector(root, "[data-group='open'] button");
     await panel.updateComplete;
-    clickSelector(root, "[data-group='archived'] button");
-    await panel.updateComplete;
+    await revealArchived(panel);
 
     const openRow = root.querySelector("[data-session='open-one']");
     const archivedRow = root.querySelector("[data-session='archived-one']");
@@ -192,13 +205,19 @@ describe("default collapse", () => {
     expect(openGroup?.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("Archived group is collapsed by default", async () => {
+  it("Archived is hidden until the toggle asks for it, then opens", async () => {
     const sessions = [mkSession("archived-one", { archived: true })];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    const archivedGroup = root.querySelector("[data-group='archived']");
-    expect(archivedGroup?.getAttribute("aria-expanded")).toBe("false");
+    expect(root.querySelector("[data-group='archived']")).toBeNull();
+
+    await revealArchived(panel);
+
+    // A toggle that revealed a collapsed header would need a second click to
+    // mean anything, so revealing also expands.
+    expect(root.querySelector("[data-group='archived']")?.getAttribute("aria-expanded")).toBe("true");
+    expect(root.querySelector("[data-session='archived-one']")).not.toBeNull();
   });
 
   it("blocked group is expanded by default", async () => {
@@ -324,8 +343,7 @@ describe("row callbacks", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='archived'] button");
-    await panel.updateComplete;
+    await revealArchived(panel);
 
     const restoreBtn = root.querySelector("[data-session='archived-one'] [data-action='restore']");
     expect(restoreBtn).not.toBeNull();
@@ -515,8 +533,10 @@ describe("unresolved-workspace rows", () => {
     await panel.updateComplete;
 
     const row = root.querySelector("[data-session='orphan-one']");
+    const chip = row?.querySelector("[data-location-chip]");
     expect(row?.getAttribute("aria-disabled")).toBe("false");
-    expect(row?.querySelector("[data-location-chip]")?.textContent).toContain("/not-loaded-yet");
+    expect(chip?.textContent.trim()).toBe("not-loaded-yet");
+    expect(chip?.getAttribute("title")).toBe("/not-loaded-yet");
   });
 
   it("lets an unresolved row request lazy workspace resolution", async () => {
@@ -776,5 +796,161 @@ describe("new session callback", () => {
     await panel.updateComplete;
 
     expect(called).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Archived visibility toggle
+// ---------------------------------------------------------------------------
+
+describe("archived visibility toggle", () => {
+  it("persists the choice per machine and reflects it in the control", async () => {
+    const sessions = [mkSession("open-one"), mkSession("archived-one", { archived: true })];
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+
+    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-pressed")).toBe("false");
+
+    await revealArchived(panel);
+    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-pressed")).toBe("true");
+
+    const remounted = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    expect(shadowRoot(remounted).querySelector("[data-group='archived']")).not.toBeNull();
+  });
+
+  it("keeps archived out of the project grouping until it is revealed", async () => {
+    const sessions = [mkSession("open-one"), mkSession("archived-one", { archived: true })];
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    const root = shadowRoot(panel);
+
+    clickSelector(root, "[data-group-by='project']");
+    await panel.updateComplete;
+    expect(root.querySelector("[data-session='archived-one']")).toBeNull();
+
+    await revealArchived(panel);
+    expect(root.querySelector("[data-session='archived-one']")).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Location metadata
+// ---------------------------------------------------------------------------
+
+describe("location metadata", () => {
+  it("names the project for a workspace that was never listed", async () => {
+    const sessions = [mkSession("open-one", { cwd: "/repo/.worktrees/feat/session-inbox" })];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions(sessions),
+      workspacesByProjectId: {},
+    });
+    const root = shadowRoot(panel);
+
+    clickSelector(root, "[data-group='open'] button");
+    await panel.updateComplete;
+
+    const chip = root.querySelector("[data-session='open-one'] [data-location-chip]");
+    expect(chip?.textContent.replace(/\s+/gu, " ").trim()).toBe("Repo · session-inbox");
+  });
+
+  it("shows only the last segment for a cwd outside every project", async () => {
+    const sessions = [mkSession("open-one", { cwd: "/elsewhere/scratch" })];
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    const root = shadowRoot(panel);
+
+    clickSelector(root, "[data-group='open'] button");
+    await panel.updateComplete;
+
+    const chip = root.querySelector("[data-session='open-one'] [data-location-chip]");
+    expect(chip?.textContent.trim()).toBe("scratch");
+    expect(chip?.getAttribute("title")).toBe("/elsewhere/scratch");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Board shortcuts
+// ---------------------------------------------------------------------------
+
+describe("board shortcuts", () => {
+  it("J and K walk the rendered rows and select them", async () => {
+    const sessions = [mkSession("open-one"), mkSession("open-two")];
+    const selected: string[] = [];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions(sessions),
+      onSelectSession: (s) => { selected.push(s.id); },
+    });
+    clickSelector(shadowRoot(panel), "[data-group='open'] button");
+    await panel.updateComplete;
+
+    await pressKey(panel, "j");
+    expect(selected).toEqual(["open-one"]);
+
+    panel.selectedSession = sessions[0];
+    await panel.updateComplete;
+    await pressKey(panel, "j");
+    expect(selected).toEqual(["open-one", "open-two"]);
+
+    panel.selectedSession = sessions[1];
+    await panel.updateComplete;
+    await pressKey(panel, "k");
+    expect(selected).toEqual(["open-one", "open-two", "open-one"]);
+  });
+
+  it("does not walk rows hidden inside a collapsed group", async () => {
+    const selected: string[] = [];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("open-one")]),
+      onSelectSession: (s) => { selected.push(s.id); },
+    });
+
+    await pressKey(panel, "j");
+
+    expect(selected).toEqual([]);
+  });
+
+  it("G switches grouping and A reveals the archive", async () => {
+    const sessions = [mkSession("open-one"), mkSession("archived-one", { archived: true })];
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    const root = shadowRoot(panel);
+
+    await pressKey(panel, "g");
+    expect(root.querySelector("[data-group-by='project']")?.getAttribute("aria-pressed")).toBe("true");
+
+    await pressKey(panel, "a");
+    expect(root.querySelector("[data-session='archived-one']")).not.toBeNull();
+  });
+
+  it("ignores shortcuts typed into an input", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    const input = document.createElement("input");
+    document.body.append(input);
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, composed: true }));
+    await panel.updateComplete;
+
+    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Overlay dismissal
+// ---------------------------------------------------------------------------
+
+describe("overlay dismissal", () => {
+  it("offers a way back only while the board is overlaid", async () => {
+    const docked = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("open-one")]),
+      onCloseOverlay: () => { /* unused while docked */ },
+    });
+    expect(shadowRoot(docked).querySelector("[data-action='close-overlay']")).toBeNull();
+
+    let closed = 0;
+    const overlaid = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("open-one")]),
+      compact: true,
+      onCloseOverlay: () => { closed += 1; },
+    });
+    clickSelector(shadowRoot(overlaid), "[data-action='close-overlay']");
+    await overlaid.updateComplete;
+
+    expect(closed).toBe(1);
   });
 });

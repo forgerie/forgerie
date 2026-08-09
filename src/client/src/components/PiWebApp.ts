@@ -23,6 +23,7 @@ import { SessionStorageTerminalSelectionMemory } from "../controllers/terminalSe
 import { SessionStorageWorkspaceSelectionMemory } from "../controllers/workspaceSelection";
 import { KeyboardShortcutDispatcher } from "../keyboardShortcuts";
 import { selectedMachineId } from "../controllers/types";
+import { isKeyEventInEditableContext } from "../keyboardContext";
 import { machineSessionKey } from "../machineKeys";
 import { createManagedProcessesRuntime } from "../managedProcessesRuntime";
 import type { ManagedProcessesBrowserEvent, ManagedProcessesRuntime } from "../../../plugin-api/unstable";
@@ -1357,6 +1358,7 @@ export class PiWebApp extends LitElement {
         .onNewSession=${() => { this.setState({ newSessionDialog: { step: "project", mode: "start" } }); }}
         .onManageWorkspaces=${() => { this.setState({ newSessionDialog: { step: "project", mode: "manage" } }); }}
         .onCancelKeyboardNavigation=${() => { void this.focusChatComposer(); }}
+        .onCloseOverlay=${() => { this.selectMainView("chat"); }}
         .unavailableCwds=${this.unavailableCwds}
       ></app-navigation-panel>
     `;
@@ -2707,16 +2709,3 @@ function buildInboxBoard(
   });
 }
 
-/** Check if a keyboard event originates from an editable/input context. */
-function isKeyEventInEditableContext(event: KeyboardEvent): boolean {
-  return event.composedPath().some((target) => {
-    if (target instanceof HTMLInputElement) return true;
-    if (target instanceof HTMLTextAreaElement) return true;
-    if (target instanceof HTMLElement) {
-      if (target.isContentEditable) return true;
-      // CodeMirror editors have role="textbox" or a cm-editor class.
-      if (target.getAttribute("role") === "textbox") return true;
-    }
-    return false;
-  });
-}

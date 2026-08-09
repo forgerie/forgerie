@@ -57,6 +57,8 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) unavailableCwds: ReadonlySet<string> = new Set();
   @property({ attribute: false }) onFocusNavigationTarget?: (target: NavigationFocusTarget) => void | Promise<void>;
   @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
+  /** Dismiss the navigation overlay. Only meaningful while `compact` is set. */
+  @property({ attribute: false }) onCloseOverlay?: () => void;
   @property({ attribute: false }) refreshControl?: unknown;
 
   @query("machine-list") private machineList?: KeyboardNavigableSection;
@@ -127,6 +129,8 @@ export class AppNavigationPanel extends LitElement {
         .onUndoArchive=${this.onUndoArchive}
         .onDismissUndoToast=${this.onDismissUndoToast}
         .unavailableCwds=${this.unavailableCwds}
+        .compact=${this.compact}
+        .onCloseOverlay=${this.onCloseOverlay}
         data-machine=${machineId ?? ""}
       ></session-inbox-panel>
     `;

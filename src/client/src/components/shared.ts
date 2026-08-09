@@ -167,10 +167,14 @@ export const appStyles = css`
    * The session stays mounted underneath: navigation slides over it so scroll
    * position, drafts, and streaming output survive summoning the panel.
    */
+  /*
+   * The board owns the shell when it cannot dock: a drawer beside a dimmed
+   * transcript would make the inbox a side quest, and on a folded phone it also
+   * squeezes every row's location and time into an ellipsis.
+   */
   .shell.overlay-navigation main.navigation-view .mobile-navigation-panel {
     position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
-    background: var(--pi-bg); border-right: 1px solid var(--pi-border);
-    max-width: min(100%, 420px); box-shadow: 0 0 40px var(--pi-shadow);
+    background: var(--pi-bg); max-width: 100%;
     animation: navigation-overlay-in 160ms ease-out;
   }
   .shell.overlay-navigation main.navigation-view .mobile-navigation-panel app-navigation-panel { flex: 1 1 auto; min-height: 0; }
