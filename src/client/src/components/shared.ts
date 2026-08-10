@@ -408,6 +408,11 @@ export const chatStyles = css`
      centred column, so wide content can use it and never more, and it is capped
      so a wide monitor does not stretch a table to the horizon. */
   .chat { --calm-bleed: min(max(0px, (100cqi - 32px - var(--calm-measure)) / 2), 10rem); --pi-chat-sticky-top: -26px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: 26px 16px 16px; box-sizing: border-box; }
+  /* One human message and its reply share a box. The box is what the reading
+     position holds at the top of the viewport when a turn opens, and what
+     reserves the space a streaming reply arrives into. It adds no spacing of
+     its own: the turn gap still comes from the human message inside it. */
+  .turn { min-width: 0; display: block; }
   .scroll-marker { display: block; height: 0; overflow: hidden; pointer-events: none; }
   /* Transcript messages carry no card. Roles are told apart by weight and
      tone, not by a border and fill per role: colour is reserved for things

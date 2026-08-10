@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { foldMetaSources, groupChatMessages, summarizeChatGroup } from "./chatGroups";
+import { chatTurns, foldMetaSources, groupChatMessages, summarizeChatGroup } from "./chatGroups";
 import type { ChatLine } from "./components/shared";
 
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
@@ -209,6 +209,61 @@ describe("foldMetaSources", () => {
     ]);
 
     expect(foldMetaSources(groups).size).toBe(0);
+  });
+});
+
+describe("chatTurns", () => {
+  const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
+
+  it("opens a turn at each human message and keeps the reply with it", () => {
+    const groups = groupChatMessages([
+      text("user", "first question"),
+      call("a"),
+      text("assistant", "first answer"),
+      text("user", "second question"),
+      text("assistant", "second answer"),
+    ]);
+
+    expect(chatTurns(groups)).toEqual([
+      {
+        openedByIndex: 0,
+        groups: [
+          { kind: "message", index: 0, message: text("user", "first question") },
+          { kind: "message", index: 2, message: text("assistant", "first answer") },
+          { kind: "group", startIndex: 1, endIndex: 1, messages: [call("a")] },
+        ],
+      },
+      {
+        openedByIndex: 3,
+        groups: [
+          { kind: "message", index: 3, message: text("user", "second question") },
+          { kind: "message", index: 4, message: text("assistant", "second answer") },
+        ],
+      },
+    ]);
+  });
+
+  it("treats a bash message as a human turn", () => {
+    const turns = chatTurns(groupChatMessages([text("bash", "ls"), text("assistant", "listing")]));
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.openedByIndex).toBe(0);
+  });
+
+  it("carries groups that precede the first human message in an unopened turn", () => {
+    const turns = chatTurns(groupChatMessages([
+      { ...text("assistant", "summary"), source: "compaction" },
+      text("user", "question"),
+    ]));
+
+    expect(turns).toHaveLength(2);
+    expect(turns[0]?.openedByIndex).toBeUndefined();
+    expect(turns[0]?.groups).toHaveLength(1);
+    expect(turns[1]?.openedByIndex).toBe(1);
+  });
+
+  it("returns no turns for an empty transcript", () => {
+    expect(chatTurns([])).toEqual([]);
   });
 });
 

@@ -85,6 +85,38 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
 }
 
 /**
+ * One human message and everything the agent did in reply.
+ *
+ * `groupChatMessages` already pools a turn's steps at the foot of the turn, so
+ * the run of groups from one human message up to the next is exactly the unit a
+ * reader scans. Naming that run lets the transcript give it a box, which is
+ * what the reading position anchors to and what reserves the space a reply
+ * streams into.
+ */
+export interface ChatTurn {
+  /** The turn's groups, in render order, starting with the human message when there is one. */
+  readonly groups: ChatGroup[];
+  /** Message index of the human message that opened the turn; absent for anything above the first one. */
+  readonly openedByIndex?: number;
+}
+
+/** Partitions rendered groups into turns, each opened by a human message. */
+export function chatTurns(groups: ChatGroup[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  let current: { groups: ChatGroup[]; openedByIndex?: number } | undefined;
+
+  for (const group of groups) {
+    const openedByIndex = group.kind === "message" && isTurnBoundary(group.message) ? group.index : undefined;
+    if (current === undefined || openedByIndex !== undefined) {
+      current = { groups: [], ...(openedByIndex === undefined ? {} : { openedByIndex }) };
+      turns.push(current);
+    }
+    current.groups.push(group);
+  }
+  return turns;
+}
+
+/**
  * Which reply's metadata each activity fold should carry, keyed by the fold's
  * start index.
  *

@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
-import { foldMetaSources, groupChatMessages, summarizeChatGroup, type ChatGroup } from "../chatGroups";
+import { chatTurns, foldMetaSources, groupChatMessages, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
 import { livenessStep } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
@@ -237,6 +237,7 @@ export class ChatView extends LitElement {
   private groupedMessagesInput?: ChatLine[];
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
+  private turnsCache: ChatTurn[] = [];
   private foldMetaCache = new Map<number, ChatLine>();
   private readonly messageMetaCache = new WeakMap<ChatLine, string>();
   private readonly messageCopyTextCache = new WeakMap<ChatLine, string>();
@@ -416,21 +417,14 @@ export class ChatView extends LitElement {
 
   override render() {
     const groups = this.groupedMessages();
+    const liveTailGroup = this.isSessionLive() ? groups[groups.length - 1] : undefined;
     return html`
       ${this.renderTopNotices()}
       ${this.renderNotificationLiveRegions()}
       <div class="chat-wrap">
         <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }}>
           ${this.renderHistoryBoundary()}
-          ${repeat(
-            groups,
-            (group) => group.kind === "group" ? this.groupRenderKey(group.startIndex) : this.messageAnchorKey(group.index),
-            (group, index) => {
-              if (group.kind === "group") return this.renderMessageGroup(group.messages, group.startIndex, group.endIndex, this.isLiveTailGroup(groups, index));
-              if (group.kind === "tool-image") return this.renderToolImageOutput(group.message, group.index, group.toolName);
-              return this.renderMessage(group.message, group.index);
-            },
-          )}
+          ${repeat(this.turns(), (turn) => this.turnRenderKey(turn), (turn) => this.renderTurn(turn, liveTailGroup))}
           ${this.renderQueuedMessages()}
           ${this.renderSessionActivity()}
           ${this.renderTranscriptLiveness()}
@@ -649,12 +643,33 @@ export class ChatView extends LitElement {
     this.groupedMessagesInput = this.messages;
     this.groupedMessagesStart = this.messageStart;
     this.groupedMessagesCache = groupChatMessages(this.messages, this.messageStart);
+    this.turnsCache = chatTurns(this.groupedMessagesCache);
     this.foldMetaCache = foldMetaSources(this.groupedMessagesCache);
     return this.groupedMessagesCache;
   }
 
-  private isLiveTailGroup(groups: ChatGroup[], index: number): boolean {
-    return index === groups.length - 1 && this.isSessionLive();
+  private turns(): ChatTurn[] {
+    this.groupedMessages();
+    return this.turnsCache;
+  }
+
+  /**
+   * A turn is a box, not just a run of siblings, so the reading position has
+   * something to hold at the top of the viewport and the last turn can reserve
+   * the space its reply streams into.
+   */
+  private renderTurn(turn: ChatTurn, liveTailGroup: ChatGroup | undefined) {
+    return html`
+      <section class="turn" data-turn-key=${this.turnRenderKey(turn)}>
+        ${repeat(turn.groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup))}
+      </section>
+    `;
+  }
+
+  private renderGroup(group: ChatGroup, live: boolean) {
+    if (group.kind === "group") return this.renderMessageGroup(group.messages, group.startIndex, group.endIndex, live);
+    if (group.kind === "tool-image") return this.renderToolImageOutput(group.message, group.index, group.toolName);
+    return this.renderMessage(group.message, group.index);
   }
 
   private isSessionLive(): boolean {
@@ -1355,8 +1370,14 @@ export class ChatView extends LitElement {
     return chatMessageAnchorKey(index);
   }
 
-  private groupRenderKey(startIndex: number): string {
-    return chatGroupAnchorKey(startIndex);
+  private groupRenderKeyFor(group: ChatGroup): string {
+    return group.kind === "group" ? chatGroupAnchorKey(group.startIndex) : chatMessageAnchorKey(group.index);
+  }
+
+  /** A turn is named by its opening group, which is stable while the turn grows. */
+  private turnRenderKey(turn: ChatTurn): string {
+    const first = turn.groups[0];
+    return first === undefined ? "turn:empty" : `turn:${this.groupRenderKeyFor(first)}`;
   }
 
   private groupAnchorKey(startIndex: number): string {
