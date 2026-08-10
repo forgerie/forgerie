@@ -3,11 +3,12 @@ import { customElement, property } from "lit/decorators.js";
 import type { SessionStatus } from "../api";
 
 /**
- * Context use earns a rule on screen only once it is close enough to the window
- * to change what someone does next. Below this it is a permanent mark on the
- * line the eye crosses on every turn, reporting a number nobody can act on.
+ * Context use earns a rule on screen once there is a reading worth drawing. A
+ * session that has barely begun sits near zero, where a sliver of tint reports
+ * nothing and only adds a mark to the line the eye crosses on every turn. Past
+ * this the rule is a measurement that grows with the session.
  */
-export const CONTEXT_USAGE_VISIBLE_PERCENT = 60;
+export const CONTEXT_USAGE_VISIBLE_PERCENT = 10;
 
 /**
  * Whether context use is far enough along to be worth showing.

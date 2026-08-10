@@ -34,9 +34,9 @@ describe("ContextUsageMeter", () => {
     expect(progress?.getAttribute("style")).toContain("--context-usage:72.00%");
   });
 
-  it("renders nothing at all while context use is unremarkable", async () => {
+  it("renders nothing at all in a session that has barely begun", async () => {
     const meter = new ContextUsageMeter();
-    meter.contextUsage = { tokens: 392_778, contextWindow: 1_000_000, percent: 39.2778 };
+    meter.contextUsage = { tokens: 38_400, contextWindow: 1_000_000, percent: 3.84 };
     document.body.append(meter);
 
     await meter.updateComplete;

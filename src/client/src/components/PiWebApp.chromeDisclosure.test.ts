@@ -55,8 +55,8 @@ describe("PiWebApp chrome disclosure", () => {
     expect(chat?.shadowRoot?.querySelector("conversation-meter")).toBeNull();
   });
 
-  it("leaves the composer its own border while context use is unremarkable", async () => {
-    const app = await mountApp(499, statusWithContext(26));
+  it("leaves the composer its own border in a session that has barely begun", async () => {
+    const app = await mountApp(499, statusWithContext(4));
 
     expect(shadowRoot(app).querySelector("context-usage-meter")).toBeNull();
   });
