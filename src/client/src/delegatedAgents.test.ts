@@ -98,6 +98,145 @@ describe("deriveDelegatedRuns", () => {
     expect(deriveDelegatedRuns([assistantLine(readPart)])).toEqual([]);
   });
 
+  it("prefers live progress over results while a run is in flight", () => {
+    const runs = deriveDelegatedRuns([
+      assistantLine({
+        type: "toolExecution",
+        toolCallId: "call-eb2ca573",
+        toolName: "subagent",
+        summary: "subagent parallel (3)",
+        status: "running",
+        args: { tasks: [{ agent: "se-architecture-strategist" }] },
+        details: {
+          mode: "parallel",
+          runId: "eb2ca573",
+          results: [],
+          progress: [
+            progress(0, "se-architecture-strategist", "running", { currentTool: "grep", currentToolArgs: "src/main/kotlin", durationMs: 240_000 }),
+            progress(1, "se-maintainability-reviewer", "completed", { durationMs: 360_000 }),
+            progress(2, "se-project-standards-reviewer", "failed", { error: "model not supported" }),
+          ],
+        },
+      }),
+    ]);
+
+    expect(runs[0]).toMatchObject({ id: "eb2ca573", live: true, state: "running" });
+    expect(runs[0]?.counts).toEqual({ total: 3, running: 1, done: 1, failed: 1 });
+    expect(runs[0]?.agents[0]).toMatchObject({
+      name: "se-architecture-strategist",
+      state: "running",
+      detail: "grep src/main/kotlin",
+      elapsedMs: 240_000,
+    });
+    expect(runs[0]?.agents[2]).toMatchObject({ state: "failed", detail: "model not supported" });
+  });
+
+  it("falls back to the call arguments before any agent has reported", () => {
+    const runs = deriveDelegatedRuns([
+      assistantLine({
+        type: "toolExecution",
+        toolCallId: "call-pending",
+        toolName: "subagent",
+        summary: "subagent parallel (2)",
+        status: "pending",
+        args: { tasks: [{ agent: "scout", task: "map the flow" }, { agent: "reviewer" }] },
+      }),
+    ]);
+
+    // No runId is available yet, so the tool call id identifies the run.
+    expect(runs[0]).toMatchObject({ id: "call-pending", live: true, label: "2 agents" });
+    expect(runs[0]?.agents.map((agent) => agent.state)).toEqual(["pending", "pending"]);
+    expect(runs[0]?.agents[0]).toMatchObject({ name: "scout", task: "map the flow" });
+  });
+
+  it("expands a repeated parallel task into one agent per copy", () => {
+    const runs = deriveDelegatedRuns([
+      assistantLine({
+        type: "toolExecution",
+        toolCallId: "call-count",
+        toolName: "subagent",
+        summary: "subagent parallel (3)",
+        status: "running",
+        args: { tasks: [{ agent: "scout", count: 3 }] },
+      }),
+    ]);
+
+    expect(runs[0]?.agents).toHaveLength(3);
+    expect(runs[0]?.label).toBe("scout ×3");
+  });
+
+  it("flattens a chain, including its parallel groups", () => {
+    const runs = deriveDelegatedRuns([
+      assistantLine({
+        type: "toolExecution",
+        toolCallId: "call-chain",
+        toolName: "subagent",
+        summary: "subagent chain (3)",
+        status: "running",
+        args: { chain: [{ agent: "scout" }, { parallel: [{ agent: "reviewer" }, { agent: "reviewer" }] }] },
+      }),
+    ]);
+
+    expect(runs[0]?.agents.map((agent) => agent.name)).toEqual(["scout", "reviewer", "reviewer"]);
+  });
+
+  it("survives details it cannot read, keeping the run visible", () => {
+    const shapes: unknown[] = [undefined, null, "boom", {}, { results: "not-an-array" }, []];
+
+    for (const details of shapes) {
+      const runs = deriveDelegatedRuns([
+        assistantLine({
+          type: "toolExecution",
+          toolCallId: "call-odd",
+          toolName: "subagent",
+          summary: "subagent single",
+          status: "running",
+          args: { agent: "worker", task: "do the thing" },
+          details,
+        }),
+      ]);
+
+      expect(runs).toHaveLength(1);
+      expect(runs[0]?.agents.map((agent) => agent.name)).toEqual(["worker"]);
+    }
+  });
+
+  it("drops a call that names no agents at all", () => {
+    expect(deriveDelegatedRuns([
+      assistantLine({
+        type: "toolExecution",
+        toolCallId: "call-empty",
+        toolName: "subagent",
+        summary: "subagent",
+        status: "running",
+        args: {},
+      }),
+    ])).toEqual([]);
+  });
+
+  it("keeps async and detached provenance for a later iteration to surface", () => {
+    const runs = deriveDelegatedRuns([
+      assistantLine({
+        type: "toolExecution",
+        toolCallId: "call-async",
+        toolName: "subagent",
+        summary: "subagent single [async]",
+        status: "success",
+        args: { agent: "worker", async: true },
+        details: {
+          mode: "single",
+          runId: "1cda7fe6",
+          asyncId: "1cda7fe6",
+          context: "fresh",
+          results: [{ agent: "worker", exitCode: 0, output: "done", detached: true }],
+        },
+      }),
+    ]);
+
+    expect(runs[0]).toMatchObject({ asyncId: "1cda7fe6", context: "fresh" });
+    expect(runs[0]?.agents[0]?.state).toBe("detached");
+  });
+
   it("ignores subagent management calls, which run no agents", () => {
     const managementPart: ToolExecutionPart = {
       type: "toolExecution",
@@ -119,6 +258,15 @@ describe("deriveDelegatedRuns", () => {
 
 function assistantLine(...parts: ToolExecutionPart[]): ChatLine {
   return { role: "assistant", parts };
+}
+
+function progress(
+  index: number,
+  agent: string,
+  status: string,
+  extra: { currentTool?: string; currentToolArgs?: string; durationMs?: number; error?: string } = {},
+) {
+  return { index, agent, status, task: `task for ${agent}`, recentTools: [], toolCount: 0, tokens: 0, durationMs: 0, ...extra };
 }
 
 function result(agent: string, exitCode: number, output: string, error?: string) {

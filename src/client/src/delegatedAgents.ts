@@ -26,6 +26,7 @@ export interface DelegatedAgent {
   readonly state: DelegatedAgentState;
   /** Current tool while running; result summary or error once finished. */
   readonly detail?: string;
+  readonly elapsedMs?: number;
   readonly task?: string;
   readonly output?: string;
 }
@@ -46,6 +47,12 @@ export interface DelegatedRun {
   readonly state: DelegatedRunState;
   readonly counts: DelegatedRunCounts;
   readonly agents: readonly DelegatedAgent[];
+  /**
+   * Provenance kept but not yet rendered: an async or detached run can outlive
+   * the parent's attention, and a later iteration needs this to find it.
+   */
+  readonly asyncId?: string;
+  readonly context?: string;
 }
 
 /**
@@ -68,11 +75,19 @@ function runFromPart(part: ChatPart): DelegatedRun | undefined {
   if (isManagementCall(part)) return undefined;
 
   const details = asRecord(part.details);
-  const agents = agentsFromResults(details);
+  // Live progress is richer than results and exists first; the call arguments
+  // are the last resort, before any agent has reported anything.
+  const agents = firstNonEmpty(
+    agentsFromProgress(details),
+    agentsFromResults(details),
+    agentsFromArgs(asRecord(part.args)),
+  );
   if (agents.length === 0) return undefined;
 
   const live = part.status === "pending" || part.status === "running";
   const counts = countAgents(agents);
+  const asyncId = stringField(details, "asyncId");
+  const context = stringField(details, "context");
   return {
     id: stringField(details, "runId") ?? part.toolCallId ?? "unknown",
     label: runLabel(agents),
@@ -80,6 +95,8 @@ function runFromPart(part: ChatPart): DelegatedRun | undefined {
     state: runState(live, counts),
     counts,
     agents,
+    ...(asyncId === undefined ? {} : { asyncId }),
+    ...(context === undefined ? {} : { context }),
   };
 }
 
@@ -89,6 +106,114 @@ function runFromPart(part: ChatPart): DelegatedRun | undefined {
  */
 function isManagementCall(part: ToolExecutionPart): boolean {
   return stringField(asRecord(part.args), "action") !== undefined;
+}
+
+function firstNonEmpty(...candidates: readonly DelegatedAgent[][]): DelegatedAgent[] {
+  return candidates.find((candidate) => candidate.length > 0) ?? [];
+}
+
+function agentsFromProgress(details: Record<string, unknown> | undefined): DelegatedAgent[] {
+  const progress = arrayField(details, "progress");
+  if (progress === undefined) return [];
+  const agents: DelegatedAgent[] = [];
+  for (const [position, entry] of progress.entries()) {
+    const record = asRecord(entry);
+    const name = stringField(record, "agent");
+    if (name === undefined) continue;
+    const state = progressState(stringField(record, "status"));
+    const detail = state === "failed"
+      ? stringField(record, "error") ?? "failed"
+      : currentToolLabel(record);
+    const elapsedMs = numberField(record, "durationMs");
+    const task = stringField(record, "task");
+    agents.push({
+      index: numberField(record, "index") ?? position,
+      name,
+      state,
+      ...(detail === undefined ? {} : { detail }),
+      ...(elapsedMs === undefined ? {} : { elapsedMs }),
+      ...(task === undefined ? {} : { task }),
+    });
+  }
+  return agents;
+}
+
+function progressState(status: string | undefined): DelegatedAgentState {
+  switch (status) {
+    case "running": return "running";
+    case "completed": return "done";
+    case "failed": return "failed";
+    case "detached": return "detached";
+    case "pending":
+    case undefined:
+    default: return "pending";
+  }
+}
+
+/** `grep src/main/kotlin` reads better on one line than the tool name alone. */
+function currentToolLabel(record: Record<string, unknown> | undefined): string | undefined {
+  const tool = stringField(record, "currentTool");
+  if (tool === undefined) return undefined;
+  const args = stringField(record, "currentToolArgs");
+  return args === undefined ? tool : `${tool} ${args}`;
+}
+
+/**
+ * Names taken from the call itself. This is the only evidence available between
+ * dispatch and the first progress update, and it carries no state of its own.
+ */
+function agentsFromArgs(args: Record<string, unknown> | undefined): DelegatedAgent[] {
+  const specs = [
+    ...expandTaskSpecs(arrayField(args, "tasks")),
+    ...expandChainSpecs(arrayField(args, "chain")),
+  ];
+  const single = stringField(args, "agent");
+  if (specs.length === 0 && single !== undefined) {
+    specs.push({ name: single, ...optionalTask(args) });
+  }
+  return specs.map((spec, index) => ({
+    index,
+    name: spec.name,
+    state: "pending" as const,
+    ...(spec.task === undefined ? {} : { task: spec.task }),
+  }));
+}
+
+interface AgentSpec {
+  readonly name: string;
+  readonly task?: string;
+}
+
+function expandTaskSpecs(tasks: unknown[] | undefined): AgentSpec[] {
+  const specs: AgentSpec[] = [];
+  for (const entry of tasks ?? []) {
+    const record = asRecord(entry);
+    const name = stringField(record, "agent");
+    if (name === undefined) continue;
+    const copies = Math.max(1, numberField(record, "count") ?? 1);
+    for (let copy = 0; copy < copies; copy += 1) specs.push({ name, ...optionalTask(record) });
+  }
+  return specs;
+}
+
+function expandChainSpecs(chain: unknown[] | undefined): AgentSpec[] {
+  const specs: AgentSpec[] = [];
+  for (const entry of chain ?? []) {
+    const record = asRecord(entry);
+    const parallel = arrayField(record, "parallel");
+    if (parallel !== undefined) {
+      specs.push(...expandTaskSpecs(parallel));
+      continue;
+    }
+    const name = stringField(record, "agent");
+    if (name !== undefined) specs.push({ name, ...optionalTask(record) });
+  }
+  return specs;
+}
+
+function optionalTask(record: Record<string, unknown> | undefined): { task?: string } {
+  const task = stringField(record, "task");
+  return task === undefined ? {} : { task };
 }
 
 function agentsFromResults(details: Record<string, unknown> | undefined): DelegatedAgent[] {
@@ -104,10 +229,13 @@ function agentsFromResults(details: Record<string, unknown> | undefined): Delega
     const output = stringField(record, "output");
     const detail = failed ? error ?? "failed" : summarise(output);
     const task = stringField(record, "task");
+    const state: DelegatedAgentState = record?.["detached"] === true
+      ? "detached"
+      : failed ? "failed" : "done";
     agents.push({
       index,
       name,
-      state: failed ? "failed" : "done",
+      state,
       ...(detail === undefined ? {} : { detail }),
       ...(task === undefined ? {} : { task }),
       ...(output === undefined ? {} : { output }),
