@@ -77,6 +77,36 @@ describe("SessionController session launch", () => {
     expect(state.clientQueuedSessionMessages[temporaryId]).toBeUndefined();
   });
 
+  it("clears a failed creation only after a replacement pending launch is accepted", async () => {
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.reject(new Error("backend unavailable")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Move this prompt");
+    const failedId = state.selectedSession?.id;
+    if (failedId === undefined) throw new Error("Expected a failed pending session");
+    const failedSession = state.selectedSession;
+    expect(state.sessions).toContain(failedSession);
+    const replacement = { ...oldSession, id: "pending-replacement", clientPendingStart: true as const, machineId: "local" };
+    state = { ...state, selectedSession: replacement, sessions: [replacement, ...state.sessions] };
+
+    controller.acceptSessionLaunchReplacement(failedId, replacement.id);
+
+    expect(state.sessions).toEqual([replacement]);
+    expect(state.sessions).not.toContain(failedSession);
+    expect(state.clientQueuedSessionMessages[failedId]).toBeUndefined();
+    expect(controller.getSessionLaunchRecovery(failedId)).toBeUndefined();
+  });
+
   it("retries failed creation once while a retry is active and keeps the original queue", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     const retryStart = deferred<SessionInfo>();
@@ -355,6 +385,48 @@ describe("SessionController session launch", () => {
     expect(state.sessionActivities[started.id]).toBeUndefined();
     expect(state.activity).toBeUndefined();
     expect(state.error).toBe("");
+  });
+
+  it("changes ambiguous recovery to confirmed unsent after refresh without resending", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const promptCalls: string[] = [];
+    let transcriptIsIdle = false;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(transcriptIsIdle
+        ? status(sessionLookupId(session))
+        : { ...status(sessionLookupId(session)), isStreaming: true }),
+      prompt: (_session, text) => {
+        promptCalls.push(text);
+        return Promise.reject(new Error("delivery timed out"));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Refresh without resending");
+    expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
+
+    transcriptIsIdle = true;
+    await controller.refreshSessionLaunchRecovery(started.id);
+
+    expect(promptCalls).toEqual(["Refresh without resending"]);
+    expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
+      stage: "promptConfirmedUnsent",
+      prompt: "Refresh without resending",
+      retrying: false,
+    });
+    expect(state.clientQueuedSessionMessages[started.id]).toEqual([
+      { kind: "followUp", text: "Refresh without resending" },
+    ]);
   });
 
   it("keeps ambiguous recovery without resending when transcript reconciliation fails", async () => {

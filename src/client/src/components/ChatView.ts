@@ -17,6 +17,7 @@ import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedS
 import type { ClosedExtensionDialog } from "../appState";
 import { selectedChatHasReadableHistory, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
+import type { SessionLaunchRecovery } from "../controllers/sessionController";
 import type { ChatLine, ChatPart } from "./shared";
 import { chatStyles, renderSessionWarningIcon } from "./shared";
 import "./AskUserCard";
@@ -35,11 +36,55 @@ export interface QueuedMessageSection {
   messages: QueuedSessionMessage[];
 }
 
-export function chatQueuedMessageSections(clientQueued: QueuedSessionMessage[], serverQueued: QueuedSessionMessage[]): QueuedMessageSection[] {
+export function chatQueuedMessageSections(
+  clientQueued: QueuedSessionMessage[],
+  serverQueued: QueuedSessionMessage[],
+  sessionLaunchRecovery?: SessionLaunchRecovery,
+): QueuedMessageSection[] {
+  const clientSection = sessionLaunchRecovery === undefined
+    ? { source: "client" as const, heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: clientQueued }
+    : { source: "client" as const, heading: "First prompt needs attention", detail: "Resolve it before later queued messages can continue", messages: clientQueued };
   return [
-    clientQueued.length === 0 ? undefined : { source: "client", heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: clientQueued },
+    clientQueued.length === 0 ? undefined : clientSection,
     serverQueued.length === 0 ? undefined : { source: "server", heading: "Queued messages", detail: `${String(serverQueued.length)} pending`, messages: serverQueued },
   ].filter((section): section is QueuedMessageSection => section !== undefined);
+}
+
+export type ChatSessionLaunchRecoveryActionKind = "retry" | "changeDestination" | "refresh" | "restore";
+
+export interface ChatSessionLaunchRecoveryPresentation {
+  heading: string;
+  detail: string;
+  actions: { kind: ChatSessionLaunchRecoveryActionKind; label: string; disabled: boolean }[];
+}
+
+/** Derive truthful, stage-specific recovery copy and controls from the controller contract. */
+export function chatSessionLaunchRecoveryPresentation(recovery: SessionLaunchRecovery): ChatSessionLaunchRecoveryPresentation {
+  if (recovery.stage === "creationFailed") {
+    return {
+      heading: "Session creation failed",
+      detail: "The session was not created, so the first prompt was not sent. Any later queued messages wait behind it.",
+      actions: [
+        { kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying },
+        { kind: "changeDestination", label: "Change destination", disabled: recovery.retrying },
+      ],
+    };
+  }
+  if (recovery.stage === "promptConfirmedUnsent") {
+    return {
+      heading: "First prompt not sent",
+      detail: "The session exists, but the first prompt was confirmed unsent. Any later queued messages wait behind it.",
+      actions: [{ kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying }],
+    };
+  }
+  return {
+    heading: "First prompt delivery unconfirmed",
+    detail: "The session exists, but Forgerie cannot verify whether the first prompt was accepted. Any later queued messages wait behind it.",
+    actions: [
+      { kind: "refresh", label: "Refresh transcript", disabled: false },
+      { kind: "restore", label: "Restore to editor", disabled: false },
+    ],
+  };
 }
 
 export type ChatImagePart = Extract<ChatPart, { type: "image" }>;
@@ -153,6 +198,11 @@ export class ChatView extends LitElement {
   @property({ type: Boolean }) isCompacting = false;
   @property({ type: Number }) pendingMessageCount = 0;
   @property({ attribute: false }) clientQueuedMessages: QueuedSessionMessage[] = [];
+  @property({ attribute: false }) sessionLaunchRecovery?: SessionLaunchRecovery;
+  @property({ attribute: false }) onRetrySessionLaunch?: (sessionId: string) => void;
+  @property({ attribute: false }) onChangeSessionLaunchDestination?: (sessionId: string) => void;
+  @property({ attribute: false }) onRefreshSessionLaunchRecovery?: (sessionId: string) => void;
+  @property({ attribute: false }) onRestoreSessionLaunchPrompt?: (sessionId: string) => void;
   @property({ attribute: false }) status?: SessionStatus;
   @property({ attribute: false }) activity?: SessionActivity;
   @property({ attribute: false }) pendingAsk?: PendingAskUser;
@@ -741,11 +791,13 @@ export class ChatView extends LitElement {
 
   private renderQueuedMessages() {
     const serverQueued = this.status?.queuedMessages ?? [];
-    return html`${chatQueuedMessageSections(this.clientQueuedMessages, serverQueued).map((section) => this.renderQueuedMessageList(section))}`;
+    return html`${chatQueuedMessageSections(this.clientQueuedMessages, serverQueued, this.sessionLaunchRecovery)
+      .map((section) => this.renderQueuedMessageList(section))}`;
   }
 
   private renderQueuedMessageList(section: QueuedMessageSection) {
     const canClear = chatQueuedSectionShowsClearAction(section, this.onClearServerQueue !== undefined);
+    const hasFirstPromptRecovery = section.source === "client" && this.sessionLaunchRecovery !== undefined;
     return html`
       <aside class="queued-messages" aria-live="polite">
         <div class="queued-header">
@@ -758,13 +810,46 @@ export class ChatView extends LitElement {
           ` : null}
         </div>
         ${section.messages.map((message, index) => html`
-          <div class="queued-message">
-            <span class="queued-kind">${message.kind === "steer" ? "Steer" : "Follow-up"} ${String(index + 1)}</span>
+          <div class=${hasFirstPromptRecovery && index === 0 ? "queued-message first-prompt-recovery" : "queued-message"}>
+            <span class="queued-kind">${hasFirstPromptRecovery && index === 0
+              ? "First prompt"
+              : `${message.kind === "steer" ? "Steer" : "Follow-up"} ${String(index + 1)}`}</span>
             <formatted-text .text=${message.text}></formatted-text>
+            ${hasFirstPromptRecovery && index === 0 ? this.renderSessionLaunchRecovery() : null}
           </div>
         `)}
       </aside>
     `;
+  }
+
+  private renderSessionLaunchRecovery() {
+    const recovery = this.sessionLaunchRecovery;
+    if (recovery === undefined) return null;
+    const presentation = chatSessionLaunchRecoveryPresentation(recovery);
+    const renderedSessionId = this.sessionId;
+    return html`
+      <section class="session-launch-recovery" aria-label="First prompt recovery">
+        <strong>${presentation.heading}</strong>
+        <p>${presentation.detail}</p>
+        <div class="session-launch-recovery-actions">
+          ${presentation.actions.map((action) => html`
+            <button
+              type="button"
+              data-recovery-action=${action.kind}
+              ?disabled=${action.disabled}
+              @click=${() => { this.activateSessionLaunchRecovery(action.kind, renderedSessionId); }}
+            >${action.label}</button>
+          `)}
+        </div>
+      </section>
+    `;
+  }
+
+  private activateSessionLaunchRecovery(action: ChatSessionLaunchRecoveryActionKind, sessionId: string): void {
+    if (action === "retry") this.onRetrySessionLaunch?.(sessionId);
+    else if (action === "changeDestination") this.onChangeSessionLaunchDestination?.(sessionId);
+    else if (action === "refresh") this.onRefreshSessionLaunchRecovery?.(sessionId);
+    else this.onRestoreSessionLaunchPrompt?.(sessionId);
   }
 
   private renderOpenAsk() {

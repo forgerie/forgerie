@@ -16,7 +16,7 @@ import { MachineController } from "../controllers/machineController";
 import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
-import { SessionController } from "../controllers/sessionController";
+import { SessionController, type SessionLaunchRecovery } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
 import { WorkspaceController, canDeleteWorkspace } from "../controllers/workspaceController";
@@ -1719,7 +1719,45 @@ export class PiWebApp extends LitElement {
     this.setState({ newSessionComposer: { kind: "closed" } });
   }
 
+  private openSessionLaunchDestinationComposer(sessionId: string): void {
+    if (this.state.newSessionComposer.kind === "open") {
+      this.newSessionComposer?.focusExisting();
+      return;
+    }
+    const recovery = this.sessions.getSessionLaunchRecovery(sessionId);
+    if (recovery?.stage !== "creationFailed") return;
+    const initialDestination = this.sessionLaunchRecoveryDestination(recovery);
+    this.setState({
+      newSessionComposer: {
+        kind: "open",
+        ...(initialDestination === undefined ? {} : { initialDestination }),
+        initialPrompt: recovery.prompt,
+        replacesFailedSessionId: sessionId,
+      },
+    });
+  }
+
+  private sessionLaunchRecoveryDestination(recovery: SessionLaunchRecovery): NewSessionCompleteDestination | undefined {
+    const machine = [this.state.selectedMachine, ...this.state.machines]
+      .find((candidate) => candidate?.id === recovery.destination.machineId);
+    const workspaces = [
+      this.state.selectedWorkspace,
+      ...this.state.workspaces,
+      ...Object.values(this.state.workspacesByProjectId).flat(),
+    ];
+    const workspace = workspaces.find((candidate) => candidate?.id === recovery.destination.workspaceId
+      && normalizeSessionPath(candidate.path) === normalizeSessionPath(recovery.destination.cwd));
+    const projects = [this.state.selectedProject, ...this.state.projects];
+    const project = workspace === undefined ? undefined : projects.find((candidate) => candidate?.id === workspace.projectId);
+    return machine === undefined || workspace === undefined || project === undefined
+      ? undefined
+      : completeNewSessionDestination(machine, project, workspace);
+  }
+
   private async submitNewSession(intent: NewSessionLaunchIntent): Promise<NewSessionSubmissionOutcome> {
+    const replacesFailedSessionId = this.state.newSessionComposer.kind === "open"
+      ? this.state.newSessionComposer.replacesFailedSessionId
+      : undefined;
     const seq = ++this.navigationSelectionSeq;
     const isCurrentToken = () => seq === this.navigationSelectionSeq && this.state.newSessionComposer.kind === "open";
     const destination = await this.revalidateNewSessionDestination(intent.destination);
@@ -1748,6 +1786,7 @@ export class PiWebApp extends LitElement {
       return { kind: "rejected", reason: "launch-rejected", message: "New session could not be queued." };
     }
 
+    if (replacesFailedSessionId !== undefined) this.sessions.acceptSessionLaunchReplacement(replacesFailedSessionId, pending.id);
     this.setState({ newSessionComposer: { kind: "closed" } });
     await this.openChat();
     void launch.catch((error: unknown) => { this.setState({ error: String(error) }); });
@@ -2609,6 +2648,22 @@ export class PiWebApp extends LitElement {
     void this.sessions.clearServerQueue();
   };
 
+  private readonly handleRetrySessionLaunch = (sessionId: string): void => {
+    void this.sessions.retrySessionLaunch(sessionId);
+  };
+
+  private readonly handleChangeSessionLaunchDestination = (sessionId: string): void => {
+    this.openSessionLaunchDestinationComposer(sessionId);
+  };
+
+  private readonly handleRefreshSessionLaunchRecovery = (sessionId: string): void => {
+    void this.sessions.refreshSessionLaunchRecovery(sessionId);
+  };
+
+  private readonly handleRestoreSessionLaunchPrompt = (sessionId: string): void => {
+    void this.sessions.restoreSessionLaunchPrompt(sessionId);
+  };
+
   private readonly handleDismissWarning = (dismissId: string): void => {
     void this.sessions.dismissWarning(dismissId);
   };
@@ -2721,7 +2776,7 @@ export class PiWebApp extends LitElement {
     const machineId = selectedMachineId(state);
     const retry = isClientPendingStartSession(session) ? undefined : this.handleRetrySelectedChat;
     return html`
-      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .sessionTitle=${sessionDisplayLabel(session)} .selectedMachineId=${machineId} .sessionCwd=${session.cwd} .selectedLoad=${state.selectedChatLoad} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .pendingMessageCount=${state.status?.pendingMessageCount ?? 0} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(machineId, session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())} .onRetry=${retry} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>
+      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .sessionTitle=${sessionDisplayLabel(session)} .selectedMachineId=${machineId} .sessionCwd=${session.cwd} .selectedLoad=${state.selectedChatLoad} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .pendingMessageCount=${state.status?.pendingMessageCount ?? 0} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .sessionLaunchRecovery=${this.sessions.getSessionLaunchRecovery(session.id)} .onRetrySessionLaunch=${this.handleRetrySessionLaunch} .onChangeSessionLaunchDestination=${this.handleChangeSessionLaunchDestination} .onRefreshSessionLaunchRecovery=${this.handleRefreshSessionLaunchRecovery} .onRestoreSessionLaunchPrompt=${this.handleRestoreSessionLaunchPrompt} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(machineId, session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())} .onRetry=${retry} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>
     `;
   }
 

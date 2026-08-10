@@ -8,6 +8,8 @@ import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination, ty
 import { PiWebApp } from "./PiWebApp";
 import type { AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import type { NewSessionComposer } from "./NewSessionComposer";
+import type { ChatView } from "./ChatView";
+import type { SessionLaunchRecovery } from "../controllers/sessionController";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -191,6 +193,146 @@ describe("PiWebApp New session composer root", () => {
     ]);
   });
 
+  it("binds rendered creation recovery to its chat session and seeds one replacement composer", async () => {
+    const app = new PiWebApp();
+    const failed = { ...session("pending-failed", mainWorkspace.path), clientPendingStart: true as const, machineId: localMachine.id };
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      selectedWorkspace: mainWorkspace,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedSession: failed,
+      sessions: [failed],
+      clientQueuedSessionMessages: { [failed.id]: [{ kind: "followUp", text: "Move this prompt" }] },
+    });
+    const controller = sessionController(app);
+    vi.spyOn(controller, "getSessionLaunchRecovery").mockReturnValue({
+      stage: "creationFailed",
+      sessionId: failed.id,
+      destination: { machineId: localMachine.id, workspaceId: mainWorkspace.id, cwd: mainWorkspace.path },
+      prompt: "Move this prompt",
+      retrying: false,
+    });
+    const retry = vi.spyOn(controller, "retrySessionLaunch").mockResolvedValue();
+    const container = renderApp(app);
+    const chat = required(container.querySelector<ChatView>("chat-view"), "chat view");
+    await elementUpdateComplete(chat);
+    const other = session("selected-after-render", mainWorkspace.path);
+    patchAppState(app, { selectedSession: other, sessions: [other, failed] });
+    const recoveryButtons = Array.from(chat.shadowRoot?.querySelectorAll<HTMLButtonElement>(".session-launch-recovery button") ?? []);
+
+    recoveryButtons[0]?.click();
+    recoveryButtons[1]?.click();
+
+    expect(retry).toHaveBeenCalledExactlyOnceWith(failed.id);
+    expect(composerRequest(app)).toEqual({
+      kind: "open",
+      initialDestination: completeNewSessionDestination(localMachine, project, mainWorkspace),
+      initialPrompt: "Move this prompt",
+      replacesFailedSessionId: failed.id,
+    });
+    expect(appState(app).sessions).toEqual([other, failed]);
+
+    invoke(app, "closeNewSessionComposer");
+
+    expect(appState(app).sessions).toEqual([other, failed]);
+  });
+
+  it("keeps the failed row, recovery, and preview until the real controller selects its replacement pending row", async () => {
+    const app = new PiWebApp();
+    const destination = completeNewSessionDestination(localMachine, project, mainWorkspace);
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedWorkspace: mainWorkspace,
+      sessions: [],
+    });
+    Reflect.set(app, "newSessionDestinationCatalog", new InMemoryNewSessionDestinationCatalog({
+      machines: [localMachine],
+      projectsByMachine: { [localMachine.id]: [project] },
+      workspacesByMachineAndProject: { [`${localMachine.id}:${project.id}`]: [mainWorkspace] },
+    }));
+    Reflect.set(app, "navigateToNewSessionDestination", vi.fn(() => Promise.resolve(true)));
+    Reflect.set(app, "openChat", vi.fn(() => Promise.resolve()));
+    const controller = sessionController(app);
+    const api: unknown = Reflect.get(controller, "api");
+    if (!isSessionTransport(api)) throw new Error("Expected SessionController transport");
+    let startCallCount = 0;
+    const startSession = vi.fn(() => {
+      startCallCount += 1;
+      return startCallCount === 1
+        ? Promise.reject(new Error("backend unavailable"))
+        : new Promise<SessionInfo>(() => undefined);
+    });
+    Reflect.set(controller, "api", { ...api, startSession });
+
+    await controller.launchSession("Move this prompt");
+    const failed = required(appState(app).selectedSession, "failed pending session");
+    const failedId = failed.id;
+    invoke(app, "openSessionLaunchDestinationComposer", failedId);
+
+    expect(appState(app).sessions).toContain(failed);
+    expect(controller.getSessionLaunchRecovery(failedId)?.stage).toBe("creationFailed");
+    expect(appState(app).clientQueuedSessionMessages[failedId]).toEqual([
+      { kind: "followUp", text: "Move this prompt" },
+    ]);
+
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Move this prompt" } satisfies NewSessionLaunchIntent);
+
+    expect(outcome).toEqual({ kind: "accepted" });
+    const replacement = required(appState(app).selectedSession, "replacement pending session");
+    expect(replacement.id).not.toBe(failedId);
+    expect(isClientPendingSession(replacement)).toBe(true);
+    expect(appState(app).sessions).toContain(replacement);
+    expect(appState(app).sessions).not.toContain(failed);
+    expect(controller.getSessionLaunchRecovery(failedId)).toBeUndefined();
+    expect(appState(app).clientQueuedSessionMessages[failedId]).toBeUndefined();
+    expect(appState(app).clientQueuedSessionMessages[replacement.id]).toEqual([
+      { kind: "followUp", text: "Move this prompt" },
+    ]);
+  });
+
+  it("binds rendered ambiguous recovery to its chat session without retry", async () => {
+    const app = new PiWebApp();
+    const selected = session("real-session", mainWorkspace.path);
+    setAppState(app, {
+      selectedMachine: localMachine,
+      selectedWorkspace: mainWorkspace,
+      selectedSession: selected,
+      sessions: [selected],
+      clientQueuedSessionMessages: { [selected.id]: [{ kind: "followUp", text: "Inspect this prompt" }] },
+    });
+    const controller = sessionController(app);
+    vi.spyOn(controller, "getSessionLaunchRecovery").mockReturnValue({
+      stage: "promptDeliveryAmbiguous",
+      sessionId: selected.id,
+      destination: { machineId: localMachine.id, workspaceId: mainWorkspace.id, cwd: mainWorkspace.path },
+      prompt: "Inspect this prompt",
+      retrying: false,
+    });
+    const refresh = vi.spyOn(controller, "refreshSessionLaunchRecovery").mockResolvedValue();
+    const restore = vi.spyOn(controller, "restoreSessionLaunchPrompt").mockResolvedValue();
+    const retry = vi.spyOn(controller, "retrySessionLaunch").mockResolvedValue();
+    const chat = required(renderApp(app).querySelector<ChatView>("chat-view"), "chat view");
+    await elementUpdateComplete(chat);
+    patchAppState(app, { selectedSession: session("selected-after-render", mainWorkspace.path) });
+    const recoveryButtons = Array.from(chat.shadowRoot?.querySelectorAll<HTMLButtonElement>(".session-launch-recovery button") ?? []);
+
+    recoveryButtons[0]?.click();
+    recoveryButtons[1]?.click();
+
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(selected.id);
+    expect(restore).toHaveBeenCalledExactlyOnceWith(selected.id);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
   it("revalidates the exact destination before accepting the synchronous pending launch handoff", async () => {
     const app = new PiWebApp();
     const destination = completeNewSessionDestination(remoteMachine, remoteProject, remoteWorkspace);
@@ -350,6 +492,11 @@ function composerRequest(app: PiWebApp): unknown {
 
 interface SessionLaunchController {
   launchSession: (prompt: string) => Promise<void>;
+  getSessionLaunchRecovery: (sessionId: string) => SessionLaunchRecovery | undefined;
+  retrySessionLaunch: (sessionId: string) => Promise<void>;
+  acceptSessionLaunchReplacement: (failedSessionId: string, replacementSessionId: string) => void;
+  refreshSessionLaunchRecovery: (sessionId: string) => Promise<void>;
+  restoreSessionLaunchPrompt: (sessionId: string) => Promise<void>;
 }
 
 interface SessionTransport {
@@ -372,7 +519,13 @@ function sessionController(app: PiWebApp): SessionLaunchController {
 }
 
 function isSessionLaunchController(value: unknown): value is SessionLaunchController {
-  return typeof value === "object" && value !== null && "launchSession" in value && typeof value.launchSession === "function";
+  return typeof value === "object" && value !== null
+    && "launchSession" in value && typeof value.launchSession === "function"
+    && "getSessionLaunchRecovery" in value && typeof value.getSessionLaunchRecovery === "function"
+    && "retrySessionLaunch" in value && typeof value.retrySessionLaunch === "function"
+    && "acceptSessionLaunchReplacement" in value && typeof value.acceptSessionLaunchReplacement === "function"
+    && "refreshSessionLaunchRecovery" in value && typeof value.refreshSessionLaunchRecovery === "function"
+    && "restoreSessionLaunchPrompt" in value && typeof value.restoreSessionLaunchPrompt === "function";
 }
 
 function isSessionTransport(value: unknown): value is SessionTransport {

@@ -258,6 +258,26 @@ export class SessionController {
     return this.sessionLaunchRecoveries.get(sessionId)?.recovery;
   }
 
+  /** Remove a failed creation after its replacement pending row is the accepted selection. */
+  acceptSessionLaunchReplacement(failedSessionId: string, replacementSessionId: string): void {
+    const record = this.sessionLaunchRecoveries.get(failedSessionId);
+    const state = this.getState();
+    if (record?.recovery.stage !== "creationFailed"
+      || replacementSessionId === failedSessionId
+      || state.selectedSession?.id !== replacementSessionId
+      || !state.sessions.some((session) => session.id === replacementSessionId)) return;
+    this.sessionLaunchRecoveries.delete(failedSessionId);
+    clearDraft(machineSessionKey(record.recovery.destination.machineId, failedSessionId));
+    this.setState({
+      sessions: state.sessions.filter((session) => session.id !== failedSessionId),
+      sessionStatuses: omitKey(state.sessionStatuses, failedSessionId),
+      sessionActivities: omitSessionActivity(state.sessionActivities, failedSessionId),
+      sendingPrompts: omitKey(state.sendingPrompts, failedSessionId),
+      clientQueuedSessionMessages: omitKey(state.clientQueuedSessionMessages, failedSessionId),
+    });
+    this.inbox?.notifyDeleted(record.recovery.destination.machineId, [failedSessionId]);
+  }
+
   async retrySessionLaunch(sessionId: string): Promise<void> {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     if (record === undefined || record.recovery.retrying) return;

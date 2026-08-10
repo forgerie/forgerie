@@ -552,6 +552,13 @@ export const chatStyles = css`
   .queued-message { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--pi-border); }
   .queued-message:first-of-type { padding-top: 0; border-top: 0; }
   .queued-kind { color: var(--pi-muted); font-size: 12px; text-transform: uppercase; }
+  .session-launch-recovery { display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid var(--pi-warning-border); }
+  .session-launch-recovery strong { color: var(--pi-warning); font-weight: 600; }
+  .session-launch-recovery p { margin: 0; color: var(--calm-ink-dim); }
+  .session-launch-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 3px; }
+  .session-launch-recovery-actions button { border: 1px solid var(--pi-warning-border); border-radius: 999px; background: var(--pi-surface); color: var(--pi-warning); padding: 5px 10px; font: 12px system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
+  .session-launch-recovery-actions button:hover, .session-launch-recovery-actions button:focus { border-color: var(--pi-warning); color: var(--pi-text-bright); }
+  .session-launch-recovery-actions button:disabled { border-color: var(--pi-border); color: var(--pi-muted); cursor: default; opacity: .7; }
   .queued-dialogs { margin: -8px 0 14px; padding: 0 4px; color: var(--pi-muted); font-size: 12px; text-align: center; }
   .session-activity { max-width: 100%; min-width: 0; box-sizing: border-box; display: grid; gap: 4px; margin: 0 0 var(--calm-turn-gap); padding: 0; border: 0; border-radius: 0; background: none; color: var(--calm-ink-dim); overflow: hidden; }
   .session-activity strong { color: var(--calm-ink-muted); font-weight: 500; }
