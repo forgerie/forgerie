@@ -1211,3 +1211,25 @@ describe("delegated fork grouping", () => {
     expect(root.querySelector("[data-session='solo'] .fork-twisty-button")).toBeNull();
   });
 });
+
+describe("collapsed rows stay quiet", () => {
+  it("reports the parent's own state, never a roll-up of its children", async () => {
+    const parent = mkSession("parent", { name: "Parent journey" });
+    const children = [
+      mkSession("child-a", { name: "Delegated", parentSessionPath: parent.path }),
+      mkSession("child-b", { name: "Delegated", parentSessionPath: parent.path }),
+    ];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([parent, ...children]),
+      unreadSessionIds: new Set(["child-a", "child-b"]),
+    });
+    const root = shadowRoot(panel);
+    await revealOpen(panel);
+
+    // The parent is not unread; its children are. A collapsed row that adopted
+    // their state would move the noise rather than remove it.
+    const parentRow = root.querySelector("[data-session='parent']");
+    expect(parentRow?.getAttribute("data-state")).toBe("open");
+    expect(parentRow?.querySelector(".fork-count")?.textContent).toBe("2");
+  });
+});

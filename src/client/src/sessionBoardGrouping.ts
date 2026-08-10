@@ -24,6 +24,14 @@ const PLACEHOLDER_PREFIX = "deleted-parent:";
 export type GroupedInboxEntry<S extends SessionBoardSessionInput> =
   | {
     readonly kind: "session";
+    /**
+     * Session at the top of this entry's subtree. Callers place an entry in
+     * whichever board group holds this row, never the entry's own group: a
+     * finished delegated child is `unread` while its parent is still
+     * `working`, and filing it by its own state would put it back on the board
+     * as a root, which is the thing this module exists to prevent.
+     */
+    readonly rootId: string;
     readonly row: SessionBoardRow<S>;
     readonly depth: number;
     readonly descendantCount: number;
@@ -32,6 +40,8 @@ export type GroupedInboxEntry<S extends SessionBoardSessionInput> =
   }
   | {
     readonly kind: "deleted-parent";
+    /** First orphan's id; the parent is gone, so it has no group of its own. */
+    readonly rootId: string;
     readonly id: string;
     /** Parent session file the children still record, for debugging and titles. */
     readonly parentPath: string;
@@ -94,15 +104,16 @@ export function groupedInboxEntries<S extends SessionBoardSessionInput>(
     pushInto(childrenByParentId, parent.session.id, row);
   }
 
-  const ordered: { row: SessionBoardRow<S> | undefined; id: string; depth: number; parentPath?: string }[] = [];
+  const ordered: { row: SessionBoardRow<S> | undefined; id: string; depth: number; parentPath?: string; rootId: string }[] = [];
 
   for (const root of roots) {
-    appendSubtree(root, 0, childrenByParentId, ordered);
+    appendSubtree(root, 0, childrenByParentId, ordered, root.session.id);
   }
   for (const [parentPath, orphans] of orphansByParentPath) {
-    ordered.push({ row: undefined, id: placeholderIdForParent(parentPath), depth: 0, parentPath });
+    const rootId = orphans[0]?.session.id ?? placeholderIdForParent(parentPath);
+    ordered.push({ row: undefined, id: placeholderIdForParent(parentPath), depth: 0, parentPath, rootId });
     for (const orphan of orphans) {
-      appendSubtree(orphan, 1, childrenByParentId, ordered);
+      appendSubtree(orphan, 1, childrenByParentId, ordered, rootId);
     }
   }
 
@@ -117,6 +128,7 @@ export function groupedInboxEntries<S extends SessionBoardSessionInput>(
     if (source.row === undefined) {
       entries.push({
         kind: "deleted-parent",
+        rootId: source.rootId,
         id: source.id,
         parentPath: source.parentPath ?? "",
         descendantCount: item.descendantCount,
@@ -126,6 +138,7 @@ export function groupedInboxEntries<S extends SessionBoardSessionInput>(
     }
     entries.push({
       kind: "session",
+      rootId: source.rootId,
       row: source.row,
       depth: source.depth,
       descendantCount: item.descendantCount,
@@ -140,11 +153,12 @@ function appendSubtree<S extends SessionBoardSessionInput>(
   row: SessionBoardRow<S>,
   depth: number,
   childrenByParentId: ReadonlyMap<string, SessionBoardRow<S>[]>,
-  out: { row: SessionBoardRow<S> | undefined; id: string; depth: number; parentPath?: string }[],
+  out: { row: SessionBoardRow<S> | undefined; id: string; depth: number; parentPath?: string; rootId: string }[],
+  rootId: string,
 ): void {
-  out.push({ row, id: row.session.id, depth });
+  out.push({ row, id: row.session.id, depth, rootId });
   for (const child of childrenByParentId.get(row.session.id) ?? []) {
-    appendSubtree(child, depth + 1, childrenByParentId, out);
+    appendSubtree(child, depth + 1, childrenByParentId, out, rootId);
   }
 }
 

@@ -188,6 +188,8 @@ export class SessionInboxPanel extends LitElement {
   @state() private showArchived = false;
   /** Parents and deleted-parent placeholders the user has opened. */
   @state() private expandedForkIds: ReadonlySet<string> = new Set();
+  /** Grouped entries for the current render, bucketed by their root's group. */
+  private entriesByGroup: ReadonlyMap<string, GroupedInboxEntry<SessionInfo>[]> | undefined;
 
   /** Previous machine id — used to detect machine switches and reload prefs. */
   private loadedMachineId: string | undefined;
@@ -457,12 +459,37 @@ export class SessionInboxPanel extends LitElement {
       ? groupSessionsByProject(board, { includeArchived: this.showArchived }).groups
       : board.groups.filter((group) => group.kind !== "archived" || this.showArchived);
 
-    const visibleGroups = groups.filter((g) => g.rows.length > 0);
+    // Delegated children collapse under whoever spawned them, so a fan-out of
+    // 99 agents costs one row rather than 99. Grouping runs once over every
+    // row on the board so a child can find a parent that sits in another
+    // state group.
+    const allEntries = groupedInboxEntries(board.rows, {
+      expandedIds: this.expandedForkIds,
+      ...(this.selectedSession === undefined ? {} : { revealId: this.selectedSession.id }),
+    });
+    // An entry belongs to whichever group holds the row at the top of its
+    // subtree, so this works for state grouping and project grouping alike.
+    const bucketed = new Map<string, GroupedInboxEntry<SessionInfo>[]>();
+    // Entries arrive in board order; each group keeps its own sort, so the
+    // subtrees are re-ordered by where their root sits in that group.
+    const chunks = new Map<string, GroupedInboxEntry<SessionInfo>[]>();
+    for (const entry of allEntries) {
+      const chunk = chunks.get(entry.rootId);
+      if (chunk === undefined) chunks.set(entry.rootId, [entry]);
+      else chunk.push(entry);
+    }
+    for (const group of groups) {
+      bucketed.set(group.kind, group.rows.flatMap((row) => chunks.get(row.session.id) ?? []));
+    }
+    this.entriesByGroup = bucketed;
+
+    const visibleGroups = groups.filter((g) => (bucketed.get(g.kind)?.length ?? 0) > 0);
     const archivedRows = board.groups.find((group) => group.kind === "archived")?.rows ?? [];
     // Keyboard J/K walks exactly what the eye can walk: expanded groups only.
     this.navigableSessions = visibleGroups
       .filter((group) => !this.collapsedGroups.has(group.kind))
-      .flatMap((group) => group.rows.map((row) => row.session));
+      .flatMap((group) => (bucketed.get(group.kind) ?? [])
+        .flatMap((entry) => entry.kind === "session" ? [entry.row.session] : []));
 
     return html`
       <div class="board-scroll" role="listbox" aria-label="Sessions">
@@ -523,13 +550,11 @@ export class SessionInboxPanel extends LitElement {
 
   private renderGroup(group: InboxGroup, resolveLocation: InboxLocationResolver, now: number): TemplateResult {
     const kind = group.kind;
-    // Delegated children collapse under whoever spawned them, so a fan-out of
-    // 99 agents is one row rather than 99. The group count follows the visible
-    // entries, not the raw row list.
-    const entries = groupedInboxEntries(group.rows, {
-      expandedIds: this.expandedForkIds,
-      ...(this.selectedSession === undefined ? {} : { revealId: this.selectedSession.id }),
-    });
+    // Grouping is computed across the whole board, not per group: a finished
+    // delegated child is `unread` while its parent is still `working`, and
+    // grouping per state group would fail to find the parent and put the child
+    // back on the board as a root.
+    const entries: readonly GroupedInboxEntry<SessionInfo>[] = this.entriesByGroup?.get(kind) ?? [];
     // The archive has one control, the shelf; it is never also collapsed.
     const collapsed = kind === "archived" ? false : this.collapsedGroups.has(kind);
     const tone = this.groupBy === "project"
