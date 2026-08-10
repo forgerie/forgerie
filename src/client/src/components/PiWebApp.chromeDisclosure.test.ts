@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { SessionInfo } from "../api";
+import type { SessionInfo, SessionStatus } from "../api";
 import { initialAppState, type AppState } from "../appState";
+import type { ChatView } from "./ChatView";
 import { PiWebApp } from "./PiWebApp";
 
 afterEach(() => {
@@ -42,19 +43,52 @@ describe("PiWebApp chrome disclosure", () => {
 
     expect(shadowRoot(app).querySelector("app-control-sheet")).not.toBeNull();
   });
+
+  it("puts session context progress above the bottom controls instead of over the transcript", async () => {
+    const app = await mountApp(499, statusWithContext());
+    const root = shadowRoot(app);
+    const meter = root.querySelector("context-usage-meter");
+    const chat = root.querySelector<ChatView>("chat-view");
+
+    expect(meter?.nextElementSibling?.tagName).toBe("PROMPT-EDITOR");
+    await chat?.updateComplete;
+    expect(chat?.shadowRoot?.querySelector("conversation-meter")).toBeNull();
+  });
 });
 
-async function mountApp(shellWidth: number): Promise<PiWebApp> {
+async function mountApp(shellWidth: number, status?: SessionStatus): Promise<PiWebApp> {
   const app = new PiWebApp();
   Object.defineProperty(app, "clientWidth", { configurable: true, value: shellWidth });
   document.body.append(app);
-  if (!Reflect.set(app, "state", appStateWithSession())) throw new Error("Could not seed PiWebApp state");
+  if (!Reflect.set(app, "state", appStateWithSession(status))) throw new Error("Could not seed PiWebApp state");
   await app.updateComplete;
   return app;
 }
 
-function appStateWithSession(): AppState {
-  return { ...initialAppState(), selectedSession: session(), mainView: "chat" };
+function appStateWithSession(status?: SessionStatus): AppState {
+  return {
+    ...initialAppState(),
+    selectedSession: session(),
+    mainView: "chat",
+    messages: [{ role: "user", parts: [{ type: "text", text: "Initial prompt" }] }],
+    messagePageEnd: 1,
+    messagePageTotal: 1,
+    ...(status === undefined ? {} : { status }),
+  };
+}
+
+function statusWithContext(): SessionStatus {
+  return {
+    sessionId: "session-1",
+    isStreaming: false,
+    isCompacting: false,
+    isBashRunning: false,
+    pendingMessageCount: 0,
+    queuedMessages: [],
+    tokens: { input: 50_000, output: 2_000, cacheRead: 0, cacheWrite: 0, total: 52_000 },
+    cost: 0,
+    contextUsage: { tokens: 52_000, contextWindow: 200_000, percent: 26 },
+  };
 }
 
 function session(): SessionInfo {

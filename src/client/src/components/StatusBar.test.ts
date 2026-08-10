@@ -1,7 +1,7 @@
 import type { TemplateResult } from "lit";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "../api";
-import { templateEventHandlerAfterMarker } from "../templateInspection.testSupport";
+import { templateEventHandlerAfterMarker, templateText } from "../templateInspection.testSupport";
 import { StatusBar, statusBarWarningControlContent } from "./StatusBar";
 
 describe("statusBarWarningControlContent", () => {
@@ -18,6 +18,21 @@ describe("statusBarWarningControlContent", () => {
 
   it("omits the control content when there are no warnings", () => {
     expect(statusBarWarningControlContent(0, false)).toBeUndefined();
+  });
+});
+
+describe("StatusBar session details", () => {
+  it("leaves context usage to the dedicated progress meter", () => {
+    const statusBar = new StatusBar();
+    statusBar.status = {
+      ...status(),
+      tokens: { input: 12_000, output: 4_000, cacheRead: 0, cacheWrite: 0, total: 16_000 },
+      contextUsage: { tokens: 50_000, contextWindow: 200_000, percent: 25 },
+    };
+
+    const text = templateText(renderStatusBar(statusBar));
+    expect(text).toContain("↑12k");
+    expect(text).not.toContain("25.0%/200k");
   });
 });
 

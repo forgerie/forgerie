@@ -154,7 +154,7 @@ export const appStyles = css`
     .shell.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
     .shell:not(.workspace-view) > workspace-panel { display: none; }
     .workspace-panel-edge { display: none; }
-    main.workspace-view chat-view, main.workspace-view prompt-editor, main.workspace-view status-bar,
+    main.workspace-view chat-view, main.workspace-view context-usage-meter, main.workspace-view prompt-editor, main.workspace-view status-bar,
     main.workspace-view .empty { display: none; }
     main.workspace-view { overflow: hidden; }
   }
@@ -188,7 +188,7 @@ export const appStyles = css`
   }
   .navigation-scrim { display: none; }
   @keyframes navigation-overlay-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-  status-bar { flex: 0 0 auto; }
+  status-bar, context-usage-meter { flex: 0 0 auto; }
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
