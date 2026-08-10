@@ -404,11 +404,19 @@ export const chatStyles = css`
      boundary below. Spacing keys on what an element is rather than what follows
      it, because a zero-height scroll marker sits between every pair of messages
      and defeats sibling adjacency. */
-  .msg { max-width: 100%; min-width: 0; box-sizing: border-box; margin: 0 0 var(--calm-para-gap); padding: 0; border: 0; border-radius: 0; background: none; color: var(--calm-ink-muted); overflow: visible; }
+  /* Full ink. Tone no longer separates prose from prose -- it only separates
+     language from machinery, which is the job it can actually do. Muting the
+     reply was the worst of it: the reply is the thing being read, and it was
+     the thing rendered faint. */
+  .msg { max-width: 100%; min-width: 0; box-sizing: border-box; margin: 0 0 var(--calm-para-gap); padding: 0; border: 0; border-radius: 0; background: none; color: var(--calm-ink); overflow: visible; }
   /* A turn starts when the human speaks. That is the only break the eye needs
      to find without reading. */
   .msg.user, .msg.bash { margin-top: calc(var(--calm-turn-gap) - var(--calm-para-gap)); }
-  .msg.user { color: var(--calm-ink); font-weight: 500; }
+  /* The question is told apart by where it sits, not by how it is coloured.
+     Alignment survives every theme, because no token can weaken a geometry.
+     Weight and tone were the previous cue and both failed the skim test: you
+     had to read a line to learn who wrote it. */
+  .msg.user { text-align: right; }
   .msg.tool, .msg.bash, .msg.skill { color: var(--calm-ink-dim); }
   .msg.tool-execution-shell, .msg.ask-user-record-shell { padding: 0; border: 0; background: transparent; color: var(--calm-ink-muted); }
   .msg.ask-user-record-shell ask-user-card { margin: 0 auto; }
@@ -502,7 +510,10 @@ export const chatStyles = css`
     .msg-meta.expanded::before { content: ""; }
   }
   formatted-text.part { display: block; }
-  formatted-text.part, .queued-message formatted-text { text-align: start; unicode-bidi: plaintext; }
+  /* Inherited rather than pinned to start, so the message can set the
+     alignment that identifies its author. With nothing overriding it this
+     still resolves to start, which is what it was. */
+  formatted-text.part, .queued-message formatted-text { text-align: inherit; unicode-bidi: plaintext; }
   .part { max-width: 100%; min-width: 0; box-sizing: border-box; overflow: visible; }
   .part + .part { margin-top: 10px; }
   .tool-line { color: var(--pi-warning); }
@@ -546,7 +557,13 @@ export const transcriptLivenessStyles = css`
 
 export const formattedTextStyles = css`
   :host { display: block; }
-  .formatted { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; text-align: start; unicode-bidi: plaintext; }
+  /* Inherited, so a message can set the alignment that identifies its author.
+     Resolves to start by default, which is what this was before. */
+  .formatted { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; text-align: inherit; unicode-bidi: plaintext; }
+  /* Structured content keeps its own alignment whatever the message does with
+     prose: a right-aligned list sits away from its own bullets, and a right
+     aligned table head parts from its column. */
+  ul, ol, blockquote, .table-scroll, table { text-align: start; }
   p, ul, ol, pre, blockquote, .table-scroll, .code-block-wrapper { margin: 0 0 10px; }
   :is(p, ul, ol, pre, blockquote, .table-scroll, .code-block-wrapper):last-child { margin-bottom: 0; }
   ul, ol { padding-left: 22px; }

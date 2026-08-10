@@ -78,7 +78,11 @@
            each child a different width and the column comes out ragged.
            32rem approximates 66 characters at the transcript's 14px base. */
         --calm-measure: clamp(20rem, 92cqi, 32rem);
-        --calm-turn-gap: 2.25rem;
+        /* Wide on purpose. This is the only break in the transcript that has to
+           be seen without being read, and it has to hold apart two things that
+           look alike: the step count closing one turn and the question opening
+           the next. */
+        --calm-turn-gap: 3.5rem;
         /* Space between paragraphs of one turn. The turn gap is reserved for
            the boundary between turns, so the two are told apart at a glance. */
         --calm-para-gap: 1rem;
