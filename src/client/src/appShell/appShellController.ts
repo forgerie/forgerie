@@ -1,7 +1,7 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import type { AppState } from "../appState";
 import { createPwaDisplayModeMedia, detectPwaDisplayMode } from "../pwaDisplayMode";
-import { shellLayoutMode, type ShellLayoutMode } from "./shellLayoutMode";
+import { chromeDisclosure, shellLayoutMode, type ShellLayoutMode } from "./shellLayoutMode";
 import { ViewportPositionRepairer } from "./viewportPositionRepair";
 
 export interface AppShellControllerOptions {
@@ -37,16 +37,14 @@ export class AppShellController implements ReactiveController {
    * Whether the chat surface hands its chrome to an on-request sheet instead of
    * keeping it resident above the transcript.
    *
-   * This rides the same axis as navigation docking because both answer one
-   * question: is there room here for more than the conversation? Adding a
-   * separate height rule would answer it twice — the bands that consume
-   * vertical space are already absent once navigation docks, and the on-screen
-   * keyboard shrinks height without changing which side of that line the shell
-   * is on. The accessor exists so call sites read as intent rather than as a
-   * navigation coincidence, and so any future divergence has one seam.
+   * A wider bar than navigation docking: a shell can dock its panel and still be
+   * phone-shaped, where every band spends screen the conversation needed. Chrome
+   * only stays resident on a true multi-pane workspace — navigation, session,
+   * and workspace panel side by side. Every folded and unfolded posture of a
+   * phone sits below that, so all of them get the conversation whole.
    */
   get isChromeSummoned(): boolean {
-    return this.isMobileNavigationLayout;
+    return chromeDisclosure(this.measureShellWidth()) === "summoned";
   }
 
   hostConnected(): void {

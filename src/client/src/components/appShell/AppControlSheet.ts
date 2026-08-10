@@ -25,7 +25,8 @@ import "./AppMobileMainTabs";
 export class AppControlSheet extends LitElement {
   static override styles = controlSheetStyles;
 
-  @property({ type: Boolean }) open = false;
+  /** Reflected so the host can claim a real box only while open — see controlSheetStyles. */
+  @property({ type: Boolean, reflect: true }) open = false;
   @property({ attribute: false }) machines: Machine[] = [];
   @property({ attribute: false }) machine?: Machine;
   @property({ attribute: false }) project?: Project;

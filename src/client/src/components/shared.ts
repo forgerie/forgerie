@@ -96,7 +96,8 @@ export const appStyles = css`
   aside app-navigation-panel { flex: 1 1 auto; min-height: 0; }
   header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
   .header-actions { display: flex; align-items: center; gap: 8px; }
-  main { grid-column: 3; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  /* Positioned in every layout so the summoned control sheet has a pane to fill. */
+  main { position: relative; grid-column: 3; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .context-bar { position: relative; flex: 0 0 auto; min-width: 0; display: none; align-items: center; gap: 0; padding: 6px 0; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-bg); }
   .context-bar::before, .context-bar::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 20px; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
   .context-bar::before { left: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
@@ -630,7 +631,13 @@ export const promptEditorStyles = css`
  * conversation untouched.
  */
 export const controlSheetStyles = css`
-  :host { position: absolute; inset: 0; z-index: 40; display: contents; }
+  /*
+   * Closed, the host takes no box at all. Open, it claims the whole pane and its
+   * own stacking context: display:contents would drop the box and take the
+   * z-index with it, letting the composer paint over the sheet.
+   */
+  :host { display: none; }
+  :host([open]) { position: absolute; inset: 0; z-index: 40; display: block; }
   .control-sheet-scrim { position: absolute; inset: 0; z-index: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: var(--pi-shadow); cursor: pointer; }
   .control-sheet {
     position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;

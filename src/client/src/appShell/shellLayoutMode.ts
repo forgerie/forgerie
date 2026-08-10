@@ -17,6 +17,24 @@ export const SESSION_COMFORTABLE_WIDTH = 560;
 /** A panel only docks when it can do so without squeezing the session. */
 export const NAVIGATION_DOCK_MIN_WIDTH = NAVIGATION_PANEL_MIN_WIDTH + SESSION_COMFORTABLE_WIDTH;
 
+/** Below this the workspace panel cannot show a file tree or diff without truncating it. */
+export const WORKSPACE_PANEL_MIN_WIDTH = 360;
+
+/**
+ * Chrome stays resident only on a true multi-pane workspace — one wide enough
+ * for navigation, the session, and the workspace panel at once. Anything
+ * narrower is a single-surface shell where bands compete with the conversation
+ * for the screen, so the conversation wins and the chrome is summoned.
+ */
+export const CHROME_RESIDENT_MIN_WIDTH = NAVIGATION_PANEL_MIN_WIDTH + SESSION_COMFORTABLE_WIDTH + WORKSPACE_PANEL_MIN_WIDTH;
+
+export type ChromeDisclosure = "resident" | "summoned";
+
+export function chromeDisclosure(availableWidth: number): ChromeDisclosure {
+  if (!Number.isFinite(availableWidth) || availableWidth <= 0) return "summoned";
+  return availableWidth >= CHROME_RESIDENT_MIN_WIDTH ? "resident" : "summoned";
+}
+
 export function shellLayoutMode(availableWidth: number): ShellLayoutMode {
   if (!Number.isFinite(availableWidth) || availableWidth <= 0) return "overlay";
   return availableWidth >= NAVIGATION_DOCK_MIN_WIDTH ? "docked" : "overlay";

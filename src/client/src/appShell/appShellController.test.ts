@@ -1,7 +1,7 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { describe, expect, it } from "vitest";
 import { AppShellController } from "./appShellController";
-import { NAVIGATION_DOCK_MIN_WIDTH } from "./shellLayoutMode";
+import { CHROME_RESIDENT_MIN_WIDTH } from "./shellLayoutMode";
 
 /** CSS-pixel viewport widths for the acceptance device, see AGENTS.md. */
 const FOLD8 = {
@@ -12,26 +12,29 @@ const FOLD8 = {
 } as const;
 
 describe("AppShellController chrome disclosure", () => {
-  it("summons chrome exactly where navigation cannot dock", () => {
-    expect(controllerAtWidth(NAVIGATION_DOCK_MIN_WIDTH - 1).isChromeSummoned).toBe(true);
-    expect(controllerAtWidth(NAVIGATION_DOCK_MIN_WIDTH).isChromeSummoned).toBe(false);
+  it("summons chrome until every pane can sit side by side", () => {
+    expect(controllerAtWidth(CHROME_RESIDENT_MIN_WIDTH - 1).isChromeSummoned).toBe(true);
+    expect(controllerAtWidth(CHROME_RESIDENT_MIN_WIDTH).isChromeSummoned).toBe(false);
   });
 
-  it("keeps the conversation alone on the postures that cannot afford chrome", () => {
+  it("gives the conversation the whole screen in every phone posture, folded or not", () => {
     expect(controllerAtWidth(FOLD8.foldedPortrait).isChromeSummoned).toBe(true);
     expect(controllerAtWidth(FOLD8.foldedLandscape).isChromeSummoned).toBe(true);
     expect(controllerAtWidth(FOLD8.unfoldedPortrait).isChromeSummoned).toBe(true);
+    expect(controllerAtWidth(FOLD8.unfoldedLandscape).isChromeSummoned).toBe(true);
   });
 
-  it("leaves chrome resident once the shell is wide enough to dock", () => {
-    expect(controllerAtWidth(FOLD8.unfoldedLandscape).isChromeSummoned).toBe(false);
+  it("leaves chrome resident on a true multi-pane workspace", () => {
     expect(controllerAtWidth(1440).isChromeSummoned).toBe(false);
+    expect(controllerAtWidth(1184).isChromeSummoned).toBe(false);
   });
 
-  it("answers from the same measurement that decides docking, not a second axis", () => {
-    const controller = controllerAtWidth(FOLD8.foldedPortrait);
+  it("summons chrome on a docked shell that is still phone-shaped", () => {
+    // Wide enough for navigation to dock, too narrow to also afford the bands.
+    const controller = controllerAtWidth(FOLD8.unfoldedLandscape);
 
-    expect(controller.isChromeSummoned).toBe(controller.isMobileNavigationLayout);
+    expect(controller.isMobileNavigationLayout).toBe(false);
+    expect(controller.isChromeSummoned).toBe(true);
   });
 });
 
