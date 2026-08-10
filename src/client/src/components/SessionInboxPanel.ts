@@ -35,6 +35,8 @@ import {
   type SessionBoardGroup,
   type SessionBoardRow,
 } from "../sessionBoard";
+import { groupedInboxEntries, type GroupedInboxEntry } from "../sessionBoardGrouping";
+import { toggleExpandedSessionId } from "../sessionForkGrouping";
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
@@ -184,6 +186,8 @@ export class SessionInboxPanel extends LitElement {
   @state() private groupBy: "state" | "project" = "state";
   @state() private collapsedGroups = new Set<string>(DEFAULT_COLLAPSED);
   @state() private showArchived = false;
+  /** Parents and deleted-parent placeholders the user has opened. */
+  @state() private expandedForkIds: ReadonlySet<string> = new Set();
 
   /** Previous machine id — used to detect machine switches and reload prefs. */
   private loadedMachineId: string | undefined;
@@ -519,6 +523,13 @@ export class SessionInboxPanel extends LitElement {
 
   private renderGroup(group: InboxGroup, resolveLocation: InboxLocationResolver, now: number): TemplateResult {
     const kind = group.kind;
+    // Delegated children collapse under whoever spawned them, so a fan-out of
+    // 99 agents is one row rather than 99. The group count follows the visible
+    // entries, not the raw row list.
+    const entries = groupedInboxEntries(group.rows, {
+      expandedIds: this.expandedForkIds,
+      ...(this.selectedSession === undefined ? {} : { revealId: this.selectedSession.id }),
+    });
     // The archive has one control, the shelf; it is never also collapsed.
     const collapsed = kind === "archived" ? false : this.collapsedGroups.has(kind);
     const tone = this.groupBy === "project"
@@ -540,7 +551,7 @@ export class SessionInboxPanel extends LitElement {
         >
           <span class="group-chevron" aria-hidden="true">▾</span>
           <span class="group-label">${group.label}</span>
-          <span class="group-count" data-group-count>${String(group.rows.length)}</span>
+          <span class="group-count" data-group-count>${String(entries.length)}</span>
           <span class="group-spacer"></span>
         </button>
         <div
@@ -550,9 +561,44 @@ export class SessionInboxPanel extends LitElement {
           aria-label=${group.label}
           ?hidden=${collapsed}
         >
-          ${collapsed ? nothing : group.rows.map((row) => this.renderRow(row, resolveLocation, now))}
+          ${collapsed ? nothing : entries.map((entry) => this.renderEntry(entry, resolveLocation, now))}
         </div>
       </section>
+    `;
+  }
+
+  private toggleFork(id: string): void {
+    this.expandedForkIds = toggleExpandedSessionId(this.expandedForkIds, id);
+  }
+
+  private renderEntry(
+    entry: GroupedInboxEntry<SessionInfo>,
+    resolveLocation: InboxLocationResolver,
+    now: number,
+  ): TemplateResult {
+    if (entry.kind === "deleted-parent") return this.renderDeletedParent(entry);
+    return this.renderRow(entry.row, resolveLocation, now, entry);
+  }
+
+  /**
+   * The children of a deleted parent would otherwise be promoted to roots and
+   * flood the board. Name what is missing rather than borrowing a child's
+   * title, which would put the repeated name back on screen.
+   */
+  private renderDeletedParent(
+    entry: Extract<GroupedInboxEntry<SessionInfo>, { kind: "deleted-parent" }>,
+  ): TemplateResult {
+    return html`
+      <button
+        class="row fork-parent"
+        data-deleted-parent=${entry.parentPath}
+        aria-expanded=${String(entry.expanded)}
+        @click=${() => { this.toggleFork(entry.id); }}
+      >
+        <span class="fork-twisty" aria-hidden="true">${entry.expanded ? "▾" : "▸"}</span>
+        <span class="row-title">Deleted session</span>
+        <span class="fork-count">${String(entry.descendantCount)} ${entry.descendantCount === 1 ? "fork" : "forks"}</span>
+      </button>
     `;
   }
 
@@ -560,6 +606,7 @@ export class SessionInboxPanel extends LitElement {
     row: SessionBoardRow<SessionInfo>,
     resolveLocation: InboxLocationResolver,
     now: number,
+    entry?: Extract<GroupedInboxEntry<SessionInfo>, { kind: "session" }>,
   ): TemplateResult {
     const session = row.session;
     const kind: BoardGroupKind = row.state.kind;
@@ -597,7 +644,8 @@ export class SessionInboxPanel extends LitElement {
         tabindex=${isDeleted ? "-1" : "0"}
         data-session=${session.id}
         data-state=${kind}
-        style="--row-tone: var(--tone-${kind}, var(--pi-dim))"
+        data-fork-depth=${String(entry?.depth ?? 0)}
+        style="--row-tone: var(--tone-${kind}, var(--pi-dim)); --fork-depth: ${String(entry?.depth ?? 0)}"
         aria-selected=${String(isSelected)}
         aria-disabled=${isDeleted ? "true" : "false"}
         @click=${handleRowClick}
@@ -609,7 +657,22 @@ export class SessionInboxPanel extends LitElement {
         }}
       >
         <span class="row-marker" aria-hidden="true"></span>
-        <div class="row-title">${session.name ?? (session.firstMessage || session.id)}</div>
+        <div class="row-title">
+          ${entry?.expandable === true
+            ? html`
+                <button
+                  class="fork-twisty-button"
+                  aria-expanded=${String(entry.expanded)}
+                  aria-label=${entry.expanded ? "Hide forks" : "Show forks"}
+                  @click=${(event: Event) => { event.stopPropagation(); this.toggleFork(session.id); }}
+                >${entry.expanded ? "▾" : "▸"}</button>
+              `
+            : nothing}
+          <span class="row-title-text">${session.name ?? (session.firstMessage || session.id)}</span>
+          ${entry !== undefined && entry.descendantCount > 0
+            ? html`<span class="fork-count">${String(entry.descendantCount)}</span>`
+            : nothing}
+        </div>
         <div class="row-meta">
           ${isDeleted
             ? html`<span class="chip chip-deleted" data-location-chip>workspace removed</span>`
@@ -1053,6 +1116,33 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .chip-branch { color: var(--pi-muted, #aaa4bd); }
+
+    /* Delegated forks nest one step per generation; the indent is small so a
+       499px row still has room for the title. */
+    .row[data-fork-depth="1"] { padding-left: 26px; }
+    .row[data-fork-depth="2"] { padding-left: 40px; }
+    .row-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .row-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fork-twisty-button {
+      flex: none;
+      background: none;
+      border: 0;
+      padding: 0 2px;
+      min-width: 20px;
+      min-height: 20px;
+      color: var(--pi-dim, var(--pi-muted, #aaa4bd));
+      cursor: pointer;
+      font: inherit;
+      line-height: 1;
+    }
+    .fork-count {
+      flex: none;
+      color: var(--pi-muted, #aaa4bd);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .row.fork-parent { cursor: pointer; background: none; border: 0; font: inherit; color: inherit; }
+    .row.fork-parent .fork-twisty { color: var(--pi-dim, var(--pi-muted, #aaa4bd)); }
     .chip-deleted { color: var(--pi-danger, #ff4f7b); font-style: italic; }
 
     .row-detail {

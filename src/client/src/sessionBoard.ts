@@ -54,6 +54,17 @@ export interface SessionBoardSessionInput {
    * the workspace without additional type wrangling.
    */
   readonly cwd?: string;
+  /**
+   * Session file path. Used to resolve a child's `parentSessionPath` back to
+   * the row that spawned it; the board itself never reads it.
+   */
+  readonly path?: string;
+  /**
+   * Parent session file, when this session was spawned by another. Manual
+   * forks are detached at creation, so a value here means the session was
+   * delegated rather than started by the user.
+   */
+  readonly parentSessionPath?: string;
 }
 
 /** Location metadata for one session row, derived by the caller from their own data. */

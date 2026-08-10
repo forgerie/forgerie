@@ -110,6 +110,12 @@ async function revealArchived(panel: SessionInboxPanel): Promise<void> {
   await panel.updateComplete;
 }
 
+/** The Open group starts collapsed; click its header to see the rows inside. */
+async function revealOpen(panel: SessionInboxPanel): Promise<void> {
+  clickSelector(shadowRoot(panel), "[data-group='open'] .group-header");
+  await panel.updateComplete;
+}
+
 /** Dispatch a board shortcut the way a real key press reaches the window. */
 async function pressKey(panel: SessionInboxPanel, key: string): Promise<void> {
   window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, composed: true }));
@@ -1128,5 +1134,80 @@ describe("stylesheet integrity", () => {
     }
 
     expect(strays).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delegated forks — one row per journey, not one per agent
+// ---------------------------------------------------------------------------
+
+describe("delegated fork grouping", () => {
+  function delegated(count: number, parentPath: string): SessionInfo[] {
+    return Array.from({ length: count }, (_, index) =>
+      mkSession(`agent-${String(index)}`, { name: "Investigate bug causal chain", parentSessionPath: parentPath }));
+  }
+
+  it("collapses a fan-out under the session that spawned it", async () => {
+    const parent = mkSession("parent", { name: "Parent journey" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([parent, ...delegated(3, parent.path)]),
+    });
+    const root = shadowRoot(panel);
+    await revealOpen(panel);
+
+    expect(root.querySelector("[data-session='parent']")).not.toBeNull();
+    expect(root.querySelector("[data-session='agent-0']")).toBeNull();
+    expect(root.querySelector("[data-session='parent'] .fork-count")?.textContent).toBe("3");
+  });
+
+  it("shows the children once the parent is opened", async () => {
+    const parent = mkSession("parent", { name: "Parent journey" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([parent, ...delegated(2, parent.path)]),
+    });
+    const root = shadowRoot(panel);
+    await revealOpen(panel);
+
+    const twisty = root.querySelector<HTMLButtonElement>("[data-session='parent'] .fork-twisty-button");
+    twisty?.click();
+    await panel.updateComplete;
+
+    expect(root.querySelector("[data-session='agent-0']")).not.toBeNull();
+    expect(root.querySelector("[data-session='agent-0']")?.getAttribute("data-fork-depth")).toBe("1");
+  });
+
+  it("collapses orphans under a named placeholder when the parent file is gone", async () => {
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions(delegated(99, "/tmp/deleted-parent.jsonl")),
+    });
+    const root = shadowRoot(panel);
+    await revealOpen(panel);
+
+    const placeholder = root.querySelector("[data-deleted-parent='/tmp/deleted-parent.jsonl']");
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.querySelector(".row-title")?.textContent).toBe("Deleted session");
+    expect(placeholder?.querySelector(".fork-count")?.textContent).toBe("99 forks");
+    expect(root.querySelector("[data-session='agent-0']")).toBeNull();
+  });
+
+  it("does not borrow a child's title for the placeholder", async () => {
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions(delegated(4, "/tmp/deleted-parent.jsonl")),
+    });
+    const root = shadowRoot(panel);
+    await revealOpen(panel);
+
+    expect(root.textContent).not.toContain("Investigate bug causal chain");
+  });
+
+  it("leaves a session with no parent as its own row", async () => {
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("solo", { name: "Solo journey" })]),
+    });
+    const root = shadowRoot(panel);
+    await revealOpen(panel);
+
+    expect(root.querySelector("[data-session='solo']")).not.toBeNull();
+    expect(root.querySelector("[data-session='solo'] .fork-twisty-button")).toBeNull();
   });
 });
