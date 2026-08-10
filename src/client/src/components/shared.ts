@@ -427,9 +427,14 @@ export const chatStyles = css`
      item, and a grid row sized from its item's own minimum stops tracking that
      item's content: a long reply then overflowed its row and drew on top of the
      liveness line below it. A block box inside the item has no such trouble, and
-     the turn goes back to being sized by what it holds. */
+     the turn goes back to being sized by what it holds.
+
+     Only the end padding comes off the screenful. The turn has to be able to
+     scroll past the scroller's start padding to reach the top edge, so that
+     padding is height the reservation must supply rather than height it can
+     assume is already there. */
   .turn-body { min-width: 0; }
-  .turn-body.reserved { min-block-size: calc(100cqb - var(--pi-chat-pad-block-start) - var(--pi-chat-pad-block-end)); }
+  .turn-body.reserved { min-block-size: calc(100cqb - var(--pi-chat-pad-block-end)); }
   .scroll-marker { display: block; height: 0; overflow: hidden; pointer-events: none; }
   /* Transcript messages carry no card. Roles are told apart by weight and
      tone, not by a border and fill per role: colour is reserved for things

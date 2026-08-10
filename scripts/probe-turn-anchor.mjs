@@ -58,6 +58,40 @@ const SETUP = `
 
 const line = (role, text) => ({ role, parts: [{ type: "text", text }] });
 
+/** Raise an open question inside the running turn. */
+const ASK_A_QUESTION = `
+  (async () => {
+    const view = window.__probe.view;
+    view.pendingAsk = {
+      askId: "probe-ask",
+      askedAt: new Date().toISOString(),
+      questions: [{
+        id: "probe",
+        question: "PROBE: is this question reachable and does it stay put while scrolling?",
+        options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }],
+      }],
+    };
+    await view.updateComplete;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return "asked";
+  })()
+`;
+
+/** Scroll up past the open question and report whether it stayed pinned to the top. */
+const SCROLL_PAST_THE_QUESTION = `
+  (async () => {
+    const probe = window.__probe;
+    const chat = probe.chat();
+    const card = chat.querySelector("ask-user-card.open-ask-card");
+    if (card === null) return "no open question rendered";
+    const before = Math.round(card.getBoundingClientRect().top - chat.getBoundingClientRect().top);
+    chat.scrollTop = Math.max(0, chat.scrollTop - 300);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const after = Math.round(card.getBoundingClientRect().top - chat.getBoundingClientRect().top);
+    return "cardTop " + String(before) + " -> " + String(after) + " after scrolling up 300px";
+  })()
+`;
+
 /** Move the scroller the way a reader would: the transcript did not write this offset. */
 const READER_SCROLL_TO_BOTTOM = `
   (async () => {
@@ -79,7 +113,14 @@ function injectScript(messages) {
       const last = turns[turns.length - 1];
       const chatRect = chat.getBoundingClientRect();
       const lastRect = last.getBoundingClientRect();
+      const liveness = chat.querySelector("transcript-liveness");
+      const beforeLiveness = liveness === null ? null : liveness.previousElementSibling;
+      const livenessGap = liveness === null || beforeLiveness === null
+        ? "none"
+        : String(Math.round(liveness.getBoundingClientRect().top - beforeLiveness.getBoundingClientRect().bottom))
+          + " after " + beforeLiveness.tagName.toLowerCase() + "." + String(beforeLiveness.className || "-");
       return {
+        livenessGap,
         turnKey: last.dataset.turnKey,
         turnCount: turns.length,
         turnChildren: last.childElementCount,
@@ -164,6 +205,14 @@ async function probePosture({ debugPort, posture, args }) {
     report("turn opens", await evaluate(cdp, injectScript(asked)));
     await screenshot(cdp, args, `${posture.name}-turn-opens`);
 
+    if (args.ask === true) {
+      await evaluate(cdp, ASK_A_QUESTION);
+      await screenshot(cdp, args, `${posture.name}-open-question`);
+      const stuck = await evaluate(cdp, SCROLL_PAST_THE_QUESTION);
+      process.stdout.write(`  ${"question while scrolling".padEnd(24)} ${String(stuck)}\n`);
+      await screenshot(cdp, args, `${posture.name}-open-question-scrolled`);
+    }
+
     const paragraph = "The reply streams in underneath the question. ".repeat(12);
     let streamed = asked;
     for (let step = 1; step <= 3; step += 1) {
@@ -198,7 +247,7 @@ function report(label, result) {
     `  ${label.padEnd(24)} turnTop=${String(result.turnTopOffset).padStart(5)} `
     + `turnH=${String(result.turnHeight).padStart(5)} reserved=${String(result.reserved).padEnd(5)} `
     + `scrollTop=${String(result.scrollTop).padStart(6)} bottomGap=${String(Math.round(bottomGap)).padStart(5)} `
-    + `fit=[${result.rowFit}] box=[${result.turnBox}] mode=${result.followMode}\n`,
+    + `fit=[${result.rowFit}] livenessGap=[${result.livenessGap}] mode=${result.followMode}\n`,
   );
 }
 
@@ -210,6 +259,7 @@ function parseArgs(argv) {
     else if (arg === "--chrome-bin") parsed.chromeBin = argv[++i];
     else if (arg === "--settle") parsed.settle = Number(argv[++i]);
     else if (arg === "--shots") parsed.shots = argv[++i];
+    else if (arg === "--ask") parsed.ask = true;
     else fail(`Unknown argument: ${arg}`);
   }
   return parsed;

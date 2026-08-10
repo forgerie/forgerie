@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
+import type { AskUserOutcome } from "../../../shared/apiTypes";
+import type { PendingExtensionDialog } from "../api";
 import { ChatView } from "./ChatView";
 import type { ChatLine } from "./shared";
 
@@ -35,6 +37,13 @@ function followMode(view: ChatView): unknown {
   return Reflect.get(view, "followMode");
 }
 
+/** Run one of the transcript's own alignment routines and report whether it found its target. */
+function aligned(view: ChatView, method: "alignOpenAskToTop" | "alignOpenDialogToTop"): boolean {
+  const align: unknown = Reflect.get(view, method);
+  if (typeof align !== "function") throw new Error(`ChatView has no ${method}`);
+  return align.call(view) === true;
+}
+
 /** Pull the transcript back the way a reader does, from somewhere above its foot. */
 async function readerScrollsUp(view: ChatView): Promise<void> {
   const chat = scroller(view);
@@ -42,6 +51,74 @@ async function readerScrollsUp(view: ChatView): Promise<void> {
   chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
   await view.updateComplete;
 }
+
+describe("ChatView running-turn tail", () => {
+  const askedQuestion = {
+    askId: "ask-open",
+    askedAt: "2026-07-20T10:00:00.000Z",
+    questions: [{ id: "editor", question: "Which editor?", options: [{ value: "vim", label: "Vim" }] }],
+  };
+
+  const answeredQuestion: AskUserOutcome = {
+    askId: "ask-done",
+    reason: "submitted",
+    askedAt: "2026-07-20T10:00:00.000Z",
+    closedAt: "2026-07-20T10:05:00.000Z",
+    questions: [{
+      question: { id: "editor", question: "Which editor?", options: [{ value: "vim", label: "Vim" }] },
+      answered: true,
+      values: ["vim"],
+    }],
+    answeredCount: 1,
+    unansweredIds: [],
+    summary: "Answered 1 of 1",
+  };
+
+  const openDialog: PendingExtensionDialog = {
+    dialogId: "dlg-1",
+    kind: "confirm",
+    title: "Allow file writes?",
+    askedAt: "2026-07-27T10:00:00.000Z",
+    runScoped: false,
+  };
+
+  it("renders the open question inside the turn that asked it", async () => {
+    const view = await loadedTranscript([said("user", "question"), said("assistant", "working")]);
+    view.pendingAsk = askedQuestion;
+    await view.updateComplete;
+
+    const card = view.shadowRoot?.querySelector("ask-user-card.open-ask-card");
+    expect(card?.closest(".turn")?.getAttribute("data-turn-key")).toBe("turn:m:0");
+    expect(aligned(view, "alignOpenAskToTop")).toBe(true);
+  });
+
+  it("renders the open extension dialog inside the turn that raised it", async () => {
+    const view = await loadedTranscript([said("user", "question")]);
+    view.pendingDialogs = [openDialog];
+    await view.updateComplete;
+
+    const card = view.shadowRoot?.querySelector("extension-dialog-card.open-dialog-card");
+    expect(card?.closest(".turn")?.getAttribute("data-turn-key")).toBe("turn:m:0");
+    expect(aligned(view, "alignOpenDialogToTop")).toBe(true);
+  });
+
+  it("keeps the tail reachable in a session with no turns yet", async () => {
+    const view = await loadedTranscript([]);
+    view.pendingAsk = askedQuestion;
+    await view.updateComplete;
+
+    expect(view.shadowRoot?.querySelector(".chat > ask-user-card.open-ask-card")).not.toBeNull();
+    expect(aligned(view, "alignOpenAskToTop")).toBe(true);
+  });
+
+  it("does not mistake a past question in the transcript for the open one", async () => {
+    const view = await loadedTranscript([{ role: "assistant", parts: [{ type: "askUserRecord", outcome: answeredQuestion }] }]);
+
+    expect(view.shadowRoot?.querySelector("ask-user-card")).not.toBeNull();
+    expect(view.shadowRoot?.querySelector("ask-user-card.open-ask-card")).toBeNull();
+    expect(aligned(view, "alignOpenAskToTop")).toBe(false);
+  });
+});
 
 describe("ChatView turn anchoring", () => {
   it("anchors a turn that opens at the foot and reserves the space its reply needs", async () => {

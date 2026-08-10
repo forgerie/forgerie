@@ -501,11 +501,7 @@ export class ChatView extends LitElement {
         <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }}>
           ${this.renderHistoryBoundary()}
           ${repeat(turns, (turn) => this.turnRenderKey(turn), (turn, index) => this.renderTurn(turn, liveTailGroup, index === turns.length - 1))}
-          ${this.renderQueuedMessages()}
-          ${this.renderSessionActivity()}
-          ${this.renderTranscriptLiveness()}
-          ${this.renderOpenAsk()}
-          ${this.renderExtensionDialogs()}
+          ${turns.length === 0 ? this.renderRunningTurnTail() : null}
         </div>
       </div>
       ${this.renderImageZoom()}
@@ -740,8 +736,28 @@ export class ChatView extends LitElement {
       <section class="turn" data-turn-key=${key}>
         <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
           ${repeat(turn.groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup))}
+          ${last ? this.renderRunningTurnTail() : null}
         </div>
       </section>
+    `;
+  }
+
+  /**
+   * What the running turn is still doing, and what it is waiting on.
+   *
+   * These belong to the turn above them, so they render inside it rather than
+   * after it. Outside, the space an opening turn reserves fell between the
+   * question and its own status line, stranding the line against the foot of the
+   * screen. Queued prompts ride along: they are the only thing left that would
+   * have been marooned down there.
+   */
+  private renderRunningTurnTail() {
+    return html`
+      ${this.renderQueuedMessages()}
+      ${this.renderSessionActivity()}
+      ${this.renderTranscriptLiveness()}
+      ${this.renderOpenAsk()}
+      ${this.renderExtensionDialogs()}
     `;
   }
 
@@ -791,6 +807,7 @@ export class ChatView extends LitElement {
     if (this.pendingAsk === undefined) return null;
     return html`
       <ask-user-card
+        class="open-ask-card"
         data-scroll-anchor-id=${`ask:${this.pendingAsk.askId}`}
         .ask=${this.pendingAsk}
         .draftSessionId=${this.askDraftSessionId}
@@ -1297,7 +1314,7 @@ export class ChatView extends LitElement {
 
   private alignOpenAskToTop(): boolean {
     const chat = this.chat;
-    const card = this.renderRoot.querySelector<HTMLElement>(".chat > ask-user-card");
+    const card = this.renderRoot.querySelector<HTMLElement>(".chat ask-user-card.open-ask-card");
     if (chat === undefined || card === null) return false;
     chat.scrollTop += card.getBoundingClientRect().top - chat.getBoundingClientRect().top;
     this.syncScrollMetrics();
@@ -1319,7 +1336,7 @@ export class ChatView extends LitElement {
 
   private alignOpenDialogToTop(): boolean {
     const chat = this.chat;
-    const card = this.renderRoot.querySelector<HTMLElement>(".chat > extension-dialog-card.open-dialog-card");
+    const card = this.renderRoot.querySelector<HTMLElement>(".chat extension-dialog-card.open-dialog-card");
     if (chat === undefined || card === null) return false;
     chat.scrollTop += card.getBoundingClientRect().top - chat.getBoundingClientRect().top;
     this.syncScrollMetrics();
