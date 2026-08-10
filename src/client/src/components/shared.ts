@@ -586,8 +586,9 @@ export const formattedTextStyles = css`
   a { color: var(--pi-accent); }
   /* A heading belongs to what follows it, so it sits far from the paragraph
      above and close to the one below. Equal space on both sides leaves it
-     floating between two blocks and belonging to neither. */
-  h1, h2, h3, h4 { margin: 28px 0 6px; line-height: 1.25; }
+     floating between two blocks and belonging to neither. Close, but not
+     touching: at 6px the heading crowded its own first line. */
+  h1, h2, h3, h4 { margin: 28px 0 10px; line-height: 1.25; }
   h1:first-child, h2:first-child, h3:first-child, h4:first-child { margin-top: 0; }
   h1 { font-size: 20px; }
   h2 { font-size: 17px; }
