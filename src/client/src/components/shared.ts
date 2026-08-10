@@ -638,7 +638,11 @@ export const formattedTextStyles = css`
 
      Declared after the margin shorthands above. A later margin shorthand resets
      margin-inline to zero, so a bleed written before it silently does nothing --
-     which is exactly what happened the first time. */
+     which is exactly what happened the first time. The same trap caught the
+     width: a later max-width of 100% on .table-scroll left the negative margins
+     in force with no room to expand into, so a table slid sideways out of the
+     column instead of widening, and scrolled horizontally with empty space
+     beside it. Nothing below may cap the width of these three. */
   .table-scroll, .code-block-wrapper, .formatted > pre { max-width: calc(100% + 2 * var(--calm-bleed, 0px)); margin-inline: calc(-1 * var(--calm-bleed, 0px)); }
   blockquote { border-left: 3px solid var(--pi-border); padding-left: 10px; color: var(--pi-muted); }
   a { color: var(--pi-accent); }
@@ -652,7 +656,7 @@ export const formattedTextStyles = css`
   h2 { font-size: 17px; }
   h3 { font-size: 15px; }
   h4 { font-size: 14px; }
-  .table-scroll { max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .table-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
   .table-scroll:focus-visible { outline: 1px solid var(--pi-accent); outline-offset: 2px; }
   table { border-collapse: collapse; width: max-content; min-width: 100%; max-width: none; }
   th, td { border: 1px solid var(--pi-border); padding: 4px 8px; max-width: 48ch; overflow-wrap: anywhere; }
