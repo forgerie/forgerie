@@ -37,6 +37,30 @@ describe("PiWebApp global shortcut modality boundary", () => {
     expect(targetKeyDown).not.toHaveBeenCalled();
   });
 
+  it("opens New session with Mod+Enter even when no workspace is selected", () => {
+    const app = new PiWebApp();
+    const target = appendKeyTarget();
+
+    const event = dispatchKeyThroughApp(app, target, "Enter");
+
+    expect(newSessionComposerIsOpen(app)).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it.each([
+    { name: "remapped", shortcuts: { "core:session.start": "alt+n" }, expected: "alt+n" },
+    { name: "disabled", shortcuts: { "core:session.start": null }, expected: undefined },
+  ])("passes the $name effective New session binding to PromptEditor", ({ shortcuts, expected }) => {
+    const app = new PiWebApp();
+    const selectedSession = session("session-shortcut");
+    setAppState(app, { selectedSession, sessions: [selectedSession], mainView: "chat" });
+    Reflect.set(app, "shortcutConfig", shortcuts);
+
+    const editor = requiredElement(renderApp(app).querySelector<PromptEditor>("prompt-editor"), "prompt editor");
+
+    expect(editor.newSessionShortcut).toBe(expected);
+  });
+
   it("leaves capture-phase keyboard handling with a rendered shared modal", async () => {
     const app = new PiWebApp();
     const target = await openAuthenticationDialog(app);
@@ -164,11 +188,15 @@ type AppKeyDownHandler = (event: KeyboardEvent) => void;
 type PromptFocusBoundary = (this: PiWebApp) => Promise<void>;
 
 function dispatchShortcutThroughApp(app: PiWebApp, target: HTMLElement): KeyboardEvent {
+  return dispatchKeyThroughApp(app, target, "k");
+}
+
+function dispatchKeyThroughApp(app: PiWebApp, target: HTMLElement, key: string): KeyboardEvent {
   const handler: unknown = Reflect.get(app, "onKeyDown");
   if (!isAppKeyDownHandler(handler)) throw new Error("PiWebApp shortcut handler was unavailable");
   window.addEventListener("keydown", handler, { capture: true });
   const event = new KeyboardEvent("keydown", {
-    key: "k",
+    key,
     ctrlKey: true,
     bubbles: true,
     cancelable: true,
@@ -281,6 +309,13 @@ function actionPaletteIsOpen(app: PiWebApp): boolean {
     throw new Error("PiWebApp action-palette state was unavailable");
   }
   return state.actionPaletteOpen;
+}
+
+function newSessionComposerIsOpen(app: PiWebApp): boolean {
+  const state: unknown = Reflect.get(app, "state");
+  return typeof state === "object" && state !== null && "newSessionComposer" in state
+    && typeof state.newSessionComposer === "object" && state.newSessionComposer !== null
+    && "kind" in state.newSessionComposer && state.newSessionComposer.kind === "open";
 }
 
 function setAppState(app: PiWebApp, patch: Partial<AppState>): void {

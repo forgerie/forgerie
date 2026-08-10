@@ -518,6 +518,7 @@ interface PluginRuntimeContext {
   refreshGit: () => void | Promise<void>;
   checkForPiWebUpdates?: () => void | Promise<void>;
   startSession: () => void | Promise<void>;
+  openNewSessionComposer?: () => void;
   archiveSession: () => void | Promise<void>;
   stopActiveWork: () => void | Promise<void>;
 }
@@ -532,6 +533,8 @@ Notes:
 - `selectWorkspaceTool()` expects a qualified panel id such as `my-plugin:workspace.info`.
 - `openTerminal()` switches to the built-in terminal panel. Pass `{ terminalId }` to deep-link to a specific terminal.
 - `checkForPiWebUpdates()` forces a fresh update check on the selected machine and refreshes `state.piWebStatus`. It is optional so plugins remain compatible with older Forgerie hosts.
+- `startSession()` is the v1-compatible name for opening the New session composer. It no longer starts an empty session immediately.
+- `openNewSessionComposer()` opens the same composer with a clearer name. It is optional so a plugin can still run on older hosts. Check for the method before calling it, and call `startSession()` as the fallback.
 - Only fields documented here and declared in `plugin-api.d.ts` are stable public plugin API. Anything else is experimental: it may become public API later, change shape, or disappear.
 
 ### Prompt editor API

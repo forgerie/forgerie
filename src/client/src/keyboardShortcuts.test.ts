@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AppAction } from "./actions";
-import { KeyboardShortcutDispatcher, parseShortcutInput, resolveShortcutBindings, shortcutTokenFromEvent, type ShortcutKeyEvent } from "./keyboardShortcuts";
+import { KeyboardShortcutDispatcher, keyboardEventMatchesShortcut, parseShortcutInput, resolveShortcutBindings, shortcutTokenFromEvent, type ShortcutKeyEvent } from "./keyboardShortcuts";
 
 function keyEvent(key: string, modifiers: Partial<ShortcutKeyEvent> = {}): ShortcutKeyEvent {
   return {
@@ -176,6 +176,18 @@ describe("shortcut conflict resolution", () => {
     expect(standaloneResolution?.shadows.map((binding) => binding.action.id)).toEqual(["plugin:sequence"]);
     expect(sequenceResolution?.active).toBe(false);
     expect(sequenceResolution?.shadowedBy?.action.id).toBe("plugin:standalone");
+  });
+});
+
+describe("single-event shortcut matching", () => {
+  it("matches a normalized configured chord", () => {
+    expect(keyboardEventMatchesShortcut(keyEvent("N", { metaKey: true, shiftKey: true }), "mod+shift+n")).toBe(true);
+    expect(keyboardEventMatchesShortcut(keyEvent("n", { metaKey: true }), "mod+shift+n")).toBe(false);
+  });
+
+  it("does not match a disabled or multi-chord binding as one event", () => {
+    expect(keyboardEventMatchesShortcut(keyEvent("Enter", { ctrlKey: true }), undefined)).toBe(false);
+    expect(keyboardEventMatchesShortcut(keyEvent("g", { ctrlKey: true }), "mod+g n")).toBe(false);
   });
 });
 

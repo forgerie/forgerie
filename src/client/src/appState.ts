@@ -1,5 +1,6 @@
 import type { AuthProviderOption, CommandOption, CommandResult, ExtensionDialogAnswer, ExtensionDialogCloseReason, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, Machine, MachineHealth, MachineRuntime, OAuthFlowState, PendingAskUser, PendingExtensionDialog, PiWebStatusResponse, Project, QueuedSessionMessage, SessionActivity, SessionInfo, SessionStatus, SessionTreeSnapshot, TerminalCommandRun, Workspace, WorkspaceActivity } from "./api";
 import type { ChatLine } from "./components/shared";
+import type { NewSessionCompleteDestination } from "./newSessionComposer";
 import type { QualifiedContributionId } from "./plugins/ids";
 import type { SelectedSessionNotificationInbox } from "./sessionNotifications";
 import { selectedChatNoTarget, type SelectedChatLoad } from "./selectedChatLoad";
@@ -117,7 +118,9 @@ export interface AppState {
   thinkingDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
   themeDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
   authDialog: AuthDialogState | undefined;
-  /** State for the new-session / workspace-management picker dialog (U7). */
+  /** Root-owned request. The mounted composer owns its editable draft. */
+  newSessionComposer: NewSessionComposerRequest;
+  /** State for the workspace-management picker dialog. */
   newSessionDialog: NewSessionDialogState | undefined;
   actionPaletteOpen: boolean;
   /** Open state of the control sheet the composer summons once chrome is not resident. */
@@ -152,26 +155,17 @@ export interface ClosedExtensionDialog {
   answer?: ExtensionDialogAnswer;
 }
 
-/**
- * State for the new-session / workspace-management picker dialog (U7).
- *
- * Owned by PiWebApp, passed to SessionInboxNewSessionDialog.
- * The dialog is closed when this is `undefined`.
- *
- * Steps:
- *   "project" — the user is picking which project to use.
- *   "workspace" — workspaces are loaded (or loading) for the chosen project.
- *
- * Mode:
- *   "start" — the primary action is "Start session".
- *   "manage" — the primary action is "Manage" (no session is started).
- */
+export type NewSessionComposerRequest =
+  | { kind: "closed" }
+  | { kind: "open"; initialDestination?: NewSessionCompleteDestination; initialPrompt: string };
+
+/** Workspace-management dialog state. Session creation uses NewSessionComposer. */
 export type NewSessionDialogState =
-  | { step: "project"; mode: "start" | "manage" }
+  | { step: "project"; mode: "manage" }
   | {
       step: "workspace";
       project: Project;
-      mode: "start" | "manage";
+      mode: "manage";
       workspaces: readonly Workspace[];
       loading: boolean;
       error: string | undefined;
@@ -272,6 +266,7 @@ export function initialAppState(): AppState {
     thinkingDialog: undefined,
     themeDialog: undefined,
     authDialog: undefined,
+    newSessionComposer: { kind: "closed" },
     newSessionDialog: undefined,
     actionPaletteOpen: false,
     controlSheetOpen: false,

@@ -48,6 +48,7 @@ function createContext(statePatch: Partial<AppState> = {}) {
     reloadPage: vi.fn(() => { calls.push("reloadPage"); }),
     deleteWorkspace: vi.fn(() => { calls.push("deleteWorkspace"); }),
     startSession: vi.fn(() => { calls.push("startSession"); }),
+    openNewSessionComposer: vi.fn(() => { calls.push("openNewSessionComposer"); }),
     archiveSession: vi.fn(() => { calls.push("archiveSession"); }),
     reloadSession: vi.fn(() => { calls.push("reloadSession"); }),
     deleteCachedNewSession: vi.fn(() => { calls.push("deleteCachedNewSession"); }),
@@ -63,6 +64,19 @@ describe("PluginRegistry", () => {
 
     expect(registry.getActions(createContext().context).some((action) => action.id === "core:actions.show")).toBe(true);
     expect(registry.getWorkspacePanels().map((panel) => panel.id)).toEqual(["core:workspace.files", "core:workspace.git", "core:workspace.terminal", "core:workspace.notifications", "core:workspace.agents"]);
+  });
+
+  it("keeps session.start globally enabled while routing its New session identity to the composer", async () => {
+    const registry = new PluginRegistry();
+    registry.register({ id: "core", plugin: corePlugin });
+    const { context } = createContext({ selectedWorkspace: undefined });
+    const action = registry.getActions(context).find((candidate) => candidate.id === "core:session.start");
+    if (action === undefined) throw new Error("Expected core:session.start");
+
+    expect(action.title).toBe("New session");
+    expect(action.enabled).not.toBe(false);
+    await action.run();
+    expect(context.openNewSessionComposer).toHaveBeenCalledOnce();
   });
 
   it("provides html and svg helpers to plugin activation and callbacks", () => {

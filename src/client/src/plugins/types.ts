@@ -120,7 +120,9 @@ export interface PluginRuntimeContext {
   checkForPiWebUpdates?: () => void | Promise<void>;
   reloadPage: () => void;
   deleteWorkspace: (workspace?: Workspace) => void | Promise<void>;
+  /** v1-compatible alias that opens the New session composer. */
   startSession: () => void | Promise<void>;
+  openNewSessionComposer: () => void;
   archiveSession: () => void | Promise<void>;
   reloadSession: () => void | Promise<void>;
   deleteCachedNewSession: () => void | Promise<void>;

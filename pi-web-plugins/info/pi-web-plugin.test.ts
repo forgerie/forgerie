@@ -8,6 +8,13 @@ describe("Info plugin copy-diagnostics action", () => {
     vi.unstubAllGlobals();
   });
 
+  it("accepts the v1 session method without requiring the additive composer alias", () => {
+    const context = runtimeContext();
+
+    expect(context.startSession).toBeTypeOf("function");
+    expect(context.openNewSessionComposer).toBeUndefined();
+  });
+
   it("copies a diagnostics summary to the clipboard", async () => {
     const writeText = vi.fn((text: string) => { void text; return Promise.resolve(); });
     vi.stubGlobal("navigator", { clipboard: { writeText } });

@@ -1,14 +1,6 @@
 /**
- * Workspace/project picker dialog for starting a new session or managing
- * a workspace (U7).
- *
- * Two steps:
- *   "project" — the user picks a project from the machine's project list.
- *   "workspace" — the user picks a workspace within that project.
- *
- * Two modes (set by the parent through `dialogState.mode`):
- *   "start" — the primary action is "Start session" (fires `onConfirmStart`).
- *   "manage" — the primary action is "Manage" (fires `onConfirmManage`).
+ * Workspace/project picker retained for workspace management.
+ * Session creation is owned by NewSessionComposer.
  *
  * State discipline:
  *   All step/mode/loading/error state is owned by the parent (PiWebApp) via
@@ -36,9 +28,7 @@ export class SessionInboxNewSessionDialog extends LitElement {
   // Callbacks — all optional; the parent wires only those it needs.
   /** Called when the user picks a project on the project step. */
   @property({ attribute: false }) onSelectProject?: (project: Project) => void;
-  /** Called when the user confirms a workspace in "start" mode. */
-  @property({ attribute: false }) onConfirmStart?: (workspace: Workspace) => void;
-  /** Called when the user confirms a workspace in "manage" mode. */
+  /** Called when the user chooses the workspace to manage. */
   @property({ attribute: false }) onConfirmManage?: (workspace: Workspace) => void;
   /** Called when the user navigates back from workspace to project step. */
   @property({ attribute: false }) onBack?: () => void;
@@ -53,8 +43,7 @@ export class SessionInboxNewSessionDialog extends LitElement {
     const state = this.dialogState;
     if (state === undefined) return nothing;
 
-    const title =
-      state.mode === "start" ? "Start a session" : "Manage workspace";
+    const title = "Manage workspace";
 
     return html`
       <modal-surface
@@ -72,7 +61,7 @@ export class SessionInboxNewSessionDialog extends LitElement {
           >×</button>
         </header>
         ${state.step === "project"
-          ? this.renderProjectStep(state)
+          ? this.renderProjectStep()
           : this.renderWorkspaceStep(state)}
       </modal-surface>
     `;
@@ -82,16 +71,10 @@ export class SessionInboxNewSessionDialog extends LitElement {
   // Project step
   // -------------------------------------------------------------------------
 
-  private renderProjectStep(
-    state: Extract<NewSessionDialogState, { step: "project" }>,
-  ) {
-    const { mode } = state;
-    const prompt =
-      mode === "start" ? "Choose a project to start a session in:" : "Choose a project:";
-
+  private renderProjectStep() {
     return html`
       <div class="step" data-step="project">
-        <p class="step-prompt">${prompt}</p>
+        <p class="step-prompt">Choose a project:</p>
         ${this.projects.length === 0
           ? html`
               <div class="empty-state" data-empty-projects>
@@ -132,8 +115,7 @@ export class SessionInboxNewSessionDialog extends LitElement {
   private renderWorkspaceStep(
     state: Extract<NewSessionDialogState, { step: "workspace" }>,
   ) {
-    const { project, mode, workspaces, loading, error } = state;
-    const actionLabel = mode === "start" ? "Start session" : "Manage";
+    const { project, workspaces, loading, error } = state;
 
     let body;
     if (loading) {
@@ -164,14 +146,11 @@ export class SessionInboxNewSessionDialog extends LitElement {
               role="option"
               data-workspace-id=${ws.id}
               title=${ws.path}
-              @click=${() => {
-                if (mode === "start") this.onConfirmStart?.(ws);
-                else this.onConfirmManage?.(ws);
-              }}
+              @click=${() => { this.onConfirmManage?.(ws); }}
             >
               <span class="item-primary">${ws.label}${ws.isMain ? " · main" : ""}</span>
               <span class="item-secondary">${ws.path}</span>
-              <span class="item-action" aria-hidden="true">${actionLabel} →</span>
+              <span class="item-action" aria-hidden="true">Manage →</span>
             </button>
           `)}
         </div>

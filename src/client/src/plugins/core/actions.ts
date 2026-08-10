@@ -161,11 +161,11 @@ export function createCoreActions(): PluginAction[] {
     },
     {
       id: "session.start",
-      title: "Start Session",
+      title: "New session",
+      description: "Compose a first prompt for a new session",
       shortcut: "mod+enter",
       group: "Session",
-      enabled: hasWorkspace,
-      run: (context) => context.startSession(),
+      run: (context) => { context.openNewSessionComposer(); },
     },
     {
       id: "model.select",

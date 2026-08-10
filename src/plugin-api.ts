@@ -104,7 +104,10 @@ export interface PluginRuntimeContext {
   /** Force a fresh Forgerie release check on the selected machine. Optional for compatibility with older hosts. */
   checkForPiWebUpdates?: () => void | Promise<void>;
   reloadPage: () => void;
+  /** Open the New session composer. This v1 method no longer starts an empty session immediately. */
   startSession: () => void | Promise<void>;
+  /** Open the New session composer. Optional for compatibility with older hosts. */
+  openNewSessionComposer?: () => void;
   archiveSession: () => void | Promise<void>;
   stopActiveWork: () => void | Promise<void>;
 }
