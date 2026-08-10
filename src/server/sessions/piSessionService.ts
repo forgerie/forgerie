@@ -24,6 +24,7 @@ import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult,
 import { projectBrowserMessage } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
+import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
 import { SessionCommandService } from "./sessionCommandService.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
@@ -4495,44 +4496,6 @@ async function sessionFileHeaderMatches(sessionFile: string, expected: { session
   return header.parentSession !== undefined && sessionPathsEqual(header.parentSession, expected.parentSessionFile);
 }
 
-/**
- * Session files named by a tool result, wherever the tool chose to report them.
- *
- * Deliberately shape-driven rather than keyed to one tool's name: any result
- * that hands back a `sessionFile` is telling us it made that session.
- */
-/**
- * Agents reported as working by a tool progress event, or undefined when the
- * event carries no progress to read.
- */
-function runningAgentCount(event: unknown): number | undefined {
-  if (!isRecord(event)) return undefined;
-  const details = toolResultDetails(event["details"] ?? event["result"]);
-  if (!isRecord(details)) return undefined;
-  const progress = details["progress"];
-  if (!Array.isArray(progress)) return undefined;
-  let running = 0;
-  for (const entry of progress) {
-    if (!isRecord(entry)) continue;
-    if (entry["status"] === "running") running += 1;
-  }
-  return running;
-}
-
-function spawnedSessionFiles(event: unknown): string[] {
-  if (!isRecord(event)) return [];
-  const details = toolResultDetails(event["result"]);
-  if (!isRecord(details)) return [];
-  const results = details["results"];
-  if (!Array.isArray(results)) return [];
-  const files: string[] = [];
-  for (const entry of results) {
-    if (!isRecord(entry)) continue;
-    const file = entry["sessionFile"];
-    if (typeof file === "string" && file !== "") files.push(file);
-  }
-  return files;
-}
 
 async function markAgentSpawned(sessionFile: string): Promise<void> {
   const content = await readFile(sessionFile, "utf8");
