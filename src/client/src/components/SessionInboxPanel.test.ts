@@ -205,19 +205,27 @@ describe("default collapse", () => {
     expect(openGroup?.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("Archived is hidden until the toggle asks for it, then opens", async () => {
+  it("keeps the archive shelf shut until it is asked to open", async () => {
     const sessions = [mkSession("archived-one", { archived: true })];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    expect(root.querySelector("[data-group='archived']")).toBeNull();
+    // The shelf announces the archive without spending the list on it.
+    const shelf = root.querySelector("[data-archive-shelf]");
+    expect(shelf?.getAttribute("aria-expanded")).toBe("false");
+    expect(shelf?.querySelector("[data-archive-count]")?.textContent).toBe("1");
+    expect(root.querySelector("[data-session='archived-one']")).toBeNull();
 
     await revealArchived(panel);
 
-    // A toggle that revealed a collapsed header would need a second click to
-    // mean anything, so revealing also expands.
     expect(root.querySelector("[data-group='archived']")?.getAttribute("aria-expanded")).toBe("true");
     expect(root.querySelector("[data-session='archived-one']")).not.toBeNull();
+  });
+
+  it("renders no shelf when the machine has never archived anything", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+
+    expect(shadowRoot(panel).querySelector("[data-group='archived']")).toBeNull();
   });
 
   it("blocked group is expanded by default", async () => {
@@ -391,6 +399,17 @@ describe("selected session group auto-expand", () => {
     // Open should be auto-expanded because the selected session is in it.
     const openGroup = root.querySelector("[data-group='open']");
     expect(openGroup?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("does not reveal the archive when the selected session is archived", async () => {
+    const archived = mkSession("archived-one", { archived: true });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([archived]),
+      selectedSession: archived,
+    });
+
+    expect(shadowRoot(panel).querySelector("[data-session='archived-one']")).toBeNull();
+    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("expands the destination group when the same selected id moves via live activity", async () => {
@@ -804,17 +823,18 @@ describe("new session callback", () => {
 // ---------------------------------------------------------------------------
 
 describe("archived visibility toggle", () => {
-  it("persists the choice per machine and reflects it in the control", async () => {
+  it("hides archived sessions again when the inbox remounts", async () => {
     const sessions = [mkSession("open-one"), mkSession("archived-one", { archived: true })];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
 
-    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-pressed")).toBe("false");
+    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
 
     await revealArchived(panel);
-    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-pressed")).toBe("true");
+    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("true");
 
     const remounted = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
-    expect(shadowRoot(remounted).querySelector("[data-group='archived']")).not.toBeNull();
+    expect(shadowRoot(remounted).querySelector("[data-session='archived-one']")).toBeNull();
+    expect(shadowRoot(remounted).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("keeps archived out of the project grouping until it is revealed", async () => {
@@ -919,14 +939,15 @@ describe("board shortcuts", () => {
   });
 
   it("ignores shortcuts typed into an input", async () => {
-    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    const sessions = [mkSession("open-one"), mkSession("archived-one", { archived: true })];
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const input = document.createElement("input");
     document.body.append(input);
 
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, composed: true }));
     await panel.updateComplete;
 
-    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-pressed")).toBe("false");
+    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

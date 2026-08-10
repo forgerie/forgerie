@@ -10,8 +10,8 @@
  *    behind its own toggle so the archive is opt-in rather than ambient.
  *  - Archive action ≥44px hit area via min-height.
  *  - Theme tokens only; pane-level container query so rows respond to pane width.
- *  - Group-by, show-archived, and collapsed-groups persisted per machine in
- *    localStorage (non-sensitive).
+ *  - Group-by and collapsed-groups persist per machine in localStorage
+ *    (non-sensitive). Archived visibility resets closed whenever the inbox mounts.
  *  - Board-local keys mirror the design prototype: J/K move, G group-by,
  *    A archived, E archive (owned by the shell, which also confirms).
  *  - Selected session's group auto-expands.
@@ -78,14 +78,6 @@ function readCollapsedGroups(machineId: string): Set<string> {
 
 function writeCollapsedGroups(machineId: string, collapsed: ReadonlySet<string>): void {
   browserStorage()?.setItem(storageKey(machineId, "collapsed"), JSON.stringify([...collapsed]));
-}
-
-function readShowArchived(machineId: string): boolean {
-  return browserStorage()?.getItem(storageKey(machineId, "showArchived")) === "true";
-}
-
-function writeShowArchived(machineId: string, showArchived: boolean): void {
-  browserStorage()?.setItem(storageKey(machineId, "showArchived"), String(showArchived));
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +256,7 @@ export class SessionInboxPanel extends LitElement {
       this.loadedMachineId = machineId;
       this.groupBy = readGroupBy(machineId);
       this.collapsedGroups = readCollapsedGroups(machineId);
-      this.showArchived = readShowArchived(machineId);
+      this.showArchived = false;
       this.previousSelectedGroupKey = undefined;
     }
 
@@ -359,7 +351,7 @@ export class SessionInboxPanel extends LitElement {
     if (nonArchivedTotal === 0 && board.counts.archived > 0) {
       return html`
         <div class="board-header">
-          ${this.renderHeader(board)}
+          ${this.renderHeader()}
         </div>
         ${gs.status === "stale" ? html`<div class="stale-notice" data-state="stale" role="status">Reconnecting…</div>` : nothing}
         <div class="board-state" data-state="all-clear">
@@ -371,21 +363,18 @@ export class SessionInboxPanel extends LitElement {
 
     return html`
       <div class="board-header">
-        ${this.renderHeader(board)}
+        ${this.renderHeader()}
       </div>
       ${gs.status === "stale" ? html`<div class="stale-notice" data-state="stale" role="status">Reconnecting…</div>` : nothing}
       ${this.renderBoardScroll(board, resolveLocation)}
     `;
   }
 
-  private renderHeader(board?: SessionBoard<SessionInfo>): TemplateResult {
-    const attention = board !== undefined ? attentionCount(board) : 0;
-    const summaryText = attention > 0
-      ? html`<strong>${attention}</strong> waiting`
-      : board !== undefined && board.counts.working > 0
-        ? html`nothing waiting`
-        : html``;
-
+  /**
+   * Title, view controls, actions. Deliberately carries no attention summary:
+   * the group headers below already report what is waiting, and say which kind.
+   */
+  private renderHeader(): TemplateResult {
     return html`
       <div class="board-title-row">
         ${this.compact && this.onCloseOverlay !== undefined ? html`
@@ -398,7 +387,6 @@ export class SessionInboxPanel extends LitElement {
           >←</button>
         ` : nothing}
         <h2 class="board-title">Inbox</h2>
-        <span class="board-summary" id="board-summary">${summaryText}</span>
       </div>
       <div class="board-actions">
         <button
@@ -429,13 +417,6 @@ export class SessionInboxPanel extends LitElement {
             @click=${() => { this.setGroupBy("project"); }}
           >Project</button>
         </div>
-        <button
-          class="toggle"
-          data-action="toggle-archived"
-          aria-pressed=${String(this.showArchived)}
-          title="Show archived sessions"
-          @click=${() => { this.setShowArchived(!this.showArchived); }}
-        ><span class="toggle-dot" aria-hidden="true"></span>Archived</button>
       </div>
     `;
   }
@@ -444,15 +425,16 @@ export class SessionInboxPanel extends LitElement {
     // Compute once per render so every row in this frame shares the same timestamp.
     const now = Date.now();
 
-    // Archived is opt-in in both grouping modes, so the toggle means the same
-    // thing wherever it is pressed.
+    // The archive is disclosed from a pinned shelf, so it only takes list space
+    // once it has been asked for.
     const stateGroups: readonly SessionBoardGroup<SessionInfo>[] =
-      board.groups.filter((group) => this.showArchived || group.kind !== "archived");
+      board.groups.filter((group) => group.kind !== "archived" || (this.showArchived && this.groupBy === "state"));
     const projectGroups: readonly { kind: string; label: string; tone: string; rows: readonly SessionBoardRow<SessionInfo>[] }[] =
       groupSessionsByProject(board, { includeArchived: this.showArchived }).groups;
     const groups: readonly InboxGroup[] = this.groupBy === "project" ? projectGroups : stateGroups;
 
     const visibleGroups = groups.filter((g) => g.rows.length > 0);
+    const archivedRows = board.groups.find((group) => group.kind === "archived")?.rows ?? [];
     // Keyboard J/K walks exactly what the eye can walk: expanded groups only.
     this.navigableSessions = visibleGroups
       .filter((group) => !this.collapsedGroups.has(group.kind))
@@ -462,7 +444,32 @@ export class SessionInboxPanel extends LitElement {
       <div class="board-scroll" role="listbox" aria-label="Sessions">
         ${visibleGroups.map((group) => this.renderGroup(group, resolveLocation, now))}
       </div>
+      ${archivedRows.length === 0 ? nothing : this.renderArchiveShelf(archivedRows.length)}
       ${this.renderUndoToast()}
+    `;
+  }
+
+  /**
+   * The archive's disclosure, pinned below the list rather than placed at the
+   * end of it: with thousands of open sessions, "last in the list" is a place
+   * no one scrolls to. Opening it reveals the group in the list itself, so the
+   * archive is browsed the same way every other group is.
+   */
+  private renderArchiveShelf(count: number): TemplateResult {
+    return html`
+      <button
+        class="archive-shelf"
+        data-action="toggle-archived"
+        data-archive-shelf
+        aria-expanded=${String(this.showArchived)}
+        aria-controls="group-rows-archived"
+        title="Show archived sessions"
+        @click=${() => { this.setShowArchived(!this.showArchived); }}
+      >
+        <span class="group-chevron" aria-hidden="true">▾</span>
+        <span class="group-label">Archived</span>
+        <span class="group-count" data-archive-count>${String(count)}</span>
+      </button>
     `;
   }
 
@@ -492,7 +499,8 @@ export class SessionInboxPanel extends LitElement {
 
   private renderGroup(group: InboxGroup, resolveLocation: InboxLocationResolver, now: number): TemplateResult {
     const kind = group.kind;
-    const collapsed = this.collapsedGroups.has(kind);
+    // The archive has one control, the shelf; it is never also collapsed.
+    const collapsed = kind === "archived" ? false : this.collapsedGroups.has(kind);
     const tone = this.groupBy === "project"
       ? "var(--pi-muted)"
       : `var(--tone-${kind}, var(--pi-muted))`;
@@ -610,11 +618,14 @@ export class SessionInboxPanel extends LitElement {
 
   private setShowArchived(showArchived: boolean): void {
     this.showArchived = showArchived;
-    const machineId = this.globalSessions?.machineId;
-    if (machineId !== undefined) writeShowArchived(machineId, showArchived);
-    // Revealing the archive should show it: a toggle that uncovers a collapsed
-    // header would need a second click to mean anything.
-    if (showArchived && this.collapsedGroups.has("archived")) this.toggleGroup("archived");
+    // Opening the shelf reveals a group far below the fold; take the reader there.
+    if (showArchived) void this.scrollArchivedIntoView();
+  }
+
+  private async scrollArchivedIntoView(): Promise<void> {
+    await this.updateComplete;
+    const archived = this.shadowRoot?.querySelector("[data-group='archived']");
+    archived?.scrollIntoView({ block: "start" });
   }
 
   private toggleGroup(kind: string): void {
@@ -688,7 +699,7 @@ export class SessionInboxPanel extends LitElement {
       background: var(--pi-surface, #101527);
     }
 
-    @container (min-width: 520px) {
+    @container (min-width: 330px) {
       .board-header {
         grid-template-columns: auto minmax(0, 1fr) auto;
         grid-template-areas: "title controls actions";
@@ -717,20 +728,6 @@ export class SessionInboxPanel extends LitElement {
       font-size: clamp(1rem, 0.98rem + 0.12cqi, 1.0625rem);
       font-weight: 650;
       color: var(--pi-text-bright, #fff);
-    }
-
-    .board-summary {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-muted, #aaa4bd);
-    }
-
-    .board-summary strong {
-      color: var(--pi-purple, #b7a2ff);
-      font-weight: 600;
     }
 
     .board-controls {
@@ -766,36 +763,6 @@ export class SessionInboxPanel extends LitElement {
       background: var(--pi-selection-bg, #1d2547);
       color: var(--pi-text-bright, #fff);
     }
-
-    .toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-height: 44px;
-      padding: 4px 10px;
-      font: inherit;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-muted, #aaa4bd);
-      background: none;
-      border: 1px solid var(--pi-border, #26304f);
-      border-radius: 999px;
-      cursor: pointer;
-    }
-
-    .toggle[aria-pressed="true"] {
-      color: var(--pi-text-bright, #fff);
-      border-color: var(--pi-accent-border, #5a47b0);
-      background: var(--pi-selection-bg, #1d2547);
-    }
-
-    .toggle-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--pi-dim, #817a99);
-    }
-
-    .toggle[aria-pressed="true"] .toggle-dot { background: var(--pi-purple, #b7a2ff); }
 
     .overlay-back-btn {
       display: inline-grid;
@@ -938,6 +905,21 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .group-spacer { flex: 1 1 auto; }
+
+    /*
+     * The archive is a shelf, not a state you are working through: it sits
+     * last, stays quiet, and does not stick to the top while scrolling past.
+     */
+    .archive-shelf { margin-top: 8px; }
+
+    .archive-shelf .group-header {
+      position: static;
+      background: none;
+      backdrop-filter: none;
+    }
+
+    .archive-shelf .group-label,
+    .archive-shelf .group-count { color: var(--pi-dim, #817a99); }
 
     /* ---- rows ---- */
 
