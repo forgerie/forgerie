@@ -412,15 +412,27 @@ export const chatStyles = css`
   /* A turn starts when the human speaks. That is the only break the eye needs
      to find without reading. */
   .msg.user, .msg.bash { margin-top: calc(var(--calm-turn-gap) - var(--calm-para-gap)); }
-  /* The question is told apart by where it sits, not by how it is coloured.
-     Weight and tone were the previous cue and both failed the skim test: you
-     had to read a line to learn who wrote it. Position survives every theme,
-     because no palette can weaken a geometry.
+  /* The question is told apart by where it sits and by carrying a container,
+     not by how it is coloured. Weight and tone were the previous cue and both
+     failed the skim test: you had to read a line to learn who wrote it.
 
-     The block is inset; the words inside stay left-aligned. Right-aligning the
-     text itself gives English a ragged left edge, which costs real reading
-     effort on anything longer than a line. */
-  .msg.user { margin-inline-start: clamp(1.5rem, 20%, 8rem); }
+     The bubble shrink-wraps and is pushed to the far side by an auto margin,
+     so a short question is a small shape and a long one still reads normally:
+     the words inside stay left-aligned. Right-aligning the text itself gives
+     English a ragged left edge, which costs real reading effort.
+
+     The hairline is not decoration. In the light theme the surface sits only
+     eight values above the canvas, which is too little to read as a container
+     on its own. */
+  .msg.user {
+    width: fit-content;
+    max-width: min(100%, 30rem);
+    margin-inline-start: auto;
+    border: 1px solid var(--calm-rule);
+    border-radius: 14px;
+    background: var(--calm-canvas-soft);
+    padding: 12px 16px;
+  }
   .msg.tool, .msg.bash, .msg.skill { color: var(--calm-ink-dim); }
   .msg.tool-execution-shell, .msg.ask-user-record-shell { padding: 0; border: 0; background: transparent; color: var(--calm-ink-muted); }
   .msg.ask-user-record-shell ask-user-card { margin: 0 auto; }
@@ -572,7 +584,10 @@ export const formattedTextStyles = css`
   .code-copy-button:hover, .code-copy-button:focus { color: var(--pi-text); border-color: var(--pi-accent); }
   blockquote { border-left: 3px solid var(--pi-border); padding-left: 10px; color: var(--pi-muted); }
   a { color: var(--pi-accent); }
-  h1, h2, h3, h4 { margin: 14px 0 8px; line-height: 1.2; }
+  /* A heading belongs to what follows it, so it sits far from the paragraph
+     above and close to the one below. Equal space on both sides leaves it
+     floating between two blocks and belonging to neither. */
+  h1, h2, h3, h4 { margin: 28px 0 6px; line-height: 1.25; }
   h1:first-child, h2:first-child, h3:first-child, h4:first-child { margin-top: 0; }
   h1 { font-size: 20px; }
   h2 { font-size: 17px; }
