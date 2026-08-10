@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { PiSessionService } from "./piSessionService.js";
+import type { ArchiveSessionInput } from "./sessionArchiveStore.js";
 import { SessionNotificationStore } from "./sessionNotificationStore.js";
 import { CapturingSessionEventHub, fakeRuntime, fakeSessionManager, resolveSessionFileFromList, runtimeCreator, sessionGateway, sessionRecord, sessionRef, testModelRuntime } from "./piSessionService.testSupport.js";
 
@@ -39,6 +40,56 @@ describe("PiSessionService archive and cleanup", () => {
     expect(() => store.inboxSnapshot("archive-notification-session", "/workspace")).toThrow("Session not found");
     expect(hub.notificationSummaryEvents.at(-1)).toMatchObject({
       summary: { sessionId: "archive-notification-session", retainedCount: 0 },
+    });
+    await service.dispose();
+  });
+
+  it("bounds the full-listing fallback passed to direct archive persistence", async () => {
+    const listed = {
+      ...sessionRecord("archive-long"),
+      firstMessage: `${"a".repeat(499)}🧪🧪`,
+      name: "Preserved name",
+      parentSessionPath: "/sessions/parent.jsonl",
+    };
+    const runtime = fakeRuntime("archive-long", {
+      sessionFile: listed.path,
+      sessionManager: fakeSessionManager(listed.cwd, {
+        getSessionId: () => listed.id,
+        getSessionFile: () => listed.path,
+      }),
+    });
+    const archive = vi.fn((input: ArchiveSessionInput) => Promise.resolve({
+      sessionId: input.sessionId,
+      cwd: input.cwd,
+      archivedAt: "2026-01-03T00:00:00.000Z",
+    }));
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(runtime.runtime),
+      archiveStore: {
+        list: () => Promise.resolve([]),
+        get: () => Promise.resolve(undefined),
+        archive,
+        restore: () => Promise.resolve(),
+        isArchived: () => Promise.resolve(false),
+      },
+      sessionManager: sessionGateway([listed]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.archive(sessionRef("archive-long"));
+
+    expect(archive).toHaveBeenCalledWith({
+      sessionId: listed.id,
+      cwd: listed.cwd,
+      path: listed.path,
+      created: listed.created.toISOString(),
+      modified: listed.modified.toISOString(),
+      messageCount: listed.messageCount,
+      firstMessage: `${"a".repeat(499)}🧪`,
+      name: "Preserved name",
+      parentSessionPath: "/sessions/parent.jsonl",
     });
     await service.dispose();
   });

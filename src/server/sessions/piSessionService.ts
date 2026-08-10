@@ -90,6 +90,7 @@ import {
   type SessionNotificationMutation,
 } from "./sessionNotificationStore.js";
 import { plainTextTheme } from "./plainTextTheme.js";
+import { boundSessionCatalogFirstMessage } from "./sessionCatalogMetadata.js";
 import { SessionUnreadStore, type SessionUnreadMutation } from "./sessionUnreadStore.js";
 
 /**
@@ -4017,7 +4018,7 @@ function clientSessionFromListEntry(session: PiSessionListEntry): ClientSession 
     created: session.created.toISOString(),
     modified: session.modified.toISOString(),
     messageCount: session.messageCount,
-    firstMessage: session.firstMessage,
+    firstMessage: boundSessionCatalogFirstMessage(session.firstMessage),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
   };
 }
@@ -4061,7 +4062,7 @@ function archiveInputFromListEntry(session: PiSessionListEntry): ArchiveSessionI
     created: session.created.toISOString(),
     modified: session.modified.toISOString(),
     messageCount: session.messageCount,
-    firstMessage: session.firstMessage,
+    firstMessage: boundSessionCatalogFirstMessage(session.firstMessage),
     ...(session.name === undefined ? {} : { name: session.name }),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
   };
@@ -4154,7 +4155,7 @@ function clientSessionFromArchivedRecord(record: ArchivedSessionRecord, fallback
     created,
     modified,
     messageCount,
-    firstMessage,
+    firstMessage: boundSessionCatalogFirstMessage(firstMessage),
     ...(parentSessionPath === undefined ? {} : { parentSessionPath }),
     archived: true,
     archivedAt: record.archivedAt,

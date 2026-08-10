@@ -33,6 +33,34 @@ describe("session cleanup planning", () => {
     expect(plan.totals).toEqual({ archiveCount: 1, deleteCount: 1 });
   });
 
+  it("bounds full-listing fallbacks while preserving cleanup archive metadata", () => {
+    const session = {
+      ...sessionEntry("archive-long", "/repo", "2026-05-01T00:00:00.000Z"),
+      firstMessage: `${"a".repeat(499)}🧪🧪`,
+      name: "Preserved name",
+      parentSessionPath: "/sessions/parent.jsonl",
+    };
+
+    const plan = planSessionCleanup({
+      now: new Date("2026-06-25T00:00:00.000Z"),
+      thresholds: { archiveIdleDays: 30 },
+      sessions: [session],
+      archivedRecords: [],
+    });
+
+    expect(plan.archiveInputs).toEqual([{
+      sessionId: session.id,
+      cwd: session.cwd,
+      path: session.path,
+      created: session.created.toISOString(),
+      modified: session.modified.toISOString(),
+      messageCount: session.messageCount,
+      firstMessage: `${"a".repeat(499)}🧪`,
+      name: "Preserved name",
+      parentSessionPath: "/sessions/parent.jsonl",
+    }]);
+  });
+
   it("filters cleanup candidates to selected project cwd paths", () => {
     const plan = planSessionCleanup({
       now: new Date("2026-06-25T00:00:00.000Z"),

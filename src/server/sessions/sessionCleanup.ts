@@ -1,6 +1,7 @@
 import type { SessionCleanupExecuteResponse, SessionCleanupPreviewResponse, SessionCleanupProjectSummary, SessionCleanupThresholds } from "../../shared/apiTypes.js";
 import type { PiSessionListEntry } from "./piSessionService.js";
 import type { ArchivedSessionRecord, ArchiveSessionInput } from "./sessionArchiveStore.js";
+import { boundSessionCatalogFirstMessage } from "./sessionCatalogMetadata.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -181,7 +182,7 @@ function archiveInputFromListEntry(session: PiSessionListEntry): ArchiveSessionI
     created: session.created.toISOString(),
     modified: session.modified.toISOString(),
     messageCount: session.messageCount,
-    firstMessage: session.firstMessage,
+    firstMessage: boundSessionCatalogFirstMessage(session.firstMessage),
     ...(session.name === undefined ? {} : { name: session.name }),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
   };

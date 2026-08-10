@@ -2,9 +2,9 @@ import type { Dirent, Stats } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
 import type { PiSessionListEntry } from "./piSessionService.js";
+import { boundSessionCatalogFirstMessage } from "./sessionCatalogMetadata.js";
 
 const CATALOG_WINDOW_BYTES = 64 * 1024;
-const CATALOG_FIRST_MESSAGE_MAX_CHARS = 500;
 const MAX_CONCURRENT_CATALOG_READS = 32;
 
 interface CachedCatalogEntry {
@@ -203,7 +203,7 @@ function messageText(content: unknown): string {
         })
         .join("\n")
       : "";
-  return Array.from(text.trim()).slice(0, CATALOG_FIRST_MESSAGE_MAX_CHARS).join("");
+  return boundSessionCatalogFirstMessage(text.trim());
 }
 
 function completeLines(buffer: Buffer, endsAtEof: boolean): string[] {

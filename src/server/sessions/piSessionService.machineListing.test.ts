@@ -124,6 +124,72 @@ describe("PiSessionService machine listing", () => {
     }
   });
 
+  it("bounds active compatibility and archived fallbacks without changing catalog metadata", async () => {
+    const oversizedFirstMessage = `${"a".repeat(499)}🧪🧪`;
+    const expectedFirstMessage = `${"a".repeat(499)}🧪`;
+    const active = {
+      ...sessionRecord("active", "/projects/active"),
+      firstMessage: oversizedFirstMessage,
+      name: "Active name",
+    };
+    const archived = {
+      ...sessionRecord("archived", "/projects/archived"),
+      firstMessage: "listed fallback",
+    };
+    const archivedPath = "/sessions/archived.jsonl";
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      sessionManager: {
+        create: () => fakeSessionManager(),
+        list: () => Promise.resolve([]),
+        listAll: () => Promise.resolve([active, archived]),
+        listParentSessionPaths: () => Promise.resolve([]),
+        invalidateSessionFile: () => undefined,
+        resolveSessionFile: () => Promise.resolve(undefined),
+        open: () => fakeSessionManager(),
+      },
+      archiveStore: {
+        list: () => Promise.resolve([{
+          ...archivedRecord("archived", "/projects/archived", archivedPath),
+          archivePath: "/archive/archived.jsonl",
+          firstMessage: oversizedFirstMessage,
+          name: "Archived name",
+          parentSessionPath: "/sessions/parent.jsonl",
+        }]),
+        get: () => Promise.resolve(undefined),
+        archive: () => Promise.reject(new Error("archive should not be called")),
+        restore: () => Promise.resolve(),
+        isArchived: () => Promise.resolve(true),
+      },
+      heartbeatIntervalMs: 60_000,
+    });
+
+    try {
+      const snapshot = await service.machineListing();
+
+      expect(snapshot.sessions).toMatchObject([
+        {
+          id: "active",
+          path: active.path,
+          name: "Active name",
+          firstMessage: expectedFirstMessage,
+        },
+        {
+          id: "archived",
+          path: archivedPath,
+          name: "Archived name",
+          parentSessionPath: "/sessions/parent.jsonl",
+          firstMessage: expectedFirstMessage,
+          archived: true,
+        },
+      ]);
+      expect(snapshot.sessions.every((session) => Array.from(session.firstMessage).length <= 500)).toBe(true);
+    } finally {
+      await service.dispose();
+    }
+  });
+
   it("returns empty arrays without opening any runtime when the machine has no sessions", async () => {
     let runtimeCreations = 0;
     const service = new PiSessionService(new CapturingSessionEventHub(), {
