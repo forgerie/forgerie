@@ -24,6 +24,7 @@ import { SessionStorageWorkspaceSelectionMemory } from "../controllers/workspace
 import { KeyboardShortcutDispatcher } from "../keyboardShortcuts";
 import { selectedMachineId } from "../controllers/types";
 import { isKeyEventInEditableContext } from "../keyboardContext";
+import { observeInputMode } from "../inputMode";
 import { machineSessionKey } from "../machineKeys";
 import { createManagedProcessesRuntime } from "../managedProcessesRuntime";
 import type { ManagedProcessesBrowserEvent, ManagedProcessesRuntime } from "../../../plugin-api/unstable";
@@ -429,6 +430,9 @@ export class PiWebApp extends LitElement {
     this.browserResume.connect();
     window.addEventListener("keydown", this.onKeyDown, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
     this.systemLightThemeMedia?.addEventListener("change", this.onSystemLightThemeChange);
+    // Controls that differ between a finger and a mouse read the input in use
+    // from the root. The watch runs for the life of the app.
+    this.stopInputModeWatch = observeInputMode(document.documentElement, document);
     this.applyPreferredTheme(false);
     this.connectRealtime();
     this.syncSessionUnreadMachines();
@@ -440,7 +444,11 @@ export class PiWebApp extends LitElement {
     void this.loadProjectsAndRestoreRoute().finally(() => { this.schedulePiWebStatusRefresh(); });
   }
 
+  private stopInputModeWatch: (() => void) | undefined;
+
   override disconnectedCallback(): void {
+    this.stopInputModeWatch?.();
+    this.stopInputModeWatch = undefined;
     this.unreadConnected = false;
     this.committedChatIdentity = undefined;
     this.readyChatIdentity = undefined;

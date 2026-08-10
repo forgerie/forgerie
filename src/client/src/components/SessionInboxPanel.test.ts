@@ -1177,3 +1177,133 @@ describe("live work indicator", () => {
     expect(shadowRoot(panel).querySelector("[data-live-work]")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Swipe to archive
+//
+// The gesture reads pointerType from the event, so these tests send real
+// pointer events and never touch a device query.
+// ---------------------------------------------------------------------------
+
+/** A named no-op, because the lint bans an empty arrow in place. */
+function noop(): void {
+  return;
+}
+
+/**
+ * happy-dom has no PointerEvent, and no layout, so a row measures zero. The
+ * helper supplies both: an event carrying pointerType, and a width for the
+ * commit distance.
+ */
+function sendPointer(
+  row: HTMLElement,
+  type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
+  init: { pointerType: string; clientX: number; clientY: number },
+): void {
+  const event = new Event(type, { bubbles: true, composed: true });
+  Object.assign(event, init, { pointerId: 1 });
+  row.dispatchEvent(event);
+}
+
+async function mountRowForSwipe(
+  onArchiveSession: (session: SessionInfo) => void,
+  onSelectSession: (session: SessionInfo) => void = noop,
+): Promise<{ panel: SessionInboxPanel; row: HTMLElement }> {
+  const panel = await mountPanel({
+    globalSessions: mkGlobalSessions([mkSession("open-one")]),
+    onArchiveSession,
+    onSelectSession,
+  });
+  const root = shadowRoot(panel);
+  clickSelector(root, "[data-group='open'] button");
+  await panel.updateComplete;
+
+  const row = root.querySelector("[data-session='open-one']");
+  if (!(row instanceof HTMLElement)) throw new Error("No row");
+  // No layout in happy-dom: give the row a width so the commit distance is real.
+  row.getBoundingClientRect = () => new DOMRect(0, 0, 340, 56);
+  row.setPointerCapture = noop;
+  return { panel, row };
+}
+
+describe("swipe to archive", () => {
+  it("archives when a finger carries the row past the commit distance", async () => {
+    const archived: string[] = [];
+    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 160, clientY: 100 });
+    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 160, clientY: 100 });
+
+    expect(archived).toEqual(["open-one"]);
+  });
+
+  it("returns the row and archives nothing when the finger stops short", async () => {
+    const archived: string[] = [];
+    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 270, clientY: 100 });
+    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 270, clientY: 100 });
+
+    expect(archived).toEqual([]);
+    expect(row.parentElement?.style.getPropertyValue("--swipe-x")).toBe("0px");
+  });
+
+  it("leaves the row alone when the finger scrolls the list", async () => {
+    const archived: string[] = [];
+    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+
+    // Down the list, with the sideways drift a real finger produces.
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 400 });
+    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 270, clientY: 200 });
+    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 270, clientY: 200 });
+
+    expect(archived).toEqual([]);
+  });
+
+  it("does not open the session after a swipe", async () => {
+    const selected: string[] = [];
+    const { row } = await mountRowForSwipe(noop, (s) => { selected.push(s.id); });
+
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 160, clientY: 100 });
+    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 160, clientY: 100 });
+    row.click();
+
+    expect(selected).toEqual([]);
+  });
+
+  it("still opens the session on a tap", async () => {
+    const selected: string[] = [];
+    const { row } = await mountRowForSwipe(noop, (s) => { selected.push(s.id); });
+
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 300, clientY: 100 });
+    row.click();
+
+    expect(selected).toEqual(["open-one"]);
+  });
+
+  it("ignores a mouse drag, which has its own action row", async () => {
+    const archived: string[] = [];
+    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+
+    sendPointer(row, "pointerdown", { pointerType: "mouse", clientX: 300, clientY: 100 });
+    sendPointer(row, "pointermove", { pointerType: "mouse", clientX: 100, clientY: 100 });
+    sendPointer(row, "pointerup", { pointerType: "mouse", clientX: 100, clientY: 100 });
+
+    expect(archived).toEqual([]);
+  });
+
+  it("archives nothing when the gesture is cancelled", async () => {
+    const archived: string[] = [];
+    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 160, clientY: 100 });
+    sendPointer(row, "pointercancel", { pointerType: "touch", clientX: 160, clientY: 100 });
+
+    expect(archived).toEqual([]);
+  });
+});

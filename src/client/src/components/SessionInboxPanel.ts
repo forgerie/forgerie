@@ -25,6 +25,7 @@ import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
 import { renderBuiltinTabIcon } from "./tabIcons";
 import { isKeyEventInEditableContext } from "../keyboardContext";
+import { commitDistance, readSwipe } from "../rowSwipe";
 import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
 import {
   attentionCount,
@@ -65,6 +66,21 @@ function writeGroupBy(machineId: string, groupBy: "state" | "project"): void {
 }
 
 const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["open", "archived"]);
+
+/**
+ * Travel before a movement counts as a swipe rather than a touch. A finger
+ * rests on a few pixels of movement, so a smaller number opens a row by
+ * accident.
+ */
+const SWIPE_ENGAGE_PX = 12;
+
+/** Where a finger went down, and what the row under it needs to commit. */
+interface SwipeOrigin {
+  readonly x: number;
+  readonly y: number;
+  readonly slot: HTMLElement;
+  readonly commitPx: number;
+}
 
 function readCollapsedGroups(machineId: string): Set<string> {
   const raw = browserStorage()?.getItem(storageKey(machineId, "collapsed"));
@@ -602,6 +618,12 @@ export class SessionInboxPanel extends LitElement {
 
     const handleRowClick = () => {
       if (isDeleted) return;
+      // A swipe ends with a click. The row opens on a tap, so a gesture that
+      // travelled must not also open the session.
+      if (this.swipeConsumedClick) {
+        this.swipeConsumedClick = false;
+        return;
+      }
       this.onSelectSession?.(session);
     };
 
@@ -615,11 +637,19 @@ export class SessionInboxPanel extends LitElement {
       this.onRestoreSession?.(session);
     };
 
+    const archivable = kind !== "archived" && !isDeleted;
+
     return html`
+      <div class="row-slot">
+        ${archivable ? html`<div class="row-behind" aria-hidden="true">✓</div>` : nothing}
       <div
         class="row"
         role="option"
         tabindex=${isDeleted ? "-1" : "0"}
+        @pointerdown=${archivable ? (e: PointerEvent) => { this.onRowPointerDown(e); } : nothing}
+        @pointermove=${archivable ? (e: PointerEvent) => { this.onRowPointerMove(e); } : nothing}
+        @pointerup=${archivable ? (e: PointerEvent) => { this.onRowPointerUp(e, session); } : nothing}
+        @pointercancel=${archivable ? (e: PointerEvent) => { this.onRowPointerUp(e, session); } : nothing}
         data-session=${session.id}
         data-state=${kind}
         style="--row-tone: var(--tone-${kind}, var(--pi-dim))"
@@ -655,7 +685,74 @@ export class SessionInboxPanel extends LitElement {
             : html`<button class="row-action" data-action="archive" title="Archive" aria-label="Archive session" @click=${handleArchive}>✓</button>`}
         </div>
       </div>
+      </div>
     `;
+  }
+
+  // -------------------------------------------------------------------------
+  // Swipe to archive
+  //
+  // Only a finger swipes. The pointer event carries `pointerType`, so the
+  // handler reads the interaction itself and asks nothing about the device.
+  //
+  // The travel is written straight to the slot rather than held as component
+  // state, because state would re-render the whole list on every move.
+  // -------------------------------------------------------------------------
+
+  private swipeOrigin: SwipeOrigin | undefined;
+  private swipeArmed = false;
+  private swipeConsumedClick = false;
+
+  private onRowPointerDown(event: PointerEvent): void {
+    if (event.pointerType !== "touch") return;
+    const row = event.currentTarget;
+    if (!(row instanceof HTMLElement)) return;
+    const slot = row.parentElement;
+    if (slot === null) return;
+
+    slot.removeAttribute("data-releasing");
+    this.swipeArmed = false;
+    this.swipeOrigin = {
+      x: event.clientX,
+      y: event.clientY,
+      slot,
+      commitPx: commitDistance(row.getBoundingClientRect().width),
+    };
+    // Keep the moves coming even when the finger leaves the row.
+    row.setPointerCapture(event.pointerId);
+  }
+
+  private onRowPointerMove(event: PointerEvent): void {
+    const origin = this.swipeOrigin;
+    if (origin === undefined || event.pointerType !== "touch") return;
+
+    const reading = readSwipe(
+      event.clientX - origin.x,
+      event.clientY - origin.y,
+      { engagePx: SWIPE_ENGAGE_PX, commitPx: origin.commitPx },
+    );
+    if (reading.engaged) this.swipeConsumedClick = true;
+    this.swipeArmed = reading.willArchive;
+
+    origin.slot.style.setProperty("--swipe-x", `${String(reading.offset)}px`);
+    origin.slot.style.setProperty("--swipe-w", `${String(-reading.offset)}px`);
+    const mark = origin.slot.querySelector(".row-behind");
+    if (mark instanceof HTMLElement) mark.dataset["armed"] = String(reading.willArchive);
+  }
+
+  private onRowPointerUp(event: PointerEvent, session: SessionInfo): void {
+    const origin = this.swipeOrigin;
+    if (origin === undefined || event.pointerType !== "touch") return;
+    this.swipeOrigin = undefined;
+
+    const archive = this.swipeArmed && event.type === "pointerup";
+    this.swipeArmed = false;
+
+    origin.slot.dataset["releasing"] = "true";
+    origin.slot.style.setProperty("--swipe-x", "0px");
+    origin.slot.style.setProperty("--swipe-w", "0px");
+
+    if (archive) this.onArchiveSession?.(session);
   }
 
   // -------------------------------------------------------------------------
@@ -969,6 +1066,44 @@ export class SessionInboxPanel extends LitElement {
 
     /* ---- rows ---- */
 
+    /*
+     * The slot holds the row still while the row itself travels. The travel
+     * lives in a custom property rather than in the row's style attribute,
+     * because Lit owns that attribute and rewrites it whole whenever the row's
+     * state changes. A rewrite during a gesture would drop the row back.
+     */
+    .row-slot {
+      position: relative;
+      overflow: hidden;
+    }
+
+    /*
+     * The mark occupies the strip the row uncovers, and nothing more, so it
+     * never sits behind the row. The row can stay transparent at rest.
+     */
+    .row-behind {
+      position: absolute;
+      inset-block: 0;
+      inset-inline-end: 0;
+      width: var(--swipe-w, 0px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--pi-surface, #101527);
+      color: var(--pi-dim, #6b7394);
+      font-size: 15px;
+      pointer-events: none;
+      border-bottom: 1px solid var(--pi-border-muted, #1b2340);
+    }
+
+    /* Armed: a release from here archives the row, so the mark commits to it. */
+    .row-behind[data-armed="true"] {
+      background: var(--tone-archived, var(--pi-selection-bg, #1d2547));
+      color: var(--pi-fg, #e6e9f5);
+    }
+
+    .row-slot[data-releasing="true"] .row { transition: transform 160ms ease; }
+
     .row {
       position: relative;
       display: grid;
@@ -981,6 +1116,12 @@ export class SessionInboxPanel extends LitElement {
       border-bottom: 1px solid var(--pi-border-muted, #1b2340);
       cursor: pointer;
       transition: background 120ms ease;
+      transform: translateX(var(--swipe-x, 0px));
+      /*
+       * The browser keeps the vertical scroll and hands over the horizontal
+       * movement, so the gesture never competes with the list.
+       */
+      touch-action: pan-y;
     }
 
     .row:hover { background: var(--pi-surface, #101527); }
@@ -1121,11 +1262,21 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .row-actions {
+      /*
+       * A finger removes these controls rather than hiding them: it archives
+       * by swiping the row, so a button on every row is a column of noise. The
+       * value arrives from the root, written by observeInputMode from the
+       * input in use -- not from a query about what the device supports.
+       *
+       * Removed, not made transparent: a transparent control still answers a
+       * tap, and on iOS a hover rule stays active after a tap, so a transparent
+       * row would appear and then stay.
+       */
+      display: var(--pi-row-actions-display, flex);
       grid-column: 3;
       grid-row: 2;
       justify-self: end;
       align-self: center;
-      display: flex;
       gap: 3px;
       /* Sits with the location line without making the row taller than it. */
       margin-block-start: -4px;
@@ -1136,11 +1287,6 @@ export class SessionInboxPanel extends LitElement {
     .row:hover .row-actions,
     .row:focus-within .row-actions,
     .row[aria-selected="true"] .row-actions { opacity: 1; }
-
-    /* Touch: actions always visible (no hover). */
-    @media (hover: none) {
-      .row-actions { opacity: 1; }
-    }
 
     /* ≥44px touch target as required by plan. */
     /*
