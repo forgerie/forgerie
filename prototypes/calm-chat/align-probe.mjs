@@ -108,11 +108,45 @@ const probe = `(() => {
     });
   }
 
+  /*
+   * The metadata row should appear once where a turn ends, not on every reply.
+   * Counting is the only honest check: a screenshot shows one screen, and the
+   * claim is about the whole transcript.
+   */
+  const replies = [...chat.querySelectorAll("article.msg.assistant")];
+  const withMeta = replies.filter((node) => node.querySelector(".msg-meta") !== null);
+  const closesTurn = (node) => {
+    const index = children.indexOf(node);
+    const next = children.slice(index + 1).find((candidate) => candidate.matches("article.msg.user, article.msg.assistant"));
+    return next === undefined || next.matches("article.msg.user");
+  };
+
   return {
     themeBg: getComputedStyle(document.body).backgroundColor,
     user: readRole("user"),
     assistant: readRole("assistant"),
     turnGaps: turnGaps.slice(0, 6),
+    meta: {
+      replies: replies.length,
+      withMeta: withMeta.length,
+      // Every reply carrying metadata should be one that ends a turn.
+      misplaced: withMeta.filter((node) => !closesTurn(node)).length,
+      // And every turn-ending reply should carry it.
+      missing: replies.filter((node) => closesTurn(node) && node.querySelector(".msg-meta") === null).length,
+    },
+    bubble: (() => {
+      const node = chat.querySelector("article.msg.user");
+      if (!node) return null;
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      const columnBox = chat.getBoundingClientRect();
+      return {
+        background: style.backgroundColor,
+        borderRadius: style.borderRadius,
+        widthPercentOfColumn: Math.round((box.width / columnBox.width) * 100),
+        gapToColumnRight: Math.round(columnBox.right - box.right),
+      };
+    })(),
   };
 })()`;
 
