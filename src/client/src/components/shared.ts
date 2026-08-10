@@ -466,6 +466,12 @@ export const chatStyles = css`
   .session-activity strong { color: var(--pi-purple); }
   .session-activity span, .session-activity small { color: var(--pi-muted); }
   .history-boundary small { color: var(--pi-dim); }
+  .transcript-liveness { display: flex; align-items: center; gap: 7px; margin: 0 0 14px; padding: 0 2px; color: var(--pi-muted); font-size: 12px; font-style: italic; }
+  .transcript-liveness-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--pi-success); }
+  @media (prefers-reduced-motion: no-preference) {
+    .transcript-liveness-dot { animation: transcript-liveness-pulse 1.8s ease-in-out infinite; }
+  }
+  @keyframes transcript-liveness-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
   .msg-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; margin-bottom: 8px; }
   .msg > .msg-header { position: sticky; top: -26px; z-index: 4; margin: -12px -12px 8px; padding: 7px 10px 6px; border-radius: 9px 9px 0 0; border-bottom: 1px solid color-mix(in srgb, var(--pi-border-muted) 35%, transparent); background: var(--pi-surface); box-shadow: 0 8px 18px var(--pi-shadow-soft); }
   .msg.user > .msg-header { border-bottom-color: color-mix(in srgb, var(--pi-accent-border) 35%, transparent); background: var(--pi-selection-bg); }

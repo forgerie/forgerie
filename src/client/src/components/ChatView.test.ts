@@ -19,7 +19,7 @@ import {
   chatQueuedSectionShowsClearAction,
   chatSessionWarningRows,
 } from "./ChatView";
-import { templateEventHandlerAfterMarker, templateEventHandlerNearMarker } from "../templateInspection.testSupport";
+import { templateEventHandlerAfterMarker, templateEventHandlerNearMarker, templateText } from "../templateInspection.testSupport";
 
 describe("chatQueuedMessageSections", () => {
   it("labels client-side pending-start sends separately from server queued messages", () => {
@@ -113,6 +113,36 @@ describe("chatSessionWarningRows", () => {
   it("derives no rows when there are no warnings or status is unset", () => {
     expect(chatSessionWarningRows(warningStatus([]))).toEqual([]);
     expect(chatSessionWarningRows(undefined)).toEqual([]);
+  });
+});
+
+describe("ChatView transcript liveness", () => {
+  it("reports the session's activity inside the transcript while work is running", () => {
+    const view = withStatus(new ChatView(), queuedStatus([]));
+
+    const rendered = renderTranscriptLiveness(view);
+    if (rendered === null) throw new Error("expected a liveness line while streaming");
+    expect(templateText(rendered)).toContain("running");
+  });
+
+  it("reports a prompt in flight before the session reports streaming", () => {
+    const view = withStatus(new ChatView(), idleStatus());
+    view.isSendingPrompt = true;
+
+    const rendered = renderTranscriptLiveness(view);
+    if (rendered === null) throw new Error("expected a liveness line while sending");
+    expect(templateText(rendered)).toContain("Sending your message");
+  });
+
+  it("stays out of the transcript when the session is idle", () => {
+    expect(renderTranscriptLiveness(withStatus(new ChatView(), idleStatus()))).toBeNull();
+  });
+
+  it("leaves compaction to its own notice rather than doubling it", () => {
+    const view = withStatus(new ChatView(), { ...queuedStatus([]), isCompacting: true });
+    view.isCompacting = true;
+
+    expect(renderTranscriptLiveness(view)).toBeNull();
   });
 });
 
@@ -511,6 +541,16 @@ function warningStatus(warnings: SessionWarning[]): SessionStatus {
     ...queuedStatus([]),
     ...(warnings.length === 0 ? {} : { warnings }),
   };
+}
+
+function renderTranscriptLiveness(view: ChatView): TemplateResult | null {
+  const method: unknown = Reflect.get(view, "renderTranscriptLiveness");
+  if (!isRenderWarnings(method)) throw new Error("ChatView.renderTranscriptLiveness is not callable");
+  return method.call(view);
+}
+
+function idleStatus(): SessionStatus {
+  return { ...queuedStatus([]), isStreaming: false };
 }
 
 function queuedStatus(queuedMessages: QueuedSessionMessage[]): SessionStatus {

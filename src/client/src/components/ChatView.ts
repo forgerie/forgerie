@@ -6,6 +6,7 @@ import { groupChatMessages, summarizeChatGroup, type ChatGroup } from "../chatGr
 import { writeClipboardText } from "../clipboard";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
+import { sessionActivityIndicator } from "../sessionStatusStrip";
 import { ChatScrollController, distanceFromScrollBottom, findFirstVisibleArticle, isNearScrollBottom, type ChatAnchorScrollPosition, type ChatScrollRestoreResult } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
@@ -440,6 +441,7 @@ export class ChatView extends LitElement {
           )}
           ${this.renderQueuedMessages()}
           ${this.renderSessionActivity()}
+          ${this.renderTranscriptLiveness()}
           ${this.renderOpenAsk()}
           ${this.renderExtensionDialogs()}
         </div>
@@ -735,6 +737,29 @@ export class ChatView extends LitElement {
           ? html`<p class="queued-dialogs" role="status">${String(queuedCount)} more extension ${queuedCount === 1 ? "dialog" : "dialogs"} queued</p>`
           : null}
       `}
+    `;
+  }
+
+  /**
+   * The transcript's own answer to "is it running?".
+   *
+   * On constrained panes the status bar and every other chrome band are gone,
+   * so an idle session and a dead one would look identical without this line.
+   * It reuses `sessionActivityIndicator` rather than deriving state a second
+   * time, so it can never disagree with the status bar where both are visible.
+   *
+   * Compaction is excluded: `renderSessionActivity` already narrates it in
+   * more detail, and two notices for one condition reads as a stutter.
+   */
+  private renderTranscriptLiveness() {
+    if (this.isCompacting) return null;
+    const indicator = sessionActivityIndicator({ status: this.status, activity: this.activity, isSendingPrompt: this.isSendingPrompt });
+    if (indicator?.active !== true) return null;
+    return html`
+      <p class="transcript-liveness" aria-live="polite">
+        <span class="transcript-liveness-dot" aria-hidden="true"></span>
+        <span>${indicator.text}</span>
+      </p>
     `;
   }
 
