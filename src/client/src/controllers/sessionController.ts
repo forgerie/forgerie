@@ -1,7 +1,7 @@
-import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
+import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type MessagePage, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
 import type { AppState, ClosedExtensionDialog } from "../appState";
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
-import { textMessage } from "../chatMessages";
+import { normalizeMessages, textMessage } from "../chatMessages";
 import { machineSessionKey } from "../machineKeys";
 import { clearDraft, moveDraft, saveDraft } from "../promptDraftStorage";
 import { clearAskDraft } from "../askDrafts";
@@ -85,11 +85,25 @@ interface BulkSessionMutationResult {
 type ClientPendingStartSessionInfo = SessionInfo & { clientPendingStart: true; machineId: string };
 
 type QueuedPendingSessionSendInput =
-  | { type: "prompt"; text: string; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery }
+  | { type: "prompt"; text: string; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose?: "initialPrompt" }
   | { type: "shell"; text: string }
   | { type: "command"; text: string };
 
 type QueuedPendingSessionSend = QueuedPendingSessionSendInput & { id: string };
+
+export interface SessionLaunchDestination {
+  readonly machineId: string;
+  readonly workspaceId: string;
+  readonly cwd: string;
+}
+
+export interface SessionLaunchRecovery {
+  readonly stage: "creationFailed" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous";
+  readonly sessionId: string;
+  readonly destination: SessionLaunchDestination;
+  readonly prompt: string;
+  readonly retrying: boolean;
+}
 
 interface PendingSessionStart {
   tempId: string;
@@ -106,6 +120,13 @@ interface PendingSessionStart {
    * dialogs — the dialogs that gate the readiness the create request waits on.
    */
   backendSessionId?: string;
+}
+
+interface SessionLaunchRecoveryRecord {
+  recovery: SessionLaunchRecovery;
+  queuedSends: QueuedPendingSessionSend[];
+  pending?: PendingSessionStart;
+  session?: SessionInfo;
 }
 
 interface SuppressedCreatedSession {
@@ -143,6 +164,7 @@ export class SessionController {
   private pendingSessionStartSeq = 0;
   private pendingQueuedSendSeq = 0;
   private readonly pendingSessionStarts = new Map<string, PendingSessionStart>();
+  private readonly sessionLaunchRecoveries = new Map<string, SessionLaunchRecoveryRecord>();
   private readonly suppressedCreatedSessions = new Map<string, SuppressedCreatedSession>();
   private readonly selectedSessionRefreshes = new TrailingRefreshCoordinator<string>();
 
@@ -218,8 +240,119 @@ export class SessionController {
     const pending = this.createPendingSessionStart(workspace, machineId);
     this.pendingSessionStarts.set(pending.tempId, pending);
     this.insertAndSelectPendingSession(pending.session);
+    await this.startPendingSession(pending);
+  }
+
+  async launchSession(firstPrompt: string): Promise<void> {
+    const workspace = this.getState().selectedWorkspace;
+    if (workspace === undefined || firstPrompt.trim() === "") return;
+    const machineId = selectedMachineId(this.getState());
+    const pending = this.createPendingSessionStart(workspace, machineId);
+    this.pendingSessionStarts.set(pending.tempId, pending);
+    this.insertAndSelectPendingSession(pending.session);
+    this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: firstPrompt, delivery: "inline", purpose: "initialPrompt" });
+    await this.startPendingSession(pending);
+  }
+
+  getSessionLaunchRecovery(sessionId: string): SessionLaunchRecovery | undefined {
+    return this.sessionLaunchRecoveries.get(sessionId)?.recovery;
+  }
+
+  async retrySessionLaunch(sessionId: string): Promise<void> {
+    const record = this.sessionLaunchRecoveries.get(sessionId);
+    if (record === undefined || record.recovery.retrying) return;
+
+    if (record.recovery.stage === "creationFailed" && record.pending !== undefined) {
+      record.recovery = { ...record.recovery, retrying: true };
+      record.pending.discarded = false;
+      delete record.pending.backendSessionId;
+      this.pendingSessionStarts.set(sessionId, record.pending);
+      this.applySessionLaunchRetryActivity(sessionId, "Creating session");
+      await this.startPendingSession(record.pending);
+      return;
+    }
+
+    if (record.recovery.stage !== "promptConfirmedUnsent" || record.session === undefined) return;
+    record.recovery = { ...record.recovery, retrying: true };
+    this.applySessionLaunchRetryActivity(sessionId, "Sending first prompt");
+    await this.flushQueuedPendingSends(record.session, record.recovery.destination.machineId, record.queuedSends, record.recovery.destination);
+    if (this.sessionLaunchRecoveries.get(sessionId) === record) this.sessionLaunchRecoveries.delete(sessionId);
+  }
+
+  async restoreSessionLaunchPrompt(sessionId: string): Promise<void> {
+    const record = this.sessionLaunchRecoveries.get(sessionId);
+    if (record?.recovery.stage !== "promptDeliveryAmbiguous" || this.replacePromptEditorText === undefined) return;
+    if (!this.isSelectedSessionIdentity(sessionId, record.recovery.destination.machineId)) return;
+    await this.replacePromptEditorText({
+      machineId: record.recovery.destination.machineId,
+      sessionId,
+      text: record.recovery.prompt,
+    });
+    if (this.sessionLaunchRecoveries.get(sessionId) !== record) return;
+    this.sessionLaunchRecoveries.delete(sessionId);
+    this.dropNextQueuedSessionMessage(sessionId);
+    this.clearInitialPromptRecoveryProjection(sessionId);
+  }
+
+  async refreshSessionLaunchRecovery(sessionId: string): Promise<void> {
+    const record = this.sessionLaunchRecoveries.get(sessionId);
+    if (record?.recovery.stage !== "promptDeliveryAmbiguous" || record.session === undefined) return;
+    const { machineId } = record.recovery.destination;
     try {
-      const session = await this.api.startSession(workspace.path, machineId, pending.tempId);
+      const [page, status] = await Promise.all([
+        this.api.messages(record.session, { limit: MESSAGE_PAGE_SIZE }, machineId),
+        this.api.status(record.session, machineId),
+      ]);
+      if (this.sessionLaunchRecoveries.get(sessionId) !== record || !this.isSelectedSessionIdentity(sessionId, machineId)) return;
+      const history = this.transcripts.mergeHistory(machineSessionKey(machineId, sessionId), page);
+      this.setState({ ...history, status });
+      this.applyStatus(status);
+      if (canonicalTranscriptContainsPrompt(page, record.recovery.prompt)) {
+        const retainedQueuedSends = record.queuedSends.slice(1);
+        this.sessionLaunchRecoveries.delete(sessionId);
+        this.dropNextQueuedSessionMessage(sessionId);
+        this.clearInitialPromptRecoveryProjection(sessionId);
+        await this.flushQueuedPendingSends(record.session, machineId, retainedQueuedSends, record.recovery.destination);
+        return;
+      }
+      const stage = canonicalSessionIsBlankAndIdle(page, status) ? "promptConfirmedUnsent" : "promptDeliveryAmbiguous";
+      record.recovery = { ...record.recovery, stage };
+      this.applyInitialPromptRecoveryActivity(record.recovery);
+    } catch (error) {
+      if (this.sessionLaunchRecoveries.get(sessionId) === record) this.setState({ error: String(error) });
+    }
+  }
+
+  private applySessionLaunchRetryActivity(sessionId: string, label: string): void {
+    const activity: SessionActivity = {
+      sessionId,
+      phase: "active",
+      label,
+      detail: "Retry in progress",
+      at: new Date().toISOString(),
+    };
+    const state = this.getState();
+    this.setState({
+      sessionActivities: { ...state.sessionActivities, [sessionId]: activity },
+      activity: state.selectedSession?.id === sessionId ? activity : state.activity,
+      error: "",
+    });
+  }
+
+  private clearInitialPromptRecoveryProjection(sessionId: string): void {
+    const state = this.getState();
+    const clearsSessionActivity = isInitialPromptRecoveryActivity(state.sessionActivities[sessionId]);
+    const clearsSelectedActivity = state.selectedSession?.id === sessionId && isInitialPromptRecoveryActivity(state.activity);
+    this.setState({
+      ...(clearsSessionActivity ? { sessionActivities: omitSessionActivity(state.sessionActivities, sessionId) } : {}),
+      ...(clearsSelectedActivity ? { activity: undefined } : {}),
+      error: "",
+    });
+  }
+
+  private async startPendingSession(pending: PendingSessionStart): Promise<void> {
+    try {
+      const session = await this.api.startSession(pending.cwd, pending.machineId, pending.tempId);
       await this.resolvePendingSessionStart(pending.tempId, session);
     } catch (error) {
       this.failPendingSessionStart(pending.tempId, error);
@@ -410,12 +543,58 @@ export class SessionController {
     });
   }
 
-  private async flushQueuedPendingSends(session: SessionInfo, machineId: string, queuedSends: readonly QueuedPendingSessionSend[]): Promise<void> {
-    for (const queued of queuedSends) {
+  private async flushQueuedPendingSends(session: SessionInfo, machineId: string, queuedSends: readonly QueuedPendingSessionSend[], destination?: SessionLaunchDestination): Promise<void> {
+    for (let index = 0; index < queuedSends.length; index += 1) {
+      const queued = queuedSends[index];
+      if (queued === undefined) continue;
       const delivered = await this.deliverQueuedPendingSend(session, machineId, queued);
-      if (!delivered) return;
-      this.dropNextQueuedSessionMessage(session.id);
+      if (delivered) {
+        this.dropNextQueuedSessionMessage(session.id);
+        continue;
+      }
+      if (!isInitialPromptSend(queued) || destination === undefined) return;
+      const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued.text);
+      if (stage === "accepted") {
+        this.dropNextQueuedSessionMessage(session.id);
+        this.clearInitialPromptRecoveryProjection(session.id);
+        continue;
+      }
+      const recovery: SessionLaunchRecovery = {
+        stage,
+        sessionId: session.id,
+        destination,
+        prompt: queued.text,
+        retrying: false,
+      };
+      this.sessionLaunchRecoveries.set(session.id, { recovery, queuedSends: queuedSends.slice(index), session });
+      this.applyInitialPromptRecoveryActivity(recovery);
+      return;
     }
+  }
+
+  private async reconcileInitialPromptDelivery(session: SessionInfo, machineId: string, prompt: string): Promise<"accepted" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous"> {
+    try {
+      const [page, status] = await Promise.all([
+        this.api.messages(session, { limit: MESSAGE_PAGE_SIZE }, machineId),
+        this.api.status(session, machineId),
+      ]);
+      if (canonicalTranscriptContainsPrompt(page, prompt)) return "accepted";
+      return canonicalSessionIsBlankAndIdle(page, status) ? "promptConfirmedUnsent" : "promptDeliveryAmbiguous";
+    } catch {
+      return "promptDeliveryAmbiguous";
+    }
+  }
+
+  private applyInitialPromptRecoveryActivity(recovery: SessionLaunchRecovery): void {
+    const activity = failedInitialPromptActivity(recovery.sessionId, recovery.stage);
+    const state = this.getState();
+    this.setState({
+      sessionActivities: { ...state.sessionActivities, [recovery.sessionId]: activity },
+      activity: state.selectedSession?.id === recovery.sessionId ? activity : state.activity,
+      error: recovery.stage === "promptConfirmedUnsent"
+        ? "The first prompt was not sent. You can retry it."
+        : "The first prompt may have been accepted. Inspect the transcript before you send it again.",
+    });
   }
 
   private async deliverQueuedPendingSend(session: SessionInfo, machineId: string, queued: QueuedPendingSessionSend): Promise<boolean> {
@@ -779,6 +958,7 @@ export class SessionController {
         // Best-effort cleanup for transient sessions that may not exist server-side anymore.
       });
     }
+    this.sessionLaunchRecoveries.delete(session.id);
     forgetCachedNewSession(session.id, machineId);
     clearDraft(this.sessionCacheKey(session.id));
     const state = this.getState();
@@ -1344,6 +1524,7 @@ export class SessionController {
     const pending = this.pendingSessionStarts.get(tempId);
     if (pending === undefined) return;
     this.pendingSessionStarts.delete(tempId);
+    this.sessionLaunchRecoveries.delete(tempId);
     const queuedSends = pending.queuedSends.splice(0);
     const releasedCreatedSessions = this.takeSuppressedCreatedSessionsFor(pending.cwd, pending.machineId, session.id);
     if (pending.discarded) {
@@ -1361,7 +1542,7 @@ export class SessionController {
     const cachedSession = markCachedNewSessionInfo(session, pending.machineId);
     if (!this.isCurrentPendingStart(pending)) {
       this.setState({ clientQueuedSessionMessages: omitKey(this.getState().clientQueuedSessionMessages, tempId) });
-      await this.flushQueuedPendingSends(cachedSession, pending.machineId, queuedSends);
+      await this.flushQueuedPendingSends(cachedSession, pending.machineId, queuedSends, sessionLaunchDestination(pending));
       return;
     }
 
@@ -1380,7 +1561,7 @@ export class SessionController {
       this.updateUrl({ replace: true });
       await this.selectSession(cachedSession, { updateUrl: false });
     }
-    await this.flushQueuedPendingSends(cachedSession, pending.machineId, queuedSends);
+    await this.flushQueuedPendingSends(cachedSession, pending.machineId, queuedSends, sessionLaunchDestination(pending));
   }
 
   private failPendingSessionStart(tempId: string, error: unknown): void {
@@ -1402,6 +1583,20 @@ export class SessionController {
     const state = this.getState();
     const message = errorMessage(error);
     const failure = `Failed to start session: ${message}`;
+    const initialPrompt = pending.queuedSends.find(isInitialPromptSend);
+    if (initialPrompt !== undefined) {
+      this.sessionLaunchRecoveries.set(tempId, {
+        recovery: {
+          stage: "creationFailed",
+          sessionId: tempId,
+          destination: { machineId: pending.machineId, workspaceId: pending.workspaceId, cwd: pending.cwd },
+          prompt: initialPrompt.text,
+          retrying: false,
+        },
+        queuedSends: pending.queuedSends,
+        pending,
+      });
+    }
     const activity = failedPendingSessionActivity(tempId, message, pending.queuedSends.length);
     const hasPendingRow = state.sessions.some((session) => session.id === tempId);
     this.setState({
@@ -1946,6 +2141,52 @@ function failedPendingSessionActivity(sessionId: string, message: string, queued
     detail: `${message}${queuedDetail}`,
     at: new Date().toISOString(),
   };
+}
+
+function failedInitialPromptActivity(sessionId: string, stage: SessionLaunchRecovery["stage"]): SessionActivity {
+  const confirmedUnsent = stage === "promptConfirmedUnsent";
+  return {
+    sessionId,
+    phase: "error",
+    label: confirmedUnsent ? "First prompt was not sent" : "First prompt delivery is unclear",
+    detail: confirmedUnsent
+      ? "The session was created, but its first prompt was confirmed unsent."
+      : "The session was created, but the first prompt may have been accepted. Inspect the transcript before sending it again.",
+    at: new Date().toISOString(),
+  };
+}
+
+function sessionLaunchDestination(pending: PendingSessionStart): SessionLaunchDestination {
+  return { machineId: pending.machineId, workspaceId: pending.workspaceId, cwd: pending.cwd };
+}
+
+function isInitialPromptRecoveryActivity(activity: SessionActivity | undefined): boolean {
+  return activity?.phase === "error"
+    && (activity.label === "First prompt was not sent" || activity.label === "First prompt delivery is unclear");
+}
+
+function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): boolean {
+  return normalizeMessages(page.messages).some((message) => {
+    if (message.role !== "user") return false;
+    if (message.promptText === prompt) return true;
+    return message.parts.map((part) => part.type === "text" ? part.text : "").join("") === prompt;
+  });
+}
+
+function canonicalSessionIsBlankAndIdle(page: MessagePage, status: SessionStatus): boolean {
+  return page.total === 0 && page.messages.length === 0 && canonicalStatusIsIdle(status);
+}
+
+function canonicalStatusIsIdle(status: SessionStatus): boolean {
+  return !status.isStreaming
+    && !status.isCompacting
+    && !status.isBashRunning
+    && status.pendingMessageCount === 0
+    && status.queuedMessages.length === 0;
+}
+
+function isInitialPromptSend(queued: QueuedPendingSessionSend): queued is Extract<QueuedPendingSessionSend, { type: "prompt" }> & { purpose: "initialPrompt" } {
+  return queued.type === "prompt" && queued.purpose === "initialPrompt";
 }
 
 function queuedSessionMessagePreview(queued: QueuedPendingSessionSend): QueuedSessionMessage {
