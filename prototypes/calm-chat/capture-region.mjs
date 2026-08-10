@@ -6,7 +6,7 @@
  * the scroller parked somewhere specific, so this drives it over CDP.
  *
  * Run through ./capture-region.sh.
- *   landmark: "fold" | "fold-open" | "user" | "system"
+ *   landmark: "fold" | "fold-open" | "user" | "system" | "turn-boundary"
  */
 
 import { spawn } from "node:child_process";
@@ -62,15 +62,78 @@ const scrollScript = (target) => `(() => {
     user: "article.msg.user",
     system: "article.msg.system",
   };
-  const nodes = [...chat.querySelectorAll(selectors[${JSON.stringify(target)}] ?? "article.msg")];
-  if (nodes.length === 0) return { error: "landmark not found", landmark: ${JSON.stringify(target)} };
+  /*
+   * The turn boundary is the gap between one turn's step count and the next
+   * question. It is the hardest thing to catch by hand in a long transcript,
+   * because scrolling to either element alone usually puts the other off
+   * screen, so it is found as a pair.
+   */
+  const boundaries = [...chat.children].flatMap((node, index, all) => {
+    if (!node.matches("details.msg.event-group")) return [];
+    const next = all.slice(index + 1).find((candidate) => candidate.matches("article.msg"));
+    return next?.matches("article.msg.user") ? [node] : [];
+  });
+
+  const landmark = ${JSON.stringify(target)};
+  const nodes = landmark === "turn-boundary"
+    ? boundaries
+    : [...chat.querySelectorAll(selectors[landmark] ?? "article.msg")];
+  if (nodes.length === 0) {
+    return {
+      error: "landmark not found",
+      landmark,
+      childCount: chat.children.length,
+      foldCount: chat.querySelectorAll("details.msg.event-group").length,
+      rolesAfterFolds: [...chat.children]
+        .flatMap((node, index, all) => {
+          if (!node.matches("details.msg.event-group")) return [];
+          const next = all.slice(index + 1).find((candidate) => candidate.matches("article.msg"));
+          return [next ? next.className : "none"];
+        })
+        .slice(0, 5),
+    };
+  }
 
   const node = nodes[Math.floor(nodes.length / 2)];
-  if (${JSON.stringify(target)} === "fold-open" && node.tagName === "DETAILS") node.open = true;
+  if (landmark === "fold-open" && node.tagName === "DETAILS") node.open = true;
 
+  // A boundary needs headroom above it, or the fold lands under the top edge.
+  const headroom = landmark === "turn-boundary" ? 150 : 40;
   const top = node.getBoundingClientRect().top - chat.getBoundingClientRect().top + chat.scrollTop;
-  chat.scrollTop = Math.max(0, top - 40);
+  chat.scrollTop = Math.max(0, top - headroom);
   return { ok: true, count: nodes.length, scrollTop: Math.round(chat.scrollTop) };
+})()`;
+
+/** Finds the transcript scroller, which lives behind nested shadow roots. */
+const chatExpression = `(() => {
+  const find = (root, selector) => {
+    const direct = root.querySelector(selector);
+    if (direct) return direct;
+    for (const host of root.querySelectorAll("*")) {
+      if (!host.shadowRoot) continue;
+      const found = find(host.shadowRoot, selector);
+      if (found) return found;
+    }
+    return null;
+  };
+  return find(document, ".chat");
+})()`;
+
+const boundaryCountScript = `(() => {
+  const chat = ${chatExpression};
+  if (!chat) return 0;
+  const all = [...chat.children];
+  return all.filter((node, index) => {
+    if (!node.matches("details.msg.event-group")) return false;
+    const next = all.slice(index + 1).find((candidate) => candidate.matches("article.msg"));
+    return next ? next.matches("article.msg.user") : false;
+  }).length;
+})()`;
+
+const scrollTopScript = `(() => {
+  const chat = ${chatExpression};
+  if (chat) chat.scrollTop = 0;
+  return true;
 })()`;
 
 const rpc = (ws, id, method, params) =>
@@ -117,6 +180,20 @@ try {
     });
     await rpc(ws, 4, "Page.reload", {});
     await sleep(9000);
+  }
+
+  /*
+   * A turn boundary only exists once a turn has finished, and the transcript
+   * loads only its tail window. Scrolling to the top pulls history in until a
+   * completed fold-then-question pair is present to photograph.
+   */
+  if (landmark === "turn-boundary") {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const counted = await rpc(ws, 100 + attempt, "Runtime.evaluate", { expression: boundaryCountScript, returnByValue: true });
+      if (Number(counted.result.value) > 0) break;
+      await rpc(ws, 200 + attempt, "Runtime.evaluate", { expression: scrollTopScript, returnByValue: true });
+      await sleep(4000);
+    }
   }
 
   const scrolled = await rpc(ws, 1, "Runtime.evaluate", { expression: scrollScript(landmark), returnByValue: true });
