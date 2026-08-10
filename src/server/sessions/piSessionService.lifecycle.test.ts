@@ -1,10 +1,11 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { PiSessionService, type PiAgentSession, type PiSessionRuntime } from "./piSessionService.js";
 import { SessionNotificationStore } from "./sessionNotificationStore.js";
-import { CapturingSessionEventHub, emptyArchiveStore, fakeRuntime, fakeSessionManager, runtimeCreator, sessionGateway, sessionRecord, sessionRef, testModelRuntime, type RuntimeCreator, type SessionGateway } from "./piSessionService.testSupport.js";
+import { CapturingSessionEventHub, emptyArchiveStore, fakeRuntime, fakeSessionManager, runtimeCreator, sessionGateway, sessionRecord, sessionRef, testModel, testModelRuntime, type RuntimeCreator, type SessionGateway } from "./piSessionService.testSupport.js";
 
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
 
@@ -336,9 +337,18 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     expect(fake.calls.dispose).toBe(1);
   });
 
-  it("binds extensions again when the SDK runtime replaces the active session", async () => {
+  it("rebinds extensions and title coordination when the SDK runtime replaces the active session", async () => {
     const hub = new CapturingSessionEventHub();
-    const fake = fakeRuntime("session-1");
+    const model = testModel();
+    const titleStream = createAssistantMessageEventStream();
+    let generationSignal: AbortSignal | undefined;
+    const fake = fakeRuntime("session-1", {
+      model,
+      agent: { streamFunction: (_streamModel, _context, options) => {
+        generationSignal = options?.signal;
+        return titleStream;
+      } },
+    });
     const replacement = fakeRuntime("session-2");
     let replacementSessionStartText: string | undefined;
     const bindReplacementExtensions = replacement.session.bindExtensions.bind(replacement.session);
@@ -357,12 +367,18 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     });
 
     await service.start("/workspace");
+    await service.prompt(sessionRef("session-1"), "Old runtime task");
+    expect(generationSignal?.aborted).toBe(false);
+
     Object.defineProperty(fake.runtime, "session", { configurable: true, value: replacement.session });
     await rebindSession?.(replacement.session);
+    expect(generationSignal?.aborted).toBe(true);
+    fake.titleBridge.publish({ type: "intent.accepted", text: "/skill:se-architecture-improvement" });
 
     expect(fake.calls.bindExtensions).toHaveLength(1);
     expect(replacement.calls.bindExtensions).toHaveLength(1);
     expect(replacementSessionStartText).toBe("replacement started");
+    expect(replacement.session.sessionName).toBe("Architecture Improvement");
     expect(service.activeCount()).toBe(1);
     expect(await service.status(sessionRef("session-2"))).toMatchObject({ sessionId: "session-2" });
 

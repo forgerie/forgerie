@@ -82,7 +82,6 @@ describe("SessionCommandService", () => {
       session: { id: "s1", cwd: "/work", name: "Useful name", messageCount: 2 },
     });
     expect(active.runtime.session.setSessionName).toHaveBeenCalledWith("Useful name");
-    expect(events.publish).toHaveBeenCalledWith("s1", { type: "session.name", sessionId: "s1", name: "Useful name" });
   });
 
   it("formats session stats", async () => {
@@ -244,7 +243,6 @@ describe("SessionCommandService", () => {
       session: { id: "forked", name: "Build auth — Fork 2" },
     });
     expect(forked.setSessionName).toHaveBeenCalledWith("Build auth — Fork 2");
-    expect(events.publish).toHaveBeenCalledWith("forked", { type: "session.name", sessionId: "forked", name: "Build auth — Fork 2" });
   });
 
   it("names cloned sessions as copies of the source title", async () => {
@@ -404,7 +402,6 @@ describe("SessionCommandService", () => {
       session: { id: "forked", name: "Build auth — Fork 1" },
     });
     expect(forked.setSessionName).toHaveBeenCalledWith("Build auth — Fork 1");
-    expect(events.publish).toHaveBeenCalledWith("forked", { type: "session.name", sessionId: "forked", name: "Build auth — Fork 1" });
   });
 });
 

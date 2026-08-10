@@ -9,28 +9,30 @@ const FALLBACK_FILLER_WORDS = new Set([
   "a", "an", "about", "can", "check", "could", "explore", "fix", "help", "i", "implement", "investigate", "me", "my", "now", "our", "please", "the", "to", "understand", "update", "we", "with", "would", "you", "your",
 ]);
 const RELAY_HANDOFF_FIRST_LINE = /^Relay\s+"([^"\n]+)"\s+leg\s+(\d+)\s+begins now\.?\s*(?:\n|$)/;
+const SKILL_COMMAND = /^\/skill:([a-z0-9][a-z0-9_-]*)(?:\s|$)/i;
 
 export function deterministicSessionName(firstMessage: unknown): string | undefined {
   if (typeof firstMessage !== "string") return undefined;
 
-  return relayHandoffSessionName(firstMessage.trimStart());
+  const input = firstMessage.trimStart();
+  return skillCommandSessionName(input) ?? relayHandoffSessionName(input);
 }
 
-export async function generateShortSessionName<TApi extends Api>(streamFn: StreamFn, model: Model<TApi>, firstMessage: string): Promise<string | undefined> {
+export async function generateShortSessionName<TApi extends Api>(streamFn: StreamFn, model: Model<TApi>, firstMessage: string, cancellationSignal?: AbortSignal): Promise<string | undefined> {
   const stream = await streamFn(
     model,
     {
-      systemPrompt: "Generate a 2-4 word retrieval label for a coding-agent chat session. Maximize signal per word. Return only the label, with no quotes or punctuation wrapper.",
+      systemPrompt: "Generate a 1-4 word retrieval label for a coding-agent chat session. Maximize signal per word. Return only the label, with no quotes or punctuation wrapper.",
       messages: [{
         role: "user",
-        content: `Label this request for recognition in a session list. Prefer specific names and compact noun phrases. Keep products, components, files, errors, or decisions that distinguish it. Omit framing and generic task verbs such as understand, explore, investigate, help, fix, update, and implement. Prefer 2-3 words when they remain clear; use 4 only when needed.\n\nRequest:\n${truncateInput(firstMessage)}`,
+        content: `Label this request for recognition in a session list. Prefer specific names and compact noun phrases. Keep products, components, files, errors, or decisions that distinguish it. Omit framing and generic task verbs such as understand, explore, investigate, help, fix, update, and implement. Prefer 2-3 words when they remain clear; use 1 for a distinctive standalone term and 4 only when needed.\n\nRequest:\n${truncateInput(firstMessage)}`,
         timestamp: Date.now(),
       }],
     },
     {
       maxTokens: 24,
       reasoning: "minimal",
-      signal: AbortSignal.timeout(SESSION_NAME_TIMEOUT_MS),
+      signal: titleGenerationSignal(cancellationSignal),
     },
   );
 
@@ -69,6 +71,19 @@ export function cleanSessionName(value: string): string | undefined {
   return title.slice(0, SESSION_NAME_MAX_LENGTH).trim();
 }
 
+function skillCommandSessionName(firstMessage: string): string | undefined {
+  const skillName = SKILL_COMMAND.exec(firstMessage)?.[1];
+  if (skillName === undefined) return undefined;
+
+  const words = skillName
+    .replace(/^se-/, "")
+    .split(/[-_]+/)
+    .filter((word) => word !== "")
+    .slice(0, SESSION_NAME_MAX_WORDS)
+    .map((word) => `${word[0]?.toLocaleUpperCase("en-US") ?? ""}${word.slice(1)}`);
+  return cleanSessionName(words.join(" "));
+}
+
 function relayHandoffSessionName(firstMessage: string): string | undefined {
   const match = RELAY_HANDOFF_FIRST_LINE.exec(firstMessage);
   if (match === null) return undefined;
@@ -92,6 +107,11 @@ function truncateRelayName(relayName: string, maxLength: number): string {
   if (relayName.length <= maxLength) return relayName;
   const truncated = relayName.slice(0, maxLength).replace(/[\s._-]+$/g, "").trim();
   return truncated === "" ? relayName.slice(0, maxLength).trim() : truncated;
+}
+
+function titleGenerationSignal(cancellationSignal: AbortSignal | undefined): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(SESSION_NAME_TIMEOUT_MS);
+  return cancellationSignal === undefined ? timeoutSignal : AbortSignal.any([cancellationSignal, timeoutSignal]);
 }
 
 function textFromAssistant(message: AssistantMessage): string {

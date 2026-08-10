@@ -178,6 +178,156 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await service.dispose();
   });
 
+  it("reports title persistence failures without rejecting the accepted prompt", async () => {
+    const logger = { info: vi.fn() };
+    const fake = fakeRuntime("title-write-failure-session", {
+      setSessionName: () => { throw new Error("disk full"); },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("title-write-failure-session")]),
+      heartbeatIntervalMs: 60_000,
+      logger,
+    });
+
+    await expect(service.prompt(sessionRef("title-write-failure-session"), "/skill:se-architecture-improvement"))
+      .resolves.toBeUndefined();
+
+    expect(logger.info).toHaveBeenCalledWith(
+      { sessionId: "title-write-failure-session", outcome: "persistence_failed", error: "disk full" },
+      "failed to persist generated session title",
+    );
+    await service.dispose();
+  });
+
+  it("claims only the first accepted intent when prompts arrive concurrently", async () => {
+    const model = testModel();
+    const titleStream = createAssistantMessageEventStream();
+    let generationCalls = 0;
+    const fake = fakeRuntime("concurrent-name-session", {
+      model,
+      agent: { streamFunction: () => {
+        generationCalls += 1;
+        return titleStream;
+      } },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("concurrent-name-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await Promise.all([
+      service.prompt(sessionRef("concurrent-name-session"), "First accepted task"),
+      service.prompt(sessionRef("concurrent-name-session"), "Second accepted task"),
+    ]);
+
+    expect(generationCalls).toBe(1);
+    await service.dispose();
+  });
+
+  it("uses raw skill intent instead of expanded skill instructions", async () => {
+    const model = testModel();
+    let generationCalls = 0;
+    const fake = fakeRuntime("raw-skill-name-session", {
+      model,
+      agent: { streamFunction: () => {
+        generationCalls += 1;
+        return createAssistantMessageEventStream();
+      } },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("raw-skill-name-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    await service.status(sessionRef("raw-skill-name-session"));
+
+    fake.titleBridge.publish({ type: "intent.accepted", text: "/skill:se-architecture-improvement" });
+
+    expect(fake.session.sessionName).toBe("Architecture Improvement");
+    expect(generationCalls).toBe(0);
+    await service.dispose();
+  });
+
+  it("aborts stale generation when the session lifecycle resets", async () => {
+    const model = testModel();
+    const titleStream = createAssistantMessageEventStream();
+    let generationSignal: AbortSignal | undefined;
+    const fake = fakeRuntime("reset-name-session", {
+      model,
+      agent: { streamFunction: (_streamModel, _context, options) => {
+        generationSignal = options?.signal;
+        return titleStream;
+      } },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("reset-name-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.prompt(sessionRef("reset-name-session"), "Investigate title lifecycle");
+    expect(generationSignal?.aborted).toBe(false);
+
+    fake.titleBridge.publish({ type: "lifecycle.reset" });
+    expect(generationSignal?.aborted).toBe(true);
+
+    fake.titleBridge.publish({ type: "intent.accepted", text: "/skill:se-architecture-improvement" });
+    expect(fake.session.sessionName).toBe("Architecture Improvement");
+
+    const generatedMessage: AssistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "Title Lifecycle" }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
+    titleStream.push({ type: "done", reason: "stop", message: generatedMessage });
+    titleStream.end(generatedMessage);
+    await Promise.resolve();
+
+    expect(fake.session.sessionName).toBe("Architecture Improvement");
+    await service.dispose();
+  });
+
+  it("does not backfill an existing unnamed conversation from a later prompt", async () => {
+    const model = testModel();
+    let generationCalls = 0;
+    const fake = fakeRuntime("existing-unnamed-session", {
+      messages: [{ role: "user", content: "Earlier task" }],
+      model,
+      agent: { streamFunction: () => {
+        generationCalls += 1;
+        return createAssistantMessageEventStream();
+      } },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("existing-unnamed-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.prompt(sessionRef("existing-unnamed-session"), "Later task");
+
+    expect(generationCalls).toBe(0);
+    expect(fake.session.sessionName).toBeUndefined();
+    await service.dispose();
+  });
+
   it("keeps a manual /name set while automatic naming is still in flight", async () => {
     const model = testModel();
     const titleStream = createAssistantMessageEventStream();

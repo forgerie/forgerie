@@ -3,6 +3,7 @@ import { InMemoryCredentialStore, type Credential, type CredentialStore } from "
 import type { GlobalSessionEvent, SessionNotificationSummaryEvent, SessionUiEvent } from "../../shared/apiTypes.js";
 import { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { PiAgentSession, PiSessionListEntry, PiSessionManager, PiSessionRuntime, PiSessionServiceDependencies, ResolvedSessionFile } from "./piSessionService.js";
+import { createSessionTitleBridgeSlot } from "./sessionTitleBridge.js";
 
 export class CapturingSessionEventHub extends SessionEventHub {
   readonly sessionEvents: { sessionId: string; event: SessionUiEvent }[] = [];
@@ -134,6 +135,7 @@ export function testModel(): NonNullable<PiAgentSession["model"]> {
 }
 
 export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession> = {}) {
+  const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
   const promptCalls: { text: string; options: unknown }[] = [];
   const customMessageCalls: { message: { customType: string; content: string; display: boolean; details?: unknown }; options: unknown }[] = [];
   const bindExtensionCalls: TestExtensionBindings[] = [];
@@ -182,6 +184,7 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
       return Promise.resolve();
     },
     prompt: (text: string, options: unknown) => {
+      sessionTitleBridgeSlot.publish({ type: "intent.accepted", text });
       calls.prompt.push({ text, options });
       return Promise.resolve();
     },
@@ -205,7 +208,10 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
     getAvailableThinkingLevels: () => [],
     setThinkingLevel: () => undefined,
     cycleThinkingLevel: () => undefined,
-    setSessionName: (name: string) => { session.sessionName = name; },
+    setSessionName: (name: string) => {
+      session.sessionName = name;
+      for (const listener of [...listeners]) listener({ type: "session_info_changed", name });
+    },
     compact: () => Promise.resolve({ summary: "", tokensBefore: 0 }),
     getUserMessagesForForking: () => [],
     agent: { streamFunction: () => { throw new Error("streamFunction should not be called in this test"); } },
@@ -214,6 +220,15 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
   const runtime: PiSessionRuntime = {
     cwd: session.sessionManager.getCwd(),
     session,
+    services: {
+      resourceLoader: {
+        getSkills: () => ({ diagnostics: [] }),
+        getPrompts: () => ({ diagnostics: [] }),
+        getThemes: () => ({ diagnostics: [] }),
+        getExtensions: () => ({ errors: [] }),
+      },
+      sessionTitleBridgeSlot,
+    },
     setRebindSession: () => undefined,
     fork: () => Promise.resolve({ cancelled: false }),
     dispose: () => {
@@ -221,7 +236,7 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
       return Promise.resolve();
     },
   };
-  return { runtime, session, calls, emit: (event: unknown) => { for (const listener of [...listeners]) listener(event); } };
+  return { runtime, session, calls, titleBridge: sessionTitleBridgeSlot, emit: (event: unknown) => { for (const listener of [...listeners]) listener(event); } };
 }
 
 export function runtimeCreator(runtime: PiSessionRuntime): RuntimeCreator {

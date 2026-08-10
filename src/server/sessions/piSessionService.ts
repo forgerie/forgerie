@@ -65,6 +65,7 @@ import type {
 } from "../../shared/apiTypes.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
+import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 
 import { type AuthChange } from "./authService.js";
@@ -461,7 +462,12 @@ export interface PiAgentSession {
   agent: { streamFunction: StreamFn };
 }
 
-type PiWebAgentSessionServices = AgentSessionServices & { processBridgeSlot?: ProcessBridgeSlot };
+type RuntimeResourceWarnings = NonNullable<RuntimeWarningSources["services"]>;
+type PiWebRuntimeServices = RuntimeResourceWarnings & {
+  processBridgeSlot?: ProcessBridgeSlot;
+  sessionTitleBridgeSlot?: SessionTitleBridgeSlot;
+};
+type PiWebAgentSessionServices = AgentSessionServices & PiWebRuntimeServices;
 
 export interface PiSessionRuntime {
   readonly cwd: string;
@@ -474,7 +480,7 @@ export interface PiSessionRuntime {
    * services; callers must treat missing sources as "no warnings".
    */
   readonly diagnostics?: readonly AgentSessionRuntimeDiagnostic[];
-  readonly services?: PiWebAgentSessionServices;
+  readonly services?: PiWebRuntimeServices;
   setRebindSession(rebindSession?: (session: PiAgentSession) => Promise<void>): void;
   fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ cancelled: boolean; selectedText?: string }>;
   dispose(): Promise<void>;
@@ -734,16 +740,20 @@ function createDefaultRuntimeFactory(
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled }) => {
     const processBridgeSlot = createProcessBridgeSlot();
+    const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
     const baseServices = await createAgentSessionServices({
       cwd,
       agentDir,
       modelRuntime,
       resourceLoaderOptions: {
         additionalExtensionPaths: [bundledManagedProcessesPackagePath()],
-        extensionFactories: [createProcessBridgeExtension(processBridgeSlot)],
+        extensionFactories: [
+          createProcessBridgeExtension(processBridgeSlot),
+          createSessionTitleBridgeExtension(sessionTitleBridgeSlot),
+        ],
       },
     });
-    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot });
+    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser);
@@ -875,6 +885,8 @@ export class PiSessionService implements SessionRouteService {
   private readonly treeExclusiveSessionOperationCounts = new Map<string, number>();
   private readonly deferredSubsessionNotifications = new WeakMap<PiAgentSession, DeferredSubsessionNotification[]>();
   private readonly deferredGeneratedSessionNames = new WeakMap<PiAgentSession, string>();
+  private readonly claimedSessionTitleIntents = new WeakSet<PiAgentSession>();
+  private readonly sessionTitleGenerationControllers = new WeakMap<PiAgentSession, AbortController>();
   private readonly compactionPromptQueues = new Map<string, QueuedPrompt[]>();
   private readonly compactionDrainTimers = new Map<string, NodeJS.Timeout>();
   private readonly authLossWarnings = new Set<string>();
@@ -2185,7 +2197,6 @@ export class PiSessionService implements SessionRouteService {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
     this.assertTreeNavigationInactive(session, "send a prompt");
-    this.maybeGenerateSessionName(session, promptText);
     const isQueued = session.isStreaming || session.isCompacting;
     const behavior = isQueued ? requestedBehavior ?? "followUp" : undefined;
     if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, promptText)) {
@@ -2907,6 +2918,8 @@ export class PiSessionService implements SessionRouteService {
     try {
       await this.abortSessionOperations(active.runtime.session);
     } finally {
+      this.cancelSessionTitleGeneration(active.runtime.session);
+      active.runtime.services?.sessionTitleBridgeSlot?.dispose();
       active.runtime.services?.processBridgeSlot?.dispose();
       await active.runtime.dispose();
     }
@@ -3086,6 +3099,7 @@ export class PiSessionService implements SessionRouteService {
     });
     const active: ActiveSession<PiSessionRuntime> = { runtime, unsubscribe: noop };
     this.bindProcessBridge(runtime, runtime.session);
+    this.bindSessionTitleBridge(runtime, runtime.session);
     let boundSession = runtime.session;
     let notificationGeneration = options.notificationGeneration;
     let notificationOwnership: "disabled" | "external" | "registered" | "replacement" = options.notifications === "disabled"
@@ -3136,7 +3150,9 @@ export class PiSessionService implements SessionRouteService {
             candidateGeneration = this.notificationStore.beginReplacement(priorGeneration, notificationIdentityForSession(session));
             this.notificationGenerationBySession.set(session, candidateGeneration);
           }
+          this.cancelSessionTitleGeneration(boundSession);
           this.bindProcessBridge(runtime, session);
+          this.bindSessionTitleBridge(runtime, session);
           this.bindRuntime(active, session);
           // The runtime being replaced parked every dialog the store still
           // holds for this session; settle those waits before the new
@@ -3192,6 +3208,8 @@ export class PiSessionService implements SessionRouteService {
       try {
         await runtime.session.abort();
       } finally {
+        this.cancelSessionTitleGeneration(runtime.session);
+        runtime.services?.sessionTitleBridgeSlot?.dispose();
         runtime.services?.processBridgeSlot?.dispose();
         await runtime.dispose();
       }
@@ -3412,6 +3430,27 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
+  private bindSessionTitleBridge(runtime: PiSessionRuntime, session: PiAgentSession): void {
+    runtime.services?.sessionTitleBridgeSlot?.setReceiver(
+      (event) => { this.handleSessionTitleBridgeEvent(session, event); },
+      (error) => {
+        this.logger.info(
+          { sessionId: session.sessionId, error: error instanceof Error ? error.message : String(error) },
+          "session title bridge receiver failed",
+        );
+      },
+    );
+  }
+
+  private handleSessionTitleBridgeEvent(session: PiAgentSession, event: SessionTitleBridgeEvent): void {
+    if (event.type === "intent.accepted") {
+      this.acceptSessionTitleIntent(session, event.text);
+      return;
+    }
+    this.cancelSessionTitleGeneration(session);
+    this.claimedSessionTitleIntents.delete(session);
+  }
+
   private bindRuntime(active: ActiveSession<PiSessionRuntime>, session: PiAgentSession = active.runtime.session): void {
     active.unsubscribe();
     for (const [sessionId, candidate] of this.active.entries()) {
@@ -3424,6 +3463,10 @@ export class PiSessionService implements SessionRouteService {
       this.events.publish(session.sessionId, toClientEvent(event, session.thinkingLevel));
       this.publishActivityForEvent(session, event);
       const eventType = getString(event, "type");
+      if (eventType === "session_info_changed") {
+        this.cancelSessionTitleGeneration(session);
+        this.publishSessionName(session);
+      }
       if (eventType === "agent_end") this.abortRunScopedExtensionDialogs(session.sessionId);
       if (eventType === "compaction_end") this.scheduleCompactionQueueDrain(session.sessionId);
       if (eventType === "agent_start" || eventType === "agent_end") this.scheduleCompactionQueueDrain(session.sessionId);
@@ -3493,10 +3536,10 @@ export class PiSessionService implements SessionRouteService {
     this.compactionDrainTimers.clear();
   }
 
-  private maybeGenerateSessionName(session: PiAgentSession, firstMessage: string): void {
-    if (session.sessionName !== undefined || hasUserMessage(session.messages) || session.isStreaming || session.isCompacting) return;
-
-    const deterministicName = deterministicSessionName(firstMessage);
+  private acceptSessionTitleIntent(session: PiAgentSession, titleInput: string): void {
+    if (session.sessionName !== undefined || hasUserMessage(session.messages) || this.claimedSessionTitleIntents.has(session)) return;
+    this.claimedSessionTitleIntents.add(session);
+    const deterministicName = deterministicSessionName(titleInput);
     if (deterministicName !== undefined) {
       this.applyGeneratedSessionName(session, deterministicName);
       return;
@@ -3504,40 +3547,58 @@ export class PiSessionService implements SessionRouteService {
 
     const model = session.model;
     if (model === undefined) {
-      this.applyGeneratedSessionName(session, fallbackSessionName(firstMessage));
+      this.applyGeneratedSessionName(session, fallbackSessionName(titleInput));
       return;
     }
 
-    void generateShortSessionName(session.agent.streamFunction, model, firstMessage).then((name) => {
-      this.applyGeneratedSessionName(session, name ?? fallbackSessionName(firstMessage));
-    }).catch(() => {
-      this.applyGeneratedSessionName(session, fallbackSessionName(firstMessage));
+    const controller = new AbortController();
+    this.sessionTitleGenerationControllers.set(session, controller);
+    void generateShortSessionName(session.agent.streamFunction, model, titleInput, controller.signal).then((name) => {
+      if (name === undefined && !controller.signal.aborted) {
+        this.logger.info({ sessionId: session.sessionId, outcome: "fallback" }, "session title generation returned no usable name");
+      }
+      this.applyGeneratedSessionName(session, name ?? fallbackSessionName(titleInput), controller);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        this.logger.info(
+          { sessionId: session.sessionId, outcome: "fallback", error: error instanceof Error ? error.message : String(error) },
+          "session title generation failed",
+        );
+      }
+      this.applyGeneratedSessionName(session, fallbackSessionName(titleInput), controller);
+    }).finally(() => {
+      if (this.sessionTitleGenerationControllers.get(session) === controller) {
+        this.sessionTitleGenerationControllers.delete(session);
+      }
     });
   }
 
-  private applyGeneratedSessionName(session: PiAgentSession, name: string | undefined): void {
-    if (name === undefined || session.sessionName !== undefined) return;
+  private cancelSessionTitleGeneration(session: PiAgentSession): void {
+    this.sessionTitleGenerationControllers.get(session)?.abort();
+    this.sessionTitleGenerationControllers.delete(session);
+  }
+
+  private applyGeneratedSessionName(session: PiAgentSession, name: string | undefined, controller?: AbortController): void {
+    if (name === undefined || session.sessionName !== undefined || !this.isCurrentActiveSession(session)) return;
+    if (controller !== undefined && (controller.signal.aborted || this.sessionTitleGenerationControllers.get(session) !== controller)) return;
     if (this.treeNavigations.has(session)) {
       this.deferredGeneratedSessionNames.set(session, name);
       return;
     }
-    session.setSessionName(name);
-    this.publishSessionName(session);
+    try {
+      session.setSessionName(name);
+    } catch (error: unknown) {
+      this.logger.info(
+        { sessionId: session.sessionId, outcome: "persistence_failed", error: error instanceof Error ? error.message : String(error) },
+        "failed to persist generated session title",
+      );
+    }
   }
 
   private flushDeferredTreeNavigationWork(session: PiAgentSession): void {
     const generatedName = this.deferredGeneratedSessionNames.get(session);
     this.deferredGeneratedSessionNames.delete(session);
-    if (generatedName !== undefined) {
-      try {
-        this.applyGeneratedSessionName(session, generatedName);
-      } catch (error: unknown) {
-        this.logger.info(
-          { sessionId: session.sessionId, error: error instanceof Error ? error.message : String(error) },
-          "failed to apply deferred session name",
-        );
-      }
-    }
+    if (generatedName !== undefined) this.applyGeneratedSessionName(session, generatedName);
 
     const notifications = this.deferredSubsessionNotifications.get(session) ?? [];
     this.deferredSubsessionNotifications.delete(session);

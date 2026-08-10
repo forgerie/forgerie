@@ -44,7 +44,6 @@ export type GetCommandActiveSession<TSession extends CommandSession = CommandSes
 
 export interface CommandEventPublisher {
   publish(sessionId: string, event: SessionUiEvent): void;
-  publishGlobal?(event: Extract<SessionUiEvent, { type: "session.name" }>): void;
 }
 
 export interface SessionCommandLifecycle<TSession extends CommandSession = CommandSession> {
@@ -155,7 +154,6 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
   private nameSession(active: CommandActiveSession<TSession>, name: string): ClientCommandResult {
     if (name === "") return { type: "unsupported", message: "Usage: /name <session name>" };
     active.runtime.session.setSessionName(name);
-    this.publishSessionName(active.runtime.session);
     return { type: "done", message: `Session named: ${name}`, session: clientSessionFromRuntime(active.runtime) };
   }
 
@@ -273,19 +271,10 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
   private tryNameRelatedSession(session: TSession, name: string): void {
     try {
       session.setSessionName(name);
-      this.publishSessionName(session);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.events.publish(session.sessionId, { type: "command.output", level: "error", message: `Session created, but naming failed: ${message}` });
     }
-  }
-
-  private publishSessionName(session: TSession): void {
-    const event = session.sessionName === undefined
-      ? { type: "session.name", sessionId: session.sessionId } as const
-      : { type: "session.name", sessionId: session.sessionId, name: session.sessionName } as const;
-    this.events.publish(session.sessionId, event);
-    this.events.publishGlobal?.(event);
   }
 
   private isRuntimeCommand(session: TSession, name: string): boolean {

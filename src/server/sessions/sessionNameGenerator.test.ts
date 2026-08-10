@@ -55,7 +55,7 @@ describe("sessionNameGenerator", () => {
     const name = await generateShortSessionName(streamFn, fakeModel(), request);
 
     expect(name).toBe("Forgerie Title Ownership");
-    expect(requestedContext?.systemPrompt).toContain("2-4 word retrieval label");
+    expect(requestedContext?.systemPrompt).toContain("1-4 word retrieval label");
     expect(requestedContext?.messages).toHaveLength(1);
     expect(requestedContext?.messages[0]?.content).toContain("Prefer specific names and compact noun phrases");
   });
@@ -75,6 +75,13 @@ describe("sessionNameGenerator", () => {
   it("rejects generated titles longer than four words before character truncation", () => {
     expect(cleanSessionName("Generic Session Title With Filler")).toBeUndefined();
     expect(cleanSessionName(`${"x".repeat(50)} two three four five`)).toBeUndefined();
+  });
+
+  it("builds deterministic names from skill commands without reading expanded skill instructions", () => {
+    expect(deterministicSessionName("/skill:se-architecture-improvement"))
+      .toBe("Architecture Improvement");
+    expect(deterministicSessionName("/skill:se-riffrec-feedback-analysis session.zip"))
+      .toBe("Riffrec Feedback Analysis");
   });
 
   it("builds deterministic names for relay handoff prompts", () => {
