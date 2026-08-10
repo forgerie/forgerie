@@ -3,6 +3,7 @@ import {
   BOARD_GROUPS,
   attentionCount,
   deriveSessionBoard,
+  deriveSessionInboxBoard,
   groupSessionsByProject,
   relativeTime,
   sessionBoardState,
@@ -633,5 +634,38 @@ describe("relativeTime", () => {
     // using a fixed UTC epoch so any local-clock-dependent path fails the boundary.
     const utcNow = Date.parse("2026-03-08T03:30:00.000Z"); // near US DST change
     expect(relativeTime("2026-03-08T02:30:00.000Z", utcNow)).toBe("1h");
+  });
+});
+
+describe("agent-spawned sessions", () => {
+  it("keeps agent-to-agent conversations off the board's top level", () => {
+    const board = deriveSessionInboxBoard({
+      projection: {
+        sessions: [
+          { id: "human", modified: "2026-08-10T10:00:00.000Z", cwd: "/repo" },
+          { id: "delegated", modified: "2026-08-10T10:01:00.000Z", cwd: "/repo", agentSpawned: true },
+        ],
+        statuses: {},
+        activities: {},
+      },
+      locationOf: () => ({ projectId: "p", projectName: "repo", projectPath: "/repo" }),
+    });
+
+    expect(board.rows.map((row) => row.session.id)).toEqual(["human"]);
+  });
+
+  it("keeps a session the user continued, which looks identical apart from the mark", () => {
+    const board = deriveSessionInboxBoard({
+      projection: {
+        sessions: [
+          { id: "continuation", modified: "2026-08-10T10:00:00.000Z", cwd: "/repo", parentSessionPath: "/s/original.jsonl" },
+        ],
+        statuses: {},
+        activities: {},
+      },
+      locationOf: () => ({ projectId: "p", projectName: "repo", projectPath: "/repo" }),
+    });
+
+    expect(board.rows.map((row) => row.session.id)).toEqual(["continuation"]);
   });
 });

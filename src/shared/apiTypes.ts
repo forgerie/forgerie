@@ -349,6 +349,13 @@ export interface SessionInfo extends SessionRef {
   firstMessage: string;
   parentSessionPath?: string;
   /**
+   * True when a tool reported spawning this session -- an agent-to-agent
+   * conversation rather than one the user is in. Recorded in the session file
+   * itself when the spawn is witnessed, because nothing about a spawned
+   * session's contents distinguishes it from one the user continued.
+   */
+  agentSpawned?: boolean;
+  /**
    * Working directory of the parent session, read from the parent session file
    * header. Only populated when the parent is outside this listing's cwd, so a
    * child whose parent lives in another worktree can point at it instead of

@@ -173,6 +173,7 @@ export function parseSessionInfo(value: unknown): SessionInfo {
     modified: requireString(record, "modified"),
     messageCount: requireNumber(record, "messageCount"),
     firstMessage: requireString(record, "firstMessage"),
+    ...(record["agentSpawned"] === true ? { agentSpawned: true } : {}),
     ...(parentSessionPath === undefined ? {} : { parentSessionPath }),
     ...(parentSessionCwd === undefined ? {} : { parentSessionCwd }),
     ...(parentSessionId === undefined ? {} : { parentSessionId }),

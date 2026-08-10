@@ -452,6 +452,9 @@ function buildSummaryFromFold(fold: SummaryFoldState, filePath: string, mtime: D
 
   const headerCwd = fold.header["cwd"];
   const parentSessionPath = fold.header["parentSession"];
+  // Written by the daemon when a tool reported spawning this session; it marks
+  // an agent-to-agent conversation rather than one the user is in.
+  const agentSpawned = fold.header["agentSpawned"] === true;
   const headerTimestamp = fold.header["timestamp"];
   return {
     path: filePath,
@@ -466,6 +469,7 @@ function buildSummaryFromFold(fold: SummaryFoldState, filePath: string, mtime: D
     allMessagesText: "",
     ...(fold.name === undefined ? {} : { name: fold.name }),
     ...(typeof parentSessionPath === "string" ? { parentSessionPath } : {}),
+    ...(agentSpawned ? { agentSpawned: true } : {}),
   };
 }
 

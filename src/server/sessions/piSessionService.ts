@@ -298,6 +298,7 @@ export interface PiSessionListEntry {
   allMessagesText: string;
   name?: string;
   parentSessionPath?: string;
+  agentSpawned?: boolean;
 }
 
 /** A session file located by id without parsing its transcript. */
@@ -2734,6 +2735,41 @@ export class PiSessionService implements SessionRouteService {
     }
   }
 
+  /**
+   * Record that a tool spawned other sessions, in those sessions' own files.
+   *
+   * The top level of the inbox is the conversations a human is in; everything
+   * an agent spawns to talk to another agent belongs under the session that
+   * owns it. Nothing in a spawned session's file distinguishes it from a
+   * conversation the user continued -- not the header, not a start reason, not
+   * the shape of the transcript, because fork-context copies the parent's
+   * history wholesale. So delegation is recorded where it is witnessed: a tool
+   * result that names a `sessionFile` spawned that session, and saying so is a
+   * statement about what just happened rather than an inference about a file.
+   *
+   * The mark travels with the artifact, so no index has to be kept in step
+   * with it, and every client reads the same truth.
+   *
+   * Runs on tool end rather than tool start: by then the spawned processes
+   * have exited, so rewriting their header cannot race their own appends.
+   */
+  private async markSessionsSpawnedByTool(event: unknown): Promise<void> {
+    for (const sessionFile of spawnedSessionFiles(event)) {
+      try {
+        await markAgentSpawned(sessionFile);
+        this.sessionHeaderCache.delete(sessionFile);
+        this.sessionManager.invalidateSessionFile(sessionFile);
+      } catch (error: unknown) {
+        // A spawned session that was never persisted has no file to mark, and
+        // that is not a failure worth reporting.
+        const code = isRecord(error) ? error["code"] : undefined;
+        if (code === "ENOENT") continue;
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`[sessions] could not mark spawned session ${sessionFile}: ${message}\n`);
+      }
+    }
+  }
+
   async detachParent(ref: PiSessionRef): Promise<void> {
     const session = await this.getOrOpen(ref);
     const sessionFile = session.sessionFile;
@@ -3840,6 +3876,7 @@ export class PiSessionService implements SessionRouteService {
     if (eventType === "tool_execution_end") {
       const isError = getBoolean(event, "isError") === true;
       this.publishActivity(session, isError ? "tool failed" : "tool complete", isError ? "error" : "idle", getString(event, "toolName"));
+      void this.markSessionsSpawnedByTool(event);
       return;
     }
     if (eventType === "bash_execution_start") { this.publishActivity(session, "running bash", "active"); return; }
@@ -4066,6 +4103,7 @@ function clientSessionFromListEntry(session: PiSessionListEntry): ClientSession 
     messageCount: session.messageCount,
     firstMessage: boundSessionCatalogFirstMessage(session.firstMessage),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
+    ...(session.agentSpawned === true ? { agentSpawned: true } : {}),
   };
 }
 
@@ -4409,6 +4447,39 @@ async function sessionFileHeaderMatches(sessionFile: string, expected: { session
   if (header?.id !== expected.sessionId) return false;
   if (expected.parentSessionFile === undefined) return true;
   return header.parentSession !== undefined && sessionPathsEqual(header.parentSession, expected.parentSessionFile);
+}
+
+/**
+ * Session files named by a tool result, wherever the tool chose to report them.
+ *
+ * Deliberately shape-driven rather than keyed to one tool's name: any result
+ * that hands back a `sessionFile` is telling us it made that session.
+ */
+function spawnedSessionFiles(event: unknown): string[] {
+  if (!isRecord(event)) return [];
+  const details = toolResultDetails(event["result"]);
+  if (!isRecord(details)) return [];
+  const results = details["results"];
+  if (!Array.isArray(results)) return [];
+  const files: string[] = [];
+  for (const entry of results) {
+    if (!isRecord(entry)) continue;
+    const file = entry["sessionFile"];
+    if (typeof file === "string" && file !== "") files.push(file);
+  }
+  return files;
+}
+
+async function markAgentSpawned(sessionFile: string): Promise<void> {
+  const content = await readFile(sessionFile, "utf8");
+  const newlineIndex = content.indexOf("\n");
+  const firstLine = newlineIndex === -1 ? content : content.slice(0, newlineIndex);
+  const rest = newlineIndex === -1 ? "" : content.slice(newlineIndex);
+  const header: unknown = JSON.parse(firstLine);
+  if (!isRecord(header) || header["type"] !== "session") throw new Error("Invalid session file header");
+  if (header["agentSpawned"] === true) return;
+  header["agentSpawned"] = true;
+  await writeFile(sessionFile, `${JSON.stringify(header)}${rest}`, "utf8");
 }
 
 async function clearParentSession(sessionFile: string): Promise<void> {

@@ -54,6 +54,12 @@ export interface SessionBoardSessionInput {
    * the workspace without additional type wrangling.
    */
   readonly cwd?: string;
+  /**
+   * True when an agent spawned this session to talk to another agent. The
+   * board's top level is the conversations the user is in, so these are left
+   * out of it; the session that owns them surfaces them in its own pane.
+   */
+  readonly agentSpawned?: boolean;
 }
 
 /** Location metadata for one session row, derived by the caller from their own data. */
@@ -272,7 +278,7 @@ export function deriveSessionInboxBoard<S extends SessionBoardSessionInput>(
   input: SessionInboxBoardInput<S>,
 ): SessionBoard<S> {
   return deriveSessionBoard({
-    sessions: input.projection.sessions,
+    sessions: input.projection.sessions.filter((session) => session.agentSpawned !== true),
     statuses: input.projection.statuses,
     activities: input.projection.activities,
     ...(input.unreadSessionIds === undefined ? {} : { unreadSessionIds: input.unreadSessionIds }),

@@ -876,13 +876,14 @@ function nextEntryId(): string {
   return `entry-${String(entryCounter)}`;
 }
 
-function headerLine(header: { id: string; cwd?: string; parentSession?: string }): string {
+function headerLine(header: { id: string; cwd?: string; parentSession?: string; agentSpawned?: boolean }): string {
   return JSON.stringify({
     type: "session",
     version: 3,
     id: header.id,
     timestamp: "2026-01-01T00:00:00.000Z",
     ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
+    ...(header.agentSpawned === true ? { agentSpawned: true } : {}),
     ...(header.parentSession === undefined ? {} : { parentSession: header.parentSession }),
   });
 }
@@ -929,3 +930,26 @@ function statWithSize(stats: Awaited<ReturnType<typeof stat>>, size: number): Aw
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+
+describe("agent-spawned marker", () => {
+  it("carries the mark from the header so the inbox can leave it out", async () => {
+    const path = await writeSession("spawned.jsonl", [
+      headerLine({ id: "spawned", cwd: WORKSPACE, parentSession: "/parents/owner.jsonl", agentSpawned: true }),
+      messageLine({ role: "user", content: textContent("do the thing") }),
+    ]);
+
+    expect((await scanSessionFileSummary(path))?.agentSpawned).toBe(true);
+  });
+
+  it("leaves the mark off a session that only records a parent", async () => {
+    const path = await writeSession("continued.jsonl", [
+      headerLine({ id: "continued", cwd: WORKSPACE, parentSession: "/parents/owner.jsonl" }),
+      messageLine({ role: "user", content: textContent("carry on") }),
+    ]);
+
+    const summary = await scanSessionFileSummary(path);
+
+    expect(summary?.agentSpawned).toBeUndefined();
+    expect(summary?.parentSessionPath).toBe("/parents/owner.jsonl");
+  });
+});
