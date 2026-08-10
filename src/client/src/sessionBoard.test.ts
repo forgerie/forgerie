@@ -210,31 +210,41 @@ describe("sessionBoardState", () => {
       expect(state).toMatchObject({ kind: "working", detail: "Running a command" });
     });
 
-    it("isStreaming → working with activity label when activity is present", () => {
+    it("isStreaming → working, without narrating the agent loop", () => {
       const state = sessionBoardState(
         mkSession("s1"),
         {
           status: mkStatus({ isStreaming: true }),
-          activity: mkActivity({ phase: "active", label: "Analyzing code" }),
+          activity: mkActivity({ phase: "active", label: "receiving response" }),
         },
       );
-      expect(state).toMatchObject({ kind: "working", detail: "Analyzing code" });
+      // Activity labels churn every few hundred milliseconds and say nothing a
+      // reader can act on, so the row states that the session is working and
+      // leaves it there.
+      expect(state).toEqual({ kind: "working" });
     });
 
-    it("isStreaming → working with fallback 'Thinking' when no activity label", () => {
+    it("isStreaming → working with no stand-in wording either", () => {
       const state = sessionBoardState(
         mkSession("s1"),
         { status: mkStatus({ isStreaming: true }) },
       );
-      expect(state).toMatchObject({ kind: "working", detail: "Thinking" });
+      expect(state).toEqual({ kind: "working" });
     });
 
     it("phase 'active' with no flags → working", () => {
       const state = sessionBoardState(
         mkSession("s1"),
-        { activity: mkActivity({ phase: "active", label: "Running" }) },
+        { activity: mkActivity({ phase: "active", label: "turn start" }) },
       );
-      expect(state).toMatchObject({ kind: "working", detail: "Running" });
+      expect(state).toEqual({ kind: "working" });
+    });
+
+    it("keeps the wording that names something specific to wait for", () => {
+      expect(sessionBoardState(mkSession("s1"), { status: mkStatus({ isCompacting: true }) }))
+        .toEqual({ kind: "working", detail: "Compacting context" });
+      expect(sessionBoardState(mkSession("s1"), { status: mkStatus({ isBashRunning: true }) }))
+        .toEqual({ kind: "working", detail: "Running a command" });
     });
 
     it("streaming wins over unread", () => {

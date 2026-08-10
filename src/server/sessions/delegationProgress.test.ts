@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { launchedAgentCount, runningAgentCount, spawnedSessionFiles } from "./delegationProgress";
+import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress";
 
 /**
  * Shaped after the events Pi actually emits: `tool_execution_update` carries
@@ -73,32 +73,3 @@ describe("spawnedSessionFiles", () => {
   });
 });
 
-describe("launchedAgentCount", () => {
-  it("counts one agent for a single delegation", () => {
-    expect(launchedAgentCount({ agent: "scout", task: "map the module" })).toBe(1);
-  });
-
-  it("counts every task in a parallel fan-out", () => {
-    expect(launchedAgentCount({ tasks: [{ agent: "a" }, { agent: "b" }, { agent: "c" }] })).toBe(3);
-  });
-
-  it("honours a repeated task's count", () => {
-    expect(launchedAgentCount({ tasks: [{ agent: "a", count: 4 }, { agent: "b" }] })).toBe(5);
-  });
-
-  it("counts a chain as one, because its steps run one after another", () => {
-    expect(launchedAgentCount({ chain: [{ agent: "a" }, { agent: "b" }, { agent: "c" }] })).toBe(1);
-  });
-
-  it("counts nothing for a call that launches no agents", () => {
-    expect(launchedAgentCount({ action: "list" })).toBe(0);
-    expect(launchedAgentCount({ tasks: [] })).toBe(0);
-    expect(launchedAgentCount({ chain: [] })).toBe(0);
-    expect(launchedAgentCount(undefined)).toBe(0);
-    expect(launchedAgentCount("nonsense")).toBe(0);
-  });
-
-  it("ignores a nonsense count rather than trusting it", () => {
-    expect(launchedAgentCount({ tasks: [{ agent: "a", count: -2 }, { agent: "b", count: 1.7 }] })).toBe(2);
-  });
-});

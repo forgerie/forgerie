@@ -22,37 +22,6 @@ export function runningAgentCount(event: unknown): number | undefined {
 }
 
 /**
- * How many agents a delegating call is about to put to work, read from the
- * call's own arguments.
- *
- * Progress reporting is optional and, in practice, absent: `pi-subagents`
- * persists per-agent results but no `progress[]`, so a run watched live never
- * moves the count off zero. The arguments always say what was launched, so
- * they are the dependable source while a call is in flight.
- *
- * Parallel work counts every task; a chain counts one, because its steps run
- * one after another and only one is working at a time.
- */
-export function launchedAgentCount(args: unknown): number {
-  if (!isRecord(args)) return 0;
-  const tasks = args["tasks"];
-  if (Array.isArray(tasks)) return sumTaskCounts(tasks);
-  const chain = args["chain"];
-  if (Array.isArray(chain)) return chain.length === 0 ? 0 : 1;
-  return typeof args["agent"] === "string" && args["agent"] !== "" ? 1 : 0;
-}
-
-function sumTaskCounts(tasks: readonly unknown[]): number {
-  let total = 0;
-  for (const task of tasks) {
-    if (!isRecord(task)) continue;
-    const count = task["count"];
-    total += typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
-  }
-  return total;
-}
-
-/**
  * Session files a tool result says it created.
  *
  * The same shape-driven rule: a result that hands back a `sessionFile` is

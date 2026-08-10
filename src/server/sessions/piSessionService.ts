@@ -24,7 +24,7 @@ import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult,
 import { projectBrowserMessage } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
-import { launchedAgentCount, runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
+import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
 import { SessionCommandService } from "./sessionCommandService.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
@@ -2786,20 +2786,6 @@ export class PiSessionService implements SessionRouteService {
    * the count untouched rather than clearing it, so a tool that only reports
    * at the end does not flicker the inbox to zero mid-run.
    */
-  /**
-   * Set the working count from what a delegating call says it launched.
-   *
-   * This is the count that actually appears in practice: progress reporting is
-   * optional and `pi-subagents` does not do it, so waiting for progress leaves
-   * a busy session looking idle for the whole run.
-   */
-  private trackLaunchedAgents(session: PiAgentSession, event: unknown): void {
-    const launched = launchedAgentCount(isRecord(event) ? event["args"] : undefined);
-    if (launched === 0) return;
-    this.workingAgentsBySession.set(session.sessionId, launched);
-    this.publishStatus(session);
-  }
-
   private trackWorkingAgents(session: PiAgentSession, event: unknown): void {
     const running = runningAgentCount(event);
     if (running === undefined) return;
@@ -3929,11 +3915,7 @@ export class PiSessionService implements SessionRouteService {
     if (eventType === "message_start") { this.publishActivity(session, "message started", "active"); return; }
     if (eventType === "message_end") { this.publishActivity(session, "message complete", "idle"); return; }
     if (eventType === "message_update") { this.publishActivity(session, "receiving response", "active"); return; }
-    if (eventType === "tool_execution_start") {
-      this.publishActivity(session, "running tool", "active", getString(event, "toolName"));
-      this.trackLaunchedAgents(session, event);
-      return;
-    }
+    if (eventType === "tool_execution_start") { this.publishActivity(session, "running tool", "active", getString(event, "toolName")); return; }
     if (eventType === "tool_execution_update") { this.trackWorkingAgents(session, event); return; }
     if (eventType === "tool_execution_end") {
       const isError = getBoolean(event, "isError") === true;

@@ -83,7 +83,7 @@ export type SessionBoardState =
   | { readonly kind: "blocked"; readonly reason: "ask"; readonly question: string }
   | { readonly kind: "blocked"; readonly reason: "dialog"; readonly question: string }
   | { readonly kind: "errored"; readonly detail: string }
-  | { readonly kind: "working"; readonly detail: string }
+  | { readonly kind: "working"; readonly detail?: string }
   | { readonly kind: "unread"; readonly completedAt?: string }
   | { readonly kind: "open" }
   | { readonly kind: "archived"; readonly archivedAt?: string };
@@ -203,12 +203,14 @@ export function sessionBoardState(
   if (status?.isBashRunning === true) {
     return { kind: "working", detail: "Running a command" };
   }
-  if (status?.isStreaming === true) {
-    return { kind: "working", detail: activity?.label ?? "Thinking" };
-  }
-  if (activity?.phase === "active") {
-    return { kind: "working", detail: activity.label };
-  }
+  // Deliberately no detail from the activity label. Those labels narrate the
+  // agent loop -- "turn start", "message started", "receiving response",
+  // "running tool" -- which churns every few hundred milliseconds and tells a
+  // reader nothing they can act on. `Working` already says the session is busy;
+  // the row's live-work counts say how busy. Compaction and a running command
+  // keep their wording because each names a specific thing to wait for.
+  if (status?.isStreaming === true) return { kind: "working" };
+  if (activity?.phase === "active") return { kind: "working" };
 
   if (isUnread) {
     return unreadCompletedAt !== undefined
