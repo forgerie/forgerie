@@ -21,9 +21,31 @@ Resident chrome above the transcript goes to zero on constrained panes.
 | Give me the controls | `⌃` in the composer row, opening a bottom sheet |
 | Something needs me | `ask_user` and errors render inline in the transcript |
 
-Visible transcript: 490 → 733px with the keyboard closed, 151 → 340px with it
-open. Numbers are read off the CSS in `src/client/src/components/shared.ts`,
-not measured on a device.
+## Measured result
+
+Transcript element height and the chrome above it, measured through CDP with an
+emulated viewport against a real 2,729-message session. `chat top` is the pixel
+where the transcript begins.
+
+| Posture | Chrome above, before | after | Transcript, before | after |
+|---|---|---|---|---|
+| Folded portrait 499×789 | 153px | **0** | 483px | 646px |
+| Folded landscape 789×499 | 147px | **0** | 191px | 356px |
+| Unfolded portrait 739×979 | 153px | **0** | 665px | 836px |
+| Unfolded landscape 979×739 | 108px | 51px | 470px | 527px |
+
+The first three postures are narrower than the 820px dock threshold, so chrome
+is summoned and the transcript starts at the top edge. Unfolded landscape docks
+and keeps its bands; its 57px saving is the thread header, deleted at every size.
+
+Earlier estimates in this document were read off the CSS and ran optimistic.
+
+## Capture note
+
+Measure with an emulated viewport (`Emulation.setDeviceMetricsOverride`, as
+`scripts/capture-screenshots.mjs` does), not `chromium --window-size`. The latter
+sizes the window rather than the viewport, so the screenshot carries dead space
+at the bottom that looks like a layout defect and is not one.
 
 ## Constraints this design carries
 
