@@ -106,9 +106,13 @@ try {
   // The theme resolves once at startup, so emulating prefers-color-scheme after
   // load does nothing. Write the app's own stored preference and reload, which
   // exercises the real theme path rather than a browser-level override.
-  if (process.env["FORGERIE_SCHEME"] === "dark") {
+  // Any known scheme, not just dark. Emulation.setEmulatedMedia does not work
+  // here: the theme resolves once at startup, so it has to be stored and the
+  // page reloaded.
+  const scheme = process.env["FORGERIE_SCHEME"];
+  if (scheme === "dark" || scheme === "light") {
     await rpc(ws, 3, "Runtime.evaluate", {
-      expression: `localStorage.setItem("pi-web-app-theme", JSON.stringify({ themeId: "themes:pi-web-dark", auto: false }))`,
+      expression: `localStorage.setItem("pi-web-app-theme", JSON.stringify({ themeId: "themes:pi-web-${scheme}", auto: false }))`,
       returnByValue: true,
     });
     await rpc(ws, 4, "Page.reload", {});
