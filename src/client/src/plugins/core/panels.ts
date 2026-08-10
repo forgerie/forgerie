@@ -1,8 +1,12 @@
 import { html, type TemplateResult } from "lit";
 import { renderBuiltinTabIcon } from "../../components/tabIcons";
+import { deriveDelegatedRuns } from "../../delegatedAgents";
+import "../../components/WorkspaceAgentsPanel";
 import "../../components/WorkspaceFilesPanel";
 import "../../components/WorkspaceGitPanel";
 import type { WorkspacePanelContribution, WorkspacePanelContext } from "../types";
+
+const AGENTS_PANEL_ID = "workspace.agents";
 
 export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
   return [
@@ -29,7 +33,40 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
       badge: (context) => context.activeTerminalCount > 0 ? context.activeTerminalCount : undefined,
       render: renderTerminal,
     },
+    {
+      id: AGENTS_PANEL_ID,
+      title: "Agents",
+      icon: renderBuiltinTabIcon("agents"),
+      // Last in the strip, after the Processes plugin at 50: Agents is the
+      // least-reached-for tool, and the wireframe places it there.
+      order: 60,
+      // A session that delegated nothing should not carry a permanently empty
+      // tab. The open-tool clause keeps the panel from vanishing from under
+      // someone who is reading it when the last run scrolls out of the window.
+      visible: (context) => agentsWorking(context).total > 0 || isOpenTool(context),
+      // Only what is running now. A total-agent badge would never clear once a
+      // session had delegated anything, which is noise rather than signal.
+      badge: (context) => {
+        const running = agentsWorking(context).running;
+        return running > 0 ? running : undefined;
+      },
+      render: renderAgents,
+    },
   ];
+}
+
+function agentsWorking(context: WorkspacePanelContext): { total: number; running: number } {
+  let total = 0;
+  let running = 0;
+  for (const run of deriveDelegatedRuns(context.state.messages)) {
+    total += run.counts.total;
+    running += run.counts.running;
+  }
+  return { total, running };
+}
+
+function isOpenTool(context: WorkspacePanelContext): boolean {
+  return context.state.workspaceTool === `core:${AGENTS_PANEL_ID}`;
 }
 
 function renderFiles(context: WorkspacePanelContext): TemplateResult {
@@ -43,6 +80,10 @@ function renderTerminal(context: WorkspacePanelContext): TemplateResult {
 
 function renderGit(context: WorkspacePanelContext): TemplateResult {
   return html`<workspace-git-panel .context=${context}></workspace-git-panel>`;
+}
+
+function renderAgents(context: WorkspacePanelContext): TemplateResult {
+  return html`<workspace-agents-panel .context=${context}></workspace-agents-panel>`;
 }
 
 function loadTerminalPanel(): void {

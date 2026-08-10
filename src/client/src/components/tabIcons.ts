@@ -1,6 +1,6 @@
 import { html, svg, type TemplateResult } from "lit";
 
-export type AppTabBuiltinIcon = "navigation" | "chat" | "files" | "git" | "terminal";
+export type AppTabBuiltinIcon = "navigation" | "chat" | "files" | "git" | "terminal" | "agents";
 export type AppTabIcon = AppTabBuiltinIcon | TemplateResult;
 
 export function renderAppTabIcon(icon: AppTabIcon): TemplateResult {
@@ -52,6 +52,17 @@ export function renderBuiltinTabIcon(icon: AppTabBuiltinIcon): TemplateResult {
           <rect x="3" y="5" width="18" height="14" rx="2"></rect>
           <path d="m7 10 3 3-3 3"></path>
           <path d="M12 16h5"></path>
+        </svg>
+      `;
+    case "agents":
+      // One node delegating to several: the shape of a run, not a robot.
+      return svg`
+        <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="5" cy="12" r="2.5"></circle>
+          <circle cx="19" cy="6" r="2.5"></circle>
+          <circle cx="19" cy="18" r="2.5"></circle>
+          <path d="M7.5 11 16.5 6.8"></path>
+          <path d="M7.5 13 16.5 17.2"></path>
         </svg>
       `;
   }
