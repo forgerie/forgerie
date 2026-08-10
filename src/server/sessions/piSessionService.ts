@@ -1750,7 +1750,7 @@ export class PiSessionService implements SessionRouteService {
   /** Status and final result of a subsession, scoped to the caller's children. */
   async checkSubsession(parentSessionId: string, sessionId: string, parentSessionFile?: string): Promise<SubsessionCheckResult> {
     const session = await this.openSubsession(parentSessionId, sessionId, parentSessionFile);
-    const messages = historyMessages(session);
+    const messages = historyMessages(session.sessionManager);
     return {
       sessionId,
       cwd: session.sessionManager.getCwd(),
@@ -1763,7 +1763,7 @@ export class PiSessionService implements SessionRouteService {
   /** Filtered, paginated transcript of a subsession, scoped to the caller's children. */
   async readSubsession(parentSessionId: string, sessionId: string, query: SubsessionReadQuery, parentSessionFile?: string): Promise<SubsessionReadResult> {
     const session = await this.openSubsession(parentSessionId, sessionId, parentSessionFile);
-    const view = buildTranscriptView(historyMessages(session), query);
+    const view = buildTranscriptView(historyMessages(session.sessionManager), query);
     return {
       sessionId,
       cwd: session.sessionManager.getCwd(),
@@ -2021,7 +2021,7 @@ export class PiSessionService implements SessionRouteService {
     if (this.subsessionNotifyArmed.get(childId) !== true) return;
     this.subsessionNotifyArmed.set(childId, false);
     const status: SubsessionStatus = this.activities.get(childId)?.phase === "error" ? "error" : "idle";
-    const finalText = finalAssistantText(historyMessages(session));
+    const finalText = finalAssistantText(historyMessages(session.sessionManager));
     const outputSection = formatSubsessionNotificationOutput(childId, finalText);
     const workingIds = this.workingSubsessionIds(link.parentSessionId);
     const next = workingIds.length === 0
@@ -2085,8 +2085,8 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {
-    const session = await this.getOrOpen(ref);
-    return pageMessagesAtSafeBoundary(historyMessages(session), page);
+    const sessionManager = await this.historySessionManager(ref);
+    return pageMessagesAtSafeBoundary(historyMessages(sessionManager), page);
   }
 
   async status(ref: PiSessionRef): Promise<ClientSessionStatus> {
@@ -3112,6 +3112,18 @@ export class PiSessionService implements SessionRouteService {
 
   private async getOrOpen(ref: PiSessionRef): Promise<PiAgentSession> {
     return (await this.getActive(ref)).runtime.session;
+  }
+
+  private async historySessionManager(ref: PiSessionRef): Promise<PiSessionManager> {
+    const active = this.activeForRef(ref);
+    if (active !== undefined) return active.runtime.session.sessionManager;
+
+    const archived = await this.getArchived(ref);
+    if (archived?.archivePath !== undefined) return this.sessionManager.open(archived.archivePath);
+
+    const match = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
+    if (!match) throw new Error("Session not found");
+    return this.sessionManager.open(match.path);
   }
 
   private async getActive(ref: PiSessionRef, options: Pick<CreateSessionRuntimeOptions, "notificationGeneration"> = {}): Promise<ActiveSession<PiSessionRuntime>> {
@@ -4664,12 +4676,12 @@ function annotateAssistantThinkingLevel(message: unknown, thinkingLevel: string 
   return { ...message, thinkingLevel };
 }
 
-function historyMessages(session: PiAgentSession): unknown[] {
+function historyMessages(sessionManager: Pick<PiSessionManager, "getBranch">): unknown[] {
   const messages: unknown[] = [];
   // Pi records the initial level at session creation and every later change, so
   // walking the branch yields the level in effect for each assistant message.
   let thinkingLevel: string | undefined;
-  for (const entry of session.sessionManager.getBranch()) {
+  for (const entry of sessionManager.getBranch()) {
     if (!isRecord(entry)) continue;
     if (entry["type"] === "message") messages.push(annotateAssistantThinkingLevel(entry["message"], thinkingLevel));
     else if (entry["type"] === "thinking_level_change") {

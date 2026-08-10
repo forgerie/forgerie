@@ -313,7 +313,7 @@ describe("PiSessionService header cache on replaced session files", () => {
         invalidateSessionFile: (sessionFile: string) => {
           realGateway.invalidateSessionFile(sessionFile);
         },
-        open: () => fakeSessionManager(CHILD_CWD, { getSessionId: () => "replacement-id" }),
+        open: (path: string) => realGateway.open(path),
       },
       heartbeatIntervalMs: 60_000,
       projectWorkspaces: { forCwd: () => Promise.resolve([CHILD_CWD, PARENT_CWD]) },
@@ -333,7 +333,7 @@ describe("PiSessionService header cache on replaced session files", () => {
 
     // The open path must agree with the listing...
     const page = await service.messages(sessionRef("replacement-id", CHILD_CWD));
-    expect(page.messages).toEqual([{ role: "user", content: "replacement transcript" }]);
+    expect(page.messages).toEqual([{ role: "user", content: [{ type: "text", text: "replacement transcript" }] }]);
     // ...and the replaced session is really gone.
     await expect(service.messages(sessionRef("original-id", CHILD_CWD))).rejects.toThrow("Session not found");
     await service.dispose();

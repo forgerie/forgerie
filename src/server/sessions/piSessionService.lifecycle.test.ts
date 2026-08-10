@@ -118,7 +118,64 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     }
   });
 
-  it("shares one runtime when concurrent cold lookups resolve to the same session", async () => {
+  it("returns direct history before a later status request starts one runtime", async () => {
+    const sessionId = "direct-then-runtime-session";
+    const createStarted = deferred();
+    const releaseCreate = deferred();
+    const unsubscribe = vi.fn();
+    const subscribe = vi.fn(() => unsubscribe);
+    const runtime = fakeRuntime(sessionId, {
+      sessionManager: fakeSessionManager("/workspace", { getSessionId: () => sessionId }),
+      subscribe,
+    });
+    let createCalls = 0;
+    const createAgentRuntime: RuntimeCreator = async () => {
+      createCalls += 1;
+      createStarted.resolve();
+      await releaseCreate.promise;
+      return runtime.runtime;
+    };
+    const historyManager = fakeSessionManager("/workspace", {
+      getSessionId: () => sessionId,
+      getBranch: () => [{ type: "message", message: { role: "user", content: "read before runtime" } }],
+    });
+    const gateway = sessionGateway([sessionRecord(sessionId)]);
+    const open = vi.spyOn(gateway, "open").mockReturnValue(historyManager);
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      archiveStore: emptyArchiveStore(),
+      createAgentRuntime,
+      sessionManager: gateway,
+      heartbeatIntervalMs: 60_000,
+    });
+
+    const messages = await service.messages(sessionRef(sessionId));
+    const createCallsAfterHistory = createCalls;
+    const activeCountAfterHistory = service.activeCount();
+    const statusPromise = service.status(sessionRef("direct-then-runtime"));
+    await createStarted.promise;
+    const callsWhileOpening = createCalls;
+    releaseCreate.resolve();
+
+    const status = await statusPromise;
+    const activeCount = service.activeCount();
+    await service.dispose();
+
+    expect(messages).toEqual({ messages: [{ role: "user", content: "read before runtime" }], start: 0, total: 1 });
+    expect(createCallsAfterHistory).toBe(0);
+    expect(activeCountAfterHistory).toBe(0);
+    expect(callsWhileOpening).toBe(1);
+    expect(createCalls).toBe(1);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(activeCount).toBe(1);
+    expect(status).toMatchObject({ sessionId });
+    expect(subscribe).toHaveBeenCalledOnce();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(runtime.calls.dispose).toBe(1);
+  });
+
+  it("shares one runtime when concurrent cold stream snapshots resolve exact and prefix refs to the same session", async () => {
     const sessionId = "single-flight-session";
     const createStarted = deferred();
     const releaseCreate = deferred();
@@ -127,10 +184,7 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     const winnerSubscribe = vi.fn(() => winnerUnsubscribe);
     const loserSubscribe = vi.fn(() => loserUnsubscribe);
     const winner = fakeRuntime(sessionId, {
-      sessionManager: fakeSessionManager("/workspace", {
-        getSessionId: () => sessionId,
-        getBranch: () => [{ type: "message", message: { role: "user", content: "shared runtime" } }],
-      }),
+      sessionManager: fakeSessionManager("/workspace", { getSessionId: () => sessionId }),
       subscribe: winnerSubscribe,
     });
     const loser = fakeRuntime(sessionId, {
@@ -158,14 +212,14 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    const messagesPromise = service.messages(sessionRef(sessionId));
+    const exactSnapshotPromise = service.streamSnapshot(sessionRef(sessionId));
     await createStarted.promise;
-    const statusPromise = service.status(sessionRef("single-flight"));
+    const prefixSnapshotPromise = service.streamSnapshot(sessionRef("single-flight"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     const callsWhileOpening = createCalls;
     releaseCreate.resolve();
 
-    const [messages, status] = await Promise.all([messagesPromise, statusPromise]);
+    const [exactSnapshot, prefixSnapshot] = await Promise.all([exactSnapshotPromise, prefixSnapshotPromise]);
     const activeCount = service.activeCount();
     await service.dispose();
 
@@ -173,8 +227,8 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     expect(createCalls).toBe(1);
     expect(open).toHaveBeenCalledOnce();
     expect(activeCount).toBe(1);
-    expect(messages).toEqual({ messages: [{ role: "user", content: "shared runtime" }], start: 0, total: 1 });
-    expect(status).toMatchObject({ sessionId });
+    expect(exactSnapshot).toEqual({ seq: 0, partial: null });
+    expect(prefixSnapshot).toEqual({ seq: 0, partial: null });
     expect(winnerSubscribe).toHaveBeenCalledOnce();
     expect(winnerUnsubscribe).toHaveBeenCalledOnce();
     expect(winner.calls.dispose).toBe(1);
@@ -201,7 +255,7 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
       resolveSessionFile: (refCwd, refId) => Promise.resolve(
         refId === sessionId ? { id: sessionId, cwd: refCwd, path: `/sessions/${sessionId}.jsonl` } : undefined,
       ),
-      open: () => fakeSessionManager(),
+      open: () => fake.session.sessionManager,
     };
     const service = new PiSessionService(new CapturingSessionEventHub(), {
       agentDir: TEST_AGENT_DIR,
@@ -271,26 +325,26 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    const messagesPromise = service.messages(sessionRef(sessionId));
+    const openingStatusPromise = service.status(sessionRef(sessionId));
     await bindStarted.promise;
-    const statusPromise = service.status(sessionRef("retry-open"));
+    const concurrentStatusPromise = service.status(sessionRef("retry-open"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     const callsWhileOpening = createCalls;
-    const failedLookups = Promise.allSettled([messagesPromise, statusPromise]);
+    const failedLookups = Promise.allSettled([openingStatusPromise, concurrentStatusPromise]);
     bindResult.reject(openingError);
 
     const outcomes = await failedLookups;
     expect(callsWhileOpening).toBe(1);
     expect(outcomes).toHaveLength(2);
-    const [messagesOutcome, statusOutcome] = outcomes;
-    expect(messagesOutcome.status).toBe("rejected");
-    if (messagesOutcome.status === "rejected") expect(messagesOutcome.reason).toBe(openingError);
-    // Status no longer parks behind the in-flight open: a session still
-    // binding its extensions is statusable (its session_start dialogs must
+    const [openingStatusOutcome, concurrentStatusOutcome] = outcomes;
+    expect(openingStatusOutcome.status).toBe("rejected");
+    if (openingStatusOutcome.status === "rejected") expect(openingStatusOutcome.reason).toBe(openingError);
+    // A second status call no longer parks behind the in-flight open: a session
+    // still binding its extensions is statusable (its session_start dialogs must
     // stay answerable for startup to be unblockable at all), so the lookup
     // resolves from the startup window rather than sharing the open's fate.
-    expect(statusOutcome.status).toBe("fulfilled");
-    if (statusOutcome.status === "fulfilled") expect(statusOutcome.value).toMatchObject({ sessionId });
+    expect(concurrentStatusOutcome.status).toBe("fulfilled");
+    if (concurrentStatusOutcome.status === "fulfilled") expect(concurrentStatusOutcome.value).toMatchObject({ sessionId });
     expect(service.activeCount()).toBe(0);
     expect(failed.calls.abort).toBe(1);
     expect(failed.calls.dispose).toBe(1);

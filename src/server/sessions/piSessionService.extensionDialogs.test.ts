@@ -600,9 +600,9 @@ describe("PiSessionService session_start dialog startup reachability", () => {
 
   it("dispose settles a startup-parked dialog instead of blocking behind its timeout", async () => {
     const { service, store, events, confirmAnswers } = startupDialogService();
-    // The open flow registers in pendingSessionOpens, which dispose awaits:
+    // The status open flow registers in pendingSessionOpens, which dispose awaits:
     // without settling the dialog first, disposal would ride its timeout.
-    const opening = service.messages(sessionRef(ACTIVE_SESSION_ID));
+    const opening = service.status(sessionRef(ACTIVE_SESSION_ID));
     await parkOnStartupDialog(store);
 
     await service.dispose();
@@ -612,13 +612,13 @@ describe("PiSessionService session_start dialog startup reachability", () => {
     expect(closedEvents).toHaveLength(1);
     expect(closedEvents[0]?.event).toMatchObject({ dialogId: "dialog-1", reason: "session-ended" });
     // The released open completed inside dispose's awaited window; the late
-    // messages read neither hangs nor rejects the test run.
+    // status read neither hangs nor rejects the test run.
     await Promise.allSettled([opening]);
   });
 
   it("closing a session whose open is parked on a session_start dialog settles the dialog first", async () => {
     const { service, store, events, confirmAnswers } = startupDialogService();
-    const opening = service.messages(sessionRef(ACTIVE_SESSION_ID));
+    const opening = service.status(sessionRef(ACTIVE_SESSION_ID));
     await parkOnStartupDialog(store);
 
     await service.stop(sessionRef(ACTIVE_SESSION_ID));
