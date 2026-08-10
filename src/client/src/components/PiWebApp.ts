@@ -817,11 +817,6 @@ export class PiWebApp extends LitElement {
     await nextFrame();
     if (!shouldComplete()) return;
     this.chatView?.restoreScrollPosition();
-    if (this.shouldAutoFocusPrompt()) this.promptEditor?.focusInput();
-  }
-
-  private shouldAutoFocusPrompt(): boolean {
-    return !this.isRenderedModalOpen() && this.appShell.shouldAutoFocusPrompt();
   }
 
   private async withChatPrependTransition(action: () => Promise<void>) {
@@ -1357,7 +1352,7 @@ export class PiWebApp extends LitElement {
         .onDismissUndoToast=${() => { this.inbox.dismissUndoToast(); }}
         .onNewSession=${() => { this.setState({ newSessionDialog: { step: "project", mode: "start" } }); }}
         .onManageWorkspaces=${() => { this.setState({ newSessionDialog: { step: "project", mode: "manage" } }); }}
-        .onCancelKeyboardNavigation=${() => { void this.focusChatComposer(); }}
+        .onCancelKeyboardNavigation=${() => { void this.openChat(); }}
         .onCloseOverlay=${() => { this.selectMainView("chat"); }}
         .unavailableCwds=${this.unavailableCwds}
       ></app-navigation-panel>
@@ -1445,7 +1440,7 @@ export class PiWebApp extends LitElement {
         next.delete(session.cwd);
         this.unavailableCwds = next;
       }
-      await this.focusChatComposer();
+      await this.openChat();
     } else if (result === "unavailable") {
       // All projects exhausted with no match: mark the cwd unavailable so the
       // row renders as disabled in the inbox panel.
@@ -1458,7 +1453,7 @@ export class PiWebApp extends LitElement {
 
   /**
    * Restore a session from the inbox and navigate to it.
-   * Like `selectNavigationItem` for restores: select session, then focus chat.
+   * Like `selectNavigationItem` for restores: select session, then open chat.
    */
   private async restoreInboxSession(session: SessionInfo): Promise<void> {
     const seq = ++this.navigationSelectionSeq;
@@ -1466,7 +1461,7 @@ export class PiWebApp extends LitElement {
     const isCurrentToken = () =>
       seq === this.navigationSelectionSeq && selectedMachineId(this.state) === machineId;
     await this.sessions.restoreSession(session);
-    if (isCurrentToken()) await this.focusChatComposer();
+    if (isCurrentToken()) await this.openChat();
   }
 
   /**
@@ -1690,13 +1685,13 @@ export class PiWebApp extends LitElement {
     const start = this.sessions.startSession().catch((error: unknown) => {
       if (shouldComplete()) this.setState({ error: String(error) });
     });
-    if (shouldComplete()) await this.focusChatComposer();
+    if (shouldComplete()) await this.openChat();
     void start;
   }
 
   private async focusNavigationTarget(target: NavigationFocusTarget): Promise<void> {
     if (target === "chat") {
-      await this.focusChatComposer();
+      await this.openChat();
       return;
     }
     await this.focusNavigationSection(target);
@@ -1721,10 +1716,25 @@ export class PiWebApp extends LitElement {
     }
   }
 
-  private async focusChatComposer(): Promise<void> {
+  /**
+   * Bring the chat surface forward and settle its render, leaving keyboard
+   * focus where the user left it.
+   *
+   * Opening a session must never focus the composer: on a touch device that
+   * raises the on-screen keyboard and squashes the transcript the user came to
+   * read. Only an explicit "focus the composer" request may move focus, so all
+   * navigation paths route here and `focusChatComposer` stays reserved for that
+   * one intent.
+   */
+  private async openChat(): Promise<void> {
     if (this.state.mainView !== "chat") this.selectMainView("chat");
     await this.updateComplete;
     await nextFrame();
+  }
+
+  /** Explicit composer entry only — see `openChat` for why navigation never calls this. */
+  private async focusChatComposer(): Promise<void> {
+    await this.openChat();
     // The focus request may outlive the dialog transition that scheduled it.
     // Recheck the rendered boundary at the final side-effect point so a newer
     // or surviving modal keeps visual and keyboard focus ownership.
@@ -1740,7 +1750,7 @@ export class PiWebApp extends LitElement {
       && originSessionId !== undefined
       && selectedMachineId(this.state) === originMachineId
       && this.state.selectedSession?.id === originSessionId) {
-      await this.focusChatComposer();
+      await this.openChat();
     }
     return result;
   }
@@ -1752,7 +1762,7 @@ export class PiWebApp extends LitElement {
 
   private closeSessionTreeNavigator(): void {
     this.sessions.closeTreeDialog();
-    void this.focusChatComposer();
+    void this.openChat();
   }
 
   private renderSessionTreeNavigator(state: AppState) {

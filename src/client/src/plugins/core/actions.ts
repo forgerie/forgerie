@@ -99,7 +99,9 @@ export function createCoreActions(): PluginAction[] {
       title: "Go to Chat",
       shortcut: "mod+1",
       group: "Navigation",
-      run: (context) => { context.focusPrompt(); },
+      // Shows the transcript without raising the on-screen keyboard.
+      // "Focus Prompt" is the action that moves focus into the composer.
+      run: (context) => { context.selectMainView("chat"); },
     },
     {
       id: "view.files",

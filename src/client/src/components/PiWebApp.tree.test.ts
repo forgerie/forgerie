@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe("PiWebApp session tree wiring", () => {
-  it("routes navigation, cancellation, abort, and prompt focus through SessionController", async () => {
+  it("routes navigation, cancellation, abort, and chat reveal through SessionController", async () => {
     const app = createApp();
     const state = setAppTree(app, tree());
     const controller = appSessionController(app);
@@ -29,7 +29,9 @@ describe("PiWebApp session tree wiring", () => {
       .mockResolvedValueOnce({ cancelled: true, aborted: true });
     const abortTreeNavigation = vi.spyOn(controller, "abortTreeNavigation").mockResolvedValue(undefined);
     const closeTreeDialog = vi.spyOn(controller, "closeTreeDialog").mockReturnValue(undefined);
+    const openChat = vi.fn(() => Promise.resolve());
     const focusChatComposer = vi.fn(() => Promise.resolve());
+    if (!Reflect.set(app, "openChat", openChat)) throw new Error("Could not replace chat reveal boundary");
     if (!Reflect.set(app, "focusChatComposer", focusChatComposer)) throw new Error("Could not replace prompt focus boundary");
 
     const rendered = renderSessionTreeNavigator(app, state);
@@ -39,17 +41,20 @@ describe("PiWebApp session tree wiring", () => {
 
     await expect(onNavigate("side", { mode: "none" })).resolves.toEqual({ cancelled: false, editorText: "edit" });
     expect(navigateTree).toHaveBeenNthCalledWith(1, "side", { mode: "none" });
-    expect(focusChatComposer).toHaveBeenCalledOnce();
+    expect(openChat).toHaveBeenCalledOnce();
 
     await expect(onNavigate("root", { mode: "default" })).resolves.toEqual({ cancelled: true, aborted: true });
-    expect(focusChatComposer).toHaveBeenCalledOnce();
+    expect(openChat).toHaveBeenCalledOnce();
 
     await onAbort();
     expect(abortTreeNavigation).toHaveBeenCalledOnce();
 
     onCancel();
     expect(closeTreeDialog).toHaveBeenCalledOnce();
-    expect(focusChatComposer).toHaveBeenCalledTimes(2);
+    expect(openChat).toHaveBeenCalledTimes(2);
+
+    // Revealing chat must never raise the on-screen keyboard.
+    expect(focusChatComposer).not.toHaveBeenCalled();
   });
 
   it("routes fork requests through SessionController and propagates results and failures", async () => {
@@ -78,8 +83,8 @@ describe("PiWebApp session tree wiring", () => {
     const controller = appSessionController(app);
     const result = deferred<SessionTreeNavigateResult>();
     vi.spyOn(controller, "navigateTree").mockReturnValue(result.promise);
-    const focusChatComposer = vi.fn(() => Promise.resolve());
-    if (!Reflect.set(app, "focusChatComposer", focusChatComposer)) throw new Error("Could not replace prompt focus boundary");
+    const openChat = vi.fn(() => Promise.resolve());
+    if (!Reflect.set(app, "openChat", openChat)) throw new Error("Could not replace chat reveal boundary");
     const onNavigate = navigatorNavigateHandler(renderSessionTreeNavigator(app, state));
 
     const navigation = onNavigate("side", { mode: "none" });
@@ -88,7 +93,7 @@ describe("PiWebApp session tree wiring", () => {
     result.resolve({ cancelled: false });
     await navigation;
 
-    expect(focusChatComposer).not.toHaveBeenCalled();
+    expect(openChat).not.toHaveBeenCalled();
   });
 });
 

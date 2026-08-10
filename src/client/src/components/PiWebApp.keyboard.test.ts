@@ -75,16 +75,21 @@ describe("PiWebApp global shortcut modality boundary", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("does not automatically focus the prompt while a rendered modal remains open", async () => {
+  it("opens the chat surface without focusing the composer", async () => {
     const app = new PiWebApp();
-    const appShell: unknown = Reflect.get(app, "appShell");
-    if (!isAutoFocusAppShell(appShell)) throw new Error("PiWebApp shell was unavailable");
-    vi.spyOn(appShell, "shouldAutoFocusPrompt").mockReturnValue(true);
+    setAppState(app, { mainView: "navigation" });
+    const focusInput = vi.fn();
+    Object.defineProperty(app, "promptEditor", { configurable: true, value: { focusInput } });
+    Object.defineProperty(app, "updateComplete", { configurable: true, value: Promise.resolve(true) });
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(performance.now());
+      return 1;
+    });
 
-    expect(appShouldAutoFocusPrompt(app)).toBe(true);
-    await openAuthenticationDialog(app);
+    await openChat(app);
 
-    expect(appShouldAutoFocusPrompt(app)).toBe(false);
+    expect(appMainView(app)).toBe("chat");
+    expect(focusInput).not.toHaveBeenCalled();
   });
 
   it("rechecks rendered modality before a delayed prompt focus takes effect", async () => {
@@ -133,11 +138,7 @@ describe("PiWebApp on-screen keyboard layout", () => {
 });
 
 type AppKeyDownHandler = (event: KeyboardEvent) => void;
-type FocusChatComposer = (this: PiWebApp) => Promise<void>;
-
-interface AutoFocusAppShell {
-  shouldAutoFocusPrompt: () => boolean;
-}
+type PromptFocusBoundary = (this: PiWebApp) => Promise<void>;
 
 function dispatchShortcutThroughApp(app: PiWebApp, target: HTMLElement): KeyboardEvent {
   const handler: unknown = Reflect.get(app, "onKeyDown");
@@ -220,12 +221,20 @@ function renderApp(app: PiWebApp): HTMLDivElement {
 }
 
 function focusChatComposer(app: PiWebApp): Promise<void> {
-  const method: unknown = Reflect.get(app, "focusChatComposer");
-  if (!isFocusChatComposer(method)) throw new Error("PiWebApp prompt focus boundary was unavailable");
+  return invokePromptFocusBoundary(app, "focusChatComposer");
+}
+
+function openChat(app: PiWebApp): Promise<void> {
+  return invokePromptFocusBoundary(app, "openChat");
+}
+
+function invokePromptFocusBoundary(app: PiWebApp, name: string): Promise<void> {
+  const method: unknown = Reflect.get(app, name);
+  if (!isPromptFocusBoundary(method)) throw new Error(`PiWebApp ${name} boundary was unavailable`);
   return Reflect.apply(method, app, []);
 }
 
-function isFocusChatComposer(value: unknown): value is FocusChatComposer {
+function isPromptFocusBoundary(value: unknown): value is PromptFocusBoundary {
   return typeof value === "function";
 }
 
@@ -233,17 +242,14 @@ function isAppKeyDownHandler(value: unknown): value is AppKeyDownHandler {
   return typeof value === "function";
 }
 
-function isAutoFocusAppShell(value: unknown): value is AutoFocusAppShell {
-  return typeof value === "object" && value !== null && "shouldAutoFocusPrompt" in value
-    && typeof value.shouldAutoFocusPrompt === "function";
-}
-
-function appShouldAutoFocusPrompt(app: PiWebApp): boolean {
-  const decision: unknown = Reflect.get(app, "shouldAutoFocusPrompt");
-  if (typeof decision !== "function") throw new Error("PiWebApp auto-focus decision was unavailable");
-  const result: unknown = Reflect.apply(decision, app, []);
-  if (typeof result !== "boolean") throw new Error("PiWebApp auto-focus decision was invalid");
-  return result;
+function appMainView(app: PiWebApp): string {
+  const state: unknown = Reflect.get(app, "state");
+  if (typeof state !== "object" || state === null || !("mainView" in state)) {
+    throw new Error("PiWebApp state was unavailable");
+  }
+  const { mainView } = state;
+  if (typeof mainView !== "string") throw new Error("PiWebApp main view was invalid");
+  return mainView;
 }
 
 function actionPaletteIsOpen(app: PiWebApp): boolean {

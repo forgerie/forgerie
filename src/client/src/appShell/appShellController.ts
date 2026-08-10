@@ -50,10 +50,6 @@ export class AppShellController implements ReactiveController {
     this.applyMeasuredWidth();
   }
 
-  shouldAutoFocusPrompt(): boolean {
-    return !this.isMobileNavigationLayout && !this.isPwaDisplayMode;
-  }
-
   shouldShowAppRefreshInHeader(): boolean {
     return this.isPwaDisplayMode && !this.isMobileNavigationLayout;
   }
