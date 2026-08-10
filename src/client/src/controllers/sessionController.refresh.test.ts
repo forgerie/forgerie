@@ -1,13 +1,111 @@
 import { describe, expect, it } from "vitest";
 import { initialAppState } from "../appState";
+import { ChatTranscriptStore } from "../chatTranscriptStore";
 import { SessionController } from "./sessionController";
-import { defaultApi, deferred, FakeSocket, oldSession, replacementSession, sessionLookupId, status, workspace, type AppState, type MessagePage, type SessionStatus } from "./sessionController.testSupport";
+import { defaultApi, deferred, FakeSocket, oldSession, replacementSession, sessionLookupId, status, workspace, type AppState, type MessagePage, type SessionStatus, type SessionStreamSnapshot } from "./sessionController.testSupport";
 
 function page(text: string, total: number): MessagePage {
   return { messages: [{ role: "assistant", content: text }], start: 0, total };
 }
 
 describe("SessionController selected-session refresh", () => {
+  it("commits fresh transcript history before a delayed status/snapshot join becomes live-ready", async () => {
+    const messages = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    const ready: string[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => messages.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), onSelectedSessionReady: ({ machineId, session }) => { ready.push(`${machineId}:${session.id}`); } },
+    );
+
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    await Promise.resolve();
+    expect(state.selectedChatLoad).toMatchObject({ kind: "loading-without-content", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
+
+    messages.resolve(page("history first", 1));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "history first" }] }]);
+    expect(state.selectedChatLoad).toMatchObject({ kind: "fresh-readable", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
+    expect(ready).toEqual([]);
+
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.resolve({ seq: 0, partial: null });
+    await selecting;
+
+    expect(state.selectedChatLoad).toMatchObject({ kind: "live-ready", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
+    expect(ready).toEqual([`local:${oldSession.id}`]);
+  });
+
+  it("keeps cached history readable and controls ineligible when the fresh history request fails", async () => {
+    const ready: string[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => Promise.reject(new Error("history failed")),
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const transcripts = new ChatTranscriptStore();
+    transcripts.mergeHistory("local:old-session", { messages: [{ role: "user", content: "cached" }], start: 0, total: 1 });
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), transcripts, onSelectedSessionReady: ({ machineId, session }) => { ready.push(`${machineId}:${session.id}`); } },
+    );
+
+    await controller.selectSession(oldSession, { updateUrl: false });
+
+    expect(state.messages).toEqual([{ role: "user", parts: [{ type: "text", text: "cached" }] }]);
+    expect(state.selectedChatLoad).toMatchObject({ kind: "failed", readability: "cached", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
+    expect(state.error).toContain("history failed");
+    expect(ready).toEqual([]);
+  });
+
+  it("loads an archived selection as read-only without connecting a session socket", async () => {
+    const archived = { ...oldSession, archived: true, archivedAt: "2026-05-16T00:00:00.000Z" };
+    const socket = new FakeSocket();
+    const ready: string[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [archived] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => Promise.resolve(page("archived history", 1)),
+      status: () => Promise.reject(new Error("status should not be called")),
+      streamSnapshot: () => Promise.reject(new Error("snapshot should not be called")),
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket, onSelectedSessionReady: ({ machineId, session }) => { ready.push(`${machineId}:${session.id}`); } },
+    );
+
+    await controller.selectSession(archived, { updateUrl: false });
+
+    expect(socket.connectedSessionIds).toEqual([]);
+    expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "archived history" }] }]);
+    expect(state.selectedChatLoad).toMatchObject({ kind: "read-only", readability: "fresh", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
+    expect(ready).toEqual([`local:${oldSession.id}`]);
+  });
+
   it("signals selection readiness only after the initial transcript join succeeds", async () => {
     const messages = deferred<MessagePage>();
     const selectedStatus = deferred<SessionStatus>();

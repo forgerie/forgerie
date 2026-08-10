@@ -105,6 +105,48 @@ describe("SessionController stream seed + watermark reconciliation", () => {
     ]);
   });
 
+  it("keeps buffering socket events after fresh history paints and drains them once after the watermark", async () => {
+    const socket = new EmitSocket();
+    const page = deferred<MessagePage>();
+    const statusResult = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => page.promise,
+      status: () => statusResult.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket },
+    );
+
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    page.resolve({ messages: [{ role: "user", content: "question" }], start: 0, total: 1 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(state.selectedChatLoad).toMatchObject({ kind: "fresh-readable" });
+    socket.emit({ type: "assistant.delta", text: "STALE", seq: 2 });
+    socket.emit({ type: "assistant.delta", text: " live", seq: 6 });
+    expect(state.messages).toEqual([{ role: "user", parts: [{ type: "text", text: "question" }] }]);
+
+    statusResult.resolve({ ...status(oldSession.id), isStreaming: true });
+    snapshot.resolve({ seq: 4, partial: assistantPartial("seed") });
+    await selecting;
+    runPendingAnimationFrames();
+
+    expect(state.messages).toEqual([
+      { role: "user", parts: [{ type: "text", text: "question" }] },
+      { role: "assistant", parts: [{ type: "text", text: "seed live" }] },
+    ]);
+  });
+
   it("handles a mid-tool join: null partial, committed tool call in history, live tool.update filtered by seq", async () => {
     const socket = new EmitSocket();
     let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
@@ -172,9 +214,10 @@ describe("SessionController stream seed + watermark reconciliation", () => {
     await controller.selectSession(session, { updateUrl: false });
 
     // The failure surfaces instead of being swallowed as "no partial to seed":
-    // no history is applied and no watermark is recorded.
+    // fresh history stays readable, but no live-ready watermark is recorded.
     expect(state.error).toContain("Not Found");
-    expect(state.messages).toEqual([]);
+    expect(state.messages).toEqual([{ role: "user", parts: [{ type: "text", text: "question" }] }]);
+    expect(state.selectedChatLoad).toMatchObject({ kind: "failed", readability: "fresh" });
 
     // The failed join still leaves the socket live (selectSession's recovery
     // path), and with no watermark nothing is filtered.
@@ -182,6 +225,7 @@ describe("SessionController stream seed + watermark reconciliation", () => {
     runPendingAnimationFrames();
 
     expect(state.messages).toEqual([
+      { role: "user", parts: [{ type: "text", text: "question" }] },
       { role: "assistant", parts: [{ type: "text", text: "live answer" }] },
     ]);
   });

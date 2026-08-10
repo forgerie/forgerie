@@ -10,6 +10,19 @@ import { isShellInput } from "../inputModes";
 import { fileCompletionInsertText } from "../promptCompletions";
 import { SessionSocket, type GlobalSessionEvent, type SessionUiEvent } from "../sessionSocket";
 import { isArchivableSessionInfo, isTransientNewSessionInfo } from "../sessionPersistence";
+import {
+  selectedChatCachedReadable,
+  selectedChatFailed,
+  selectedChatFreshReadable,
+  selectedChatLiveReady,
+  selectedChatLoading,
+  selectedChatNoTarget,
+  selectedChatReadOnly,
+  selectedChatReadability,
+  selectedChatTarget,
+  type SelectedChatReadability,
+  type SelectedChatTarget,
+} from "../selectedChatLoad";
 import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
@@ -166,6 +179,7 @@ export class SessionController {
     this.selectionSeq += 1;
     this.socket.close();
     this.clearPendingUpdates();
+    this.setState({ selectedChatLoad: selectedChatNoTarget() });
   }
 
   clearActiveSession() {
@@ -178,7 +192,7 @@ export class SessionController {
     // session must not cancel the in-flight upload indicator of the session
     // that is still sending; the per-session entry is cleared by send()'s
     // finally block when the request settles.
-    this.setState({ selectedSession: undefined, messages: [], messagePageStart: 0, messagePageEnd: 0, messagePageTotal: 0, isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [], availableThinkingLevels: [], treeDialog: undefined });
+    this.setState({ selectedSession: undefined, selectedChatLoad: selectedChatNoTarget(), messages: [], messagePageStart: 0, messagePageEnd: 0, messagePageTotal: 0, isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [], availableThinkingLevels: [], treeDialog: undefined });
   }
 
   deselectSession(options?: { forgetRememberedSelection?: boolean | undefined; updateUrl?: boolean | undefined }) {
@@ -228,9 +242,12 @@ export class SessionController {
     const machineId = selectedMachineId(this.getState());
     this.notifications?.prepareSelectedSession(session, machineId);
     const transcriptKey = this.sessionCacheKey(session.id);
+    const target = selectedChatTarget(machineId, session);
     const cached = this.transcripts.cachedView(transcriptKey);
+    const cachedReadability = this.transcripts.rawHistoryPage(transcriptKey) === undefined ? "absent" : "cached";
     this.setState({
       selectedSession: session,
+      selectedChatLoad: cachedReadability === "cached" ? selectedChatCachedReadable(target) : selectedChatLoading(target),
       ...cached,
       isLoadingEarlierMessages: false,
       ...(options?.preserveTreeDialog === true ? {} : { treeDialog: undefined }),
@@ -247,7 +264,7 @@ export class SessionController {
         const page = await this.api.messages(session, { limit: MESSAGE_PAGE_SIZE }, selectedMachineId(this.getState()));
         if (seq !== this.selectionSeq || this.getState().selectedSession?.id !== session.id) return;
         const history = this.transcripts.mergeHistory(transcriptKey, page);
-        this.setState({ ...history, isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] });
+        this.setState({ ...history, selectedChatLoad: selectedChatReadOnly(target, "fresh"), isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] });
         this.transcripts.schedulePersist(transcriptKey);
         this.onSelectedSessionReady?.({ machineId, session });
         if (options?.updateUrl !== false) this.updateUrl();
@@ -290,7 +307,7 @@ export class SessionController {
         for (const event of buffered) this.applyEvent(event);
         this.socket.setHandler((event) => { this.applyEvent(event); });
       }
-      this.setState({ error: String(error) });
+      this.setState({ selectedChatLoad: selectedChatFailed(target, this.currentSelectedChatReadability(target), error), error: String(error) });
       if (options?.propagateRefreshError === true) throw error;
     }
   }
@@ -1061,7 +1078,10 @@ export class SessionController {
       selectionSeq: this.selectionSeq,
     };
     return this.requestSelectedSessionRefresh(target).catch((error: unknown) => {
-      if (this.isCurrentRefreshTarget(target)) this.setState({ error: String(error) });
+      if (this.isCurrentRefreshTarget(target)) {
+        const selectedTarget = selectedChatTarget(target.machineId, target.session);
+        this.setState({ selectedChatLoad: selectedChatFailed(selectedTarget, this.currentSelectedChatReadability(selectedTarget), error), error: String(error) });
+      }
     });
   }
 
@@ -1070,31 +1090,72 @@ export class SessionController {
     return this.selectedSessionRefreshes.request(key, async () => {
       if (!this.isCurrentRefreshTarget(target)) return;
       this.flushPendingUpdates();
-      const [page, status, streamSnapshot] = await Promise.all([
-        this.api.messages(target.session, { limit: MESSAGE_PAGE_SIZE }, target.machineId),
-        this.api.status(target.session, target.machineId),
-        this.api.streamSnapshot(target.session, target.machineId),
-        this.notifications?.refreshSelectedSession(target.session, target.machineId) ?? Promise.resolve(),
-      ]);
-      if (!this.isCurrentRefreshTarget(target)) return;
+      const selectedTarget = selectedChatTarget(target.machineId, target.session);
+      this.markSelectedChatRefreshing(selectedTarget);
+      const historyPromise = this.api.messages(target.session, { limit: MESSAGE_PAGE_SIZE }, target.machineId);
+      const statusPromise = this.api.status(target.session, target.machineId);
+      const streamSnapshotPromise = this.api.streamSnapshot(target.session, target.machineId);
+      void this.notifications?.refreshSelectedSession(target.session, target.machineId).catch(() => undefined);
+
+      const historyViewPromise = historyPromise.then((page) => {
+        if (!this.isCurrentRefreshTarget(target)) return undefined;
+        const history = this.transcripts.mergeHistory(key, page);
+        this.setState({ ...history, selectedChatLoad: selectedChatFreshReadable(selectedTarget), isLoadingEarlierMessages: false });
+        this.transcripts.schedulePersist(key);
+        return history;
+      });
+      const statusResultPromise = statusPromise.then(
+        (status) => ({ ok: true, status }) as const,
+        (error: unknown) => ({ ok: false, error }) as const,
+      );
+      const streamSnapshotResultPromise = streamSnapshotPromise.then(
+        (streamSnapshot) => ({ ok: true, streamSnapshot }) as const,
+        (error: unknown) => ({ ok: false, error }) as const,
+      );
+
+      const history = await historyViewPromise;
+      if (history === undefined || !this.isCurrentRefreshTarget(target)) return;
+      const [statusResult, streamSnapshotResult] = await Promise.all([statusResultPromise, streamSnapshotResultPromise]);
+      if (!statusResult.ok) throw statusResult.error;
+      if (!streamSnapshotResult.ok) throw streamSnapshotResult.error;
+      const { status } = statusResult;
+      const { streamSnapshot } = streamSnapshotResult;
       // Seed the in-flight partial assistant message on top of committed history
       // and record the snapshot's sequence as the watermark. Buffered/live events
       // with `seq <= watermark` are already reflected here and are dropped by
       // `applyEvent`; later events (`seq > watermark`) stream in on top. The
       // partial is seeded into the in-memory transcript only, never the raw
       // history cache, so it never persists.
-      const history = this.transcripts.mergeHistory(key, page);
       const messages = this.transcripts.seedStreamingPartial(history.messages, streamSnapshot.partial);
       this.streamWatermark = { sessionId: target.session.id, seq: streamSnapshot.seq };
       this.setState({
         ...history,
         messages,
+        selectedChatLoad: selectedChatLiveReady(selectedTarget),
         status,
         activity: this.getState().sessionActivities[target.session.id],
       });
       this.applyStatus(status);
-      this.transcripts.schedulePersist(key);
     });
+  }
+
+  private markSelectedChatRefreshing(target: SelectedChatTarget): void {
+    const state = this.getState();
+    if (state.selectedChatLoad.kind === "cached-readable" || state.selectedChatLoad.kind === "fresh-readable") return;
+    if (state.selectedChatLoad.kind === "loading-without-content" || state.selectedChatLoad.kind === "loading-with-readable-history") return;
+    const readability = this.currentSelectedChatReadability(target);
+    this.setState({ selectedChatLoad: selectedChatLoading(target, readability) });
+  }
+
+  private currentSelectedChatReadability(target: SelectedChatTarget): SelectedChatReadability {
+    const state = this.getState();
+    if ("target" in state.selectedChatLoad
+      && state.selectedChatLoad.target.machineId === target.machineId
+      && state.selectedChatLoad.target.sessionId === target.sessionId
+      && state.selectedChatLoad.target.cwd === target.cwd) {
+      return selectedChatReadability(state.selectedChatLoad);
+    }
+    return this.transcripts.rawHistoryPage(machineSessionKey(target.machineId, target.sessionId)) === undefined ? "absent" : "cached";
   }
 
   private isCurrentRefreshTarget(target: SelectedSessionRefreshTarget): boolean {
@@ -1238,6 +1299,7 @@ export class SessionController {
     this.setState({
       ...(options?.sessions === undefined ? {} : { sessions: options.sessions }),
       selectedSession: session,
+      selectedChatLoad: selectedChatLoading(selectedChatTarget(session.machineId, session)),
       messages: [],
       messagePageStart: 0,
       messagePageEnd: 0,
@@ -1291,7 +1353,7 @@ export class SessionController {
       sessionActivities: omitSessionActivity(state.sessionActivities, tempId),
       sendingPrompts: moveRecordKey(state.sendingPrompts, tempId, cachedSession.id),
       clientQueuedSessionMessages: moveRecordKey(state.clientQueuedSessionMessages, tempId, cachedSession.id),
-      ...(wasSelected ? { selectedSession: cachedSession, status: state.sessionStatuses[cachedSession.id], activity: state.sessionActivities[cachedSession.id], pendingAsk: state.sessionStatuses[cachedSession.id]?.pendingAsk, pendingDialogs: state.sessionStatuses[cachedSession.id]?.pendingDialogs ?? [], closedDialogs: [] } : {}),
+      ...(wasSelected ? { selectedSession: cachedSession, selectedChatLoad: selectedChatLoading(selectedChatTarget(pending.machineId, cachedSession)), status: state.sessionStatuses[cachedSession.id], activity: state.sessionActivities[cachedSession.id], pendingAsk: state.sessionStatuses[cachedSession.id]?.pendingAsk, pendingDialogs: state.sessionStatuses[cachedSession.id]?.pendingDialogs ?? [], closedDialogs: [] } : {}),
       error: "",
     });
     this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);

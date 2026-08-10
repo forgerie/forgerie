@@ -2,6 +2,7 @@ import type { AuthProviderOption, CommandOption, CommandResult, ExtensionDialogA
 import type { ChatLine } from "./components/shared";
 import type { QualifiedContributionId } from "./plugins/ids";
 import type { SelectedSessionNotificationInbox } from "./sessionNotifications";
+import { selectedChatNoTarget, type SelectedChatLoad } from "./selectedChatLoad";
 import type { WorkspaceUploadBatchState } from "./workspaceUploadState";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ export interface AppState {
   selectedProject: Project | undefined;
   selectedWorkspace: Workspace | undefined;
   selectedSession: SessionInfo | undefined;
+  selectedChatLoad: SelectedChatLoad;
   status: SessionStatus | undefined;
   activity: SessionActivity | undefined;
   /**
@@ -186,6 +188,7 @@ export type WorkspaceScopedStateReset = Pick<AppState,
   | "clientQueuedSessionMessages"
   | "startingSessionCount"
   | "selectedNotificationInbox"
+  | "selectedChatLoad"
   | "treeDialog"
   | "fileTree"
   | "expandedDirs"
@@ -207,6 +210,7 @@ export function resetWorkspaceScopedState(): WorkspaceScopedStateReset {
     clientQueuedSessionMessages: {},
     startingSessionCount: 0,
     selectedNotificationInbox: undefined,
+    selectedChatLoad: selectedChatNoTarget(),
     treeDialog: undefined,
     fileTree: [],
     expandedDirs: {},
@@ -246,6 +250,7 @@ export function initialAppState(): AppState {
     selectedProject: undefined,
     selectedWorkspace: undefined,
     selectedSession: undefined,
+    selectedChatLoad: selectedChatNoTarget(),
     status: undefined,
     activity: undefined,
     pendingAsk: undefined,
