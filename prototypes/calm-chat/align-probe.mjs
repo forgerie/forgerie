@@ -109,17 +109,14 @@ const probe = `(() => {
   }
 
   /*
-   * The metadata row should appear once where a turn ends, not on every reply.
-   * Counting is the only honest check: a screenshot shows one screen, and the
-   * claim is about the whole transcript.
+   * Metadata belongs to the turn, so it rides on the activity fold that closes
+   * the turn and appears nowhere else. Counting is the only honest check: a
+   * screenshot shows one screen, and the claim is about the whole transcript.
    */
-  const replies = [...chat.querySelectorAll("article.msg.assistant")];
-  const withMeta = replies.filter((node) => node.querySelector(".msg-meta") !== null);
-  const closesTurn = (node) => {
-    const index = children.indexOf(node);
-    const next = children.slice(index + 1).find((candidate) => candidate.matches("article.msg.user, article.msg.assistant"));
-    return next === undefined || next.matches("article.msg.user");
-  };
+  const messagesWithMeta = [...chat.querySelectorAll("article.msg")].filter((node) => node.querySelector(".msg-meta") !== null);
+  const allFolds = [...chat.querySelectorAll("details.msg.event-group")];
+  const historyFolds = allFolds.filter((node) => (node.querySelector("summary")?.textContent ?? "").includes("summar"));
+  const foldsWithMeta = allFolds.filter((node) => node.querySelector("summary .msg-meta") !== null);
 
   return {
     themeBg: getComputedStyle(document.body).backgroundColor,
@@ -127,13 +124,23 @@ const probe = `(() => {
     assistant: readRole("assistant"),
     turnGaps: turnGaps.slice(0, 6),
     meta: {
-      replies: replies.length,
-      withMeta: withMeta.length,
-      // Every reply carrying metadata should be one that ends a turn.
-      misplaced: withMeta.filter((node) => !closesTurn(node)).length,
-      // And every turn-ending reply should carry it.
-      missing: replies.filter((node) => closesTurn(node) && node.querySelector(".msg-meta") === null).length,
+      // No message should carry a metadata row any more.
+      messagesWithMeta: messagesWithMeta.length,
+      folds: allFolds.length,
+      historyFolds: historyFolds.length,
+      foldsWithMeta: foldsWithMeta.length,
+      // Every fold that is not a history summary should carry one.
+      foldsMissingMeta: allFolds.length - historyFolds.length - foldsWithMeta.length,
     },
+    folds: [...chat.querySelectorAll("details.msg.event-group")].slice(-4).map((node) => {
+      const summary = node.querySelector("summary");
+      const meta = summary?.querySelector(".msg-meta") ?? undefined;
+      return {
+        summary: (summary?.textContent ?? "").trim().replace(/[ \\t\\n]+/gu, " ").slice(0, 70),
+        hasMetaElement: meta !== undefined,
+        metaText: meta ? (meta.textContent ?? "").trim().slice(0, 60) : null,
+      };
+    }),
     bubble: (() => {
       const node = chat.querySelector("article.msg.user");
       if (!node) return null;
