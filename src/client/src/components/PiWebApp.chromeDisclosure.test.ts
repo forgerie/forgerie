@@ -45,7 +45,7 @@ describe("PiWebApp chrome disclosure", () => {
   });
 
   it("puts session context progress above the bottom controls instead of over the transcript", async () => {
-    const app = await mountApp(499, statusWithContext());
+    const app = await mountApp(499, statusWithContext(72));
     const root = shadowRoot(app);
     const meter = root.querySelector("context-usage-meter");
     const chat = root.querySelector<ChatView>("chat-view");
@@ -53,6 +53,12 @@ describe("PiWebApp chrome disclosure", () => {
     expect(meter?.nextElementSibling?.tagName).toBe("PROMPT-EDITOR");
     await chat?.updateComplete;
     expect(chat?.shadowRoot?.querySelector("conversation-meter")).toBeNull();
+  });
+
+  it("leaves the composer its own border while context use is unremarkable", async () => {
+    const app = await mountApp(499, statusWithContext(26));
+
+    expect(shadowRoot(app).querySelector("context-usage-meter")).toBeNull();
   });
 });
 
@@ -77,7 +83,7 @@ function appStateWithSession(status?: SessionStatus): AppState {
   };
 }
 
-function statusWithContext(): SessionStatus {
+function statusWithContext(percent: number): SessionStatus {
   return {
     sessionId: "session-1",
     isStreaming: false,
@@ -87,7 +93,7 @@ function statusWithContext(): SessionStatus {
     queuedMessages: [],
     tokens: { input: 50_000, output: 2_000, cacheRead: 0, cacheWrite: 0, total: 52_000 },
     cost: 0,
-    contextUsage: { tokens: 52_000, contextWindow: 200_000, percent: 26 },
+    contextUsage: { tokens: Math.round(200_000 * (percent / 100)), contextWindow: 200_000, percent },
   };
 }
 

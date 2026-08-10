@@ -65,6 +65,7 @@ import "./SessionTreeNavigator";
 import "./ChatView";
 import type { ChatView } from "./ChatView";
 import "./ContextUsageMeter";
+import { contextUsageWorthShowing } from "./ContextUsageMeter";
 import "./PromptEditor";
 import type { PromptEditor } from "./PromptEditor";
 import "./StatusBar";
@@ -2555,9 +2556,14 @@ export class PiWebApp extends LitElement {
     `;
   }
 
+  /**
+   * Absent, not empty, below the threshold: the shell keys the composer's own
+   * border off this element, so an element that renders nothing would leave the
+   * composer with no rule at all.
+   */
   private renderContextUsageMeter(state: AppState) {
     const contextUsage = state.status?.contextUsage;
-    if (contextUsage === undefined) return null;
+    if (!contextUsageWorthShowing(contextUsage)) return null;
     return html`<context-usage-meter .contextUsage=${contextUsage}></context-usage-meter>`;
   }
 

@@ -191,6 +191,9 @@ export const appStyles = css`
   .navigation-scrim { display: none; }
   @keyframes navigation-overlay-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
   status-bar, context-usage-meter { flex: 0 0 auto; }
+  /* While the meter is present it *is* the composer's top rule, so the session
+     shows one hairline instead of a tinted bar stacked on a border. */
+  main:has(context-usage-meter) prompt-editor { --pi-composer-rule: transparent; }
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
@@ -663,7 +666,7 @@ export const autocompleteStyles = css`
 
 export const promptEditorStyles = css`
   :host { position: relative; z-index: 5; display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; }
-  footer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border-top: 1px solid var(--pi-border); }
+  footer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border-top: 1px solid var(--pi-composer-rule, var(--pi-border)); }
   footer.shell-mode { border-top-color: var(--pi-success); background: var(--pi-success-bg); }
   .editor-wrap { position: relative; min-width: 0; }
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
