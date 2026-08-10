@@ -33,6 +33,22 @@ export class AppShellController implements ReactiveController {
     return this.layoutMode === "overlay";
   }
 
+  /**
+   * Whether the chat surface hands its chrome to an on-request sheet instead of
+   * keeping it resident above the transcript.
+   *
+   * This rides the same axis as navigation docking because both answer one
+   * question: is there room here for more than the conversation? Adding a
+   * separate height rule would answer it twice — the bands that consume
+   * vertical space are already absent once navigation docks, and the on-screen
+   * keyboard shrinks height without changing which side of that line the shell
+   * is on. The accessor exists so call sites read as intent rather than as a
+   * navigation coincidence, and so any future divergence has one seam.
+   */
+  get isChromeSummoned(): boolean {
+    return this.isMobileNavigationLayout;
+  }
+
   hostConnected(): void {
     this.observeShellElement();
     for (const media of this.pwaDisplayModeMedia) media.addEventListener("change", this.onPwaDisplayModeChange);
