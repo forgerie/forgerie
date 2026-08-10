@@ -318,8 +318,8 @@ describe("chat event-group content seams", () => {
   it("distinguishes the live tail group by class and disclosure label", () => {
     expect(chatMessageGroupClassName(true)).toBe("msg event-group live");
     expect(chatMessageGroupClassName(false)).toBe("msg event-group");
-    expect(chatMessageGroupLabel(true)).toBe("live events");
-    expect(chatMessageGroupLabel(false)).toBe("events");
+    expect(chatMessageGroupLabel(true)).toBe("Running");
+    expect(chatMessageGroupLabel(false)).toBe("Activity");
   });
 });
 

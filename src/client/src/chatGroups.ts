@@ -43,15 +43,18 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
   return groups;
 }
 
+/**
+ * The closed-fold summary.
+ *
+ * Deliberately a single count. The previous form broke the total down by role
+ * ("4 events · 3 tool · 1 assistant"), which asks the reader to parse a
+ * breakdown before deciding whether to open the fold -- the opposite of what a
+ * fold is for. The breakdown is visible inside, where it costs nothing.
+ */
 export function summarizeChatGroup(messages: ChatLine[]): string {
   if (messages.every((message) => message.source === "compaction")) return `${String(messages.length)} history compaction ${messages.length === 1 ? "summary" : "summaries"}`;
   if (messages.every((message) => message.source === "branch_summary")) return `${String(messages.length)} branch ${messages.length === 1 ? "summary" : "summaries"}`;
-  const counts = messages.reduce<Record<string, number>>((acc, message) => {
-    acc[message.role] = (acc[message.role] ?? 0) + 1;
-    return acc;
-  }, {});
-  const details = Object.entries(counts).map(([role, count]) => `${String(count)} ${role}`).join(" · ");
-  return `${String(messages.length)} ${messages.length === 1 ? "event" : "events"}${details !== "" ? ` · ${details}` : ""}`;
+  return `${String(messages.length)} ${messages.length === 1 ? "step" : "steps"}`;
 }
 
 function isToolImageMessage(message: ChatLine): boolean {

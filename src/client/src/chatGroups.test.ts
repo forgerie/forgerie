@@ -117,7 +117,11 @@ describe("summarizeChatGroup", () => {
     ])).toBe("2 branch summaries");
   });
 
-  it("summarizes mixed groups by role counts", () => {
-    expect(summarizeChatGroup([text("tool", "a"), text("system", "b"), text("tool", "c")])).toBe("3 events · 2 tool · 1 system");
+  it("reports a mixed group as a single step count, not a role breakdown", () => {
+    expect(summarizeChatGroup([text("tool", "a"), text("system", "b"), text("tool", "c")])).toBe("3 steps");
+  });
+
+  it("keeps the step count singular for a lone step", () => {
+    expect(summarizeChatGroup([text("tool", "a")])).toBe("1 step");
   });
 });

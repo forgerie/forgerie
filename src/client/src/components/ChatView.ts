@@ -3,6 +3,7 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
 import { groupChatMessages, summarizeChatGroup, type ChatGroup } from "../chatGroups";
+import { splitChatNotice } from "../chatNotices";
 import { writeClipboardText } from "../clipboard";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
@@ -140,7 +141,7 @@ export function chatMessageGroupClassName(defaultOpen: boolean): string {
 
 /** The disclosure summary label for an event group, distinguishing the live tail. */
 export function chatMessageGroupLabel(defaultOpen: boolean): string {
-  return defaultOpen ? "live events" : "events";
+  return defaultOpen ? "Running" : "Activity";
 }
 
 /** Whether a queued-message section shows the server clear-queue action. */
@@ -893,6 +894,13 @@ export class ChatView extends LitElement {
     return html`<span class="scroll-marker" data-marker-id=${markerId} aria-hidden="true"></span>`;
   }
 
+  /** A failure reads as a short signal phrase plus plain detail, not a red block. */
+  private renderSystemNotice(text: string) {
+    const notice = splitChatNotice(text);
+    if (notice.lead === "") return html`<p class="part system-notice" dir="auto">${notice.detail}</p>`;
+    return html`<p class="part system-notice" dir="auto"><span class="system-notice-lead">${notice.lead}</span> ${notice.detail}</p>`;
+  }
+
   private renderMessageHeader(message: ChatLine, key: string, label: string = message.role) {
     const meta = this.messageMetaLabel(message);
     const expanded = this.expandedMetaKey === key;
@@ -962,6 +970,7 @@ export class ChatView extends LitElement {
 
   private renderPart(part: ChatPart, message?: ChatLine) {
     if (part.type === "text" && message?.role === "bash") return html`<pre class="part shell-output">${part.text}</pre>`;
+    if (part.type === "text" && message?.role === "system") return this.renderSystemNotice(part.text);
     if (part.type === "text") return html`<formatted-text class="part" .text=${part.text}></formatted-text>`;
     if (part.type === "thinking") return html`<details class="part"><summary>thinking</summary><formatted-text .text=${part.text}></formatted-text></details>`;
     if (part.type === "skillInvocation") return html`
