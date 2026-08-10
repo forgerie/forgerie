@@ -85,6 +85,32 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
 }
 
 /**
+ * The messages that close a turn -- the agent's last word before the human
+ * speaks again.
+ *
+ * Only these carry the timestamp and model. The row is near-identical on every
+ * message of a turn, so printing it on each one repeats a constant and reads as
+ * noise between paragraphs. Printed once, where the turn ends, it says when the
+ * answer was finished and what produced it.
+ */
+export function turnClosingIndexes(groups: ChatGroup[]): Set<number> {
+  const closing = new Set<number>();
+  let candidate: number | undefined;
+
+  for (const group of groups) {
+    if (group.kind !== "message") continue;
+    if (group.message.role === "user" || group.message.role === "bash") {
+      if (candidate !== undefined) closing.add(candidate);
+      candidate = undefined;
+      continue;
+    }
+    if (group.message.role === "assistant") candidate = group.index;
+  }
+  if (candidate !== undefined) closing.add(candidate);
+  return closing;
+}
+
+/**
  * A turn starts when the human does something. Everything the agent does in
  * reply -- however many sentences and tool calls -- belongs to that turn.
  */

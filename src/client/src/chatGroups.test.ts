@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupChatMessages, summarizeChatGroup } from "./chatGroups";
+import { groupChatMessages, summarizeChatGroup, turnClosingIndexes } from "./chatGroups";
 import type { ChatLine } from "./components/shared";
 
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
@@ -159,6 +159,51 @@ describe("groupChatMessages", () => {
       { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "newer" }] },
       text("assistant", "answer"),
     ], 8).at(-1)).toMatchObject({ kind: "group", startIndex: 8, endIndex: 9 });
+  });
+});
+
+describe("turnClosingIndexes", () => {
+  it("marks only the last reply of each turn", () => {
+    const groups = groupChatMessages([
+      text("user", "first question"),
+      text("assistant", "partway"),
+      text("assistant", "answer"),
+      text("user", "second question"),
+      text("assistant", "second answer"),
+    ]);
+
+    expect([...turnClosingIndexes(groups)].sort((a, b) => a - b)).toEqual([2, 4]);
+  });
+
+  it("marks the last reply of a turn still in progress", () => {
+    const groups = groupChatMessages([text("user", "question"), text("assistant", "working on it")]);
+
+    expect([...turnClosingIndexes(groups)]).toEqual([1]);
+  });
+
+  it("marks nothing when the agent has not replied yet", () => {
+    expect(turnClosingIndexes(groupChatMessages([text("user", "question")])).size).toBe(0);
+  });
+
+  it("treats a human shell command as ending the turn before it", () => {
+    const groups = groupChatMessages([
+      text("user", "question"),
+      text("assistant", "answer"),
+      text("bash", "ls"),
+      text("assistant", "after the command"),
+    ]);
+
+    expect([...turnClosingIndexes(groups)].sort((a, b) => a - b)).toEqual([1, 3]);
+  });
+
+  it("ignores tool and system messages when finding the last reply", () => {
+    const groups = groupChatMessages([
+      text("user", "question"),
+      text("assistant", "answer"),
+      text("system", "a notice"),
+    ]);
+
+    expect([...turnClosingIndexes(groups)]).toEqual([1]);
   });
 });
 
