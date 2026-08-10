@@ -4,10 +4,12 @@ import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
+import { textMessage } from "../chatMessages";
 import { AuthDialog } from "./AuthDialog";
 import { ChatView } from "./ChatView";
 import { ModalSurface } from "./ModalSurface";
 import { PiWebApp } from "./PiWebApp";
+import type { PromptEditor } from "./PromptEditor";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
 
@@ -134,6 +136,26 @@ describe("PiWebApp on-screen keyboard layout", () => {
 
     expect(container.querySelector("prompt-editor")).not.toBeNull();
     expect(container.querySelector("status-bar")).toBeNull();
+  });
+
+  it("gives the composer the selected session's user prompt history", () => {
+    const app = new PiWebApp();
+    const selectedSession = session("session-history");
+    setAppState(app, {
+      selectedSession,
+      sessions: [selectedSession],
+      mainView: "chat",
+      messages: [
+        textMessage("user", "first prompt"),
+        textMessage("assistant", "answer"),
+        textMessage("user", "second prompt"),
+      ],
+    });
+
+    const container = renderApp(app);
+    const editor = requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "prompt editor");
+
+    expect(editor.promptHistory).toEqual(["second prompt", "first prompt"]);
   });
 });
 

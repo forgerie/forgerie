@@ -29,6 +29,7 @@ import { machineSessionKey } from "../machineKeys";
 import { createManagedProcessesRuntime } from "../managedProcessesRuntime";
 import type { ManagedProcessesBrowserEvent, ManagedProcessesRuntime } from "../../../plugin-api/unstable";
 import { resolveParentSessionLocation, type ParentSessionLocation } from "../parentSessionLocation";
+import { promptHistoryEntries } from "../promptHistory";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
 import { notificationInboxTotalCount, selectedNotificationView } from "../sessionNotifications";
 import { SessionUnreadController } from "../sessionUnread";
@@ -88,7 +89,7 @@ import { navigateToInboxSession, type InboxNavigationResult } from "../controlle
 import { deriveSessionInboxBoard } from "../sessionBoard";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
-import { appStyles } from "./shared";
+import { appStyles, type ChatLine } from "./shared";
 
 
 const PI_WEB_STATUS_REFRESH_MS = 15 * 60 * 1000;
@@ -144,6 +145,12 @@ export class PiWebApp extends LitElement {
   private unreadConnected = false;
   private committedChatIdentity: string | undefined;
   private readyChatIdentity: string | undefined;
+  private promptHistoryCache: {
+    readonly sessionIdentity: string;
+    readonly pageStart: number;
+    readonly latestUserMessage: ChatLine | undefined;
+    readonly entries: readonly string[];
+  } | undefined;
   private readonly managedProcessesListeners = new Set<(event: ManagedProcessesBrowserEvent) => void>();
   private readonly managedProcessesSnapshots = new Map<string, ManagedProcessesSnapshot>();
 
@@ -2480,6 +2487,26 @@ export class PiWebApp extends LitElement {
     return branch === undefined || branch === "" ? workspace.label : `${workspace.label} · ${branch}`;
   }
 
+  private selectedPromptHistory(state: AppState): readonly string[] {
+    const session = state.selectedSession;
+    if (session === undefined) return [];
+    let latestUserMessage: ChatLine | undefined;
+    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.messages[index];
+      if (message?.role === "user") { latestUserMessage = message; break; }
+    }
+
+    const sessionIdentity = machineSessionKey(selectedMachineId(state), session.id);
+    const cached = this.promptHistoryCache;
+    if (cached?.sessionIdentity === sessionIdentity
+      && cached.pageStart === state.messagePageStart
+      && cached.latestUserMessage === latestUserMessage) return cached.entries;
+
+    const entries = promptHistoryEntries(state.messages);
+    this.promptHistoryCache = { sessionIdentity, pageStart: state.messagePageStart, latestUserMessage, entries };
+    return entries;
+  }
+
   /** Mirrors the thread header's old conditions so the action does not outlive its meaning. */
   private canArchiveSelectedSession(state: AppState): boolean {
     return state.selectedSession?.archived !== true && state.globalSessions !== undefined;
@@ -2614,7 +2641,7 @@ export class PiWebApp extends LitElement {
           ${state.selectedSession ? html`
             ${this.renderChatView(state, state.selectedSession)}
             ${this.renderContextUsageMeter(state)}
-            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
+            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
             ${this.renderStatusBar(state)}
             ${this.renderControlSheet(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}

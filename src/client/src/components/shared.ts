@@ -65,6 +65,8 @@ export type ChatPart =
 export interface ChatLine {
   role: "user" | "assistant" | "tool" | "system" | "bash" | "skill";
   parts: ChatPart[];
+  /** Original user prompt when normalization splits one prompt into several visible lines. */
+  promptText?: string;
   source?: "compaction" | "branch_summary";
   meta?: {
     timestamp?: string;

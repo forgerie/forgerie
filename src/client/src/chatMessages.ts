@@ -61,7 +61,7 @@ export function normalizeMessage(message: unknown): ChatLine[] {
     : undefined;
   const parts = supersededRecord === undefined ? contentParts : [...contentParts, supersededRecord];
   const skillLines = role === "user" ? normalizeSkillInvocation(parts) : undefined;
-  if (skillLines !== undefined) return skillLines.map((line) => withMessageMeta(line, message));
+  if (skillLines !== undefined) return skillLines.map((line) => ({ ...withMessageMeta(line, message), promptText: parts[0]?.type === "text" ? parts[0].text : "" }));
   const source = normalizeSource(message);
   if (role === "tool") return [withMessageMeta({ role, parts, ...(source === undefined ? {} : { source }) }, message)];
 
@@ -295,7 +295,7 @@ function coalesceToolExecutions(lines: ChatLine[]): ChatLine[] {
 
   for (const line of lines) {
     let passthroughParts: ChatPart[] = [];
-    const metadata = { ...(line.source === undefined ? {} : { source: line.source }), ...(line.meta === undefined ? {} : { meta: line.meta }) };
+    const metadata = { ...(line.promptText === undefined ? {} : { promptText: line.promptText }), ...(line.source === undefined ? {} : { source: line.source }), ...(line.meta === undefined ? {} : { meta: line.meta }) };
     const flushPassthrough = () => {
       if (passthroughParts.length === 0) return;
       result.push({ role: line.role, parts: passthroughParts, ...metadata });

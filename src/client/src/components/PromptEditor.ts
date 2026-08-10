@@ -14,6 +14,7 @@ import { detectPromptCompletionTrigger, fileCompletionInsertText, modelCompletio
 import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
 import { loadAttachmentDelivery, saveAttachmentDelivery } from "../attachmentPreferences";
 import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
+import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
 import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderSummonIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
@@ -34,6 +35,7 @@ export class PromptEditor extends LitElement {
   @property({ type: Boolean }) canStop = false;
   @property({ attribute: false }) status?: SessionStatus;
   @property({ type: Boolean }) sending = false;
+  @property({ attribute: false, hasChanged: promptHistoryChanged }) promptHistory: readonly string[] = [];
   @property({ attribute: false }) onSend?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => void | Promise<void>;
   @property({ attribute: false }) onStop?: () => void;
   @property({ attribute: false }) onSelectModel?: () => void;
@@ -64,22 +66,29 @@ export class PromptEditor extends LitElement {
   private attachmentSeq = 0;
   private requestVersion = 0;
   private editor: EditorView | undefined;
+  private promptHistoryState: PromptHistoryState = createPromptHistory();
+  private applyingPromptHistory = false;
   private readonly editableCompartment = new Compartment();
   private readonly readOnlyCompartment = new Compartment();
   private readonly mobilePromptEnterMedia = createMobilePromptEnterMedia();
   private explicitShiftKeyActive = false;
 
   protected override willUpdate(changed: PropertyValues<this>) {
-    if (!changed.has("sessionId") && !changed.has("machineId")) return;
-    const previousSessionId = changed.has("sessionId") ? changed.get("sessionId") : this.sessionId;
-    const previousMachineId = changed.has("machineId") ? changed.get("machineId") : this.machineId;
-    const previousKey = draftStorageKey(previousMachineId, previousSessionId);
-    if (previousKey !== undefined) saveDraft(previousKey, this.draft);
-    const currentKey = draftStorageKey(this.machineId, this.sessionId);
-    this.draft = currentKey !== undefined ? loadDraft(currentKey) : "";
-    this.currentInputMode = inputModeForDraft(this.draft);
-    this.completions = [];
-    this.selectedIndex = 0;
+    const sessionChanged = changed.has("sessionId") || changed.has("machineId");
+    if (sessionChanged) {
+      const previousSessionId = changed.has("sessionId") ? changed.get("sessionId") : this.sessionId;
+      const previousMachineId = changed.has("machineId") ? changed.get("machineId") : this.machineId;
+      const previousKey = draftStorageKey(previousMachineId, previousSessionId);
+      if (previousKey !== undefined) saveDraft(previousKey, this.draft);
+      const currentKey = draftStorageKey(this.machineId, this.sessionId);
+      this.draft = currentKey !== undefined ? loadDraft(currentKey) : "";
+      this.currentInputMode = inputModeForDraft(this.draft);
+      this.completions = [];
+      this.selectedIndex = 0;
+    }
+    if (sessionChanged || changed.has("promptHistory")) {
+      this.promptHistoryState = createPromptHistory(this.promptHistory);
+    }
   }
 
   protected override shouldUpdate(changed: PropertyValues<this>): boolean {
@@ -163,6 +172,7 @@ export class PromptEditor extends LitElement {
   }
 
   replaceText(text: string): void {
+    this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
     this.draft = text;
     const key = draftStorageKey(this.machineId, this.sessionId);
     if (key !== undefined) saveDraft(key, text);
@@ -361,8 +371,8 @@ export class PromptEditor extends LitElement {
           }),
           keymap.of([
             { any: (view, event) => this.handleEditorKeyDown(event, view) },
-            { key: "ArrowDown", run: () => this.moveCompletion(1) },
-            { key: "ArrowUp", run: () => this.moveCompletion(-1) },
+            { key: "ArrowDown", run: (view) => this.moveCompletion(1) || this.movePromptHistory(view, "newer") },
+            { key: "ArrowUp", run: (view) => this.moveCompletion(-1) || this.movePromptHistory(view, "older") },
             { key: "Escape", run: () => this.closeCompletions() },
             { key: "Tab", run: (view) => this.handleEditorTab(view) },
             { key: "Shift-Tab", run: (view) => indentWithTab.shift?.(view) ?? false },
@@ -396,6 +406,7 @@ export class PromptEditor extends LitElement {
   }
 
   private updateDraft(value: string) {
+    if (!this.applyingPromptHistory) this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
     this.draft = value;
     const key = draftStorageKey(this.machineId, this.sessionId);
     if (key !== undefined) saveDraft(key, this.draft);
@@ -467,6 +478,35 @@ export class PromptEditor extends LitElement {
   private closeCompletions(): boolean {
     if (!this.completions.length) return false;
     this.completions = [];
+    return true;
+  }
+
+  private movePromptHistory(view: EditorView, direction: "older" | "newer"): boolean {
+    const selection = view.state.selection.main;
+    if (!selection.empty || this.promptHistoryState.entries.length === 0) return false;
+    if (direction === "newer" && this.promptHistoryState.position.kind === "draft") return false;
+    if (direction === "older" && this.promptHistoryState.position.kind === "draft" && view.state.doc.length > 0 && selection.head !== 0) return false;
+    if (!isOnPromptBoundaryLine(view, selection.head, direction === "older" ? "top" : "bottom")) return false;
+
+    const navigation = navigatePromptHistory(this.promptHistoryState, direction, {
+      text: view.state.doc.toString(),
+      selection: { anchor: selection.anchor, head: selection.head },
+      atTop: direction === "older",
+      atBottom: direction === "newer",
+    });
+    if (navigation === undefined) return false;
+
+    this.promptHistoryState = navigation.state;
+    this.applyingPromptHistory = true;
+    try {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: navigation.editor.text },
+        selection: EditorSelection.range(navigation.editor.selection.anchor, navigation.editor.selection.head),
+        scrollIntoView: true,
+      });
+    } finally {
+      this.applyingPromptHistory = false;
+    }
     return true;
   }
 
@@ -545,6 +585,7 @@ export class PromptEditor extends LitElement {
     const behavior = this.canSteer || this.isCompacting ? streamingBehavior : undefined;
     const attachments = pending.length > 0 ? this.currentAttachments() : undefined;
     const delivery = this.effectiveAttachmentDelivery();
+    this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, text);
     this.resetComposer();
     // Sending is owned by the controller (it drives the chat activity dock and,
     // for folder mode, orchestrates the upload + reference rewrite), so this is
@@ -566,6 +607,26 @@ export class PromptEditor extends LitElement {
   }
 
   static override styles = promptEditorStyles;
+}
+
+function isOnPromptBoundaryLine(view: EditorView, position: number, boundary: "top" | "bottom"): boolean {
+  const line = view.state.doc.lineAt(position);
+  const isDocumentBoundary = boundary === "top" ? line.number === 1 : line.number === view.state.doc.lines;
+  if (!isDocumentBoundary) return false;
+
+  const boundaryPosition = boundary === "top" ? line.from : line.to;
+  const cursorCoords = view.coordsAtPos(position);
+  const boundaryCoords = view.coordsAtPos(boundaryPosition);
+  if (cursorCoords === null || boundaryCoords === null) return true;
+  const cursorEdge = boundary === "top" ? cursorCoords.top : cursorCoords.bottom;
+  const boundaryEdge = boundary === "top" ? boundaryCoords.top : boundaryCoords.bottom;
+  return Math.abs(cursorEdge - boundaryEdge) < 1;
+}
+
+function promptHistoryChanged(value: readonly string[], previous: readonly string[] | undefined): boolean {
+  if (value === previous) return false;
+  if (previous?.length !== value.length) return true;
+  return value.some((entry, index) => entry !== previous[index]);
 }
 
 // The only `status` fields the template reads directly are the model identity
