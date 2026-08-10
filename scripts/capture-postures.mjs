@@ -88,6 +88,25 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
     await loaded;
     await sleep(args.settle);
 
+    // Headless Chromium sends a mouse pointer, so a capture cannot reach the
+    // touch affordances on its own. Dispatching a real pointerdown with a
+    // pointerType drives the app's own observer, rather than writing the
+    // result the observer is supposed to produce.
+    if (args.inputMode !== undefined) {
+      const applied = await evaluate(cdp, `
+        (() => {
+          document.dispatchEvent(new PointerEvent("pointerdown", {
+            pointerType: ${JSON.stringify(args.inputMode)},
+            bubbles: true,
+          }));
+          return getComputedStyle(document.documentElement)
+            .getPropertyValue("--pi-row-actions-display").trim();
+        })()
+      `);
+      process.stdout.write(`  ${posture.name}: input=${args.inputMode} row-actions=${String(applied)}\n`);
+      await sleep(300);
+    }
+
     if (args.clickTitle !== undefined) {
       await evaluate(cdp, DEEP_QUERY);
       const clicked = await evaluate(cdp, `
@@ -119,6 +138,7 @@ function parseArgs(argv) {
     else if (arg === "--out") parsed.out = argv[++i];
     else if (arg === "--label") parsed.label = argv[++i];
     else if (arg === "--click-title") parsed.clickTitle = argv[++i];
+    else if (arg === "--input-mode") parsed.inputMode = argv[++i];
     else if (arg === "--chrome-bin") parsed.chromeBin = argv[++i];
     else if (arg === "--settle") parsed.settle = Number(argv[++i]);
     else fail(`Unknown argument: ${arg}`);
