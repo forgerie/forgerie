@@ -774,7 +774,9 @@ describe("accessibility", () => {
     panel.globalSessions = mkGlobalSessions([session]);
     await panel.updateComplete;
 
-    expect(shadowRoot(panel).activeElement).toBe(row);
+    const focusedRow = shadowRoot(panel).activeElement;
+    expect(focusedRow?.getAttribute("data-session")).toBe("focused");
+    expect(focusedRow?.getAttribute("aria-selected")).toBe("true");
   });
 });
 
