@@ -54,6 +54,12 @@ export interface SessionCommandLifecycle<TSession extends CommandSession = Comma
   hasActiveWork?: (session: TSession) => boolean;
   isTreeNavigationActive?: (session: TSession) => boolean;
   runSessionReplacement?: <T>(session: TSession, operation: () => Promise<T>) => Promise<T>;
+  /**
+   * A fork or clone the user made by hand has just produced a new session.
+   * The host uses this to detach it from its parent, so `parentSession` only
+   * ever means "delegated by an agent".
+   */
+  onUserFork?: (session: TSession) => Promise<void>;
 }
 
 export interface SessionCommandNaming {
@@ -144,7 +150,10 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
       // replacement boundary as the fork, not Pi's text-only /fork selector.
       const position = this.forkPosition(session, entryId);
       const forkResult = await active.runtime.fork(entryId, { position });
-      if (!forkResult.cancelled) this.tryNameRelatedSession(active.runtime.session, relatedName);
+      if (!forkResult.cancelled) {
+        this.tryNameRelatedSession(active.runtime.session, relatedName);
+        await this.lifecycle.onUserFork?.(active.runtime.session);
+      }
       return forkResult;
     });
     if (result.cancelled) return { type: "done", message: "Fork cancelled" };
@@ -203,7 +212,10 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     if (leafId === null || leafId === "") return { type: "unsupported", message: "Cannot clone: no current session entry" };
     const result = await this.runSessionReplacement(active.runtime, async () => {
       const cloneResult = await active.runtime.fork(leafId, { position: "at" });
-      if (!cloneResult.cancelled) this.tryNameRelatedSession(active.runtime.session, relatedName);
+      if (!cloneResult.cancelled) {
+        this.tryNameRelatedSession(active.runtime.session, relatedName);
+        await this.lifecycle.onUserFork?.(active.runtime.session);
+      }
       return cloneResult;
     });
     if (result.cancelled) return { type: "done", message: "Clone cancelled" };

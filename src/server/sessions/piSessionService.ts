@@ -1006,6 +1006,7 @@ export class PiSessionService implements SessionRouteService {
           "Stop current session activity before replacing the session",
           operation,
         ),
+        onUserFork: (session) => this.detachForkedSession(session),
       },
       { listSessionNames: (cwd) => this.listSessionNames(cwd) },
     );
@@ -2384,17 +2385,6 @@ export class PiSessionService implements SessionRouteService {
         this.publishStatus(forkedSession);
       }
       if (result.session.id !== session.sessionId) this.clearSupersededSessionActivity(session);
-      // A fork the user made by hand is a new journey, not a delegated child.
-      // Clearing the link at creation is what lets `parentSession` mean
-      // delegation, so the inbox can collapse machine-spawned children without
-      // hiding the user's own forks. Detaching must never fail the fork: a
-      // child that kept its parent link is recoverable by hand, a lost fork is
-      // not.
-      try {
-        await this.detachParent({ id: result.session.id, cwd: result.session.cwd });
-      } catch (error: unknown) {
-        void error;
-      }
       return {
         cancelled: false,
         session: result.session,
@@ -2697,6 +2687,51 @@ export class PiSessionService implements SessionRouteService {
       },
     );
     this.publishStatus(reopenedSession);
+  }
+
+  /**
+   * Detach a freshly forked session by rewriting its file directly.
+   *
+   * `detachParent` opens the session first, which spins up a runtime and, in
+   * the middle of a fork, contends with the tree-exclusive lock the fork holds.
+   * The path is already known here, so the file and the caches that memoize it
+   * are all that need touching.
+   *
+   * A failure must not fail the fork: a child that kept its parent link can be
+   * detached by hand, a lost fork cannot be recovered. It is reported rather
+   * than swallowed, because a silent failure here looks exactly like the
+   * feature working.
+   */
+  /**
+   * Detach a session the user just forked or cloned by hand.
+   *
+   * Called from the command service, which is where `/fork`, `/clone`, and the
+   * session-tree fork all converge; patching only the tree path leaves the
+   * slash commands attached.
+   *
+   * Both halves matter. Pi writes some forked files immediately and defers
+   * others until the first append, so the in-memory header is cleared for the
+   * deferred case and the file for the written one.
+   *
+   * A failure must not fail the fork: a child that kept its parent link can be
+   * detached by hand, a lost fork cannot be recovered.
+   */
+  private async detachForkedSession(forked: PiAgentSession): Promise<void> {
+    clearParentSessionHeader(forked.sessionManager);
+    const sessionFile = forked.sessionFile;
+    if (sessionFile === undefined || sessionFile === "") return;
+    this.sessionHeaderCache.delete(sessionFile);
+    this.sessionManager.invalidateSessionFile(sessionFile);
+    try {
+      await clearParentSession(sessionFile);
+    } catch (error: unknown) {
+      // A missing file is the normal case rather than a failure: Pi has not
+      // written it yet, and the in-memory clear already covers that session.
+      const code = isRecord(error) ? error["code"] : undefined;
+      if (code === "ENOENT") return;
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[sessions] could not detach forked session ${sessionFile}: ${message}\n`);
+    }
   }
 
   async detachParent(ref: PiSessionRef): Promise<void> {

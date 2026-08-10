@@ -412,3 +412,38 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+describe("user forks are detached from their parent", () => {
+  it("signals a hand-made fork so the host can clear its parent link", async () => {
+    const active = activeSession();
+    const onUserFork = vi.fn<(session: unknown) => Promise<void>>(() => Promise.resolve());
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher(), { onUserFork });
+
+    await expect(service.forkEntry("s1", "m1")).resolves.toMatchObject({ type: "done", message: "Session forked" });
+
+    // The fork replaces the runtime's session, so the hook must receive the new
+    // session rather than the one the command started from.
+    expect(onUserFork).toHaveBeenCalledWith(active.runtime.session);
+  });
+
+  it("signals a clone too, since that is also a journey the user started", async () => {
+    const active = activeSession();
+    const onUserFork = vi.fn<(session: unknown) => Promise<void>>(() => Promise.resolve());
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher(), { onUserFork });
+
+    await expect(service.run("s1", "/clone")).resolves.toMatchObject({ type: "done" });
+
+    expect(onUserFork).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not signal a cancelled fork", async () => {
+    const active = activeSession();
+    vi.mocked(active.runtime.fork).mockResolvedValueOnce({ cancelled: true });
+    const onUserFork = vi.fn<(session: unknown) => Promise<void>>(() => Promise.resolve());
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher(), { onUserFork });
+
+    await service.forkEntry("s1", "m1");
+
+    expect(onUserFork).not.toHaveBeenCalled();
+  });
+});
