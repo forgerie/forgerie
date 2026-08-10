@@ -71,11 +71,3 @@ export function latestToolStep(messages: readonly ChatLine[]): string | undefine
   }
   return undefined;
 }
-
-/** Milliseconds a turn has been running, or undefined when its start is unknown. */
-export function elapsedSince(startedAt: string | undefined, now: number): number | undefined {
-  if (startedAt === undefined || startedAt === "") return undefined;
-  const started = Date.parse(startedAt);
-  if (!Number.isFinite(started)) return undefined;
-  return Math.max(0, now - started);
-}

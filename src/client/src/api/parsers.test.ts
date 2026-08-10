@@ -437,6 +437,7 @@ describe("API parsers", () => {
       label: "running tool",
       detail: "read",
       at: "2026-08-08T10:00:00.000Z",
+      activeSince: "2026-08-08T09:58:00.000Z",
     };
     expect(parseMachineSessionListingSnapshot({ sessions: [session], statuses: [status], activities: [activity] })).toEqual({
       sessions: [session],
@@ -444,6 +445,11 @@ describe("API parsers", () => {
       activities: [activity],
     });
     expect(parseMachineSessionListingSnapshot({ sessions: [session], statuses: [status] }).activities).toEqual([]);
+    expect(() => parseMachineSessionListingSnapshot({
+      sessions: [session],
+      statuses: [status],
+      activities: [{ ...activity, activeSince: "" }],
+    })).toThrow("Expected non-empty string field: activeSince");
     expect(() => parseMachineSessionListingSnapshot({ sessions: [session], statuses: "live" })).toThrow("Expected array");
   });
 

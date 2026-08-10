@@ -15,6 +15,7 @@ import type { GlobalSessionsState } from "../appState";
 import * as inboxLocation from "../inboxLocation";
 import * as sessionBoard from "../sessionBoard";
 import { SessionInboxPanel } from "./SessionInboxPanel";
+import { SessionWorkingRuntime } from "./SessionWorkingRuntime";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,6 +45,19 @@ function mkBlockedStatus(sessionId: string): SessionStatus {
       askedAt: "2026-08-07T10:00:00.000Z",
       questions: [{ id: "q1", question: "Proceed?", options: [] }],
     },
+    pendingMessageCount: 0,
+    queuedMessages: [],
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
+  };
+}
+
+function mkWorkingStatus(sessionId: string): SessionStatus {
+  return {
+    sessionId,
+    isStreaming: true,
+    isCompacting: false,
+    isBashRunning: false,
     pendingMessageCount: 0,
     queuedMessages: [],
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
@@ -98,6 +112,12 @@ function shadowRoot(panel: SessionInboxPanel): ShadowRoot {
   return root;
 }
 
+function workingRuntime(panel: SessionInboxPanel): SessionWorkingRuntime {
+  const runtime = shadowRoot(panel).querySelector("session-working-runtime");
+  if (!(runtime instanceof SessionWorkingRuntime)) throw new Error("No working runtime");
+  return runtime;
+}
+
 /** Click a DOM element found by selector, if it exists and is an HTMLElement. */
 function clickSelector(root: ShadowRoot | Element, selector: string): void {
   const el = root.querySelector(selector);
@@ -123,6 +143,7 @@ async function pressKey(panel: SessionInboxPanel, key: string): Promise<void> {
 afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -1128,6 +1149,79 @@ describe("stylesheet integrity", () => {
     }
 
     expect(strays).toEqual([]);
+  });
+});
+
+describe("working runtime", () => {
+  it("replaces message recency with the active turn runtime and a clock", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-11T10:02:30.000Z");
+    const session = mkSession("running", { modified: "2026-08-01T00:00:00.000Z" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session], {
+        statuses: { running: mkWorkingStatus("running") },
+        activities: {
+          running: {
+            sessionId: "running",
+            phase: "active",
+            label: "running tool",
+            at: "2026-08-11T10:02:15.000Z",
+            activeSince: "2026-08-11T10:00:00.000Z",
+          },
+        },
+      }),
+    });
+
+    const runtime = workingRuntime(panel);
+    const runtimeRoot = runtime.shadowRoot;
+    if (runtimeRoot === null) throw new Error("No runtime shadow root");
+    expect(runtime.startedAt).toBe("2026-08-11T10:00:00.000Z");
+    expect(runtimeRoot.textContent.trim()).toBe("2m");
+    expect(runtimeRoot.querySelector("[data-runtime-clock]")).not.toBeNull();
+  });
+
+  it("keeps the first observed start until a Working row settles", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-11T10:00:00.000Z");
+    const session = mkSession("fallback");
+    const working = () => mkGlobalSessions([session], {
+      statuses: { fallback: mkWorkingStatus("fallback") },
+      activities: {
+        fallback: {
+          sessionId: "fallback",
+          phase: "active",
+          label: "agent running",
+          at: new Date().toISOString(),
+        },
+      },
+    });
+    const panel = await mountPanel({ globalSessions: working(), selectedSession: session });
+
+    expect(workingRuntime(panel).startedAt).toBe("2026-08-11T10:00:00.000Z");
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    panel.globalSessions = working();
+    await panel.updateComplete;
+    expect(workingRuntime(panel).startedAt).toBe("2026-08-11T10:00:00.000Z");
+
+    panel.globalSessions = mkGlobalSessions([session]);
+    await panel.updateComplete;
+    panel.globalSessions = working();
+    await panel.updateComplete;
+    expect(workingRuntime(panel).startedAt).toBe("2026-08-11T10:02:00.000Z");
+  });
+
+  it("keeps message recency for a session that is not working", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-07T10:02:00.000Z");
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("idle", { modified: "2026-08-07T10:00:00.000Z" })]),
+      selectedSession: mkSession("idle"),
+    });
+
+    const rowTime = shadowRoot(panel).querySelector(".row-time");
+    if (rowTime === null) throw new Error("No row time");
+    expect(rowTime.textContent.trim()).toBe("2m");
+    expect(shadowRoot(panel).querySelector("session-working-runtime")).toBeNull();
   });
 });
 

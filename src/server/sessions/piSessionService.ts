@@ -882,7 +882,13 @@ export class PiSessionService implements SessionRouteService {
    * on full readiness.
    */
   private readonly startupSessions = new Map<string, PiAgentSession>();
-  private readonly activities = new Map<string, { phase: "active" | "idle" | "error"; label: string; detail?: string; at: string }>();
+  private readonly activities = new Map<string, {
+    phase: "active" | "idle" | "error";
+    label: string;
+    detail?: string;
+    activeSince?: string;
+    at: string;
+  }>();
   private readonly heartbeat: NodeJS.Timeout;
   private readonly commandService: SessionCommandService<PiAgentSession>;
   /** Runtime-identity gate held while Pi may await abandoned-branch summarization. */
@@ -3818,7 +3824,7 @@ export class PiSessionService implements SessionRouteService {
       this.updateSubsessionTracking(session);
       const activity = this.activities.get(session.sessionId);
       if (!this.hasActiveWork(session)) {
-        if (activity?.phase === "active") this.publishStatus(session);
+        if (activity?.phase === "active" || activity?.activeSince !== undefined) this.publishStatus(session);
         continue;
       }
       this.publishStatus(session);
@@ -4009,9 +4015,21 @@ export class PiSessionService implements SessionRouteService {
 
   private publishActivity(session: PiAgentSession, label: string, phase: "active" | "idle" | "error", detail?: string): void {
     const at = new Date().toISOString();
-    const stored = detail === undefined ? { phase, label, at } : { phase, label, detail, at };
+    const previous = this.activities.get(session.sessionId);
+    // SDK tool/message completion events can briefly say idle while the turn is
+    // still streaming. Keep one start across those internal phase changes so a
+    // Working runtime measures the user's whole wait, not the current tool.
+    const stillWorking = phase === "active" || this.hasActiveWork(session);
+    const activeSince = stillWorking ? previous?.activeSince ?? at : undefined;
+    const stored = {
+      phase,
+      label,
+      ...(detail === undefined ? {} : { detail }),
+      ...(activeSince === undefined ? {} : { activeSince }),
+      at,
+    };
     this.activities.set(session.sessionId, stored);
-    const activity = detail === undefined ? { sessionId: session.sessionId, phase, label, at } : { sessionId: session.sessionId, phase, label, detail, at };
+    const activity = { sessionId: session.sessionId, ...stored };
     this.workspaceActivity?.applySessionActivity(session.sessionManager.getCwd(), activity);
     this.events.publish(session.sessionId, { type: "activity.update", activity });
     this.events.publishGlobal({ type: "activity.update", activity });
@@ -4029,9 +4047,17 @@ export class PiSessionService implements SessionRouteService {
 
   private clearStaleActiveActivity(session: PiAgentSession): void {
     const current = this.activities.get(session.sessionId);
-    if (current?.phase !== "active" || this.hasActiveWork(session)) return;
+    if (current === undefined || this.hasActiveWork(session)) return;
+    if (current.phase !== "active" && current.activeSince === undefined) return;
     const at = new Date().toISOString();
-    const stored = { phase: "idle" as const, label: "idle", at };
+    const stored = current.phase === "active"
+      ? { phase: "idle" as const, label: "idle", at }
+      : {
+          phase: current.phase,
+          label: current.label,
+          ...(current.detail === undefined ? {} : { detail: current.detail }),
+          at,
+        };
     this.activities.set(session.sessionId, stored);
     const activity = { sessionId: session.sessionId, ...stored };
     this.events.publish(session.sessionId, { type: "activity.update", activity });

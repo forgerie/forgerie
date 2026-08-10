@@ -24,6 +24,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
 import { renderBuiltinTabIcon } from "./tabIcons";
+import "./SessionWorkingRuntime";
 import { isKeyEventInEditableContext } from "../keyboardContext";
 import { commitDistance, readSwipe } from "../rowSwipe";
 import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
@@ -213,6 +214,8 @@ export class SessionInboxPanel extends LitElement {
   private previousSelectedGroupKey: string | undefined;
   /** Board and resolver owned by the current Lit update and shared by lifecycle and render. */
   private updateDerivation: InboxPanelDerivation | undefined;
+  /** First observed instant for Working rows whose server activity predates this browser. */
+  private readonly observedWorkingSince = new Map<string, string>();
 
   // -------------------------------------------------------------------------
   // Lifecycle
@@ -282,11 +285,13 @@ export class SessionInboxPanel extends LitElement {
       this.collapsedGroups = readCollapsedGroups(machineId);
       this.showArchived = false;
       this.previousSelectedGroupKey = undefined;
+      this.observedWorkingSince.clear();
     }
 
     // Own one derivation for this Lit update. Auto-expand and render consume
     // this same snapshot, so their view of row state and location cannot differ.
     this.updateDerivation = this.deriveForUpdate();
+    this.syncWorkingStarts(this.updateDerivation?.board, Date.now());
     if (this.updateDerivation === undefined) {
       // Loading and empty renders have no keyboard-visible rows. Do not let
       // J/K reuse the prior board's navigation order during a transition.
@@ -317,6 +322,25 @@ export class SessionInboxPanel extends LitElement {
   // -------------------------------------------------------------------------
   // Board derivation
   // -------------------------------------------------------------------------
+
+  /** Keep one stable start per continuous stay in the Working state. */
+  private syncWorkingStarts(board: SessionBoard<SessionInfo> | undefined, now: number): void {
+    const workingIds = new Set<string>();
+    for (const row of board?.rows ?? []) {
+      if (row.state.kind !== "working") continue;
+      const sessionId = row.session.id;
+      workingIds.add(sessionId);
+      const reported = this.globalSessions?.activities[sessionId]?.activeSince;
+      if (reported !== undefined && Number.isFinite(Date.parse(reported))) {
+        this.observedWorkingSince.set(sessionId, reported);
+      } else if (!this.observedWorkingSince.has(sessionId)) {
+        this.observedWorkingSince.set(sessionId, new Date(now).toISOString());
+      }
+    }
+    for (const sessionId of this.observedWorkingSince.keys()) {
+      if (!workingIds.has(sessionId)) this.observedWorkingSince.delete(sessionId);
+    }
+  }
 
   private deriveForUpdate(): InboxPanelDerivation | undefined {
     const gs = this.globalSessions;
@@ -678,7 +702,11 @@ export class SessionInboxPanel extends LitElement {
           ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
           ${this.renderLiveWork(session.id)}
         </div>
-        <span class="row-time">${relativeTime(session.modified, now)}</span>
+        <span class="row-time">
+          ${kind === "working"
+            ? html`<session-working-runtime .startedAt=${this.observedWorkingSince.get(session.id) ?? new Date(now).toISOString()}></session-working-runtime>`
+            : relativeTime(session.modified, now)}
+        </span>
         <div class="row-actions">
           ${kind === "archived"
             ? html`<button class="row-action" data-action="restore" title="Restore" aria-label="Restore session" @click=${handleRestore}>↩</button>`
@@ -1254,7 +1282,7 @@ export class SessionInboxPanel extends LitElement {
     /*
      * The right column mirrors the left's two-line rhythm: when on the title's
      * line, act on the location's line. Sharing baselines is what makes the
-     * timestamp read as part of the session rather than as a label on a button.
+     * time read as part of the session rather than as a label on a button.
      */
     .row-time {
       grid-column: 3;

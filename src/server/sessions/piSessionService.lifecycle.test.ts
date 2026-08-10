@@ -721,6 +721,60 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     }
   });
 
+  it("keeps the active start time stable across one working turn", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-11T10:00:00.000Z");
+    const hub = new CapturingSessionEventHub();
+    const fake = fakeRuntime("timed-session", { isStreaming: true });
+    const service = new PiSessionService(hub, {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("timed-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    try {
+      await service.status(sessionRef("timed-session"));
+      fake.emit({ type: "agent_start" });
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      fake.emit({ type: "tool_execution_start", toolName: "read" });
+
+      const activities = hub.globalEvents.flatMap((event) => event.type === "activity.update" ? [event.activity] : []);
+      expect(activities.at(0)).toMatchObject({
+        phase: "active",
+        activeSince: "2026-08-11T10:00:00.000Z",
+      });
+      expect(activities.at(-1)).toMatchObject({
+        phase: "active",
+        at: "2026-08-11T10:02:00.000Z",
+        activeSince: "2026-08-11T10:00:00.000Z",
+      });
+      fake.emit({ type: "tool_execution_end", toolName: "read", isError: false });
+      const betweenTools = hub.globalEvents.flatMap((event) => event.type === "activity.update" ? [event.activity] : []).at(-1);
+      expect(betweenTools).toMatchObject({
+        phase: "idle",
+        activeSince: "2026-08-11T10:00:00.000Z",
+      });
+      await expect(service.machineListing()).resolves.toMatchObject({
+        activities: [{ activeSince: "2026-08-11T10:00:00.000Z" }],
+      });
+
+      fake.session.isStreaming = false;
+      await vi.advanceTimersByTimeAsync(60_000);
+      const settled = hub.globalEvents.flatMap((event) => event.type === "activity.update" ? [event.activity] : []).at(-1);
+      expect(settled).toMatchObject({ phase: "idle" });
+      expect(settled).not.toHaveProperty("activeSince");
+      await expect(service.machineListing()).resolves.toMatchObject({
+        activities: [{ phase: "idle" }],
+      });
+      expect((await service.machineListing()).activities[0]).not.toHaveProperty("activeSince");
+    } finally {
+      await service.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes idle activity for SDK completion events", async () => {
     const hub = new CapturingSessionEventHub();
     let listener: ((event: unknown) => void) | undefined;

@@ -546,6 +546,7 @@ function parseSessionActivity(value: unknown): SessionActivity {
     phase: requireSessionActivityPhase(record, "phase"),
     label: requireNonEmptyString(record, "label"),
     ...optionalField("detail", optionalString(record, "detail")),
+    ...optionalField("activeSince", optionalNonEmptyString(record, "activeSince")),
     at: requireNonEmptyString(record, "at"),
     ...optionalField("startup", optionalActivityStartupMarker(record)),
   };

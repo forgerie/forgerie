@@ -461,6 +461,9 @@ export interface SessionActivity {
   phase: "active" | "idle" | "error";
   label: string;
   detail?: string;
+  /** When the current continuous stretch of Working state began. */
+  activeSince?: string;
+  /** When this specific activity update was published. */
   at: string;
   /**
    * Set only on the startup window's own reports. A startup phase is genuinely

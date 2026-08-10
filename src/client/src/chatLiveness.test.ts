@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { elapsedSince, formatElapsed, latestToolStep, livenessStep } from "./chatLiveness";
+import { formatElapsed, latestToolStep, livenessStep } from "./chatLiveness";
+import { elapsedSince } from "./sessionWorkingRuntime";
 import type { SessionActivity } from "./api";
 import type { ChatLine, ChatPart } from "./components/shared";
 

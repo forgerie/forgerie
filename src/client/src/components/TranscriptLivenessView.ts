@@ -1,6 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { elapsedSince, formatElapsed } from "../chatLiveness";
+import { formatElapsed } from "../chatLiveness";
+import { elapsedSince } from "../sessionWorkingRuntime";
 import { transcriptLivenessStyles } from "./shared";
 
 /**
