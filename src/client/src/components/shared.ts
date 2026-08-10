@@ -332,10 +332,13 @@ export const listStyles = css`
 
 export const chatStyles = css`
   :host { position: relative; z-index: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--pi-text); font: 14px system-ui, sans-serif; }
-  /* Inline-size container for the transcript. Lives on the wrapper rather than
-     the scroller so containment cannot interact with sticky headers or scroll
-     anchoring inside .chat. Resolves --calm-measure for the reading column. */
-  .chat-wrap { container-type: inline-size; position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  /* Size container for the transcript. Lives on the wrapper rather than the
+     scroller so containment cannot interact with sticky headers or scroll
+     anchoring inside .chat. Resolves --calm-measure for the reading column from
+     its inline size, and the reserved height of an opening turn from its block
+     size. The wrapper is sized by the flex column above it, never by its own
+     contents, so size containment costs it nothing. */
+  .chat-wrap { container-type: size; position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   .top-notices { box-sizing: border-box; flex: 0 0 auto; max-height: 40%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-bottom: 1px solid var(--pi-border); background: var(--pi-bg-overlay); }
   .session-warnings { flex: 0 1 auto; display: grid; gap: 8px; max-height: 50%; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 10px 16px; border-bottom: 1px solid var(--pi-border-muted); }
   .session-warnings:only-child { flex: 1 1 auto; max-height: 100%; border-bottom: 0; }
@@ -407,12 +410,26 @@ export const chatStyles = css`
      immediately beside it. This is exactly the free space either side of the
      centred column, so wide content can use it and never more, and it is capped
      so a wide monitor does not stretch a table to the horizon. */
-  .chat { --calm-bleed: min(max(0px, (100cqi - 32px - var(--calm-measure)) / 2), 10rem); --pi-chat-sticky-top: -26px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: 26px 16px 16px; box-sizing: border-box; }
+  .chat { --calm-bleed: min(max(0px, (100cqi - 32px - var(--calm-measure)) / 2), 10rem); --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) 16px var(--pi-chat-pad-block-end); box-sizing: border-box; }
   /* One human message and its reply share a box. The box is what the reading
      position holds at the top of the viewport when a turn opens, and what
      reserves the space a streaming reply arrives into. It adds no spacing of
      its own: the turn gap still comes from the human message inside it. */
   .turn { min-width: 0; display: block; }
+  /* An opening turn reserves a screenful so its first line can sit at the top
+     of the viewport with the reply arriving underneath it, instead of the reply
+     pushing the question up the screen as it streams. The reservation belongs to
+     the turn rather than to a trailing spacer, so it disappears exactly as the
+     turn's own content grows to fill the screen and leaves no dead space behind
+     a long answer.
+
+     It sits on an inner block rather than on the turn itself. The turn is a grid
+     item, and a grid row sized from its item's own minimum stops tracking that
+     item's content: a long reply then overflowed its row and drew on top of the
+     liveness line below it. A block box inside the item has no such trouble, and
+     the turn goes back to being sized by what it holds. */
+  .turn-body { min-width: 0; }
+  .turn-body.reserved { min-block-size: calc(100cqb - var(--pi-chat-pad-block-start) - var(--pi-chat-pad-block-end)); }
   .scroll-marker { display: block; height: 0; overflow: hidden; pointer-events: none; }
   /* Transcript messages carry no card. Roles are told apart by weight and
      tone, not by a border and fill per role: colour is reserved for things

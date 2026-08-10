@@ -7,6 +7,7 @@ import {
   chatMessageAnchorKey,
   chatToolOutputLabel,
 } from "./ChatView";
+import { followTurn, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
 import { templateEventHandlerAfterMarker } from "../templateInspection.testSupport";
 
 describe("ChatView image content derivation", () => {
@@ -38,19 +39,23 @@ describe("ChatView image event wiring", () => {
   // effect. Vitest runs with no DOM environment here, so a shadow-DOM click
   // harness would add disproportionate setup; direct handler extraction anchored
   // to the stable `@load=`/`@click=` attribute markup is proportionate.
-  it("re-pins late image loads only while already pinned to the bottom", () => {
+  it("re-follows late image loads according to the transcript's follow mode", () => {
     const view = new ChatView();
     let scrollCalls = 0;
+    let alignCalls = 0;
     if (!Reflect.set(view, "scrollToBottom", () => { scrollCalls += 1; })) throw new Error("Could not observe ChatView.scrollToBottom");
+    if (!Reflect.set(view, "alignAnchoredTurn", () => { alignCalls += 1; })) throw new Error("Could not observe ChatView.alignAnchoredTurn");
     const rendered = renderPart(view, { type: "image", mimeType: "image/png", data: "QUJD" });
     const onLoad = templateEventHandlerAfterMarker(rendered, "@load=");
 
-    if (!Reflect.set(view, "pinnedToBottom", true)) throw new Error("Could not set ChatView.pinnedToBottom");
+    if (!Reflect.set(view, "followMode", FOLLOW_TAIL)) throw new Error("Could not set ChatView.followMode");
     onLoad(new Event("load"));
-    if (!Reflect.set(view, "pinnedToBottom", false)) throw new Error("Could not set ChatView.pinnedToBottom");
+    if (!Reflect.set(view, "followMode", followTurn("turn:m:2"))) throw new Error("Could not set ChatView.followMode");
+    onLoad(new Event("load"));
+    if (!Reflect.set(view, "followMode", FOLLOW_FREE)) throw new Error("Could not set ChatView.followMode");
     onLoad(new Event("load"));
 
-    expect(scrollCalls).toBe(1);
+    expect({ scrollCalls, alignCalls }).toEqual({ scrollCalls: 1, alignCalls: 1 });
   });
 
   it("opens and closes the image zoom target on click and close", () => {

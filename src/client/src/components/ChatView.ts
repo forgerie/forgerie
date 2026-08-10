@@ -11,6 +11,7 @@ import { writeClipboardText } from "../clipboard";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
+import { anchoredTurnKey, followModeAfterReaderPullback, followModeAfterScroll, followModeAfterTurnOpened, FOLLOW_FREE, FOLLOW_TAIL, type ChatFollowMode } from "../chatFollowMode";
 import { ChatScrollController, distanceFromScrollBottom, isNearScrollBottom, type ChatAnchorScrollPosition, type ChatScrollRestoreResult } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
@@ -216,7 +217,15 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) onLoadMore?: () => void;
   @query(".chat") private chat?: HTMLDivElement;
   @query("dialog.image-zoom") private imageZoomDialog?: HTMLDialogElement;
-  @state() private pinnedToBottom = true;
+  @state() private followMode: ChatFollowMode = FOLLOW_TAIL;
+  /**
+   * The turn whose reserved space is still standing.
+   *
+   * It outlives the anchor on purpose. Taking the space back the moment the
+   * reader returns to the tail would pull the reply they are reading up the
+   * screen; the space is only reclaimed when the next turn opens and takes it.
+   */
+  @state() private reservedTurnKey: string | undefined;
   @state() private zoomedImage: { src: string; alt: string } | undefined = undefined;
   @state() private expandedMetaKey: string | undefined;
   /** ISO time the current stretch of work began; undefined while idle. */
@@ -232,6 +241,7 @@ export class ChatView extends LitElement {
   private suppressLoadMoreRequests = false;
   private loadMoreCheckFrame: number | undefined;
   private scrollToBottomFrame: number | undefined;
+  private alignAnchoredTurnFrame: number | undefined;
   private scrollToOpenAskFrame: number | undefined;
   private scrollToOpenDialogFrame: number | undefined;
   private groupedMessagesInput?: ChatLine[];
@@ -243,6 +253,20 @@ export class ChatView extends LitElement {
   private readonly messageCopyTextCache = new WeakMap<ChatLine, string>();
   private lastScrollTop = 0;
   private lastClientHeight = 0;
+  /**
+   * The offset the transcript last put the scroller at itself.
+   *
+   * A scroll event carries no hint about who caused it, and an anchored turn
+   * must ignore its own alignment: aligning a turn lands the scroller at the
+   * foot of the reserved space, which is indistinguishable from the reader
+   * choosing to return to the tail unless the transcript remembers the offset
+   * it wrote.
+   */
+  private selfScrollTop: number | undefined;
+  private lastSeenTurnKey: string | undefined;
+  private lastSeenTurnCount = 0;
+  private turnTrackingReady = false;
+  private sentFromHere = false;
   private touchStartY: number | undefined;
   private pendingScrollRestoreSessionId: string | undefined;
   private pendingScrollRestorePosition: ChatAnchorScrollPosition | undefined;
@@ -250,11 +274,13 @@ export class ChatView extends LitElement {
   private prependRestoreToken = 0;
   @state() private loadMoreRequested = false;
   private readonly onViewportResize = () => {
-    if (this.pinnedToBottom) this.scrollToBottom();
+    if (this.followMode.kind === "tail") this.scrollToBottom();
+    else if (this.followMode.kind === "turn") this.alignAnchoredTurn();
     else this.lastClientHeight = this.chat?.clientHeight ?? 0;
   };
   private readonly onImageLoad = (): void => {
-    if (this.pinnedToBottom) this.scrollToBottom();
+    if (this.followMode.kind === "tail") this.scrollToBottom();
+    else if (this.followMode.kind === "turn") this.alignAnchoredTurn();
   };
   private readonly openImageZoom = (src: string, alt: string): void => {
     this.zoomedImage = { src, alt };
@@ -294,6 +320,7 @@ export class ChatView extends LitElement {
     if (this.restoreScrollFrame !== undefined) cancelAnimationFrame(this.restoreScrollFrame);
     if (this.loadMoreCheckFrame !== undefined) cancelAnimationFrame(this.loadMoreCheckFrame);
     if (this.scrollToBottomFrame !== undefined) cancelAnimationFrame(this.scrollToBottomFrame);
+    if (this.alignAnchoredTurnFrame !== undefined) cancelAnimationFrame(this.alignAnchoredTurnFrame);
     if (this.scrollToOpenAskFrame !== undefined) {
       cancelAnimationFrame(this.scrollToOpenAskFrame);
       this.scrollToOpenAskFrame = undefined;
@@ -323,6 +350,15 @@ export class ChatView extends LitElement {
     this.pendingScrollRestoreSessionId = undefined;
     this.pendingScrollRestorePosition = undefined;
     this.prependRestoreToken += 1;
+    this.selfScrollTop = undefined;
+    this.turnTrackingReady = false;
+    this.lastSeenTurnCount = 0;
+    this.sentFromHere = false;
+    this.reservedTurnKey = undefined;
+    if (this.alignAnchoredTurnFrame !== undefined) {
+      cancelAnimationFrame(this.alignAnchoredTurnFrame);
+      this.alignAnchoredTurnFrame = undefined;
+    }
     if (this.restoreScrollFrame !== undefined) {
       cancelAnimationFrame(this.restoreScrollFrame);
       this.restoreScrollFrame = undefined;
@@ -348,7 +384,43 @@ export class ChatView extends LitElement {
       this.pendingNotificationFocus = undefined;
       this.retainedEmptyNotificationTrayTargetKey = undefined;
     }
-    if (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) this.pinnedToBottom = this.pinnedToBottom && (this.didChatHeightChange() || this.isNearBottom());
+    if (changed.has("isSendingPrompt") && this.isSendingPrompt) this.sentFromHere = true;
+    if (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) {
+      if (this.followMode.kind === "tail" && !this.didChatHeightChange() && !this.isNearBottom()) this.followMode = FOLLOW_FREE;
+    }
+    this.trackOpenedTurn();
+  }
+
+  /**
+   * A turn opening at the foot of the transcript takes the reading position.
+   *
+   * A transcript arriving all at once is not a turn opening: a session restores
+   * to where its reader left it, which is the whole point of saving that
+   * position. Only growth from a transcript that was already on screen counts --
+   * or the first turn of a session that had none.
+   */
+  private trackOpenedTurn(): void {
+    const turns = this.turns();
+    const last = turns[turns.length - 1];
+    const key = last === undefined ? undefined : this.turnRenderKey(last);
+    const seen = this.lastSeenTurnCount;
+    if (!this.turnTrackingReady) {
+      this.turnTrackingReady = true;
+      this.lastSeenTurnKey = key;
+      this.lastSeenTurnCount = turns.length;
+      return;
+    }
+    if (key === undefined || key === this.lastSeenTurnKey) return;
+    this.lastSeenTurnKey = key;
+    this.lastSeenTurnCount = turns.length;
+    if (seen === 0 && turns.length > 1) return;
+    if (last?.openedByIndex === undefined) return;
+    const sentFromHere = this.sentFromHere;
+    this.sentFromHere = false;
+    const next = followModeAfterTurnOpened(this.followMode, key, sentFromHere);
+    if (next.kind !== "turn") return;
+    this.followMode = next;
+    this.reservedTurnKey = key;
   }
 
   protected override update(changed: Map<string, unknown>): void {
@@ -363,11 +435,14 @@ export class ChatView extends LitElement {
     if (changed.has("sessionId")) this.restoreScrollPosition();
     const openedAsk = changed.has("pendingAsk") && this.isNewPendingAsk(changed.get("pendingAsk"));
     const openedDialog = changed.has("pendingDialogs") && this.isNewOpenDialog(changed.get("pendingDialogs"));
+    const following = this.followMode.kind !== "free";
+    const contentChanged = changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs");
     // The form uses the transcript scroller. Start a new long form at question
     // one rather than applying the usual live-tail scroll and landing at its end.
-    if (!changed.has("sessionId") && openedAsk && this.pinnedToBottom) this.scrollToOpenAsk();
-    else if (!changed.has("sessionId") && openedDialog && this.pinnedToBottom) this.scrollToOpenDialog();
-    else if (!changed.has("sessionId") && (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) && this.pinnedToBottom) this.scrollToBottom();
+    if (!changed.has("sessionId") && openedAsk && following) this.scrollToOpenAsk();
+    else if (!changed.has("sessionId") && openedDialog && following) this.scrollToOpenDialog();
+    else if (!changed.has("sessionId") && this.followMode.kind === "turn" && (contentChanged || changed.has("followMode"))) this.alignAnchoredTurn();
+    else if (!changed.has("sessionId") && contentChanged && this.followMode.kind === "tail") this.scrollToBottom();
     if (changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) this.continuePendingScrollRestore();
     if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
     if (changed.has("notificationInbox") && this.pendingNotificationFocus !== undefined) this.focusPendingNotificationTarget();
@@ -418,13 +493,14 @@ export class ChatView extends LitElement {
   override render() {
     const groups = this.groupedMessages();
     const liveTailGroup = this.isSessionLive() ? groups[groups.length - 1] : undefined;
+    const turns = this.turns();
     return html`
       ${this.renderTopNotices()}
       ${this.renderNotificationLiveRegions()}
       <div class="chat-wrap">
         <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }}>
           ${this.renderHistoryBoundary()}
-          ${repeat(this.turns(), (turn) => this.turnRenderKey(turn), (turn) => this.renderTurn(turn, liveTailGroup))}
+          ${repeat(turns, (turn) => this.turnRenderKey(turn), (turn, index) => this.renderTurn(turn, liveTailGroup, index === turns.length - 1))}
           ${this.renderQueuedMessages()}
           ${this.renderSessionActivity()}
           ${this.renderTranscriptLiveness()}
@@ -658,10 +734,13 @@ export class ChatView extends LitElement {
    * something to hold at the top of the viewport and the last turn can reserve
    * the space its reply streams into.
    */
-  private renderTurn(turn: ChatTurn, liveTailGroup: ChatGroup | undefined) {
+  private renderTurn(turn: ChatTurn, liveTailGroup: ChatGroup | undefined, last: boolean) {
+    const key = this.turnRenderKey(turn);
     return html`
-      <section class="turn" data-turn-key=${this.turnRenderKey(turn)}>
-        ${repeat(turn.groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup))}
+      <section class="turn" data-turn-key=${key}>
+        <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
+          ${repeat(turn.groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup))}
+        </div>
       </section>
     `;
   }
@@ -1057,12 +1136,12 @@ export class ChatView extends LitElement {
 
   private onScroll() {
     this.requestLoadMoreIfNeeded();
-    this.updatePinnedToBottomFromScroll();
+    this.updateFollowModeFromScroll();
     if (!this.suppressScrollSave) this.scheduleScrollPositionSave();
   }
 
   private onWheel(event: WheelEvent) {
-    if (event.deltaY < 0 && this.canScrollUp()) this.pinnedToBottom = false;
+    if (event.deltaY < 0) this.followMode = followModeAfterReaderPullback(this.followMode, this.canScrollUp());
   }
 
   private onTouchStart(event: TouchEvent) {
@@ -1071,23 +1150,30 @@ export class ChatView extends LitElement {
 
   private onTouchMove(event: TouchEvent) {
     const y = event.touches[0]?.clientY;
-    if (this.touchStartY !== undefined && y !== undefined && y > this.touchStartY && this.canScrollUp()) this.pinnedToBottom = false;
+    if (this.touchStartY !== undefined && y !== undefined && y > this.touchStartY) this.followMode = followModeAfterReaderPullback(this.followMode, this.canScrollUp());
   }
 
-  private updatePinnedToBottomFromScroll() {
+  private updateFollowModeFromScroll() {
     const chat = this.chat;
     if (!chat) return;
-    const heightChanged = this.didChatHeightChange();
-    const wasPinnedToBottom = this.pinnedToBottom;
-    const scrollingUp = chat.scrollTop < this.lastScrollTop;
-    if (heightChanged && wasPinnedToBottom) {
+    if (this.didChatHeightChange()) {
       this.lastClientHeight = chat.clientHeight;
-      this.scrollToBottom();
-      return;
+      if (this.followMode.kind === "tail") {
+        this.scrollToBottom();
+        return;
+      }
+      if (this.followMode.kind === "turn") {
+        this.alignAnchoredTurn();
+        return;
+      }
     }
-    if (this.isAtBottom()) this.pinnedToBottom = true;
-    else if (scrollingUp) this.pinnedToBottom = false;
-    else this.pinnedToBottom = this.isNearBottom();
+    const driver = this.selfScrollTop !== undefined && Math.abs(chat.scrollTop - this.selfScrollTop) < 1 ? "component" : "reader";
+    if (driver === "reader") this.selfScrollTop = undefined;
+    this.followMode = followModeAfterScroll(this.followMode, {
+      atBottom: this.isAtBottom(),
+      nearBottom: this.isNearBottom(),
+      scrollingUp: chat.scrollTop < this.lastScrollTop,
+    }, driver);
     this.lastScrollTop = chat.scrollTop;
     this.lastClientHeight = chat.clientHeight;
   }
@@ -1152,10 +1238,36 @@ export class ChatView extends LitElement {
       if (!chat) return;
       this.withSuppressedScrollSave(() => {
         chat.scrollTop = chat.scrollHeight;
-        this.lastScrollTop = chat.scrollTop;
-        this.lastClientHeight = chat.clientHeight;
+        this.syncScrollMetrics();
       });
     });
+  }
+
+  /**
+   * Put the anchored turn's head back at the top of the viewport.
+   *
+   * Re-applied on every update rather than once when the turn opens, so that a
+   * fold expanding above the anchor, or the on-screen keyboard changing the
+   * viewport, moves the content rather than the reader's place in it.
+   */
+  private alignAnchoredTurn(): void {
+    if (this.alignAnchoredTurnFrame !== undefined) return;
+    this.alignAnchoredTurnFrame = requestAnimationFrame(() => {
+      this.alignAnchoredTurnFrame = undefined;
+      const chat = this.chat;
+      const turn = this.anchoredTurnElement();
+      if (chat === undefined || turn === undefined) return;
+      this.withSuppressedScrollSave(() => {
+        chat.scrollTop += turn.getBoundingClientRect().top - chat.getBoundingClientRect().top;
+        this.syncScrollMetrics();
+      });
+    });
+  }
+
+  private anchoredTurnElement(): HTMLElement | undefined {
+    const turnKey = anchoredTurnKey(this.followMode);
+    if (turnKey === undefined) return undefined;
+    return this.renderRoot.querySelector<HTMLElement>(`.turn[data-turn-key="${CSS.escape(turnKey)}"]`) ?? undefined;
   }
 
   private isNewPendingAsk(previous: unknown): boolean {
@@ -1189,7 +1301,7 @@ export class ChatView extends LitElement {
     if (chat === undefined || card === null) return false;
     chat.scrollTop += card.getBoundingClientRect().top - chat.getBoundingClientRect().top;
     this.syncScrollMetrics();
-    this.pinnedToBottom = this.isNearBottom();
+    this.followMode = this.isNearBottom() ? FOLLOW_TAIL : FOLLOW_FREE;
     return true;
   }
 
@@ -1211,7 +1323,7 @@ export class ChatView extends LitElement {
     if (chat === undefined || card === null) return false;
     chat.scrollTop += card.getBoundingClientRect().top - chat.getBoundingClientRect().top;
     this.syncScrollMetrics();
-    this.pinnedToBottom = this.isNearBottom();
+    this.followMode = this.isNearBottom() ? FOLLOW_TAIL : FOLLOW_FREE;
     return true;
   }
 
@@ -1247,14 +1359,14 @@ export class ChatView extends LitElement {
   private handleScrollRestoreResult(sessionId: string, result: ChatScrollRestoreResult): void {
     this.syncScrollMetrics();
     if (result.status !== "missing") {
-      this.updatePinnedToBottomAfterRestore(result.status);
+      this.updateFollowModeAfterRestore(result.status);
       if (result.status === "restored" || result.status === "bottom") this.cancelPrependRestore();
       this.pendingScrollRestoreSessionId = undefined;
       this.pendingScrollRestorePosition = undefined;
       return;
     }
 
-    this.pinnedToBottom = false;
+    this.followMode = FOLLOW_FREE;
     this.pendingScrollRestoreSessionId = sessionId;
     this.pendingScrollRestorePosition = result.position;
     const chat = this.chat;
@@ -1271,9 +1383,9 @@ export class ChatView extends LitElement {
     return !this.hasMore;
   }
 
-  private updatePinnedToBottomAfterRestore(status: Exclude<ChatScrollRestoreResult["status"], "missing">): void {
-    if (status === "bottom") this.pinnedToBottom = true;
-    else if (status === "restored") this.pinnedToBottom = this.isNearBottom();
+  private updateFollowModeAfterRestore(status: Exclude<ChatScrollRestoreResult["status"], "missing">): void {
+    if (status === "bottom") this.followMode = FOLLOW_TAIL;
+    else if (status === "restored") this.followMode = this.isNearBottom() ? FOLLOW_TAIL : FOLLOW_FREE;
   }
 
   private syncScrollMetrics(): void {
@@ -1281,6 +1393,7 @@ export class ChatView extends LitElement {
     if (chat === undefined) return;
     this.lastScrollTop = chat.scrollTop;
     this.lastClientHeight = chat.clientHeight;
+    this.selfScrollTop = chat.scrollTop;
   }
 
   private cancelPrependRestore(): void {
