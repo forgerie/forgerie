@@ -2384,6 +2384,17 @@ export class PiSessionService implements SessionRouteService {
         this.publishStatus(forkedSession);
       }
       if (result.session.id !== session.sessionId) this.clearSupersededSessionActivity(session);
+      // A fork the user made by hand is a new journey, not a delegated child.
+      // Clearing the link at creation is what lets `parentSession` mean
+      // delegation, so the inbox can collapse machine-spawned children without
+      // hiding the user's own forks. Detaching must never fail the fork: a
+      // child that kept its parent link is recoverable by hand, a lost fork is
+      // not.
+      try {
+        await this.detachParent({ id: result.session.id, cwd: result.session.cwd });
+      } catch (error: unknown) {
+        void error;
+      }
       return {
         cancelled: false,
         session: result.session,

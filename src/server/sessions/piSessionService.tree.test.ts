@@ -660,4 +660,31 @@ describe("PiSessionService session-tree fork-from-entry", () => {
 
     await service.dispose();
   });
+
+  it("detaches a hand-made fork from its parent so the inbox treats it as its own journey", async () => {
+    const fsp = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    // The harness resolves this session's file from its id; write a real one
+    // there so the header rewrite is exercised against bytes on disk.
+    const sessionFile = path.join(tmpdir(), `${SESSION_ID}.jsonl`);
+    const header = { type: "session", version: 3, id: SESSION_ID, timestamp: "2026-08-10T00:00:00.000Z", cwd: "/workspace", parentSession: "/sessions/parent.jsonl" };
+    const secondLine = String.raw`{"type":"model_change"}`;
+    await fsp.writeFile(sessionFile, `${JSON.stringify(header)}\n${secondLine}\n`, "utf8");
+
+    const { service, fake } = treeHarness({}, {
+      getUserMessagesForForking: () => [{ entryId: "entry-1", text: "draft text" }],
+    });
+    fake.runtime.fork = vi.fn(() => Promise.resolve({ cancelled: false, selectedText: "draft text" }));
+
+    await expect(service.forkFromTree(sessionRef(SESSION_ID), forkRequest())).resolves.toMatchObject({ cancelled: false });
+
+    const lines = (await fsp.readFile(sessionFile, "utf8")).split("\n");
+    expect(JSON.parse(lines[0] ?? "{}")).not.toHaveProperty("parentSession");
+    // The rest of the transcript must survive the header rewrite untouched.
+    expect(lines[1]).toBe(secondLine);
+
+    await fsp.rm(sessionFile, { force: true });
+    await service.dispose();
+  });
 });
