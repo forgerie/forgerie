@@ -1089,6 +1089,12 @@ export class SessionInboxPanel extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      /*
+       * The mark is zero wide until a finger uncovers it. A centred glyph in a
+       * zero-wide box still paints, half on each side of the edge, which puts a
+       * clipped tick on every row. Clip the mark to its own width.
+       */
+      overflow: hidden;
       background: var(--pi-surface, #101527);
       color: var(--pi-dim, #6b7394);
       font-size: 15px;
