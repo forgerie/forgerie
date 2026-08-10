@@ -296,9 +296,9 @@ describe("socket stream validation", () => {
   });
 });
 
-class FakeWebSocket {
+class RecordingWebSocket {
   static readonly CONNECTING = 0;
-  static readonly instances: FakeWebSocket[] = [];
+  static readonly instances: RecordingWebSocket[] = [];
 
   readyState = 1;
   onopen: (() => void) | null = null;
@@ -307,7 +307,7 @@ class FakeWebSocket {
   onclose: (() => void) | null = null;
 
   constructor(readonly url: string) {
-    FakeWebSocket.instances.push(this);
+    RecordingWebSocket.instances.push(this);
   }
 
   close(): void {
@@ -315,13 +315,77 @@ class FakeWebSocket {
   }
 }
 
+describe("realtime socket lifecycle", () => {
+  const reconnectTimers: (() => void)[] = [];
+
+  beforeEach(() => {
+    RecordingWebSocket.instances.length = 0;
+    reconnectTimers.length = 0;
+    vi.stubGlobal("WebSocket", RecordingWebSocket);
+    vi.stubGlobal("document", { baseURI: "https://pi.example.test/" });
+    vi.stubGlobal("window", {
+      clearTimeout: vi.fn(),
+      setTimeout: vi.fn((callback: () => void) => {
+        reconnectTimers.push(callback);
+        return reconnectTimers.length;
+      }),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("distinguishes the first open from an unplanned reconnect", () => {
+    const socket = new RealtimeSocket();
+    const onInitialOpen = vi.fn();
+    const onReconnect = vi.fn();
+
+    socket.connect(vi.fn(), onReconnect, "machine-a", onInitialOpen);
+    const firstSocket = RecordingWebSocket.instances[0];
+    if (firstSocket === undefined) throw new Error("expected initial realtime socket");
+    firstSocket.onopen?.();
+
+    expect(onInitialOpen).toHaveBeenCalledOnce();
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    firstSocket.onclose?.();
+    reconnectTimers.shift()?.();
+    const secondSocket = RecordingWebSocket.instances[1];
+    if (secondSocket === undefined) throw new Error("expected reconnected realtime socket");
+    secondSocket.onopen?.();
+
+    expect(onInitialOpen).toHaveBeenCalledOnce();
+    expect(onReconnect).toHaveBeenCalledOnce();
+  });
+
+  it("treats the first open after an explicit close as initial", () => {
+    const socket = new RealtimeSocket();
+    const firstInitialOpen = vi.fn();
+    const firstReconnect = vi.fn();
+    const nextInitialOpen = vi.fn();
+    const nextReconnect = vi.fn();
+
+    socket.connect(vi.fn(), firstReconnect, "machine-a", firstInitialOpen);
+    RecordingWebSocket.instances[0]?.onopen?.();
+    socket.close();
+    socket.connect(vi.fn(), nextReconnect, "machine-b", nextInitialOpen);
+    RecordingWebSocket.instances[1]?.onopen?.();
+
+    expect(firstInitialOpen).toHaveBeenCalledOnce();
+    expect(firstReconnect).not.toHaveBeenCalled();
+    expect(nextInitialOpen).toHaveBeenCalledOnce();
+    expect(nextReconnect).not.toHaveBeenCalled();
+  });
+});
+
 describe("socket instance isolation", () => {
   const setTimeoutSpy = vi.fn(() => 1);
 
   beforeEach(() => {
-    FakeWebSocket.instances.length = 0;
+    RecordingWebSocket.instances.length = 0;
     setTimeoutSpy.mockClear();
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("WebSocket", RecordingWebSocket);
     vi.stubGlobal("document", { baseURI: "https://pi.example.test/" });
     vi.stubGlobal("window", { clearTimeout: vi.fn(), setTimeout: setTimeoutSpy });
   });
@@ -337,7 +401,7 @@ describe("socket instance isolation", () => {
     const onInitialOpen = vi.fn();
     const target = { id: "session-1", cwd: "/repo" };
     socket.connect(target, oldHandler, undefined, "machine-a");
-    const oldSocket = FakeWebSocket.instances[0];
+    const oldSocket = RecordingWebSocket.instances[0];
     if (oldSocket === undefined) throw new Error("expected old session socket");
     const staleClose = oldSocket.onclose;
     oldSocket.onmessage?.({ data: JSON.stringify(inboxEvent()) });
@@ -351,7 +415,7 @@ describe("socket instance isolation", () => {
     expect(newHandler).not.toHaveBeenCalled();
     expect(setTimeoutSpy).not.toHaveBeenCalled();
 
-    const newSocket = FakeWebSocket.instances[1];
+    const newSocket = RecordingWebSocket.instances[1];
     if (newSocket === undefined) throw new Error("expected replacement session socket");
     newSocket.onopen?.();
     expect(onInitialOpen).toHaveBeenCalledOnce();
@@ -375,7 +439,7 @@ describe("socket instance isolation", () => {
       },
     };
     socket.connect(oldHandler, undefined, "machine-a");
-    const oldSocket = FakeWebSocket.instances[0];
+    const oldSocket = RecordingWebSocket.instances[0];
     if (oldSocket === undefined) throw new Error("expected old realtime socket");
     oldSocket.onmessage?.({ data: JSON.stringify(event) });
 
@@ -386,7 +450,7 @@ describe("socket instance isolation", () => {
     expect(oldHandler).not.toHaveBeenCalled();
     expect(newHandler).not.toHaveBeenCalled();
 
-    const newSocket = FakeWebSocket.instances[1];
+    const newSocket = RecordingWebSocket.instances[1];
     if (newSocket === undefined) throw new Error("expected replacement realtime socket");
     newSocket.onmessage?.({ data: JSON.stringify(event) });
     await Promise.resolve();

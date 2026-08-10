@@ -1,8 +1,11 @@
 import type { TemplateResult } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeSnapshot, SessionTreeSummaryChoice } from "../api";
+import { activityApi, sessionsApi, terminalsApi, type Machine, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSnapshot, type SessionTreeSummaryChoice, type Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
+import { ActivityController } from "../controllers/activityController";
 import { SessionController } from "../controllers/sessionController";
+import { SessionInboxController } from "../controllers/sessionInboxController";
+import { SessionUnreadController } from "../sessionUnread";
 // This node-environment test uses the shared, type-guarded template inspection
 // escape hatch only to verify PiWebApp's navigator callback boundary.
 import { templateValueAfterMarker } from "../templateInspection.testSupport";
@@ -13,11 +16,33 @@ type ForkHandler = (entryId: string) => Promise<SessionTreeForkResult>;
 type AbortHandler = () => Promise<void>;
 type CancelHandler = () => void;
 type RenderSessionTreeNavigator = (this: PiWebApp, state: AppState) => TemplateResult | null;
+type AppMethod = (this: PiWebApp, ...args: unknown[]) => unknown;
+
+const reconnectTimers: (() => void)[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+class RecordingWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly instances: RecordingWebSocket[] = [];
+
+  readyState = 1;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: MessageEvent["data"] }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  constructor(readonly url: string) {
+    RecordingWebSocket.instances.push(this);
+  }
+
+  close(): void {
+    this.readyState = 3;
+  }
+}
 
 describe("PiWebApp session tree wiring", () => {
   it("routes navigation, cancellation, abort, and chat reveal through SessionController", async () => {
@@ -97,14 +122,219 @@ describe("PiWebApp session tree wiring", () => {
   });
 });
 
+describe("PiWebApp realtime snapshot wiring", () => {
+  it("leaves initial selected-machine snapshots to the explicit loaders and corrects them on reconnect", async () => {
+    const app = createApp();
+    const selectedWorkspace = workspace();
+    setAppMachineState(app, [machine("local", "local")], machine("local", "local"), selectedWorkspace);
+    const requests = recordSnapshotRequests();
+
+    await Promise.all([
+      appInboxController(app).refresh("local"),
+      appUnreadController(app).refresh("local"),
+      appActivityController(app).refresh("local"),
+      refreshActiveTerminals(app, selectedWorkspace),
+    ]);
+    connectRealtime(app);
+
+    expectSnapshotRequestCounts(requests, 1);
+    const initialSocket = RecordingWebSocket.instances[0];
+    if (initialSocket === undefined) throw new Error("Expected selected-machine realtime socket");
+    initialSocket.onopen?.();
+    await settlePromises();
+
+    expectSnapshotRequestCounts(requests, 1);
+
+    initialSocket.onclose?.();
+    runNextReconnectTimer();
+    const reconnectedSocket = RecordingWebSocket.instances[1];
+    if (reconnectedSocket === undefined) throw new Error("Expected selected-machine reconnect socket");
+    reconnectedSocket.onopen?.();
+    await settlePromises();
+
+    expectSnapshotRequestCounts(requests, 2);
+  });
+
+  it("keeps a new machine's first socket open separate from its explicit inbox load", async () => {
+    const app = createApp();
+    const firstMachine = machine("machine-a", "remote");
+    const nextMachine = machine("machine-b", "remote");
+    setAppMachineState(app, [], firstMachine);
+    const requests = recordSnapshotRequests();
+
+    await appInboxController(app).refresh(firstMachine.id);
+    connectRealtime(app);
+    RecordingWebSocket.instances[0]?.onopen?.();
+    await settlePromises();
+    expect(requests.machineListing).toHaveBeenCalledTimes(1);
+
+    callAppMethod(app, "setState", { selectedMachine: nextMachine });
+    await settlePromises();
+    expect(requests.machineListing).toHaveBeenCalledTimes(2);
+    expect(requests.machineListing).toHaveBeenLastCalledWith(nextMachine.id);
+
+    const nextMachineSocket = RecordingWebSocket.instances[1];
+    if (nextMachineSocket === undefined) throw new Error("Expected new-machine realtime socket");
+    nextMachineSocket.onopen?.();
+    await settlePromises();
+
+    expect(requests.machineListing).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes background-machine unread and activity snapshots on first open and reconnect", async () => {
+    const app = createApp();
+    const local = machine("local", "local");
+    const remote = machine("remote-a", "remote");
+    setAppMachineState(app, [local, remote], local);
+    const requests = recordSnapshotRequests();
+
+    syncMachineActivitySubscriptions(app);
+    const initialSocket = RecordingWebSocket.instances[0];
+    if (initialSocket === undefined) throw new Error("Expected background-machine realtime socket");
+    initialSocket.onopen?.();
+    await settlePromises();
+
+    expect(requests.unreadCatalog).toHaveBeenCalledTimes(1);
+    expect(requests.unreadCatalog).toHaveBeenLastCalledWith("remote-a");
+    expect(requests.workspaceActivity).toHaveBeenCalledTimes(1);
+    expect(requests.workspaceActivity).toHaveBeenLastCalledWith("remote-a");
+
+    initialSocket.onclose?.();
+    runNextReconnectTimer();
+    const reconnectedSocket = RecordingWebSocket.instances[1];
+    if (reconnectedSocket === undefined) throw new Error("Expected background-machine reconnect socket");
+    reconnectedSocket.onopen?.();
+    await settlePromises();
+
+    expect(requests.unreadCatalog).toHaveBeenCalledTimes(2);
+    expect(requests.workspaceActivity).toHaveBeenCalledTimes(2);
+    expect(requests.machineListing).not.toHaveBeenCalled();
+    expect(requests.terminals).not.toHaveBeenCalled();
+  });
+});
+
 function createApp(): PiWebApp {
   const storage = {
     getItem: () => null,
     setItem: () => undefined,
     removeItem: () => undefined,
   };
-  vi.stubGlobal("window", { location: { search: "" }, localStorage: storage });
+  RecordingWebSocket.instances.length = 0;
+  reconnectTimers.length = 0;
+  vi.stubGlobal("WebSocket", RecordingWebSocket);
+  vi.stubGlobal("document", { baseURI: "https://pi.example.test/" });
+  vi.stubGlobal("window", {
+    location: { search: "" },
+    localStorage: storage,
+    clearTimeout: vi.fn(),
+    setTimeout: vi.fn((callback: () => void) => {
+      reconnectTimers.push(callback);
+      return reconnectTimers.length;
+    }),
+  });
   return new PiWebApp();
+}
+
+function setAppMachineState(app: PiWebApp, machines: Machine[], selectedMachine: Machine, selectedWorkspace?: Workspace): void {
+  const state = {
+    ...initialAppState(),
+    machines,
+    selectedMachine,
+    selectedWorkspace,
+    workspaces: selectedWorkspace === undefined ? [] : [selectedWorkspace],
+  };
+  if (!Reflect.set(app, "state", state)) throw new Error("Could not set PiWebApp machine state");
+}
+
+function recordSnapshotRequests() {
+  return {
+    machineListing: vi.spyOn(sessionsApi, "machineListing").mockResolvedValue({ sessions: [], statuses: [], activities: [] }),
+    asksCatalog: vi.spyOn(sessionsApi, "asksCatalog").mockResolvedValue({ sessions: [] }),
+    unreadCatalog: vi.spyOn(sessionsApi, "unreadCatalog").mockResolvedValue({ catalogId: "catalog-a", catalogRevision: 0, sessions: [] }),
+    workspaceActivity: vi.spyOn(activityApi, "workspaceActivity").mockResolvedValue({ workspaces: [], generatedAt: "2026-08-09T00:00:00.000Z" }),
+    terminals: vi.spyOn(terminalsApi, "terminals").mockResolvedValue([]),
+  };
+}
+
+function expectSnapshotRequestCounts(requests: ReturnType<typeof recordSnapshotRequests>, count: number): void {
+  expect(requests.machineListing).toHaveBeenCalledTimes(count);
+  expect(requests.asksCatalog).toHaveBeenCalledTimes(count);
+  expect(requests.unreadCatalog).toHaveBeenCalledTimes(count);
+  expect(requests.workspaceActivity).toHaveBeenCalledTimes(count);
+  expect(requests.terminals).toHaveBeenCalledTimes(count);
+}
+
+function appInboxController(app: PiWebApp): SessionInboxController {
+  const controller: unknown = Reflect.get(app, "inbox");
+  if (!(controller instanceof SessionInboxController)) throw new Error("PiWebApp SessionInboxController was unavailable");
+  return controller;
+}
+
+function appUnreadController(app: PiWebApp): SessionUnreadController {
+  const controller: unknown = Reflect.get(app, "sessionUnread");
+  if (!(controller instanceof SessionUnreadController)) throw new Error("PiWebApp SessionUnreadController was unavailable");
+  return controller;
+}
+
+function appActivityController(app: PiWebApp): ActivityController {
+  const controller: unknown = Reflect.get(app, "activity");
+  if (!(controller instanceof ActivityController)) throw new Error("PiWebApp ActivityController was unavailable");
+  return controller;
+}
+
+function connectRealtime(app: PiWebApp): void {
+  callAppMethod(app, "connectRealtime");
+}
+
+function syncMachineActivitySubscriptions(app: PiWebApp): void {
+  callAppMethod(app, "syncMachineActivitySubscriptions");
+}
+
+async function refreshActiveTerminals(app: PiWebApp, selectedWorkspace: Workspace): Promise<void> {
+  await callAppMethod(app, "refreshActiveTerminals", selectedWorkspace);
+}
+
+function callAppMethod(app: PiWebApp, name: string, ...args: unknown[]): ReturnType<AppMethod> {
+  const method: unknown = Reflect.get(app, name);
+  if (!isAppMethod(method)) throw new Error(`PiWebApp.${name} was unavailable`);
+  return method.call(app, ...args);
+}
+
+function isAppMethod(value: unknown): value is AppMethod {
+  return typeof value === "function";
+}
+
+function runNextReconnectTimer(): void {
+  const timer = reconnectTimers.shift();
+  if (timer === undefined) throw new Error("Expected a scheduled realtime reconnect");
+  timer();
+}
+
+async function settlePromises(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+}
+
+function machine(id: string, kind: Machine["kind"]): Machine {
+  return {
+    id,
+    name: id,
+    kind,
+    createdAt: "2026-08-09T00:00:00.000Z",
+    updatedAt: "2026-08-09T00:00:00.000Z",
+  };
+}
+
+function workspace(): Workspace {
+  return {
+    id: "workspace-1",
+    projectId: "project-1",
+    path: "/repo",
+    label: "repo",
+    isMain: true,
+    isGitRepo: true,
+    isGitWorktree: false,
+    effectiveConfig: {},
+  };
 }
 
 function setAppTree(app: PiWebApp, treeSnapshot: SessionTreeSnapshot): AppState {

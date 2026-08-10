@@ -93,17 +93,25 @@ export class SessionSocket {
 export class RealtimeSocket {
   private socket: WebSocket | undefined;
   private onEvent: ((event: BrowserRealtimeEvent) => void) | undefined;
-  private onOpen: (() => void) | undefined;
+  private onReconnect: (() => void) | undefined;
+  private onInitialOpen: (() => void) | undefined;
   private reconnectTimer?: number;
   private reconnectDelay = 500;
   private shouldReconnect = false;
+  private hasOpened = false;
   private machineId = "local";
 
-  connect(onEvent: (event: BrowserRealtimeEvent) => void, onOpen?: () => void, machineId = "local"): void {
+  connect(
+    onEvent: (event: BrowserRealtimeEvent) => void,
+    onReconnect?: () => void,
+    machineId = "local",
+    onInitialOpen?: () => void,
+  ): void {
     this.close();
     this.machineId = machineId;
     this.onEvent = onEvent;
-    this.onOpen = onOpen;
+    this.onReconnect = onReconnect;
+    this.onInitialOpen = onInitialOpen;
     this.shouldReconnect = true;
     this.open();
   }
@@ -114,7 +122,9 @@ export class RealtimeSocket {
     closeSocketQuietly(this.socket);
     this.socket = undefined;
     this.onEvent = undefined;
-    this.onOpen = undefined;
+    this.onReconnect = undefined;
+    this.onInitialOpen = undefined;
+    this.hasOpened = false;
     this.machineId = "local";
   }
 
@@ -125,7 +135,10 @@ export class RealtimeSocket {
     socket.onopen = () => {
       if (this.socket !== socket) return;
       this.reconnectDelay = 500;
-      this.onOpen?.();
+      const isReconnect = this.hasOpened;
+      this.hasOpened = true;
+      if (isReconnect) this.onReconnect?.();
+      else this.onInitialOpen?.();
     };
     socket.onmessage = (message) => void this.handleMessage(message.data, socket);
     socket.onerror = () => { socket.close(); };

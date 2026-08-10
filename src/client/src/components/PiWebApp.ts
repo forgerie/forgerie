@@ -1039,18 +1039,19 @@ export class PiWebApp extends LitElement {
 
   private connectRealtime(): void {
     const machineId = selectedMachineId(this.state);
+    const refreshAfterReconnect = () => {
+      void this.sessionUnread.refresh(machineId);
+      // Re-snapshot the inbox on reconnect: corrects stale Blocked/Working
+      // classifications that accumulated while the socket was disconnected
+      // (e.g. after a sessiond restart clears in-memory pending asks).
+      void this.inbox.refresh(machineId);
+      const workspace = this.state.selectedWorkspace;
+      if (workspace !== undefined) void this.refreshActiveTerminals(workspace);
+      void this.refreshWorkspaceActivity(machineId);
+    };
     this.realtime.connect(
       (event) => { this.handleRealtimeEvent(machineId, event); },
-      () => {
-        void this.sessionUnread.refresh(machineId);
-        // Re-snapshot the inbox on reconnect: corrects stale Blocked/Working
-        // classifications that accumulated while the socket was disconnected
-        // (e.g. after a sessiond restart clears in-memory pending asks).
-        void this.inbox.refresh(machineId);
-        const workspace = this.state.selectedWorkspace;
-        if (workspace !== undefined) void this.refreshActiveTerminals(workspace);
-        void this.refreshWorkspaceActivity(machineId);
-      },
+      refreshAfterReconnect,
       machineId,
     );
   }
@@ -1065,13 +1066,15 @@ export class PiWebApp extends LitElement {
     for (const machineId of desiredMachineIds) {
       if (this.machineRealtimeSockets.has(machineId)) continue;
       const socket = new RealtimeSocket();
+      const refreshMachineActivity = () => {
+        void this.sessionUnread.refresh(machineId);
+        void this.refreshWorkspaceActivity(machineId);
+      };
       socket.connect(
         (event) => { this.handleMachineActivityEvent(machineId, event); },
-        () => {
-          void this.sessionUnread.refresh(machineId);
-          void this.refreshWorkspaceActivity(machineId);
-        },
+        refreshMachineActivity,
         machineId,
+        refreshMachineActivity,
       );
       this.machineRealtimeSockets.set(machineId, socket);
     }
