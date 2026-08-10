@@ -19,26 +19,110 @@ export interface ChatHistoryCacheAdapter {
   remove?(sessionId: string): void;
 }
 
+export interface ChatTranscriptPersistScheduler {
+  requestAnimationFrame(callback: () => void): number;
+  cancelAnimationFrame(id: number): void;
+  setTimeout(callback: () => void, delayMs: number): number;
+  clearTimeout(id: number): void;
+}
+
+export interface ChatTranscriptStoreOptions {
+  capacity?: number | undefined;
+  scheduler?: ChatTranscriptPersistScheduler | undefined;
+  persistDelayMs?: number | undefined;
+}
+
+interface HotTranscriptEntry {
+  raw: RawMessagePage;
+  view: ChatTranscriptView;
+  generation: number;
+}
+
+interface PendingPersist {
+  frameId: number | undefined;
+  timerId: number | undefined;
+  generation: number;
+  raw: RawMessagePage;
+}
+
+export const DEFAULT_CHAT_TRANSCRIPT_HOT_CAPACITY = 5;
+const DEFAULT_PERSIST_DELAY_MS = 0;
+
 const browserChatHistoryCache: ChatHistoryCacheAdapter = {
   read: readChatHistoryCache,
   write: writeChatHistoryCache,
   remove: removeChatHistoryCache,
 };
 
-export class ChatTranscriptStore {
-  private readonly rawHistoryPages = new Map<string, RawMessagePage>();
+const browserPersistScheduler: ChatTranscriptPersistScheduler = {
+  requestAnimationFrame(callback: () => void): number {
+    return globalThis.requestAnimationFrame(callback);
+  },
+  cancelAnimationFrame(id: number): void {
+    globalThis.cancelAnimationFrame(id);
+  },
+  setTimeout(callback: () => void, delayMs: number): number {
+    return Number(globalThis.setTimeout(callback, delayMs));
+  },
+  clearTimeout(id: number): void {
+    globalThis.clearTimeout(id);
+  },
+};
 
-  constructor(private readonly cache: ChatHistoryCacheAdapter = browserChatHistoryCache) {}
+export class ChatTranscriptStore {
+  private readonly hotEntries = new Map<string, HotTranscriptEntry>();
+  private readonly pendingPersists = new Map<string, PendingPersist>();
+  private readonly capacity: number;
+  private readonly scheduler: ChatTranscriptPersistScheduler;
+  private readonly persistDelayMs: number;
+
+  constructor(
+    private readonly cache: ChatHistoryCacheAdapter = browserChatHistoryCache,
+    options: ChatTranscriptStoreOptions = {},
+  ) {
+    this.capacity = validCapacity(options.capacity) ? options.capacity : DEFAULT_CHAT_TRANSCRIPT_HOT_CAPACITY;
+    this.scheduler = options.scheduler ?? browserPersistScheduler;
+    this.persistDelayMs = options.persistDelayMs ?? DEFAULT_PERSIST_DELAY_MS;
+  }
 
   cachedView(sessionId: string): ChatTranscriptView {
-    return transcriptViewFromHistory(this.rawHistoryPage(sessionId));
+    const entry = this.hotEntry(sessionId);
+    return entry?.view ?? transcriptViewFromHistory(undefined);
   }
 
   mergeHistory(sessionId: string, page: RawMessagePage): ChatTranscriptView {
-    const history = mergeChatHistory(this.rawHistoryPage(sessionId), page);
-    this.rawHistoryPages.set(sessionId, history);
-    this.cache.write(sessionId, history);
-    return transcriptViewFromHistory(history);
+    const existing = this.hotEntry(sessionId);
+    const history = mergeChatHistory(existing?.raw, page);
+    if (existing !== undefined && rawMessagePagesEqual(existing.raw, history)) {
+      this.touch(sessionId, existing);
+      return existing.view;
+    }
+
+    const pending = this.pendingPersists.get(sessionId);
+    const entry = this.storeHotEntry(sessionId, history, Math.max(existing?.generation ?? 0, pending?.generation ?? 0) + 1);
+    return entry.view;
+  }
+
+  schedulePersist(sessionId: string): void {
+    const entry = this.hotEntries.get(sessionId);
+    if (entry === undefined) return;
+
+    this.clearScheduledPersist(sessionId);
+    const pending: PendingPersist = {
+      frameId: undefined,
+      timerId: undefined,
+      generation: entry.generation,
+      raw: cloneRawMessagePage(entry.raw),
+    };
+    pending.frameId = this.scheduler.requestAnimationFrame(() => {
+      pending.frameId = undefined;
+      if (this.pendingPersists.get(sessionId) !== pending) return;
+      pending.timerId = this.scheduler.setTimeout(() => {
+        pending.timerId = undefined;
+        this.runScheduledPersist(sessionId, pending);
+      }, this.persistDelayMs);
+    });
+    this.pendingPersists.set(sessionId, pending);
   }
 
   applyLiveEvent(messages: ChatLine[], event: SessionUiEvent): ChatLine[] | undefined {
@@ -55,14 +139,83 @@ export class ChatTranscriptStore {
   }
 
   discard(sessionId: string): void {
-    this.rawHistoryPages.delete(sessionId);
-    this.cache.remove?.(sessionId);
+    this.clearScheduledPersist(sessionId);
+    this.hotEntries.delete(sessionId);
+    try {
+      this.cache.remove?.(sessionId);
+    } catch {
+      // Removing browser cache is best effort for the same reason writes are.
+    }
   }
 
   rawHistoryPage(sessionId: string): RawMessagePage | undefined {
-    const cached = this.rawHistoryPages.get(sessionId) ?? this.cache.read(sessionId);
-    if (cached !== undefined) this.rawHistoryPages.set(sessionId, cached);
-    return cached;
+    return this.hotEntry(sessionId)?.raw;
+  }
+
+  private hotEntry(sessionId: string): HotTranscriptEntry | undefined {
+    const existing = this.hotEntries.get(sessionId);
+    if (existing !== undefined) {
+      this.touch(sessionId, existing);
+      return existing;
+    }
+
+    const pending = this.pendingPersists.get(sessionId);
+    if (pending !== undefined) return this.storeHotEntry(sessionId, pending.raw, pending.generation);
+
+    let cached: RawMessagePage | undefined;
+    try {
+      cached = this.cache.read(sessionId);
+    } catch {
+      return undefined;
+    }
+    if (cached === undefined) return undefined;
+    return this.storeHotEntry(sessionId, cached, 0);
+  }
+
+  private storeHotEntry(sessionId: string, raw: RawMessagePage, generation: number): HotTranscriptEntry {
+    const entry: HotTranscriptEntry = {
+      raw,
+      view: transcriptViewFromHistory(raw),
+      generation,
+    };
+    this.hotEntries.delete(sessionId);
+    this.hotEntries.set(sessionId, entry);
+    this.evictOverflow();
+    return entry;
+  }
+
+  private touch(sessionId: string, entry: HotTranscriptEntry): void {
+    this.hotEntries.delete(sessionId);
+    this.hotEntries.set(sessionId, entry);
+  }
+
+  private evictOverflow(): void {
+    while (this.hotEntries.size > this.capacity) {
+      const oldest = this.hotEntries.keys().next().value;
+      if (typeof oldest !== "string") return;
+      this.hotEntries.delete(oldest);
+    }
+  }
+
+  private runScheduledPersist(sessionId: string, pending: PendingPersist): void {
+    if (this.pendingPersists.get(sessionId) !== pending) return;
+    this.pendingPersists.delete(sessionId);
+    const current = this.hotEntries.get(sessionId);
+    if (current !== undefined && current.generation !== pending.generation) return;
+    try {
+      this.cache.write(sessionId, current?.raw ?? pending.raw);
+    } catch {
+      // Persisted transcript history is best effort. The in-memory hot view
+      // remains authoritative for this tab when storage is full or blocked.
+    }
+  }
+
+  private clearScheduledPersist(sessionId: string): void {
+    const pending = this.pendingPersists.get(sessionId);
+    if (pending === undefined) return;
+    if (pending.frameId !== undefined) this.scheduler.cancelAnimationFrame(pending.frameId);
+    if (pending.timerId !== undefined) this.scheduler.clearTimeout(pending.timerId);
+    this.pendingPersists.delete(sessionId);
   }
 }
 
@@ -74,4 +227,19 @@ export function transcriptViewFromHistory(history: RawMessagePage | undefined): 
     messagePageEnd: start + (history?.messages.length ?? 0),
     messagePageTotal: history?.total ?? 0,
   };
+}
+
+function validCapacity(value: number | undefined): value is number {
+  return value !== undefined && Number.isInteger(value) && value > 0;
+}
+
+function rawMessagePagesEqual(left: RawMessagePage, right: RawMessagePage): boolean {
+  return left.start === right.start
+    && left.total === right.total
+    && left.messages.length === right.messages.length
+    && left.messages.every((message, index) => Object.is(message, right.messages[index]));
+}
+
+function cloneRawMessagePage(page: RawMessagePage): RawMessagePage {
+  return { start: page.start, total: page.total, messages: [...page.messages] };
 }

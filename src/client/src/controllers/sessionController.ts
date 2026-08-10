@@ -248,6 +248,7 @@ export class SessionController {
         if (seq !== this.selectionSeq || this.getState().selectedSession?.id !== session.id) return;
         const history = this.transcripts.mergeHistory(transcriptKey, page);
         this.setState({ ...history, isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] });
+        this.transcripts.schedulePersist(transcriptKey);
         this.onSelectedSessionReady?.({ machineId, session });
         if (options?.updateUrl !== false) this.updateUrl();
         return;
@@ -302,8 +303,10 @@ export class SessionController {
     try {
       const page = await this.api.messages(session, { before: state.messagePageStart, limit: MESSAGE_PAGE_SIZE }, selectedMachineId(this.getState()));
       if (this.getState().selectedSession?.id !== session.id) return;
-      const history = this.transcripts.mergeHistory(this.sessionCacheKey(session.id), page);
+      const key = this.sessionCacheKey(session.id);
+      const history = this.transcripts.mergeHistory(key, page);
       this.setState(history);
+      this.transcripts.schedulePersist(key);
     } catch (error) {
       this.setState({ error: String(error) });
     } finally {
@@ -1090,6 +1093,7 @@ export class SessionController {
         activity: this.getState().sessionActivities[target.session.id],
       });
       this.applyStatus(status);
+      this.transcripts.schedulePersist(key);
     });
   }
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../appState";
-import { ChatTranscriptStore } from "../chatTranscriptStore";
+import { ChatTranscriptStore, type ChatTranscriptPersistScheduler } from "../chatTranscriptStore";
 import { machineSessionKey } from "../machineKeys";
 import { loadDraft, saveDraft } from "../promptDraftStorage";
 import { SessionTreeForkUnavailableError, type CommandResult, type SessionTreeSnapshot } from "../api";
@@ -22,6 +22,43 @@ import {
   type MessagePage,
   type SessionStatus,
 } from "./sessionController.testSupport";
+
+class ManualPersistScheduler implements ChatTranscriptPersistScheduler {
+  private nextId = 1;
+  private readonly frames = new Map<number, () => void>();
+  private readonly timers = new Map<number, () => void>();
+
+  requestAnimationFrame(callback: () => void): number {
+    const id = this.nextId;
+    this.nextId += 1;
+    this.frames.set(id, callback);
+    return id;
+  }
+
+  cancelAnimationFrame(id: number): void {
+    this.frames.delete(id);
+  }
+
+  setTimeout(callback: () => void): number {
+    const id = this.nextId;
+    this.nextId += 1;
+    this.timers.set(id, callback);
+    return id;
+  }
+
+  clearTimeout(id: number): void {
+    this.timers.delete(id);
+  }
+
+  flush(): void {
+    const frames = [...this.frames.values()];
+    this.frames.clear();
+    for (const frame of frames) frame();
+    const timers = [...this.timers.values()];
+    this.timers.clear();
+    for (const timer of timers) timer();
+  }
+}
 
 const tree: SessionTreeSnapshot = {
   nodes: [
@@ -105,11 +142,12 @@ describe("SessionController session tree navigation", () => {
       streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
       thinkingLevels: () => Promise.resolve({ levels: [] }),
     };
+    const scheduler = new ManualPersistScheduler();
     const transcripts = new ChatTranscriptStore({
       read: (key) => cachedPages.get(key),
       write: (key, value) => { cachedPages.set(key, value); },
       remove: (key) => { removedKeys.push(key); cachedPages.delete(key); },
-    });
+    }, { scheduler });
     const controller = new SessionController(
       () => state,
       (patch) => { state = { ...state, ...patch }; },
@@ -138,6 +176,8 @@ describe("SessionController session tree navigation", () => {
       request: { targetId: "root", expectedLeafId: "leaf-1", summary: { mode: "custom", instructions: "focus on the prompt" } },
       machineId: "local",
     }]);
+    scheduler.flush();
+
     expect(messageCalls).toBe(3);
     expect(statusCalls).toBe(3);
     expect(removedKeys).toEqual([cacheKey]);
@@ -472,11 +512,12 @@ describe("SessionController session tree navigation", () => {
       streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
       thinkingLevels: () => Promise.resolve({ levels: [] }),
     };
+    const scheduler = new ManualPersistScheduler();
     const transcripts = new ChatTranscriptStore({
       read: (key) => cachedPages.get(key),
       write: (key, value) => { cachedPages.set(key, value); },
       remove: (key) => { removedKeys.push(key); cachedPages.delete(key); },
-    });
+    }, { scheduler });
     const controller = new SessionController(
       () => state,
       (patch) => { state = { ...state, ...patch }; },
@@ -489,6 +530,8 @@ describe("SessionController session tree navigation", () => {
     await controller.selectSession(replacementSession, { updateUrl: false });
     navigationResult.resolve({ cancelled: false, editorText: "originating draft" });
     await navigation;
+
+    scheduler.flush();
 
     expect(state.selectedSession?.id).toBe(replacementSession.id);
     expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "replacement authoritative" }] }]);

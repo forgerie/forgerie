@@ -1,9 +1,29 @@
-import { describe, expect, it } from "vitest";
-import { mergeChatHistory, type RawMessagePage } from "./chatHistoryCache";
+import { afterEach, describe, expect, it } from "vitest";
+import { mergeChatHistory, readChatHistoryCache, writeChatHistoryCache, type RawMessagePage } from "./chatHistoryCache";
 
 function page(start: number, total: number, messages: unknown[]): RawMessagePage {
   return { start, total, messages };
 }
+
+afterEach(() => {
+  Reflect.deleteProperty(globalThis, "sessionStorage");
+});
+
+describe("browser chat history cache", () => {
+  it("treats quota failures as best effort writes", () => {
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      value: {
+        getItem: () => null,
+        removeItem: () => undefined,
+        setItem: () => { throw new Error("quota exceeded"); },
+      },
+    });
+
+    expect(() => { writeChatHistoryCache("s1", page(0, 1, ["a"])); }).not.toThrow();
+    expect(readChatHistoryCache("s1")).toBeUndefined();
+  });
+});
 
 describe("mergeChatHistory", () => {
   it("merges adjacent cached and incoming pages", () => {
