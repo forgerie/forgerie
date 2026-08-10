@@ -586,6 +586,16 @@ export const promptEditorStyles = css`
   .markdown-editor .cm-placeholder { color: var(--pi-dim); }
   .markdown-editor .cm-focused { outline: none; }
   .shell-mode textarea, .shell-mode .markdown-editor .cm-editor { border-color: var(--pi-success); box-shadow: 0 0 0 1px var(--pi-success-ring); }
+  /*
+   * At rest the composer stands down to a single line so the transcript keeps
+   * the space. Focus, typed text, or an attachment restores it; the model and
+   * thinking controls come back with it rather than being lost.
+   */
+  .resting { gap: 6px; padding-block: 6px; }
+  .resting .markdown-editor .cm-editor { min-height: 38px; }
+  .resting .markdown-editor .cm-content { min-height: 22px; padding-block: 6px; }
+  .resting .editor-attach { width: 26px; height: 26px; bottom: 6px; }
+  .resting .select-model, .resting .select-thinking { display: none; }
   .mode-hint { position: absolute; right: 46px; bottom: 8px; max-width: calc(100% - 54px); border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 2px 8px; font-size: 12px; pointer-events: none; }
   .attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
   .attachment-chip { position: relative; width: 56px; height: 56px; border: 1px solid var(--pi-border); border-radius: 8px; overflow: hidden; background: var(--pi-bg); }

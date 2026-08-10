@@ -54,6 +54,7 @@ export class PromptEditor extends LitElement {
   // long-press edit/paste callout). Only `currentInputMode` (shell vs. normal)
   // is reactive, since that is the only draft-derived value the template shows.
   private draft = "";
+  @state() private composerFocused = false;
   @state() private currentInputMode: InputMode = { kind: "normal" };
   @state() private completions: CompletionItem[] = [];
   @state() private selectedIndex = 0;
@@ -113,7 +114,14 @@ export class PromptEditor extends LitElement {
     const queuesInput = this.canSteer || this.isCompacting;
     const busy = this.disabled || this.sending;
     return html`
-      <footer class=${shellMode ? "shell-mode" : ""} @paste=${(event: ClipboardEvent) => { void this.handlePaste(event); }} @dragover=${(event: DragEvent) => { this.handleDragOver(event); }} @drop=${(event: DragEvent) => { void this.handleDrop(event); }}>
+      <footer
+        class=${this.footerClass(shellMode)}
+        @focusin=${() => { this.composerFocused = true; }}
+        @focusout=${(event: FocusEvent) => { this.releaseComposerFocus(event); }}
+        @paste=${(event: ClipboardEvent) => { void this.handlePaste(event); }}
+        @dragover=${(event: DragEvent) => { this.handleDragOver(event); }}
+        @drop=${(event: DragEvent) => { void this.handleDrop(event); }}
+      >
         <div class="editor-wrap">
           <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label="Message pi" aria-disabled=${this.disabled ? "true" : "false"}></div>
           <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
@@ -131,6 +139,23 @@ export class PromptEditor extends LitElement {
         </div>
       </footer>
     `;
+  }
+
+  private footerClass(shellMode: boolean): string {
+    const resting = promptComposerIsResting({
+      chromeSummoned: this.chromeSummoned,
+      focused: this.composerFocused,
+      draft: this.draft,
+      attachmentCount: this.attachments.length,
+    });
+    return [shellMode ? "shell-mode" : "", resting ? "resting" : ""].filter((name) => name !== "").join(" ");
+  }
+
+  /** Focus moving between the editor and its own buttons must not collapse the composer. */
+  private releaseComposerFocus(event: FocusEvent): void {
+    const next = event.relatedTarget;
+    if (next instanceof Node && this.renderRoot instanceof ShadowRoot && this.renderRoot.contains(next)) return;
+    this.composerFocused = false;
   }
 
   focusInput() {
@@ -634,3 +659,26 @@ function inputAssistanceContentAttributes(draftBeforeCursor: string): Record<str
   return inputModeForDraft(draftBeforeCursor).kind === "normal" ? proseInputAssistanceAttributes : codeLikeInputAssistanceAttributes;
 }
 
+
+export interface PromptComposerRestingInput {
+  chromeSummoned: boolean;
+  focused: boolean;
+  draft: string;
+  attachmentCount: number;
+}
+
+/**
+ * Whether the composer can stand down to a single line.
+ *
+ * Only where the conversation owns the screen: on a docked pane the vertical
+ * space is not contested, so collapsing would cost discoverability and buy
+ * nothing. Anything in hand — focus, typed text, a pending attachment — keeps
+ * the composer open, because a surface that hides work in progress reads as
+ * having lost it.
+ */
+export function promptComposerIsResting(input: PromptComposerRestingInput): boolean {
+  if (!input.chromeSummoned) return false;
+  if (input.focused) return false;
+  if (input.attachmentCount > 0) return false;
+  return input.draft.trim() === "";
+}
