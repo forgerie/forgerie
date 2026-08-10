@@ -15,6 +15,7 @@ import { createPiSessionManagerGateway } from "./sessions/piSessionManagerGatewa
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
 import { registerProcessRoutes } from "./sessions/processRoutes.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
+import { initializeSessionArchive } from "./sessions/sessionArchiveInitialization.js";
 import { SessionArchiveStore, defaultSessionArchiveFilePath } from "./sessions/sessionArchiveStore.js";
 import { FileSessionUnreadPersistence, SessionUnreadStore, defaultSessionUnreadFilePath } from "./sessions/sessionUnreadStore.js";
 import { ProjectScopedSpawnTargetResolver } from "./sessions/spawnTargetResolver.js";
@@ -77,16 +78,7 @@ async function createSessionDaemonRuntime() {
   });
   await unreadStore.load();
   const archiveStore = new SessionArchiveStore(defaultSessionArchiveFilePath(daemonEnvironment));
-  try {
-    const archiveInitialization = await archiveStore.initialize();
-    if (archiveInitialization.status === "degraded") {
-      app.log.warn({ err: archiveInitialization.error }, "session archive index compaction failed; continuing with the disk snapshot");
-    }
-  } catch (error: unknown) {
-    // Keep the unreadable index in place. Route operations will surface the
-    // same initialization failure instead of replacing it with empty state.
-    app.log.error({ err: error }, "session archive index initialization failed");
-  }
+  await initializeSessionArchive(archiveStore.initialize(), app.log);
   const workspaceActivity = new WorkspaceActivityService(eventHub);
   const auth = await AuthService.create({ agentDir: activeAgentProfile.dir, logger: app.log });
   // Capture providers registered by global extensions while the runtime is

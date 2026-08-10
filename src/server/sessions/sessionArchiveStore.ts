@@ -175,29 +175,28 @@ export class SessionArchiveStore {
   }
 
   private async loadAndCompact(): Promise<SessionArchiveInitializationResult> {
-    const diskSnapshot = await this.readFromDisk();
-    const normalized = normalizeArchiveFile(diskSnapshot);
+    const diskDocument = await this.readFromDisk();
+    const normalized = normalizeArchiveDocument(diskDocument);
     if (!normalized.changed) {
-      this.cachedSnapshot = cloneArchiveFile(diskSnapshot);
+      this.cachedSnapshot = cloneArchiveFile(normalized.data);
       return { status: "ready", compacted: false };
     }
 
     try {
-      await this.write(normalized.data);
+      await this.write(normalized.document);
       this.cachedSnapshot = cloneArchiveFile(normalized.data);
       return { status: "ready", compacted: true };
     } catch (error: unknown) {
       // The atomic replacement failed, so keep serving the parsed disk state.
       // Transport mapping still applies the catalog bound until persistence recovers.
-      this.cachedSnapshot = cloneArchiveFile(diskSnapshot);
+      this.cachedSnapshot = cloneArchiveFile(parseSessionArchiveFile(diskDocument));
       return { status: "degraded", compacted: false, error };
     }
   }
 
-  private async readFromDisk(): Promise<SessionArchiveFile> {
+  private async readFromDisk(): Promise<unknown> {
     try {
-      const value: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
-      return parseSessionArchiveFile(value);
+      return JSON.parse(await readFile(this.filePath, "utf8"));
     } catch (error: unknown) {
       if (isNodeErrorWithCode(error, "ENOENT")) return { sessions: [] };
       throw error;
@@ -210,7 +209,7 @@ export class SessionArchiveStore {
     this.cachedSnapshot = cloneArchiveFile(normalized);
   }
 
-  private async write(data: SessionArchiveFile): Promise<void> {
+  private async write(data: unknown): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     const tempPath = join(dirname(this.filePath), `.${basename(this.filePath)}.${String(process.pid)}.${Date.now().toString()}.${randomUUID()}.tmp`);
     try {
@@ -221,6 +220,25 @@ export class SessionArchiveStore {
       throw error;
     }
   }
+}
+
+function normalizeArchiveDocument(document: unknown): { document: unknown; data: SessionArchiveFile; changed: boolean } {
+  const data = parseSessionArchiveFile(document);
+  if (!isRecord(document) || !Array.isArray(document["sessions"])) throw new Error("Invalid archive file");
+
+  const rawSessions = document["sessions"];
+  const sessions = rawSessions.map((record) => {
+    if (!isRecord(record)) throw new Error("Invalid archived session record");
+    const firstMessage = record["firstMessage"];
+    if (typeof firstMessage !== "string") return record;
+    const boundedFirstMessage = boundSessionCatalogFirstMessage(firstMessage);
+    return boundedFirstMessage === firstMessage ? record : { ...record, firstMessage: boundedFirstMessage };
+  });
+  const changed = sessions.some((record, index) => record !== rawSessions[index]);
+  if (!changed) return { document, data, changed: false };
+
+  const normalizedDocument = { ...document, sessions };
+  return { document: normalizedDocument, data: parseSessionArchiveFile(normalizedDocument), changed: true };
 }
 
 function normalizeArchiveFile(data: SessionArchiveFile): { data: SessionArchiveFile; changed: boolean } {

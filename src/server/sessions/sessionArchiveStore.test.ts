@@ -196,7 +196,7 @@ describe("SessionArchiveStore", () => {
     await expect(store.get("cached")).resolves.toMatchObject({ sessionId: "cached" });
   });
 
-  it("compacts legacy firstMessage metadata without changing other fields or the transcript", async () => {
+  it("compacts only legacy firstMessage metadata while preserving raw records and the transcript", async () => {
     const root = await createTempRoot("pi-web-archive-compact-");
     const archiveFile = join(root, "archived-sessions.json");
     const transcriptPath = join(root, "archived-files", "legacy.jsonl");
@@ -204,7 +204,10 @@ describe("SessionArchiveStore", () => {
     const transcript = "complete prompt remains in transcript 🎉\n";
     await writeFile(transcriptPath, transcript, "utf8");
     const oversized = `${"a".repeat(499)}🎉suffix`;
+    const bounded = `${"a".repeat(499)}🎉`;
+    const rawCwd = join(root, "workspace", "..", "workspace");
     const legacy = archiveRecord("legacy", {
+      cwd: rawCwd,
       firstMessage: oversized,
       name: "Generated name",
       archivePath: transcriptPath,
@@ -213,15 +216,18 @@ describe("SessionArchiveStore", () => {
       modified: "2026-01-02T00:00:00.000Z",
       messageCount: 17,
       parentSessionPath: join(root, "parent.jsonl"),
+      unknownExtra: { retained: true },
     });
     await writeFile(archiveFile, JSON.stringify({ sessions: [legacy] }), "utf8");
     const store = new SessionArchiveStore(archiveFile, join(root, "archived-files"));
 
     await expect(store.initialize()).resolves.toEqual({ status: "ready", compacted: true });
 
-    const [record] = parseArchiveText(await readFile(archiveFile, "utf8")).sessions;
-    expect(record).toEqual({ ...legacy, firstMessage: `${"a".repeat(499)}🎉` });
-    expect(Array.from(record?.firstMessage ?? "")).toHaveLength(500);
+    const persisted: unknown = JSON.parse(await readFile(archiveFile, "utf8"));
+    expect(persisted).toEqual({ sessions: [{ ...legacy, firstMessage: bounded }] });
+    const cached = await store.list();
+    expect(cached).toMatchObject([{ sessionId: "legacy", cwd: resolve(rawCwd), firstMessage: bounded, name: "Generated name" }]);
+    expect(cached[0]).not.toHaveProperty("unknownExtra");
     await expect(readFile(transcriptPath, "utf8")).resolves.toBe(transcript);
     const reloaded = new SessionArchiveStore(archiveFile, join(root, "archived-files"));
     await expect(reloaded.initialize()).resolves.toEqual({ status: "ready", compacted: false });
