@@ -155,23 +155,29 @@ describe("PiWebApp realtime snapshot wiring", () => {
     expectSnapshotRequestCounts(requests, 2);
   });
 
-  it("keeps a new machine's first socket open separate from its explicit inbox load", async () => {
+  it("refreshes machine-switch snapshots once without first-open duplication", async () => {
     const app = createApp();
     const firstMachine = machine("machine-a", "remote");
     const nextMachine = machine("machine-b", "remote");
     setAppMachineState(app, [], firstMachine);
     const requests = recordSnapshotRequests();
 
-    await appInboxController(app).refresh(firstMachine.id);
+    await Promise.all([
+      appInboxController(app).refresh(firstMachine.id),
+      appActivityController(app).refresh(firstMachine.id),
+    ]);
     connectRealtime(app);
     RecordingWebSocket.instances[0]?.onopen?.();
     await settlePromises();
     expect(requests.machineListing).toHaveBeenCalledTimes(1);
+    expect(requests.workspaceActivity).toHaveBeenCalledTimes(1);
 
     callAppMethod(app, "setState", { selectedMachine: nextMachine });
     await settlePromises();
     expect(requests.machineListing).toHaveBeenCalledTimes(2);
     expect(requests.machineListing).toHaveBeenLastCalledWith(nextMachine.id);
+    expect(requests.workspaceActivity).toHaveBeenCalledTimes(2);
+    expect(requests.workspaceActivity).toHaveBeenLastCalledWith(nextMachine.id);
 
     const nextMachineSocket = RecordingWebSocket.instances[1];
     if (nextMachineSocket === undefined) throw new Error("Expected new-machine realtime socket");
@@ -179,6 +185,7 @@ describe("PiWebApp realtime snapshot wiring", () => {
     await settlePromises();
 
     expect(requests.machineListing).toHaveBeenCalledTimes(2);
+    expect(requests.workspaceActivity).toHaveBeenCalledTimes(2);
   });
 
   it("refreshes background-machine unread and activity snapshots on first open and reconnect", async () => {

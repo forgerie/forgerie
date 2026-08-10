@@ -6,6 +6,12 @@ export type { GlobalSessionEvent, RealtimeEvent, SessionUiEvent } from "../../sh
 
 export type BrowserRealtimeEvent = Exclude<RealtimeEvent, { type: "notifications.summary" }>;
 
+interface RealtimeSocketConnectOptions {
+  machineId: string;
+  onInitialOpen?: () => void;
+  onReconnect?: () => void;
+}
+
 export class SessionSocket {
   private socket: WebSocket | undefined;
   private session: SessionRef | undefined;
@@ -98,20 +104,18 @@ export class RealtimeSocket {
   private reconnectTimer?: number;
   private reconnectDelay = 500;
   private shouldReconnect = false;
-  private hasOpened = false;
+  private lifecycleState: "initial" | "opened" | "retrying" = "initial";
   private machineId = "local";
 
   connect(
     onEvent: (event: BrowserRealtimeEvent) => void,
-    onReconnect?: () => void,
-    machineId = "local",
-    onInitialOpen?: () => void,
+    options: RealtimeSocketConnectOptions,
   ): void {
     this.close();
-    this.machineId = machineId;
+    this.machineId = options.machineId;
     this.onEvent = onEvent;
-    this.onReconnect = onReconnect;
-    this.onInitialOpen = onInitialOpen;
+    this.onReconnect = options.onReconnect;
+    this.onInitialOpen = options.onInitialOpen;
     this.shouldReconnect = true;
     this.open();
   }
@@ -124,7 +128,7 @@ export class RealtimeSocket {
     this.onEvent = undefined;
     this.onReconnect = undefined;
     this.onInitialOpen = undefined;
-    this.hasOpened = false;
+    this.lifecycleState = "initial";
     this.machineId = "local";
   }
 
@@ -135,8 +139,8 @@ export class RealtimeSocket {
     socket.onopen = () => {
       if (this.socket !== socket) return;
       this.reconnectDelay = 500;
-      const isReconnect = this.hasOpened;
-      this.hasOpened = true;
+      const isReconnect = this.lifecycleState !== "initial";
+      this.lifecycleState = "opened";
       if (isReconnect) this.onReconnect?.();
       else this.onInitialOpen?.();
     };
@@ -145,6 +149,7 @@ export class RealtimeSocket {
     socket.onclose = () => {
       if (this.socket !== socket) return;
       this.socket = undefined;
+      this.lifecycleState = "retrying";
       this.scheduleReconnect();
     };
   }

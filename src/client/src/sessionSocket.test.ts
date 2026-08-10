@@ -341,7 +341,11 @@ describe("realtime socket lifecycle", () => {
     const onInitialOpen = vi.fn();
     const onReconnect = vi.fn();
 
-    socket.connect(vi.fn(), onReconnect, "machine-a", onInitialOpen);
+    socket.connect(vi.fn(), {
+      machineId: "machine-a",
+      onInitialOpen,
+      onReconnect,
+    });
     const firstSocket = RecordingWebSocket.instances[0];
     if (firstSocket === undefined) throw new Error("expected initial realtime socket");
     firstSocket.onopen?.();
@@ -359,6 +363,24 @@ describe("realtime socket lifecycle", () => {
     expect(onReconnect).toHaveBeenCalledOnce();
   });
 
+  it("treats a successful open after the first attempt closes as reconnect", () => {
+    const socket = new RealtimeSocket();
+    const onInitialOpen = vi.fn();
+    const onReconnect = vi.fn();
+
+    socket.connect(vi.fn(), {
+      machineId: "machine-a",
+      onInitialOpen,
+      onReconnect,
+    });
+    RecordingWebSocket.instances[0]?.onclose?.();
+    reconnectTimers.shift()?.();
+    RecordingWebSocket.instances[1]?.onopen?.();
+
+    expect(onInitialOpen).not.toHaveBeenCalled();
+    expect(onReconnect).toHaveBeenCalledOnce();
+  });
+
   it("treats the first open after an explicit close as initial", () => {
     const socket = new RealtimeSocket();
     const firstInitialOpen = vi.fn();
@@ -366,10 +388,18 @@ describe("realtime socket lifecycle", () => {
     const nextInitialOpen = vi.fn();
     const nextReconnect = vi.fn();
 
-    socket.connect(vi.fn(), firstReconnect, "machine-a", firstInitialOpen);
+    socket.connect(vi.fn(), {
+      machineId: "machine-a",
+      onInitialOpen: firstInitialOpen,
+      onReconnect: firstReconnect,
+    });
     RecordingWebSocket.instances[0]?.onopen?.();
     socket.close();
-    socket.connect(vi.fn(), nextReconnect, "machine-b", nextInitialOpen);
+    socket.connect(vi.fn(), {
+      machineId: "machine-b",
+      onInitialOpen: nextInitialOpen,
+      onReconnect: nextReconnect,
+    });
     RecordingWebSocket.instances[1]?.onopen?.();
 
     expect(firstInitialOpen).toHaveBeenCalledOnce();
@@ -425,10 +455,14 @@ describe("socket instance isolation", () => {
     expect(newHandler).toHaveBeenCalledOnce();
   });
 
-  it("does not attribute a queued global frame to a replacement machine", async () => {
+  it("isolates replaced realtime socket events and lifecycle callbacks", async () => {
     const socket = new RealtimeSocket();
     const oldHandler = vi.fn();
+    const oldInitialOpen = vi.fn();
+    const oldReconnect = vi.fn();
     const newHandler = vi.fn();
+    const newInitialOpen = vi.fn();
+    const newReconnect = vi.fn();
     const event = {
       type: "workspace.activity",
       activity: {
@@ -438,20 +472,40 @@ describe("socket instance isolation", () => {
         updatedAt: "2026-07-18T00:00:00.000Z",
       },
     };
-    socket.connect(oldHandler, undefined, "machine-a");
+    socket.connect(oldHandler, {
+      machineId: "machine-a",
+      onInitialOpen: oldInitialOpen,
+      onReconnect: oldReconnect,
+    });
     const oldSocket = RecordingWebSocket.instances[0];
     if (oldSocket === undefined) throw new Error("expected old realtime socket");
+    const staleOpen = oldSocket.onopen;
+    const staleClose = oldSocket.onclose;
     oldSocket.onmessage?.({ data: JSON.stringify(event) });
 
-    socket.connect(newHandler, undefined, "machine-b");
+    socket.connect(newHandler, {
+      machineId: "machine-b",
+      onInitialOpen: newInitialOpen,
+      onReconnect: newReconnect,
+    });
+    staleOpen?.();
+    staleClose?.();
     await Promise.resolve();
     await Promise.resolve();
 
     expect(oldHandler).not.toHaveBeenCalled();
+    expect(oldInitialOpen).not.toHaveBeenCalled();
+    expect(oldReconnect).not.toHaveBeenCalled();
     expect(newHandler).not.toHaveBeenCalled();
+    expect(newInitialOpen).not.toHaveBeenCalled();
+    expect(newReconnect).not.toHaveBeenCalled();
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
 
     const newSocket = RecordingWebSocket.instances[1];
     if (newSocket === undefined) throw new Error("expected replacement realtime socket");
+    newSocket.onopen?.();
+    expect(newInitialOpen).toHaveBeenCalledOnce();
+    expect(newReconnect).not.toHaveBeenCalled();
     newSocket.onmessage?.({ data: JSON.stringify(event) });
     await Promise.resolve();
     await Promise.resolve();

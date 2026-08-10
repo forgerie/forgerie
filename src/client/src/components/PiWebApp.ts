@@ -1051,8 +1051,7 @@ export class PiWebApp extends LitElement {
     };
     this.realtime.connect(
       (event) => { this.handleRealtimeEvent(machineId, event); },
-      refreshAfterReconnect,
-      machineId,
+      { machineId, onReconnect: refreshAfterReconnect },
     );
   }
 
@@ -1072,9 +1071,11 @@ export class PiWebApp extends LitElement {
       };
       socket.connect(
         (event) => { this.handleMachineActivityEvent(machineId, event); },
-        refreshMachineActivity,
-        machineId,
-        refreshMachineActivity,
+        {
+          machineId,
+          onInitialOpen: refreshMachineActivity,
+          onReconnect: refreshMachineActivity,
+        },
       );
       this.machineRealtimeSockets.set(machineId, socket);
     }
@@ -1153,9 +1154,11 @@ export class PiWebApp extends LitElement {
     this.sessions.clearActiveSession();
     this.realtime.close();
     this.connectRealtime();
-    // Refresh the inbox for the new machine; the controller's generation guard
-    // discards any in-flight response from the previous machine.
-    void this.inbox.refresh(selectedMachineId(next));
+    const machineId = selectedMachineId(next);
+    // Refresh snapshots owned by machine selection. Controller generation guards
+    // discard any in-flight responses from the previous machine.
+    void this.inbox.refresh(machineId);
+    void this.refreshWorkspaceActivity(machineId);
     this.activeTerminalIds.clear();
     this.sessionCleanupDialog = undefined;
     // Machine switch invalidates all unavailable-cwd marks from the previous machine.
