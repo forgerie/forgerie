@@ -452,12 +452,7 @@ export const chatStyles = css`
   .session-activity strong { color: var(--calm-ink-muted); font-weight: 500; }
   .session-activity span, .session-activity small { color: var(--calm-ink-dim); }
   .history-boundary small { color: var(--pi-dim); }
-  .transcript-liveness { display: flex; align-items: center; gap: 7px; margin: 0 0 14px; padding: 0 2px; color: var(--pi-muted); font-size: 12px; font-style: italic; }
-  .transcript-liveness-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--pi-success); }
-  @media (prefers-reduced-motion: no-preference) {
-    .transcript-liveness-dot { animation: transcript-liveness-pulse 1.8s ease-in-out infinite; }
-  }
-  @keyframes transcript-liveness-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  transcript-liveness { display: block; margin: 0 0 var(--calm-turn-gap); }
   /* No sticky header band. The row survives only to host the copy action and
      the message id, both of which stay hidden until hover or focus. Kept in
      flow rather than absolutely positioned: on touch the actions are always
@@ -521,6 +516,19 @@ export const chatStyles = css`
   .process-notification .raw-disclosure summary { cursor: pointer; color: var(--pi-muted); font-size: 12px; }
   .process-notification .raw-content { margin: 6px 0 0; padding: 8px; max-height: 180px; overflow: auto; border: 1px solid var(--pi-border-muted); border-radius: 6px; background: var(--pi-bg); color: var(--pi-text); font: 11px var(--pi-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
   @keyframes pulse { 0%, 100% { transform: scale(.75); opacity: .55; } 50% { transform: scale(1.2); opacity: 1; } }
+`;
+
+/** The liveness line at the foot of a running turn. */
+export const transcriptLivenessStyles = css`
+  :host { display: block; }
+  .liveness { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; color: var(--calm-ink-dim); font-size: 13px; }
+  /* One line, always. A step is a glance; the fold holds the full text. */
+  .liveness span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .liveness-dot { flex: 0 0 auto; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--pi-accent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .liveness-dot { animation: transcript-liveness-pulse 1.8s ease-in-out infinite; }
+  }
+  @keyframes transcript-liveness-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 `;
 
 export const formattedTextStyles = css`

@@ -3,7 +3,10 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
 import { groupChatMessages, summarizeChatGroup, type ChatGroup } from "../chatGroups";
+import { livenessStep } from "../chatLiveness";
+import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
+import "./TranscriptLivenessView";
 import { writeClipboardText } from "../clipboard";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
@@ -231,6 +234,8 @@ export class ChatView extends LitElement {
   @state() private pinnedToBottom = true;
   @state() private zoomedImage: { src: string; alt: string } | undefined = undefined;
   @state() private expandedMetaKey: string | undefined;
+  /** ISO time the current stretch of work began; undefined while idle. */
+  @state() private activeSince: string | undefined;
   @state() private copiedMessageKey: string | undefined;
   @state() private currentConversationIndex: number | undefined;
   @state() private collapsedNotificationTargetKeys: NotificationTrayPreferences = new Map();
@@ -349,9 +354,12 @@ export class ChatView extends LitElement {
   }
 
   protected override willUpdate(changed: Map<string, unknown>): void {
+    this.trackActiveSince();
     if (changed.has("sessionId")) {
+      this.activeSince = undefined;
       this.savePreviousSessionScrollPosition(changed.get("sessionId"));
       this.prepareSessionUiState();
+      this.trackActiveSince();
     } else if (changed.has("notificationInbox") && this.notificationTargetChanged(changed.get("notificationInbox"))) {
       this.pendingNotificationFocus = undefined;
       this.retainedEmptyNotificationTrayTargetKey = undefined;
@@ -760,14 +768,30 @@ export class ChatView extends LitElement {
    */
   private renderTranscriptLiveness() {
     if (this.isCompacting) return null;
-    const indicator = sessionActivityIndicator({ status: this.status, activity: this.activity, isSendingPrompt: this.isSendingPrompt });
+    const indicator = this.livenessIndicator();
     if (indicator?.active !== true) return null;
-    return html`
-      <p class="transcript-liveness" aria-live="polite">
-        <span class="transcript-liveness-dot" aria-hidden="true"></span>
-        <span>${indicator.text}</span>
-      </p>
-    `;
+    return html`<transcript-liveness
+      .startedAt=${this.activeSince ?? ""}
+      .step=${livenessStep(this.messages, this.activity, indicator.text)}
+    ></transcript-liveness>`;
+  }
+
+  private livenessIndicator(): SessionActivityIndicator | undefined {
+    return sessionActivityIndicator({ status: this.status, activity: this.activity, isSendingPrompt: this.isSendingPrompt });
+  }
+
+  /**
+   * When the current stretch of work began.
+   *
+   * Not `activity.at`: the activity feed republishes on every tool event, so its
+   * timestamp is the last thing that happened, and elapsed time computed from it
+   * sits at zero for as long as the agent keeps reporting. This latches the
+   * first moment the session went active and holds it until it goes idle.
+   */
+  private trackActiveSince(): void {
+    const active = this.livenessIndicator()?.active === true && !this.isCompacting;
+    if (active === (this.activeSince !== undefined)) return;
+    this.activeSince = active ? new Date().toISOString() : undefined;
   }
 
   private renderSessionActivity() {
@@ -859,14 +883,20 @@ export class ChatView extends LitElement {
     return message.parts.length > 0 && message.parts.every((part) => part.type === "askUserRecord");
   }
 
-  private renderMessageGroup(messages: ChatLine[], startIndex: number, endIndex: number, defaultOpen: boolean) {
-    const disclosureKey = this.groupDisclosureKey(startIndex, endIndex, defaultOpen);
-    const open = this.disclosures.isOpen(disclosureKey, defaultOpen);
+  /**
+   * `live` marks the tail group of a running turn. It selects the group's label
+   * and its stable disclosure key, but no longer forces the group open: tool
+   * activity streaming into view is the transcript's main source of noise, and
+   * the liveness line already reports that work is happening and what it is.
+   */
+  private renderMessageGroup(messages: ChatLine[], startIndex: number, endIndex: number, live: boolean) {
+    const disclosureKey = this.groupDisclosureKey(startIndex, endIndex, live);
+    const open = this.disclosures.isOpen(disclosureKey, false);
     return html`
       ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
-      <details class=${chatMessageGroupClassName(defaultOpen)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event, defaultOpen); }}>
+      <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
         <summary>
-          <b class="label">${chatMessageGroupLabel(defaultOpen)}</b>
+          <b class="label">${chatMessageGroupLabel(live)}</b>
           <span>${summarizeChatGroup(messages)}</span>
         </summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
@@ -891,6 +921,7 @@ export class ChatView extends LitElement {
   }
 
   private renderScrollMarker(markerId: string) {
+
     return html`<span class="scroll-marker" data-marker-id=${markerId} aria-hidden="true"></span>`;
   }
 
@@ -1025,10 +1056,10 @@ export class ChatView extends LitElement {
     return null;
   }
 
-  private onGroupToggle(key: string, event: Event, defaultOpen: boolean) {
+  private onGroupToggle(key: string, event: Event) {
     const details = event.currentTarget;
     if (!(details instanceof HTMLDetailsElement)) return;
-    if (this.disclosures.applyToggle(key, details.open, defaultOpen)) this.requestUpdate();
+    if (this.disclosures.applyToggle(key, details.open, false)) this.requestUpdate();
   }
 
   private onScroll() {
@@ -1368,8 +1399,9 @@ export class ChatView extends LitElement {
     });
   }
 
-  private groupDisclosureKey(startIndex: number, endIndex: number, defaultOpen: boolean): string {
-    return defaultOpen ? `${this.sessionId}:live:${String(startIndex)}` : `${this.sessionId}:${String(endIndex)}`;
+  /** The live tail keys on its start, which is stable while events stream in. */
+  private groupDisclosureKey(startIndex: number, endIndex: number, live: boolean): string {
+    return live ? `${this.sessionId}:live:${String(startIndex)}` : `${this.sessionId}:${String(endIndex)}`;
   }
 
   private messageAnchorKey(index: number): string {

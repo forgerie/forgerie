@@ -339,12 +339,25 @@ describe("ChatView event-group disclosure wiring", () => {
     expect(bodyCalls).toEqual([]);
   });
 
-  it("renders a live tail body by default", () => {
+  it("keeps the live tail body closed so streaming activity stays out of view", () => {
     const view = new ChatView();
     view.sessionId = "session-1";
     const bodyCalls = observeGroupBodyRenders(view);
 
     renderMessageGroup(view, messages, 40, 41, true);
+
+    expect(bodyCalls).toEqual([]);
+  });
+
+  it("opens the live tail when it is toggled, and keeps it open as events arrive", () => {
+    const view = new ChatView();
+    view.sessionId = "session-1";
+    const bodyCalls = observeGroupBodyRenders(view);
+    const closed = renderMessageGroup(view, messages, 40, 41, true);
+
+    dispatchDetailsToggle(templateEventHandlerAfterMarker(closed, "@toggle="), true);
+    // The tail grows: same start, later end. The disclosure must survive it.
+    renderMessageGroup(view, messages, 40, 43, true);
 
     expect(bodyCalls).toEqual([{ messages, startIndex: 40 }]);
   });
