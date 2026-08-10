@@ -79,6 +79,9 @@
            32rem approximates 66 characters at the transcript's 14px base. */
         --calm-measure: clamp(20rem, 92cqi, 32rem);
         --calm-turn-gap: 2.25rem;
+        /* Space between paragraphs of one turn. The turn gap is reserved for
+           the boundary between turns, so the two are told apart at a glance. */
+        --calm-para-gap: 1rem;
       }
       html, body { margin: 0; height: 100%; overflow: hidden; background: var(--pi-bg); color: var(--pi-text); }
       body { min-height: 100dvh; }

@@ -5,7 +5,7 @@ import type { ChatLine } from "./components/shared";
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
 
 describe("groupChatMessages", () => {
-  it("groups technical parts until a readable message is encountered", () => {
+  it("pools a turn's technical parts into one group below its prose", () => {
     const messages: ChatLine[] = [
       { role: "assistant", parts: [{ type: "thinking", text: "plan" }, { type: "toolCall", toolName: "read", summary: "file" }] },
       text("assistant", "visible answer"),
@@ -13,10 +13,64 @@ describe("groupChatMessages", () => {
     ];
 
     expect(groupChatMessages(messages, 10)).toEqual([
-      { kind: "group", startIndex: 10, endIndex: 10, messages: [messages[0]] },
       { kind: "message", index: 11, message: text("assistant", "visible answer") },
-      { kind: "group", startIndex: 12, endIndex: 12, messages: [messages[2]] },
+      { kind: "group", startIndex: 10, endIndex: 12, messages: [messages[0], messages[2]] },
     ]);
+  });
+
+  it("starts a new pool at each human turn", () => {
+    const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
+    const messages: ChatLine[] = [
+      text("user", "first question"),
+      call("a"),
+      text("assistant", "partway"),
+      call("b"),
+      text("assistant", "answer"),
+      text("user", "second question"),
+      call("c"),
+      text("assistant", "second answer"),
+    ];
+
+    expect(groupChatMessages(messages)).toEqual([
+      { kind: "message", index: 0, message: text("user", "first question") },
+      { kind: "message", index: 2, message: text("assistant", "partway") },
+      { kind: "message", index: 4, message: text("assistant", "answer") },
+      { kind: "group", startIndex: 1, endIndex: 3, messages: [messages[1], messages[3]] },
+      { kind: "message", index: 5, message: text("user", "second question") },
+      { kind: "message", index: 7, message: text("assistant", "second answer") },
+      { kind: "group", startIndex: 6, endIndex: 6, messages: [messages[6]] },
+    ]);
+  });
+
+  it("treats a human shell command as the start of a turn", () => {
+    const messages: ChatLine[] = [
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "a" }] },
+      text("bash", "ls"),
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "b" }] },
+    ];
+
+    expect(groupChatMessages(messages)).toEqual([
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [messages[0]] },
+      { kind: "message", index: 1, message: text("bash", "ls") },
+      { kind: "group", startIndex: 2, endIndex: 2, messages: [messages[2]] },
+    ]);
+  });
+
+  it("keeps history summaries in their own group, not pooled with steps", () => {
+    const messages: ChatLine[] = [
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "a" }] },
+      { ...text("assistant", "summary"), source: "compaction" },
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "b" }] },
+    ];
+
+    const groups = groupChatMessages(messages);
+    const history = groups[1];
+
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toMatchObject({ kind: "group", startIndex: 0, endIndex: 0 });
+    expect(groups[2]).toMatchObject({ kind: "group", startIndex: 2, endIndex: 2 });
+    if (history?.kind !== "group") throw new Error("expected a history group");
+    expect(summarizeChatGroup(history.messages)).toBe("1 history compaction summary");
   });
 
   it("splits mixed readable and technical parts from a single message", () => {
@@ -25,8 +79,8 @@ describe("groupChatMessages", () => {
     ];
 
     expect(groupChatMessages(messages)).toEqual([
-      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "hidden" }] }] },
       { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "shown" }] } },
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "hidden" }] }] },
     ]);
   });
 
@@ -36,8 +90,8 @@ describe("groupChatMessages", () => {
     ];
 
     expect(groupChatMessages(messages)).toEqual([
-      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "plan" }] }] },
       { kind: "message", index: 0, message: { role: "skill", parts: [{ type: "skillRead", name: "playwright", path: "/skills/playwright/SKILL.md" }] } },
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "plan" }] }] },
     ]);
   });
 
@@ -48,13 +102,13 @@ describe("groupChatMessages", () => {
     ];
 
     expect(groupChatMessages(messages)).toEqual([
+      { kind: "tool-image", index: 0, message: { role: "tool", parts: [image] }, toolName: "read" },
       {
         kind: "group",
         startIndex: 0,
         endIndex: 0,
         messages: [{ role: "tool", parts: [{ type: "toolResult", toolName: "read", text: "Read image file [image/png]", isError: false }] }],
       },
-      { kind: "tool-image", index: 0, message: { role: "tool", parts: [image] }, toolName: "read" },
     ]);
   });
 
@@ -64,8 +118,8 @@ describe("groupChatMessages", () => {
     const message: ChatLine = { role: "tool", parts: [{ type: "toolResult", toolName: "read", text: "ok", isError: false }, image], meta };
 
     expect(groupChatMessages([message])).toEqual([
-      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "tool", parts: [message.parts[0]], meta }] },
       { kind: "tool-image", index: 0, message: { role: "tool", parts: [image], meta }, toolName: "read" },
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "tool", parts: [message.parts[0]], meta }] },
     ]);
   });
 
@@ -82,8 +136,8 @@ describe("groupChatMessages", () => {
     const message: ChatLine = { role: "assistant", parts: [{ type: "thinking", text: "hidden" }, { type: "text", text: "shown" }], meta: { timestamp: "2026-05-09T12:00:00.000Z", model: { provider: "test", id: "model" } } };
 
     expect(groupChatMessages([message])).toEqual([
-      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "hidden" }], meta: message.meta }] },
       { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "shown" }], meta: message.meta } },
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "hidden" }], meta: message.meta }] },
     ]);
   });
 
@@ -104,7 +158,7 @@ describe("groupChatMessages", () => {
       { role: "tool", parts: [{ type: "toolResult", toolName: "read", text: "older", isError: false }] },
       { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "newer" }] },
       text("assistant", "answer"),
-    ], 8)[0]).toMatchObject({ kind: "group", startIndex: 8, endIndex: 9 });
+    ], 8).at(-1)).toMatchObject({ kind: "group", startIndex: 8, endIndex: 9 });
   });
 });
 

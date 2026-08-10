@@ -138,13 +138,8 @@ export function chatGroupScrollMarkerId(endIndex: number): string {
 }
 
 /** The CSS class list for an event-group `<details>`, distinguishing the live tail. */
-export function chatMessageGroupClassName(defaultOpen: boolean): string {
-  return defaultOpen ? "msg event-group live" : "msg event-group";
-}
-
-/** The disclosure summary label for an event group, distinguishing the live tail. */
-export function chatMessageGroupLabel(defaultOpen: boolean): string {
-  return defaultOpen ? "Running" : "Activity";
+export function chatMessageGroupClassName(live: boolean): string {
+  return live ? "msg event-group live" : "msg event-group";
 }
 
 /** Whether a queued-message section shows the server clear-queue action. */
@@ -895,10 +890,7 @@ export class ChatView extends LitElement {
     return html`
       ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
       <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
-        <summary>
-          <b class="label">${chatMessageGroupLabel(live)}</b>
-          <span>${summarizeChatGroup(messages)}</span>
-        </summary>
+        <summary><span>${summarizeChatGroup(messages)}</span></summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
       </details>
     `;

@@ -13,7 +13,6 @@ import {
   chatGroupAnchorKey,
   chatGroupScrollMarkerId,
   chatMessageGroupClassName,
-  chatMessageGroupLabel,
   chatMessageMetadataLabel,
   chatQueuedMessageSections,
   chatQueuedSectionShowsClearAction,
@@ -315,11 +314,9 @@ describe("chat event-group content seams", () => {
     expect(chatGroupScrollMarkerId(41)).toBe("g:41");
   });
 
-  it("distinguishes the live tail group by class and disclosure label", () => {
+  it("distinguishes the live tail group by class", () => {
     expect(chatMessageGroupClassName(true)).toBe("msg event-group live");
     expect(chatMessageGroupClassName(false)).toBe("msg event-group");
-    expect(chatMessageGroupLabel(true)).toBe("Running");
-    expect(chatMessageGroupLabel(false)).toBe("Activity");
   });
 });
 

@@ -115,7 +115,7 @@ describe("applyTranscriptEvent", () => {
 
     expect(live).toEqual(hydrated);
     expect(live.filter((line) => line.parts.some((part) => part.type === "askUserRecord"))).toHaveLength(1);
-    expect(groupChatMessages(live).map((group) => group.kind)).toEqual(["group", "message"]);
+    expect(groupChatMessages(live).map((group) => group.kind)).toEqual(["message", "group"]);
   });
 
   it("replaces the streamed assistant message with the finalized history shape", () => {
@@ -312,9 +312,9 @@ describe("applyTranscriptEvent", () => {
     };
     expect(messages).toEqual([finalizedToolLine, textMessage("assistant", "done")]);
     expect(groupChatMessages(messages)).toEqual([
-      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ ...finalizedToolLine, parts: [finalizedToolLine.parts[0]] }] },
       { kind: "tool-image", index: 0, message: { ...finalizedToolLine, parts: [finalImage] }, toolName: "read" },
       { kind: "message", index: 1, message: textMessage("assistant", "done") },
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ ...finalizedToolLine, parts: [finalizedToolLine.parts[0]] }] },
     ]);
   });
 
@@ -341,7 +341,7 @@ describe("applyTranscriptEvent", () => {
         content: [image],
       }, image],
     }]);
-    expect(groupChatMessages(messages).map((group) => group.kind)).toEqual(["group", "tool-image"]);
+    expect(groupChatMessages(messages).map((group) => group.kind)).toEqual(["tool-image", "group"]);
   });
 
   it("keeps repeated final tool-result events idempotent", () => {
@@ -430,8 +430,8 @@ describe("applyTranscriptEvent", () => {
       return undefined;
     };
 
-    expect(historyGroups.map((group) => group.kind)).toEqual(["group", "tool-image"]);
-    expect(liveGroups.map((group) => group.kind)).toEqual(["group", "tool-image"]);
+    expect(historyGroups.map((group) => group.kind)).toEqual(["tool-image", "group"]);
+    expect(liveGroups.map((group) => group.kind)).toEqual(["tool-image", "group"]);
     expect(technicalParts(liveGroups)).toEqual(technicalParts(historyGroups));
     expect(visibleImages(liveGroups)).toEqual(visibleImages(historyGroups));
     expect(visibleImageMeta(historyGroups)).toEqual({ timestamp });

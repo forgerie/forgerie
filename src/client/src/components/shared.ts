@@ -400,7 +400,14 @@ export const chatStyles = css`
   /* Transcript messages carry no card. Roles are told apart by weight and
      tone, not by a border and fill per role: colour is reserved for things
      that need attention, and a colour per role spends it on everything. */
-  .msg { max-width: 100%; min-width: 0; box-sizing: border-box; margin: 0 0 var(--calm-turn-gap); padding: 0; border: 0; border-radius: 0; background: none; color: var(--calm-ink-muted); overflow: visible; }
+  /* Paragraph rhythm by default; the wide gap is added back only at a turn
+     boundary below. Spacing keys on what an element is rather than what follows
+     it, because a zero-height scroll marker sits between every pair of messages
+     and defeats sibling adjacency. */
+  .msg { max-width: 100%; min-width: 0; box-sizing: border-box; margin: 0 0 var(--calm-para-gap); padding: 0; border: 0; border-radius: 0; background: none; color: var(--calm-ink-muted); overflow: visible; }
+  /* A turn starts when the human speaks. That is the only break the eye needs
+     to find without reading. */
+  .msg.user, .msg.bash { margin-top: calc(var(--calm-turn-gap) - var(--calm-para-gap)); }
   .msg.user { color: var(--calm-ink); font-weight: 500; }
   .msg.tool, .msg.bash, .msg.skill { color: var(--calm-ink-dim); }
   .msg.tool-execution-shell, .msg.ask-user-record-shell { padding: 0; border: 0; background: transparent; color: var(--calm-ink-muted); }
@@ -452,7 +459,13 @@ export const chatStyles = css`
   .session-activity strong { color: var(--calm-ink-muted); font-weight: 500; }
   .session-activity span, .session-activity small { color: var(--calm-ink-dim); }
   .history-boundary small { color: var(--pi-dim); }
-  transcript-liveness { display: block; margin: 0 0 var(--calm-turn-gap); }
+  /* The liveness line is the running turn's footer, so it sits with the pooled
+     activity above it rather than floating between them. */
+  transcript-liveness { display: block; margin: -6px 0 var(--calm-turn-gap); }
+  /* A turn's pooled activity closes that turn, so it sits tight under the prose
+     it belongs to and keeps the full gap below to open the next turn. While the
+     turn runs, the liveness line joins it as one footer. */
+
   /* No sticky header band. The row survives only to host the copy action and
      the message id, both of which stay hidden until hover or focus. Kept in
      flow rather than absolutely positioned: on touch the actions are always

@@ -5,30 +5,70 @@ export type ChatGroup =
   | { kind: "tool-image"; message: ChatLine; index: number; toolName?: string }
   | { kind: "group"; messages: ChatLine[]; startIndex: number; endIndex: number };
 
+/**
+ * Splits a flat message list into what the transcript renders.
+ *
+ * All the tool work in one turn pools into a single group at the foot of that
+ * turn, below the prose. Flushing on every readable part instead shredded a
+ * turn into an alternating ladder -- prose, activity, prose, activity -- which
+ * spaced a sentence and the work it introduced as far apart as two unrelated
+ * turns, and made the page read as twice as many items as it held.
+ *
+ * Pooling gives up strict chronology inside a turn: a sentence no longer sits
+ * beside its own steps. Order is preserved inside the fold, and the turn is
+ * the unit a reader actually scans.
+ */
 export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGroup[] {
   const groups: ChatGroup[] = [];
   let eventMessages: ChatLine[] = [];
   let eventStartIndex = 0;
+  // Tracked, not derived from the length: a pooled turn skips over the prose
+  // messages interleaved with its steps, so its indices are not contiguous.
+  let eventEndIndex = 0;
+  let historyMessages: ChatLine[] = [];
+  let historyStartIndex = 0;
+  let historyEndIndex = 0;
 
   const pushEvent = (message: ChatLine, index: number) => {
     if (!eventMessages.length) eventStartIndex = index;
+    eventEndIndex = index;
     eventMessages.push(message);
   };
   const flushEvents = () => {
     if (!eventMessages.length) return;
-    groups.push({ kind: "group", messages: eventMessages, startIndex: eventStartIndex, endIndex: eventStartIndex + eventMessages.length - 1 });
+    groups.push({ kind: "group", messages: eventMessages, startIndex: eventStartIndex, endIndex: eventEndIndex });
     eventMessages = [];
+  };
+  const pushHistory = (message: ChatLine, index: number) => {
+    if (!historyMessages.length) historyStartIndex = index;
+    historyEndIndex = index;
+    historyMessages.push(message);
+  };
+  const flushHistory = () => {
+    if (!historyMessages.length) return;
+    groups.push({ kind: "group", messages: historyMessages, startIndex: historyStartIndex, endIndex: historyEndIndex });
+    historyMessages = [];
   };
 
   messages.forEach((message, index) => {
+    const absoluteIndex = indexOffset + index;
+    const metadata = { ...(message.source === undefined ? {} : { source: message.source }), ...(message.meta === undefined ? {} : { meta: message.meta }) };
+
+    // Compactions and branch summaries stay in a group of their own, so the
+    // fold can keep naming them for what they are rather than calling them steps.
+    if (isHistoryMessage(message)) {
+      flushEvents();
+      pushHistory({ role: message.role, parts: message.parts, ...metadata }, absoluteIndex);
+      return;
+    }
+    flushHistory();
+
     const readableParts = message.parts.filter((part) => isReadablePart(message, part));
     const technicalParts = message.parts.filter((part) => !isReadablePart(message, part));
 
-    const absoluteIndex = indexOffset + index;
-    const metadata = { ...(message.source === undefined ? {} : { source: message.source }), ...(message.meta === undefined ? {} : { meta: message.meta }) };
+    if (readableParts.length && isTurnBoundary(message)) flushEvents();
     if (technicalParts.length) pushEvent({ role: message.role, parts: technicalParts, ...metadata }, absoluteIndex);
     if (readableParts.length) {
-      flushEvents();
       const role = readableParts.every((part) => part.type === "skillRead") ? "skill" : message.role;
       const readableMessage = { role, parts: readableParts, ...metadata };
       if (isToolImageMessage(readableMessage)) {
@@ -40,7 +80,20 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
     }
   });
   flushEvents();
+  flushHistory();
   return groups;
+}
+
+/**
+ * A turn starts when the human does something. Everything the agent does in
+ * reply -- however many sentences and tool calls -- belongs to that turn.
+ */
+function isTurnBoundary(message: ChatLine): boolean {
+  return message.role === "user" || message.role === "bash";
+}
+
+function isHistoryMessage(message: ChatLine): boolean {
+  return message.source === "compaction" || message.source === "branch_summary";
 }
 
 /**
