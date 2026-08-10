@@ -194,35 +194,6 @@ export const appStyles = css`
   .empty { margin: auto; color: var(--pi-muted); }
   .error { padding: 10px 16px; border-bottom: 1px solid var(--pi-border); color: var(--pi-danger); }
 
-  /* Thread header: rendered above the chat view for session-level actions. */
-  .thread-header {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--pi-border-muted, #1b2340);
-    background: var(--pi-surface, #101527);
-  }
-  .thread-header-actions { display: flex; align-items: center; gap: 6px; }
-  .thread-action {
-    display: inline-grid;
-    place-items: center;
-    min-height: 44px;
-    padding: 0 12px;
-    font: inherit;
-    font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-    color: var(--pi-muted, #aaa4bd);
-    background: var(--pi-surface, #101527);
-    border: 1px solid var(--pi-border, #26304f);
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .thread-action:hover {
-    color: var(--pi-text-bright, #fff);
-    background: var(--pi-surface-hover, #151b31);
-  }
 `;
 
 export const workspacePanelStyles = css`
@@ -640,4 +611,31 @@ export const promptEditorStyles = css`
     button { padding: 5px 7px; }
     .icon-button { width: 34px; height: 34px; }
   }
+`;
+
+/**
+ * The control sheet the composer summons once the chat surface stops keeping
+ * its chrome resident. It rises from the bottom because that is where it was
+ * asked for, and it overlays rather than displaces so dismissing it returns the
+ * conversation untouched.
+ */
+export const controlSheetStyles = css`
+  :host { position: absolute; inset: 0; z-index: 40; display: contents; }
+  .control-sheet-scrim { position: absolute; inset: 0; z-index: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: var(--pi-shadow); cursor: pointer; }
+  .control-sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+    display: flex; flex-direction: column; gap: 2px;
+    max-height: 80%; overflow-y: auto;
+    padding: 7px 0 max(9px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--pi-border);
+    border-radius: 12px 12px 0 0;
+    background: var(--pi-bg);
+    box-shadow: 0 -10px 24px var(--pi-shadow-strong);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .control-sheet { animation: control-sheet-in 160ms ease-out; }
+  }
+  @keyframes control-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .control-sheet-grab { align-self: center; width: 34px; height: 4px; margin-bottom: 5px; border-radius: 2px; background: var(--pi-border); }
+  .control-sheet-notifications { margin: 0; padding: 9px 12px 2px; color: var(--pi-muted); font-size: 12px; }
 `;
