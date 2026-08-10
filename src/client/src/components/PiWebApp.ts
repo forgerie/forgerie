@@ -29,7 +29,7 @@ import { createManagedProcessesRuntime } from "../managedProcessesRuntime";
 import type { ManagedProcessesBrowserEvent, ManagedProcessesRuntime } from "../../../plugin-api/unstable";
 import { resolveParentSessionLocation, type ParentSessionLocation } from "../parentSessionLocation";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
-import { selectedNotificationView } from "../sessionNotifications";
+import { notificationInboxTotalCount, selectedNotificationView } from "../sessionNotifications";
 import { SessionUnreadController } from "../sessionUnread";
 import { deriveUnreadPresence, EMPTY_UNREAD_PRESENCE, sameUnreadPresence, type UnreadPresence } from "../unreadPresence";
 import { initialSessionWarningVisibilityState, reconcileSessionWarningVisibility, toggleSessionWarnings } from "../sessionWarningVisibility";
@@ -76,6 +76,7 @@ import "./SettingsDialog";
 import "./WorkspacePanel";
 import type { WorkspacePanelEmptyState } from "./WorkspacePanel";
 import "./appShell/AppContextBar";
+import "./appShell/AppControlSheet";
 import "./appShell/AppMobileMainTabs";
 import type { AppMobileMainTab, AppMobileMainTabIcon } from "./appShell/AppMobileMainTabs";
 import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/AppNavigationPanel";
@@ -2477,27 +2478,9 @@ export class PiWebApp extends LitElement {
     this.setState({ controlSheetOpen: true });
   };
 
-  private renderThreadHeader(state: AppState, session: SessionInfo) {
-    if (session.archived === true) return null;
-    if (state.globalSessions === undefined) return null;
-    return html`
-      <div class="thread-header" data-thread-header>
-        <div class="thread-header-actions">
-          <button
-            class="thread-action archive-and-next"
-            data-action="archive-and-next"
-            title="Archive this session and open the next one waiting for you"
-            aria-label="Archive &amp; next"
-            @click=${() => { void this.archiveAndNext(); }}
-          >Archive &amp; next</button>
-        </div>
-      </div>
-    `;
-  }
-
   private renderChatView(state: AppState, session: SessionInfo) {
     return html`
-      <chat-view .sessionId=${session.id} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .pendingMessageCount=${state.status?.pendingMessageCount ?? 0} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(selectedMachineId(state), session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .onDismissNotification=${this.handleDismissNotification} .onDismissAllNotifications=${this.handleDismissAllNotifications} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())}></chat-view>
+      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .pendingMessageCount=${state.status?.pendingMessageCount ?? 0} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(selectedMachineId(state), session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .onDismissNotification=${this.handleDismissNotification} .onDismissAllNotifications=${this.handleDismissAllNotifications} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())}></chat-view>
     `;
   }
 
@@ -2515,7 +2498,33 @@ export class PiWebApp extends LitElement {
     return html`<button type="button" class="navigation-scrim" aria-label="Close navigation" @click=${() => { this.selectMainView("chat"); }}></button>`;
   }
 
+  /** Zero when no session is selected or its inbox has not loaded, so the sheet stays quiet. */
+  private selectedNotificationCount(state: AppState): number {
+    const inbox = selectedNotificationView(state.selectedNotificationInbox);
+    return inbox === undefined ? 0 : notificationInboxTotalCount(inbox);
+  }
+
+  private renderControlSheet(state: AppState) {
+    return html`
+      <app-control-sheet
+        .open=${state.controlSheetOpen}
+        .machines=${state.machines}
+        .machine=${state.selectedMachine}
+        .project=${state.selectedProject}
+        .workspace=${state.selectedWorkspace}
+        .session=${state.selectedSession}
+        .tabs=${this.mobileMainTabs()}
+        .selectedView=${state.mainView}
+        .notificationCount=${this.selectedNotificationCount(state)}
+        .onSelectView=${(view: AppState["mainView"]) => { this.selectMainView(view); }}
+        .onOpenSection=${(section: NavigationSection) => { this.openNavigationSection(section); }}
+        .onClose=${() => { this.setState({ controlSheetOpen: false }); }}
+      ></app-control-sheet>
+    `;
+  }
+
   private renderContextBar() {
+    if (this.appShell.isChromeSummoned) return null;
     if (!this.appShell.isMobileNavigationLayout) return null;
     return html`
       <app-context-bar
@@ -2532,6 +2541,7 @@ export class PiWebApp extends LitElement {
   }
 
   private renderMobileMainTabs() {
+    if (this.appShell.isChromeSummoned) return null;
     return html`
       <app-mobile-main-tabs
         .tabs=${this.mobileMainTabs()}
@@ -2581,10 +2591,10 @@ export class PiWebApp extends LitElement {
           ${this.renderNavigationScrim(state)}
           <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout ? this.renderNavigationPanel() : null}</div>
           ${state.selectedSession ? html`
-            ${this.renderThreadHeader(state, state.selectedSession)}
             ${this.renderChatView(state, state.selectedSession)}
             <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
             ${this.renderStatusBar(state)}
+            ${this.renderControlSheet(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
             ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}
             ${state.thinkingDialog !== undefined ? html`<command-picker title=${state.thinkingDialog.title} .options=${state.thinkingDialog.options} .selectedValue=${state.thinkingDialog.selectedValue} .onPick=${(value: string) => { void this.pickThinking(value); }} .onCancel=${() => { this.setState({ thinkingDialog: undefined }); }}></command-picker>` : null}

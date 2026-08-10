@@ -203,6 +203,8 @@ export class ChatView extends LitElement {
   @property({ type: Boolean }) loadingMore = false;
   @property({ type: Boolean }) isSendingPrompt = false;
   @property({ type: Boolean }) isCompacting = false;
+  /** Set when the chat surface has handed its chrome to an on-request sheet. */
+  @property({ type: Boolean }) chromeSummoned = false;
   @property({ type: Number }) pendingMessageCount = 0;
   @property({ attribute: false }) clientQueuedMessages: QueuedSessionMessage[] = [];
   @property({ attribute: false }) status?: SessionStatus;
@@ -458,6 +460,10 @@ export class ChatView extends LitElement {
   }
 
   private renderNotificationTray() {
+    // Summoned chrome means the transcript owns the screen: arrivals are still
+    // announced through the live regions and counted in the control sheet, but
+    // they no longer take a band off the top of the conversation.
+    if (this.chromeSummoned) return null;
     const inbox = this.notificationInbox;
     if (inbox?.sessionId !== this.sessionId) return null;
     const chatKey = notificationTargetKey(inbox);
