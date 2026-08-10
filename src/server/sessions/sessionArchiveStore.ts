@@ -4,6 +4,7 @@ import { access, copyFile, mkdir, readFile, rename, unlink, writeFile } from "no
 import { basename, dirname, join } from "node:path";
 import { piWebDataDir } from "../../config.js";
 import { canonicalizeStoredCwd } from "../workingDirectory.js";
+import { boundSessionCatalogFirstMessage } from "./sessionCatalogMetadata.js";
 
 export interface ArchiveSessionInput {
   sessionId: string;
@@ -35,25 +36,39 @@ export interface SessionArchiveFile {
   sessions: ArchivedSessionRecord[];
 }
 
+export type SessionArchiveInitializationResult =
+  | { status: "ready"; compacted: boolean }
+  | { status: "degraded"; compacted: false; error: unknown };
+
 export function defaultSessionArchiveFilePath(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string {
   return join(piWebDataDir(env, cwd), "archived-sessions.json");
 }
 
 export class SessionArchiveStore {
   private operationQueue: Promise<void> = Promise.resolve();
+  private initializationPromise: Promise<SessionArchiveInitializationResult> | undefined;
+  private cachedSnapshot: SessionArchiveFile | undefined;
 
   constructor(
     private readonly filePath = defaultSessionArchiveFilePath(),
     private readonly archiveDir = join(dirname(filePath), "archived-sessions"),
   ) {}
 
+  initialize(): Promise<SessionArchiveInitializationResult> {
+    if (this.initializationPromise !== undefined) return this.initializationPromise;
+    const initializationPromise = this.loadAndCompact();
+    this.initializationPromise = initializationPromise;
+    return initializationPromise;
+  }
+
   async list(): Promise<ArchivedSessionRecord[]> {
-    return (await this.read()).sessions;
+    return cloneArchiveFile(await this.snapshot()).sessions;
   }
 
   async get(sessionId: string): Promise<ArchivedSessionRecord | undefined> {
-    const sessions = (await this.read()).sessions;
-    return sessions.find((session) => session.sessionId === sessionId) ?? sessions.find((session) => session.sessionId.startsWith(sessionId));
+    const sessions = (await this.snapshot()).sessions;
+    const record = sessions.find((session) => session.sessionId === sessionId) ?? sessions.find((session) => session.sessionId.startsWith(sessionId));
+    return record === undefined ? undefined : { ...record };
   }
 
   async archive(session: ArchiveSessionInput): Promise<ArchivedSessionRecord> {
@@ -65,7 +80,7 @@ export class SessionArchiveStore {
   async archiveMany(sessions: readonly ArchiveSessionInput[]): Promise<ArchivedSessionRecord[]> {
     if (sessions.length === 0) return [];
     return this.exclusive(async () => {
-      const data = await this.read();
+      const data = cloneArchiveFile(await this.snapshot());
       const records: ArchivedSessionRecord[] = [];
       const filesToRemove: { source: string; archivePath: string }[] = [];
 
@@ -87,7 +102,7 @@ export class SessionArchiveStore {
         filesToRemove.push({ source: session.path, archivePath });
       }
 
-      await this.write(data);
+      await this.persistAndPublish(data);
       for (const file of filesToRemove) await removeActiveSessionFile(file.source, file.archivePath);
       return records;
     });
@@ -95,7 +110,7 @@ export class SessionArchiveStore {
 
   async restore(sessionId: string): Promise<void> {
     await this.exclusive(async () => {
-      const data = await this.read();
+      const data = cloneArchiveFile(await this.snapshot());
       const record = data.sessions.find((session) => session.sessionId === sessionId);
       if (record === undefined) return;
 
@@ -104,7 +119,7 @@ export class SessionArchiveStore {
       }
 
       const sessions = data.sessions.filter((session) => session.sessionId !== sessionId);
-      await this.write({ sessions });
+      await this.persistAndPublish({ sessions });
     });
   }
 
@@ -116,7 +131,7 @@ export class SessionArchiveStore {
     const targetIds = uniqueStrings(sessionIds);
     if (targetIds.length === 0) return [];
     return this.exclusive(async () => {
-      const data = await this.read();
+      const data = cloneArchiveFile(await this.snapshot());
       const targetIdSet = new Set(targetIds);
       const records = data.sessions.filter((session) => targetIdSet.has(session.sessionId));
       if (records.length === 0) return [];
@@ -125,7 +140,7 @@ export class SessionArchiveStore {
         if (record.archivePath !== undefined && await pathExists(record.archivePath)) await unlink(record.archivePath);
       }
       const sessions = data.sessions.filter((session) => !targetIdSet.has(session.sessionId));
-      await this.write({ sessions });
+      await this.persistAndPublish({ sessions });
       const deletedIds = new Set(records.map((record) => record.sessionId));
       return targetIds.filter((sessionId) => deletedIds.has(sessionId));
     });
@@ -153,7 +168,33 @@ export class SessionArchiveStore {
     }
   }
 
-  private async read(): Promise<SessionArchiveFile> {
+  private async snapshot(): Promise<SessionArchiveFile> {
+    await this.initialize();
+    if (this.cachedSnapshot === undefined) throw new Error("Session archive store initialization did not publish a snapshot");
+    return this.cachedSnapshot;
+  }
+
+  private async loadAndCompact(): Promise<SessionArchiveInitializationResult> {
+    const diskSnapshot = await this.readFromDisk();
+    const normalized = normalizeArchiveFile(diskSnapshot);
+    if (!normalized.changed) {
+      this.cachedSnapshot = cloneArchiveFile(diskSnapshot);
+      return { status: "ready", compacted: false };
+    }
+
+    try {
+      await this.write(normalized.data);
+      this.cachedSnapshot = cloneArchiveFile(normalized.data);
+      return { status: "ready", compacted: true };
+    } catch (error: unknown) {
+      // The atomic replacement failed, so keep serving the parsed disk state.
+      // Transport mapping still applies the catalog bound until persistence recovers.
+      this.cachedSnapshot = cloneArchiveFile(diskSnapshot);
+      return { status: "degraded", compacted: false, error };
+    }
+  }
+
+  private async readFromDisk(): Promise<SessionArchiveFile> {
     try {
       const value: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
       return parseSessionArchiveFile(value);
@@ -161,6 +202,12 @@ export class SessionArchiveStore {
       if (isNodeErrorWithCode(error, "ENOENT")) return { sessions: [] };
       throw error;
     }
+  }
+
+  private async persistAndPublish(data: SessionArchiveFile): Promise<void> {
+    const normalized = normalizeArchiveFile(data).data;
+    await this.write(normalized);
+    this.cachedSnapshot = cloneArchiveFile(normalized);
   }
 
   private async write(data: SessionArchiveFile): Promise<void> {
@@ -174,6 +221,22 @@ export class SessionArchiveStore {
       throw error;
     }
   }
+}
+
+function normalizeArchiveFile(data: SessionArchiveFile): { data: SessionArchiveFile; changed: boolean } {
+  let changed = false;
+  const sessions = data.sessions.map((record) => {
+    if (record.firstMessage === undefined) return { ...record };
+    const firstMessage = boundSessionCatalogFirstMessage(record.firstMessage);
+    if (firstMessage === record.firstMessage) return { ...record };
+    changed = true;
+    return { ...record, firstMessage };
+  });
+  return { data: { sessions }, changed };
+}
+
+function cloneArchiveFile(data: SessionArchiveFile): SessionArchiveFile {
+  return { sessions: data.sessions.map((record) => ({ ...record })) };
 }
 
 function archiveRecordFromInput(session: ArchiveSessionInput, archive: { archivedAt: string; originalPath: string; archivePath: string }): ArchivedSessionRecord {

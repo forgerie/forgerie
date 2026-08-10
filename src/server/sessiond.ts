@@ -76,6 +76,17 @@ async function createSessionDaemonRuntime() {
     },
   });
   await unreadStore.load();
+  const archiveStore = new SessionArchiveStore(defaultSessionArchiveFilePath(daemonEnvironment));
+  try {
+    const archiveInitialization = await archiveStore.initialize();
+    if (archiveInitialization.status === "degraded") {
+      app.log.warn({ err: archiveInitialization.error }, "session archive index compaction failed; continuing with the disk snapshot");
+    }
+  } catch (error: unknown) {
+    // Keep the unreadable index in place. Route operations will surface the
+    // same initialization failure instead of replacing it with empty state.
+    app.log.error({ err: error }, "session archive index initialization failed");
+  }
   const workspaceActivity = new WorkspaceActivityService(eventHub);
   const auth = await AuthService.create({ agentDir: activeAgentProfile.dir, logger: app.log });
   // Capture providers registered by global extensions while the runtime is
@@ -102,7 +113,7 @@ async function createSessionDaemonRuntime() {
   const sessions = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: auth.runtime,
     agentDir: activeAgentProfile.dir,
-    archiveStore: new SessionArchiveStore(defaultSessionArchiveFilePath(daemonEnvironment)),
+    archiveStore,
     workspaceActivity,
     logger: app.log,
     ...(spawnTargets === undefined ? {} : { spawnTargets }),
