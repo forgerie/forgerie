@@ -39,6 +39,12 @@ export interface DelegatedRunCounts {
 }
 
 export interface DelegatedRun {
+  /**
+   * Short, stable run identity. `pi-subagents` supplies an 8-character run id,
+   * but a run observed only through `tool.start` has none, and the raw tool call
+   * id can exceed 100 characters — long enough to push a row off a 499px screen.
+   * Both cases collapse to the same short shape so rows stay one line.
+   */
   readonly id: string;
   /** Agent name when every child shares one, otherwise a bare count. */
   readonly label: string;
@@ -89,7 +95,7 @@ function runFromPart(part: ChatPart): DelegatedRun | undefined {
   const asyncId = stringField(details, "asyncId");
   const context = stringField(details, "context");
   return {
-    id: stringField(details, "runId") ?? part.toolCallId ?? "unknown",
+    id: runIdentity(stringField(details, "runId"), part.toolCallId),
     label: runLabel(agents),
     live,
     state: runState(live, counts),
@@ -285,6 +291,24 @@ function summarise(output: string | undefined): string | undefined {
 // ---------------------------------------------------------------------------
 // Defensive readers. `details` is `unknown` off the wire; nothing here throws.
 // ---------------------------------------------------------------------------
+
+/**
+ * Prefer the extension's own run id. Otherwise reduce the tool call id to the
+ * same 8-character shape: keep only word characters, drop a leading `call_`,
+ * and take the tail so ids that share a long common prefix stay distinct.
+ */
+function runIdentity(runId: string | undefined, toolCallId: string | undefined): string {
+  if (runId !== undefined && runId !== "") return runId;
+  if (toolCallId === undefined || toolCallId === "") return "unknown";
+  // Short ids are already readable; shortening them only mangles them.
+  if (toolCallId.length <= MAX_READABLE_RUN_ID) return toolCallId;
+  const cleaned = toolCallId.replace(/^call_/, "").replace(/[^A-Za-z0-9]/g, "");
+  if (cleaned === "") return "unknown";
+  // Tail, not head: provider call ids share long common prefixes.
+  return cleaned.slice(-8);
+}
+
+const MAX_READABLE_RUN_ID = 12;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -51,9 +51,10 @@ export class WorkspaceAgentsPanel extends LitElement {
       }
       .run:hover { background: var(--pi-surface-hover, transparent); }
       .run .twisty { color: var(--pi-dim, var(--pi-muted)); width: 10px; }
-      .run .run-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-      .run .run-label { color: var(--pi-muted); font-size: 12px; }
-      .run .run-state { margin-left: auto; color: var(--pi-muted); font-size: 12px; }
+      /* min-width:0 lets the id shrink instead of pushing the state off a 499px screen. */
+      .run .run-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .run .run-label { color: var(--pi-muted); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .run .run-state { margin-left: auto; color: var(--pi-muted); font-size: 12px; white-space: nowrap; flex: none; }
 
       .agent {
         display: flex; align-items: center; gap: 8px;
@@ -207,12 +208,17 @@ function summaryText(runs: readonly DelegatedRun[]): string {
   if (running > 0) parts.push(`${String(running)} working`);
   if (done > 0) parts.push(`${String(done)} done`);
   if (failed > 0) parts.push(`${String(failed)} failed`);
+  // Without this the counts silently fail to add up: a run observed only
+  // through `tool.start` is all-pending, so every agent would be unaccounted.
+  const pending = total - running - done - failed;
+  if (pending > 0) parts.push(`${String(pending)} pending`);
   return parts.join(" · ");
 }
 
 function runStateText(run: DelegatedRun): string {
   switch (run.state) {
-    case "running": return `${String(run.counts.running)} working`;
+    // A run can be live with nothing started yet; "0 working" reads as a stall.
+    case "running": return run.counts.running === 0 ? "pending" : `${String(run.counts.running)} working`;
     case "done": return "done";
     case "failed": return "failed";
     case "partial": return `${String(run.counts.done)}/${String(run.counts.total)} done`;

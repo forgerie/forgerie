@@ -284,3 +284,38 @@ function finishedRun(runId: string, results: ReturnType<typeof result>[]): ToolE
     details: { mode: "parallel", runId, context: "fork", results },
   };
 }
+
+describe("run identity", () => {
+  it("shortens a provider tool call id that would overflow a narrow row", () => {
+    const runs = deriveDelegatedRuns([
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "toolExecution",
+            toolCallId: "call_8yyrs7CbYpYfaZanzrA73Bih|fc_0ef8b93aaa273613016a78e12deecc819a8dcf4ad090426f17",
+            toolName: "subagent",
+            summary: "subagent parallel",
+            status: "running",
+            args: { tasks: [{ agent: "se-coherence-reviewer" }] },
+          },
+        ],
+      },
+    ]);
+
+    expect(runs[0]?.id).toBe("90426f17");
+  });
+
+  it("leaves a short id alone rather than mangling it", () => {
+    const runs = deriveDelegatedRuns([
+      {
+        role: "assistant",
+        parts: [
+          { type: "toolExecution", toolCallId: "call-pending", toolName: "subagent", summary: "s", status: "running", args: { agent: "scout" } },
+        ],
+      },
+    ]);
+
+    expect(runs[0]?.id).toBe("call-pending");
+  });
+});

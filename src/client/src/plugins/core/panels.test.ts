@@ -13,7 +13,7 @@ describe("core workspace panels", () => {
       { id: "workspace.files", order: 10 },
       { id: "workspace.git", order: 20 },
       { id: "workspace.terminal", order: 30 },
-      { id: "workspace.agents", order: 40 },
+      { id: "workspace.agents", order: 60 },
     ]);
   });
 

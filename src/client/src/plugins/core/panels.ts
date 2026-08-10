@@ -37,11 +37,15 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
       id: AGENTS_PANEL_ID,
       title: "Agents",
       icon: renderBuiltinTabIcon("agents"),
-      order: 40,
+      // Last in the strip, after the Processes plugin at 50: Agents is the
+      // least-reached-for tool, and the wireframe places it there.
+      order: 60,
       // A session that delegated nothing should not carry a permanently empty
       // tab. The open-tool clause keeps the panel from vanishing from under
       // someone who is reading it when the last run scrolls out of the window.
       visible: (context) => agentsWorking(context).total > 0 || isOpenTool(context),
+      // Only what is running now. A total-agent badge would never clear once a
+      // session had delegated anything, which is noise rather than signal.
       badge: (context) => {
         const running = agentsWorking(context).running;
         return running > 0 ? running : undefined;
