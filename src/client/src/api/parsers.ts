@@ -456,6 +456,8 @@ export function parseSessionStatus(value: unknown): SessionStatus {
     isStreaming: requireBoolean(record, "isStreaming"),
     isCompacting: requireBoolean(record, "isCompacting"),
     isBashRunning: requireBoolean(record, "isBashRunning"),
+    ...optionalField("workingAgents", optionalNumber(record, "workingAgents")),
+    ...optionalField("runningProcesses", optionalNumber(record, "runningProcesses")),
     pendingMessageCount: requireNumber(record, "pendingMessageCount"),
     queuedMessages: record["queuedMessages"] === undefined ? [] : arrayOf(parseQueuedSessionMessage)(record["queuedMessages"]),
     ...optionalField("messageCount", optionalNumber(record, "messageCount")),

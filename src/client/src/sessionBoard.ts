@@ -32,6 +32,10 @@ export interface SessionBoardStatusInput {
   readonly isStreaming: boolean;
   readonly isCompacting: boolean;
   readonly isBashRunning: boolean;
+  /** Delegated agents working now; drives the row's live-work indicator. */
+  readonly workingAgents?: number | undefined;
+  /** Managed processes running now; drives the row's live-work indicator. */
+  readonly runningProcesses?: number | undefined;
   readonly pendingAsk?: SessionBoardPendingAsk | undefined;
   readonly pendingDialogs?: readonly SessionBoardPendingDialog[] | undefined;
 }

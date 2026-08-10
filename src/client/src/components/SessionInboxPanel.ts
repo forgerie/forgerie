@@ -23,6 +23,7 @@ import { LitElement, css, html, nothing, svg, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
+import { renderBuiltinTabIcon } from "./tabIcons";
 import { isKeyEventInEditableContext } from "../keyboardContext";
 import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
 import {
@@ -556,6 +557,30 @@ export class SessionInboxPanel extends LitElement {
     `;
   }
 
+  /**
+   * What this session has working right now, as counts rather than words:
+   * delegated agents and managed processes. Both are omitted when zero, so a
+   * resting row shows nothing and the inbox stays quiet.
+   */
+  private renderLiveWork(sessionId: string): TemplateResult | typeof nothing {
+    const status = this.globalSessions?.statuses[sessionId];
+    const agents = status?.workingAgents ?? 0;
+    const processes = status?.runningProcesses ?? 0;
+    if (agents === 0 && processes === 0) return nothing;
+    const parts: TemplateResult[] = [];
+    if (agents > 0) {
+      parts.push(html`<span class="live-work-item" title=${`${String(agents)} ${agents === 1 ? "agent" : "agents"} working`}>
+        ${renderBuiltinTabIcon("agents")}${String(agents)}
+      </span>`);
+    }
+    if (processes > 0) {
+      parts.push(html`<span class="live-work-item" title=${`${String(processes)} ${processes === 1 ? "process" : "processes"} running`}>
+        ${renderBuiltinTabIcon("terminal")}${String(processes)}
+      </span>`);
+    }
+    return html`<span class="live-work" data-live-work>${parts}</span>`;
+  }
+
   private renderRow(
     row: SessionBoardRow<SessionInfo>,
     resolveLocation: InboxLocationResolver,
@@ -621,6 +646,7 @@ export class SessionInboxPanel extends LitElement {
                 `
               : html`<span class="chip" data-location-chip title=${session.cwd}>${unknownLocationLabel(session.cwd)}</span>`}
           ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
+          ${this.renderLiveWork(session.id)}
         </div>
         <span class="row-time">${relativeTime(session.modified, now)}</span>
         <div class="row-actions">
@@ -1053,6 +1079,18 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .chip-branch { color: var(--pi-muted, #aaa4bd); }
+
+    /* Live work sits with the location chip: icon plus count, never a word. */
+    .live-work { display: inline-flex; align-items: center; gap: 8px; }
+    .live-work-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      color: var(--pi-muted, #aaa4bd);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .live-work-item .tab-icon { width: 13px; height: 13px; }
     .chip-deleted { color: var(--pi-danger, #ff4f7b); font-style: italic; }
 
     .row-detail {

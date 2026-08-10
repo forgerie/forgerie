@@ -905,6 +905,16 @@ export class PiSessionService implements SessionRouteService {
    * time. Headers are written once, so identity-verified reads are cached.
    */
   private readonly sessionHeaderCache = new Map<string, CachedSessionHeader>();
+  /**
+   * Agents each session currently has working, keyed by session id.
+   *
+   * Runtime-only: it describes what is happening right now, so it is rebuilt
+   * from the event stream after a restart rather than persisted. Delegation
+   * progress rides `tool_execution_update`, which the daemon already sees for
+   * every hosted session, so the inbox can report a session's fan-out without
+   * opening it.
+   */
+  private readonly workingAgentsBySession = new Map<string, number>();
   /** Session file path -> its in-flight header read, so concurrent scans share one read per file. */
   private readonly pendingSessionHeaderReads = new Map<string, Promise<SessionHeaderSummary | undefined>>();
   /**
@@ -2753,6 +2763,38 @@ export class PiSessionService implements SessionRouteService {
    * Runs on tool end rather than tool start: by then the spawned processes
    * have exited, so rewriting their header cannot race their own appends.
    */
+  /**
+   * Delegated agents and managed processes this session has running now.
+   *
+   * Both are omitted when zero so a resting session carries no extra wire
+   * fields and the inbox has nothing to render.
+   */
+  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number } {
+    const workingAgents = this.workingAgentsBySession.get(session.sessionId) ?? 0;
+    const bridge = this.active.get(session.sessionId)?.runtime.services?.processBridgeSlot;
+    const runningProcesses = bridge?.snapshot().processes.filter((process) => process.status === "running").length ?? 0;
+    return {
+      ...(workingAgents > 0 ? { workingAgents } : {}),
+      ...(runningProcesses > 0 ? { runningProcesses } : {}),
+    };
+  }
+
+  /**
+   * Track how many delegated agents a session has working, from the progress
+   * the delegating tool reports. A run that reports no progress array leaves
+   * the count untouched rather than clearing it, so a tool that only reports
+   * at the end does not flicker the inbox to zero mid-run.
+   */
+  private trackWorkingAgents(session: PiAgentSession, event: unknown): void {
+    const running = runningAgentCount(event);
+    if (running === undefined) return;
+    const previous = this.workingAgentsBySession.get(session.sessionId) ?? 0;
+    if (running === previous) return;
+    if (running === 0) this.workingAgentsBySession.delete(session.sessionId);
+    else this.workingAgentsBySession.set(session.sessionId, running);
+    this.publishStatus(session);
+  }
+
   private async markSessionsSpawnedByTool(event: unknown): Promise<void> {
     for (const sessionFile of spawnedSessionFiles(event)) {
       try {
@@ -3873,9 +3915,12 @@ export class PiSessionService implements SessionRouteService {
     if (eventType === "message_end") { this.publishActivity(session, "message complete", "idle"); return; }
     if (eventType === "message_update") { this.publishActivity(session, "receiving response", "active"); return; }
     if (eventType === "tool_execution_start") { this.publishActivity(session, "running tool", "active", getString(event, "toolName")); return; }
+    if (eventType === "tool_execution_update") { this.trackWorkingAgents(session, event); return; }
     if (eventType === "tool_execution_end") {
       const isError = getBoolean(event, "isError") === true;
       this.publishActivity(session, isError ? "tool failed" : "tool complete", isError ? "error" : "idle", getString(event, "toolName"));
+      // A finished run leaves nothing working, whatever its last progress said.
+      if (this.workingAgentsBySession.delete(session.sessionId)) this.publishStatus(session);
       void this.markSessionsSpawnedByTool(event);
       return;
     }
@@ -3979,6 +4024,7 @@ export class PiSessionService implements SessionRouteService {
       isStreaming: session.isStreaming,
       isCompacting: session.isCompacting,
       isBashRunning: session.isBashRunning,
+      ...this.liveWorkCounts(session),
       pendingMessageCount: this.pendingMessageCount(session),
       queuedMessages: queuedMessagesFromSession(session, this.compactionQueuedMessages(session.sessionId)),
       messageCount: session.messages.length,
@@ -4455,6 +4501,24 @@ async function sessionFileHeaderMatches(sessionFile: string, expected: { session
  * Deliberately shape-driven rather than keyed to one tool's name: any result
  * that hands back a `sessionFile` is telling us it made that session.
  */
+/**
+ * Agents reported as working by a tool progress event, or undefined when the
+ * event carries no progress to read.
+ */
+function runningAgentCount(event: unknown): number | undefined {
+  if (!isRecord(event)) return undefined;
+  const details = toolResultDetails(event["details"] ?? event["result"]);
+  if (!isRecord(details)) return undefined;
+  const progress = details["progress"];
+  if (!Array.isArray(progress)) return undefined;
+  let running = 0;
+  for (const entry of progress) {
+    if (!isRecord(entry)) continue;
+    if (entry["status"] === "running") running += 1;
+  }
+  return running;
+}
+
 function spawnedSessionFiles(event: unknown): string[] {
   if (!isRecord(event)) return [];
   const details = toolResultDetails(event["result"]);

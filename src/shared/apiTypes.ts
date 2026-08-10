@@ -923,6 +923,10 @@ export interface SessionStatus {
   isStreaming: boolean;
   isCompacting: boolean;
   isBashRunning: boolean;
+  /** Delegated agents this session has working now; omitted when none. */
+  workingAgents?: number;
+  /** Managed processes this session has running now; omitted when none. */
+  runningProcesses?: number;
   pendingMessageCount: number;
   queuedMessages: QueuedSessionMessage[];
   messageCount?: number;

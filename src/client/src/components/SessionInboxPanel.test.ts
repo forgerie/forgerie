@@ -1130,3 +1130,50 @@ describe("stylesheet integrity", () => {
     expect(strays).toEqual([]);
   });
 });
+
+describe("live work indicator", () => {
+  function statusWith(patch: Record<string, unknown>) {
+    return {
+      sessionId: "live", isStreaming: true, isCompacting: false, isBashRunning: false,
+      pendingMessageCount: 0, queuedMessages: [],
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0,
+      ...patch,
+    };
+  }
+
+  it("shows an icon and a count for agents and processes", async () => {
+    const session = mkSession("live", { name: "Busy session" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session], {
+        statuses: { live: statusWith({ workingAgents: 2, runningProcesses: 1 }) },
+      }),
+    });
+    const root = shadowRoot(panel);
+
+    const items = root.querySelectorAll("[data-live-work] .live-work-item");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent.trim()).toBe("2");
+    expect(items[1]?.textContent.trim()).toBe("1");
+    expect(items[0]?.getAttribute("title")).toBe("2 agents working");
+    expect(items[1]?.getAttribute("title")).toBe("1 process running");
+  });
+
+  it("omits a count that is zero rather than showing a nought", async () => {
+    const session = mkSession("live", { name: "Busy session" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session], {
+        statuses: { live: statusWith({ workingAgents: 3 }) },
+      }),
+    });
+
+    const items = shadowRoot(panel).querySelectorAll("[data-live-work] .live-work-item");
+    expect(items).toHaveLength(1);
+    expect(items[0]?.getAttribute("title")).toBe("3 agents working");
+  });
+
+  it("stays silent for a session with nothing running", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("idle")]) });
+
+    expect(shadowRoot(panel).querySelector("[data-live-work]")).toBeNull();
+  });
+});
