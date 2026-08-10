@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
-import { groupChatMessages, summarizeChatGroup, turnClosingIndexes, type ChatGroup } from "../chatGroups";
+import { foldMetaSources, groupChatMessages, summarizeChatGroup, type ChatGroup } from "../chatGroups";
 import { livenessStep } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
@@ -237,7 +237,7 @@ export class ChatView extends LitElement {
   private groupedMessagesInput?: ChatLine[];
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
-  private turnClosingCache = new Set<number>();
+  private foldMetaCache = new Map<number, ChatLine>();
   private readonly messageMetaCache = new WeakMap<ChatLine, string>();
   private readonly messageCopyTextCache = new WeakMap<ChatLine, string>();
   private lastScrollTop = 0;
@@ -649,14 +649,8 @@ export class ChatView extends LitElement {
     this.groupedMessagesInput = this.messages;
     this.groupedMessagesStart = this.messageStart;
     this.groupedMessagesCache = groupChatMessages(this.messages, this.messageStart);
-    this.turnClosingCache = turnClosingIndexes(this.groupedMessagesCache);
+    this.foldMetaCache = foldMetaSources(this.groupedMessagesCache);
     return this.groupedMessagesCache;
-  }
-
-  /** Whether this message ends a turn, and so carries the turn's metadata. */
-  private closesTurn(index: number): boolean {
-    this.groupedMessages();
-    return this.turnClosingCache.has(index);
   }
 
   private isLiveTailGroup(groups: ChatGroup[], index: number): boolean {
@@ -826,7 +820,7 @@ export class ChatView extends LitElement {
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
       <article class=${toolOnly || askUserRecordOnly ? shellClass : `msg ${message.role}`} data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
-        ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message, String(index), message.role, message.role !== "assistant" || this.closesTurn(index))}
+        ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message, String(index))}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
     `;
@@ -863,7 +857,7 @@ export class ChatView extends LitElement {
     return html`
       ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
       <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
-        <summary><span>${summarizeChatGroup(messages)}</span></summary>
+        <summary><span>${summarizeChatGroup(messages)}</span>${this.renderFoldMeta(startIndex)}</summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
       </details>
     `;
@@ -897,20 +891,37 @@ export class ChatView extends LitElement {
     return html`<p class="part system-notice" dir="auto"><span class="system-notice-lead">${notice.lead}</span> ${notice.detail}</p>`;
   }
 
-  private renderMessageHeader(message: ChatLine, key: string, label: string = message.role, showMeta = true) {
-    const meta = this.messageMetaLabel(message);
-    const expanded = this.expandedMetaKey === key;
+  /**
+   * A message carries no metadata of its own. The turn's time and model ride on
+   * the activity fold that closes the turn, where one line describes the whole
+   * answer instead of repeating a constant above every paragraph.
+   */
+  private renderMessageHeader(message: ChatLine, key: string, label: string = message.role) {
     return html`
       <div class="msg-header">
         <b class="label">${label}</b>
-        <div class="msg-header-trailing">
-          ${this.renderMessageActions(message, key)}
-          ${showMeta
-            ? html`<span class=${expanded ? "msg-meta expanded" : "msg-meta"} role="button" tabindex="0" title=${meta} aria-label=${meta} aria-expanded=${String(expanded)} @click=${() => { this.expandedMetaKey = expanded ? undefined : key; }} @keydown=${(event: KeyboardEvent) => { this.onMetaKeydown(event, key, expanded); }}>${meta}</span>`
-            : null}
-        </div>
+        <div class="msg-header-trailing">${this.renderMessageActions(message, key)}</div>
       </div>
     `;
+  }
+
+  /** The turn's time and model, sitting opposite its step count. */
+  private renderFoldMeta(startIndex: number) {
+    const source = this.foldMetaCache.get(startIndex);
+    if (source === undefined) return null;
+    const meta = this.messageMetaLabel(source);
+    const key = `fold:${String(startIndex)}`;
+    const expanded = this.expandedMetaKey === key;
+    return html`<span
+      class=${expanded ? "msg-meta expanded" : "msg-meta"}
+      role="button"
+      tabindex="0"
+      title=${meta}
+      aria-label=${meta}
+      aria-expanded=${String(expanded)}
+      @click=${(event: Event) => { event.preventDefault(); event.stopPropagation(); this.expandedMetaKey = expanded ? undefined : key; }}
+      @keydown=${(event: KeyboardEvent) => { event.stopPropagation(); this.onMetaKeydown(event, key, expanded); }}
+    >${meta}</span>`;
   }
 
   private renderMessageActions(message: ChatLine, key: string) {

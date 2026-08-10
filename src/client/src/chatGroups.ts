@@ -85,29 +85,31 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
 }
 
 /**
- * The messages that close a turn -- the agent's last word before the human
- * speaks again.
+ * Which reply's metadata each activity fold should carry, keyed by the fold's
+ * start index.
  *
- * Only these carry the timestamp and model. The row is near-identical on every
- * message of a turn, so printing it on each one repeats a constant and reads as
- * noise between paragraphs. Printed once, where the turn ends, it says when the
- * answer was finished and what produced it.
+ * The fold closes a turn, and the turn's time and model are a property of the
+ * turn rather than of any one paragraph inside it. Reading them off the reply
+ * that ended the turn keeps them describing the answer, not the last tool call.
+ *
+ * History folds are left out: a compaction summary is not the product of a
+ * reply, so stamping one with a reply's model would be a lie.
  */
-export function turnClosingIndexes(groups: ChatGroup[]): Set<number> {
-  const closing = new Set<number>();
-  let candidate: number | undefined;
+export function foldMetaSources(groups: ChatGroup[]): Map<number, ChatLine> {
+  const sources = new Map<number, ChatLine>();
+  let lastReply: ChatLine | undefined;
 
   for (const group of groups) {
-    if (group.kind !== "message") continue;
-    if (group.message.role === "user" || group.message.role === "bash") {
-      if (candidate !== undefined) closing.add(candidate);
-      candidate = undefined;
+    if (group.kind === "message") {
+      if (group.message.role === "user" || group.message.role === "bash") lastReply = undefined;
+      else if (group.message.role === "assistant") lastReply = group.message;
       continue;
     }
-    if (group.message.role === "assistant") candidate = group.index;
+    if (group.kind !== "group") continue;
+    if (group.messages.every(isHistoryMessage)) continue;
+    if (lastReply !== undefined) sources.set(group.startIndex, lastReply);
   }
-  if (candidate !== undefined) closing.add(candidate);
-  return closing;
+  return sources;
 }
 
 /**

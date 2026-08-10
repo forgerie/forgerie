@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupChatMessages, summarizeChatGroup, turnClosingIndexes } from "./chatGroups";
+import { foldMetaSources, groupChatMessages, summarizeChatGroup } from "./chatGroups";
 import type { ChatLine } from "./components/shared";
 
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
@@ -162,48 +162,53 @@ describe("groupChatMessages", () => {
   });
 });
 
-describe("turnClosingIndexes", () => {
-  it("marks only the last reply of each turn", () => {
+describe("foldMetaSources", () => {
+  const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
+
+  it("gives a fold the reply that ended its turn", () => {
+    const closing = text("assistant", "answer");
     const groups = groupChatMessages([
-      text("user", "first question"),
+      text("user", "question"),
+      call("a"),
       text("assistant", "partway"),
-      text("assistant", "answer"),
-      text("user", "second question"),
+      call("b"),
+      closing,
+    ]);
+
+    const sources = foldMetaSources(groups);
+
+    expect(sources.size).toBe(1);
+    expect([...sources.values()][0]).toEqual(closing);
+  });
+
+  it("keeps each turn's fold on its own reply", () => {
+    const groups = groupChatMessages([
+      text("user", "first"),
+      call("a"),
+      text("assistant", "first answer"),
+      text("user", "second"),
+      call("b"),
       text("assistant", "second answer"),
     ]);
 
-    expect([...turnClosingIndexes(groups)].sort((a, b) => a - b)).toEqual([2, 4]);
+    expect([...foldMetaSources(groups).values()]).toEqual([
+      text("assistant", "first answer"),
+      text("assistant", "second answer"),
+    ]);
   });
 
-  it("marks the last reply of a turn still in progress", () => {
-    const groups = groupChatMessages([text("user", "question"), text("assistant", "working on it")]);
-
-    expect([...turnClosingIndexes(groups)]).toEqual([1]);
+  it("leaves a fold unstamped when the turn produced no reply", () => {
+    expect(foldMetaSources(groupChatMessages([text("user", "question"), call("a")])).size).toBe(0);
   });
 
-  it("marks nothing when the agent has not replied yet", () => {
-    expect(turnClosingIndexes(groupChatMessages([text("user", "question")])).size).toBe(0);
-  });
-
-  it("treats a human shell command as ending the turn before it", () => {
+  it("does not stamp a history fold with a reply's model", () => {
     const groups = groupChatMessages([
       text("user", "question"),
       text("assistant", "answer"),
-      text("bash", "ls"),
-      text("assistant", "after the command"),
+      { ...text("assistant", "summary"), source: "compaction" },
     ]);
 
-    expect([...turnClosingIndexes(groups)].sort((a, b) => a - b)).toEqual([1, 3]);
-  });
-
-  it("ignores tool and system messages when finding the last reply", () => {
-    const groups = groupChatMessages([
-      text("user", "question"),
-      text("assistant", "answer"),
-      text("system", "a notice"),
-    ]);
-
-    expect([...turnClosingIndexes(groups)]).toEqual([1]);
+    expect(foldMetaSources(groups).size).toBe(0);
   });
 });
 

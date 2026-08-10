@@ -449,6 +449,17 @@ export const chatStyles = css`
   .msg.event-group[open] > summary::before { content: "▾"; }
   .msg.event-group > summary:hover, .msg.event-group > summary:focus-visible { color: var(--calm-ink-muted); }
   .msg.event-group > summary .label { margin: 0; }
+  /* The turn's time and model sit opposite its step count: one quiet line
+     closing the turn, rather than a row repeated above every paragraph.
+
+     Stays readable text on touch. Elsewhere a metadata row collapses to an
+     information glyph on a device that cannot hover, because it would otherwise
+     sit visible above every message forever -- but this row appears once per
+     turn and is meant to be read without asking for it. */
+  .msg.event-group > summary .msg-meta { margin-inline-start: auto; opacity: 1; color: var(--calm-ink-dim); }
+  .msg.event-group > summary .msg-meta:not(.expanded) { display: inline; width: auto; max-width: none; height: auto; font-size: 11px; text-overflow: ellipsis; }
+  .msg.event-group > summary .msg-meta::before { content: none; }
+  .msg.event-group > summary .msg-meta.expanded { flex: 0 1 auto; }
   .group-body { display: grid; gap: 18px; margin-top: 14px; padding: 0; }
   .chat-image { display: block; max-width: 100%; max-height: 320px; margin: 8px 0 0; border: 1px solid var(--pi-border-muted); border-radius: 8px; object-fit: contain; cursor: zoom-in; }
   .chat-image:focus-visible { outline: 2px solid var(--pi-accent, var(--pi-success-border)); outline-offset: 2px; }
