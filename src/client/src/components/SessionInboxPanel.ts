@@ -115,6 +115,11 @@ type InboxGroup =
   | SessionBoardGroup<SessionInfo>
   | { readonly kind: string; readonly label: string; readonly tone: string; readonly rows: readonly SessionBoardRow<SessionInfo>[] };
 
+interface InboxPanelDerivation {
+  readonly board: SessionBoard<SessionInfo>;
+  readonly resolveLocation: InboxLocationResolver;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -189,6 +194,8 @@ export class SessionInboxPanel extends LitElement {
   private navigableSessions: readonly SessionInfo[] = [];
   /** Last visible group of the selected row, including the grouping mode. */
   private previousSelectedGroupKey: string | undefined;
+  /** Board and resolver owned by the current Lit update and shared by lifecycle and render. */
+  private updateDerivation: InboxPanelDerivation | undefined;
 
   // -------------------------------------------------------------------------
   // Lifecycle
@@ -260,11 +267,19 @@ export class SessionInboxPanel extends LitElement {
       this.previousSelectedGroupKey = undefined;
     }
 
+    // Own one derivation for this Lit update. Auto-expand and render consume
+    // this same snapshot, so their view of row state and location cannot differ.
+    this.updateDerivation = this.deriveForUpdate();
+    if (this.updateDerivation === undefined) {
+      // Loading and empty renders have no keyboard-visible rows. Do not let
+      // J/K reuse the prior board's navigation order during a transition.
+      this.navigableSessions = [];
+    }
+
     // Auto-expand whenever the selected row's visible destination changes.
     // This covers live state moves with the same id and state/project mode changes.
     const selectedId = this.selectedSession?.id;
-    const board = selectedId === undefined ? undefined : this.deriveBoard(this.buildLocationResolver());
-    const row = board?.rows.find((candidate) => candidate.session.id === selectedId);
+    const row = this.updateDerivation?.board.rows.find((candidate) => candidate.session.id === selectedId);
     const groupKind = row === undefined
       ? undefined
       : this.groupBy === "project"
@@ -285,6 +300,14 @@ export class SessionInboxPanel extends LitElement {
   // -------------------------------------------------------------------------
   // Board derivation
   // -------------------------------------------------------------------------
+
+  private deriveForUpdate(): InboxPanelDerivation | undefined {
+    const gs = this.globalSessions;
+    if (gs === undefined || gs.status === "loading" || gs.sessions.length === 0) return undefined;
+    const resolveLocation = this.buildLocationResolver();
+    const board = this.deriveBoard(resolveLocation);
+    return board === undefined ? undefined : { board, resolveLocation };
+  }
 
   private buildLocationResolver(): InboxLocationResolver {
     return createInboxLocationResolver(this.projects, this.workspacesByProjectId);
@@ -320,13 +343,10 @@ export class SessionInboxPanel extends LitElement {
       `;
     }
 
-    // Compute once per render; passed to deriveBoard and renderBoardScroll so
-    // neither rebuilds the resolver independently.
-    const resolveLocation = this.buildLocationResolver();
-    const board = this.deriveBoard(resolveLocation);
+    const derivation = this.updateDerivation;
 
     // Empty machine (no sessions at all).
-    if (board === undefined) {
+    if (derivation === undefined) {
       return html`
         <div class="board-header">
           ${this.renderHeader()}
@@ -341,6 +361,8 @@ export class SessionInboxPanel extends LitElement {
         </div>
       `;
     }
+
+    const { board, resolveLocation } = derivation;
 
     // All-clear: every non-archived row is zero and there are archived sessions.
     const attentionTotal = attentionCount(board);
@@ -427,11 +449,9 @@ export class SessionInboxPanel extends LitElement {
 
     // The archive is disclosed from a pinned shelf, so it only takes list space
     // once it has been asked for.
-    const stateGroups: readonly SessionBoardGroup<SessionInfo>[] =
-      board.groups.filter((group) => group.kind !== "archived" || (this.showArchived && this.groupBy === "state"));
-    const projectGroups: readonly { kind: string; label: string; tone: string; rows: readonly SessionBoardRow<SessionInfo>[] }[] =
-      groupSessionsByProject(board, { includeArchived: this.showArchived }).groups;
-    const groups: readonly InboxGroup[] = this.groupBy === "project" ? projectGroups : stateGroups;
+    const groups: readonly InboxGroup[] = this.groupBy === "project"
+      ? groupSessionsByProject(board, { includeArchived: this.showArchived }).groups
+      : board.groups.filter((group) => group.kind !== "archived" || this.showArchived);
 
     const visibleGroups = groups.filter((g) => g.rows.length > 0);
     const archivedRows = board.groups.find((group) => group.kind === "archived")?.rows ?? [];

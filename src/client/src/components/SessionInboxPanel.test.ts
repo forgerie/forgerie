@@ -9,9 +9,11 @@
  * and semantic accessibility attributes.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
+import * as inboxLocation from "../inboxLocation";
+import * as sessionBoard from "../sessionBoard";
 import { SessionInboxPanel } from "./SessionInboxPanel";
 
 // ---------------------------------------------------------------------------
@@ -121,6 +123,110 @@ async function pressKey(panel: SessionInboxPanel, key: string): Promise<void> {
 afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
+  vi.restoreAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// Update-cycle derivation ownership
+// ---------------------------------------------------------------------------
+
+describe("update-cycle derivation ownership", () => {
+  it("derives one board with one location resolver for a selected-session update", async () => {
+    const deriveBoard = vi.spyOn(sessionBoard, "deriveSessionInboxBoard");
+    const createLocationResolver = vi.spyOn(inboxLocation, "createInboxLocationResolver");
+    const session = mkSession("selected");
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      selectedSession: session,
+    });
+    deriveBoard.mockClear();
+    createLocationResolver.mockClear();
+
+    panel.globalSessions = mkGlobalSessions([session], {
+      activities: {
+        selected: {
+          sessionId: "selected",
+          phase: "active",
+          label: "running tool",
+          at: "2026-08-08T10:00:00.000Z",
+        },
+      },
+    });
+    await panel.updateComplete;
+
+    expect(deriveBoard).toHaveBeenCalledTimes(1);
+    expect(createLocationResolver).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not compute project grouping in state mode", async () => {
+    const groupByProject = vi.spyOn(sessionBoard, "groupSessionsByProject");
+
+    await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open")]) });
+
+    expect(groupByProject).not.toHaveBeenCalled();
+  });
+
+  it("clears the prior keyboard order on loading and empty transitions", async () => {
+    const sessions = [mkSession("first"), mkSession("second")];
+    const selected: string[] = [];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions(sessions),
+      onSelectSession: (session) => { selected.push(session.id); },
+    });
+    clickSelector(shadowRoot(panel), "[data-group='open'] button");
+    await panel.updateComplete;
+
+    panel.globalSessions = mkGlobalSessions(sessions, { status: "loading" });
+    await panel.updateComplete;
+    await pressKey(panel, "j");
+
+    panel.globalSessions = mkGlobalSessions(sessions);
+    await panel.updateComplete;
+    panel.globalSessions = mkGlobalSessions([]);
+    await panel.updateComplete;
+    await pressKey(panel, "j");
+
+    expect(selected).toEqual([]);
+  });
+
+  it("preserves project attention and row recency order in project mode", async () => {
+    localStorage.setItem("forgerie:inbox:local:groupBy", "project");
+    const calm = mkSession("calm", { cwd: "/calm" });
+    const urgentOlder = mkSession("urgent-older", {
+      cwd: "/urgent",
+      modified: "2026-08-06T10:00:00.000Z",
+    });
+    const urgentNewer = mkSession("urgent-newer", {
+      cwd: "/urgent",
+      modified: "2026-08-08T10:00:00.000Z",
+    });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([calm, urgentOlder, urgentNewer], {
+        statuses: {
+          "urgent-older": mkBlockedStatus("urgent-older"),
+          "urgent-newer": mkBlockedStatus("urgent-newer"),
+        },
+      }),
+      projects: [
+        { ...mkProject("calm-project", "Calm"), path: "/calm" },
+        { ...mkProject("urgent-project", "Urgent"), path: "/urgent" },
+      ],
+      workspacesByProjectId: {
+        "calm-project": [mkWorkspace("calm-workspace", "calm-project", "/calm")],
+        "urgent-project": [mkWorkspace("urgent-workspace", "urgent-project", "/urgent")],
+      },
+    });
+    const groups = shadowRoot(panel).querySelectorAll("[data-group]");
+
+    expect(Array.from(groups, (group) => group.getAttribute("data-group"))).toEqual([
+      "urgent-project",
+      "calm-project",
+    ]);
+    expect(Array.from(groups[0]?.querySelectorAll("[data-session]") ?? [], (row) => row.getAttribute("data-session"))).toEqual([
+      "urgent-newer",
+      "urgent-older",
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -653,6 +759,22 @@ describe("accessibility", () => {
     // Open group auto-expands because selected session is in it.
     const row = root.querySelector("[data-session='open-one']");
     expect(row?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps focus on a selected row through an ordinary board recomputation", async () => {
+    const session = mkSession("focused");
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      selectedSession: session,
+    });
+    const row = shadowRoot(panel).querySelector("[data-session='focused']");
+    if (!(row instanceof HTMLElement)) throw new Error("Expected focused session row");
+    row.focus();
+
+    panel.globalSessions = mkGlobalSessions([session]);
+    await panel.updateComplete;
+
+    expect(shadowRoot(panel).activeElement).toBe(row);
   });
 });
 

@@ -448,19 +448,31 @@ describe("groupSessionsByProject", () => {
     expect(group?.rows.map((r) => r.session.id).sort()).toEqual(["done", "live"]);
   });
 
-  it("orders project groups by attention weight (most urgent first)", () => {
+  it("orders project groups by attention and their rows by recency", () => {
     const sessions = [
       mkSession("calm", { projectId: "proj-calm", projectName: "Calm", projectPath: "/calm" }),
-      mkSession("urgent", { projectId: "proj-urgent", projectName: "Urgent", projectPath: "/urgent" }),
+      mkSession("urgent-older", {
+        projectId: "proj-urgent",
+        projectName: "Urgent",
+        projectPath: "/urgent",
+        modified: "2026-08-06T10:00:00.000Z",
+      }),
+      mkSession("urgent-newer", {
+        projectId: "proj-urgent",
+        projectName: "Urgent",
+        projectPath: "/urgent",
+        modified: "2026-08-08T10:00:00.000Z",
+      }),
     ];
     const board = mkBoard(sessions, {
       statuses: {
-        urgent: mkStatus({ pendingAsk: { questions: [{ question: "!" }] } }),
+        "urgent-older": mkStatus({ pendingAsk: { questions: [{ question: "!" }] } }),
+        "urgent-newer": mkStatus({ pendingAsk: { questions: [{ question: "!" }] } }),
       },
     });
     const byProject = groupSessionsByProject(board);
-    expect(byProject.groups[0]?.kind).toBe("proj-urgent");
-    expect(byProject.groups[1]?.kind).toBe("proj-calm");
+    expect(byProject.groups.map((group) => group.kind)).toEqual(["proj-urgent", "proj-calm"]);
+    expect(byProject.groups[0]?.rows.map((row) => row.session.id)).toEqual(["urgent-newer", "urgent-older"]);
   });
 
   it("breaks attention-weight ties alphabetically by project name", () => {
