@@ -122,6 +122,7 @@ async function readCatalogEntry(filePath: string, stats: Stats): Promise<PiSessi
       allMessagesText: "",
       ...((suffixName ?? parsed.name) === undefined ? {} : { name: suffixName ?? parsed.name }),
       ...(parsed.parentSessionPath === undefined ? {} : { parentSessionPath: parsed.parentSessionPath }),
+      ...(parsed.agentSpawned === true ? { agentSpawned: true } : {}),
     };
   } catch {
     return undefined;
@@ -135,6 +136,8 @@ interface PrefixMetadata {
   cwd: string;
   timestamp?: string;
   parentSessionPath?: string;
+  /** Header mark written when a tool reported spawning this session. */
+  agentSpawned?: boolean;
   firstMessage: string;
   name?: string;
   messageCount: number;
@@ -164,6 +167,7 @@ function parsePrefix(lines: readonly string[]): PrefixMetadata | undefined {
     ...(typeof header["parentSession"] === "string" && header["parentSession"] !== ""
       ? { parentSessionPath: header["parentSession"] }
       : {}),
+    ...(header["agentSpawned"] === true ? { agentSpawned: true } : {}),
     firstMessage: metadata.firstMessage,
     ...(metadata.name === undefined ? {} : { name: metadata.name }),
     messageCount: metadata.messageCount,

@@ -64,3 +64,36 @@ describe("SessionCatalogScanner", () => {
     await expect(scanner.scanDirectories([sessionDir])).resolves.toMatchObject([{ name: "Fresh name" }]);
   });
 });
+
+describe("agent-spawned marker", () => {
+  it("reads the mark that keeps agent-to-agent conversations out of the inbox", async () => {
+    const sessionDir = join(tempDir, "spawned");
+    await mkdir(sessionDir);
+    const sessionFile = join(sessionDir, "2026-08-10T12-00-00-000Z_spawned-a.jsonl");
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: "session", version: 3, id: "spawned-a", timestamp: "2026-08-10T12:00:00.000Z", cwd: "/projects/repo", parentSession: "/sessions/owner.jsonl", agentSpawned: true }),
+      JSON.stringify({ type: "message", id: "user-1", message: { role: "user", content: [{ type: "text", text: "do the thing" }] } }),
+      "",
+    ].join("\n"));
+
+    const [entry] = await new SessionCatalogScanner().scanDirectories([sessionDir]);
+
+    expect(entry).toMatchObject({ id: "spawned-a", agentSpawned: true });
+  });
+
+  it("leaves the mark off a session that only records a parent", async () => {
+    const sessionDir = join(tempDir, "continued");
+    await mkdir(sessionDir);
+    const sessionFile = join(sessionDir, "2026-08-10T12-00-00-000Z_continued-a.jsonl");
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: "session", version: 3, id: "continued-a", timestamp: "2026-08-10T12:00:00.000Z", cwd: "/projects/repo", parentSession: "/sessions/owner.jsonl" }),
+      JSON.stringify({ type: "message", id: "user-1", message: { role: "user", content: [{ type: "text", text: "carry on" }] } }),
+      "",
+    ].join("\n"));
+
+    const [entry] = await new SessionCatalogScanner().scanDirectories([sessionDir]);
+
+    expect(entry?.agentSpawned).toBeUndefined();
+    expect(entry?.parentSessionPath).toBe("/sessions/owner.jsonl");
+  });
+});
