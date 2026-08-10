@@ -118,6 +118,8 @@ export interface AppState {
   /** State for the new-session / workspace-management picker dialog (U7). */
   newSessionDialog: NewSessionDialogState | undefined;
   actionPaletteOpen: boolean;
+  /** Open state of the control sheet the composer summons once chrome is not resident. */
+  controlSheetOpen: boolean;
   projectDialogOpen: boolean;
   machineDialogOpen: boolean;
   workspaceTool: QualifiedContributionId;
@@ -267,6 +269,7 @@ export function initialAppState(): AppState {
     authDialog: undefined,
     newSessionDialog: undefined,
     actionPaletteOpen: false,
+    controlSheetOpen: false,
     projectDialogOpen: false,
     machineDialogOpen: false,
     workspaceTool: "core:workspace.files",

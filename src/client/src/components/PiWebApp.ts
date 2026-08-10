@@ -2451,6 +2451,32 @@ export class PiWebApp extends LitElement {
    * Hidden when the session is archived, or when the inbox global store has
    * not yet loaded (no actions to offer without the triage queue).
    */
+  /**
+   * Where the user is, in the one row that survives every size.
+   *
+   * The context bar carried this until the chrome bands were retired; the
+   * composer inherits a shortened form rather than reviving a band for it.
+   */
+  private composerSessionLabel(state: AppState): string | undefined {
+    const workspace = state.selectedWorkspace;
+    if (workspace === undefined) return undefined;
+    const branch = workspace.branch;
+    return branch === undefined || branch === "" ? workspace.label : `${workspace.label} · ${branch}`;
+  }
+
+  /** Mirrors the thread header's old conditions so the action does not outlive its meaning. */
+  private canArchiveSelectedSession(state: AppState): boolean {
+    return state.selectedSession?.archived !== true && state.globalSessions !== undefined;
+  }
+
+  private readonly handleArchiveAndNext = (): void => {
+    void this.archiveAndNext();
+  };
+
+  private readonly handleOpenControlSheet = (): void => {
+    this.setState({ controlSheetOpen: true });
+  };
+
   private renderThreadHeader(state: AppState, session: SessionInfo) {
     if (session.archived === true) return null;
     if (state.globalSessions === undefined) return null;
@@ -2557,7 +2583,7 @@ export class PiWebApp extends LitElement {
           ${state.selectedSession ? html`
             ${this.renderThreadHeader(state, state.selectedSession)}
             ${this.renderChatView(state, state.selectedSession)}
-            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
+            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
             ${this.renderStatusBar(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
             ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}

@@ -15,7 +15,7 @@ import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
 import { loadAttachmentDelivery, saveAttachmentDelivery } from "../attachmentPreferences";
 import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { promptEditorStyles, type CompletionItem } from "./shared";
-import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderSummonIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import "./AutocompleteMenu";
 
@@ -38,6 +38,12 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) onStop?: () => void;
   @property({ attribute: false }) onSelectModel?: () => void;
   @property({ attribute: false }) onSelectThinking?: () => void;
+  /** Set when the chat surface has handed its chrome to an on-request sheet. */
+  @property({ type: Boolean }) chromeSummoned = false;
+  @property() sessionLabel?: string;
+  @property({ type: Boolean }) canArchive = false;
+  @property({ attribute: false }) onArchiveAndNext?: () => void;
+  @property({ attribute: false }) onOpenControlSheet?: () => void;
   @property({ attribute: false }) availableThinkingLevels: readonly string[] = [];
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
   @query(".attachment-input") private attachmentInput?: HTMLInputElement;
@@ -165,9 +171,49 @@ export class PromptEditor extends LitElement {
     const provider = status.model?.provider !== undefined && status.model.provider !== "" ? `${status.model.provider}/` : "";
     return html`
       <div class="compact-status" aria-label="Session status">
+        ${this.renderSessionIdentity()}
         <button class="select-model" title="Select model" @click=${() => this.onSelectModel?.()}>${provider}${model}</button>
         <button class="select-thinking icon-button" title=${`Thinking level: ${thinkingLevelLabel(status.thinkingLevel)}`} aria-label=${`Thinking level: ${thinkingLevelLabel(status.thinkingLevel)}`} @click=${() => this.onSelectThinking?.()}>${renderThinkingGauge(thinkingGauge(status.thinkingLevel, this.availableThinkingLevels))}</button>
+        ${this.renderArchiveAction()}
+        ${this.renderSummonAction()}
       </div>
+    `;
+  }
+
+  /**
+   * Identity, archive, and the summon control only appear once the chat surface
+   * has given up its chrome bands. The composer is the one row that survives at
+   * every size, so it inherits what the bands used to carry: where you are,
+   * the action that ends a turn, and the way back to everything else.
+   */
+  private renderSessionIdentity() {
+    if (!this.chromeSummoned) return null;
+    const label = this.sessionLabel;
+    if (label === undefined || label === "") return null;
+    return html`<span class="session-identity" title=${label}>${label}</span>`;
+  }
+
+  private renderArchiveAction() {
+    if (!this.chromeSummoned || !this.canArchive) return null;
+    return html`
+      <button
+        class="composer-archive"
+        title="Archive this session and open the next one waiting for you"
+        aria-label="Archive &amp; next"
+        @click=${() => this.onArchiveAndNext?.()}
+      >Archive &amp; next</button>
+    `;
+  }
+
+  private renderSummonAction() {
+    if (!this.chromeSummoned) return null;
+    return html`
+      <button
+        class="composer-summon icon-button"
+        title="Show session controls"
+        aria-label="Show session controls"
+        @click=${() => this.onOpenControlSheet?.()}
+      >${renderSummonIcon()}</button>
     `;
   }
 
