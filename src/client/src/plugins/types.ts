@@ -176,6 +176,17 @@ export interface WorkspacePanelContext extends WorkspaceContext {
   onClearWorkspaceUpload: (batchId: string) => void;
   onRefreshGit: () => void;
   onSelectDiff: (path: string) => void;
+  /**
+   * Open the session stored at a file path.
+   *
+   * A delegated child is known by the path its run reported, not by an id the
+   * panel can resolve. The host matches the path against the sessions it has
+   * listed; a child that no listing covers cannot be opened, and the host says
+   * so rather than failing silently.
+   */
+  onOpenSessionFile?: (sessionFile: string) => void;
+  /** Return a delegated child to the inbox as a session of its own. */
+  onPromoteSpawnedSession?: (sessionFile: string) => void;
   onSelectTerminal: (terminalId: string | undefined, options?: { replace?: boolean | undefined }) => void;
 }
 

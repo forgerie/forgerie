@@ -89,6 +89,10 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
 
   constructor(private readonly resolver: SessionDirResolver) {}
 
+  defaultSessionsRoot(): string {
+    return this.resolver.defaultSessionsRoot();
+  }
+
   async list(cwd: string): Promise<PiSessionListEntry[]> {
     const resolution = this.resolver.resolve(cwd);
     // Lightweight streaming summaries instead of the SDK's full-transcript

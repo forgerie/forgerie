@@ -466,6 +466,24 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
+  /*
+   * Keyed by file, not by session id: a delegated child is not open, and the
+   * caller learns of it from a tool result that reports a path. The service
+   * checks the path against the sessions root before it writes.
+   */
+  app.post<{ Body: { sessionFile?: unknown } | undefined }>(`${prefix}/sessions/promote-spawned`, async (request, reply) => {
+    try {
+      const sessionFile = optionalRecord(request.body)["sessionFile"];
+      if (typeof sessionFile !== "string" || sessionFile === "") {
+        return await reply.code(400).send({ error: "sessionFile is required" });
+      }
+      await sessions.promoteSpawnedSession(sessionFile);
+      return { promoted: true };
+    } catch (error) {
+      return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
+    }
+  });
+
   app.get<{ Params: { sessionId: string }; Querystring: SessionQuery }>(`${prefix}/sessions/:sessionId/events`, { websocket: true }, (socket, request) => {
     // Only the id matters for event subscription; cwd is intentionally ignored
     // so a malformed value cannot throw inside the websocket handler.

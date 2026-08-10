@@ -1557,6 +1557,33 @@ export class PiWebApp extends LitElement {
     }
   }
 
+  /**
+   * Open a session identified by the file it was written to.
+   *
+   * A delegated child is known by path, not by id. A child that no listing
+   * covers -- a run stored beside its parent rather than in the session store
+   * -- cannot be opened, and that is reported instead of ignored.
+   */
+  private async openSessionByFile(sessionFile: string): Promise<void> {
+    const sessions = this.state.globalSessions?.sessions ?? this.state.sessions;
+    const match = sessions.find((session) => session.path === sessionFile);
+    if (match === undefined) {
+      this.setState({ error: "That agent's transcript is not in the session list." });
+      return;
+    }
+    await this.selectInboxSession(match);
+  }
+
+  /** Clear the spawn marker, which returns the child to the inbox. */
+  private async promoteSpawnedSession(sessionFile: string): Promise<void> {
+    try {
+      await sessionsApi.promoteSpawned(sessionFile, selectedMachineId(this.state));
+      await this.inbox.refresh(selectedMachineId(this.state));
+    } catch (error: unknown) {
+      this.setState({ error: String(error) });
+    }
+  }
+
   private openNavigationSection(section: NavigationSection): void {
     this.navigationSections.open(section, () => { this.selectMainView("navigation"); });
   }
@@ -1932,6 +1959,8 @@ export class PiWebApp extends LitElement {
         onClearWorkspaceUpload: (batchId) => { this.files.clearWorkspaceUpload(batchId); },
         onRefreshGit: () => { void this.git.refreshGit(); },
         onSelectDiff: (path: string) => { void this.git.selectDiff(path); },
+        onOpenSessionFile: (sessionFile: string) => { void this.openSessionByFile(sessionFile); },
+        onPromoteSpawnedSession: (sessionFile: string) => { void this.promoteSpawnedSession(sessionFile); },
         onSelectTerminal: (terminalId: string | undefined, options?: { replace?: boolean | undefined }) => { this.selectTerminal(terminalId, options); },
       }, createContext);
     };

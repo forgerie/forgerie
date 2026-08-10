@@ -94,5 +94,6 @@ export interface SessionRouteService {
   archiveTree(ref: SessionRouteRef): Promise<ClientArchiveSessionsResponse>;
   restore(ref: SessionRouteRef): Promise<void>;
   reload(ref: SessionRouteRef): Promise<void>;
+  promoteSpawnedSession(sessionFile: string): Promise<void>;
   detachParent(ref: SessionRouteRef): Promise<void>;
 }

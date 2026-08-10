@@ -39,6 +39,7 @@ import {
   parsePiWebRuntimeResponse,
   parsePiWebStatusResponse,
   parseProject,
+  parsePromoted,
   parseReloaded,
   parseRestored,
   parseSavedAttachments,
@@ -253,6 +254,11 @@ export const sessionsApi = {
   archiveWithDescendants: (session: SessionRef, machineId = "local") => request(sessionPath(session, "archive-tree", machineId), parseArchived, { method: "POST", body: sessionBody(session) }),
   restore: (session: SessionRef, machineId = "local") => request(sessionPath(session, "restore", machineId), parseRestored, { method: "POST", body: sessionBody(session) }),
   detachParent: (session: SessionRef, machineId = "local") => request(sessionPath(session, "detach-parent", machineId), parseDetached, { method: "POST", body: sessionBody(session) }),
+  /**
+   * Return a delegated child to the inbox. Keyed by file, because the child is
+   * not open and the caller knows it only by the path its run reported.
+   */
+  promoteSpawned: (sessionFile: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/promote-spawned`, parsePromoted, { method: "POST", body: JSON.stringify({ sessionFile }) }),
   reloadSession: (session: SessionRef, machineId = "local") => request(sessionPath(session, "reload", machineId), parseReloaded, { method: "POST", body: sessionBody(session) }),
   authProviders: (options?: { mode?: "login" | "logout"; authType?: "oauth" | "api_key"; machineId?: string }) => {
     const params = new URLSearchParams();

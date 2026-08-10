@@ -1,5 +1,5 @@
 import { statSync, type Stats } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
@@ -377,6 +377,12 @@ export interface PiSessionManagerGateway {
    * provides it and machine listing falls back to `listAll` for compatibility.
    */
   listCatalog?(): Promise<PiSessionListEntry[]>;
+  /**
+   * The directory Pi stores sessions in. Used to confine a path-keyed write to
+   * the session store. Optional so existing fakes still satisfy the interface;
+   * a caller that needs confinement must refuse when it is absent.
+   */
+  defaultSessionsRoot?(): string;
   open(path: string): PiSessionManager;
 }
 
@@ -2813,6 +2819,28 @@ export class PiSessionService implements SessionRouteService {
     }
   }
 
+  /**
+   * Return a delegated child to the inbox as a session in its own right.
+   *
+   * Keyed by file rather than by session id: a spawned child is not open, and
+   * the caller learns of it from a tool result that reports a path. The path is
+   * therefore checked against the sessions root before anything is written, so
+   * a request cannot reach a file elsewhere on the disk.
+   */
+  async promoteSpawnedSession(sessionFile: string): Promise<void> {
+    const configuredRoot = this.sessionManager.defaultSessionsRoot?.();
+    if (configuredRoot === undefined) throw new Error("Sessions directory is unknown");
+    const root = resolve(configuredRoot);
+    const target = resolve(sessionFile);
+    if (target !== root && !target.startsWith(`${root}${sep}`)) {
+      throw new Error("Session file is outside the sessions directory");
+    }
+
+    await clearAgentSpawned(target);
+    this.sessionHeaderCache.delete(target);
+    this.sessionManager.invalidateSessionFile(target);
+  }
+
   async detachParent(ref: PiSessionRef): Promise<void> {
     const session = await this.getOrOpen(ref);
     const sessionFile = session.sessionFile;
@@ -4497,28 +4525,56 @@ async function sessionFileHeaderMatches(sessionFile: string, expected: { session
 }
 
 
-async function markAgentSpawned(sessionFile: string): Promise<void> {
+/**
+ * Rewrite a session file's header line in place.
+ *
+ * The header is the first line of the file and the agent appends to the rest,
+ * so only the first line is parsed and only the first line is replaced. The
+ * mutate function returns false when it changed nothing, which skips the write
+ * and leaves the file's timestamp alone.
+ */
+async function rewriteSessionHeader(
+  sessionFile: string,
+  mutate: (header: Record<string, unknown>) => boolean,
+): Promise<void> {
   const content = await readFile(sessionFile, "utf8");
   const newlineIndex = content.indexOf("\n");
   const firstLine = newlineIndex === -1 ? content : content.slice(0, newlineIndex);
   const rest = newlineIndex === -1 ? "" : content.slice(newlineIndex);
   const header: unknown = JSON.parse(firstLine);
   if (!isRecord(header) || header["type"] !== "session") throw new Error("Invalid session file header");
-  if (header["agentSpawned"] === true) return;
-  header["agentSpawned"] = true;
+  if (!mutate(header)) return;
   await writeFile(sessionFile, `${JSON.stringify(header)}${rest}`, "utf8");
 }
 
+async function markAgentSpawned(sessionFile: string): Promise<void> {
+  await rewriteSessionHeader(sessionFile, (header) => {
+    if (header["agentSpawned"] === true) return false;
+    header["agentSpawned"] = true;
+    return true;
+  });
+}
+
+/**
+ * Undo the spawn marker, which returns the session to the inbox.
+ *
+ * The marker is what keeps a delegated child out of the inbox, so clearing it
+ * is the whole of promoting that child to a session of its own.
+ */
+async function clearAgentSpawned(sessionFile: string): Promise<void> {
+  await rewriteSessionHeader(sessionFile, (header) => {
+    if (header["agentSpawned"] !== true) return false;
+    delete header["agentSpawned"];
+    return true;
+  });
+}
+
 async function clearParentSession(sessionFile: string): Promise<void> {
-  const content = await readFile(sessionFile, "utf8");
-  const newlineIndex = content.indexOf("\n");
-  const firstLine = newlineIndex === -1 ? content : content.slice(0, newlineIndex);
-  const rest = newlineIndex === -1 ? "" : content.slice(newlineIndex);
-  const header: unknown = JSON.parse(firstLine);
-  if (!isRecord(header) || header["type"] !== "session") throw new Error("Invalid session file header");
-  if (header["parentSession"] === undefined) return;
-  delete header["parentSession"];
-  await writeFile(sessionFile, `${JSON.stringify(header)}${rest}`, "utf8");
+  await rewriteSessionHeader(sessionFile, (header) => {
+    if (header["parentSession"] === undefined) return false;
+    delete header["parentSession"];
+    return true;
+  });
 }
 
 function clearParentSessionHeader(sessionManager: PiSessionManager): void {

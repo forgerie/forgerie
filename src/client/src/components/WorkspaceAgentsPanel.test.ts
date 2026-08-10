@@ -172,6 +172,13 @@ function context(patch: PanelStatePatch): WorkspacePanelContext {
   };
 }
 
+/** The panel always has a context in these tests; narrow without asserting. */
+function requireContext(panel: WorkspaceAgentsPanel): WorkspacePanelContext {
+  const context = panel.context;
+  if (context === undefined) throw new Error("Panel has no context");
+  return context;
+}
+
 function line(part: ToolExecutionPart): ChatLine {
   return { role: "assistant", parts: [part] };
 }
@@ -232,3 +239,109 @@ function finishedRun(): ToolExecutionPart {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Agent row menu
+// ---------------------------------------------------------------------------
+
+/** A finished run: only a result reports the session each agent wrote. */
+function finishedRunWithSessionFiles(): ToolExecutionPart {
+  return {
+    type: "toolExecution",
+    toolCallId: "call-aa11bb22",
+    toolName: "subagent",
+    summary: "subagent parallel (2)",
+    status: "success",
+    args: { tasks: [{ agent: "scout" }, { agent: "scribe" }] },
+    details: {
+      mode: "parallel",
+      runId: "aa11bb22",
+      results: [
+        { agent: "scout", exitCode: 0, output: "done", sessionFile: "/sessions/scout.jsonl" },
+        { agent: "scribe", exitCode: 0, output: "done", sessionFile: "/sessions/scribe.jsonl" },
+      ],
+    },
+  };
+}
+
+describe("agent row menu", () => {
+  it("offers no menu while an agent still works, because no session exists yet", async () => {
+    const panel = await renderPanel({ messages: [line(runningRun())] });
+    const buttons = rows(panel, "[data-action='agent-menu']");
+    expect(buttons).toHaveLength(0);
+  });
+
+  it("offers a menu for each finished agent", async () => {
+    const panel = await renderPanel({ messages: [line(finishedRunWithSessionFiles())] });
+    const buttons = rows(panel, "[data-action='agent-menu']");
+    expect(buttons).toHaveLength(2);
+  });
+
+  it("opens the transcript of the agent whose menu was used", async () => {
+    const onOpenSessionFile = vi.fn<NonNullable<WorkspacePanelContext["onOpenSessionFile"]>>();
+    const panel = await renderPanel({ messages: [line(finishedRunWithSessionFiles())] });
+    panel.context = { ...requireContext(panel), onOpenSessionFile };
+    await panel.updateComplete;
+
+    const buttons = rows(panel, "[data-action='agent-menu']");
+    const second = buttons[1];
+    if (!(second instanceof HTMLElement)) throw new Error("No second menu button");
+    second.click();
+    await panel.updateComplete;
+
+    const open = rows(panel, "[data-action='open-transcript']")[0];
+    if (!(open instanceof HTMLElement)) throw new Error("No open-transcript command");
+    open.click();
+
+    expect(onOpenSessionFile).toHaveBeenCalledWith("/sessions/scribe.jsonl");
+  });
+
+  it("promotes the agent whose menu was used", async () => {
+    const onPromoteSpawnedSession = vi.fn<NonNullable<WorkspacePanelContext["onPromoteSpawnedSession"]>>();
+    const panel = await renderPanel({ messages: [line(finishedRunWithSessionFiles())] });
+    panel.context = { ...requireContext(panel), onPromoteSpawnedSession };
+    await panel.updateComplete;
+
+    const button = rows(panel, "[data-action='agent-menu']")[0];
+    if (!(button instanceof HTMLElement)) throw new Error("No menu button");
+    button.click();
+    await panel.updateComplete;
+
+    const promote = rows(panel, "[data-action='promote']")[0];
+    if (!(promote instanceof HTMLElement)) throw new Error("No promote command");
+    promote.click();
+
+    expect(onPromoteSpawnedSession).toHaveBeenCalledWith("/sessions/scout.jsonl");
+  });
+
+  it("closes the menu once a command runs", async () => {
+    const panel = await renderPanel({ messages: [line(finishedRunWithSessionFiles())] });
+
+    const button = rows(panel, "[data-action='agent-menu']")[0];
+    if (!(button instanceof HTMLElement)) throw new Error("No menu button");
+    button.click();
+    await panel.updateComplete;
+    expect(rows(panel, ".agent-menu")).toHaveLength(1);
+
+    const promote = rows(panel, "[data-action='promote']")[0];
+    if (!(promote instanceof HTMLElement)) throw new Error("No promote command");
+    promote.click();
+    await panel.updateComplete;
+
+    expect(rows(panel, ".agent-menu")).toHaveLength(0);
+  });
+
+  it("keeps one menu open at a time", async () => {
+    const panel = await renderPanel({ messages: [line(finishedRunWithSessionFiles())] });
+    const buttons = rows(panel, "[data-action='agent-menu']");
+    const [first, second] = [buttons[0], buttons[1]];
+    if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) throw new Error("No menu buttons");
+
+    first.click();
+    await panel.updateComplete;
+    second.click();
+    await panel.updateComplete;
+
+    expect(rows(panel, ".agent-menu")).toHaveLength(1);
+  });
+});

@@ -1983,6 +1983,12 @@ export function parseDetached(value: unknown): { detached: true } {
   return { detached: true };
 }
 
+export function parsePromoted(value: unknown): { promoted: true } {
+  const record = requireRecord(value);
+  if (record["promoted"] !== true) throw new Error("Expected promoted response");
+  return { promoted: true };
+}
+
 export function parseReloaded(value: unknown): { reloaded: true } {
   const record = requireRecord(value);
   if (record["reloaded"] !== true) throw new Error("Expected reloaded response");

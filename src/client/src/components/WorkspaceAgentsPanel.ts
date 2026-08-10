@@ -66,6 +66,37 @@ export class WorkspaceAgentsPanel extends LitElement {
         font-size: 12px; white-space: nowrap;
       }
       .agent .glyph { flex: 0 0 auto; width: 12px; text-align: center; }
+      /*
+       * The menu button keeps the row to one line: it holds its place at the
+       * end and never wraps, and it is absent while an agent still works.
+       */
+      .agent-menu-button {
+        flex: 0 0 auto;
+        margin-left: auto;
+        min-width: 28px; min-height: 28px;
+        padding: 0 6px;
+        background: none; border: none;
+        color: var(--pi-dim); font-size: 13px; line-height: 1;
+        cursor: pointer;
+      }
+      .agent-menu-button:hover { color: var(--pi-fg); }
+
+      .agent-menu {
+        display: flex; flex-direction: column;
+        margin-left: 24px;
+        border-left: 2px solid var(--pi-border);
+        background: var(--pi-surface);
+      }
+      .agent-menu button {
+        min-height: 44px;
+        padding: 0 12px 0 26px;
+        background: none; border: none;
+        border-bottom: 1px solid var(--pi-border-muted, var(--pi-border));
+        color: var(--pi-fg);
+        font-size: 12px; text-align: left; white-space: nowrap;
+        cursor: pointer;
+      }
+      .agent-menu button:hover { background: var(--pi-selection-bg); }
       .agent .name { flex: 0 0 auto; }
       /* Detail yields first when width is scarce; identity and action never do. */
       .agent .detail {
@@ -94,6 +125,9 @@ export class WorkspaceAgentsPanel extends LitElement {
 
   /** Manual expand/collapse, layered over the defaults. Cleared per session. */
   @state() private expansionOverrides: ReadonlyMap<string, boolean> = new Map();
+
+  /** The agent whose menu is open, as run id and index. One at a time. */
+  @state() private openMenuKey: string | undefined;
 
   private runsCache: RunsCache | undefined;
 
@@ -142,8 +176,72 @@ export class WorkspaceAgentsPanel extends LitElement {
         <span class="run-label">${run.label}</span>
         <span class="run-state">${runStateText(run)}</span>
       </button>
-      ${expanded ? run.agents.map((agent) => renderAgent(agent)) : null}
+      ${expanded ? run.agents.map((agent) => this.renderAgent(run, agent)) : null}
     `;
+  }
+
+  /**
+   * One line per agent, with its commands behind a menu.
+   *
+   * Both commands need the session the agent wrote, and only a finished run
+   * reports one, so the menu button is absent while an agent still works.
+   * There is nothing to open or promote until then.
+   */
+  private renderAgent(run: DelegatedRun, agent: DelegatedAgent): TemplateResult {
+    const sessionFile = agent.sessionFile;
+    const key = `${run.id}:${String(agent.index)}`;
+    const open = this.openMenuKey === key;
+
+    return html`
+      <div class="agent" data-agent=${agent.name} data-state=${agent.state}>
+        <span class="glyph" aria-hidden="true">${STATE_GLYPH[agent.state]}</span>
+        <span class="name">${agent.name}</span>
+        <span class="detail">${agent.detail ?? ""}</span>
+        <span class="agent-state">${agent.state}</span>
+        <span class="elapsed">${formatElapsed(agent.elapsedMs)}</span>
+        ${sessionFile === undefined
+          ? null
+          : html`<button
+              class="agent-menu-button"
+              type="button"
+              data-action="agent-menu"
+              aria-haspopup="menu"
+              aria-expanded=${String(open)}
+              aria-label=${`Commands for ${agent.name}`}
+              title="Commands"
+              @click=${() => { this.toggleMenu(key); }}
+            >···</button>`}
+      </div>
+      ${open && sessionFile !== undefined ? this.renderAgentMenu(sessionFile) : null}
+    `;
+  }
+
+  private renderAgentMenu(sessionFile: string): TemplateResult {
+    return html`
+      <div class="agent-menu" role="menu">
+        <button
+          type="button"
+          role="menuitem"
+          data-action="open-transcript"
+          @click=${() => { this.runCommand(() => { this.context?.onOpenSessionFile?.(sessionFile); }); }}
+        >Open transcript</button>
+        <button
+          type="button"
+          role="menuitem"
+          data-action="promote"
+          @click=${() => { this.runCommand(() => { this.context?.onPromoteSpawnedSession?.(sessionFile); }); }}
+        >Promote to its own session</button>
+      </div>
+    `;
+  }
+
+  private toggleMenu(key: string): void {
+    this.openMenuKey = this.openMenuKey === key ? undefined : key;
+  }
+
+  private runCommand(command: () => void): void {
+    this.openMenuKey = undefined;
+    command();
   }
 
   /**
@@ -181,17 +279,6 @@ export class WorkspaceAgentsPanel extends LitElement {
   }
 }
 
-function renderAgent(agent: DelegatedAgent): TemplateResult {
-  return html`
-    <div class="agent" data-agent=${agent.name} data-state=${agent.state}>
-      <span class="glyph" aria-hidden="true">${STATE_GLYPH[agent.state]}</span>
-      <span class="name">${agent.name}</span>
-      <span class="detail">${agent.detail ?? ""}</span>
-      <span class="agent-state">${agent.state}</span>
-      <span class="elapsed">${formatElapsed(agent.elapsedMs)}</span>
-    </div>
-  `;
-}
 
 function summaryText(runs: readonly DelegatedRun[]): string {
   let total = 0;

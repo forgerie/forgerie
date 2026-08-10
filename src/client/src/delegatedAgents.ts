@@ -29,6 +29,15 @@ export interface DelegatedAgent {
   readonly elapsedMs?: number;
   readonly task?: string;
   readonly output?: string;
+  /**
+   * The session the agent wrote, reported by the run's own result.
+   *
+   * Present only once an agent finishes: a run in flight reports progress, and
+   * progress carries no file. Commands that need a transcript are therefore
+   * unavailable while the agent is still working, which is honest -- there is
+   * nothing to open yet.
+   */
+  readonly sessionFile?: string;
 }
 
 export interface DelegatedRunCounts {
@@ -238,6 +247,7 @@ function agentsFromResults(details: Record<string, unknown> | undefined): Delega
     const state: DelegatedAgentState = record?.["detached"] === true
       ? "detached"
       : failed ? "failed" : "done";
+    const sessionFile = stringField(record, "sessionFile");
     agents.push({
       index,
       name,
@@ -245,6 +255,7 @@ function agentsFromResults(details: Record<string, unknown> | undefined): Delega
       ...(detail === undefined ? {} : { detail }),
       ...(task === undefined ? {} : { task }),
       ...(output === undefined ? {} : { output }),
+      ...(sessionFile === undefined ? {} : { sessionFile }),
     });
   }
   return agents;
