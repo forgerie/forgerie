@@ -76,8 +76,11 @@
            different font sizes (messages 14px, history boundary 12px), and ch
            resolves against the element it is used on, so a ch-based cap gives
            each child a different width and the column comes out ragged.
-           32rem approximates 66 characters at the transcript's 14px base. */
-        --calm-measure: clamp(20rem, 92cqi, 32rem);
+           36rem is about 71 characters at the transcript's 15px prose, which
+           stays inside the range where the eye reliably finds the next line.
+           Raising the cap without raising the type would have pushed past it,
+           which is the usual way a reading column is spoiled. */
+        --calm-measure: clamp(20rem, 92cqi, 36rem);
         /* Wide on purpose. This is the only break in the transcript that has to
            be seen without being read, and it has to hold apart two things that
            look alike: the step count closing one turn and the question opening

@@ -397,7 +397,14 @@ export const chatStyles = css`
      shorthands later in this sheet, which would silently reset margin-inline
      and left-align the column. The track owns the width, so child rules cannot
      fight it. */
-  .chat { --pi-chat-sticky-top: -26px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: 26px 16px 16px; box-sizing: border-box; }
+  /* How far content wider than prose may reach past the reading column.
+
+     Prose is capped for reading, but a table or a code block is not prose: it
+     was being clipped and made to scroll sideways while empty space sat
+     immediately beside it. This is exactly the free space either side of the
+     centred column, so wide content can use it and never more, and it is capped
+     so a wide monitor does not stretch a table to the horizon. */
+  .chat { --calm-bleed: min(max(0px, (100cqi - 32px - var(--calm-measure)) / 2), 10rem); --pi-chat-sticky-top: -26px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: 26px 16px 16px; box-sizing: border-box; }
   .scroll-marker { display: block; height: 0; overflow: hidden; pointer-events: none; }
   /* Transcript messages carry no card. Roles are told apart by weight and
      tone, not by a border and fill per role: colour is reserved for things
@@ -426,7 +433,12 @@ export const chatStyles = css`
      The hairline is not decoration. In the light theme the surface sits only
      eight values above the canvas, which is too little to read as a container
      on its own. */
+  /* Prose runs a size larger than the interface around it, because it is the
+     thing being read rather than operated. */
+  .msg.user, .msg.assistant { font-size: 15px; }
   .msg.user {
+    /* A bubble is a container, not a page: content inside it stays inside it. */
+    --calm-bleed: 0px;
     width: fit-content;
     max-width: min(100%, 30rem);
     margin-inline-start: auto;
@@ -583,7 +595,7 @@ export const transcriptLivenessStyles = css`
 
 export const formattedTextStyles = css`
   :host { display: block; }
-  .formatted { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; text-align: start; unicode-bidi: plaintext; }
+  .formatted { white-space: normal; overflow-wrap: anywhere; line-height: 1.55; text-align: start; unicode-bidi: plaintext; }
   p, ul, ol, pre, blockquote, .table-scroll, .code-block-wrapper { margin: 0 0 10px; }
   :is(p, ul, ol, pre, blockquote, .table-scroll, .code-block-wrapper):last-child { margin-bottom: 0; }
   ul, ol { padding-left: 22px; }
@@ -595,6 +607,14 @@ export const formattedTextStyles = css`
   pre code { border: 0; padding: 0; background: transparent; }
   .code-copy-button { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--pi-border); border-radius: 6px; background: var(--pi-surface); color: var(--pi-muted); padding: 0; font: 14px system-ui, sans-serif; line-height: 1; cursor: pointer; }
   .code-copy-button:hover, .code-copy-button:focus { color: var(--pi-text); border-color: var(--pi-accent); }
+  /* Content that is not prose may use the space beside the reading column.
+     Only a standalone pre bleeds: one inside a code-block wrapper would widen
+     twice, once for each box.
+
+     Declared after the margin shorthands above. A later margin shorthand resets
+     margin-inline to zero, so a bleed written before it silently does nothing --
+     which is exactly what happened the first time. */
+  .table-scroll, .code-block-wrapper, .formatted > pre { max-width: calc(100% + 2 * var(--calm-bleed, 0px)); margin-inline: calc(-1 * var(--calm-bleed, 0px)); }
   blockquote { border-left: 3px solid var(--pi-border); padding-left: 10px; color: var(--pi-muted); }
   a { color: var(--pi-accent); }
   /* A heading belongs to what follows it, so it sits far from the paragraph
