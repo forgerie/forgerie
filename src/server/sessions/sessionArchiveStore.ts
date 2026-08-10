@@ -249,7 +249,7 @@ function archiveRecordFromInput(session: ArchiveSessionInput, archive: { archive
     created: session.created,
     modified: session.modified,
     messageCount: session.messageCount,
-    firstMessage: session.firstMessage,
+    firstMessage: boundSessionCatalogFirstMessage(session.firstMessage),
     ...(session.name === undefined ? {} : { name: session.name }),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
   };

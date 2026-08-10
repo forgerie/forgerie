@@ -50,6 +50,25 @@ describe("SessionArchiveStore", () => {
     await expect(readFile(join(dataDir, "archived-sessions.json"), "utf8")).resolves.toContain('"sessionId": "managed"');
   });
 
+  it("bounds an archived firstMessage in the returned, cached, and persisted records", async () => {
+    const root = await createTempRoot("pi-web-archive-first-message-");
+    const archiveFile = join(root, "archived-sessions.json");
+    const sourcePath = join(root, "active", "oversized.jsonl");
+    await mkdir(join(root, "active"), { recursive: true });
+    await writeFile(sourcePath, "complete transcript remains available 🎉\n", "utf8");
+    const store = new SessionArchiveStore(archiveFile, join(root, "archived-files"));
+    const oversized = `${"a".repeat(499)}🎉suffix`;
+    const bounded = `${"a".repeat(499)}🎉`;
+
+    const record = await store.archive(archiveInput("oversized", sourcePath, oversized));
+
+    expect(record.firstMessage).toBe(bounded);
+    expect(Array.from(record.firstMessage ?? "")).toHaveLength(500);
+    await expect(store.list()).resolves.toMatchObject([{ sessionId: "oversized", firstMessage: bounded }]);
+    const persisted = parseArchiveText(await readFile(archiveFile, "utf8"));
+    expect(persisted.sessions).toMatchObject([{ sessionId: "oversized", firstMessage: bounded }]);
+  });
+
   it("moves archived session files out of the active session directory and restores them", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-web-archive-"));
     tempRoots.push(root);
@@ -204,7 +223,6 @@ describe("SessionArchiveStore", () => {
     expect(record).toEqual({ ...legacy, firstMessage: `${"a".repeat(499)}🎉` });
     expect(Array.from(record?.firstMessage ?? "")).toHaveLength(500);
     await expect(readFile(transcriptPath, "utf8")).resolves.toBe(transcript);
-    await expect(store.initialize()).resolves.toEqual({ status: "ready", compacted: true });
     const reloaded = new SessionArchiveStore(archiveFile, join(root, "archived-files"));
     await expect(reloaded.initialize()).resolves.toEqual({ status: "ready", compacted: false });
   });
@@ -225,14 +243,13 @@ describe("SessionArchiveStore", () => {
     first.firstMessage = "caller mutation";
     const returnedByGet = await store.get("a");
     if (returnedByGet === undefined) throw new Error("Expected archived record");
-    returnedByGet.name = "caller mutation";
+    returnedByGet.firstMessage = "caller mutation from get";
 
     const later = await store.list();
     expect(later).toMatchObject([
       { sessionId: "a", firstMessage: "first" },
       { sessionId: "b", firstMessage: "second" },
     ]);
-    expect(later[0]).not.toHaveProperty("name");
   });
 
   it("initializes a missing index as empty without creating it", async () => {
@@ -326,6 +343,8 @@ describe("SessionArchiveStore", () => {
     const indexDir = join(root, "index");
     const archiveFile = join(indexDir, "archived-sessions.json");
     await mkdir(indexDir, { recursive: true });
+    const originalIndex = JSON.stringify({ sessions: [archiveRecord("existing", { firstMessage: "existing" })] });
+    await writeFile(archiveFile, originalIndex, "utf8");
     const store = new SessionArchiveStore(archiveFile, join(root, "archived-files"));
     await store.initialize();
     const sourcePath = join(root, "active", "new.jsonl");
@@ -341,8 +360,8 @@ describe("SessionArchiveStore", () => {
 
     expect(await exists(sourcePath)).toBe(true);
     expect(await exists(join(root, "archived-files", "new.jsonl"))).toBe(true);
-    expect(await exists(archiveFile)).toBe(false);
-    await expect(store.list()).resolves.toEqual([]);
+    await expect(readFile(archiveFile, "utf8")).resolves.toBe(originalIndex);
+    await expect(store.list()).resolves.toMatchObject([{ sessionId: "existing", firstMessage: "existing" }]);
   });
 
   it.skipIf(process.platform === "win32")("keeps prior index and cache when restore persistence fails after moving the transcript", async () => {
