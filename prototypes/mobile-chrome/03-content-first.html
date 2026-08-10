@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Forgerie mobile — content-only rest, bottom sheet on request</title>
+<style>
+  :root {
+    --ink: #14161a;
+    --muted: #6b7280;
+    --line: #cbc3ae;
+    --read: #f2f6f3;
+    --write: #e6ecf7;
+    --write-line: #8ba3c9;
+    --kbd: #d7d9dd;
+    --sheet: #f4efe2;
+    --live: #3f8f5c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 34px 40px 40px;
+    background: #f7f6f3;
+    color: var(--ink);
+    font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.01em; }
+  .sub { margin: 0 0 6px; color: var(--muted); font-size: 15px; }
+  .note { margin: 0 0 24px; color: var(--muted); font-size: 13px; }
+
+  .row { display: flex; gap: 30px; margin-bottom: 26px; }
+  .col { width: 340px; }
+  .caption { margin: 0 0 3px; font-size: 16px; font-weight: 700; }
+  .when { margin: 0 0 9px; font-size: 13px; color: var(--muted); min-height: 34px; }
+
+  /* 499 x 789 CSS px at 0.68 */
+  .phone {
+    position: relative;
+    width: 340px;
+    height: 537px;
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    overflow: hidden;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .read {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+    padding: 14px 13px 8px;
+    background: var(--read);
+    overflow: hidden;
+  }
+  .read.fixed { flex: 0 0 auto; }
+  /* faux transcript text */
+  .ln { height: 6px; border-radius: 3px; background: #c4cec7; margin: 0 0 7px; }
+  .ln.u { background: #7d8a83; height: 7px; }
+  .gap { height: 15px; }
+  .foot {
+    position: absolute; left: 13px; right: 13px; bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-style: italic; color: #4d7a5d;
+  }
+  .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--live); }
+  .readtag {
+    position: absolute; right: 8px; top: 8px;
+    font-size: 10px; color: #7c8a82; border: 1px solid #c4cec7;
+    border-radius: 3px; padding: 0 4px; background: #fff;
+  }
+  .dimmer { position: absolute; inset: 0; background: rgba(20,22,26,.42); z-index: 3; }
+
+  .composer {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 8px;
+    background: var(--write);
+    border-top: 1px solid var(--write-line);
+    font-size: 11px; color: #2c4468;
+    overflow: hidden;
+  }
+  .composer .say { flex: 1 1 auto; color: #7d8ba3; }
+  .chip {
+    flex: 0 0 auto; border: 1px solid #a9bad6; border-radius: 999px;
+    background: #fff; padding: 2px 6px; font-size: 10px; white-space: nowrap;
+  }
+  .chip.live { border-color: #93bfa3; }
+  .icon {
+    flex: 0 0 auto; display: inline-grid; place-items: center;
+    width: 20px; height: 20px; border: 1px solid #a9bad6; border-radius: 5px;
+    background: #fff; font-size: 11px;
+  }
+  .icon.pri { background: #6d7fb8; border-color: #56679c; color: #fff; }
+  .composer.tall { align-items: flex-start; padding-top: 8px; flex-wrap: wrap; }
+  .composer .draftline { flex: 1 1 100%; height: 6px; border-radius: 3px; background: #a9bad6; margin-bottom: 7px; }
+  .composer .foot2 { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; }
+
+  .kbd {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--kbd);
+    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.055) 0 6px, transparent 6px 12px);
+    color: var(--muted); font-size: 11px;
+  }
+
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
+    background: var(--sheet);
+    border-top: 1px solid var(--line);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -10px 24px rgba(0,0,0,.2);
+    padding: 7px 9px 9px;
+    font-size: 11px;
+  }
+  .grab { width: 34px; height: 4px; border-radius: 2px; background: #c3b48c; margin: 0 auto 9px; }
+  .sheet h3 { margin: 0 0 6px; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .crumbs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .crumb { border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 2px 7px; font-size: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 10px; }
+  .cell { border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 8px 4px; text-align: center; font-size: 10px; }
+  .cell.on { border-color: #6d7fb8; background: #e6ecf8; font-weight: 700; }
+  .sheetfoot { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 10px; border-top: 1px solid var(--line); padding-top: 7px; }
+
+  .rules { border-top: 1px solid #ddd8cc; padding-top: 16px; }
+  .rules h2 { margin: 0 0 10px; font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  table { border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 5px 24px 5px 0; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .win { margin-top: 14px; font-size: 14px; max-width: 1180px; }
+</style>
+</head>
+<body>
+
+<h1>Content at rest. Controls only when asked.</h1>
+<p class="sub">Cover screen, folded portrait: 499 × 789 CSS px. Frames to scale (0.68). Heights in CSS px.</p>
+<p class="note">Nothing sits at the top edge in any resting state. Every number below is visible pixels — nothing is hidden under an overlay.</p>
+
+<div class="row">
+
+  <div class="col">
+    <p class="caption">Rest</p>
+    <p class="when">Idle. The transcript is the entire screen.</p>
+    <div class="phone">
+      <div class="read">
+        <div class="ln u" style="width:62%"></div>
+        <div class="gap"></div>
+        <div class="ln" style="width:100%"></div>
+        <div class="ln" style="width:96%"></div>
+        <div class="ln" style="width:88%"></div>
+        <div class="ln" style="width:99%"></div>
+        <div class="ln" style="width:71%"></div>
+        <div class="gap"></div>
+        <div class="ln u" style="width:44%"></div>
+        <div class="gap"></div>
+        <div class="ln" style="width:98%"></div>
+        <div class="ln" style="width:93%"></div>
+        <div class="ln" style="width:100%"></div>
+        <div class="ln" style="width:85%"></div>
+        <div class="ln" style="width:97%"></div>
+        <div class="ln" style="width:59%"></div>
+        <span class="readtag">733 px</span>
+      </div>
+      <div class="composer" style="height:38px">
+        <span class="say">Say something.</span>
+        <span class="chip">main</span>
+        <span class="icon">⌃</span>
+        <span class="icon pri">➤</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="caption">Working</p>
+    <p class="when">Liveness lives in the transcript, not in a bar. This is what makes deleting the bar safe.</p>
+    <div class="phone">
+      <div class="read">
+        <div class="ln u" style="width:55%"></div>
+        <div class="gap"></div>
+        <div class="ln" style="width:100%"></div>
+        <div class="ln" style="width:91%"></div>
+        <div class="ln" style="width:97%"></div>
+        <div class="ln" style="width:64%"></div>
+        <div class="gap"></div>
+        <div class="ln u" style="width:48%"></div>
+        <div class="gap"></div>
+        <div class="ln" style="width:96%"></div>
+        <div class="ln" style="width:82%"></div>
+        <div class="foot"><span class="pulse"></span> Working&hellip; · 2 tools</div>
+        <span class="readtag">733 px</span>
+      </div>
+      <div class="composer" style="height:38px">
+        <span class="say">Say something.</span>
+        <span class="chip live">main</span>
+        <span class="icon">⌃</span>
+        <span class="icon pri">■</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="caption">Writing</p>
+    <p class="when">Keyboard open. The composer grows; nothing else appears.</p>
+    <div class="phone">
+      <div class="read fixed" style="height:231px">
+        <div class="ln" style="width:100%"></div>
+        <div class="ln" style="width:88%"></div>
+        <div class="ln" style="width:95%"></div>
+        <div class="ln" style="width:73%"></div>
+        <div class="gap"></div>
+        <div class="ln u" style="width:52%"></div>
+        <div class="gap"></div>
+        <div class="ln" style="width:97%"></div>
+        <div class="ln" style="width:61%"></div>
+        <span class="readtag">340 px</span>
+      </div>
+      <div class="composer tall" style="height:75px">
+        <div class="draftline" style="width:100%"></div>
+        <div class="draftline" style="width:47%"></div>
+        <div class="foot2">
+          <span class="chip">anthropic/claude-opus-5</span>
+          <span style="flex:1 1 auto"></span>
+          <span class="icon">⌃</span>
+          <span class="icon pri">➤</span>
+        </div>
+      </div>
+      <div class="kbd" style="height:231px">on-screen keyboard · 339</div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="caption">Summoned</p>
+    <p class="when">Tap ⌃. The sheet rises from where you asked. Swipe down, tap away, or tap ⌃ again to dismiss. No timer.</p>
+    <div class="phone">
+      <div class="read">
+        <div class="ln u" style="width:62%"></div>
+        <div class="gap"></div>
+        <div class="ln" style="width:100%"></div>
+        <div class="ln" style="width:96%"></div>
+        <div class="ln" style="width:88%"></div>
+        <div class="ln" style="width:71%"></div>
+        <div class="dimmer"></div>
+      </div>
+      <div class="composer" style="height:38px">
+        <span class="say">Say something.</span>
+        <span class="chip">main</span>
+        <span class="icon">⌃</span>
+        <span class="icon pri">➤</span>
+      </div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <h3>where you are</h3>
+        <div class="crumbs"><span class="crumb">zao</span><span class="crumb">forgerie</span><span class="crumb">main</span></div>
+        <h3>panels</h3>
+        <div class="grid">
+          <div class="cell">sessions</div><div class="cell on">chat</div><div class="cell">files</div>
+          <div class="cell">git</div><div class="cell">terminal</div><div class="cell">tasks</div>
+          <div class="cell">processes</div><div class="cell">links</div><div class="cell">info</div>
+        </div>
+        <div class="sheetfoot"><span>2 notifications</span><span>Archive &amp; next</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="rules">
+  <h2>The rule</h2>
+  <table>
+    <tr><th>Question</th><th>Answered by</th><th>Costs</th></tr>
+    <tr><td>Is it running?</td><td><b>Working…</b> at the foot of the live turn, inside the transcript</td><td>0 px of chrome</td></tr>
+    <tr><td>Which session is this?</td><td>Quiet chip in the composer row</td><td>0 px — the row already exists</td></tr>
+    <tr><td>Give me the controls</td><td><b>⌃</b> in the composer row → bottom sheet</td><td>0 px, no new gesture</td></tr>
+    <tr><td>Something needs me</td><td>ask_user and errors render inline in the transcript</td><td>0 px until it happens</td></tr>
+  </table>
+
+  <p class="win"><b>Visible transcript:</b> 490 → 733 px with the keyboard closed (1.50×). 151 → 340 px with it open (2.25×). Resident chrome above the transcript: 189 px → <b>0</b>. <b>Prerequisite:</b> the transcript must be able to say “Working…” on its own before the top bar can be deleted — the streaming stance is no longer the last phase, it is the first.</p>
+</div>
+
+</body>
+</html>
