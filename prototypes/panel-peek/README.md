@@ -1,0 +1,126 @@
+# Panel peek — design record
+
+How side panels appear, who decides, and what a gesture is allowed to change.
+No sketches yet; this is the model the sketches will have to satisfy.
+
+Borrowed from Obsidian on Android: a horizontal drag anywhere in the content
+area pulls a side sheet in, tracking the finger, so a peek can be aborted at
+zero cost.
+
+## The rule
+
+**Space owns presentation. The user owns intent. A peek never writes intent.**
+
+Nothing recomputes a stored user choice because the window got narrower. A
+swipe, a fold, a rotate, and a resize all change what you see and none of them
+change what you asked for.
+
+## The model
+
+```
+presentation = f(intent, capacity, availability)
+```
+
+| Input | Source | Lifetime | Example |
+|---|---|---|---|
+| `PanelIntent` | user only, by explicit act | durable, global | `Auto` \| `Pinned` \| `Dismissed` |
+| `capacity` | available inline size vs content minimums | recomputed continuously | single- / two- / three-surface |
+| `availability` | the selected session's content | per session | no workspace → nothing to show |
+
+`PanelPresentation` is `Docked` \| `Peeked(progress)` \| `Hidden`, derived, never
+stored. `Peeked` carries a 0–1 progress because the finger drives it; it is
+discarded on dismiss, navigation, and reload.
+
+Capacity thresholds are the content minimums already in
+`src/client/src/appShell/shellLayoutMode.ts` — navigation 260, transcript 560,
+workspace 360 — not device classes.
+
+**Availability is not intent.** A panel that yields because it has nothing to
+show must not read back as "the user dismissed it".
+
+## Intent × capacity
+
+| Intent | single-surface | two-surface | three-surface |
+|---|---|---|---|
+| `Auto` | Hidden | inbox `Docked` | both `Docked` |
+| `Pinned` | Hidden | `Docked` | `Docked` |
+| `Dismissed` | Hidden | Hidden | Hidden |
+
+Read the first column: on a phone, intent is inert. There is only the
+transcript and the peek gesture. Nothing persisted can surprise you on the
+narrowest surface. Intent is dormant there, not absent — it is read the moment
+the device unfolds, rotates, or opens on a desktop.
+
+### Decisions taken
+
+| Question | Answer | Rejected |
+|---|---|---|
+| Scope of intent | **Global.** One key per panel | Per project — the inbox is machine-scoped by invariant (`GlobalSessionsState`), so layout would flip on every cross-project hop. Per capacity band — device-class state in an intrinsic costume |
+| `Pinned` where only one surface fits | **Degrade to `Auto`** | "This is my home surface" — one word, two meanings, the exact paradigm flip the intrinsic rule exists to prevent |
+| Two pinned panels, one dockable slot | **Pinned is just pinned.** Panels dock in content-minimum order until space runs out; the one that cannot fit stays peekable and re-docks when space returns | Fixed arbitrary priority; most-recently-pinned (needs a stored timestamp driving layout) |
+| Horizontal drag already means "archive" on inbox rows | **The sheet wins.** Row actions move to a long-press menu | Row-wins (two gesture vocabularies in one surface); direction split (left archives, right peeks — indistinguishable mid-drag) |
+
+## Control surface
+
+One pin toggle. Three internal states, because "never touched" is not
+"explicitly off".
+
+| State | Reached by | Behaviour |
+|---|---|---|
+| `Auto` | never touched | capacity decides |
+| `Pinned` | pin | docked whenever it physically fits |
+| `Dismissed` | unpin | never docked; peek only |
+
+The pin renders only where it does something — two-surface capacity and up. A
+pushpin on a phone that changes nothing visible is a lie. Cost: a phone-only
+user cannot express a layout preference, which is consistent, because they have
+no layout to express one about.
+
+Only these write intent: the pin control inside a peeked sheet, unpinning a
+docked panel, and reset-to-auto. Explicitly **not** writing intent: swiping,
+opening or closing a peek, resizing, folding, rotating. No "you did this three
+times so I made it permanent" — silent inference is the fight this model exists
+to avoid.
+
+## Two verbs, and only two
+
+| Verb | Scope | Means | Desktop twin |
+|---|---|---|---|
+| horizontal drag | shell-level, everywhere | reveal / dismiss a panel | trackpad `deltaX`, edge control, shortcut |
+| long-press | surface-local, on an item | act on this item | right-click |
+
+One meaning each, no exceptions. A gesture that means two things depending on
+where the finger landed is the failure this whole model is built to avoid.
+
+Because long-press is surface-local, it stays text selection in the transcript
+(whose items *are* text) and becomes the row menu in a list. No contradiction —
+the surface owns the noun, the verb is constant.
+
+## The gesture
+
+What makes swipe-anywhere safe is not that it is anywhere; it is that it is
+**drag-tracked**. The sheet follows the finger, so a 15% peek can be abandoned
+for free. Ship that property first. A tap-toggle bound to a whole-surface
+gesture has the blast radius with none of the reversibility.
+
+The same pipeline serves the desktop: a trackpad two-finger horizontal `wheel`
+with `deltaX` is the same drag and earns the same rubber-band peek. The
+keyboard shortcut and `AppPanelEdgeControl` are other ways to say the same
+three words — `reveal`, `dismiss`, `pin`. One intent vocabulary, four input
+devices, no device sniffing.
+
+Conflict rules, because the transcript is full of horizontal scrollers:
+
+1. The drag must be within ~30° of horizontal and pass ~10px before it captures.
+2. A drag starting on a horizontally scrollable descendant belongs to that
+   element. Reaching its scroll end does **not** chain into the sheet; a fresh
+   gesture is required.
+3. Long-press first is text selection; the gesture is disarmed for that pointer.
+
+## Known collisions
+
+| Where | What |
+|---|---|
+| `SessionInboxPanel.ts` | Swipe-to-archive on rows must be removed and rebuilt as a long-press menu. `actionMenu.ts` already provides placement. The `E` shortcut and the controller-owned undo toast are unaffected. Net gain, not just cost: a swipe exposed one action, a menu exposes archive plus rename, fork, delete, and mark-unread |
+| `PanelCollapseController.ts` | Holds exactly the boolean-per-panel shape this model replaces, and does not persist |
+| `shared.ts`, `PiWebApp.ts`, `AppMobileMainTabs.ts`, `AppPanelEdgeControl.ts`, `SettingsPanelFrame.ts`, `TerminalPanel.ts`, `SessionTreeNavigator.ts` | Viewport breakpoints at 1180/1181 and 760 survive from the fork point. Both sit inside or beside the 499–979 posture range. `shellLayoutMode.ts` has the right model; these components have not migrated to it. Seamlessness does not arrive until they do |
