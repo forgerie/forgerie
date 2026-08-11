@@ -34,6 +34,14 @@ export interface PromptResourceCatalogAvailable {
   diagnostics: string[];
 }
 
+export interface PromptResourceCatalogUnavailable {
+  available: false;
+  reason: "error" | "busy" | "timeout" | "over-limit";
+  message: string;
+}
+
+export type PromptResourceCatalogResponse = PromptResourceCatalogAvailable | PromptResourceCatalogUnavailable;
+
 export function parseLeadingSlashCommand(input: string): LeadingSlashCommandParseResult {
   if (!input.startsWith("/")) return { kind: "not-command" };
   const afterSlash = input.slice(1);

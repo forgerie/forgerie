@@ -33,6 +33,8 @@ import { createActiveAgentProfileDescriptor } from "../sessiond/activeAgentProfi
 import { applyAgentHttpIdleTimeout } from "./sessiond/agentHttpDispatcher.js";
 import { sessionServiceDependencies } from "./sessiond/sessionServiceDependencies.js";
 import { scrubNonAgentVisibleEnvKeys } from "./sessiond/agentProcessEnvironment.js";
+import { PromptResourceCatalogService } from "./resources/promptResourceCatalog.js";
+import { registerPromptResourceRoutes } from "./resources/promptResourceRoutes.js";
 
 const daemonEnvironment: NodeJS.ProcessEnv = Object.freeze({ ...process.env });
 const { config } = effectivePiWebConfig({ env: daemonEnvironment });
@@ -124,19 +126,21 @@ async function createSessionDaemonRuntime() {
   }));
   auth.subscribe((change) => { sessions.applyAuthChange(change); });
   const terminals = new TerminalService(eventHub, workspaceActivity);
+  const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
   const runtimeComponent = Object.freeze({
     ...getPiWebRuntimeComponent("sessiond", SESSIOND_RUNTIME_CAPABILITIES),
     activeAgentProfile,
   });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher };
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources }: SessionDaemonRuntime): void {
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
   registerSessionRoutes(app, sessions, eventHub);
   registerProcessRoutes(app, sessions);
   registerTerminalRoutes(app, terminals);
+  registerPromptResourceRoutes(app, promptResources);
 
   app.get("/health", () => ({
     ok: true,
