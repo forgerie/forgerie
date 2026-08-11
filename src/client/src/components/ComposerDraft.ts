@@ -20,6 +20,8 @@ import "./AutocompleteMenu";
 
 type PendingAttachment = CapturedAttachment & { id: string };
 
+let composerDraftSequence = 0;
+
 export interface ComposerDraftDisplayState {
   inputMode: InputMode;
   empty: boolean;
@@ -78,6 +80,8 @@ export class ComposerDraft extends LitElement {
   @state() private attachments: PendingAttachment[] = [];
   @state() private attachmentDelivery: PromptAttachmentDelivery = loadAttachmentDelivery();
   @state() private attachmentError: string | undefined = undefined;
+  @state() private politeAnnouncement = "";
+  @state() private assertiveAnnouncement = "";
   @state() private completionError: ComposerDraftCompletionError | undefined = undefined;
   @state() private focused = false;
   private attachmentSeq = 0;
@@ -91,6 +95,10 @@ export class ComposerDraft extends LitElement {
   private explicitShiftKeyActive = false;
   private lastDisplayState: ComposerDraftDisplayState | undefined;
   private readonly restoredSeedIds = new Set<string>();
+  private readonly instanceId = `composer-draft-${String(++composerDraftSequence)}`;
+  private readonly completionListboxId = `${this.instanceId}-completion-listbox`;
+  private readonly completionOptionIdPrefix = `${this.instanceId}-completion-option-`;
+  private readonly attachmentDeliveryGroupName = `${this.instanceId}-attachment-delivery`;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     if (changed.has("storageKey")) {
@@ -120,6 +128,8 @@ export class ComposerDraft extends LitElement {
   protected override updated(changed: PropertyValues<this>): void {
     if (changed.has("disabled")) this.updateEditorDisabledState();
     if (changed.has("storageKey")) this.syncEditorDoc();
+    this.syncEditorAccessibility();
+    this.syncCompletionMenuBoundary();
     this.publishDisplayState();
   }
 
@@ -160,8 +170,16 @@ export class ComposerDraft extends LitElement {
         <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
         ${shellMode ? html`<div class="mode-hint">Shell command${shellInputMode.excludeFromContext ? " · excluded from context" : ""}</div>` : null}
         ${this.compacting && !shellMode ? html`<div class="mode-hint">Compacting history · message will be queued</div>` : null}
+        <div class="composer-live-region" aria-live="polite" aria-atomic="true" data-live="attachments">${this.politeAnnouncement}</div>
+        <div class="composer-live-region" aria-live="assertive" aria-atomic="true" data-live="attachment-errors">${this.assertiveAnnouncement}</div>
         ${this.renderAttachments()}
-        <autocomplete-menu .items=${this.completions} .selectedIndex=${this.selectedIndex} .onPick=${(item: CompletionItem) => { this.pick(item); }}></autocomplete-menu>
+        <autocomplete-menu
+          .items=${this.completions}
+          .selectedIndex=${this.selectedIndex}
+          .listboxId=${this.completionListboxId}
+          .optionIdPrefix=${this.completionOptionIdPrefix}
+          .onPick=${(item: CompletionItem) => { this.pick(item); }}
+        ></autocomplete-menu>
         ${this.completionError === undefined ? null : html`<div class="completion-error" role="alert">${this.completionError.message}</div>`}
       </div>
     `;
@@ -274,23 +292,57 @@ export class ComposerDraft extends LitElement {
     if (this.attachments.length === 0 && this.attachmentError === undefined) return null;
     const canUseInlineDelivery = promptAttachmentsCanUseInlineDelivery(this.attachments);
     const delivery = this.effectiveAttachmentDelivery();
+    const total = this.attachments.length;
     return html`
       <div class="attachments" aria-label="Pending attachments">
-        ${this.attachments.map((attachment) => html`
-          <div class=${`attachment-chip ${isInlinePromptAttachment(attachment) ? "attachment-chip-image" : "attachment-chip-file"}`} title=${attachment.name}>
-            ${this.renderAttachmentPreview(attachment)}
-            <button type="button" class="attachment-remove" title="Remove attachment" aria-label=${`Remove ${attachment.name}`} @click=${() => { this.removeAttachment(attachment.id); }}>×</button>
-          </div>
-        `)}
+        ${this.attachments.map((attachment, index) => {
+          const attachmentLabel = attachmentAccessibleLabel(attachment, index, total);
+          return html`
+            <div
+              class=${`attachment-chip ${isInlinePromptAttachment(attachment) ? "attachment-chip-image" : "attachment-chip-file"}`}
+              title=${attachment.name}
+              role="group"
+              tabindex="0"
+              aria-label=${attachmentLabel}
+            >
+              ${this.renderAttachmentPreview(attachment)}
+              <button
+                type="button"
+                class="attachment-remove"
+                title="Remove attachment"
+                aria-label=${`Remove ${attachmentLabel}`}
+                @click=${() => { this.removeAttachment(attachment.id); }}
+              >×</button>
+            </div>
+          `;
+        })}
         ${this.attachments.length > 0 ? html`
-          <label class="attachment-delivery" title=${canUseInlineDelivery ? "How attachments are delivered to the agent" : "General files are saved and mentioned from the workspace"}>
-            <select .value=${delivery} @change=${(event: Event) => { this.changeDelivery(event); }}>
-              <option value="inline" ?disabled=${!canUseInlineDelivery}>Attach to message${canUseInlineDelivery ? "" : " (images only)"}</option>
-              <option value="folder">Save to .forgerie/attachments</option>
-            </select>
-          </label>
+          <fieldset class="attachment-delivery" aria-label="Attachment delivery">
+            <legend>Attachment delivery</legend>
+            <label>
+              <input
+                type="radio"
+                name=${this.attachmentDeliveryGroupName}
+                value="inline"
+                ?checked=${delivery === "inline"}
+                ?disabled=${!canUseInlineDelivery}
+                @change=${(event: Event) => { this.changeDelivery(event); }}
+              />
+              <span>Attach to message${canUseInlineDelivery ? "" : " (images only)"}</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name=${this.attachmentDeliveryGroupName}
+                value="folder"
+                ?checked=${delivery === "folder"}
+                @change=${(event: Event) => { this.changeDelivery(event); }}
+              />
+              <span>Save to .forgerie/attachments</span>
+            </label>
+          </fieldset>
         ` : null}
-        ${this.attachmentError !== undefined ? html`<div class="attachment-error">${this.attachmentError}</div>` : null}
+        ${this.attachmentError !== undefined ? html`<div class="attachment-error" role="alert">${this.attachmentError}</div>` : null}
       </div>
     `;
   }
@@ -306,19 +358,27 @@ export class ComposerDraft extends LitElement {
   }
 
   private changeDelivery(event: Event): void {
-    if (!(event.target instanceof HTMLSelectElement)) return;
+    if (!(event.target instanceof HTMLInputElement) || event.target.type !== "radio" || !event.target.checked) return;
     const requested = event.target.value === "folder" ? "folder" : "inline";
     if (requested === "inline" && !promptAttachmentsCanUseInlineDelivery(this.attachments)) {
-      event.target.value = "folder";
+      event.target.checked = false;
+      this.attachmentError = "Only image attachments can be attached directly to a message.";
+      this.announceAssertive(this.attachmentError);
       return;
     }
     this.attachmentDelivery = requested;
     saveAttachmentDelivery(this.attachmentDelivery);
+    this.attachmentError = undefined;
+    this.announcePolite(requested === "inline" ? "Attachments will be attached to the message." : "Attachments will be saved to .forgerie/attachments.");
     this.onDraftEdited?.();
   }
 
   private removeAttachment(id: string): void {
+    const index = this.attachments.findIndex((attachment) => attachment.id === id);
+    const removed = index === -1 ? undefined : this.attachments[index];
+    const total = this.attachments.length;
     this.attachments = this.attachments.filter((attachment) => attachment.id !== id);
+    if (removed !== undefined) this.announcePolite(`Removed ${attachmentAccessibleLabel(removed, index, total)}.`);
     this.onDraftEdited?.();
     this.publishDisplayState();
   }
@@ -368,11 +428,17 @@ export class ComposerDraft extends LitElement {
     this.attachmentError = undefined;
     const { attachments, error } = await capturePromptAttachments(files, readFileAsBase64);
     if (attachments.length > 0) {
-      this.attachments = [...this.attachments, ...attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }))];
+      const previousTotal = this.attachments.length;
+      const added = attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }));
+      this.attachments = [...this.attachments, ...added];
+      this.announcePolite(attachmentAddedAnnouncement(added, previousTotal, this.attachments.length));
       this.onDraftEdited?.();
       this.publishDisplayState();
     }
-    if (error !== undefined) this.attachmentError = error;
+    if (error !== undefined) {
+      this.attachmentError = error;
+      this.announceAssertive(error);
+    }
   }
 
   private currentAttachments(): PromptAttachment[] {
@@ -424,6 +490,8 @@ export class ComposerDraft extends LitElement {
         ],
       }),
     });
+    this.syncEditorAccessibility();
+    this.syncCompletionMenuBoundary();
   }
 
   private syncEditorDoc(): void {
@@ -465,15 +533,19 @@ export class ComposerDraft extends LitElement {
     const runtime = this.runtime;
     if (trigger === undefined || runtime?.supportedCompletionKinds.has(trigger.kind) !== true) {
       this.completions = [];
+      this.syncEditorAccessibility();
       return;
     }
     try {
       const completions = await runtime.resolveCompletion(trigger);
       if (version !== this.requestVersion) return;
       this.completions = [...completions];
+      this.syncEditorAccessibility();
+      this.syncCompletionMenuBoundary();
     } catch (error) {
       if (version !== this.requestVersion) return;
       this.completions = [];
+      this.syncEditorAccessibility();
       this.completionError = { kind: trigger.kind, message: errorMessage(error, "Completions unavailable.") };
       this.onCompletionError?.(this.completionError);
     }
@@ -486,12 +558,14 @@ export class ComposerDraft extends LitElement {
   private moveCompletion(delta: number): boolean {
     if (!this.completions.length) return false;
     this.selectedIndex = (this.selectedIndex + delta + this.completions.length) % this.completions.length;
+    this.syncEditorAccessibility();
     return true;
   }
 
   private closeCompletions(): boolean {
     if (!this.completions.length) return false;
     this.completions = [];
+    this.syncEditorAccessibility();
     return true;
   }
 
@@ -599,6 +673,8 @@ export class ComposerDraft extends LitElement {
       scrollIntoView: true,
     });
     this.completions = [];
+    editor.focus();
+    this.syncEditorAccessibility();
   }
 
   private resetComposer(): void {
@@ -625,7 +701,68 @@ export class ComposerDraft extends LitElement {
     this.onDisplayStateChange?.(state);
   }
 
+  private syncEditorAccessibility(): void {
+    const content = this.editor?.contentDOM;
+    if (content === undefined) return;
+    content.setAttribute("role", "combobox");
+    content.setAttribute("aria-label", this.editorLabel);
+    content.setAttribute("aria-autocomplete", "list");
+    content.setAttribute("aria-haspopup", "listbox");
+    content.setAttribute("aria-controls", this.completionListboxId);
+    content.setAttribute("aria-expanded", this.completions.length > 0 ? "true" : "false");
+    if (this.completions.length > 0) {
+      content.setAttribute("aria-activedescendant", `${this.completionOptionIdPrefix}${String(this.selectedIndex)}`);
+    } else {
+      content.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  private syncCompletionMenuBoundary(): void {
+    const menu = this.querySelector<HTMLElement>("autocomplete-menu");
+    if (menu === null) return;
+    const blockSize = this.completionMenuBlockSize();
+    if (blockSize === undefined) {
+      menu.style.removeProperty("--composer-completion-menu-max-block-size");
+      return;
+    }
+    menu.style.setProperty("--composer-completion-menu-max-block-size", `${String(blockSize)}px`);
+  }
+
+  private completionMenuBlockSize(): number | undefined {
+    const editorHost = this.editorHost;
+    if (editorHost === undefined || this.completions.length === 0) return undefined;
+    const boundary = this.closest(".composer") ?? this.closest("footer") ?? this.parentElement;
+    if (!(boundary instanceof HTMLElement)) return undefined;
+    const boundaryRect = boundary.getBoundingClientRect();
+    const editorRect = editorHost.getBoundingClientRect();
+    if (boundaryRect.height <= 0 || editorRect.height <= 0) return undefined;
+    const availableAboveEditor = Math.floor(editorRect.top - boundaryRect.top - 8);
+    const availableInsideBoundary = Math.floor(boundaryRect.height - 16);
+    const available = Math.min(availableAboveEditor > 0 ? availableAboveEditor : availableInsideBoundary, availableInsideBoundary);
+    return Math.max(64, available);
+  }
+
+  private announcePolite(message: string): void {
+    this.politeAnnouncement = message;
+  }
+
+  private announceAssertive(message: string): void {
+    this.assertiveAnnouncement = message;
+  }
+
   static override styles = promptEditorStyles;
+}
+
+
+function attachmentAccessibleLabel(attachment: PendingAttachment, index: number, total: number): string {
+  const position = total <= 1 ? "attachment 1 of 1" : `attachment ${String(index + 1)} of ${String(total)}`;
+  return `${position}: ${attachment.name}, ${attachment.mimeType}, ${String(attachment.size)} bytes`;
+}
+
+function attachmentAddedAnnouncement(added: readonly PendingAttachment[], previousTotal: number, total: number): string {
+  const first = added[0];
+  if (added.length === 1 && first !== undefined) return `Added ${attachmentAccessibleLabel(first, previousTotal, total)}.`;
+  return `Added ${String(added.length)} attachments. ${String(total)} attachments pending.`;
 }
 
 function displayStatesEqual(left: ComposerDraftDisplayState, right: ComposerDraftDisplayState | undefined): boolean {

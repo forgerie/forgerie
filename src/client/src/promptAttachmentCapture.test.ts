@@ -140,7 +140,7 @@ describe("PromptEditor attachment wiring", () => {
       await flushMicrotasks();
       await editor.updateComplete;
 
-      removeButton(editor, "Remove report.pdf").click();
+      removeButton(editor, "Remove attachment 1 of 2: report.pdf, application/pdf, 6 bytes").click();
       await editor.updateComplete;
       sendButton(editor).click();
 

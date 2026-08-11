@@ -797,10 +797,17 @@ export const formattedTextStyles = css`
 
 export const autocompleteStyles = css`
   :host { display: block; }
-  .menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10; max-height: 260px; overflow: auto; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); box-shadow: 0 10px 30px var(--pi-shadow); }
+  .menu {
+    position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
+    max-height: min(260px, var(--composer-completion-menu-max-block-size, 260px));
+    max-block-size: min(260px, var(--composer-completion-menu-max-block-size, 260px));
+    overflow: auto; overscroll-behavior: contain;
+    border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); box-shadow: 0 10px 30px var(--pi-shadow);
+  }
   button { display: grid; grid-template-columns: minmax(120px, 1fr) auto; gap: 4px 10px; width: 100%; border: 0; border-bottom: 1px solid var(--pi-border); border-radius: 0; background: transparent; color: var(--pi-text); padding: 8px 10px; text-align: left; cursor: pointer; }
   button:last-child { border-bottom: 0; }
   button.selected, button:hover { background: var(--pi-selection-bg); }
+  button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
   span { color: var(--pi-muted); font-size: 12px; }
   small { grid-column: 1 / -1; color: var(--pi-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `;
@@ -830,6 +837,7 @@ export const promptEditorStyles = css`
   context-usage-meter { position: absolute; top: 0; right: 0; left: 0; }
   footer.shell-mode { border-color: var(--pi-success); background: var(--pi-success-bg); }
   .editor-wrap { position: relative; min-width: 0; }
+  .composer-live-region { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }
   .compact-status > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -906,7 +914,12 @@ export const promptEditorStyles = css`
   .attachment-file-preview { display: grid; place-items: center; width: 34px; height: 26px; border: 1px solid var(--pi-border-muted); border-radius: 4px; background: var(--pi-surface); color: var(--pi-muted); font: 700 10px/1 system-ui, sans-serif; letter-spacing: .03em; }
   .attachment-file-name { position: absolute; right: 4px; bottom: 3px; left: 4px; overflow: hidden; color: var(--pi-muted); font-size: 10px; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
   .attachment-remove { position: absolute; top: 1px; right: 1px; width: 18px; height: 18px; padding: 0; line-height: 16px; border-radius: 50%; border: 1px solid var(--pi-border); background: var(--pi-surface); color: var(--pi-text); font-size: 13px; cursor: pointer; }
-  .attachment-delivery select { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 5px 7px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
+  .attachment-chip:focus-visible, .attachment-remove:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .attachment-delivery { min-width: min(100%, 18rem); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 7px 9px; border: 1px solid var(--pi-border-muted); border-radius: 8px; }
+  .attachment-delivery legend { padding: 0 4px; color: var(--pi-muted); font-size: 12px; }
+  .attachment-delivery label { display: inline-flex; align-items: center; gap: 5px; color: var(--pi-text); font-size: 12px; }
+  .attachment-delivery input { margin: 0; accent-color: var(--pi-accent); }
+  .attachment-delivery input:disabled + span { color: var(--pi-dim); }
   .attachment-error { flex-basis: 100%; color: var(--pi-danger); font-size: 12px; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   button:disabled, textarea:disabled, .markdown-editor-disabled .cm-editor { opacity: .5; cursor: not-allowed; }

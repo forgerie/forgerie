@@ -72,6 +72,58 @@ describe("ComposerDraft", () => {
     expect(draft.querySelector(".attachment-chip")).toBeNull();
   });
 
+  it("keeps attachment chips, remove actions, delivery radios, and live updates accessible without focus theft", async () => {
+    const draft = await mountDraft();
+    draft.focusInput();
+    const focusedEditor = editorContent(draft);
+
+    await attachFile(draft, new File(["one"], "duplicate.txt", { type: "text/plain" }));
+    await attachFile(draft, new File(["two"], "duplicate.txt", { type: "text/plain" }));
+
+    const chips = Array.from(draft.querySelectorAll<HTMLElement>(".attachment-chip"));
+    const removeButtons = Array.from(draft.querySelectorAll<HTMLButtonElement>(".attachment-remove"));
+    const radios = Array.from(draft.querySelectorAll<HTMLInputElement>(".attachment-delivery input[type='radio']"));
+    const live = draft.querySelector<HTMLElement>("[data-live='attachments']");
+
+    expect(document.activeElement).toBe(focusedEditor);
+    expect(chips.map((chip) => chip.getAttribute("tabindex"))).toEqual(["0", "0"]);
+    expect(chips.map((chip) => chip.getAttribute("aria-label"))).toEqual([
+      "attachment 1 of 2: duplicate.txt, text/plain, 3 bytes",
+      "attachment 2 of 2: duplicate.txt, text/plain, 3 bytes",
+    ]);
+    expect(removeButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Remove attachment 1 of 2: duplicate.txt, text/plain, 3 bytes",
+      "Remove attachment 2 of 2: duplicate.txt, text/plain, 3 bytes",
+    ]);
+    expect(draft.querySelector(".attachment-delivery")?.getAttribute("aria-label")).toBe("Attachment delivery");
+    expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
+    expect(radios.find((radio) => radio.value === "folder")?.checked).toBe(true);
+    expect(radios.find((radio) => radio.value === "inline")?.disabled).toBe(true);
+    expect(live?.textContent).toBe("Added attachment 2 of 2: duplicate.txt, text/plain, 3 bytes.");
+
+    removeButtons[0]?.click();
+    await draft.updateComplete;
+
+    expect(live?.textContent).toBe("Removed attachment 1 of 2: duplicate.txt, text/plain, 3 bytes.");
+  });
+
+  it("announces attachment capture errors assertively without clearing successful attachments", async () => {
+    const draft = await mountDraft();
+    await attachFile(draft, new File(["ok"], "kept.txt", { type: "text/plain" }));
+    vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (this: FileReader) {
+      queueMicrotask(() => {
+        Object.defineProperty(this, "error", { configurable: true, value: new Error("read failed") });
+        this.dispatchEvent(new ProgressEvent("error"));
+      });
+    });
+
+    await attachFileExpectingError(draft, new File(["bad"], "broken.txt", { type: "text/plain" }));
+
+    expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1);
+    expect(draft.querySelector(".attachment-error")?.textContent).toBe("Failed to read an attachment.");
+    expect(draft.querySelector("[data-live='attachment-errors']")?.textContent).toBe("Failed to read an attachment.");
+  });
+
   it("keeps an immutable submitted snapshot until the host accepts it", async () => {
     const acceptance = deferred<"accepted" | "rejected">();
     const onSubmit = vi.fn((snapshot: ComposerDraftSubmitSnapshot) => acceptance.promise.then((outcome) => {
@@ -114,7 +166,7 @@ describe("ComposerDraft", () => {
     expect(draft.view?.state.doc.toString()).toBe("");
   });
 
-  it("keeps completion navigation ahead of prompt history", async () => {
+  it("keeps completion navigation ahead of prompt history and updates combobox state", async () => {
     const draft = await mountDraft({
       promptHistory: ["previous"],
       runtime: runtimeWith(({ kind, from, to }) => kind === "command" ? [
@@ -124,13 +176,42 @@ describe("ComposerDraft", () => {
     });
     setEditorText(draft, "/");
     await waitForMenuItems(draft, 2);
+    const content = editorContent(draft);
+    const foundMenu = menu(draft);
+    const listbox = foundMenu?.shadowRoot?.querySelector("[role='listbox']");
+    const options = Array.from(foundMenu?.shadowRoot?.querySelectorAll<HTMLElement>("[role='option']") ?? []);
+
+    expect(content.getAttribute("role")).toBe("combobox");
+    expect(content.getAttribute("aria-expanded")).toBe("true");
+    expect(content.getAttribute("aria-controls")).toBe(listbox?.id);
+    expect(content.getAttribute("aria-activedescendant")).toBe(options[0]?.id);
+    expect(options[0]?.getAttribute("aria-selected")).toBe("true");
 
     press(draft, "ArrowUp");
     await draft.updateComplete;
-    await menu(draft)?.updateComplete;
+    await foundMenu?.updateComplete;
 
-    expect(menu(draft)?.shadowRoot?.querySelector("button.selected strong")?.textContent).toBe("/two");
+    expect(foundMenu?.shadowRoot?.querySelector("button.selected strong")?.textContent).toBe("/two");
+    expect(content.getAttribute("aria-activedescendant")).toBe(options[1]?.id);
+    expect(foundMenu?.shadowRoot?.querySelector("[role='option'][aria-selected='true']")?.id).toBe(options[1]?.id);
     expect(draft.view?.state.doc.toString()).toBe("/");
+  });
+
+  it("picks a pointer-selected completion and restores editor focus", async () => {
+    const draft = await mountDraft({
+      runtime: runtimeWith(({ kind, from, to }) => kind === "command" ? [{ kind: "command", replaceFrom: from, replaceTo: to, insertText: "/review", detail: "skill" }] : []),
+    });
+    setEditorText(draft, "/");
+    await waitForMenuItems(draft, 1);
+    const option = menu(draft)?.shadowRoot?.querySelector<HTMLElement>("[role='option']");
+    if (option === null || option === undefined) throw new Error("Expected completion option");
+
+    option.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, composed: true }));
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("/review ");
+    expect(editorContent(draft).getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(editorContent(draft));
   });
 
   it("browses session prompts and restores the unsent draft", async () => {
@@ -242,6 +323,12 @@ function press(draft: ComposerDraft, key: string): KeyboardEvent {
   return pressKey(view.contentDOM, key);
 }
 
+function editorContent(draft: ComposerDraft): HTMLElement {
+  const content = draft.view?.contentDOM;
+  if (content === undefined) throw new Error("Expected CodeMirror content DOM");
+  return content;
+}
+
 function menu(draft: ComposerDraft): AutocompleteMenu | null | undefined {
   return draft.querySelector<AutocompleteMenu>("autocomplete-menu");
 }
@@ -262,9 +349,18 @@ async function waitForMenuItems(draft: ComposerDraft, count: number): Promise<vo
 async function attachFile(draft: ComposerDraft, file: File): Promise<void> {
   const input = draft.querySelector<HTMLInputElement>(".attachment-input");
   if (input === null) throw new Error("Expected attachment input");
+  const previousCount = draft.querySelectorAll(".attachment-chip").length;
   Object.defineProperty(input, "files", { configurable: true, value: [file] });
   input.dispatchEvent(new Event("change"));
-  await vi.waitFor(() => { expect(draft.querySelector(".attachment-chip")).not.toBeNull(); });
+  await vi.waitFor(() => { expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(previousCount + 1); });
+}
+
+async function attachFileExpectingError(draft: ComposerDraft, file: File): Promise<void> {
+  const input = draft.querySelector<HTMLInputElement>(".attachment-input");
+  if (input === null) throw new Error("Expected attachment input");
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new Event("change"));
+  await vi.waitFor(() => { expect(draft.querySelector(".attachment-error")).not.toBeNull(); });
 }
 
 function deferred<T>() {
