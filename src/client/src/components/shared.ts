@@ -234,14 +234,35 @@ export const appStyles = css`
    * the compositor instead of asking for paint on every frame.
    */
   .peek-sheet[data-tracking] { transition: none; will-change: transform; }
-  .peek-sheet[data-side="navigation"] { inset-inline-start: 0; transform: translateX(calc((var(--peek-progress, 0) - 1) * 100%)); }
-  .peek-sheet[data-side="workspace"] { inset-inline-end: 0; transform: translateX(calc((1 - var(--peek-progress, 0)) * 100%)); }
+  /*
+   * Only the edge that faces the session is rounded. The other edge is flush
+   * with the screen, and rounding it would show the transcript through the
+   * corners of a sheet that is supposed to be covering it.
+   *
+   * The radius is written out because this codebase has no radius token: the
+   * theme contract carries colour only, and every corner in the app is a
+   * literal. A sheet is a larger surface than the 8px controls around it, so it
+   * takes a larger corner.
+   */
+  .peek-sheet[data-side="navigation"] {
+    inset-inline-start: 0;
+    transform: translateX(calc((var(--peek-progress, 0) - 1) * 100%));
+    border-start-end-radius: 16px;
+    border-end-end-radius: 16px;
+  }
+  .peek-sheet[data-side="workspace"] {
+    inset-inline-end: 0;
+    transform: translateX(calc((1 - var(--peek-progress, 0)) * 100%));
+    border-start-start-radius: 16px;
+    border-end-start-radius: 16px;
+  }
   /*
    * One control, no title. The panel underneath already names itself, and a
    * second name for the same thing is two vocabularies for one concept. The
    * band carries the pin only, so the sheet spends almost no height on chrome.
    */
-  .peek-sheet-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; padding: 4px 6px; }
+  /* Inline padding clears the sheet's corner, so the pin is not inside the curve. */
+  .peek-sheet-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; padding: 6px 12px; }
   .peek-pin { flex: 0 0 auto; min-height: 28px; padding: 2px 10px; font-size: 12px; color: var(--pi-muted); }
   .peek-pin:hover, .peek-pin:focus-visible { color: var(--pi-text); }
   .peek-sheet-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
