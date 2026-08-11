@@ -7,6 +7,7 @@ import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { api, type FileSuggestion, type PromptAttachment, type SessionModel, type SessionStatus, type SlashCommand } from "../api";
 import type { PromptAttachmentDelivery } from "../../../shared/apiTypes";
+import { sessionGuidanceSummary } from "../../../shared/sessionGuidance";
 import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePromptAttachment, promptAttachmentsCanUseInlineDelivery, type CapturedAttachment } from "../promptAttachmentCapture";
 import { composerRail, type ComposerRail } from "../composerRail";
 import { inputModeForDraft, inputModesEqual, type InputMode } from "../inputModes";
@@ -21,6 +22,7 @@ import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, ren
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import "./AutocompleteMenu";
 import "./ContextUsageMeter";
+import "./GuidancePicker";
 
 type PendingAttachment = CapturedAttachment & { id: string };
 
@@ -45,6 +47,7 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) onStop?: () => void;
   @property({ attribute: false }) onSelectModel?: () => void;
   @property({ attribute: false }) onSelectThinking?: () => void;
+  @property({ attribute: false }) onSetGuidance?: (entryId: string, enabled: boolean) => Promise<boolean>;
   /** Set when the chat surface has handed its chrome to an on-request sheet. */
   @property({ type: Boolean }) chromeSummoned = false;
   @property() sessionLabel?: string;
@@ -57,6 +60,7 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) availableThinkingLevels: readonly string[] = [];
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
   @query(".attachment-input") private attachmentInput?: HTMLInputElement;
+  @query(".guidance-trigger") private guidanceTrigger?: HTMLButtonElement;
   // `draft` is the live document text but is intentionally NOT reactive: it
   // changes on every keystroke and the visible text is owned by CodeMirror, not
   // by Lit's render. Re-rendering the surrounding template on each keystroke is
@@ -71,6 +75,10 @@ export class PromptEditor extends LitElement {
   @state() private attachments: PendingAttachment[] = [];
   @state() private attachmentDelivery: PromptAttachmentDelivery = loadAttachmentDelivery();
   @state() private attachmentError: string | undefined = undefined;
+  @state() private guidanceOpen = false;
+  @state() private guidancePending = false;
+  @state() private guidanceError: string | undefined = undefined;
+  private guidanceRequestVersion = 0;
   private attachmentSeq = 0;
   private requestVersion = 0;
   private editor: EditorView | undefined;
@@ -93,6 +101,10 @@ export class PromptEditor extends LitElement {
       this.currentInputMode = inputModeForDraft(this.draft);
       this.completions = [];
       this.selectedIndex = 0;
+      this.guidanceRequestVersion += 1;
+      this.guidanceOpen = false;
+      this.guidancePending = false;
+      this.guidanceError = undefined;
     }
     if (sessionChanged || changed.has("promptHistory")) {
       this.promptHistoryState = createPromptHistory(this.promptHistory);
@@ -129,8 +141,21 @@ export class PromptEditor extends LitElement {
     const shellInputMode = this.currentInputMode.kind === "shell" ? this.currentInputMode : undefined;
     const shellMode = shellInputMode !== undefined;
     const rail = this.rail();
-    const busy = this.sending;
+    const busy = this.sending || this.guidancePending;
     return html`
+      ${this.guidanceOpen ? html`
+        <guidance-picker
+          id="session-guidance-picker"
+          .activeIds=${this.status?.activeGuidanceIds ?? []}
+          .pending=${this.guidancePending}
+          .working=${this.canSteer || this.isCompacting}
+          .readOnly=${this.disabled || !this.runtimeControlsAvailable}
+          .error=${this.guidanceError}
+          .trigger=${this.guidanceTrigger}
+          .onToggle=${(entryId: string, enabled: boolean) => { void this.setGuidance(entryId, enabled); }}
+          .onClose=${(restoreFocus: boolean) => { this.closeGuidance(restoreFocus); }}
+        ></guidance-picker>
+      ` : null}
       <footer
         class=${this.footerClass(shellMode)}
         @focusin=${() => { this.composerFocused = true; }}
@@ -156,7 +181,7 @@ export class PromptEditor extends LitElement {
             data-action="new-session"
             title=${NEW_SESSION_LABEL}
             aria-label=${NEW_SESSION_LABEL}
-            @click=${() => { this.onNewSession?.(); }}
+            @click=${() => { this.closeGuidance(false, true); this.onNewSession?.(); }}
           >${renderNewSessionIcon()}</button>
           ${this.renderPrimaryAction(rail)}
           <button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>
@@ -235,7 +260,7 @@ export class PromptEditor extends LitElement {
   private rail(): ComposerRail {
     return composerRail({
       disabled: this.disabled || !this.runtimeControlsAvailable,
-      sending: this.sending,
+      sending: this.sending || this.guidancePending,
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
       stoppable: this.canStop,
@@ -287,6 +312,14 @@ export class PromptEditor extends LitElement {
             ${renderThinkingGauge(thinkingGauge(status.thinkingLevel, this.availableThinkingLevels))}<span class="thinking-level">${thinking}</span>
           </button>
         </div>
+        <button
+          id="guidance-trigger"
+          class="guidance-trigger"
+          aria-controls="session-guidance-picker"
+          aria-expanded=${this.guidanceOpen ? "true" : "false"}
+          title="Session guidance"
+          @click=${() => { this.toggleGuidance(); }}
+        >${sessionGuidanceSummary(status.activeGuidanceIds ?? [])}</button>
         ${this.renderArchiveAction()}
       </div>
     `;
@@ -313,12 +346,53 @@ export class PromptEditor extends LitElement {
 
   private selectModel(): void {
     if (this.disabled || !this.runtimeControlsAvailable) return;
+    this.closeGuidance(false, true);
     this.onSelectModel?.();
   }
 
   private selectThinking(): void {
     if (this.disabled || !this.runtimeControlsAvailable) return;
+    this.closeGuidance(false, true);
     this.onSelectThinking?.();
+  }
+
+  private toggleGuidance(): void {
+    if (this.guidanceOpen) {
+      this.closeGuidance(true);
+      return;
+    }
+    this.requestVersion += 1;
+    this.completions = [];
+    this.selectedIndex = 0;
+    this.guidanceError = undefined;
+    this.guidanceOpen = true;
+  }
+
+  private closeGuidance(restoreFocus: boolean, force = false): void {
+    if (!this.guidanceOpen || (this.guidancePending && !force)) return;
+    this.guidanceOpen = false;
+    this.guidanceError = undefined;
+    if (restoreFocus) void this.updateComplete.then(() => { this.guidanceTrigger?.focus(); });
+  }
+
+  private async setGuidance(entryId: string, enabled: boolean): Promise<void> {
+    if (this.guidancePending || this.disabled || !this.runtimeControlsAvailable) return;
+    const requestVersion = ++this.guidanceRequestVersion;
+    this.guidancePending = true;
+    this.guidanceError = undefined;
+    let success: boolean;
+    try {
+      success = await this.onSetGuidance?.(entryId, enabled) ?? false;
+    } catch {
+      success = false;
+    }
+    if (requestVersion !== this.guidanceRequestVersion) return;
+    this.guidancePending = false;
+    if (success) {
+      this.closeGuidance(true, true);
+      return;
+    }
+    this.guidanceError = "Could not update guidance. Try again.";
   }
 
   private renderArchiveAction() {
@@ -328,7 +402,7 @@ export class PromptEditor extends LitElement {
         class="composer-archive summoned-secondary"
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
-        @click=${() => this.onArchiveAndNext?.()}
+        @click=${() => { this.closeGuidance(false, true); this.onArchiveAndNext?.(); }}
       >Archive &amp; next</button>
     `;
   }
@@ -351,7 +425,7 @@ export class PromptEditor extends LitElement {
         ?disabled=${busy}
         title=${label}
         aria-label=${label}
-        @click=${() => this.onOpenControlSheet?.()}
+        @click=${() => { this.closeGuidance(false, true); this.onOpenControlSheet?.(); }}
       >${renderAttachIcon()}${waiting ? html`<span class="island-menu-count" aria-hidden="true">${String(this.attentionCount)}</span>` : null}</button>
     `;
   }
@@ -682,7 +756,7 @@ export class PromptEditor extends LitElement {
   }
 
   private send(streamingBehavior?: "steer" | "followUp") {
-    if (this.disabled || !this.runtimeControlsAvailable || this.sending) return;
+    if (this.disabled || !this.runtimeControlsAvailable || this.sending || this.guidancePending) return;
     const text = this.draft.trim();
     const pending = this.attachments;
     if (text === "" && pending.length === 0) return;
@@ -733,8 +807,8 @@ function promptHistoryChanged(value: readonly string[], previous: readonly strin
   return value.some((entry, index) => entry !== previous[index]);
 }
 
-// The only `status` fields the template reads directly are the model identity
-// and thinking level (shown in renderCompactStatus). Everything else the editor
+// The only `status` fields the template reads directly are the model identity,
+// thinking level, and guidance summary (shown in renderCompactStatus). Everything else the editor
 // cares about (canSteer/canStop/isCompacting/sending) is passed as a separate
 // property that Lit already diffs by value. Comparing just these fields lets us
 // ignore the per-token status churn that does not change anything on screen.
@@ -743,7 +817,12 @@ function sessionStatusRenderEqual(a: SessionStatus | undefined, b: SessionStatus
   if (a === undefined || b === undefined) return false;
   return a.model?.id === b.model?.id
     && a.model?.provider === b.model?.provider
-    && a.thinkingLevel === b.thinkingLevel;
+    && a.thinkingLevel === b.thinkingLevel
+    && stringArraysEqual(a.activeGuidanceIds ?? [], b.activeGuidanceIds ?? []);
+}
+
+function stringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function draftStorageKey(machineId: unknown, sessionId: unknown): string | undefined {

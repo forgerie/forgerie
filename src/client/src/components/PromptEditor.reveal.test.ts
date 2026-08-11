@@ -31,13 +31,14 @@ describe("PromptEditor rail reveals", () => {
     expect(onArchiveAndNext).toHaveBeenCalledOnce();
   });
 
-  it("reveals identity and archive from the island's own width, in that order", () => {
+  it("keeps guidance resident and reveals identity and archive only after it", () => {
     const css = promptEditorStyles.cssText;
 
     expect(css).toMatch(/\.session-identity\s*{\s*display:\s*none/);
     expect(css).toMatch(/\.composer-archive\s*{\s*display:\s*none/);
-    expect(css).toMatch(/@container \(min-width: 560px\)\s*{\s*\.session-identity/);
-    expect(css).toMatch(/@container \(min-width: 700px\)\s*{\s*\.composer-archive/);
+    expect(css).toMatch(/\.compact-status\s*>\s*\.guidance-trigger\s*{[^}]*flex:\s*0 0 auto/);
+    expect(css).toMatch(/@container \(min-width: 760px\)\s*{\s*\.session-identity/);
+    expect(css).toMatch(/@container \(min-width: 920px\)\s*{\s*\.composer-archive/);
   });
 });
 
@@ -53,6 +54,7 @@ function editor(): PromptEditor {
     isBashRunning: false,
     pendingMessageCount: 0,
     queuedMessages: [],
+    activeGuidanceIds: [],
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     cost: 0,
     model: { id: "gpt-5.6-sol", provider: "openai-codex" },

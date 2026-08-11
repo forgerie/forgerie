@@ -810,7 +810,9 @@ export const promptEditorStyles = css`
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }
   .compact-status > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; }
+  .compact-status > .guidance-trigger { flex: 0 0 auto; min-width: 0; max-width: min(38cqi, 190px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-text-secondary); font-size: inherit; }
+  .guidance-trigger[aria-expanded="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-text); }
+  .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; overflow: hidden; }
   .model-capsule .select-model { max-width: min(42cqi, 320px); border-start-end-radius: 0; border-end-end-radius: 0; }
   .model-capsule .select-thinking { width: auto; min-width: 34px; margin-inline-start: -1px; padding-inline: 6px; border-start-start-radius: 0; border-end-start-radius: 0; }
   /* The gauge carries the level; the word joins it only where the rail has room. */
@@ -826,10 +828,10 @@ export const promptEditorStyles = css`
    */
   .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
   .composer-archive { display: none; flex: 0 0 auto; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-muted); padding: 5px 9px; font-size: inherit; }
-  @container (min-width: 560px) {
+  @container (min-width: 760px) {
     .session-identity { display: inline; }
   }
-  @container (min-width: 700px) {
+  @container (min-width: 920px) {
     .composer-archive { display: inline-flex; }
   }
   .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
