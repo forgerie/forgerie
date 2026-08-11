@@ -69,3 +69,31 @@ at the bottom that looks like a layout defect and is not one.
 `Archive & next` moves into the bottom sheet, which makes the triage loop
 read → archive → next two taps instead of one. Unresolved: whether archive
 earns a place directly in the composer row.
+
+---
+
+## Below the transcript, measured again (2026-08-10)
+
+The chrome above the transcript went to zero; the area below it was still a
+composer plus a status bar. The floating composer island
+(`work/items/active/01KZQD4T7N8B2K5M9V1XW3PH6C-floating-composer-island/`)
+retires the bar and folds its readings into the sheet the composer summons.
+
+Measured with the same CDP emulated-viewport method, at rest with an empty
+draft, on the same session in both builds:
+
+| Posture | Resident below transcript, before | After |
+|---|---|---|
+| Unfolded portrait 739x979 | 145px (composer 114 + meter 2 + bar 29) | **125px** |
+| Unfolded landscape 979x739 | 145px | **125px** |
+| Folded portrait 499x789 | 145px | **125px** |
+| Folded landscape 789x499 | 145px | **125px** |
+
+Twenty pixels back at every posture, and one surface instead of three. The
+gain is smaller than the bar's own height because the island pays for its
+gutter, border, and internal padding — the calm is the larger part of the
+return, and the readings the bar carried are now a tap away rather than
+permanently on screen.
+
+The open cost recorded above is resolved: `Archive & next` sits on the rail
+whenever the island is at least 700px wide, and in the sheet when it is not.
