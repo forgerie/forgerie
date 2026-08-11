@@ -2111,9 +2111,10 @@ export class PiSessionService implements SessionRouteService {
     const change = setSessionGuidance(slot.snapshot(), entryId, enabled);
     if (!change.changed) return this.statusFromSession(session);
     const sessionManager = session.sessionManager;
-    if (sessionManager.appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
+    const appendCustomEntry = sessionManager.appendCustomEntry?.bind(sessionManager);
+    if (appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
     await this.runSessionEntryMutation(session, "change session guidance", () => {
-      sessionManager.appendCustomEntry?.(
+      appendCustomEntry(
         SESSION_GUIDANCE_CUSTOM_TYPE,
         persistedSessionGuidance(change.activeIds),
       );
@@ -2437,8 +2438,17 @@ export class PiSessionService implements SessionRouteService {
 
       const forkedSession = this.active.get(result.session.id)?.runtime.session;
       if (forkedSession !== undefined && this.isCurrentActiveSession(forkedSession)) {
-        await this.inheritSessionGuidance(forkedSession, inheritedGuidanceIds);
-        this.publishActivity(forkedSession, "session forked", "idle");
+        let guidanceInheritanceError: unknown;
+        try {
+          await this.inheritSessionGuidance(forkedSession, inheritedGuidanceIds);
+        } catch (error: unknown) {
+          guidanceInheritanceError = error;
+        }
+        if (guidanceInheritanceError === undefined) {
+          this.publishActivity(forkedSession, "session forked", "idle");
+        } else {
+          this.publishActivity(forkedSession, "session forked without guidance", "error", errorMessage(guidanceInheritanceError));
+        }
         this.publishStatus(forkedSession);
       }
       if (result.session.id !== session.sessionId) this.clearSupersededSessionActivity(session);
@@ -2462,9 +2472,10 @@ export class PiSessionService implements SessionRouteService {
     const slot = this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot;
     if (slot === undefined || arraysEqual(slot.snapshot(), inheritedIds)) return;
     const sessionManager = session.sessionManager;
-    if (sessionManager.appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
+    const appendCustomEntry = sessionManager.appendCustomEntry?.bind(sessionManager);
+    if (appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
     await this.runSessionEntryMutation(session, "inherit session guidance", () => {
-      sessionManager.appendCustomEntry?.(
+      appendCustomEntry(
         SESSION_GUIDANCE_CUSTOM_TYPE,
         persistedSessionGuidance(inheritedIds),
       );
@@ -3364,8 +3375,10 @@ export class PiSessionService implements SessionRouteService {
       runtime.setRebindSession(async (session) => {
         const priorGeneration = notificationGeneration;
         let candidateGeneration: SessionNotificationGeneration | undefined;
-        runtime.services?.sessionGuidanceSlot?.replace([]);
+        const guidanceSlot = runtime.services?.sessionGuidanceSlot;
+        const previousGuidance = guidanceSlot?.snapshot() ?? [];
         try {
+          guidanceSlot?.replace(restoreSessionGuidance(session.sessionManager.getEntries?.() ?? []));
           await this.prepareUnreadRuntimeRebind(boundSession, session);
           await this.recoverSubsessionTrackingForOpenedSession(session);
           if (priorGeneration !== undefined) {
@@ -3387,6 +3400,7 @@ export class PiSessionService implements SessionRouteService {
             notificationGeneration = candidateGeneration;
           }
         } catch (error: unknown) {
+          guidanceSlot?.replace(previousGuidance);
           if (candidateGeneration !== undefined) {
             this.publishNotificationMutations(this.notificationStore.abortReplacement(candidateGeneration, "candidate"));
             notificationGeneration = candidateGeneration;

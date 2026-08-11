@@ -124,6 +124,37 @@ describe("PiSessionService session guidance", () => {
     await service.dispose();
   });
 
+  it("restores prior guidance when replacement binding fails", async () => {
+    const slot = createSessionGuidanceSlot();
+    slot.replace(["technical-english"]);
+    const original = fakeRuntime("original-failed-rebind");
+    const replacement = fakeRuntime("replacement-failed-rebind", {
+      sessionManager: fakeSessionManager("/workspace", {
+        getSessionId: () => "replacement-failed-rebind",
+        getEntries: () => [],
+      }),
+    });
+    attachSlot(original.runtime, slot);
+    let rebindSession: ((session: PiAgentSession) => Promise<void>) | undefined;
+    original.runtime.setRebindSession = (callback) => { rebindSession = callback; };
+    replacement.session.bindExtensions = () => Promise.reject(new Error("bind failed"));
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(original.runtime),
+      sessionManager: sessionGateway([]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.start("/workspace");
+    if (rebindSession === undefined) throw new Error("Expected runtime rebind callback");
+    if (!Reflect.set(original.runtime, "session", replacement.session)) throw new Error("Could not replace runtime session");
+    await expect(rebindSession(replacement.session)).rejects.toThrow("bind failed");
+
+    expect(slot.snapshot()).toEqual(["technical-english"]);
+    await service.dispose();
+  });
+
   it("rejects even an idempotent change during active tree navigation", async () => {
     let finishNavigation!: () => void;
     const navigation = new Promise<{ cancelled: false }>((resolve) => {
@@ -205,6 +236,49 @@ describe("PiSessionService session guidance", () => {
       { version: 1, activeIds: ["technical-english"] },
     );
     expect(slot.snapshot()).toEqual(["technical-english"]);
+    await service.dispose();
+  });
+
+  it("keeps a completed fork when guidance inheritance persistence fails", async () => {
+    const slot = createSessionGuidanceSlot();
+    slot.replace(["technical-english"]);
+    const original = fakeRuntime("source-guidance-failure", {
+      sessionManager: fakeSessionManager("/workspace", {
+        getSessionId: () => "source-guidance-failure",
+        getLeafId: () => "leaf-1",
+      }),
+    });
+    const replacement = fakeRuntime("forked-guidance-failure", {
+      sessionManager: fakeSessionManager("/workspace", {
+        getSessionId: () => "forked-guidance-failure",
+        getEntries: () => [],
+        appendCustomEntry: () => { throw new Error("guidance disk full"); },
+      }),
+    });
+    attachSlot(original.runtime, slot);
+    let rebindSession: ((session: PiAgentSession) => Promise<void>) | undefined;
+    original.runtime.setRebindSession = (callback) => { rebindSession = callback; };
+    original.runtime.fork = async () => {
+      if (rebindSession === undefined) throw new Error("Expected runtime rebind callback");
+      if (!Reflect.set(original.runtime, "session", replacement.session)) throw new Error("Could not replace runtime session");
+      await rebindSession(replacement.session);
+      return { cancelled: false };
+    };
+    const hub = new CapturingSessionEventHub();
+    const service = new PiSessionService(hub, {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(original.runtime),
+      sessionManager: sessionGateway([]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.start("/workspace");
+    await expect(service.forkFromTree(sessionRef("source-guidance-failure"), {
+      entryId: "entry-1",
+      expectedLeafId: "leaf-1",
+    })).resolves.toMatchObject({ cancelled: false, session: { id: "forked-guidance-failure" } });
+    expect(hub.globalEvents.some((event) => event.type === "activity.update" && event.activity.phase === "error")).toBe(true);
     await service.dispose();
   });
 

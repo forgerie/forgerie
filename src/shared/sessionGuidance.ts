@@ -21,6 +21,10 @@ export interface SessionGuidanceChange {
 
 const builtInIds: readonly SessionGuidanceId[] = SESSION_GUIDANCE_ENTRIES.map((entry) => entry.id);
 
+export function isSessionGuidanceId(value: unknown): value is SessionGuidanceId {
+  return typeof value === "string" && builtInIds.some((id) => id === value);
+}
+
 export function normalizeSessionGuidanceIds(
   value: unknown,
   knownIds: readonly string[] = builtInIds,

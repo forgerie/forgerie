@@ -1,11 +1,11 @@
-import { normalizeSessionGuidanceIds } from "../../shared/sessionGuidance.js";
+import { isSessionGuidanceId, normalizeSessionGuidanceIds, type SessionGuidanceId } from "../../shared/sessionGuidance.js";
 
 export const SESSION_GUIDANCE_CUSTOM_TYPE = "forgerie.session-guidance";
 const SESSION_GUIDANCE_VERSION = 1;
 
-const instructions: Readonly<Record<string, string>> = {
+const instructions = {
   "technical-english": "Use ASD-STE100 Simplified Technical English. Use short sentences. Put one idea in each sentence. Use plain words and one term for each concept.",
-};
+} satisfies Readonly<Record<SessionGuidanceId, string>>;
 
 export interface PersistedSessionGuidance {
   readonly version: 1;
@@ -29,10 +29,7 @@ export function restoreSessionGuidance(entries: readonly unknown[]): string[] {
 }
 
 export function sessionGuidancePromptBlock(activeIds: readonly string[]): string | undefined {
-  const activeInstructions = normalizeSessionGuidanceIds(activeIds).flatMap((id) => {
-    const instruction = instructions[id];
-    return instruction === undefined ? [] : [instruction];
-  });
+  const activeInstructions = normalizeSessionGuidanceIds(activeIds).flatMap((id) => isSessionGuidanceId(id) ? [instructions[id]] : []);
   if (activeInstructions.length === 0) return undefined;
   return `Session guidance:\n${activeInstructions.map((instruction) => `- ${instruction}`).join("\n")}`;
 }
