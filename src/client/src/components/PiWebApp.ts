@@ -16,7 +16,7 @@ import { MachineController } from "../controllers/machineController";
 import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
-import { SessionController, type SessionLaunchRecovery } from "../controllers/sessionController";
+import { SessionController, type FirstPromptSubmission, type SessionLaunchRecovery } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
 import { WorkspaceController, canDeleteWorkspace } from "../controllers/workspaceController";
@@ -1839,7 +1839,9 @@ export class PiWebApp extends LitElement {
     });
     const pending = this.state.selectedSession;
     const queued = pending === undefined ? undefined : this.state.clientQueuedSessionMessages[pending.id];
-    if (pending === undefined || pending.id === previouslySelectedSessionId || queued?.some((message) => message.text === intent.firstPrompt.text) !== true) {
+    const queuedFirstPrompt = queued?.some((message) => message.text === intent.firstPrompt.text) === true
+      || ((intent.firstPrompt.attachments?.length ?? 0) > 0 && (queued?.length ?? 0) > 0);
+    if (pending === undefined || pending.id === previouslySelectedSessionId || !queuedFirstPrompt) {
       void launch.catch((error: unknown) => { if (isCurrentToken()) this.setState({ error: String(error) }); });
       return { kind: "rejected", reason: "launch-rejected", message: "New session could not be queued." };
     }
@@ -3129,6 +3131,7 @@ export class PiWebApp extends LitElement {
           .onCancel=${() => { this.closeNewSessionComposer(); }}
           .onSubmit=${(intent: NewSessionLaunchIntent) => this.submitNewSession(intent)}
           .onClaimRecoveryDraft=${(recoverySeedId: string) => this.sessions.claimSessionLaunchRecoveryDraft(recoverySeedId)}
+          .onReturnRecoveryDraft=${(recoverySeedId: string, snapshot: FirstPromptSubmission) => { this.sessions.returnSessionLaunchRecoveryDraft(recoverySeedId, snapshot); }}
         ></new-session-composer>` : null}
         ${state.workspaceManagementDialog !== undefined ? html`<workspace-management-dialog
           .dialogState=${state.workspaceManagementDialog}

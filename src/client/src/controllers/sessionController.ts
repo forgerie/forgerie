@@ -147,12 +147,23 @@ interface PendingSessionStart {
   backendSessionId?: string;
 }
 
+type FirstPromptQueuedSend = Extract<QueuedPendingSessionSend, { type: "prompt" }> | Extract<QueuedPendingSessionSend, { type: "promptResource" }>;
+
+type ClaimedSessionLaunchRecoveryDraftQueue = Omit<Extract<QueuedPendingSessionSend, { type: "prompt" }>, "text" | "attachments" | "deliveredText">
+  | Omit<Extract<QueuedPendingSessionSend, { type: "promptResource" }>, "text" | "attachments" | "deliveredText">;
+
+interface ClaimedSessionLaunchRecoveryDraft {
+  readonly index: number;
+  readonly queued: ClaimedSessionLaunchRecoveryDraftQueue;
+}
+
 interface SessionLaunchRecoveryRecord {
   recovery: SessionLaunchRecovery;
   queuedSends: QueuedPendingSessionSend[];
   pending?: PendingSessionStart;
   session?: SessionInfo;
   creationFailureMessage?: string;
+  claimedDraft?: ClaimedSessionLaunchRecoveryDraft;
 }
 
 interface SuppressedCreatedSession {
@@ -192,7 +203,6 @@ export class SessionController {
   private pendingQueuedSendSeq = 0;
   private readonly pendingSessionStarts = new Map<string, PendingSessionStart>();
   private readonly sessionLaunchRecoveries = new Map<string, SessionLaunchRecoveryRecord>();
-  private readonly claimedSessionLaunchRecoveryDrafts = new Set<string>();
   private readonly suppressedCreatedSessions = new Map<string, SuppressedCreatedSession>();
   private readonly selectedSessionRefreshes = new TrailingRefreshCoordinator<string>();
 
@@ -293,12 +303,18 @@ export class SessionController {
   }
 
   claimSessionLaunchRecoveryDraft(sessionId: string): SessionLaunchRecoveryDraftSeed | undefined {
-    if (this.claimedSessionLaunchRecoveryDrafts.has(sessionId)) return undefined;
     const record = this.sessionLaunchRecoveries.get(sessionId);
-    if (record?.recovery.stage !== "creationFailed") return undefined;
-    const queued = record.queuedSends[0];
-    if (queued === undefined || (queued.type !== "prompt" && queued.type !== "promptResource")) return undefined;
-    this.claimedSessionLaunchRecoveryDrafts.add(sessionId);
+    if (record?.recovery.stage !== "creationFailed" || record.claimedDraft !== undefined) return undefined;
+    const index = record.queuedSends.findIndex(isInitialPromptSend);
+    const queued = index === -1 ? undefined : record.queuedSends[index];
+    if (queued === undefined || !isInitialPromptSend(queued)) return undefined;
+    record.queuedSends.splice(index, 1);
+    if (record.pending !== undefined && record.pending.queuedSends !== record.queuedSends) {
+      record.pending.queuedSends = record.pending.queuedSends.filter((candidate) => candidate.id !== queued.id);
+    }
+    record.claimedDraft = { index, queued: claimedRecoveryDraftQueueBookkeeping(queued) };
+    record.recovery = payloadFreeClaimedCreationRecovery(record.recovery, queued);
+    this.publishCreationFailedRecoveryQueue(sessionId, record);
     return {
       id: sessionId,
       snapshot: {
@@ -308,6 +324,20 @@ export class SessionController {
         ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
       },
     };
+  }
+
+  returnSessionLaunchRecoveryDraft(sessionId: string, snapshot: FirstPromptSubmission): void {
+    const record = this.sessionLaunchRecoveries.get(sessionId);
+    const claimed = record?.claimedDraft;
+    if (record?.recovery.stage !== "creationFailed" || claimed === undefined) return;
+    const queued = queuedRecoveryDraftFromSnapshot(claimed.queued, snapshot);
+    insertQueuedRecoveryDraft(record.queuedSends, claimed.index, queued);
+    if (record.pending !== undefined && record.pending.queuedSends !== record.queuedSends) {
+      insertQueuedRecoveryDraft(record.pending.queuedSends, claimed.index, queued);
+    }
+    delete record.claimedDraft;
+    record.recovery = creationRecoveryWithQueuedSubmission(record.recovery, queued);
+    this.publishCreationFailedRecoveryQueue(sessionId, record);
   }
 
   mergeCreationFailedSessionStarts(cwd: string, listedSessions: SessionInfo[], machineId: string): SessionInfo[] {
@@ -690,6 +720,24 @@ export class SessionController {
     } catch {
       return "promptDeliveryAmbiguous";
     }
+  }
+
+  private publishCreationFailedRecoveryQueue(sessionId: string, record: SessionLaunchRecoveryRecord): void {
+    if (record.recovery.stage !== "creationFailed") return;
+    const state = this.getState();
+    const queuedMessages = record.queuedSends.map(queuedSessionMessagePreview);
+    const activity = record.creationFailureMessage === undefined
+      ? state.sessionActivities[sessionId]
+      : failedPendingSessionActivity(sessionId, record.creationFailureMessage, record.queuedSends.length);
+    this.setState({
+      clientQueuedSessionMessages: queuedMessages.length === 0
+        ? omitKey(state.clientQueuedSessionMessages, sessionId)
+        : { ...state.clientQueuedSessionMessages, [sessionId]: queuedMessages },
+      ...(activity === undefined ? {} : {
+        sessionActivities: { ...state.sessionActivities, [sessionId]: activity },
+        ...(state.selectedSession?.id === sessionId ? { activity } : {}),
+      }),
+    });
   }
 
   private applyInitialPromptRecoveryActivity(recovery: SessionLaunchRecovery): void {
@@ -2410,9 +2458,9 @@ function appendSavedAttachmentReferences(text: string, paths: readonly string[])
 ${references}`;
 }
 
-function recoverySubmissionProjection(queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Pick<SessionLaunchRecovery, "attachments" | "delivery" | "promptResourceCommandIdentity"> {
+function recoverySubmissionProjection(queued: FirstPromptQueuedSend): Pick<SessionLaunchRecovery, "attachments" | "delivery" | "promptResourceCommandIdentity"> {
   return {
-    ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: queued.identity } : {}),
+    ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
     ...(queued.attachments === undefined || queued.attachments.length === 0 ? {} : {
       delivery: queued.delivery,
       attachments: queued.attachments.map((attachment) => ({
@@ -2421,6 +2469,87 @@ function recoverySubmissionProjection(queued: Extract<QueuedPendingSessionSend, 
         size: base64ByteSize(attachment.data),
       })),
     }),
+  };
+}
+
+function claimedRecoveryDraftQueueBookkeeping(queued: FirstPromptQueuedSend): ClaimedSessionLaunchRecoveryDraft["queued"] {
+  if (queued.type === "promptResource") {
+    return {
+      type: queued.type,
+      id: queued.id,
+      identity: { ...queued.identity },
+      ...(queued.streamingBehavior === undefined ? {} : { streamingBehavior: queued.streamingBehavior }),
+      delivery: queued.delivery,
+      purpose: queued.purpose,
+      ...(queued.deliveryReceipt === undefined ? {} : { deliveryReceipt: queued.deliveryReceipt }),
+    };
+  }
+  return {
+    type: queued.type,
+    id: queued.id,
+    ...(queued.streamingBehavior === undefined ? {} : { streamingBehavior: queued.streamingBehavior }),
+    delivery: queued.delivery,
+    ...(queued.purpose === undefined ? {} : { purpose: queued.purpose }),
+    ...(queued.deliveryReceipt === undefined ? {} : { deliveryReceipt: queued.deliveryReceipt }),
+  };
+}
+
+function payloadFreeClaimedCreationRecovery(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
+  return {
+    stage: recovery.stage,
+    sessionId: recovery.sessionId,
+    destination: recovery.destination,
+    prompt: "",
+    retrying: recovery.retrying,
+    delivery: queued.delivery,
+    ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
+    ...(queued.attachments === undefined || queued.attachments.length === 0 ? {} : {
+      attachments: queued.attachments.map((attachment) => ({
+        ...(attachment.name === undefined ? {} : { name: attachment.name }),
+        mimeType: attachment.mimeType,
+        size: base64ByteSize(attachment.data),
+      })),
+    }),
+  };
+}
+
+function queuedRecoveryDraftFromSnapshot(bookkeeping: ClaimedSessionLaunchRecoveryDraft["queued"], snapshot: FirstPromptSubmission): FirstPromptQueuedSend {
+  const attachments = snapshot.attachments === undefined ? undefined : snapshot.attachments.map((attachment) => ({ ...attachment }));
+  if (bookkeeping.type === "promptResource" && snapshot.promptResourceCommandIdentity !== undefined) {
+    return {
+      ...bookkeeping,
+      identity: { ...snapshot.promptResourceCommandIdentity },
+      text: snapshot.text,
+      attachments,
+      delivery: snapshot.delivery ?? bookkeeping.delivery,
+      purpose: "initialPrompt",
+    };
+  }
+  return {
+    type: "prompt",
+    id: bookkeeping.id,
+    ...(bookkeeping.streamingBehavior === undefined ? {} : { streamingBehavior: bookkeeping.streamingBehavior }),
+    text: snapshot.text,
+    attachments,
+    delivery: snapshot.delivery ?? bookkeeping.delivery,
+    purpose: "initialPrompt",
+  };
+}
+
+function insertQueuedRecoveryDraft(queue: QueuedPendingSessionSend[], index: number, queued: FirstPromptQueuedSend): void {
+  const withoutDuplicate = queue.filter((candidate) => candidate.id !== queued.id);
+  const insertionIndex = Math.max(0, Math.min(index, withoutDuplicate.length));
+  queue.splice(0, queue.length, ...withoutDuplicate.slice(0, insertionIndex), queued, ...withoutDuplicate.slice(insertionIndex));
+}
+
+function creationRecoveryWithQueuedSubmission(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
+  return {
+    stage: recovery.stage,
+    sessionId: recovery.sessionId,
+    destination: recovery.destination,
+    prompt: queued.text,
+    retrying: recovery.retrying,
+    ...recoverySubmissionProjection(queued),
   };
 }
 

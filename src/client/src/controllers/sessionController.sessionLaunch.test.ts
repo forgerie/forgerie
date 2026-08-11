@@ -402,6 +402,151 @@ describe("SessionController session launch", () => {
     expect(state.clientQueuedSessionMessages[temporaryId]).toBeUndefined();
   });
 
+  it("moves a claimed creation recovery draft out of the controller queue until rollback", async () => {
+    const startRequest = deferred<SessionInfo>();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => startRequest.promise,
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    const launch = controller.launchSession({ text: "Recover privately" });
+    const failedId = state.selectedSession?.id;
+    if (failedId === undefined) throw new Error("Expected pending session");
+    await controller.send("Queued behind it");
+    startRequest.reject(new Error("backend unavailable"));
+    await launch;
+
+    const seed = controller.claimSessionLaunchRecoveryDraft(failedId);
+
+    expect(seed).toEqual({ id: failedId, snapshot: { text: "Recover privately", delivery: "inline" } });
+    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toBeUndefined();
+    expect(controller.getSessionLaunchRecovery(failedId)).toMatchObject({ prompt: "" });
+    expect(state.clientQueuedSessionMessages[failedId]).toEqual([{ kind: "followUp", text: "Queued behind it" }]);
+    expect(JSON.stringify({ recovery: controller.getSessionLaunchRecovery(failedId), queued: state.clientQueuedSessionMessages[failedId] })).not.toContain("Recover privately");
+    expect(queuedRecoveryTexts(controller, failedId)).toEqual(["Queued behind it"]);
+
+    controller.returnSessionLaunchRecoveryDraft(failedId, { text: "Edited recovery", delivery: "inline" });
+
+    expect(controller.getSessionLaunchRecovery(failedId)).toMatchObject({ prompt: "Edited recovery" });
+    expect(state.clientQueuedSessionMessages[failedId]).toEqual([
+      { kind: "followUp", text: "Edited recovery" },
+      { kind: "followUp", text: "Queued behind it" },
+    ]);
+    expect(queuedRecoveryTexts(controller, failedId)).toEqual(["Edited recovery", "Queued behind it"]);
+    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({ id: failedId, snapshot: { text: "Edited recovery", delivery: "inline" } });
+    expect(state.clientQueuedSessionMessages[failedId]).toEqual([{ kind: "followUp", text: "Queued behind it" }]);
+  });
+
+  it("restores claimed attachment-only recovery drafts without retaining base64 in app state", async () => {
+    const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.reject(new Error("backend unavailable")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "", attachments, delivery: "inline" });
+    const failedId = state.selectedSession?.id;
+    if (failedId === undefined) throw new Error("Expected failed pending session");
+
+    const seed = controller.claimSessionLaunchRecoveryDraft(failedId);
+
+    expect(seed).toEqual({ id: failedId, snapshot: { text: "", attachments, delivery: "inline" } });
+    expect(JSON.stringify({ recovery: controller.getSessionLaunchRecovery(failedId), queued: state.clientQueuedSessionMessages[failedId] })).not.toContain("QUJD");
+
+    controller.returnSessionLaunchRecoveryDraft(failedId, { text: "", attachments, delivery: "inline" });
+
+    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({ id: failedId, snapshot: { text: "", attachments, delivery: "inline" } });
+  });
+
+  it("preserves prompt-resource identity when a claimed creation recovery rolls back and retries", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    let startCount = 0;
+    const resourceCalls: { text: string; identity: PromptResourceCommandIdentity }[] = [];
+    let genericPromptCalls = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => {
+        startCount += 1;
+        return startCount === 1 ? Promise.reject(new Error("backend unavailable")) : Promise.resolve(started);
+      },
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => { genericPromptCalls += 1; return Promise.resolve({ accepted: true }); },
+      runPromptResourceCommand: (_session, text, sentIdentity) => {
+        resourceCalls.push({ text, identity: sentIdentity });
+        return Promise.resolve({ accepted: true, deliveryFingerprint: "b".repeat(64) });
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    const failedId = state.selectedSession?.id;
+    if (failedId === undefined) throw new Error("Expected failed pending session");
+
+    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({
+      id: failedId,
+      snapshot: { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity },
+    });
+
+    controller.returnSessionLaunchRecoveryDraft(failedId, { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    await controller.retrySessionLaunch(failedId);
+
+    expect(resourceCalls).toEqual([{ text: "/review src", identity }]);
+    expect(genericPromptCalls).toBe(0);
+  });
+
+  it("clears old claimed recovery bookkeeping when a replacement is accepted", async () => {
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.reject(new Error("backend unavailable")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "Replace this failed launch" });
+    const failed = state.selectedSession;
+    if (failed === undefined) throw new Error("Expected failed pending session");
+    expect(controller.claimSessionLaunchRecoveryDraft(failed.id)).toEqual({ id: failed.id, snapshot: { text: "Replace this failed launch", delivery: "inline" } });
+    const replacement = { ...oldSession, id: "pending-replacement", clientPendingStart: true as const, machineId: "local" };
+    state = { ...state, selectedSession: replacement, sessions: [replacement, ...state.sessions] };
+
+    controller.acceptSessionLaunchReplacement(failed.id, replacement.id);
+
+    expect(controller.getSessionLaunchRecovery(failed.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[failed.id]).toBeUndefined();
+    expect(JSON.stringify(state)).not.toContain("Replace this failed launch");
+  });
+
   it("retains an off-workspace creation failure and reconstructs its failed row when selected", async () => {
     const startRequest = deferred<SessionInfo>();
     const otherWorkspace = { ...workspace, id: "workspace-2", path: "/other" };
@@ -1601,19 +1746,28 @@ interface ControllerWithLaunchRecoveries {
 }
 
 interface QueuedRecoveryRecord {
-  queuedSends: { deliveryReceipt?: string | undefined }[];
+  queuedSends: { text?: string | undefined; deliveryReceipt?: string | undefined }[];
 }
 
 function recordLaunchDeliveryReceipt(controller: SessionController, sessionId: string, receipt: string): void {
+  const record = launchRecoveryRecord(controller, sessionId);
+  const queued = record.queuedSends[0];
+  if (queued === undefined) throw new Error("Expected launch recovery queued send");
+  queued.deliveryReceipt = receipt;
+}
+
+function queuedRecoveryTexts(controller: SessionController, sessionId: string): string[] {
+  return launchRecoveryRecord(controller, sessionId).queuedSends.map((queued) => queued.text ?? "");
+}
+
+function launchRecoveryRecord(controller: SessionController, sessionId: string): QueuedRecoveryRecord {
   const source: object = controller;
   if (!hasLaunchRecoveries(source)) throw new Error("Expected launch recovery map");
   const recoveries = source.sessionLaunchRecoveries;
   if (!isRecoveryMap(recoveries)) throw new Error("Expected launch recovery map");
   const record = recoveries.get(sessionId);
   if (!isQueuedRecoveryRecord(record)) throw new Error("Expected launch recovery queued sends");
-  const queued = record.queuedSends[0];
-  if (queued === undefined) throw new Error("Expected launch recovery queued send");
-  queued.deliveryReceipt = receipt;
+  return record;
 }
 
 function hasLaunchRecoveries(value: object): value is ControllerWithLaunchRecoveries {

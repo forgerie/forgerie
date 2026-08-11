@@ -37,6 +37,8 @@ interface SlashValidationError {
   readonly retryable: boolean;
 }
 
+type NewSessionRecoveryDraftSeed = ComposerDraftSeed & { snapshot: NewSessionFirstPromptSubmission };
+
 @customElement("new-session-composer")
 export class NewSessionComposer extends LitElement {
   /** Initial values are read once. Later property updates never replace the mounted local draft. */
@@ -45,7 +47,8 @@ export class NewSessionComposer extends LitElement {
   @property({ attribute: false }) catalog: NewSessionDestinationCatalog = createApiNewSessionDestinationCatalog();
   @property({ attribute: false }) onCancel?: () => void;
   @property({ attribute: false }) onSubmit?: (intent: NewSessionLaunchIntent) => Promise<NewSessionSubmissionOutcome> | NewSessionSubmissionOutcome;
-  @property({ attribute: false }) onClaimRecoveryDraft?: (recoverySeedId: string) => ComposerDraftSeed | undefined;
+  @property({ attribute: false }) onClaimRecoveryDraft?: (recoverySeedId: string) => NewSessionRecoveryDraftSeed | undefined;
+  @property({ attribute: false }) onReturnRecoveryDraft?: (recoverySeedId: string, snapshot: NewSessionFirstPromptSubmission) => void;
   @property({ attribute: false }) promptResourceCatalog: (projectId: string, workspaceId: string, machineId: string) => Promise<PromptResourceCatalogResponse> = (projectId, workspaceId, machineId) => workspacesApi.promptResourceCatalog(projectId, workspaceId, machineId);
 
   @state() private composerState: NewSessionComposerState = createNewSessionComposerState();
@@ -60,6 +63,7 @@ export class NewSessionComposer extends LitElement {
   private focusRegion = "";
   private runtime: ComposerRuntime = createPreSessionComposerRuntime({ machineId: "local" });
   private claimedRecoverySeedId: string | undefined;
+  private claimedRecoveryPromptResourceCommandIdentity: NewSessionFirstPromptSubmission["promptResourceCommandIdentity"];
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
@@ -480,6 +484,7 @@ export class NewSessionComposer extends LitElement {
   private requestCancel(): void {
     if (this.composerState.kind === "submitting") return;
     this.requestGeneration += 1;
+    this.returnClaimedRecoveryDraft();
     this.draft?.discardDraft();
     this.onCancel?.();
   }
@@ -489,7 +494,21 @@ export class NewSessionComposer extends LitElement {
     if (seedId === undefined || seedId === this.claimedRecoverySeedId || this.draft === undefined || this.onClaimRecoveryDraft === undefined) return;
     this.claimedRecoverySeedId = seedId;
     const seed = this.onClaimRecoveryDraft(seedId);
+    this.claimedRecoveryPromptResourceCommandIdentity = seed?.snapshot.promptResourceCommandIdentity;
     if (seed !== undefined) this.draft.restoreSeed(seed);
+  }
+
+  private returnClaimedRecoveryDraft(): void {
+    const seedId = this.claimedRecoverySeedId;
+    const draft = this.draft;
+    if (seedId === undefined || draft === undefined || this.onReturnRecoveryDraft === undefined) return;
+    const snapshot = draft.currentSnapshot();
+    const identity = this.claimedRecoveryPromptResourceCommandIdentity;
+    this.onReturnRecoveryDraft(seedId, {
+      ...snapshot,
+      ...(identity !== undefined && promptResourceIdentityApplies(snapshot.text, identity) ? { promptResourceCommandIdentity: { ...identity } } : {}),
+    });
+    this.claimedRecoveryPromptResourceCommandIdentity = undefined;
   }
 
   private focusCurrentRegion(): void {
@@ -522,6 +541,12 @@ function machineAvailabilityLabel(machine: Machine): string {
   if (machine.status === "error") return "Unavailable";
   if (machine.status === "online") return "Online";
   return "Status unknown";
+}
+
+function promptResourceIdentityApplies(text: string, identity: NewSessionFirstPromptSubmission["promptResourceCommandIdentity"]): boolean {
+  if (identity === undefined) return false;
+  const parsed = parseLeadingSlashCommand(text);
+  return !("kind" in parsed) && parsed.name === identity.name;
 }
 
 function errorMessage(error: unknown, fallback = "New session could not be started."): string {

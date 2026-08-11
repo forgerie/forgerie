@@ -203,6 +203,15 @@ export class ComposerDraft extends LitElement {
     return this.editor;
   }
 
+  currentSnapshot(): ComposerDraftSubmitSnapshot {
+    const attachments = this.attachments.length > 0 ? this.currentAttachments() : undefined;
+    return {
+      text: this.draft,
+      ...(attachments === undefined ? {} : { attachments }),
+      delivery: this.effectiveAttachmentDelivery(),
+    };
+  }
+
   closeCompletionMenu(): boolean {
     return this.closeCompletions();
   }

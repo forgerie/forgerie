@@ -3,6 +3,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, workspacesApi, type Machine, type Project, type Workspace } from "../api";
+import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import type { NewSessionDestinationCatalog, NewSessionLaunchIntent, NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination } from "../newSessionComposer";
 import { ComposerDraft } from "./ComposerDraft";
@@ -28,12 +29,14 @@ async function mountComposer(options: {
   catalog?: NewSessionDestinationCatalog;
   onCancel?: () => void;
   onSubmit?: NewSessionComposer["onSubmit"];
+  onReturnRecoveryDraft?: NewSessionComposer["onReturnRecoveryDraft"];
 } = {}): Promise<NewSessionComposer> {
   const composer = new NewSessionComposer();
   if (options.initialDestination !== undefined) composer.initialDestination = options.initialDestination;
   if (options.catalog !== undefined) composer.catalog = options.catalog;
   if (options.onCancel !== undefined) composer.onCancel = options.onCancel;
   if (options.onSubmit !== undefined) composer.onSubmit = options.onSubmit;
+  if (options.onReturnRecoveryDraft !== undefined) composer.onReturnRecoveryDraft = options.onReturnRecoveryDraft;
   document.body.append(composer);
   await settleRenderedDialog(composer);
   if (options.initialPrompt !== undefined) {
@@ -610,6 +613,43 @@ describe("new-session-composer modal lifetime", () => {
     composer.requestUpdate();
     await composer.updateComplete;
     expect(claim).toHaveBeenCalledOnce();
+  });
+
+  it("returns the current claimed recovery snapshot on cancel before discarding the draft", async () => {
+    const attachment = { kind: "image" as const, mimeType: "image/png", data: "QUJD", name: "shot.png" };
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "original", attachments: [attachment], delivery: "inline" } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    await enterPrompt(composer, "edited");
+    const snapshot = draft(composer).currentSnapshot();
+    if (snapshot.attachments === undefined) throw new Error("Expected restored attachment");
+    snapshot.attachments[0] = { ...attachment, data: "changed" };
+    expect(draft(composer).currentSnapshot().attachments?.[0]?.data).toBe("QUJD");
+    button(composer, "[data-action='cancel']").click();
+
+    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "edited", attachments: [attachment], delivery: "inline" });
+  });
+
+  it("keeps prompt-resource identity out of the draft but returns it with claimed recovery rollback", async () => {
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    button(composer, "[data-action='cancel']").click();
+
+    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
   });
 
   it("focusExisting returns focus to the same draft without reinitializing it", async () => {

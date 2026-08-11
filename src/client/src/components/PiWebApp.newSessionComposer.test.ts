@@ -285,6 +285,49 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).sessions).toEqual([other, failed]);
   });
 
+  it("returns a claimed recovery draft through the root callback before cancel closes the composer", async () => {
+    const app = new PiWebApp();
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedWorkspace: mainWorkspace,
+      sessions: [],
+    });
+    const controller = sessionController(app);
+    const api: unknown = Reflect.get(controller, "api");
+    if (!isSessionTransport(api)) throw new Error("Expected SessionController transport");
+    Reflect.set(controller, "api", { ...api, startSession: () => Promise.reject(new Error("backend unavailable")) });
+
+    await controller.launchSession({ text: "Recover through root" });
+    const failed = required(appState(app).selectedSession, "failed pending session");
+    invoke(app, "openSessionLaunchDestinationComposer", failed.id);
+    const container = renderApp(app);
+    let composer = required(container.querySelector<NewSessionComposer>("new-session-composer"), "new-session composer");
+    await elementUpdateComplete(composer);
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toBeUndefined();
+
+    setComposerText(composer, "Edited through root");
+    required(composer.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='cancel']"), "cancel button").click();
+
+    expect(composerRequest(app)).toEqual({ kind: "closed" });
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toEqual([{ kind: "followUp", text: "Edited through root" }]);
+
+    invoke(app, "openSessionLaunchDestinationComposer", failed.id);
+    const reopenedContainer = renderApp(app);
+    composer = required(reopenedContainer.querySelector<NewSessionComposer>("new-session-composer"), "reopened new-session composer");
+    await elementUpdateComplete(composer);
+    await elementUpdateComplete(composer);
+
+    const draftElement = required(composer.shadowRoot?.querySelector("composer-draft"), "shared composer draft");
+    if (!(draftElement instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
+    await vi.waitFor(() => { expect(draftElement.currentSnapshot()).toEqual({ text: "Edited through root", delivery: "inline" }); });
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toBeUndefined();
+  });
+
   it("keeps the failed row, recovery, and preview until the real controller selects its replacement pending row", async () => {
     const app = new PiWebApp();
     const destination = completeNewSessionDestination(localMachine, project, mainWorkspace);
@@ -562,6 +605,7 @@ interface SessionLaunchController {
   getSessionLaunchRecovery: (sessionId: string) => SessionLaunchRecovery | undefined;
   retrySessionLaunch: (sessionId: string) => Promise<void>;
   acceptSessionLaunchReplacement: (failedSessionId: string, replacementSessionId: string) => void;
+  returnSessionLaunchRecoveryDraft: (sessionId: string, snapshot: FirstPromptSubmission) => void;
   refreshSessionLaunchRecovery: (sessionId: string) => Promise<void>;
   restoreSessionLaunchPrompt: (sessionId: string) => Promise<void>;
 }
@@ -591,6 +635,7 @@ function isSessionLaunchController(value: unknown): value is SessionLaunchContro
     && "getSessionLaunchRecovery" in value && typeof value.getSessionLaunchRecovery === "function"
     && "retrySessionLaunch" in value && typeof value.retrySessionLaunch === "function"
     && "acceptSessionLaunchReplacement" in value && typeof value.acceptSessionLaunchReplacement === "function"
+    && "returnSessionLaunchRecoveryDraft" in value && typeof value.returnSessionLaunchRecoveryDraft === "function"
     && "refreshSessionLaunchRecovery" in value && typeof value.refreshSessionLaunchRecovery === "function"
     && "restoreSessionLaunchPrompt" in value && typeof value.restoreSessionLaunchPrompt === "function";
 }
