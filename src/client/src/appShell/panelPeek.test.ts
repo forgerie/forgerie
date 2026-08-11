@@ -12,7 +12,7 @@ describe("trackPeek", () => {
   it("pulls the navigation panel in from the left on a rightward drag", () => {
     const peek = track(PEEK_CLOSED, 60, 0);
 
-    expect(peek).toEqual({ kind: "tracking", panel: "navigation", progress: 0.2 });
+    expect(peek).toEqual({ kind: "tracking", panel: "navigation", progress: 0.2, gesture: "opening" });
   });
 
   it("pulls the workspace panel in from the right on a leftward drag", () => {
@@ -56,13 +56,30 @@ describe("trackPeek", () => {
   it("lets an open sheet be pushed back out", () => {
     const open: PanelPeek = { kind: "open", panel: "navigation" };
 
-    expect(track(open, -SHEET / 2, 0)).toEqual({ kind: "tracking", panel: "navigation", progress: 0.5 });
+    expect(track(open, -SHEET / 2, 0)).toEqual({ kind: "tracking", panel: "navigation", progress: 0.5, gesture: "closing" });
   });
 
-  it("leaves an open sheet alone when the drag pulls it further open", () => {
-    const open: PanelPeek = { kind: "open", panel: "navigation" };
+  it("keeps pushing out across a whole retreat, not only its first move", () => {
+    // The defect this guards: once tracking, a retreat was re-read as an
+    // opening drag running backwards, so the sheet collapsed to nothing on the
+    // second move and vanished on release.
+    let peek = track({ kind: "open", panel: "navigation" }, -30, 0);
+    for (const travelled of [-45, -60, -75]) peek = track(peek, travelled, 0);
 
-    expect(track(open, 200, 0)).toEqual(open);
+    expect(peek).toEqual({ kind: "tracking", panel: "navigation", progress: 0.75, gesture: "closing" });
+    expect(releasePeek(peek, PANEL_PEEK)).toEqual({ kind: "open", panel: "navigation" });
+  });
+
+  it("pulls the sheet open again when a retreat reverses under the finger", () => {
+    const pushed = track({ kind: "open", panel: "navigation" }, -120, 0);
+
+    expect(track(pushed, 20, 0)).toEqual({ kind: "tracking", panel: "navigation", progress: 1, gesture: "closing" });
+  });
+
+  it("closes when the retreat carried the sheet most of the way out", () => {
+    const pushed = track({ kind: "open", panel: "navigation" }, -SHEET * 0.8, 0);
+
+    expect(releasePeek(pushed, PANEL_PEEK)).toEqual(PEEK_CLOSED);
   });
 
   it("holds still when the shell has not been measured", () => {
@@ -74,13 +91,13 @@ describe("trackPeek", () => {
 
 describe("releasePeek", () => {
   it("opens a sheet that was pulled past the commit point", () => {
-    const peek: PanelPeek = { kind: "tracking", panel: "navigation", progress: PANEL_PEEK.commitFraction };
+    const peek: PanelPeek = { kind: "tracking", panel: "navigation", progress: PANEL_PEEK.commitFraction, gesture: "opening" };
 
     expect(releasePeek(peek, PANEL_PEEK)).toEqual({ kind: "open", panel: "navigation" });
   });
 
   it("lets a half-hearted look fall back, which is what makes a peek free", () => {
-    const peek: PanelPeek = { kind: "tracking", panel: "navigation", progress: PANEL_PEEK.commitFraction - 0.01 };
+    const peek: PanelPeek = { kind: "tracking", panel: "navigation", progress: PANEL_PEEK.commitFraction - 0.01, gesture: "opening" };
 
     expect(releasePeek(peek, PANEL_PEEK)).toEqual(PEEK_CLOSED);
   });

@@ -11,10 +11,21 @@ import type { ShellPanel } from "./panelIntent";
  * does that. Without the split, one accidental drag would follow the user to
  * every device.
  */
+/**
+ * Which way a drag is taking the sheet.
+ *
+ * Part of the state because the answer cannot be recovered from the travel: a
+ * drag that pulls a sheet in and a drag that pushes it back both run along the
+ * same axis, and only where they started tells them apart. Without it, the
+ * second move of a retreat reads as an opening drag running backwards, and the
+ * sheet collapses under the finger.
+ */
+export type PeekGesture = "opening" | "closing";
+
 export type PanelPeek =
   | { readonly kind: "closed" }
   /** A finger is down and the sheet is at `progress` of its width. */
-  | { readonly kind: "tracking"; readonly panel: ShellPanel; readonly progress: number }
+  | { readonly kind: "tracking"; readonly panel: ShellPanel; readonly progress: number; readonly gesture: PeekGesture }
   | { readonly kind: "open"; readonly panel: ShellPanel };
 
 export const PEEK_CLOSED: PanelPeek = { kind: "closed" };
@@ -72,13 +83,14 @@ export function trackPeek(input: PeekTrackInput): PanelPeek {
   if (sheetWidthPx <= 0) return current;
 
   if (current.kind === "open") return trackClosing(current.panel, dx, sheetWidthPx);
+  if (current.kind === "tracking" && current.gesture === "closing") return trackClosing(current.panel, dx, sheetWidthPx);
 
   const panel = current.kind === "tracking" ? current.panel : capturedPanel(dx, dy, input);
   if (panel === undefined) return current;
 
   const travel = panel === "navigation" ? dx : -dx;
-  if (travel <= 0) return current.kind === "tracking" ? { kind: "tracking", panel, progress: 0 } : current;
-  return { kind: "tracking", panel, progress: clampFraction(travel / sheetWidthPx) };
+  if (travel <= 0) return current.kind === "tracking" ? { kind: "tracking", panel, progress: 0, gesture: "opening" } : current;
+  return { kind: "tracking", panel, progress: clampFraction(travel / sheetWidthPx), gesture: "opening" };
 }
 
 /** What letting go leaves on screen. */
@@ -98,11 +110,16 @@ export function peekedPanel(peek: PanelPeek): ShellPanel | undefined {
   return peek.kind === "closed" ? undefined : peek.panel;
 }
 
-/** A drag back across the sheet closes it, and letting go part-way re-opens it. */
+/**
+ * A drag back across the sheet pushes it out, and letting go part-way lets it
+ * fall back to whichever end it is nearer. Travel is measured from where the
+ * finger went down, so reversing mid-gesture pulls the sheet open again rather
+ * than ending the gesture.
+ */
 function trackClosing(panel: ShellPanel, dx: number, sheetWidthPx: number): PanelPeek {
   const backwards = panel === "navigation" ? -dx : dx;
-  if (backwards <= 0) return { kind: "open", panel };
-  return { kind: "tracking", panel, progress: clampFraction(1 - backwards / sheetWidthPx) };
+  if (backwards <= 0) return { kind: "tracking", panel, progress: 1, gesture: "closing" };
+  return { kind: "tracking", panel, progress: clampFraction(1 - backwards / sheetWidthPx), gesture: "closing" };
 }
 
 /**
