@@ -90,7 +90,7 @@ import "./appShell/AppMobileMainTabs";
 import type { AppMobileMainTab, AppMobileMainTabIcon } from "./appShell/AppMobileMainTabs";
 import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import "./SessionInboxPanel";
-import "./SessionInboxNewSessionDialog";
+import "./WorkspaceManagementDialog";
 import { navigateToInboxSession, type InboxNavigationResult } from "../controllers/inboxNavigation";
 import { deriveSessionInboxBoard } from "../sessionBoard";
 import "./appShell/AppPanelEdgeControl";
@@ -1400,7 +1400,7 @@ export class PiWebApp extends LitElement {
         .onUndoArchive=${() => { void this.undoInboxArchive(); }}
         .onDismissUndoToast=${() => { this.inbox.dismissUndoToast(); }}
         .onNewSession=${() => { this.openNewSessionComposer(); }}
-        .onManageWorkspaces=${() => { this.setState({ newSessionDialog: { step: "project" } }); }}
+        .onManageWorkspaces=${() => { this.setState({ workspaceManagementDialog: { step: "project" } }); }}
         .onCancelKeyboardNavigation=${() => { void this.openChat(); }}
         .onCloseOverlay=${() => { this.selectMainView("chat"); }}
         .unavailableCwds=${this.unavailableCwds}
@@ -1833,10 +1833,10 @@ export class PiWebApp extends LitElement {
    * Called when the user selects a project in the dialog.
    * Loads workspaces (lazy) and advances the dialog to the workspace step.
    */
-  private async openNewSessionDialogWorkspaceStep(project: Project): Promise<void> {
+  private async openWorkspaceManagementDialogWorkspaceStep(project: Project): Promise<void> {
     // Show loading state immediately so the user knows work is in flight.
     this.setState({
-      newSessionDialog: {
+      workspaceManagementDialog: {
         step: "workspace",
         project,
         workspaces: [],
@@ -1847,14 +1847,14 @@ export class PiWebApp extends LitElement {
     try {
       const workspaces = await this.workspaces.refreshProjectWorkspaces(project.id);
       // Guard: if the user cancelled or navigated away, discard the result.
-      const current = this.state.newSessionDialog;
+      const current = this.state.workspaceManagementDialog;
       if (current?.step !== "workspace" || current.project.id !== project.id) return;
-      this.setState({ newSessionDialog: { ...current, workspaces, loading: false } });
+      this.setState({ workspaceManagementDialog: { ...current, workspaces, loading: false } });
     } catch (error: unknown) {
-      const current = this.state.newSessionDialog;
+      const current = this.state.workspaceManagementDialog;
       if (current?.step !== "workspace" || current.project.id !== project.id) return;
       this.setState({
-        newSessionDialog: { ...current, loading: false, error: String(error) },
+        workspaceManagementDialog: { ...current, loading: false, error: String(error) },
       });
     }
   }
@@ -1865,7 +1865,7 @@ export class PiWebApp extends LitElement {
    * Closes the dialog, then exposes the workspace tools.
    */
   private async confirmManageWorkspace(workspace: Workspace): Promise<void> {
-    this.setState({ newSessionDialog: undefined });
+    this.setState({ workspaceManagementDialog: undefined });
     const seq = ++this.navigationSelectionSeq;
     const isCurrentToken = () => seq === this.navigationSelectionSeq;
     const navigated = await this.navigateToWorkspace(workspace, isCurrentToken);
@@ -2946,19 +2946,19 @@ export class PiWebApp extends LitElement {
           .onCancel=${() => { this.closeNewSessionComposer(); }}
           .onSubmit=${(intent: NewSessionLaunchIntent) => this.submitNewSession(intent)}
         ></new-session-composer>` : null}
-        ${state.newSessionDialog !== undefined ? html`<session-inbox-new-session-dialog
-          .dialogState=${state.newSessionDialog}
+        ${state.workspaceManagementDialog !== undefined ? html`<workspace-management-dialog
+          .dialogState=${state.workspaceManagementDialog}
           .projects=${state.projects}
-          .onSelectProject=${(project: Project) => { void this.openNewSessionDialogWorkspaceStep(project); }}
+          .onSelectProject=${(project: Project) => { void this.openWorkspaceManagementDialogWorkspaceStep(project); }}
           .onConfirmManage=${(workspace: Workspace) => { void this.confirmManageWorkspace(workspace); }}
           .onBack=${() => {
-            const current = state.newSessionDialog;
+            const current = state.workspaceManagementDialog;
             if (current !== undefined) {
-              this.setState({ newSessionDialog: { step: "project" } });
+              this.setState({ workspaceManagementDialog: { step: "project" } });
             }
           }}
-          .onCancel=${() => { this.setState({ newSessionDialog: undefined }); }}
-        ></session-inbox-new-session-dialog>` : null}
+          .onCancel=${() => { this.setState({ workspaceManagementDialog: undefined }); }}
+        ></workspace-management-dialog>` : null}
         ${state.authDialog !== undefined ? html`<auth-dialog .state=${state.authDialog} .onChooseMethod=${(authType: "oauth" | "api_key") => { void this.auth.chooseLoginMethod(authType); }} .onSelectProvider=${(providerId: string, authType: "oauth" | "api_key") => { void this.auth.selectLoginProvider(providerId, authType); }} .onLogoutProvider=${(providerId: string) => { void this.auth.logoutProvider(providerId); }} .onOAuthInput=${(value: string) => { this.auth.updateOAuthInput(value); }} .onOAuthRespond=${(value?: string) => { void this.auth.respondOAuth(value); }} .onOAuthCancel=${() => { void this.auth.cancelOAuth(); }} .onCancel=${() => { this.auth.closeDialog(); }}></auth-dialog>` : null}
         ${state.actionPaletteOpen ? html`<action-palette .actions=${this.getActions()} .onRun=${(action: AppAction) => { this.setState({ actionPaletteOpen: false }); this.runAction(action); }} .onCancel=${() => { this.setState({ actionPaletteOpen: false }); }}></action-palette>` : null}
         ${this.renderSessionTreeNavigator(state)}

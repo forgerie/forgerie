@@ -2,8 +2,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, Workspace } from "../api";
-import type { NewSessionDialogState } from "../appState";
-import { SessionInboxNewSessionDialog } from "./SessionInboxNewSessionDialog";
+import type { WorkspaceManagementDialogState } from "../appState";
+import { WorkspaceManagementDialog } from "./WorkspaceManagementDialog";
 import { settleRenderedDialog } from "./modalSurfaceTestSupport";
 
 afterEach(() => {
@@ -11,7 +11,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("SessionInboxNewSessionDialog workspace management", () => {
+describe("WorkspaceManagementDialog workspace management", () => {
   it("renders no session-start mode and opens the selected workspace for management", async () => {
     const onConfirmManage = vi.fn();
     const dialog = await mount({
@@ -55,13 +55,13 @@ const project: Project = { id: "project", name: "Forgerie", path: "/repo", creat
 const workspace: Workspace = { id: "workspace", projectId: project.id, path: project.path, label: "main", isMain: true, isGitRepo: true, isGitWorktree: false, effectiveConfig: {} };
 
 async function mount(properties: {
-  dialogState: NewSessionDialogState;
+  dialogState: WorkspaceManagementDialogState;
   onSelectProject?: (project: Project) => void;
   onConfirmManage?: (workspace: Workspace) => void;
   onBack?: () => void;
   onCancel?: () => void;
-}): Promise<SessionInboxNewSessionDialog> {
-  const dialog = new SessionInboxNewSessionDialog();
+}): Promise<WorkspaceManagementDialog> {
+  const dialog = new WorkspaceManagementDialog();
   dialog.dialogState = properties.dialogState;
   dialog.projects = [project];
   if (properties.onSelectProject !== undefined) dialog.onSelectProject = properties.onSelectProject;

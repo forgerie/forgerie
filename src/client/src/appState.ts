@@ -121,7 +121,7 @@ export interface AppState {
   /** Root-owned request. The mounted composer owns its editable draft. */
   newSessionComposer: NewSessionComposerRequest;
   /** State for the workspace-management picker dialog. */
-  newSessionDialog: NewSessionDialogState | undefined;
+  workspaceManagementDialog: WorkspaceManagementDialogState | undefined;
   actionPaletteOpen: boolean;
   /** Open state of the control sheet the composer summons once chrome is not resident. */
   controlSheetOpen: boolean;
@@ -160,7 +160,7 @@ export type NewSessionComposerRequest =
   | { kind: "open"; initialDestination?: NewSessionCompleteDestination; initialPrompt: string; replacesFailedSessionId?: string };
 
 /** Workspace-management dialog state. Session creation uses NewSessionComposer. */
-export type NewSessionDialogState =
+export type WorkspaceManagementDialogState =
   | { step: "project" }
   | {
       step: "workspace";
@@ -266,7 +266,7 @@ export function initialAppState(): AppState {
     themeDialog: undefined,
     authDialog: undefined,
     newSessionComposer: { kind: "closed" },
-    newSessionDialog: undefined,
+    workspaceManagementDialog: undefined,
     actionPaletteOpen: false,
     controlSheetOpen: false,
     projectDialogOpen: false,

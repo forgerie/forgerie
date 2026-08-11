@@ -15,13 +15,13 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { Project, Workspace } from "../api";
-import type { NewSessionDialogState } from "../appState";
+import type { WorkspaceManagementDialogState } from "../appState";
 import "./ModalSurface";
 
-@customElement("session-inbox-new-session-dialog")
-export class SessionInboxNewSessionDialog extends LitElement {
+@customElement("workspace-management-dialog")
+export class WorkspaceManagementDialog extends LitElement {
   /** When `undefined` the element renders nothing (dialog is closed). */
-  @property({ attribute: false }) dialogState: NewSessionDialogState | undefined;
+  @property({ attribute: false }) dialogState: WorkspaceManagementDialogState | undefined;
   /** Full project list from the machine; shown on the project step. */
   @property({ attribute: false }) projects: Project[] = [];
 
@@ -113,7 +113,7 @@ export class SessionInboxNewSessionDialog extends LitElement {
   // -------------------------------------------------------------------------
 
   private renderWorkspaceStep(
-    state: Extract<NewSessionDialogState, { step: "workspace" }>,
+    state: Extract<WorkspaceManagementDialogState, { step: "workspace" }>,
   ) {
     const { project, workspaces, loading, error } = state;
 

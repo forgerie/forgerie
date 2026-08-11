@@ -112,7 +112,7 @@ describe("PiWebApp New session composer root", () => {
     void navigation.onNewSession?.();
 
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
-    expect(appState(app).newSessionDialog).toBeUndefined();
+    expect(appState(app).workspaceManagementDialog).toBeUndefined();
   });
 
   it("routes the workspace header trigger through the same root open path", () => {
