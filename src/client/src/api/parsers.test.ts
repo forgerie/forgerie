@@ -489,6 +489,7 @@ describe("API parsers", () => {
       isBashRunning: false,
       pendingMessageCount: 2,
       queuedMessages: [{ kind: "steer", text: "adjust this" }, { kind: "followUp", text: "then do that" }],
+      activeGuidanceIds: [],
       messageCount: 7,
       tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 },
       cost: 0.12,
@@ -496,6 +497,16 @@ describe("API parsers", () => {
       contextUsage: { tokens: null, contextWindow: 100, percent: 0.5 },
       thinkingLevel: "medium",
     });
+  });
+
+  it("normalizes session guidance IDs and accepts omission from older daemons", () => {
+    expect(parseSessionStatus({
+      ...statusWire(),
+      activeGuidanceIds: ["unknown", "technical-english", "technical-english"],
+    }).activeGuidanceIds).toEqual(["technical-english"]);
+    expect(parseSessionStatus(statusWire()).activeGuidanceIds).toEqual([]);
+    expect(() => parseSessionStatus({ ...statusWire(), activeGuidanceIds: "technical-english" })).toThrow("Expected string array field: activeGuidanceIds");
+    expect(() => parseSessionStatus({ ...statusWire(), activeGuidanceIds: [true] })).toThrow("Expected string array field: activeGuidanceIds");
   });
 
   it("parses live session warnings including optional source and path", () => {

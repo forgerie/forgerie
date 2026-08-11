@@ -165,6 +165,7 @@ function statusWire() {
     isBashRunning: false,
     pendingMessageCount: 0,
     queuedMessages: [],
+    activeGuidanceIds: [],
     tokens: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, total: 3 },
     cost: 0.5,
   };

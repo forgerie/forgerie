@@ -310,6 +310,7 @@ describe("session API compatibility", () => {
       isBashRunning: false,
       pendingMessageCount: 0,
       queuedMessages: [],
+      activeGuidanceIds: [],
       tokens: { input: 3, output: 2, cacheRead: 1, cacheWrite: 0, total: 6 },
       cost: 0.25,
     });
@@ -319,6 +320,33 @@ describe("session API compatibility", () => {
     expect(url).toBe("https://pi.example.test/api/machines/remote%20%2F%3F/sessions/s%20%2F%3F/queue/clear");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo with spaces" });
+  });
+
+  it("changes guidance through a bounded session request", async () => {
+    const fetchMock = stubJsonFetch({
+      sessionId: "s /?",
+      isStreaming: false,
+      isCompacting: false,
+      isBashRunning: false,
+      pendingMessageCount: 0,
+      queuedMessages: [],
+      activeGuidanceIds: ["technical-english"],
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: 0,
+    });
+
+    await expect(sessionsApi.setGuidance(
+      { id: "s /?", cwd: "/repo with spaces" },
+      "technical-english",
+      true,
+      "remote /?",
+    )).resolves.toMatchObject({ activeGuidanceIds: ["technical-english"] });
+
+    const [url, init] = fetchCall(fetchMock, 0);
+    expect(url).toBe("https://pi.example.test/api/machines/remote%20%2F%3F/sessions/s%20%2F%3F/guidance");
+    expect(init?.method).toBe("POST");
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo with spaces", entryId: "technical-english", enabled: true });
   });
 
   it("answers and cancels extension dialogs through encoded machine routes", async () => {
@@ -656,9 +684,9 @@ function dialogStatusWire() {
   };
 }
 
-// The parsed status normalizes the wire shape (queuedMessages defaults to []).
+// The parsed status normalizes fields omitted by older daemon responses.
 function parsedDialogStatus() {
-  return { ...dialogStatusWire(), queuedMessages: [] };
+  return { ...dialogStatusWire(), queuedMessages: [], activeGuidanceIds: [] };
 }
 
 function piWebConfigResponse(config: PiWebConfigValues) {

@@ -72,6 +72,7 @@ export interface SessionRouteService {
   dismissWarning(ref: SessionRouteRef, dismissId: string): Promise<ClientSessionStatus>;
   availableModels(ref: SessionRouteRef): Promise<ClientSessionModel[]>;
   setModel(ref: SessionRouteRef, provider: string, modelId: string): Promise<ClientSessionStatus>;
+  setGuidance(ref: SessionRouteRef, entryId: string, enabled: unknown): Promise<ClientSessionStatus>;
   cycleModel(ref: SessionRouteRef, direction: "forward" | "backward"): Promise<ClientSessionStatus>;
   availableThinkingLevels(ref: SessionRouteRef): Promise<ClientThinkingLevel[]>;
   setThinkingLevel(ref: SessionRouteRef, level: string): Promise<ClientSessionStatus>;

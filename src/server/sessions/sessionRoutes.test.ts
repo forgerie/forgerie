@@ -889,6 +889,33 @@ describe("session routes", () => {
     }
   });
 
+  it("changes session guidance with workspace context and validates the desired state", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const requestCwd = resolve("/repo");
+      const enabled = await routeApp.inject({ method: "POST", url: "/sessions/session-1/guidance", payload: { cwd: requestCwd, entryId: "technical-english", enabled: true } });
+      const invalid = await routeApp.inject({ method: "POST", url: "/sessions/session-1/guidance", payload: { cwd: requestCwd, entryId: "technical-english", enabled: "yes" } });
+
+      expect(enabled.statusCode).toBe(200);
+      expect(enabled.json()).toMatchObject({ sessionId: "session-1", activeGuidanceIds: ["technical-english"] });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json()).toEqual({ error: "enabled field must be Boolean" });
+      expect(routeService.guidanceCalls).toEqual([{
+        lookup: { id: "session-1", cwd: requestCwd },
+        entryId: "technical-english",
+        enabled: true,
+      }]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("dismisses a session warning with workspace context and returns fresh status", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1066,6 +1093,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly reloadCalls: SessionRouteRef[] = [];
   readonly clearQueueCalls: SessionRouteRef[] = [];
   readonly dismissWarningCalls: { lookup: SessionRouteRef; dismissId: string }[] = [];
+  readonly guidanceCalls: { lookup: SessionRouteRef; entryId: string; enabled: boolean }[] = [];
   readonly notificationInboxCalls: SessionRef[] = [];
   readonly acknowledgeUnreadCalls: { sessionId: string; request: SessionUnreadAcknowledgeRequest }[] = [];
   readonly unreadCatalogResponse: SessionUnreadCatalogSnapshot = { catalogId: "catalog-test", catalogRevision: 1, sessions: [] };
@@ -1200,6 +1228,12 @@ class CapturingRouteSessionService implements SessionRouteService {
   start(cwd: string, options?: { startupToken?: string }): Promise<ClientSession> {
     this.startCalls.push({ cwd, startupToken: options?.startupToken });
     return Promise.resolve({ id: "session-1", path: "/tmp/session-1.jsonl", cwd, created: "2026-06-25T00:00:00.000Z", modified: "2026-06-25T00:00:00.000Z", messageCount: 0, firstMessage: "" });
+  }
+
+  setGuidance(lookup: SessionRouteRef, entryId: string, enabled: unknown): Promise<SessionStatus> {
+    if (typeof enabled !== "boolean") return Promise.reject(new Error("Guidance state must be Boolean"));
+    this.guidanceCalls.push({ lookup, entryId, enabled });
+    return Promise.resolve({ ...idleStatus(lookup), activeGuidanceIds: enabled ? [entryId] : [] });
   }
 
   dismissWarning(lookup: SessionRouteRef, dismissId: string): Promise<SessionStatus> {

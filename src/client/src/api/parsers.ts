@@ -3,6 +3,7 @@ import type { ManagedProcessEndReason, ManagedProcessInfo, ManagedProcessKillRes
 import type { MachineSessionListingSnapshot, SessionAskCatalogEntry, SessionAskCatalogSnapshot } from "../../../shared/apiTypes";
 import { parseActiveAgentProfileDescriptor } from "../../../shared/activeAgentProfile";
 import { parseKnownPiWebCapabilities } from "../../../shared/capabilities";
+import { normalizeSessionGuidanceIds } from "../../../shared/sessionGuidance";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -460,6 +461,9 @@ export function parseSessionStatus(value: unknown): SessionStatus {
     ...optionalField("runningProcesses", optionalNumber(record, "runningProcesses")),
     pendingMessageCount: requireNumber(record, "pendingMessageCount"),
     queuedMessages: record["queuedMessages"] === undefined ? [] : arrayOf(parseQueuedSessionMessage)(record["queuedMessages"]),
+    activeGuidanceIds: record["activeGuidanceIds"] === undefined
+      ? []
+      : normalizeSessionGuidanceIds(arrayOfString(record["activeGuidanceIds"], "activeGuidanceIds")),
     ...optionalField("messageCount", optionalNumber(record, "messageCount")),
     tokens: parseTokens(record["tokens"]),
     cost: requireNumber(record, "cost"),

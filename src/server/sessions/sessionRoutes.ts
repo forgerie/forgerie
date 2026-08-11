@@ -229,6 +229,21 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
+  app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown; entryId?: unknown; enabled?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/guidance`, async (request, reply) => {
+    try {
+      const body = optionalRecord(request.body);
+      const enabled = body["enabled"];
+      if (typeof enabled !== "boolean") throw new Error("enabled field must be Boolean");
+      return await sessions.setGuidance(
+        sessionRefFromBody(request.params.sessionId, body),
+        requireString(body, "entryId"),
+        enabled,
+      );
+    } catch (error) {
+      return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
+    }
+  });
+
   app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown; direction?: "forward" | "backward" } | undefined }>(`${prefix}/sessions/:sessionId/model/cycle`, async (request, reply) => {
     try {
       const body = optionalRecord(request.body);

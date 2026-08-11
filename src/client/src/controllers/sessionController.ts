@@ -153,6 +153,8 @@ export class SessionController {
   private readonly onSelectedSessionReady: SessionControllerDependencies["onSelectedSessionReady"];
   private readonly onManagedProcessesEvent: SessionControllerDependencies["onManagedProcessesEvent"];
   private selectionSeq = 0;
+  private guidanceMutationSeq = 0;
+  private readonly statusApplicationSeqBySession = new Map<string, number>();
   private disposed = false;
   // Join-time stream watermark for the selected session. `seq` is the
   // `SessionEventHub` sequence captured together with the seeded partial by the
@@ -1193,6 +1195,27 @@ export class SessionController {
     }
   }
 
+  async setGuidance(entryId: string, enabled: boolean): Promise<boolean> {
+    const state = this.getState();
+    const session = state.selectedSession;
+    if (session === undefined || session.archived === true || isClientPendingStartSessionInfo(session)) return false;
+    const machineId = selectedMachineId(state);
+    const selectionSeq = this.selectionSeq;
+    const mutationSeq = ++this.guidanceMutationSeq;
+    const statusSeq = this.statusApplicationSeqBySession.get(session.id) ?? 0;
+    try {
+      const status = await this.api.setGuidance(session, entryId, enabled, machineId);
+      if (!this.isCurrentSessionSelection(session.id, machineId, selectionSeq) || mutationSeq !== this.guidanceMutationSeq) return false;
+      if ((this.statusApplicationSeqBySession.get(session.id) ?? 0) === statusSeq) this.applyStatus(status);
+      return true;
+    } catch (error) {
+      if (this.isCurrentSessionSelection(session.id, machineId, selectionSeq) && mutationSeq === this.guidanceMutationSeq) {
+        this.setState({ error: String(error) });
+      }
+      return false;
+    }
+  }
+
   async clearServerQueue() {
     const state = this.getState();
     const session = state.selectedSession;
@@ -1831,6 +1854,7 @@ export class SessionController {
   }
 
   private applyStatus(status: SessionStatus) {
+    this.statusApplicationSeqBySession.set(status.sessionId, (this.statusApplicationSeqBySession.get(status.sessionId) ?? 0) + 1);
     const state = this.getState();
     const isSelected = state.selectedSession?.id === status.sessionId;
     const clearsStaleActivity = state.sessionActivities[status.sessionId]?.phase === "active" && !isSessionActive(status);
