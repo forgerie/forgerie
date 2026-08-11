@@ -50,7 +50,7 @@ import { AppShellController } from "../appShell/appShellController";
 import { BrowserResumeController } from "../appShell/browserResumeController";
 import { NavigationSectionsController, type NavigationSection } from "../appShell/navigationState";
 import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
-import { PanelCollapseController, mainViewClass } from "../appShell/panelCollapseController";
+import { PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
 import { chromeDisclosureClass, shellLayoutModeClass } from "../appShell/shellLayoutMode";
 import { PanelResizeController, type PanelResizeConstraints, type ResizablePanelSide } from "../appShell/panelResizeController";
 import { readRoute, writeRoute, type AppRoute } from "../route";
@@ -105,7 +105,6 @@ const GIT_ROUTE_NAMESPACE = queryNamespace("core:workspace.git");
 const TERMINAL_ROUTE_NAMESPACE = queryNamespace("core:workspace.terminal");
 const MIN_RESIZABLE_CHAT_WIDTH_PX = 320;
 const PANEL_EDGE_COLUMNS_WIDTH_PX = 2;
-const DESKTOP_SIDE_BY_SIDE_MEDIA_QUERY = "(min-width: 1181px)";
 
 /** PiWebApp-internal focus target type. Kept separate from AppNavigationPanel's export. */
 type NavigationFocusTarget = NavigationSection | "chat";
@@ -276,7 +275,7 @@ export class PiWebApp extends LitElement {
     refreshAfterResume: () => this.refreshAfterBrowserResume(),
     onRefreshError: (error) => { console.warn("Failed to refresh after browser resume", error); },
   });
-  private readonly panelCollapse = new PanelCollapseController(this);
+  private readonly panelIntent = new PanelIntentController(this);
   private readonly panelResize = new PanelResizeController(this);
   private readonly navigationSections = new NavigationSectionsController(
     this,
@@ -437,7 +436,9 @@ export class PiWebApp extends LitElement {
     if (this.isRenderedModalOpen()) return false;
     if (this.state.mainView === "chat") return true;
     if (this.state.mainView === "navigation") return !this.appShell.isMobileNavigationLayout;
-    return this.isDesktopSideBySideLayout();
+    // The workspace view only leaves the session on screen beside it on a shell
+    // wide enough to hold both, so elsewhere the session is not being read.
+    return this.appShell.disclosure === "resident";
   }
 
   private isRenderedModalOpen(): boolean {
@@ -1234,12 +1235,12 @@ export class PiWebApp extends LitElement {
         resizeLabel="Resize navigation panel"
         expandLabel="Expand navigation panel"
         collapseLabel="Collapse navigation panel"
-        .collapsed=${this.panelCollapse.navigationPanelCollapsed}
+        .collapsed=${!this.panelIntent.isDocked("navigation")}
         .resizable=${!this.appShell.isMobileNavigationLayout}
         .panelWidth=${this.panelResize.panelWidth("navigation")}
         .minWidth=${constraints.minWidth}
         .maxWidth=${constraints.maxWidth}
-        .onToggle=${() => { this.panelCollapse.toggleNavigationPanel(); }}
+        .onToggle=${() => { this.panelIntent.toggle("navigation"); }}
         .onResizeStart=${() => this.startPanelResize("navigation")}
         .onResize=${(width: number) => { this.panelResize.resizePanel("navigation", width, { persist: false }); }}
         .onResizeEnd=${() => { this.panelResize.persistPanelSizes(); }}
@@ -1259,12 +1260,12 @@ export class PiWebApp extends LitElement {
         resizeLabel="Resize workspace panel"
         expandLabel="Expand workspace panel"
         collapseLabel="Collapse workspace panel"
-        .collapsed=${this.panelCollapse.workspacePanelCollapsed}
+        .collapsed=${!this.panelIntent.isDocked("workspace")}
         .resizable=${!this.appShell.isMobileNavigationLayout}
         .panelWidth=${this.panelResize.panelWidth("workspace")}
         .minWidth=${constraints.minWidth}
         .maxWidth=${constraints.maxWidth}
-        .onToggle=${() => { this.panelCollapse.toggleWorkspacePanel(); }}
+        .onToggle=${() => { this.panelIntent.toggle("workspace"); }}
         .onResizeStart=${() => this.startPanelResize("workspace")}
         .onResize=${(width: number) => { this.panelResize.resizePanel("workspace", width, { persist: false }); }}
         .onResizeEnd=${() => { this.panelResize.persistPanelSizes(); }}
@@ -1274,8 +1275,7 @@ export class PiWebApp extends LitElement {
   }
 
   private startPanelResize(side: ResizablePanelSide): number {
-    if (side === "navigation") this.panelCollapse.expandNavigationPanel();
-    else this.panelCollapse.expandWorkspacePanel();
+    this.panelIntent.keep(side);
     return this.measuredPanelWidth(side) ?? this.panelResize.panelWidth(side);
   }
 
@@ -1303,13 +1303,10 @@ export class PiWebApp extends LitElement {
   }
 
   private isResizablePanelCollapsedOrStacked(side: ResizablePanelSide): boolean {
-    if (side === "navigation") return this.panelCollapse.navigationPanelCollapsed;
-    return this.panelCollapse.workspacePanelCollapsed || !this.isDesktopSideBySideLayout();
-  }
-
-  private isDesktopSideBySideLayout(): boolean {
-    if (typeof window === "undefined" || !("matchMedia" in window)) return true;
-    return window.matchMedia(DESKTOP_SIDE_BY_SIDE_MEDIA_QUERY).matches;
+    if (side === "navigation") return !this.panelIntent.isDocked("navigation");
+    // Below a resident shell the workspace panel stacks under the session, so it
+    // never takes width from its neighbour even while it is on screen.
+    return !this.panelIntent.isDocked("workspace") || this.appShell.disclosure !== "resident";
   }
 
   private measuredPanelWidth(side: ResizablePanelSide): number | undefined {
@@ -1787,7 +1784,7 @@ export class PiWebApp extends LitElement {
   }
 
   private async focusNavigationSection(section: NavigationSection): Promise<void> {
-    this.panelCollapse.expandNavigationPanel();
+    this.panelIntent.keep("navigation");
     if (this.appShell.isMobileNavigationLayout) this.selectMainView("navigation");
     // The navigation panel now hosts the inbox; non-machine sections map to
     // focusing the inbox panel itself.
@@ -2779,7 +2776,7 @@ export class PiWebApp extends LitElement {
     const intent = this.chatNavigationIntent;
     const runtimeAvailable = this.selectedChatRuntimeAvailable();
     return html`
-      <div class=${`${this.panelCollapse.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
+      <div class=${`${this.panelIntent.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
         <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout ? null : this.renderNavigationPanel()}</aside>
         ${this.renderNavigationPanelEdgeControl()}
         <main class=${mainViewClass(state.mainView)}>
