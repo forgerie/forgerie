@@ -33,6 +33,12 @@ export type PanelPeek =
    * out of the document the instant it is dismissed, and a thing that arrived
    * by following a finger vanishes instead of going back the way it came.
    */
+  /**
+   * Mounted, but not yet let in. A press has no travel behind it, so the sheet
+   * has to start from where a drag would have started or it appears instead of
+   * arriving. It holds this for one frame and then opens.
+   */
+  | { readonly kind: "opening"; readonly panel: ShellPanel }
   | { readonly kind: "closing"; readonly panel: ShellPanel }
   | { readonly kind: "open"; readonly panel: ShellPanel };
 

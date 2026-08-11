@@ -50,20 +50,16 @@ export class AppPanelEdgeControl extends LitElement {
     super.disconnectedCallback();
   }
 
+  /**
+   * A resize handle and nothing more.
+   *
+   * This used to carry an arrow that opened and closed the panel, which made a
+   * second way to reach a panel that looked nothing like the sheet. Asking for
+   * a panel now belongs to the burger and the drag; the seam only decides how
+   * wide a docked panel is.
+   */
   override render() {
-    const label = this.collapsed ? this.expandLabel : this.collapseLabel;
-    return html`
-      ${this.renderResizeHandle()}
-      <button
-        type="button"
-        class="edge-button"
-        title=${label}
-        aria-label=${label}
-        aria-controls=${this.controls}
-        aria-expanded=${String(!this.collapsed)}
-        @click=${() => { this.onToggle?.(); }}
-      >${this.renderIcon()}</button>
-    `;
+    return html`${this.renderResizeHandle()}`;
   }
 
   private renderResizeHandle() {
@@ -95,16 +91,6 @@ export class AppPanelEdgeControl extends LitElement {
     return this.panelWidth === undefined ? nothing : String(Math.round(this.panelWidth));
   }
 
-  private renderIcon() {
-    const direction = this.iconDirection();
-    const path = direction === "left" ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6";
-    return html`<svg class="edge-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${path}/></svg>`;
-  }
-
-  private iconDirection(): "left" | "right" {
-    if (this.side === "navigation") return this.collapsed ? "right" : "left";
-    return this.collapsed ? "left" : "right";
-  }
 
   private onResizePointerDown(event: PointerEvent): void {
     if (!this.resizable || event.button !== 0) return;
@@ -215,11 +201,6 @@ export class AppPanelEdgeControl extends LitElement {
     .resize-handle { position: absolute; inset: 0 -6px; z-index: 0; cursor: col-resize; touch-action: none; outline: none; }
     .resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); background: transparent; transition: width .12s ease, background .12s ease, opacity .12s ease; }
     .resize-handle:hover::after, .resize-handle:focus-visible::after, :host([resizing]) .resize-handle::after { width: 3px; background: var(--pi-accent); opacity: .72; }
-    .edge-button { position: relative; z-index: 1; box-sizing: border-box; display: grid; place-items: center; width: 18px; height: 48px; padding: 0; border: 1px solid var(--pi-border-muted); border-radius: 999px; background: var(--pi-bg); color: var(--pi-muted); opacity: .75; cursor: pointer; }
-    .edge-button:hover, .edge-button:focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); opacity: 1; }
-    :host([side="navigation"][collapsed]) .edge-button { transform: translateX(calc(50% - .5px)); }
-    :host([side="workspace"][collapsed]) .edge-button { transform: translateX(calc(-50% + .5px)); }
-    .edge-icon { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     :host([disclosure="summoned"][side="navigation"]) { grid-row: 1 / 3; }
     /*
      * Hidden only while the panel is away. A docked panel has no sheet, so this

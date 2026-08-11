@@ -68,6 +68,7 @@ export class PanelPeekController implements ReactiveController {
   private wheelTravel = 0;
   private wheelTimer: ReturnType<typeof setTimeout> | undefined;
   private exitTimer: ReturnType<typeof setTimeout> | undefined;
+  private entryFrame: number | undefined;
 
   constructor(private readonly host: ReactiveControllerHost, private readonly options: PanelPeekControllerOptions) {
     host.addController(this);
@@ -82,6 +83,13 @@ export class PanelPeekController implements ReactiveController {
     this.disarm();
     this.clearWheel();
     this.clearExitTimer();
+    this.clearEntryFrame();
+  }
+
+  private clearEntryFrame(): void {
+    if (this.entryFrame === undefined) return;
+    cancelAnimationFrame(this.entryFrame);
+    this.entryFrame = undefined;
   }
 
   get panel(): ShellPanel | undefined {
@@ -102,8 +110,23 @@ export class PanelPeekController implements ReactiveController {
   }
 
   /** Sends the sheet back the way it came rather than taking it off screen. */
+  /**
+   * Open a sheet without a drag.
+   *
+   * A press has no travel to follow, so the sheet animates in on its own. It is
+   * the same sheet a drag opens, in the same state, so the two ways in cannot
+   * drift apart.
+   */
+  open(panel: ShellPanel): void {
+    this.disarm();
+    this.clearEntryFrame();
+    this.setPeek({ kind: "opening", panel });
+    this.entryFrame = requestAnimationFrame(() => { this.setPeek({ kind: "open", panel }); });
+  }
+
   close(): void {
     this.disarm();
+    this.clearEntryFrame();
     const panel = peekedPanel(this.peek);
     this.setPeek(panel === undefined ? PEEK_CLOSED : { kind: "closing", panel });
   }

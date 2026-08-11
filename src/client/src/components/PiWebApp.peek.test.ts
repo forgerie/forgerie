@@ -154,21 +154,23 @@ describe("PiWebApp panel peek", () => {
     localStorage.setItem("pi-web-panel-intents", JSON.stringify({ navigation: "auto", workspace: "pinned" }));
     const app = await mountApp(979);
 
-    const edge = shadowRoot(app).querySelector("app-panel-edge-control[side='workspace']");
-    if (!(edge instanceof HTMLElement)) throw new Error("The shell rendered no workspace edge control");
+    const burger = shadowRoot(app).querySelector("app-panel-burger[side='workspace']");
+    if (!(burger instanceof HTMLElement)) throw new Error("The shell rendered no workspace burger");
 
-    expect(edge.hasAttribute("collapsed")).toBe(false);
-    expect(getComputedStyle(edge).display).not.toBe("none");
+    expect(getComputedStyle(burger).display).not.toBe("none");
+    const button = burger.shadowRoot?.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("The burger rendered no button");
+    expect(button.getAttribute("aria-label")).toBe("Hide workspace");
   });
 
   it("leaves a way out of every panel a three-pane shell docks", async () => {
     const app = await mountApp(DESKTOP);
 
     for (const side of ["navigation", "workspace"] as const) {
-      const edge = shadowRoot(app).querySelector(`app-panel-edge-control[side='${side}']`);
-      if (!(edge instanceof HTMLElement)) throw new Error(`The shell rendered no ${side} edge control`);
-      expect(edge.hasAttribute("collapsed")).toBe(false);
-      expect(getComputedStyle(edge).display).not.toBe("none");
+      const burger = shadowRoot(app).querySelector(`app-panel-burger[side='${side}']`);
+      if (!(burger instanceof HTMLElement)) throw new Error(`The shell rendered no ${side} burger`);
+      expect(getComputedStyle(burger).display).not.toBe("none");
+      expect(burger.shadowRoot?.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
     }
   });
 

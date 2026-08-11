@@ -96,6 +96,7 @@ import "./SessionInboxPanel";
 import "./WorkspaceManagementDialog";
 import { navigateToInboxSession, type InboxNavigationResult } from "../controllers/inboxNavigation";
 import { deriveSessionInboxBoard } from "../sessionBoard";
+import "./appShell/AppPanelBurger";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
 import { appStyles, NEW_SESSION_LABEL, renderNewSessionIcon, type ChatLine } from "./shared";
@@ -2972,6 +2973,33 @@ export class PiWebApp extends LitElement {
    * The pin inside the sheet is the one route from a look to a decision. The
    * drag itself never writes intent.
    */
+  /**
+   * The press that asks for a side panel.
+   *
+   * One control with one meaning: this panel, on or off. Pressing it opens the
+   * same sheet a drag opens; pressing it again puts the panel away, whether it
+   * arrived as a sheet or was pinned into the layout.
+   *
+   * It must stay while a panel is docked. A docked panel has no sheet, so if
+   * this were hidden there the panel could be pinned and never unpinned -- the
+   * trap the seam arrow used to spring.
+   */
+  private renderPanelBurger(side: ShellPanel) {
+    if (this.panelPeek.panel === side) return null;
+    if (side === "navigation" && this.appShell.isMobileNavigationLayout) return null;
+    const docked = this.panelIntent.isDocked(side);
+    const noun = side === "navigation" ? "sessions" : "workspace";
+    return html`
+      <app-panel-burger
+        side=${side}
+        controls=${`${side}-panel`}
+        label=${docked ? `Hide ${noun}` : `Show ${noun}`}
+        .open=${docked}
+        .onPress=${() => { if (docked) this.panelIntent.toggle(side); else this.panelPeek.open(side); }}
+      ></app-panel-burger>
+    `;
+  }
+
   private renderPeekSheet() {
     const panel = this.panelPeek.panel;
     if (panel === undefined) return null;
@@ -3169,6 +3197,8 @@ export class PiWebApp extends LitElement {
         <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout || this.panelPeek.panel === "navigation" ? null : this.renderNavigationPanel()}</aside>
         ${this.renderNavigationPanelEdgeControl()}
         <main class=${mainViewClass(state.mainView)}>
+          ${this.renderPanelBurger("navigation")}
+          ${this.renderPanelBurger("workspace")}
           ${this.renderContextBar()}
           ${this.renderMobileMainTabs()}
           ${this.renderGlobalError(state)}
