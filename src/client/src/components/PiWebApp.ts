@@ -16,7 +16,7 @@ import { MachineController } from "../controllers/machineController";
 import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
-import { SessionController, type FirstPromptSubmission, type SessionLaunchRecovery } from "../controllers/sessionController";
+import { SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
 import { WorkspaceController, canDeleteWorkspace } from "../controllers/workspaceController";
@@ -3131,7 +3131,7 @@ export class PiWebApp extends LitElement {
           .onCancel=${() => { this.closeNewSessionComposer(); }}
           .onSubmit=${(intent: NewSessionLaunchIntent) => this.submitNewSession(intent)}
           .onClaimRecoveryDraft=${(recoverySeedId: string) => this.sessions.claimSessionLaunchRecoveryDraft(recoverySeedId)}
-          .onReturnRecoveryDraft=${(recoverySeedId: string, snapshot: FirstPromptSubmission) => { this.sessions.returnSessionLaunchRecoveryDraft(recoverySeedId, snapshot); }}
+          .onReturnRecoveryDraft=${(recoverySeedId: string, snapshot: SessionLaunchRecoveryDraftSnapshot) => { this.sessions.returnSessionLaunchRecoveryDraft(recoverySeedId, snapshot); }}
         ></new-session-composer>` : null}
         ${state.workspaceManagementDialog !== undefined ? html`<workspace-management-dialog
           .dialogState=${state.workspaceManagementDialog}

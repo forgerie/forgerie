@@ -27,7 +27,7 @@ import {
 import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
 import { base64ByteLength } from "../../../shared/promptAttachments";
-import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
+import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
 import type { SessionInboxBridge } from "./sessionInboxController";
@@ -103,9 +103,11 @@ export interface FirstPromptSubmission {
   readonly promptResourceCommandIdentity?: PromptResourceCommandIdentity | undefined;
 }
 
+export type SessionLaunchRecoveryDraftSnapshot = Omit<FirstPromptSubmission, "promptResourceCommandIdentity">;
+
 export interface SessionLaunchRecoveryDraftSeed {
   readonly id: string;
-  readonly snapshot: FirstPromptSubmission;
+  readonly snapshot: SessionLaunchRecoveryDraftSnapshot;
 }
 
 export interface SessionLaunchDestination {
@@ -322,12 +324,11 @@ export class SessionController {
         text: queued.text,
         ...(queued.attachments === undefined ? {} : { attachments: queued.attachments.map((attachment) => ({ ...attachment })) }),
         delivery: queued.delivery,
-        ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
       },
     };
   }
 
-  returnSessionLaunchRecoveryDraft(sessionId: string, snapshot: FirstPromptSubmission): void {
+  returnSessionLaunchRecoveryDraft(sessionId: string, snapshot: SessionLaunchRecoveryDraftSnapshot): void {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     const claimed = record?.claimedDraft;
     if (record?.recovery.stage !== "creationFailed" || claimed === undefined) return;
@@ -2501,12 +2502,12 @@ function payloadFreeClaimedCreationRecovery(recovery: SessionLaunchRecovery, que
   };
 }
 
-function queuedRecoveryDraftFromSnapshot(bookkeeping: ClaimedSessionLaunchRecoveryDraft["queued"], snapshot: FirstPromptSubmission): FirstPromptQueuedSend {
+function queuedRecoveryDraftFromSnapshot(bookkeeping: ClaimedSessionLaunchRecoveryDraft["queued"], snapshot: SessionLaunchRecoveryDraftSnapshot): FirstPromptQueuedSend {
   const attachments = snapshot.attachments === undefined ? undefined : snapshot.attachments.map((attachment) => ({ ...attachment }));
-  if (bookkeeping.type === "promptResource" && snapshot.promptResourceCommandIdentity !== undefined) {
+  if (bookkeeping.type === "promptResource" && promptResourceIdentityApplies(snapshot.text, bookkeeping.identity)) {
     return {
       ...bookkeeping,
-      identity: { ...snapshot.promptResourceCommandIdentity },
+      identity: { ...bookkeeping.identity },
       text: snapshot.text,
       attachments,
       delivery: snapshot.delivery ?? bookkeeping.delivery,
@@ -2522,6 +2523,11 @@ function queuedRecoveryDraftFromSnapshot(bookkeeping: ClaimedSessionLaunchRecove
     delivery: snapshot.delivery ?? bookkeeping.delivery,
     purpose: "initialPrompt",
   };
+}
+
+function promptResourceIdentityApplies(text: string, identity: PromptResourceCommandIdentity): boolean {
+  const parsed = parseLeadingSlashCommand(text);
+  return parsed.kind === "command" && parsed.name === identity.name;
 }
 
 function insertQueuedRecoveryDraft(queue: QueuedPendingSessionSend[], index: number, queued: FirstPromptQueuedSend): void {

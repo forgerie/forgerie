@@ -509,10 +509,10 @@ describe("SessionController session launch", () => {
 
     expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({
       id: failedId,
-      snapshot: { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity },
+      snapshot: { text: "/review src", delivery: "inline" },
     });
 
-    controller.returnSessionLaunchRecoveryDraft(failedId, { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    controller.returnSessionLaunchRecoveryDraft(failedId, { text: "/review src", delivery: "inline" });
     await controller.retrySessionLaunch(failedId);
 
     expect(resourceCalls).toEqual([{ text: "/review src", identity }]);

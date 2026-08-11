@@ -3,7 +3,6 @@
 import { EditorSelection } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, workspacesApi, type Machine, type Project, type Workspace } from "../api";
-import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import type { NewSessionDestinationCatalog, NewSessionLaunchIntent, NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination } from "../newSessionComposer";
 import { ComposerDraft } from "./ComposerDraft";
@@ -762,12 +761,11 @@ describe("new-session-composer modal lifetime", () => {
     expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "edited", attachments: [attachment], delivery: "inline" });
   });
 
-  it("keeps prompt-resource identity out of the draft but returns it with claimed recovery rollback", async () => {
-    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+  it("returns only draft-owned fields when a claimed recovery rolls back", async () => {
     const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
     const composer = new NewSessionComposer();
     composer.recoverySeedId = "recovery-1";
-    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity } });
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "/review src", delivery: "inline" } });
     composer.onReturnRecoveryDraft = returned;
     document.body.append(composer);
     await settleRenderedDialog(composer);
@@ -775,7 +773,7 @@ describe("new-session-composer modal lifetime", () => {
 
     button(composer, "[data-action='cancel']").click();
 
-    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "/review src", promptResourceCommandIdentity: identity });
+    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "/review src" });
   });
 
   it("focusExisting returns focus to the same draft without reinitializing it", async () => {
