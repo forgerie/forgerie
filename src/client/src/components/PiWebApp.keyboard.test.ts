@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { textMessage } from "../chatMessages";
+import { selectedChatLiveReady, selectedChatTarget } from "../selectedChatLoad";
 import { AuthDialog } from "./AuthDialog";
 import { ChatView } from "./ChatView";
 import { ModalSurface } from "./ModalSurface";
@@ -263,7 +264,12 @@ function dispatchEditorKeyThroughApp(
 async function renderChatEditor(shortcuts: Record<string, string | null>): Promise<{ app: PiWebApp; editor: PromptEditor }> {
   const app = new PiWebApp();
   const selectedSession = session("session-shortcut");
-  setAppState(app, { selectedSession, sessions: [selectedSession], mainView: "chat" });
+  setAppState(app, {
+    selectedSession,
+    sessions: [selectedSession],
+    selectedChatLoad: selectedChatLiveReady(selectedChatTarget("local", selectedSession)),
+    mainView: "chat",
+  });
   Reflect.set(app, "shortcutConfig", shortcuts);
   const editor = requiredElement(renderApp(app).querySelector<PromptEditor>("prompt-editor"), "prompt editor");
   await editor.updateComplete;
