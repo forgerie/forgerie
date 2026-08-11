@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH } from "../../../shared/apiTypes";
-import { parseAborted, parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
+import { parseAborted, parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parsePromptResourceCatalogResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
 import { parseMachineSessionListingSnapshot, parseSessionAskCatalogSnapshot } from "./parsers";
 
 describe("API parsers", () => {
@@ -72,6 +72,23 @@ describe("API parsers", () => {
       effectiveConfig: { host: "127.0.0.1", port: 8504, allowedHosts: true, pathAccess: { allowedPaths: ["/tmp"] }, uploads: { defaultFolder: ".forgerie/uploads" }, agent: { command: "agent-lab", dir: "/Users/dev/agent-profiles/lab" } },
       envOverrides: { host: true, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false, agentCommand: false, agentDir: true, agentDirSource: "pi-compatibility", agentSessionDir: false },
     });
+  });
+
+  it("parses prompt-resource catalog responses and rejects non-resource entries", () => {
+    expect(parsePromptResourceCatalogResponse({
+      available: true,
+      commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "a".repeat(64) }, description: "Review" }],
+      diagnostics: [],
+    })).toEqual({
+      available: true,
+      commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "a".repeat(64) }, description: "Review" }],
+      diagnostics: [],
+    });
+    expect(parsePromptResourceCatalogResponse({ available: false, reason: "busy", message: "Busy" })).toEqual({ available: false, reason: "busy", message: "Busy" });
+    expect(() => parsePromptResourceCatalogResponse({ available: true, commands: [{ name: "tree", source: "builtin", identity: { source: "prompt", name: "tree", fingerprint: "a".repeat(64) } }], diagnostics: [] })).toThrow("Invalid prompt-resource command source");
+    expect(() => parsePromptResourceCatalogResponse({ available: true, commands: [{ name: "deploy", source: "extension", identity: { source: "prompt", name: "deploy", fingerprint: "a".repeat(64) } }], diagnostics: [] })).toThrow("Invalid prompt-resource command source");
+    expect(() => parsePromptResourceCatalogResponse({ available: true, commands: [{ name: "review", source: "prompt", identity: { source: "skill", name: "review", fingerprint: "a".repeat(64) } }], diagnostics: [] })).toThrow("Invalid prompt-resource command identity");
+    expect(() => parsePromptResourceCatalogResponse({ available: true, commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "x" } }], diagnostics: [] })).toThrow("Invalid prompt-resource identity fingerprint");
   });
 
   it("parses Forgerie runtime responses including the daemon-owned active profile", () => {

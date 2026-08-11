@@ -498,6 +498,15 @@ describe("machine-scoped file suggestion API", () => {
 });
 
 describe("machine-scoped workspace API", () => {
+  it("reads prompt-resource catalogs through the workspace route", async () => {
+    const fetchMock = stubJsonFetch({ available: true, commands: [], diagnostics: [] });
+
+    await expect(workspacesApi.promptResourceCatalog("p 1", "w/1", "remote a")).resolves.toEqual({ available: true, commands: [], diagnostics: [] });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchCall(fetchMock, 0)[0]).toBe("https://pi.example.test/api/machines/remote%20a/projects/p%201/workspaces/w%2F1/prompt-resource-catalog");
+  });
+
   it("keeps project ids in one encoded route segment when listing workspaces", async () => {
     const fetchMock = stubJsonFetch([]);
 

@@ -13,6 +13,7 @@ import { listDirectorySuggestions } from "./projects/directorySuggestions.js";
 import { SessionDaemonClient } from "../sessiond/sessionDaemonClient.js";
 import { registerSessionProxyRoutes, type SessionProxyDaemon } from "./sessiond/sessionProxyRoutes.js";
 import { registerWorkspaceExplorerRoutes } from "./workspaceExplorerRoutes.js";
+import { registerPromptResourceCatalogProxyRoutes } from "./resources/promptResourceRoutes.js";
 import { registerGitRoutes } from "./gitRoutes.js";
 import { registerTerminalProxyRoutes } from "./terminalProxyRoutes.js";
 import { registerWorkspaceDeletionRoutes } from "./workspaces/workspaceDeletionRoutes.js";
@@ -203,6 +204,8 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   registerSessionProxyRoutes(app, sessionDaemon, "/api/machines/local");
   registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api", { config: configService });
   registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api/machines/local", { config: configService });
+  registerPromptResourceCatalogProxyRoutes(app, projects, workspaces, sessionDaemon, "/api");
+  registerPromptResourceCatalogProxyRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local");
   registerGitRoutes(app, projects, workspaces);
   registerGitRoutes(app, projects, workspaces, "/api/machines/local");
   registerTerminalProxyRoutes(app, projects, workspaces, sessionDaemon);

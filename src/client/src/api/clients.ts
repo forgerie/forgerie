@@ -1,4 +1,5 @@
 import type { AskUserSubmission, DeleteWorkspaceFileResponse, ExtensionDialogAnswer, FileSuggestion, MachineSessionListingSnapshot, MoveWorkspaceFileOptions, PiPackageInstallRequest, PiPackageRemoveRequest, PiPackageScope, PiPackageUpdateRequest, PiWebConfigValues, PromptAttachment, RunTerminalCommandInput, SessionAskCatalogSnapshot, SessionBulkMutationRef, SessionCleanupRequest, SessionNotificationDismissThrough, SessionRef, SessionTreeForkRequest, SessionTreeForkResult, SessionTreeNavigateRequest, SessionUnreadAcknowledgeRequest, TerminalCommandRun, TerminalCommandRunFilter, WriteWorkspaceFileOptions } from "../../../shared/apiTypes";
+import type { PromptResourceCatalogResponse } from "../../../shared/promptResourceCommand";
 import { resolveAppUrl } from "../appUrl";
 import { request } from "./http";
 import {
@@ -39,6 +40,7 @@ import {
   parsePiWebRuntimeResponse,
   parsePiWebStatusResponse,
   parseProject,
+  parsePromptResourceCatalogResponse,
   parsePromoted,
   parseReloaded,
   parseRestored,
@@ -167,6 +169,7 @@ export const workspacesApi = {
   deleteWorkspace: (projectId: string, workspaceId: string, machineId = "local") => request(`${machinePrefix(machineId)}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}`, parseTerminalCommandRun, { method: "DELETE" }),
   workspaceTree: (projectId: string, workspaceId: string, path = "", machineId = "local") => request(`${machinePrefix(machineId)}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}/tree?path=${encodeURIComponent(path)}`, parseFileTreeResponse),
   workspaceFile: (projectId: string, workspaceId: string, path: string, machineId = "local") => request(`${machinePrefix(machineId)}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}/file?path=${encodeURIComponent(path)}`, parseFileContentResponse),
+  promptResourceCatalog: (projectId: string, workspaceId: string, machineId = "local"): Promise<PromptResourceCatalogResponse> => request(`${machinePrefix(machineId)}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}/prompt-resource-catalog`, parsePromptResourceCatalogResponse),
   writeWorkspaceFile: (projectId: string, workspaceId: string, path: string, content: string | Uint8Array, options?: WriteWorkspaceFileOptions, machineId = "local") => {
     const params = new URLSearchParams({ path });
     if (options?.createDirs === false) params.set("createDirs", "false");

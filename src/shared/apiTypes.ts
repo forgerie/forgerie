@@ -986,6 +986,8 @@ export interface SlashCommand {
   source: "extension" | "prompt" | "skill" | "builtin";
 }
 
+export type { PromptResourceCatalogResponse, PromptResourceCommandDescriptor, PromptResourceCommandIdentity } from "./promptResourceCommand.js";
+
 export interface FileSuggestion {
   path: string;
   kind: "tracked" | "untracked" | "other";

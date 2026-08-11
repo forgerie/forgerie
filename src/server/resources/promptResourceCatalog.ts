@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { DefaultResourceLoader, type PromptTemplate, type ResourceDiagnostic, type Skill, type SourceInfo } from "@earendil-works/pi-coding-agent";
 import { buildPromptResourceCatalogFromResources } from "../sessions/commandCatalog.js";
 import type { PromptResourceCatalogAvailable, PromptResourceCatalogResponse } from "../../shared/promptResourceCommand.js";
@@ -194,7 +194,15 @@ function serializedByteLength(response: PromptResourceCatalogAvailable): number 
 }
 
 function safeOrigin(kind: "prompt" | "skill", filePath: string | undefined, sourceInfo: SourceInfo | undefined): string {
-  return `${kind}:${sourceInfo?.scope ?? "unknown"}:${sourceInfo?.origin ?? "unknown"}:${sourceInfo?.source ?? "unknown"}:${filePath === undefined ? "unknown" : basename(filePath)}`;
+  const sourceInfoPath = sourceInfoPathValue(sourceInfo);
+  const canonicalPath = sourceInfoPath ?? filePath;
+  return `${kind}:${sourceInfo?.scope ?? "unknown"}:${sourceInfo?.origin ?? "unknown"}:${sourceInfo?.source ?? "unknown"}:${canonicalPath === undefined ? "unknown" : resolve(canonicalPath)}`;
+}
+
+function sourceInfoPathValue(sourceInfo: SourceInfo | undefined): string | undefined {
+  if (sourceInfo === undefined) return undefined;
+  if (!("path" in sourceInfo)) return undefined;
+  return typeof sourceInfo.path === "string" ? sourceInfo.path : undefined;
 }
 
 function safeDiagnostic(diagnostic: ResourceDiagnostic): string {

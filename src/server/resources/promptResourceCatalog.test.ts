@@ -60,11 +60,37 @@ describe("PromptResourceCatalogService", () => {
     const active = await buildActiveCommandCatalog({
       builtins: [],
       extensions: [],
-      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", origin: "prompt:project:top-level:local:review.md" }],
-      skills: [{ name: "audit", description: "Audit", content: skillBody, origin: "skill:project:top-level:local:SKILL.md", baseDir: join(workspace, ".pi", "skills", "audit"), filePath: skillPath }],
+      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", origin: `prompt:project:top-level:local:${join(workspace, ".pi", "prompts", "review.md")}` }],
+      skills: [{ name: "audit", description: "Audit", content: skillBody, origin: `skill:project:top-level:local:${skillPath}`, baseDir: join(workspace, ".pi", "skills", "audit"), filePath: skillPath }],
     });
 
     expect(response).toEqual({ available: true, commands: active.firstPromptCommands, diagnostics: [] });
+  });
+
+  it("uses canonical origins, not public basenames, in command identities", async () => {
+    const firstPath = "/workspace/a/.pi/prompts/review.md";
+    const secondPath = "/workspace/b/.pi/prompts/review.md";
+    const service = new PromptResourceCatalogService({
+      agentDir: "/agent",
+      loader: {
+        loadResources({ cwd }) {
+          const filePath = cwd === "/workspace/a" ? firstPath : secondPath;
+          return Promise.resolve({
+            prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", filePath, sourceInfo: sourceInfo(filePath) }],
+            skills: [],
+            diagnostics: [],
+          });
+        },
+      },
+    });
+
+    const first = await service.catalog("/workspace/a");
+    const second = await service.catalog("/workspace/b");
+
+    if (!first.available || !second.available) throw new Error("Expected available catalogs");
+    expect(first.commands[0]?.identity.fingerprint).not.toBe(second.commands[0]?.identity.fingerprint);
+    expect(JSON.stringify(first)).not.toContain(firstPath);
+    expect(JSON.stringify(second)).not.toContain(secondPath);
   });
 
   it("returns an available empty catalog for a destination with no prompt resources", async () => {
