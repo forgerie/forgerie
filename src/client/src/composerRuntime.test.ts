@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { api, type SessionModel } from "./api";
-import { createSessionComposerRuntime } from "./composerRuntime";
+import { api, workspacesApi, type SessionModel } from "./api";
+import { createPreSessionComposerRuntime, createSessionComposerRuntime } from "./composerRuntime";
 import type { PromptCompletionTrigger } from "./promptCompletions";
 
 const sonnet: SessionModel = { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" };
@@ -8,6 +8,42 @@ const gpt: SessionModel = { provider: "openai", id: "gpt-5.2" };
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("pre-session composer runtime", () => {
+  it("lists destination prompt resources and files but not models", async () => {
+    const catalog = vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValue({
+      available: true,
+      diagnostics: [],
+      commands: [
+        { name: "review", source: "prompt", description: "Review code", identity: { source: "prompt", name: "review", fingerprint: "a".repeat(64) } },
+        { name: "audit", source: "skill", identity: { source: "skill", name: "audit", fingerprint: "b".repeat(64) } },
+      ],
+    });
+    const files = vi.spyOn(api, "files").mockResolvedValue([{ path: "src/index.ts", kind: "tracked" }]);
+    const runtime = createPreSessionComposerRuntime({ machineId: "remote-a", projectId: "project-1", workspaceId: "workspace-1" });
+
+    await expect(runtime.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([
+      { kind: "command", replaceFrom: 0, replaceTo: 3, insertText: "/review", detail: "prompt", description: "Review code" },
+    ]);
+    await expect(runtime.resolveCompletion({ kind: "file", query: "src", from: 5, to: 9, fileScope: "tracked" })).resolves.toEqual([
+      { kind: "file", replaceFrom: 5, replaceTo: 9, insertText: "@src/index.ts", detail: "tracked" },
+    ]);
+    await expect(runtime.resolveCompletion({ kind: "model", query: "cla", from: 0, to: 4 })).resolves.toEqual([]);
+
+    expect(runtime.supportedCompletionKinds).toEqual(new Set(["command", "file"]));
+    expect(catalog).toHaveBeenCalledWith("project-1", "workspace-1", "remote-a");
+    expect(files).toHaveBeenCalledWith("src", { scope: "tracked", machineId: "remote-a", projectId: "project-1", workspaceId: "workspace-1" });
+  });
+
+  it("returns empty pre-session completions without a complete destination or with unavailable resources", async () => {
+    vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValue({ available: false, reason: "busy", message: "busy" });
+    const missingDestination = createPreSessionComposerRuntime({ machineId: "local" });
+    const unavailableResources = createPreSessionComposerRuntime({ machineId: "local", projectId: "project-1", workspaceId: "workspace-1" });
+
+    await expect(missingDestination.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([]);
+    await expect(unavailableResources.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([]);
+  });
 });
 
 describe("session composer runtime", () => {
