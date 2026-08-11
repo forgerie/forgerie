@@ -19,6 +19,7 @@ import { promptEditorStyles, type CompletionItem } from "./shared";
 import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderSummonIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import "./AutocompleteMenu";
+import "./ContextUsageMeter";
 
 type PendingAttachment = CapturedAttachment & { id: string };
 
@@ -34,6 +35,8 @@ export class PromptEditor extends LitElement {
   @property({ type: Boolean }) isCompacting = false;
   @property({ type: Boolean }) canStop = false;
   @property({ attribute: false }) status?: SessionStatus;
+  /** Drawn as the island's own top edge; absent below the reporting threshold. */
+  @property({ attribute: false }) contextUsage?: SessionStatus["contextUsage"];
   @property({ type: Boolean }) sending = false;
   @property({ attribute: false, hasChanged: promptHistoryChanged }) promptHistory: readonly string[] = [];
   @property({ attribute: false }) onSend?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => void | Promise<void>;
@@ -131,6 +134,7 @@ export class PromptEditor extends LitElement {
         @dragover=${(event: DragEvent) => { this.handleDragOver(event); }}
         @drop=${(event: DragEvent) => { void this.handleDrop(event); }}
       >
+        <context-usage-meter .contextUsage=${this.contextUsage}></context-usage-meter>
         <div class="editor-wrap">
           <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label="Message pi" aria-disabled=${this.disabled ? "true" : "false"}></div>
           <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />

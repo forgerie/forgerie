@@ -5,6 +5,7 @@ import type { SessionInfo, SessionStatus } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import type { ChatView } from "./ChatView";
 import { PiWebApp } from "./PiWebApp";
+import type { PromptEditor } from "./PromptEditor";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -44,21 +45,25 @@ describe("PiWebApp chrome disclosure", () => {
     expect(shadowRoot(app).querySelector("app-control-sheet")).not.toBeNull();
   });
 
-  it("puts session context progress above the bottom controls instead of over the transcript", async () => {
+  it("draws session context progress on the composer island itself, not over the transcript", async () => {
     const app = await mountApp(499, statusWithContext(72));
     const root = shadowRoot(app);
-    const meter = root.querySelector("context-usage-meter");
+    const composer = root.querySelector<PromptEditor>("prompt-editor");
     const chat = root.querySelector<ChatView>("chat-view");
 
-    expect(meter?.nextElementSibling?.tagName).toBe("PROMPT-EDITOR");
+    expect(root.querySelector("context-usage-meter")).toBeNull();
+    await composer?.updateComplete;
+    expect(composer?.shadowRoot?.querySelector("context-usage-meter")).not.toBeNull();
     await chat?.updateComplete;
     expect(chat?.shadowRoot?.querySelector("conversation-meter")).toBeNull();
   });
 
-  it("leaves the composer its own border in a session that has barely begun", async () => {
+  it("leaves the island's edge unmarked in a session that has barely begun", async () => {
     const app = await mountApp(499, statusWithContext(4));
+    const composer = shadowRoot(app).querySelector<PromptEditor>("prompt-editor");
 
-    expect(shadowRoot(app).querySelector("context-usage-meter")).toBeNull();
+    await composer?.updateComplete;
+    expect(composer?.shadowRoot?.querySelector("context-usage-meter")?.shadowRoot?.querySelector(".meter")).toBeNull();
   });
 });
 

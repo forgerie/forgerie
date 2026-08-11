@@ -156,7 +156,7 @@ export const appStyles = css`
     .shell.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
     .shell:not(.workspace-view) > workspace-panel { display: none; }
     .workspace-panel-edge { display: none; }
-    main.workspace-view chat-view, main.workspace-view context-usage-meter, main.workspace-view prompt-editor, main.workspace-view status-bar,
+    main.workspace-view chat-view, main.workspace-view prompt-editor, main.workspace-view status-bar,
     main.workspace-view .empty { display: none; }
     main.workspace-view { overflow: hidden; }
   }
@@ -190,10 +190,7 @@ export const appStyles = css`
   }
   .navigation-scrim { display: none; }
   @keyframes navigation-overlay-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-  status-bar, context-usage-meter { flex: 0 0 auto; }
-  /* While the meter is present it *is* the composer's top rule, so the session
-     shows one hairline instead of a tinted bar stacked on a border. */
-  main:has(context-usage-meter) prompt-editor { --pi-composer-rule: transparent; }
+  status-bar { flex: 0 0 auto; }
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
@@ -659,14 +656,34 @@ export const autocompleteStyles = css`
 `;
 
 export const promptEditorStyles = css`
-  :host { position: relative; z-index: 5; display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; }
-  footer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border-top: 1px solid var(--pi-composer-rule, var(--pi-border)); }
-  footer.shell-mode { border-top-color: var(--pi-success); background: var(--pi-success-bg); }
+  /*
+   * The composer is one island: an inset surface the transcript runs up to,
+   * rather than a stack of full-width bands. Everything it needs — the context
+   * reading, the draft, one control rail — lives inside that single border, so
+   * a new capability has to earn its place on the rail instead of adding a row.
+   * It is its own container: nothing here keys off the viewport.
+   */
+  :host { position: relative; z-index: 5; display: block; container-type: inline-size; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+  footer {
+    position: relative;
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px;
+    margin: 0 clamp(6px, 2cqi, 12px) max(8px, env(safe-area-inset-bottom));
+    padding: 10px;
+    overflow: hidden;
+    border: 1px solid var(--pi-border);
+    border-radius: 16px;
+    background: var(--pi-bg);
+    box-shadow: 0 6px 18px var(--pi-shadow);
+  }
+  /* Context use is the island's own top edge — one reading on a line the eye
+     already crosses, instead of a band of its own. */
+  context-usage-meter { position: absolute; top: 0; right: 0; left: 0; }
+  footer.shell-mode { border-color: var(--pi-success); background: var(--pi-success-bg); }
   .editor-wrap { position: relative; min-width: 0; }
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }
   .compact-status > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .select-model { max-width: min(42vw, 320px); }
+  .select-model { max-width: min(42cqi, 320px); }
   /* Identity, archive, and the summon control only appear once the chrome bands are gone. */
   .session-identity { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
   .composer-archive { flex: 0 0 auto; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-muted); padding: 5px 9px; font-size: inherit; }
@@ -694,7 +711,7 @@ export const promptEditorStyles = css`
    * the space. Focus, typed text, or an attachment restores it; the model and
    * thinking controls come back with it rather than being lost.
    */
-  .resting { gap: 6px; padding-block: 6px; }
+  .resting { gap: 6px; padding-block: 7px; }
   .resting .markdown-editor .cm-editor { min-height: 38px; }
   .resting .markdown-editor .cm-content { min-height: 22px; padding-block: 6px; }
   .resting .editor-attach { width: 26px; height: 26px; bottom: 6px; }
@@ -711,18 +728,17 @@ export const promptEditorStyles = css`
   .attachment-error { flex-basis: 100%; color: var(--pi-danger); font-size: 12px; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   button:disabled, textarea:disabled, .markdown-editor-disabled .cm-editor { opacity: .5; cursor: not-allowed; }
-  @media (max-width: 640px) {
+  @container (max-width: 640px) {
     footer { gap: 8px; padding: 8px; }
     .actions { gap: 6px; }
     .compact-status { flex: 1 1 220px; gap: 4px; }
-    .select-model { max-width: min(58vw, 260px); }
+    .select-model { max-width: min(58cqi, 260px); }
     button { padding: 6px 8px; }
   }
-  @media (max-width: 430px) {
+  @container (max-width: 430px) {
     .compact-status { flex-basis: 170px; font-size: 11px; }
-    .select-model { max-width: 48vw; }
+    .select-model { max-width: 48cqi; }
     button { padding: 5px 7px; }
-    .icon-button { width: 34px; height: 34px; }
   }
 `;
 
