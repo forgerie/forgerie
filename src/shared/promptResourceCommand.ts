@@ -53,7 +53,7 @@ export function parseLeadingSlashCommand(input: string): LeadingSlashCommandPars
 }
 
 export async function fingerprintPromptResourceCommand(input: PromptResourceCommandFingerprintInput): Promise<string> {
-  const payload = JSON.stringify({
+  return sha256Hex({
     schema: 1,
     source: input.source,
     name: input.name,
@@ -61,7 +61,18 @@ export async function fingerprintPromptResourceCommand(input: PromptResourceComm
     content: input.content,
     baseDir: input.baseDir ?? null,
   });
-  const bytes = new TextEncoder().encode(payload);
+}
+
+export async function fingerprintPromptResourceDeliveryText(text: string): Promise<string> {
+  // The delivery receipt proves only the canonical user-message text persisted
+  // in transcript history. It deliberately excludes images because transcript
+  // history has no stable persisted image identity that the client can
+  // reproduce during recovery reconciliation.
+  return sha256Hex({ schema: 1, kind: "prompt-resource-delivery-text", text });
+}
+
+async function sha256Hex(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

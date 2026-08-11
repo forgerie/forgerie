@@ -5,7 +5,7 @@ import { createAssistantMessageEventStream, InMemoryCredentialStore, type Assist
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fingerprintPromptResourceCommand } from "../../shared/promptResourceCommand.js";
+import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText } from "../../shared/promptResourceCommand.js";
 import { PiSessionService } from "./piSessionService.js";
 import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources } from "./commandCatalog.js";
 import { CapturingSessionEventHub, createTestModelRuntime, fakeRuntime, runtimeCreator, seedCredential, sessionGateway, sessionRecord, sessionRef, TEST_MODEL_ID, TEST_MODEL_PROVIDER, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
@@ -90,7 +90,8 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
 
     const response = await service.runPromptResourceCommand(sessionRef("prompt-resource-session"), "/review src", identity);
 
-    expect(response.accepted).toBe(true);
+    expect(response).toEqual({ accepted: true, deliveryFingerprint: await fingerprintPromptResourceDeliveryText("Review src") });
+    expect(JSON.stringify(response)).not.toContain("Review src");
     expect(fake.calls.prompt).toEqual([{ text: "Review src", options: { expandPromptTemplates: false } }]);
     await service.dispose();
   });
@@ -186,9 +187,19 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     });
 
     try {
-      await service.runPromptResourceCommand(sessionRef("prompt-resource-expansion-session"), "/review src 'quoted value'", review.identity);
-      await service.runPromptResourceCommand(sessionRef("prompt-resource-expansion-session"), "/skill:audit target", audit.identity);
+      const reviewResponse = await service.runPromptResourceCommand(sessionRef("prompt-resource-expansion-session"), "/review src 'quoted value'", review.identity);
+      const skillResponse = await service.runPromptResourceCommand(sessionRef("prompt-resource-expansion-session"), "/skill:audit target", audit.identity);
 
+      expect(reviewResponse.deliveryFingerprint).toBe(await fingerprintPromptResourceDeliveryText("Review src and quoted value for src quoted value"));
+      expect(skillResponse.deliveryFingerprint).toBe(await fingerprintPromptResourceDeliveryText(`<skill name="audit" location="${skillPath}">
+References are relative to ${root}.
+
+Use the audit skill
+</skill>
+
+target`));
+      expect(JSON.stringify(reviewResponse)).not.toContain("Review src and quoted value");
+      expect(JSON.stringify(skillResponse)).not.toContain("Use the audit skill");
       expect(fake.calls.prompt).toEqual([
         { text: "Review src and quoted value for src quoted value", options: { expandPromptTemplates: false } },
         { text: `<skill name="audit" location="${skillPath}">

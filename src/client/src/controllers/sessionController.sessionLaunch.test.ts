@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialAppState } from "../appState";
 import { SessionController } from "./sessionController";
-import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
+import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { defaultApi, deferred, emptyPage, FakeSocket, MemoryStorage, oldSession, sessionLookupId, status, workspace, type AppState, type PromptAttachment, type SessionInfo } from "./sessionController.testSupport";
 
 describe("SessionController session launch", () => {
@@ -267,6 +267,99 @@ describe("SessionController session launch", () => {
       attachments: [{ mimeType: "image/png", name: "shot.png", size: 3 }],
     });
     expect(JSON.stringify(controller.getSessionLaunchRecovery(started.id))).not.toContain("QUJD");
+  });
+
+  it("clears prompt-resource ambiguous recovery when expanded transcript text matches the delivery receipt", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const expandedText = "Review src";
+    const receipt = await fingerprintPromptResourceDeliveryText(expandedText);
+    const transcriptText = expandedText;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve({ messages: [{ role: "user", content: transcriptText }], start: 0, total: 1 }),
+      status: (session) => Promise.resolve({ ...status(sessionLookupId(session)), isStreaming: true }),
+      runPromptResourceCommand: () => Promise.reject(new Error("delivery timed out")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    recordLaunchDeliveryReceipt(controller, started.id, receipt);
+
+    await controller.refreshSessionLaunchRecovery(started.id);
+
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+  });
+
+  it("keeps prompt-resource ambiguous recovery when transcript text does not match the delivery receipt", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const receipt = await fingerprintPromptResourceDeliveryText("Review src");
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve({ messages: [{ role: "user", content: "Review other" }], start: 0, total: 1 }),
+      status: (session) => Promise.resolve({ ...status(sessionLookupId(session)), isStreaming: true }),
+      runPromptResourceCommand: () => Promise.reject(new Error("delivery timed out")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    recordLaunchDeliveryReceipt(controller, started.id, receipt);
+
+    await controller.refreshSessionLaunchRecovery(started.id);
+
+    expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
+    expect(state.clientQueuedSessionMessages[started.id]).toEqual([
+      { kind: "followUp", text: "/review src" },
+    ]);
+  });
+
+  it("does not clear prompt-resource recovery from raw slash text when the delivery receipt was for expanded text", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const receipt = await fingerprintPromptResourceDeliveryText("Review src");
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve({ messages: [{ role: "user", content: "/review src" }], start: 0, total: 1 }),
+      status: (session) => Promise.resolve({ ...status(sessionLookupId(session)), isStreaming: true }),
+      runPromptResourceCommand: () => Promise.reject(new Error("delivery timed out")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    recordLaunchDeliveryReceipt(controller, started.id, receipt);
+
+    await controller.refreshSessionLaunchRecovery(started.id);
+
+    expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
+    expect(state.clientQueuedSessionMessages[started.id]).toEqual([
+      { kind: "followUp", text: "/review src" },
+    ]);
   });
 
   it("retains stage-specific recovery data when creation fails", async () => {
@@ -1502,3 +1595,35 @@ describe("SessionController session launch", () => {
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
   });
 });
+
+interface ControllerWithLaunchRecoveries {
+  sessionLaunchRecoveries: unknown;
+}
+
+interface QueuedRecoveryRecord {
+  queuedSends: { deliveryReceipt?: string | undefined }[];
+}
+
+function recordLaunchDeliveryReceipt(controller: SessionController, sessionId: string, receipt: string): void {
+  const source: object = controller;
+  if (!hasLaunchRecoveries(source)) throw new Error("Expected launch recovery map");
+  const recoveries = source.sessionLaunchRecoveries;
+  if (!isRecoveryMap(recoveries)) throw new Error("Expected launch recovery map");
+  const record = recoveries.get(sessionId);
+  if (!isQueuedRecoveryRecord(record)) throw new Error("Expected launch recovery queued sends");
+  const queued = record.queuedSends[0];
+  if (queued === undefined) throw new Error("Expected launch recovery queued send");
+  queued.deliveryReceipt = receipt;
+}
+
+function hasLaunchRecoveries(value: object): value is ControllerWithLaunchRecoveries {
+  return "sessionLaunchRecoveries" in value;
+}
+
+function isRecoveryMap(value: unknown): value is Map<string, unknown> {
+  return value instanceof Map;
+}
+
+function isQueuedRecoveryRecord(value: unknown): value is QueuedRecoveryRecord {
+  return typeof value === "object" && value !== null && Array.isArray(Reflect.get(value, "queuedSends"));
+}

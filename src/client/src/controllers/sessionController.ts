@@ -26,7 +26,7 @@ import {
 } from "../selectedChatLoad";
 import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
-import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
+import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
 import type { SessionInboxBridge } from "./sessionInboxController";
@@ -375,7 +375,7 @@ export class SessionController {
       const history = this.transcripts.mergeHistory(machineSessionKey(machineId, sessionId), page);
       this.setState(history);
       this.applyStatus(status);
-      if (canonicalTranscriptContainsPrompt(page, record.recovery.prompt)) {
+      if (await initialPromptRecoveryAccepted(page, record.recovery, record.queuedSends[0])) {
         const retainedQueuedSends = record.queuedSends.slice(1);
         this.sessionLaunchRecoveries.delete(sessionId);
         this.dropNextQueuedSessionMessage(sessionId);
@@ -635,7 +635,7 @@ export class SessionController {
         return;
       }
       if (destination === undefined) return;
-      const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued.deliveredText ?? queued.text);
+      const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued);
       if (stage === "accepted") {
         this.markCachedNewSessionPersisted(session);
         this.dropNextQueuedSessionMessage(session.id);
@@ -656,13 +656,13 @@ export class SessionController {
     }
   }
 
-  private async reconcileInitialPromptDelivery(session: SessionInfo, machineId: string, prompt: string): Promise<"accepted" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous"> {
+  private async reconcileInitialPromptDelivery(session: SessionInfo, machineId: string, queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Promise<"accepted" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous"> {
     try {
       const [page, status] = await Promise.all([
         this.api.messages(session, { limit: MESSAGE_PAGE_SIZE }, machineId),
         this.api.status(session, machineId),
       ]);
-      if (canonicalTranscriptContainsPrompt(page, prompt)) return "accepted";
+      if (await queuedInitialPromptAccepted(page, queued)) return "accepted";
       return canonicalSessionIsBlankAndIdle(page, status) ? "promptConfirmedUnsent" : "promptDeliveryAmbiguous";
     } catch {
       return "promptDeliveryAmbiguous";
@@ -2410,12 +2410,43 @@ function base64ByteSize(data: string): number {
   return Math.max(0, Math.floor(data.length * 3 / 4) - padding);
 }
 
+async function initialPromptRecoveryAccepted(page: MessagePage, recovery: SessionLaunchRecovery, queued: QueuedPendingSessionSend | undefined): Promise<boolean> {
+  if (recovery.promptResourceCommandIdentity !== undefined) {
+    return queued?.type === "promptResource" && queued.deliveryReceipt !== undefined
+      ? await canonicalTranscriptContainsDeliveryReceipt(page, queued.deliveryReceipt)
+      : false;
+  }
+  return canonicalTranscriptContainsPrompt(page, recovery.prompt);
+}
+
+async function queuedInitialPromptAccepted(page: MessagePage, queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Promise<boolean> {
+  if (queued.type === "promptResource") {
+    return queued.deliveryReceipt !== undefined ? await canonicalTranscriptContainsDeliveryReceipt(page, queued.deliveryReceipt) : false;
+  }
+  return canonicalTranscriptContainsPrompt(page, queued.deliveredText ?? queued.text);
+}
+
 function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): boolean {
   return normalizeMessages(page.messages).some((message) => {
     if (message.role !== "user") return false;
     if (message.promptText === prompt) return true;
-    return message.parts.map((part) => part.type === "text" ? part.text : "").join("") === prompt;
+    return canonicalUserMessageText(message) === prompt;
   });
+}
+
+async function canonicalTranscriptContainsDeliveryReceipt(page: MessagePage, receipt: string): Promise<boolean> {
+  for (const message of normalizeMessages(page.messages)) {
+    if (message.role !== "user") continue;
+    const texts = message.promptText === undefined ? [canonicalUserMessageText(message)] : [message.promptText, canonicalUserMessageText(message)];
+    for (const text of texts) {
+      if (await fingerprintPromptResourceDeliveryText(text) === receipt) return true;
+    }
+  }
+  return false;
+}
+
+function canonicalUserMessageText(message: { parts: readonly { type: string; text?: string | undefined }[] }): string {
+  return message.parts.map((part) => part.type === "text" ? part.text ?? "" : "").join("");
 }
 
 function canonicalSessionIsBlankAndIdle(page: MessagePage, status: SessionStatus): boolean {

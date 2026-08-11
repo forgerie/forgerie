@@ -36,7 +36,7 @@ import { deterministicSessionName, fallbackSessionName, generateShortSessionName
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
-import { fingerprintPromptResourceCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
+import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
 import { SESSION_GUIDANCE_ENTRIES, setSessionGuidance } from "../../shared/sessionGuidance.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
 import type {
@@ -2327,12 +2327,12 @@ export class PiSessionService implements SessionRouteService {
     if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, expanded)) {
       this.publishActivity(session, "duplicate queued message ignored", "active");
       this.publishStatus(session);
-      return { accepted: true, deliveryFingerprint: await deliveryFingerprint(identity, expanded, images) };
+      return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
     }
     await this.voidOpenAskForUserMessage(session);
     if (session.isCompacting) this.enqueuePromptDuringCompaction(session, expanded, behavior ?? "followUp", images, true, false);
     else void this.submitPrompt(session, expanded, behavior, images, true, false);
-    return { accepted: true, deliveryFingerprint: await deliveryFingerprint(identity, expanded, images) };
+    return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
   }
 
   async saveAttachments(ref: PiSessionRef, attachments: unknown, folder?: string): Promise<SavedPromptAttachment[]> {
@@ -4798,13 +4798,8 @@ async function readResourceContent(path: string): Promise<string> {
   }
 }
 
-async function deliveryFingerprint(identity: PromptResourceCommandIdentity, expanded: string, images: readonly ImageContent[]): Promise<string> {
-  return await fingerprintPromptResourceCommand({
-    source: identity.source,
-    name: identity.name,
-    origin: `delivery:${identity.fingerprint}:${String(images.length)}`,
-    content: expanded,
-  });
+async function deliveryFingerprint(expanded: string): Promise<string> {
+  return await fingerprintPromptResourceDeliveryText(expanded);
 }
 
 function stringValue(value: unknown): string {

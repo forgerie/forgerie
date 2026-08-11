@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fingerprintPromptResourceCommand, parseLeadingSlashCommand } from "./promptResourceCommand.js";
+import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand } from "./promptResourceCommand.js";
 
 describe("prompt resource command policy", () => {
   it("parses only offset-zero slash commands and preserves the text after the first whitespace separator", () => {
@@ -25,5 +25,14 @@ describe("prompt resource command policy", () => {
     await expect(fingerprintPromptResourceCommand({ source: "skill", name: "skill:Café", origin: "skill:project:review", content: "body", baseDir: "" })).resolves.not.toBe(
       await fingerprintPromptResourceCommand({ source: "skill", name: "skill:Café", origin: "skill:project:review", content: "body" }),
     );
+  });
+
+  it("fingerprints only the canonical delivery text for prompt-resource receipts", async () => {
+    const base = await fingerprintPromptResourceDeliveryText("Review src");
+
+    expect(base).toMatch(/^[a-f0-9]{64}$/u);
+    await expect(fingerprintPromptResourceDeliveryText("Review src")).resolves.toBe(base);
+    await expect(fingerprintPromptResourceDeliveryText("/review src")).resolves.not.toBe(base);
+    await expect(fingerprintPromptResourceDeliveryText("Review src\n")).resolves.not.toBe(base);
   });
 });
