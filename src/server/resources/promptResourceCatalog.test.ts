@@ -142,6 +142,36 @@ describe("PromptResourceCatalogService", () => {
     expect(enforcePromptResourceCatalogLimits(responseWithSerializedBytes(PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes + 1))).toEqual(promptResourceCatalogUnavailable("over-limit", "Prompt-resource catalog exceeded the response size limit."));
   });
 
+  it("rejects oversized and non-regular skill resource content before fingerprinting", async () => {
+    const root = await tempRoot();
+    const oversizedPath = join(root, "oversized", "SKILL.md");
+    await mkdir(join(root, "oversized"), { recursive: true });
+    await writeFile(oversizedPath, "x".repeat(PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes + 1), "utf8");
+    const oversized = new PromptResourceCatalogService({
+      agentDir: join(root, "agent"),
+      loader: resourcesFrom({
+        prompts: [],
+        skills: [{ name: "oversized", description: "Too large", filePath: oversizedPath, baseDir: join(root, "oversized"), sourceInfo: sourceInfo(oversizedPath), disableModelInvocation: false }],
+        diagnostics: [],
+      }),
+    });
+
+    await expect(oversized.catalog(join(root, "workspace"))).resolves.toEqual(promptResourceCatalogUnavailable("over-limit", "Prompt-resource catalog contained over-limit resource content."));
+
+    const directoryPath = join(root, "directory-skill");
+    await mkdir(directoryPath, { recursive: true });
+    const nonRegular = new PromptResourceCatalogService({
+      agentDir: join(root, "agent"),
+      loader: resourcesFrom({
+        prompts: [],
+        skills: [{ name: "directory", description: "Not a file", filePath: directoryPath, baseDir: directoryPath, sourceInfo: sourceInfo(directoryPath), disableModelInvocation: false }],
+        diagnostics: [],
+      }),
+    });
+
+    await expect(nonRegular.catalog(join(root, "workspace"))).resolves.toEqual(promptResourceCatalogUnavailable("over-limit", "Prompt-resource catalog contained over-limit resource content."));
+  });
+
   it("coalesces concurrent loads for the same canonical destination", async () => {
     let calls = 0;
     let release: (() => void) | undefined;
@@ -194,6 +224,29 @@ describe("PromptResourceCatalogService", () => {
     expect(started).toHaveLength(18);
   });
 
+  it("times out queued destinations even when an active loader never settles", async () => {
+    const service = new PromptResourceCatalogService({
+      agentDir: "/agent",
+      limits: { ...PROMPT_RESOURCE_CATALOG_LIMITS, deadlineMs: 5, activeLoads: 1, queuedLoads: 1 },
+      loader: {
+        async loadResources() {
+          await new Promise<void>(() => undefined);
+          return { prompts: [], skills: [], diagnostics: [] };
+        },
+      },
+    });
+
+    const active = service.catalog("/hung");
+    const queued = service.catalog("/queued");
+
+    await expect(active).resolves.toEqual(promptResourceCatalogUnavailable("timeout", "Prompt-resource catalog loading timed out after 10 seconds; the loader will finish in the background."));
+    const queuedOutcome = await Promise.race([
+      queued,
+      new Promise<"still-pending">((resolvePending) => { setTimeout(() => { resolvePending("still-pending"); }, 50); }),
+    ]);
+    expect(queuedOutcome).toEqual(promptResourceCatalogUnavailable("timeout", "Prompt-resource catalog loading timed out after 10 seconds; the loader will finish in the background."));
+  });
+
   it("reports the ten-second deadline truthfully without claiming abort and keeps the active slot until settlement", async () => {
     let releaseFirst: (() => void) | undefined;
     const started: string[] = [];
@@ -218,9 +271,12 @@ describe("PromptResourceCatalogService", () => {
     expect(timedOut.message).not.toMatch(/abort|cancel/iu);
     expect(started).toEqual(["/slow"]);
 
+    await expect(queued).resolves.toEqual(promptResourceCatalogUnavailable("timeout", "Prompt-resource catalog loading timed out after 10 seconds; the loader will finish in the background."));
     releaseFirst?.();
-    await expect(queued).resolves.toEqual({ available: true, commands: [], diagnostics: [] });
-    expect(started).toEqual(["/slow", "/queued"]);
+    await Promise.resolve();
+    await Promise.resolve();
+    await expect(service.catalog("/after-settlement")).resolves.toEqual({ available: true, commands: [], diagnostics: [] });
+    expect(started).toEqual(["/slow", "/after-settlement"]);
   });
 });
 
