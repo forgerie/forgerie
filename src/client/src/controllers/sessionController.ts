@@ -490,7 +490,7 @@ export class SessionController {
       const session = await this.api.startSession(pending.cwd, pending.machineId, pending.tempId);
       await this.resolvePendingSessionStart(pending.tempId, session);
     } catch (error) {
-      this.failPendingSessionStart(pending.tempId, error);
+      await this.failPendingSessionStart(pending.tempId, error);
     }
   }
 
@@ -1830,9 +1830,17 @@ export class SessionController {
     await this.flushQueuedPendingSends(cachedSession, pending.machineId, queuedSends, sessionLaunchDestination(pending));
   }
 
-  private failPendingSessionStart(tempId: string, error: unknown): void {
+  private async failPendingSessionStart(tempId: string, error: unknown): Promise<void> {
     const pending = this.pendingSessionStarts.get(tempId);
     if (pending === undefined) return;
+    const identifiedCreatedSession = pending.backendSessionId === undefined
+      ? undefined
+      : this.suppressedCreatedSessions.get(pending.backendSessionId);
+    if (identifiedCreatedSession?.machineId === pending.machineId
+      && sessionPathsEqual(identifiedCreatedSession.session.cwd, pending.cwd)) {
+      await this.resolvePendingSessionStart(tempId, identifiedCreatedSession.session);
+      return;
+    }
     this.pendingSessionStarts.delete(tempId);
     const wasDiscarded = pending.discarded;
     // The pending start is dead: stop routing its dialog frames (a card on the

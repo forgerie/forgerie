@@ -82,6 +82,49 @@ describe("SessionController pending starts", () => {
     expect(isCachedNewSessionInfo(state.sessions[0])).toBe(true);
   });
 
+  it("adopts the identified created session when the HTTP start response is lost", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const startRequest = deferred<SessionInfo>();
+    const promptCalls: string[] = [];
+    let startCalls = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => { startCalls += 1; return startRequest.promise; },
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: (_session, text) => { promptCalls.push(text); return Promise.resolve({ accepted: true }); },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    const launch = controller.launchSession({ text: "Deliver this once" });
+    const temporaryId = state.selectedSession?.id;
+    if (temporaryId === undefined) throw new Error("Expected a temporary session");
+    controller.applyGlobalEvent({
+      type: "session.startup",
+      startupToken: temporaryId,
+      activity: { sessionId: started.id, phase: "active", label: "Creating session", detail: "Starting Pi", at: "2026-08-11T00:00:00.000Z", startup: true },
+    });
+    controller.applyGlobalEvent({ type: "session.created", session: started });
+    startRequest.reject(new Error("HTTP response lost"));
+    await launch;
+
+    expect(state.sessions.map((session) => session.id)).toEqual([started.id]);
+    expect(state.selectedSession?.id).toBe(started.id);
+    expect(promptCalls).toEqual(["Deliver this once"]);
+    expect(controller.getSessionLaunchRecovery(temporaryId)).toBeUndefined();
+
+    await controller.retrySessionLaunch(temporaryId);
+    expect(startCalls).toBe(1);
+    expect(promptCalls).toEqual(["Deliver this once"]);
+  });
+
   it("releases unrelated created-session broadcasts after pending starts settle", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     const otherClientSession: SessionInfo = { ...oldSession, id: "other-client-session", path: "/tmp/other-client-session.jsonl" };
