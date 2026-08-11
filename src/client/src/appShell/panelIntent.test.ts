@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PANEL_INTENTS, dockedPanels, toggledIntent, type PanelIntents } from "./panelIntent";
-import { CHROME_RESIDENT_MIN_WIDTH, NAVIGATION_DOCK_MIN_WIDTH } from "./shellLayoutMode";
+import { CHROME_RESIDENT_MIN_WIDTH, NAVIGATION_DOCK_MIN_WIDTH, WORKSPACE_DOCK_MIN_WIDTH } from "./shellLayoutMode";
 
 /** CSS-pixel viewport widths for the acceptance device, see AGENTS.md. */
 const FOLD8 = {
@@ -43,22 +43,31 @@ describe("dockedPanels", () => {
     expect(dockedPanels(1000, intents)).toEqual({ navigation: true, workspace: false });
   });
 
-  it("never docks a panel the shell has no column for, however hard it is pinned", () => {
-    // The workspace column exists only on a three-surface grid. Marking it
-    // docked on a narrower shell hid it and made it unreachable by gesture,
-    // because a docked panel is not worth peeking at.
+  it("docks a pinned workspace panel as soon as it and the session both fit", () => {
+    // Read from what those two need together, not from the widest arrangement:
+    // a reader who put the session list away can keep the panel well before
+    // there is room for all three.
     const intents: PanelIntents = { navigation: "dismissed", workspace: "pinned" };
 
-    expect(dockedPanels(CHROME_RESIDENT_MIN_WIDTH - 1, intents).workspace).toBe(false);
-    expect(dockedPanels(CHROME_RESIDENT_MIN_WIDTH, intents).workspace).toBe(true);
+    expect(dockedPanels(WORKSPACE_DOCK_MIN_WIDTH - 1, intents).workspace).toBe(false);
+    expect(dockedPanels(WORKSPACE_DOCK_MIN_WIDTH, intents).workspace).toBe(true);
   });
 
-  it("leaves a pinned workspace panel peekable on an unfolded landscape shell", () => {
-    // The posture where a pin used to strand the panel: wide enough to seat it
-    // by arithmetic, too narrow for the shell to lay it out.
+  it("keeps a pinned workspace panel through an unfold, and drops it on a fold", () => {
     const intents: PanelIntents = { navigation: "auto", workspace: "pinned" };
 
-    expect(dockedPanels(FOLD8.unfoldedLandscape, intents).workspace).toBe(false);
+    // Unfolded landscape has room for the session and the panel, so the pin acts
+    // and the session list steps aside for it.
+    expect(dockedPanels(FOLD8.unfoldedLandscape, intents)).toEqual({ navigation: false, workspace: true });
+    // Folded, neither fits beside a readable session, so the request lies dormant.
+    expect(dockedPanels(FOLD8.foldedPortrait, intents)).toEqual({ navigation: false, workspace: false });
+  });
+
+  it("leaves an untouched workspace panel to the three-pane shell", () => {
+    // Only an explicit pin docks it early. Never-touched still means "wait until
+    // the shell can hold all three".
+    expect(dockedPanels(WORKSPACE_DOCK_MIN_WIDTH, DEFAULT_PANEL_INTENTS).workspace).toBe(false);
+    expect(dockedPanels(CHROME_RESIDENT_MIN_WIDTH, DEFAULT_PANEL_INTENTS).workspace).toBe(true);
   });
 
   it("gives the last slot to the cheaper panel when both are pinned", () => {

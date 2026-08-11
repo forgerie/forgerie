@@ -1268,9 +1268,12 @@ export class PiWebApp extends LitElement {
   private renderWorkspacePanel(placement: "docked" | "peeked" = "docked") {
     if (placement === "docked" && this.panelPeek.panel === "workspace") return null;
     // The panel shows its own tool strip unless something else already shows
-    // one. Docked on a summoned shell, the shell's tab strip carries the tools;
-    // inside a peeked sheet nothing else does, so the panel must.
-    const hideToolTabs = placement === "docked" && this.appShell.isChromeSummoned;
+    // one. Stacked under the session on a summoned shell, the control sheet
+    // carries the tools. Docked beside the session, or inside a peeked sheet,
+    // nothing else does, so the panel must carry them itself.
+    const hideToolTabs = placement === "docked"
+      && this.appShell.isChromeSummoned
+      && !this.panelIntent.isDocked("workspace");
     const workspace = this.state.selectedWorkspace;
     const panelContext = workspace === undefined ? undefined : this.createWorkspacePanelContext(workspace);
     const emptyState = workspace === undefined ? this.workspacePanelEmptyState() : undefined;

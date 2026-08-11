@@ -1,4 +1,4 @@
-import { CHROME_RESIDENT_MIN_WIDTH, NAVIGATION_DOCK_MIN_WIDTH, NAVIGATION_PANEL_MIN_WIDTH, SESSION_COMFORTABLE_WIDTH, WORKSPACE_PANEL_MIN_WIDTH } from "./shellLayoutMode";
+import { CHROME_RESIDENT_MIN_WIDTH, NAVIGATION_DOCK_MIN_WIDTH, NAVIGATION_PANEL_MIN_WIDTH, SESSION_COMFORTABLE_WIDTH, WORKSPACE_DOCK_MIN_WIDTH, WORKSPACE_PANEL_MIN_WIDTH } from "./shellLayoutMode";
 
 /**
  * What the user asked for, not what the shell decided. Space changes what a
@@ -45,17 +45,20 @@ const AUTO_DOCK_MIN_WIDTHS: Readonly<Record<ShellPanel, number>> = {
 };
 
 /**
- * The width below which the shell has nowhere to put a docked panel at all.
+ * The width below which docking this panel stops being reasonable.
  *
- * A pin asks for space; it cannot ask for a column that does not exist. The
- * shell only lays out a workspace column on a three-surface grid, so pinning it
- * on a narrower shell used to mark it docked while the stylesheet hid it -- and
- * because a docked panel is not worth peeking at, the panel became unreachable
- * by any gesture. A pin must never be able to hide a panel from its owner.
+ * Read from what the panel and the session need together, not from the shell's
+ * widest arrangement. A reader who has put the session list away can keep the
+ * workspace panel beside the conversation long before there is room for all
+ * three, and a posture that folds and unfolds should gain and lose that panel
+ * on the same terms.
+ *
+ * Below the floor a pin stays a request: nothing docks, and the panel stays
+ * reachable by gesture. A pin must never be able to hide a panel from its owner.
  */
 const DOCK_FLOOR_WIDTHS: Readonly<Record<ShellPanel, number>> = {
   navigation: NAVIGATION_DOCK_MIN_WIDTH,
-  workspace: CHROME_RESIDENT_MIN_WIDTH,
+  workspace: WORKSPACE_DOCK_MIN_WIDTH,
 };
 
 /**

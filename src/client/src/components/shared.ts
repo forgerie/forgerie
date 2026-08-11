@@ -157,25 +157,35 @@ export const appStyles = css`
    * (CHROME_RESIDENT_MIN_WIDTH), so the shell keeps three columns only while all
    * three can actually be read.
    */
-  .shell.chrome-resident.navigation-panel-collapsed { --navigation-panel-width: 0px; }
-  .shell.chrome-resident.navigation-panel-collapsed > aside { display: none; }
-  .shell.chrome-resident.workspace-panel-collapsed { --workspace-panel-width: 0px; }
-  .shell.chrome-resident.workspace-panel-collapsed > workspace-panel { display: none; }
-  .shell.chrome-summoned { grid-template-columns: var(--navigation-panel-width) 1px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .shell.chrome-summoned.navigation-panel-collapsed { --navigation-panel-width: 0px; }
-  .shell.chrome-summoned.navigation-panel-collapsed > aside { display: none; }
-  .shell.chrome-summoned aside { grid-row: 1 / 3; }
-  .shell.chrome-summoned .navigation-panel-edge { grid-row: 1 / 3; }
-  .shell.chrome-summoned main { grid-column: 3; grid-row: 1 / 3; }
+  /*
+   * A panel that is not docked takes no width, whatever band the shell is in.
+   * These are keyed on what is docked rather than on disclosure, so a shell that
+   * folds and unfolds gains and loses a column on the same terms.
+   */
+  .shell.navigation-panel-collapsed { --navigation-panel-width: 0px; }
+  .shell.navigation-panel-collapsed > aside { display: none; }
+  .shell.workspace-panel-collapsed { --workspace-panel-width: 0px; }
+  .shell.workspace-panel-collapsed > workspace-panel { display: none; }
+
+  /*
+   * A summoned shell with no docked workspace panel is a single-column shell:
+   * the session owns it, and the workspace panel stacks underneath on request.
+   * With the panel docked, the shell keeps its side-by-side columns instead --
+   * the same arrangement a wider shell uses, minus the panes that do not fit.
+   */
+  .shell.chrome-summoned.workspace-panel-collapsed { grid-template-columns: var(--navigation-panel-width) 1px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .shell.chrome-summoned.workspace-panel-collapsed aside { grid-row: 1 / 3; }
+  .shell.chrome-summoned.workspace-panel-collapsed .navigation-panel-edge { grid-row: 1 / 3; }
+  .shell.chrome-summoned.workspace-panel-collapsed main { grid-column: 3; grid-row: 1 / 3; }
+  .shell.chrome-summoned.workspace-panel-collapsed .workspace-panel-edge { display: none; }
+  .shell.chrome-summoned.workspace-panel-collapsed.workspace-view main { grid-row: 1; min-height: auto; }
+  .shell.chrome-summoned.workspace-panel-collapsed.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
+  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view chat-view,
+  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view prompt-editor,
+  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view .empty { display: none; }
+  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view { overflow: hidden; }
   .shell.chrome-summoned app-mobile-main-tabs { display: block; flex: 0 0 auto; min-width: 0; }
   .shell.chrome-summoned .mobile-tabs-frame { display: flex; }
-  .shell.chrome-summoned.workspace-view main { grid-row: 1; min-height: auto; }
-  .shell.chrome-summoned.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
-  .shell.chrome-summoned:not(.workspace-view) > workspace-panel { display: none; }
-  .shell.chrome-summoned .workspace-panel-edge { display: none; }
-  .shell.chrome-summoned main.workspace-view chat-view, .shell.chrome-summoned main.workspace-view prompt-editor,
-  .shell.chrome-summoned main.workspace-view .empty { display: none; }
-  .shell.chrome-summoned main.workspace-view { overflow: hidden; }
   .shell.overlay-navigation { grid-template-columns: minmax(0, 1fr); }
   .shell.overlay-navigation > aside, .shell.overlay-navigation .navigation-panel-edge { display: none; }
   .shell.overlay-navigation main, .shell.overlay-navigation.workspace-view > workspace-panel { grid-column: 1; }

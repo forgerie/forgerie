@@ -21,6 +21,15 @@ export const NAVIGATION_DOCK_MIN_WIDTH = NAVIGATION_PANEL_MIN_WIDTH + SESSION_CO
 export const WORKSPACE_PANEL_MIN_WIDTH = 360;
 
 /**
+ * The narrowest shell that can hold the session and the workspace panel at once.
+ *
+ * Derived from what those two need, not from the three-pane shell: a reader who
+ * has put the session list away can reasonably keep the workspace panel beside
+ * the conversation well before the shell is wide enough for all three.
+ */
+export const WORKSPACE_DOCK_MIN_WIDTH = SESSION_COMFORTABLE_WIDTH + WORKSPACE_PANEL_MIN_WIDTH;
+
+/**
  * Chrome stays resident only on a true multi-pane workspace — one wide enough
  * for navigation, the session, and the workspace panel at once. Anything
  * narrower is a single-surface shell where bands compete with the conversation
