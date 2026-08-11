@@ -41,11 +41,14 @@ export function chatQueuedMessageSections(
   serverQueued: QueuedSessionMessage[],
   sessionLaunchRecovery?: SessionLaunchRecovery,
 ): QueuedMessageSection[] {
+  const recoveryClientQueued = sessionLaunchRecovery !== undefined && clientQueued.length === 0
+    ? [{ kind: "followUp" as const, text: sessionLaunchRecovery.prompt }]
+    : clientQueued;
   const clientSection = sessionLaunchRecovery === undefined
-    ? { source: "client" as const, heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: clientQueued }
-    : { source: "client" as const, heading: "First prompt needs attention", detail: "Resolve it before later queued messages can continue", messages: clientQueued };
+    ? { source: "client" as const, heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: recoveryClientQueued }
+    : { source: "client" as const, heading: "First prompt needs attention", detail: "Resolve it before later queued messages can continue", messages: recoveryClientQueued };
   return [
-    clientQueued.length === 0 ? undefined : clientSection,
+    recoveryClientQueued.length === 0 ? undefined : clientSection,
     serverQueued.length === 0 ? undefined : { source: "server", heading: "Queued messages", detail: `${String(serverQueued.length)} pending`, messages: serverQueued },
   ].filter((section): section is QueuedMessageSection => section !== undefined);
 }

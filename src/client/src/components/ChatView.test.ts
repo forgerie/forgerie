@@ -37,6 +37,23 @@ describe("chatQueuedMessageSections", () => {
       },
     ]);
   });
+
+  it("synthesizes the recoverable first prompt when the machine-scoped client queue is unavailable", () => {
+    const sections = chatQueuedMessageSections([], [], {
+      stage: "promptDeliveryAmbiguous",
+      sessionId: "session-1",
+      destination: { machineId: "remote", workspaceId: "workspace-1", cwd: "/repo" },
+      prompt: "Recover outside the original workspace",
+      retrying: false,
+    });
+
+    expect(sections).toEqual([{
+      source: "client",
+      heading: "First prompt needs attention",
+      detail: "Resolve it before later queued messages can continue",
+      messages: [{ kind: "followUp", text: "Recover outside the original workspace" }],
+    }]);
+  });
 });
 
 describe("chatQueuedSectionShowsClearAction", () => {

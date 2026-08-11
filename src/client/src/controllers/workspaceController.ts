@@ -21,7 +21,7 @@ export class WorkspaceController {
     private readonly getState: GetState,
     private readonly setState: SetState,
     private readonly updateUrl: UpdateUrl,
-    private readonly sessions: Pick<SessionController, "clearActiveSession" | "preferredSession" | "selectSession">,
+    private readonly sessions: Pick<SessionController, "clearActiveSession" | "mergeCreationFailedSessionStarts" | "preferredSession" | "selectSession">,
     private readonly workspaceSelection: WorkspaceSelectionMemory = new InMemoryWorkspaceSelectionMemory(),
     deps: WorkspaceControllerDependencies = {},
   ) {
@@ -64,9 +64,10 @@ export class WorkspaceController {
     this.sessions.clearActiveSession();
     this.setState({ selectedWorkspace: workspace, isLoadingWorkspaces: false, ...resetWorkspaceScopedState() });
     try {
-      const sessions = mergeCachedNewSessions(workspace.path, await this.api.sessions(workspace.path, machineId), machineId);
+      const listedSessions = mergeCachedNewSessions(workspace.path, await this.api.sessions(workspace.path, machineId), machineId);
       if (selectedMachineId(this.getState()) !== machineId || this.getState().selectedWorkspace?.id !== workspace.id || this.getState().selectedProject?.id !== workspace.projectId) return;
       if (target?.isCurrent !== undefined && !target.isCurrent()) return;
+      const sessions = this.sessions.mergeCreationFailedSessionStarts(workspace.path, listedSessions, machineId);
       this.setState({ sessions });
       const session = this.sessions.preferredSession(workspace.path, sessions, target?.sessionId);
       if (session) await this.sessions.selectSession(session, { updateUrl: target?.updateUrl });

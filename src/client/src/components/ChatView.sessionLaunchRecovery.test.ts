@@ -84,6 +84,23 @@ describe("ChatView session launch recovery wiring", () => {
     ]);
   });
 
+  it("renders recovery controls from the recovery prompt when the client queue is unavailable", async () => {
+    const view = new ChatView();
+    view.sessionId = "session-1";
+    view.clientQueuedMessages = [];
+    view.sessionLaunchRecovery = recovery("promptDeliveryAmbiguous");
+    document.body.append(view);
+    await view.updateComplete;
+
+    expect(view.shadowRoot?.querySelector<HTMLElement & { text: string }>(".queued-message formatted-text")?.text).toBe("Recover this exact prompt");
+    expect(view.shadowRoot?.querySelector(".queued-kind")?.textContent.trim()).toBe("First prompt");
+    expect(view.shadowRoot?.querySelector(".session-launch-recovery")).not.toBeNull();
+    expect(Array.from(view.shadowRoot?.querySelectorAll<HTMLButtonElement>(".session-launch-recovery button") ?? []).map((button) => button.textContent.trim())).toEqual([
+      "Refresh transcript",
+      "Restore to editor",
+    ]);
+  });
+
   it("keeps ordinary no-recovery queue copy and labels unchanged", async () => {
     const view = new ChatView();
     view.clientQueuedMessages = [{ kind: "followUp", text: "Ordinary queued prompt" }];

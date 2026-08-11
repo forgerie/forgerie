@@ -207,8 +207,10 @@ export class PiWebApp extends LitElement {
       },
       replacePromptEditorText: async ({ machineId, sessionId, text }) => {
         await this.updateComplete;
-        if (selectedMachineId(this.state) !== machineId || this.state.selectedSession?.id !== sessionId) return;
-        this.promptEditor?.replaceText(text);
+        const promptEditor = this.promptEditor;
+        if (selectedMachineId(this.state) !== machineId || this.state.selectedSession?.id !== sessionId || promptEditor === undefined) return false;
+        promptEditor.replaceText(text);
+        return true;
       },
     },
   );
@@ -1227,7 +1229,7 @@ export class PiWebApp extends LitElement {
         .tool=${this.state.workspaceTool}
         .panels=${this.visibleWorkspacePanels()}
         .onSelectTool=${(tool: QualifiedContributionId) => { this.openWorkspaceTool(tool); }}
-        .onNewSession=${() => { this.openNewSessionComposer(); }}
+        .onNewSession=${this.state.mainView === "chat" || this.state.mainView === "navigation" ? undefined : () => { this.openNewSessionComposer(); }}
       ></workspace-panel>
     `;
   }

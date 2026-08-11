@@ -76,7 +76,7 @@ Forgerie currently has two incompatible start paths: an inbox picker and a globa
 ### Relevant Code and Patterns
 
 - `src/client/src/components/ModalSurface.ts` already owns modal focus entry, focus trapping, Escape/backdrop behavior, layer ordering, and focus restoration. The composer should be modal content, not another overlay implementation.
-- `src/client/src/components/SessionInboxNewSessionDialog.ts` and its tests show the current project/workspace loading and cancellation conventions. Its start mode will be retired; its workspace-management behavior remains.
+- `src/client/src/components/WorkspaceManagementDialog.ts` and its tests show the current project/workspace loading and cancellation conventions. Its start mode will be retired; its workspace-management behavior remains.
 - `src/client/src/components/PiWebApp.ts` owns modal state, navigation sequencing, controller composition, and all root action callbacks. It is the one orchestration boundary for opening and submitting the composer.
 - `src/client/src/plugins/core/actions.ts` defines `session.start`. Keeping that action ID preserves custom shortcut preferences while changing the action title, enabled state, and behavior.
 - `src/client/src/components/PromptEditor.ts` handles Enter inside CodeMirror before the global dispatcher. It needs an explicit modified-Enter route to the root New session callback.
@@ -277,7 +277,7 @@ flowchart TB
 **Patterns to follow:**
 - Tagged dialog state in `src/client/src/appState.ts`
 - Focus and busy semantics in `src/client/src/components/ModalSurface.ts`
-- Lazy loading/error handling in `src/client/src/components/SessionInboxNewSessionDialog.ts`
+- Lazy loading/error handling in `src/client/src/components/WorkspaceManagementDialog.ts`
 - Existing dialog styles and controls in `src/client/src/components/shared.ts`
 
 **Test scenarios:**
@@ -315,8 +315,8 @@ flowchart TB
 - Modify: `src/client/src/plugins/core/actions.ts`
 - Modify: `src/client/src/plugins/types.ts`
 - Modify: `src/client/src/components/appShell/AppNavigationPanel.ts`
-- Modify: `src/client/src/components/SessionInboxNewSessionDialog.ts`
-- Modify: `src/client/src/components/SessionInboxNewSessionDialog.test.ts`
+- Modify: `src/client/src/components/WorkspaceManagementDialog.ts`
+- Modify: `src/client/src/components/WorkspaceManagementDialog.test.ts`
 
 **Approach:**
 - Store only the root composer request in `AppState`: closed or open with an initial destination and optional recovered prompt. The mounted composer remains the single draft owner.
@@ -519,7 +519,7 @@ flowchart TB
 - Work metadata: [work.md](work.md)
 - Related action definitions: `src/client/src/plugins/core/actions.ts`
 - Root orchestration: `src/client/src/components/PiWebApp.ts`
-- Current picker: `src/client/src/components/SessionInboxNewSessionDialog.ts`
+- Current picker: `src/client/src/components/WorkspaceManagementDialog.ts`
 - Shared modal: `src/client/src/components/ModalSurface.ts`
 - Existing composer: `src/client/src/components/PromptEditor.ts`
 - Pending launch and queue: `src/client/src/controllers/sessionController.ts`

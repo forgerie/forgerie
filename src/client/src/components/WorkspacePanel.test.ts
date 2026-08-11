@@ -37,6 +37,7 @@ describe("WorkspacePanel header", () => {
     const renderPlugin = vi.fn(() => html`<div data-plugin-content>Plugin content</div>`);
     const panel = await mountPanel({
       hideToolTabs: true,
+      onNewSession: vi.fn(),
       panels: [workspacePanel("plugin:workspace.processes", "Processes", renderPlugin)],
       tool: "plugin:workspace.processes",
     });
@@ -46,6 +47,12 @@ describe("WorkspacePanel header", () => {
     expect(root.querySelector("[data-action='new-session']")).not.toBeNull();
     expect(root.querySelector(".panel-content > [data-plugin-content]")?.textContent).toContain("Plugin content");
     expect(renderPlugin).toHaveBeenCalledOnce();
+  });
+
+  it("omits the New session action when the root does not provide it", async () => {
+    const panel = await mountPanel();
+
+    expect(panel.shadowRoot?.querySelector("[data-action='new-session']")).toBeNull();
   });
 
   it("leaves tabs horizontally scrollable while the fixed action owns no overlay", () => {
@@ -76,7 +83,7 @@ async function mountPanel(options: MountPanelOptions = {}): Promise<WorkspacePan
   ];
   panel.tool = options.tool ?? "core:workspace.files";
   panel.hideToolTabs = options.hideToolTabs ?? false;
-  panel.onNewSession = options.onNewSession ?? (() => undefined);
+  if (options.onNewSession !== undefined) panel.onNewSession = options.onNewSession;
   panel.onSelectTool = options.onSelectTool ?? (() => undefined);
   document.body.append(panel);
   await panel.updateComplete;

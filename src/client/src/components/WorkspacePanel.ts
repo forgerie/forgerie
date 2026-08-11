@@ -81,13 +81,15 @@ export class WorkspacePanel extends LitElement {
             </div>
           </div>
         `}
-        <button
-          class="workspace-header-action"
-          data-action="new-session"
-          title=${NEW_SESSION_LABEL}
-          aria-label=${NEW_SESSION_LABEL}
-          @click=${() => { this.onNewSession?.(); }}
-        >${renderNewSessionIcon()}<span class="workspace-header-action-label">${NEW_SESSION_LABEL}</span></button>
+        ${this.onNewSession === undefined ? null : html`
+          <button
+            class="workspace-header-action"
+            data-action="new-session"
+            title=${NEW_SESSION_LABEL}
+            aria-label=${NEW_SESSION_LABEL}
+            @click=${this.onNewSession}
+          >${renderNewSessionIcon()}<span class="workspace-header-action-label">${NEW_SESSION_LABEL}</span></button>
+        `}
       </header>
       ${selectedPanel === undefined ? this.renderEmptyState({
         title: "No workspace tools available",

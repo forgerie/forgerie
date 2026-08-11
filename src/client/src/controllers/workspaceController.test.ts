@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppState } from "../appState";
 import { initialAppState } from "../appState";
 import type { Machine, Project, SessionInfo, Workspace } from "../api";
-import type { SessionController } from "./sessionController";
+import { chatSessionLaunchRecoveryPresentation } from "../components/ChatView";
+import { SessionController } from "./sessionController";
+import { defaultApi, deferred, FakeSocket } from "./sessionController.testSupport";
 import { WorkspaceController } from "./workspaceController";
 
 function machine(id: string): Machine {
@@ -36,8 +38,9 @@ function harness(initial: Partial<AppState>, loadWorkspaces: LoadWorkspaces): Ha
   let state: AppState = { ...initialAppState(), ...initial };
   const setState = (patch: Partial<AppState>) => { state = { ...state, ...patch }; };
   const clearActiveSession = vi.fn();
-  const sessions: Pick<SessionController, "clearActiveSession" | "preferredSession" | "selectSession"> = {
+  const sessions: Pick<SessionController, "clearActiveSession" | "mergeCreationFailedSessionStarts" | "preferredSession" | "selectSession"> = {
     clearActiveSession,
+    mergeCreationFailedSessionStarts: (_cwd, listedSessions) => listedSessions,
     preferredSession: vi.fn(),
     selectSession: vi.fn(),
   };
@@ -56,6 +59,71 @@ function harness(initial: Partial<AppState>, loadWorkspaces: LoadWorkspaces): Ha
   );
   return { controller, state: () => state, clearActiveSession, updateUrl, backgroundErrors, setState };
 }
+
+describe("WorkspaceController.selectWorkspace", () => {
+  it("restores and selects an off-workspace failed launch with its prompt and recovery controls", async () => {
+    const repo = project("p1", "/repo");
+    const origin = workspace(repo.id, "/repo-feature/");
+    const other = workspace(repo.id, "/repo-other");
+    const startRequest = deferred<SessionInfo>();
+    let state: AppState = {
+      ...initialAppState(),
+      selectedMachine: machine("local"),
+      projects: [repo],
+      selectedProject: repo,
+      selectedWorkspace: origin,
+      workspaces: [origin, other],
+      sessions: [],
+    };
+    const setState = (patch: Partial<AppState>) => { state = { ...state, ...patch }; };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => startRequest.promise,
+      sessions: () => Promise.resolve([]),
+    };
+    const sessions = new SessionController(
+      () => state,
+      setState,
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+    const workspaces = new WorkspaceController(
+      () => state,
+      setState,
+      () => undefined,
+      sessions,
+      undefined,
+      { api },
+    );
+
+    const launch = sessions.launchSession("Recover through workspace navigation");
+    const temporaryId = state.selectedSession?.id;
+    if (temporaryId === undefined) throw new Error("Expected a pending session");
+    await workspaces.selectWorkspace(other);
+    startRequest.reject(new Error("backend unavailable"));
+    await launch;
+
+    expect(state.sessions).toEqual([]);
+    expect(state.selectedWorkspace).toBe(other);
+
+    await workspaces.selectWorkspace({ ...origin, path: "/repo-feature" });
+
+    expect(state.sessions.map((candidate) => candidate.id)).toEqual([temporaryId]);
+    expect(state.selectedSession?.id).toBe(temporaryId);
+    expect(state.clientQueuedSessionMessages[temporaryId]).toEqual([
+      { kind: "followUp", text: "Recover through workspace navigation" },
+    ]);
+    expect(state.activity).toMatchObject({ phase: "error", label: "Session creation failed" });
+    const recovery = sessions.getSessionLaunchRecovery(temporaryId);
+    expect(recovery).toMatchObject({ stage: "creationFailed", prompt: "Recover through workspace navigation", retrying: false });
+    if (recovery === undefined) throw new Error("Expected creation-failed recovery");
+    expect(chatSessionLaunchRecoveryPresentation(recovery).actions).toEqual([
+      { kind: "retry", label: "Retry", disabled: false },
+      { kind: "changeDestination", label: "Change destination", disabled: false },
+    ]);
+  });
+});
 
 describe("WorkspaceController.refreshProjectWorkspaces", () => {
   it("does not cache a lazy workspace response after the machine changes", async () => {

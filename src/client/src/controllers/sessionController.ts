@@ -71,7 +71,9 @@ export interface SessionControllerDependencies {
   notifications?: SessionNotificationSessionBridge;
   /** Bridge to the machine-scoped inbox store for archive/restore notifications. */
   inbox?: SessionInboxBridge;
-  replacePromptEditorText?: (replacement: PromptEditorTextReplacement) => void | Promise<void>;
+  // `void` keeps existing editor bridges source-compatible; only explicit `false` reports a lost replacement race.
+  // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+  replacePromptEditorText?: (replacement: PromptEditorTextReplacement) => boolean | void | Promise<boolean | void>;
   onSelectedSessionReady?: (selection: SelectedSessionReady) => void;
   onManagedProcessesEvent?: (event: Extract<SharedSessionUiEvent, { type: "processes.update" | "processes.output" }> | { type: "processes.refresh" }) => void;
 }
@@ -127,6 +129,7 @@ interface SessionLaunchRecoveryRecord {
   queuedSends: QueuedPendingSessionSend[];
   pending?: PendingSessionStart;
   session?: SessionInfo;
+  creationFailureMessage?: string;
 }
 
 interface SuppressedCreatedSession {
@@ -258,6 +261,20 @@ export class SessionController {
     return this.sessionLaunchRecoveries.get(sessionId)?.recovery;
   }
 
+  mergeCreationFailedSessionStarts(cwd: string, listedSessions: SessionInfo[], machineId: string): SessionInfo[] {
+    const recovered: ClientPendingStartSessionInfo[] = [];
+    for (const record of this.sessionLaunchRecoveries.values()) {
+      if (record.recovery.stage !== "creationFailed"
+        || record.pending === undefined
+        || record.recovery.destination.machineId !== machineId
+        || !sessionPathsEqual(record.recovery.destination.cwd, cwd)) continue;
+      recovered.push(record.pending.session);
+    }
+    if (recovered.length === 0) return listedSessions;
+    const recoveredIds = new Set(recovered.map((session) => session.id));
+    return [...recovered, ...listedSessions.filter((session) => !recoveredIds.has(session.id))];
+  }
+
   /** Remove a failed creation after its replacement pending row is the accepted selection. */
   acceptSessionLaunchReplacement(failedSessionId: string, replacementSessionId: string): void {
     const record = this.sessionLaunchRecoveries.get(failedSessionId);
@@ -294,21 +311,24 @@ export class SessionController {
 
     if (record.recovery.stage !== "promptConfirmedUnsent" || record.session === undefined) return;
     record.recovery = { ...record.recovery, retrying: true };
-    this.applySessionLaunchRetryActivity(sessionId, "Sending first prompt");
+    this.applySessionLaunchRetryActivity(sessionId, INITIAL_PROMPT_RETRY_ACTIVITY_LABEL);
     await this.flushQueuedPendingSends(record.session, record.recovery.destination.machineId, record.queuedSends, record.recovery.destination);
-    if (this.sessionLaunchRecoveries.get(sessionId) === record) this.sessionLaunchRecoveries.delete(sessionId);
+    if (this.sessionLaunchRecoveries.get(sessionId) === record) {
+      this.sessionLaunchRecoveries.delete(sessionId);
+      this.clearSuccessfulInitialPromptRetryActivity(sessionId);
+    }
   }
 
   async restoreSessionLaunchPrompt(sessionId: string): Promise<void> {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     if (record?.recovery.stage !== "promptDeliveryAmbiguous" || record.session === undefined || this.replacePromptEditorText === undefined) return;
     if (!this.isSelectedSessionIdentity(sessionId, record.recovery.destination.machineId)) return;
-    await this.replacePromptEditorText({
+    const replaced = await this.replacePromptEditorText({
       machineId: record.recovery.destination.machineId,
       sessionId,
       text: record.recovery.prompt,
     });
-    if (this.sessionLaunchRecoveries.get(sessionId) !== record) return;
+    if (replaced === false || this.sessionLaunchRecoveries.get(sessionId) !== record) return;
     const retainedQueuedSends = record.queuedSends.slice(1);
     this.sessionLaunchRecoveries.delete(sessionId);
     this.dropNextQueuedSessionMessage(sessionId);
@@ -369,6 +389,17 @@ export class SessionController {
       ...(clearsSessionActivity ? { sessionActivities: omitSessionActivity(state.sessionActivities, sessionId) } : {}),
       ...(clearsSelectedActivity ? { activity: undefined } : {}),
       error: "",
+    });
+  }
+
+  private clearSuccessfulInitialPromptRetryActivity(sessionId: string): void {
+    const state = this.getState();
+    const clearsSessionActivity = isInitialPromptRetryActivity(state.sessionActivities[sessionId]);
+    const clearsSelectedActivity = state.selectedSession?.id === sessionId && isInitialPromptRetryActivity(state.activity);
+    if (!clearsSessionActivity && !clearsSelectedActivity) return;
+    this.setState({
+      ...(clearsSessionActivity ? { sessionActivities: omitSessionActivity(state.sessionActivities, sessionId) } : {}),
+      ...(clearsSelectedActivity ? { activity: undefined } : {}),
     });
   }
 
@@ -572,7 +603,11 @@ export class SessionController {
         this.dropNextQueuedSessionMessage(session.id);
         continue;
       }
-      if (!isInitialPromptSend(queued) || destination === undefined) return;
+      if (!isInitialPromptSend(queued)) {
+        this.dropQueuedSessionMessages(session.id, queuedSends.length - index);
+        return;
+      }
+      if (destination === undefined) return;
       const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued.text);
       if (stage === "accepted") {
         this.dropNextQueuedSessionMessage(session.id);
@@ -684,10 +719,14 @@ export class SessionController {
   }
 
   private dropNextQueuedSessionMessage(sessionId: string): void {
+    this.dropQueuedSessionMessages(sessionId, 1);
+  }
+
+  private dropQueuedSessionMessages(sessionId: string, count: number): void {
     const state = this.getState();
     const current = state.clientQueuedSessionMessages[sessionId] ?? [];
     if (current.length === 0) return;
-    const remaining = current.slice(1);
+    const remaining = current.slice(count);
     this.setState({ clientQueuedSessionMessages: remaining.length === 0 ? omitKey(state.clientQueuedSessionMessages, sessionId) : { ...state.clientQueuedSessionMessages, [sessionId]: remaining } });
   }
 
@@ -1537,9 +1576,16 @@ export class SessionController {
     this.clearPendingUpdates();
     const state = this.getState();
     const pendingStart = this.pendingSessionStarts.get(session.id);
-    const activity = options?.activity ?? state.sessionActivities[session.id] ?? (pendingStart !== undefined ? creatingPendingSessionActivity(session.id, pendingStart.queuedSends.length) : undefined);
+    const recoveryRecord = this.sessionLaunchRecoveries.get(session.id);
+    const creationFailedActivity = recoveryRecord?.recovery.stage === "creationFailed" && recoveryRecord.creationFailureMessage !== undefined
+      ? failedPendingSessionActivity(session.id, recoveryRecord.creationFailureMessage, recoveryRecord.queuedSends.length)
+      : undefined;
+    const activity = options?.activity ?? creationFailedActivity ?? state.sessionActivities[session.id] ?? (pendingStart !== undefined ? creatingPendingSessionActivity(session.id, pendingStart.queuedSends.length) : undefined);
     const failedStart = pendingStart === undefined && activity?.phase === "error"
       ? `Failed to start session: ${activity.detail ?? activity.label}`
+      : undefined;
+    const recoveredQueuedMessages = recoveryRecord?.recovery.stage === "creationFailed"
+      ? recoveryRecord.queuedSends.map(queuedSessionMessagePreview)
       : undefined;
     this.setState({
       ...(options?.sessions === undefined ? {} : { sessions: options.sessions }),
@@ -1560,6 +1606,7 @@ export class SessionController {
       availableThinkingLevels: [],
       treeDialog: undefined,
       ...(activity === undefined ? {} : { sessionActivities: { ...state.sessionActivities, [session.id]: activity } }),
+      ...(recoveredQueuedMessages === undefined ? {} : { clientQueuedSessionMessages: { ...state.clientQueuedSessionMessages, [session.id]: recoveredQueuedMessages } }),
       error: failedStart ?? "",
     });
     // Re-selecting the row mid-startup re-establishes the constructing
@@ -1624,15 +1671,10 @@ export class SessionController {
     if (this.getState().selectedSession?.id === tempId) this.socket.close();
     const releasedCreatedSessions = this.takeSuppressedCreatedSessionsFor(pending.cwd, pending.machineId);
     const isCurrentPendingStart = this.isCurrentPendingStart(pending);
-    if (wasDiscarded || !isCurrentPendingStart) {
-      if (isCurrentPendingStart) this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);
-      return;
-    }
-    const state = this.getState();
     const message = errorMessage(error);
     const failure = `Failed to start session: ${message}`;
     const initialPrompt = pending.queuedSends.find(isInitialPromptSend);
-    if (initialPrompt !== undefined) {
+    if (!wasDiscarded && initialPrompt !== undefined) {
       this.sessionLaunchRecoveries.set(tempId, {
         recovery: {
           stage: "creationFailed",
@@ -1643,8 +1685,14 @@ export class SessionController {
         },
         queuedSends: pending.queuedSends,
         pending,
+        creationFailureMessage: message,
       });
     }
+    if (wasDiscarded || !isCurrentPendingStart) {
+      if (isCurrentPendingStart) this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);
+      return;
+    }
+    const state = this.getState();
     const activity = failedPendingSessionActivity(tempId, message, pending.queuedSends.length);
     const hasPendingRow = state.sessions.some((session) => session.id === tempId);
     this.setState({
@@ -2194,6 +2242,7 @@ function failedPendingSessionActivity(sessionId: string, message: string, queued
   };
 }
 
+const INITIAL_PROMPT_RETRY_ACTIVITY_LABEL = "Sending first prompt";
 const INITIAL_PROMPT_CONFIRMED_UNSENT_ACTIVITY_LABEL = "First prompt was not sent";
 const INITIAL_PROMPT_AMBIGUOUS_ACTIVITY_LABEL = "First prompt delivery is unclear";
 const INITIAL_PROMPT_RECOVERY_ACTIVITY_LABELS = new Set([
@@ -2220,6 +2269,12 @@ function sessionLaunchDestination(pending: PendingSessionStart): SessionLaunchDe
 
 function isInitialPromptRecoveryActivity(activity: SessionActivity | undefined): boolean {
   return activity?.phase === "error" && INITIAL_PROMPT_RECOVERY_ACTIVITY_LABELS.has(activity.label);
+}
+
+function isInitialPromptRetryActivity(activity: SessionActivity | undefined): boolean {
+  return activity?.phase === "active"
+    && activity.label === INITIAL_PROMPT_RETRY_ACTIVITY_LABEL
+    && activity.detail === "Retry in progress";
 }
 
 function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): boolean {

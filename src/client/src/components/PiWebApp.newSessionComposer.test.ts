@@ -115,14 +115,31 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).workspaceManagementDialog).toBeUndefined();
   });
 
-  it("routes the workspace header trigger through the same root open path", () => {
+  it("routes the workspace header trigger through the same root open path in workspace mode", () => {
     const app = new PiWebApp();
+    setAppState(app, { mainView: "core:workspace.files" });
     const container = renderApp(app);
     const workspace = required(container.querySelector<WorkspacePanel>("workspace-panel"), "workspace panel");
 
     workspace.onNewSession?.();
 
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
+  });
+
+  it("does not provide the workspace header action while desktop chat owns the visible New session action", () => {
+    const app = new PiWebApp();
+    setAppState(app, { mainView: "chat", selectedSession: session("selected", mainWorkspace.path) });
+    const workspace = required(renderApp(app).querySelector<WorkspacePanel>("workspace-panel"), "workspace panel");
+
+    expect(workspace.onNewSession).toBeUndefined();
+  });
+
+  it("provides the workspace header action when workspace mode hides the chat surface", () => {
+    const app = new PiWebApp();
+    setAppState(app, { mainView: "core:workspace.files", selectedSession: session("selected", mainWorkspace.path) });
+    const workspace = required(renderApp(app).querySelector<WorkspacePanel>("workspace-panel"), "workspace panel");
+
+    expect(workspace.onNewSession).toBeTypeOf("function");
   });
 
   it("shows the shared New session action when no chat composer exists", () => {
@@ -360,6 +377,28 @@ describe("PiWebApp New session composer root", () => {
     expect(retry).not.toHaveBeenCalled();
   });
 
+  it("reports whether ambiguous prompt restoration still targets the selected editor", async () => {
+    const app = new PiWebApp();
+    const selected = session("selected", mainWorkspace.path);
+    const replaceText = vi.fn();
+    setAppState(app, { selectedMachine: localMachine, selectedSession: selected });
+    Object.defineProperty(app, "updateComplete", { configurable: true, value: Promise.resolve(true) });
+    Object.defineProperty(app, "promptEditor", { configurable: true, value: { replaceText } });
+    await expect(callSessionPromptEditorReplacement(app, { machineId: localMachine.id, sessionId: selected.id, text: "Restore me" })).resolves.toBe(true);
+
+    let finishUpdate: (() => void) | undefined;
+    Object.defineProperty(app, "updateComplete", {
+      configurable: true,
+      value: new Promise<boolean>((resolve) => { finishUpdate = () => { resolve(true); }; }),
+    });
+    const lostReplacement = callSessionPromptEditorReplacement(app, { machineId: localMachine.id, sessionId: selected.id, text: "Do not restore" });
+    patchAppState(app, { selectedSession: session("different", mainWorkspace.path) });
+    finishUpdate?.();
+
+    await expect(lostReplacement).resolves.toBe(false);
+    expect(replaceText).toHaveBeenCalledExactlyOnceWith("Restore me");
+  });
+
   it("revalidates the exact destination before accepting the synchronous pending launch handoff", async () => {
     const app = new PiWebApp();
     const destination = completeNewSessionDestination(remoteMachine, remoteProject, remoteWorkspace);
@@ -553,6 +592,14 @@ function isSessionLaunchController(value: unknown): value is SessionLaunchContro
     && "acceptSessionLaunchReplacement" in value && typeof value.acceptSessionLaunchReplacement === "function"
     && "refreshSessionLaunchRecovery" in value && typeof value.refreshSessionLaunchRecovery === "function"
     && "restoreSessionLaunchPrompt" in value && typeof value.restoreSessionLaunchPrompt === "function";
+}
+
+async function callSessionPromptEditorReplacement(app: PiWebApp, replacementRequest: { machineId: string; sessionId: string; text: string }): Promise<unknown> {
+  const controller: unknown = Reflect.get(app, "sessions");
+  if (typeof controller !== "object" || controller === null) throw new Error("Expected PiWebApp SessionController");
+  const replacement: unknown = Reflect.get(controller, "replacePromptEditorText");
+  if (typeof replacement !== "function") throw new Error("Expected prompt editor replacement dependency");
+  return await Reflect.apply(replacement, controller, [replacementRequest]);
 }
 
 function isSessionTransport(value: unknown): value is SessionTransport {
