@@ -265,6 +265,11 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    expect(state.selectedSession).toMatchObject({ id: started.id });
+    expect(state.selectedSession).not.toHaveProperty("browserCachedNew");
+    const listedSession = state.sessions.find((session) => session.id === started.id);
+    expect(listedSession).toMatchObject({ id: started.id });
+    expect(listedSession).not.toHaveProperty("browserCachedNew");
     expect(state.error).toBe("");
   });
 
@@ -638,6 +643,45 @@ describe("SessionController session launch", () => {
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
       { kind: "followUp", text: "Keep this prompt" },
     ]);
+  });
+
+  it("marks the cached session persisted when a later refresh proves the initial prompt was accepted", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    let transcriptContainsPrompt = false;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(transcriptContainsPrompt
+        ? { messages: [{ role: "user", content: "Accepted before refresh" }], start: 0, total: 1 }
+        : emptyPage),
+      status: (session) => Promise.resolve(transcriptContainsPrompt
+        ? status(sessionLookupId(session))
+        : { ...status(sessionLookupId(session)), isStreaming: true }),
+      prompt: () => Promise.reject(new Error("delivery timed out")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Accepted before refresh");
+    expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
+    expect(state.selectedSession).toHaveProperty("browserCachedNew", true);
+
+    transcriptContainsPrompt = true;
+    await controller.refreshSessionLaunchRecovery(started.id);
+
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    expect(state.selectedSession).toMatchObject({ id: started.id });
+    expect(state.selectedSession).not.toHaveProperty("browserCachedNew");
+    const listedSession = state.sessions.find((session) => session.id === started.id);
+    expect(listedSession).toMatchObject({ id: started.id });
+    expect(listedSession).not.toHaveProperty("browserCachedNew");
   });
 
   it("clears accepted recovery and flushes retained tail sends in order after transcript refresh", async () => {

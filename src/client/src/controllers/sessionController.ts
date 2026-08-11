@@ -354,6 +354,7 @@ export class SessionController {
         this.sessionLaunchRecoveries.delete(sessionId);
         this.dropNextQueuedSessionMessage(sessionId);
         this.clearInitialPromptRecoveryProjection(sessionId);
+        this.markCachedNewSessionPersisted(record.session);
         await this.flushQueuedPendingSends(record.session, machineId, retainedQueuedSends, record.recovery.destination);
         return;
       }
@@ -610,6 +611,7 @@ export class SessionController {
       if (destination === undefined) return;
       const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued.text);
       if (stage === "accepted") {
+        this.markCachedNewSessionPersisted(session);
         this.dropNextQueuedSessionMessage(session.id);
         this.clearInitialPromptRecoveryProjection(session.id);
         continue;
