@@ -54,6 +54,9 @@ import { BrowserResumeController } from "../appShell/browserResumeController";
 import { NavigationSectionsController, type NavigationSection } from "../appShell/navigationState";
 import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
 import { PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
+import { PanelPeekController } from "../appShell/panelPeekController";
+import { peekSheetWidth } from "../appShell/panelPeek";
+import type { ShellPanel } from "../appShell/panelIntent";
 import { chromeDisclosureClass, shellLayoutModeClass } from "../appShell/shellLayoutMode";
 import { PanelResizeController, type PanelResizeConstraints, type ResizablePanelSide } from "../appShell/panelResizeController";
 import { readRoute, writeRoute, type AppRoute } from "../route";
@@ -285,6 +288,10 @@ export class PiWebApp extends LitElement {
     onRefreshError: (error) => { console.warn("Failed to refresh after browser resume", error); },
   });
   private readonly panelIntent = new PanelIntentController(this);
+  private readonly panelPeek = new PanelPeekController(this, {
+    peekable: (panel) => !this.panelIntent.isDocked(panel),
+    sheetWidth: () => peekSheetWidth(this.clientWidth),
+  });
   private readonly panelResize = new PanelResizeController(this);
   private readonly navigationSections = new NavigationSectionsController(
     this,
@@ -344,6 +351,12 @@ export class PiWebApp extends LitElement {
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
     if (this.isRenderedModalOpen()) return;
+    // A peek is a look, so it yields to the first key that asks it to.
+    if (event.key === "Escape" && this.panelPeek.panel !== undefined) {
+      event.preventDefault();
+      this.panelPeek.close();
+      return;
+    }
     if (this.keyboard.handle(event, this.getDefaultActions(), { shortcuts: this.shortcutConfig })) {
       event.preventDefault();
       event.stopPropagation();
@@ -1216,7 +1229,12 @@ export class PiWebApp extends LitElement {
     if (tool === "core:workspace.git") void this.git.refreshGit();
   }
 
-  private renderWorkspacePanel() {
+  /**
+   * One panel, one place. A peeked panel moves into the sheet rather than being
+   * mounted twice, which would run its subscriptions twice with it.
+   */
+  private renderWorkspacePanel(placement: "docked" | "peeked" = "docked") {
+    if (placement === "docked" && this.panelPeek.panel === "workspace") return null;
     const workspace = this.state.selectedWorkspace;
     const panelContext = workspace === undefined ? undefined : this.createWorkspacePanelContext(workspace);
     const emptyState = workspace === undefined ? this.workspacePanelEmptyState() : undefined;
@@ -2792,6 +2810,59 @@ export class PiWebApp extends LitElement {
     return selectedChatTargetsEqual(selectedChatTarget(selectedMachineId(this.state), session), selectedChatTarget(machineId, target));
   }
 
+  /**
+   * The sheet a drag pulls in, and the scrim it dims the session with.
+   *
+   * Both track the finger: the sheet by its own width, the scrim by how much of
+   * it shows. A look that is abandoned costs nothing, which is what allows the
+   * gesture to live anywhere rather than on an edge.
+   *
+   * The pin inside the sheet is the one route from a look to a decision. The
+   * drag itself never writes intent.
+   */
+  private renderPeekSheet() {
+    const panel = this.panelPeek.panel;
+    if (panel === undefined) return null;
+    const progress = this.panelPeek.progress(panel);
+    const label = panel === "navigation" ? "Sessions" : "Workspace";
+    return html`
+      <button
+        type="button"
+        class="peek-scrim"
+        aria-label=${`Close ${label.toLowerCase()}`}
+        style=${`opacity: ${String(progress)}`}
+        @click=${() => { this.panelPeek.close(); }}
+      ></button>
+      <div
+        class="peek-sheet"
+        data-side=${panel}
+        ?data-tracking=${this.panelPeek.isTracking}
+        role="dialog"
+        aria-label=${label}
+        style=${`width: ${String(peekSheetWidth(this.clientWidth))}px; --peek-progress: ${String(progress)}`}
+      >
+        <div class="peek-sheet-head">
+          <button
+            type="button"
+            class="peek-pin"
+            title=${`Keep ${label.toLowerCase()} open`}
+            aria-label=${`Keep ${label.toLowerCase()} open`}
+            @click=${() => { this.pinPeekedPanel(panel); }}
+          >Pin</button>
+        </div>
+        <div class="peek-sheet-body">
+          ${panel === "navigation" ? this.renderNavigationPanel() : this.renderWorkspacePanel("peeked")}
+        </div>
+      </div>
+    `;
+  }
+
+  /** The only promotion from a look to a decision. */
+  private pinPeekedPanel(panel: ShellPanel): void {
+    this.panelPeek.close();
+    this.panelIntent.keep(panel);
+  }
+
   /** Dismisses the summoned navigation overlay by returning to the session underneath. */
   private renderNavigationScrim(state: AppState) {
     if (!this.appShell.isMobileNavigationLayout || state.mainView !== "navigation") return null;
@@ -2920,8 +2991,17 @@ export class PiWebApp extends LitElement {
     const intent = this.chatNavigationIntent;
     const runtimeAvailable = this.selectedChatRuntimeAvailable();
     return html`
-      <div class=${`${this.panelIntent.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
-        <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout ? null : this.renderNavigationPanel()}</aside>
+      <div
+        class=${`${this.panelIntent.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`}
+        style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}
+        @pointerdown=${(event: PointerEvent) => { this.panelPeek.onPointerDown(event); }}
+        @pointermove=${(event: PointerEvent) => { this.panelPeek.onPointerMove(event); }}
+        @pointerup=${(event: PointerEvent) => { this.panelPeek.onPointerUp(event); }}
+        @pointercancel=${() => { this.panelPeek.onPointerCancel(); }}
+        @wheel=${(event: WheelEvent) => { this.panelPeek.onWheel(event); }}
+      >
+        ${this.renderPeekSheet()}
+        <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout || this.panelPeek.panel === "navigation" ? null : this.renderNavigationPanel()}</aside>
         ${this.renderNavigationPanelEdgeControl()}
         <main class=${mainViewClass(state.mainView)}>
           ${this.renderContextBar()}

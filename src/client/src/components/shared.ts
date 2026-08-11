@@ -103,7 +103,11 @@ export const appStyles = css`
   @media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
     :host { --pi-app-safe-area-bottom: env(safe-area-inset-bottom); }
   }
-  .shell { --navigation-panel-size: 340px; --workspace-panel-size: minmax(360px, 42vw); --navigation-panel-width: var(--navigation-panel-size); --workspace-panel-width: var(--workspace-panel-size); display: grid; grid-template-columns: var(--navigation-panel-width) 1px minmax(320px, 1fr) 1px var(--workspace-panel-width); height: 100%; min-height: 0; }
+  /*
+   * A peeked sheet is placed against the shell's own box, so the shell is the
+   * containing block. Everything else in here is grid placement.
+   */
+  .shell { position: relative; --navigation-panel-size: 340px; --workspace-panel-size: minmax(360px, 42vw); --navigation-panel-width: var(--navigation-panel-size); --workspace-panel-width: var(--workspace-panel-size); display: grid; grid-template-columns: var(--navigation-panel-width) 1px minmax(320px, 1fr) 1px var(--workspace-panel-width); height: 100%; min-height: 0; }
   aside { grid-column: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   aside app-navigation-panel { flex: 1 1 auto; min-height: 0; }
   header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
@@ -202,6 +206,60 @@ export const appStyles = css`
   }
   .navigation-scrim { display: none; }
   @keyframes navigation-overlay-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+  /*
+   * The sheet follows the finger. Travel is a share of the sheet's own width,
+   * written by the renderer, so the arithmetic that decided to open it and the
+   * transform that shows it read the same number.
+   *
+   * While a finger is down the sheet has no transition: easing would make the
+   * sheet lag the hand and the peek would stop feeling direct. The transition
+   * returns for the release, which is the part that should glide.
+   */
+  .peek-sheet {
+    position: absolute;
+    inset-block: 0;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-width: 100%;
+    overflow: hidden;
+    background: var(--pi-bg);
+    box-shadow: 0 0 24px var(--pi-shadow);
+    transition: transform 180ms ease;
+  }
+  .peek-sheet[data-tracking] { transition: none; }
+  .peek-sheet[data-side="navigation"] { inset-inline-start: 0; transform: translateX(calc((var(--peek-progress, 0) - 1) * 100%)); }
+  .peek-sheet[data-side="workspace"] { inset-inline-end: 0; transform: translateX(calc((1 - var(--peek-progress, 0)) * 100%)); }
+  /*
+   * One control, no title. The panel underneath already names itself, and a
+   * second name for the same thing is two vocabularies for one concept. The
+   * band carries the pin only, so the sheet spends almost no height on chrome.
+   */
+  .peek-sheet-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; padding: 4px 6px; }
+  .peek-pin { flex: 0 0 auto; min-height: 28px; padding: 2px 10px; font-size: 12px; color: var(--pi-muted); }
+  .peek-pin:hover, .peek-pin:focus-visible { color: var(--pi-text); }
+  .peek-sheet-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .peek-sheet-body > * { flex: 1 1 auto; min-height: 0; }
+
+  /* Dims what the sheet covers, by exactly as much of the sheet as shows. */
+  .peek-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--pi-shadow);
+    cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .peek-sheet { transition: none; }
+  }
+
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
