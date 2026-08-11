@@ -199,6 +199,7 @@ async function captureFailedRetryState(cdp, args, posture, target) {
   await selectAndWaitReady(cdp, target, args, "failed-retry-source");
   await forceSelectedFailure(cdp, target);
   await waitForRetryButton(cdp, args.timeoutMs);
+  await revealRetryButton(cdp);
   await screenshot(cdp, args, `${posture.name}-failed-retry`);
   const beforeAttemptId = await latestIntentAttemptId(cdp, target);
   await clickRetry(cdp);
@@ -461,6 +462,19 @@ async function waitForChatSession(cdp, ref, timeoutMs, label) {
 
 async function waitForRetryButton(cdp, timeoutMs) {
   await waitForCondition(cdp, `window.__chatOpenProbe.chatView()?.shadowRoot?.querySelector(".chat-load-retry") !== null`, timeoutMs, "failed chat retry button");
+}
+
+async function revealRetryButton(cdp) {
+  await evaluate(cdp, `
+    (async () => {
+      const button = window.__chatOpenProbe.chatView()?.shadowRoot?.querySelector(".chat-load-retry");
+      if (button === null || button === undefined) return false;
+      button.scrollIntoView({ block: "center" });
+      button.focus();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return true;
+    })()
+  `);
 }
 
 async function waitForMilestone(cdp, attemptId, milestone, timeoutMs, ref) {
