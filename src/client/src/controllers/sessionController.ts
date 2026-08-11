@@ -26,6 +26,7 @@ import {
 } from "../selectedChatLoad";
 import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
+import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
 import type { SessionInboxBridge } from "./sessionInboxController";
@@ -88,15 +89,29 @@ type ClientPendingStartSessionInfo = SessionInfo & { clientPendingStart: true; m
 
 type QueuedPendingSessionSendInput =
   | { type: "prompt"; text: string; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose?: "initialPrompt" }
+  | { type: "promptResource"; text: string; identity: PromptResourceCommandIdentity; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose: "initialPrompt" }
   | { type: "shell"; text: string }
   | { type: "command"; text: string };
 
-type QueuedPendingSessionSend = QueuedPendingSessionSendInput & { id: string };
+type QueuedPendingSessionSend = QueuedPendingSessionSendInput & { id: string; deliveredText?: string | undefined; deliveryReceipt?: string | undefined };
+
+export interface FirstPromptSubmission {
+  readonly text: string;
+  readonly attachments?: PromptAttachment[] | undefined;
+  readonly delivery?: PromptAttachmentDelivery | undefined;
+  readonly promptResourceCommandIdentity?: PromptResourceCommandIdentity | undefined;
+}
 
 export interface SessionLaunchDestination {
   readonly machineId: string;
   readonly workspaceId: string;
   readonly cwd: string;
+}
+
+export interface SessionLaunchAttachmentMetadata {
+  readonly name?: string | undefined;
+  readonly mimeType: string;
+  readonly size: number;
 }
 
 export interface SessionLaunchRecovery {
@@ -105,6 +120,9 @@ export interface SessionLaunchRecovery {
   readonly destination: SessionLaunchDestination;
   readonly prompt: string;
   readonly retrying: boolean;
+  readonly attachments?: readonly SessionLaunchAttachmentMetadata[] | undefined;
+  readonly delivery?: PromptAttachmentDelivery | undefined;
+  readonly promptResourceCommandIdentity?: PromptResourceCommandIdentity | undefined;
 }
 
 interface PendingSessionStart {
@@ -247,14 +265,21 @@ export class SessionController {
     await this.startPendingSession(pending);
   }
 
-  async launchSession(firstPrompt: string): Promise<void> {
+  async launchSession(firstPrompt: string | FirstPromptSubmission): Promise<void> {
     const workspace = this.getState().selectedWorkspace;
-    if (workspace === undefined || firstPrompt.trim() === "") return;
+    const submission = normalizeFirstPromptSubmission(firstPrompt);
+    if (workspace === undefined || firstPromptSubmissionIsEmpty(submission)) return;
+    const promptResourceIdentity = submission.promptResourceCommandIdentity;
+    if (submission.text.startsWith("/") && promptResourceIdentity === undefined) return;
     const machineId = selectedMachineId(this.getState());
     const pending = this.createPendingSessionStart(workspace, machineId);
     this.pendingSessionStarts.set(pending.tempId, pending);
     this.insertAndSelectPendingSession(pending.session);
-    this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: firstPrompt, delivery: "inline", purpose: "initialPrompt" });
+    if (promptResourceIdentity === undefined) {
+      this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: submission.text, attachments: submission.attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
+    } else {
+      this.enqueuePendingSessionSend(pending.session, { type: "promptResource", text: submission.text, identity: promptResourceIdentity, attachments: submission.attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
+    }
     await this.startPendingSession(pending);
   }
 
@@ -610,7 +635,7 @@ export class SessionController {
         return;
       }
       if (destination === undefined) return;
-      const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued.text);
+      const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued.deliveredText ?? queued.text);
       if (stage === "accepted") {
         this.markCachedNewSessionPersisted(session);
         this.dropNextQueuedSessionMessage(session.id);
@@ -623,6 +648,7 @@ export class SessionController {
         destination,
         prompt: queued.text,
         retrying: false,
+        ...recoverySubmissionProjection(queued),
       };
       this.sessionLaunchRecoveries.set(session.id, { recovery, queuedSends: queuedSends.slice(index), session });
       this.applyInitialPromptRecoveryActivity(recovery);
@@ -656,22 +682,47 @@ export class SessionController {
   }
 
   private async deliverQueuedPendingSend(session: SessionInfo, machineId: string, queued: QueuedPendingSessionSend): Promise<boolean> {
-    if (queued.type === "prompt") return this.deliverPromptToSession(session, queued.text, queued.streamingBehavior, queued.attachments, queued.delivery, machineId, { markSending: true });
+    if (queued.type === "prompt") return this.deliverPromptToSession(session, queued.text, queued.streamingBehavior, queued.attachments, queued.delivery, machineId, { markSending: true, recordDelivery: (delivery) => { queued.deliveredText = delivery.text; } });
+    if (queued.type === "promptResource") return this.deliverPromptResourceToSession(session, queued.text, queued.identity, queued.streamingBehavior, queued.attachments, queued.delivery, machineId, { markSending: true, recordDelivery: (delivery) => { queued.deliveredText = delivery.text; queued.deliveryReceipt = delivery.receipt; } });
     if (queued.type === "shell") return this.deliverShellToSession(session, queued.text, machineId, { optimisticLine: true });
     return this.deliverCommandToSession(session, queued.text, machineId, { applyResult: true });
   }
 
-  private async deliverPromptToSession(session: SessionInfo, text: string, streamingBehavior: "steer" | "followUp" | undefined, attachments: PromptAttachment[] | undefined, delivery: PromptAttachmentDelivery, machineId: string, options: { markSending: boolean }): Promise<boolean> {
+  private async deliverPromptToSession(session: SessionInfo, text: string, streamingBehavior: "steer" | "followUp" | undefined, attachments: PromptAttachment[] | undefined, delivery: PromptAttachmentDelivery, machineId: string, options: { markSending: boolean; recordDelivery?: ((delivery: { text: string }) => void) | undefined }): Promise<boolean> {
     const hasAttachments = attachments !== undefined && attachments.length > 0;
     if (options.markSending) this.markSendingPrompt(session.id, true);
     try {
       if (hasAttachments && delivery === "folder") {
         const saved = await this.api.saveAttachments(session, attachments, machineId);
-        const references = saved.map((file) => fileCompletionInsertText(file.path, false)).join(" ");
-        const body = text === "" ? references : `${text}\n\n${references}`;
+        const body = appendSavedAttachmentReferences(text, saved.map((file) => file.path));
+        options.recordDelivery?.({ text: body });
         await this.api.prompt(session, body, streamingBehavior, machineId);
       } else {
+        options.recordDelivery?.({ text });
         await this.api.prompt(session, text, streamingBehavior, machineId, attachments);
+      }
+      this.markCachedNewSessionPersisted(session);
+      return true;
+    } catch (error) {
+      this.setState({ error: String(error) });
+      return false;
+    } finally {
+      if (options.markSending) this.markSendingPrompt(session.id, false);
+    }
+  }
+
+  private async deliverPromptResourceToSession(session: SessionInfo, text: string, identity: PromptResourceCommandIdentity, streamingBehavior: "steer" | "followUp" | undefined, attachments: PromptAttachment[] | undefined, delivery: PromptAttachmentDelivery, machineId: string, options: { markSending: boolean; recordDelivery?: ((delivery: { text: string; receipt: string }) => void) | undefined }): Promise<boolean> {
+    const hasAttachments = attachments !== undefined && attachments.length > 0;
+    if (options.markSending) this.markSendingPrompt(session.id, true);
+    try {
+      if (hasAttachments && delivery === "folder") {
+        const saved = await this.api.saveAttachments(session, attachments, machineId);
+        const body = appendSavedAttachmentReferences(text, saved.map((file) => file.path));
+        const response = await this.api.runPromptResourceCommand(session, body, identity, streamingBehavior, machineId);
+        options.recordDelivery?.({ text: body, receipt: response.deliveryFingerprint });
+      } else {
+        const response = await this.api.runPromptResourceCommand(session, text, identity, streamingBehavior, machineId, attachments);
+        options.recordDelivery?.({ text, receipt: response.deliveryFingerprint });
       }
       this.markCachedNewSessionPersisted(session);
       return true;
@@ -1729,6 +1780,7 @@ export class SessionController {
           destination: { machineId: pending.machineId, workspaceId: pending.workspaceId, cwd: pending.cwd },
           prompt: initialPrompt.text,
           retrying: false,
+          ...recoverySubmissionProjection(initialPrompt),
         },
         queuedSends: pending.queuedSends,
         pending,
@@ -2324,6 +2376,40 @@ function isInitialPromptRetryActivity(activity: SessionActivity | undefined): bo
     && activity.detail === "Retry in progress";
 }
 
+function normalizeFirstPromptSubmission(input: string | FirstPromptSubmission): Required<Pick<FirstPromptSubmission, "text">> & Omit<FirstPromptSubmission, "text"> {
+  return typeof input === "string" ? { text: input } : input;
+}
+
+function firstPromptSubmissionIsEmpty(submission: FirstPromptSubmission): boolean {
+  return submission.text.trim() === "" && (submission.attachments === undefined || submission.attachments.length === 0);
+}
+
+function appendSavedAttachmentReferences(text: string, paths: readonly string[]): string {
+  const references = paths.map((path) => fileCompletionInsertText(path, false)).join(" ");
+  return text === "" ? references : `${text}
+
+${references}`;
+}
+
+function recoverySubmissionProjection(queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Pick<SessionLaunchRecovery, "attachments" | "delivery" | "promptResourceCommandIdentity"> {
+  return {
+    ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: queued.identity } : {}),
+    ...(queued.attachments === undefined || queued.attachments.length === 0 ? {} : {
+      delivery: queued.delivery,
+      attachments: queued.attachments.map((attachment) => ({
+        ...(attachment.name === undefined ? {} : { name: attachment.name }),
+        mimeType: attachment.mimeType,
+        size: base64ByteSize(attachment.data),
+      })),
+    }),
+  };
+}
+
+function base64ByteSize(data: string): number {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(data.length * 3 / 4) - padding);
+}
+
 function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): boolean {
   return normalizeMessages(page.messages).some((message) => {
     if (message.role !== "user") return false;
@@ -2344,12 +2430,12 @@ function canonicalStatusIsIdle(status: SessionStatus): boolean {
     && status.queuedMessages.length === 0;
 }
 
-function isInitialPromptSend(queued: QueuedPendingSessionSend): queued is Extract<QueuedPendingSessionSend, { type: "prompt" }> & { purpose: "initialPrompt" } {
-  return queued.type === "prompt" && queued.purpose === "initialPrompt";
+function isInitialPromptSend(queued: QueuedPendingSessionSend): queued is Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }> & { purpose: "initialPrompt" } {
+  return (queued.type === "prompt" || queued.type === "promptResource") && queued.purpose === "initialPrompt";
 }
 
 function queuedSessionMessagePreview(queued: QueuedPendingSessionSend): QueuedSessionMessage {
-  if (queued.type === "prompt") {
+  if (queued.type === "prompt" || queued.type === "promptResource") {
     return { kind: queued.streamingBehavior === "steer" ? "steer" : "followUp", text: queuedPromptPreviewText(queued.text, queued.attachments) };
   }
   return { kind: "followUp", text: queued.text };

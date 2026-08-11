@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { initialAppState } from "../appState";
 import { SessionController } from "./sessionController";
-import { defaultApi, deferred, emptyPage, FakeSocket, MemoryStorage, oldSession, sessionLookupId, status, workspace, type AppState, type SessionInfo } from "./sessionController.testSupport";
+import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
+import { defaultApi, deferred, emptyPage, FakeSocket, MemoryStorage, oldSession, sessionLookupId, status, workspace, type AppState, type PromptAttachment, type SessionInfo } from "./sessionController.testSupport";
 
 describe("SessionController session launch", () => {
   it("selects one pending session and queues its initial prompt before creation resolves", async () => {
@@ -35,6 +36,237 @@ describe("SessionController session launch", () => {
 
     startRequest.reject(new Error("stop test"));
     await launch;
+  });
+
+  it("launches one session with a typed first-prompt submission and inline attachments", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const startRequest = deferred<SessionInfo>();
+    const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    const promptCalls: { sessionId: string; text: string; attachments?: PromptAttachment[] }[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => startRequest.promise,
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: (session, text, _behavior, _machineId, sentAttachments) => {
+        promptCalls.push({ sessionId: sessionLookupId(session), text, ...(sentAttachments === undefined ? {} : { attachments: sentAttachments }) });
+        return Promise.resolve({ accepted: true });
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    const launch = controller.launchSession({ text: "Build with image", attachments, delivery: "inline" });
+    const temporaryId = state.selectedSession?.id;
+    if (temporaryId === undefined) throw new Error("Expected pending session");
+
+    expect(state.sessions.map((session) => session.id)).toEqual([temporaryId]);
+    expect(state.clientQueuedSessionMessages[temporaryId]).toEqual([
+      { kind: "followUp", text: "Build with image\n\n[1 attachment queued: shot.png]" },
+    ]);
+
+    startRequest.resolve(started);
+    await launch;
+
+    expect(promptCalls).toEqual([{ sessionId: started.id, text: "Build with image", attachments }]);
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+  });
+
+  it("allows an attachment-only launch through the structured empty-submission guard", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    const promptCalls: { text: string; attachments?: PromptAttachment[] }[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: (_session, text, _behavior, _machineId, sentAttachments) => {
+        promptCalls.push({ text, ...(sentAttachments === undefined ? {} : { attachments: sentAttachments }) });
+        return Promise.resolve({ accepted: true });
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "", attachments, delivery: "inline" });
+
+    expect(promptCalls).toEqual([{ text: "", attachments }]);
+    expect(state.sessions).toHaveLength(1);
+    expect(state.selectedSession?.id).toBe(started.id);
+  });
+
+  it("exposes only attachment metadata for failed launch recovery and retries with private payloads", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    const promptCalls: { text: string; attachments?: PromptAttachment[] }[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    let startCount = 0;
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => {
+        startCount += 1;
+        return startCount === 1 ? Promise.reject(new Error("backend unavailable")) : Promise.resolve(started);
+      },
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: (_session, text, _behavior, _machineId, sentAttachments) => {
+        promptCalls.push({ text, ...(sentAttachments === undefined ? {} : { attachments: sentAttachments }) });
+        return Promise.resolve({ accepted: true });
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "Recover with attachment", attachments, delivery: "inline" });
+    const failedId = state.selectedSession?.id;
+    if (failedId === undefined) throw new Error("Expected failed pending session");
+
+    const recovery = controller.getSessionLaunchRecovery(failedId);
+    expect(recovery).toMatchObject({
+      stage: "creationFailed",
+      prompt: "Recover with attachment",
+      retrying: false,
+      attachments: [{ mimeType: "image/png", name: "shot.png", size: 3 }],
+      delivery: "inline",
+    });
+    expect(JSON.stringify(recovery)).not.toContain("QUJD");
+
+    await controller.retrySessionLaunch(failedId);
+
+    expect(promptCalls).toEqual([{ text: "Recover with attachment", attachments }]);
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+  });
+
+  it("runs a prevalidated prompt-resource first prompt through the identity-bound endpoint only", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    let genericPromptCalls = 0;
+    let genericCommandCalls = 0;
+    const resourceCalls: { text: string; identity: PromptResourceCommandIdentity }[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => { genericPromptCalls += 1; return Promise.resolve({ accepted: true }); },
+      runCommand: () => { genericCommandCalls += 1; return Promise.resolve({ type: "done" }); },
+      runPromptResourceCommand: (_session, text, sentIdentity) => {
+        resourceCalls.push({ text, identity: sentIdentity });
+        return Promise.resolve({ accepted: true, deliveryFingerprint: "b".repeat(64) });
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+
+    expect(resourceCalls).toEqual([{ text: "/review src", identity }]);
+    expect(genericPromptCalls).toBe(0);
+    expect(genericCommandCalls).toBe(0);
+  });
+
+  it("appends folder references before identity-bound first-prompt execution", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "skill", name: "skill:audit", fingerprint: "a".repeat(64) };
+    const attachments: PromptAttachment[] = [{ kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" }];
+    const calls: string[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      saveAttachments: (_session, sentAttachments) => {
+        calls.push(`save:${sentAttachments[0]?.name ?? ""}`);
+        return Promise.resolve([{ path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 }]);
+      },
+      prompt: () => { calls.push("generic-prompt"); return Promise.resolve({ accepted: true }); },
+      runCommand: () => { calls.push("generic-command"); return Promise.resolve({ type: "done" }); },
+      runPromptResourceCommand: (_session, text, sentIdentity, _behavior, _machineId, sentAttachments) => {
+        calls.push(`resource:${text}:${sentIdentity.fingerprint}:${String(sentAttachments?.length ?? 0)}`);
+        return Promise.resolve({ accepted: true, deliveryFingerprint: "b".repeat(64) });
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/skill:audit target", attachments, delivery: "folder", promptResourceCommandIdentity: identity });
+
+    expect(calls).toEqual([
+      "save:notes.txt",
+      `resource:/skill:audit target\n\n@.forgerie/attachments/notes.txt:${identity.fingerprint}:0`,
+    ]);
+  });
+
+  it("retains confirmed-unsent prompt-resource recovery without calling generic prompt or command", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    let genericPromptCalls = 0;
+    let genericCommandCalls = 0;
+    let resourceCalls = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => { genericPromptCalls += 1; return Promise.resolve({ accepted: true }); },
+      runCommand: () => { genericCommandCalls += 1; return Promise.resolve({ type: "done" }); },
+      runPromptResourceCommand: () => {
+        resourceCalls += 1;
+        return Promise.reject(new Error("Prompt-resource command is no longer available"));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", attachments, delivery: "inline", promptResourceCommandIdentity: identity });
+
+    expect(resourceCalls).toBe(1);
+    expect(genericPromptCalls).toBe(0);
+    expect(genericCommandCalls).toBe(0);
+    expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
+      stage: "promptConfirmedUnsent",
+      promptResourceCommandIdentity: identity,
+      attachments: [{ mimeType: "image/png", name: "shot.png", size: 3 }],
+    });
+    expect(JSON.stringify(controller.getSessionLaunchRecovery(started.id))).not.toContain("QUJD");
   });
 
   it("retains stage-specific recovery data when creation fails", async () => {
