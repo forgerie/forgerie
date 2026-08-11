@@ -30,6 +30,7 @@ async function mountComposer(options: {
   onCancel?: () => void;
   onSubmit?: NewSessionComposer["onSubmit"];
   onReturnRecoveryDraft?: NewSessionComposer["onReturnRecoveryDraft"];
+  promptResourceCatalog?: NewSessionComposer["promptResourceCatalog"];
 } = {}): Promise<NewSessionComposer> {
   const composer = new NewSessionComposer();
   if (options.initialDestination !== undefined) composer.initialDestination = options.initialDestination;
@@ -37,6 +38,7 @@ async function mountComposer(options: {
   if (options.onCancel !== undefined) composer.onCancel = options.onCancel;
   if (options.onSubmit !== undefined) composer.onSubmit = options.onSubmit;
   if (options.onReturnRecoveryDraft !== undefined) composer.onReturnRecoveryDraft = options.onReturnRecoveryDraft;
+  if (options.promptResourceCatalog !== undefined) composer.promptResourceCatalog = options.promptResourceCatalog;
   document.body.append(composer);
   await settleRenderedDialog(composer);
   if (options.initialPrompt !== undefined) {
@@ -112,6 +114,15 @@ async function settleCatalog(composer: NewSessionComposer): Promise<void> {
   await composer.updateComplete;
   await Promise.resolve();
   await composer.updateComplete;
+}
+
+function deferredPromptResourceCatalog(): {
+  promise: Promise<Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>>;
+  resolve: (value: Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>) => void;
+} {
+  let resolve!: (value: Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>) => void;
+  const promise = new Promise<Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>>((resolver) => { resolve = resolver; });
+  return { promise, resolve };
 }
 
 describe("new-session-composer editing and submission", () => {
@@ -236,6 +247,121 @@ describe("new-session-composer editing and submission", () => {
     pressPrompt(composer, "Enter");
     await settleCatalog(composer);
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("ignores stale slash validation after editing, destination change, or cancel", async () => {
+    const firstDestination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const replacementDestination = completeNewSessionDestination(machine("remote"), project("other"), workspace("feature", "other"));
+    const validations: ReturnType<typeof deferredPromptResourceCatalog>[] = [];
+    const promptResourceCatalog = vi.fn(() => {
+      const validation = deferredPromptResourceCatalog();
+      validations.push(validation);
+      return validation.promise;
+    });
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const onCancel = vi.fn<() => void>();
+    const catalog = new InMemoryNewSessionDestinationCatalog({
+      machines: [replacementDestination.machine],
+      projectsByMachine: { remote: [replacementDestination.project] },
+      workspacesByMachineAndProject: { "remote:other": [replacementDestination.workspace] },
+    });
+    const composer = await mountComposer({ initialDestination: firstDestination, initialPrompt: "/review", catalog, onSubmit, onCancel, promptResourceCatalog });
+
+    await vi.waitFor(() => { expect(validations).toHaveLength(1); });
+    validations[0]?.resolve({
+      available: true,
+      diagnostics: [],
+      commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "b".repeat(64) } }],
+    });
+    await settleCatalog(composer);
+    const editedValidationIndex = validations.length;
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(editedValidationIndex); });
+    await enterPrompt(composer, "plain replacement");
+    validations[editedValidationIndex]?.resolve({ available: false, reason: "error", message: "Old destination unavailable" });
+    await settleCatalog(composer);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(root(composer).querySelector("[role='alert']")).toBeNull();
+    expect(promptText(composer)).toBe("plain replacement");
+
+    await enterPrompt(composer, "/review");
+    const destinationValidationIndex = validations.length;
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(destinationValidationIndex); });
+    button(composer, "[data-action='change-destination']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-machine-id='remote']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-project-id='other']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-workspace-id='feature']").click();
+    await composer.updateComplete;
+    validations[destinationValidationIndex]?.resolve({ available: false, reason: "error", message: "Stale validation error" });
+    await settleCatalog(composer);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(root(composer).querySelector("[role='alert']")).toBeNull();
+
+    const cancelValidationIndex = validations.length;
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(cancelValidationIndex); });
+    button(composer, "[data-action='cancel']").click();
+    validations[cancelValidationIndex]?.resolve({
+      available: true,
+      diagnostics: [],
+      commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "c".repeat(64) } }],
+    });
+    await settleCatalog(composer);
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("retries transient slash validation and blocks missing or ambiguous command names", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "d".repeat(64) };
+    let loads = 0;
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = await mountComposer({
+      initialDestination: destination,
+      initialPrompt: "/review",
+      onSubmit,
+      promptResourceCatalog: () => {
+        loads += 1;
+        if (loads === 2) return Promise.reject(new Error("Catalog offline"));
+        return Promise.resolve({ available: true, diagnostics: [], commands: [{ name: "review", source: "prompt", identity }] });
+      },
+    });
+
+    button(composer, "[data-action='send']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-action='retry-prompt-resource-validation']").click();
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review", promptResourceCommandIdentity: identity } }); });
+
+    document.body.replaceChildren();
+    const missingName = await mountComposer({ initialDestination: destination, initialPrompt: "/", onSubmit });
+    button(missingName, "[data-action='send']").click();
+    await settleCatalog(missingName);
+    expect(root(missingName).querySelector("[role='alert']")?.textContent).toContain("name after /");
+
+    document.body.replaceChildren();
+    const ambiguous = await mountComposer({
+      initialDestination: destination,
+      initialPrompt: "/review",
+      onSubmit,
+      promptResourceCatalog: () => Promise.resolve({
+        available: true,
+        diagnostics: [],
+        commands: [
+          { name: "review", source: "prompt", identity },
+          { name: "review", source: "skill", identity: { source: "skill", name: "review", fingerprint: "e".repeat(64) } },
+        ],
+      }),
+    });
+    button(ambiguous, "[data-action='send']").click();
+    await settleCatalog(ambiguous);
+    expect(root(ambiguous).querySelector("[role='alert']")?.textContent).toContain("ambiguous");
   });
 
   it("lets plain text and attachment-only launches proceed when the prompt-resource catalog fails", async () => {

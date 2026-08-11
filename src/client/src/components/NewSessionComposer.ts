@@ -38,6 +38,10 @@ interface SlashValidationError {
   readonly retryable: boolean;
 }
 
+type SlashValidationResult =
+  | { readonly kind: "valid"; readonly submission: NewSessionFirstPromptSubmission }
+  | { readonly kind: "invalid"; readonly error: SlashValidationError };
+
 type NewSessionRecoveryDraftSeed = ComposerDraftSeed & { snapshot: NewSessionFirstPromptSubmission };
 
 @customElement("new-session-composer")
@@ -61,6 +65,7 @@ export class NewSessionComposer extends LitElement {
   private initialized = false;
   private requestGeneration = 0;
   private runtimeGeneration = 0;
+  private submissionGeneration = 0;
   private focusRegion = "";
   private runtime: ComposerRuntime = createPreSessionComposerRuntime({ machineId: "local" });
   private claimedRecoverySeedId: string | undefined;
@@ -86,6 +91,7 @@ export class NewSessionComposer extends LitElement {
   override disconnectedCallback(): void {
     this.requestGeneration += 1;
     this.runtimeGeneration += 1;
+    this.submissionGeneration += 1;
     super.disconnectedCallback();
   }
 
@@ -123,7 +129,7 @@ export class NewSessionComposer extends LitElement {
                 .submissionDisabled=${this.slashValidationError !== undefined}
                 .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
                 .onDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
-                .onDraftEdited=${() => { this.clearValidationError(); }}
+                .onDraftEdited=${() => { this.invalidatePendingSubmission(); this.clearValidationError(); }}
                 .onCompletionError=${() => { this.clearValidationError(); }}
               ></composer-draft>
               ${this.slashValidationError === undefined ? nothing : html`
@@ -315,9 +321,14 @@ export class NewSessionComposer extends LitElement {
     const destination = this.currentDestination();
     if (destination === undefined) return "rejected";
     const runtimeGeneration = this.runtimeGeneration;
-    const validated = await this.validatePromptResourceCommand(snapshot, destination);
-    if (validated === undefined || runtimeGeneration !== this.runtimeGeneration) return "rejected";
-    const next = beginNewSessionSubmission(this.composerState, validated);
+    const submissionGeneration = ++this.submissionGeneration;
+    const validation = await this.validatePromptResourceCommand(snapshot, destination);
+    if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
+    if (validation.kind === "invalid") {
+      this.slashValidationError = validation.error;
+      return "rejected";
+    }
+    const next = beginNewSessionSubmission(this.composerState, validation.submission);
     if (next.kind !== "submitting" || next === this.composerState) return "rejected";
     this.requestGeneration += 1;
     this.composerState = next;
@@ -328,12 +339,12 @@ export class NewSessionComposer extends LitElement {
     }
     try {
       const outcome = await callback({ destination: next.destination, firstPrompt: next.submission });
-      if (!this.isConnected) return "rejected";
+      if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
       if (outcome.kind === "accepted") return "accepted";
       this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
       return "rejected";
     } catch (error) {
-      if (this.isConnected) {
+      if (this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) {
         this.composerState = rejectNewSessionSubmission(this.composerState, {
           kind: "rejected",
           reason: "launch-rejected",
@@ -344,37 +355,33 @@ export class NewSessionComposer extends LitElement {
     }
   }
 
-  private async validatePromptResourceCommand(snapshot: ComposerDraftSubmitSnapshot, destination: NewSessionCompleteDestination): Promise<NewSessionFirstPromptSubmission | undefined> {
+  private async validatePromptResourceCommand(snapshot: ComposerDraftSubmitSnapshot, destination: NewSessionCompleteDestination): Promise<SlashValidationResult> {
     const parsed = parseLeadingSlashCommand(snapshot.text);
-    if (parsed.kind === "not-command") return snapshot;
+    if (parsed.kind === "not-command") return { kind: "valid", submission: snapshot };
     if (parsed.kind !== "command") {
-      this.slashValidationError = { message: "Enter a prompt resource command name after / before starting a session.", retryable: false };
-      return undefined;
+      return { kind: "invalid", error: { message: "Enter a prompt resource command name after / before starting a session.", retryable: false } };
     }
     let catalog: PromptResourceCatalogResponse;
     try {
       catalog = await this.promptResourceCatalog(destination.project.id, destination.workspace.id, destination.machine.id);
     } catch (error) {
-      this.slashValidationError = { message: errorMessage(error, "Prompt-resource catalog unavailable. Retry before sending a slash command."), retryable: true };
-      return undefined;
+      return { kind: "invalid", error: { message: errorMessage(error, "Prompt-resource catalog unavailable. Retry before sending a slash command."), retryable: true } };
     }
-    if (!catalog.available) {
-      this.slashValidationError = { message: catalog.message, retryable: true };
-      return undefined;
-    }
+    if (!catalog.available) return { kind: "invalid", error: { message: catalog.message, retryable: true } };
     const matches = catalog.commands.filter((command) => command.name === parsed.name);
     const match = matches[0];
     if (matches.length !== 1 || match === undefined) {
-      this.slashValidationError = {
-        message: matches.length === 0
-          ? `/${parsed.name} is not available as a first-prompt command in this destination.`
-          : `/${parsed.name} is ambiguous in this destination. Refresh resources and choose the command again.`,
-        retryable: false,
+      return {
+        kind: "invalid",
+        error: {
+          message: matches.length === 0
+            ? `/${parsed.name} is not available as a first-prompt command in this destination.`
+            : `/${parsed.name} is ambiguous in this destination. Refresh resources and choose the command again.`,
+          retryable: false,
+        },
       };
-      return undefined;
     }
-    this.slashValidationError = undefined;
-    return { ...snapshot, promptResourceCommandIdentity: { ...match.identity } };
+    return { kind: "valid", submission: { ...snapshot, promptResourceCommandIdentity: { ...match.identity } } };
   }
 
   private clearValidationError(): void {
@@ -387,6 +394,7 @@ export class NewSessionComposer extends LitElement {
   }
 
   private openDestinationChoice(): void {
+    this.invalidatePendingSubmission();
     const requestId = this.nextRequest();
     const next = startNewSessionDestinationChoice(this.composerState, requestId);
     if (next === this.composerState) return;
@@ -486,9 +494,20 @@ export class NewSessionComposer extends LitElement {
   private requestCancel(): void {
     if (this.composerState.kind === "submitting") return;
     this.requestGeneration += 1;
+    this.invalidatePendingSubmission();
     this.returnClaimedRecoveryDraft();
     this.draft?.discardDraft();
     this.onCancel?.();
+  }
+
+  private submissionIsCurrent(submissionGeneration: number, runtimeGeneration: number): boolean {
+    return this.isConnected
+      && submissionGeneration === this.submissionGeneration
+      && runtimeGeneration === this.runtimeGeneration;
+  }
+
+  private invalidatePendingSubmission(): void {
+    this.submissionGeneration += 1;
   }
 
   private claimRecoveryDraftOnce(): void {
