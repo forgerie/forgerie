@@ -708,12 +708,19 @@ export const promptEditorStyles = css`
   .stop-button:not(:disabled) { color: var(--pi-danger); }
   .select-thinking .prompt-thinking-gauge .gauge-bar { fill: currentColor; stroke: none; opacity: .28; }
   .select-thinking .prompt-thinking-gauge .gauge-bar-active { opacity: 1; }
-  .editor-attach { position: absolute; right: 8px; bottom: 8px; z-index: 2; width: 30px; height: 30px; }
-  .editor-attach .prompt-action-icon { width: 16px; height: 16px; }
+  /* One way in to everything the rail does not hold, and the only place a
+     waiting warning or notification can announce itself now the bar is gone. */
+  .island-menu { position: relative; }
+  .island-menu.attention { border-color: var(--pi-accent); color: var(--pi-accent); }
+  .island-menu-count {
+    position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px; padding: 0 3px;
+    border-radius: 999px; background: var(--pi-accent); color: var(--pi-bg);
+    font: 600 10px/15px system-ui, sans-serif; text-align: center;
+  }
   textarea, .markdown-editor .cm-editor { box-sizing: border-box; width: 100%; min-height: 54px; max-height: 220px; resize: none; overflow: hidden; border-radius: 8px; border: 1px solid var(--pi-border); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); }
   textarea { overflow-y: auto; padding: 8px; }
   .markdown-editor .cm-scroller { max-height: 220px; overflow-y: auto; font-family: var(--pi-control-font-family, system-ui, sans-serif); line-height: 1.4; }
-  .markdown-editor .cm-content { min-height: 38px; padding: 8px 44px 8px 8px; caret-color: var(--pi-text); text-align: start; unicode-bidi: plaintext; }
+  .markdown-editor .cm-content { min-height: 38px; padding: 8px; caret-color: var(--pi-text); text-align: start; unicode-bidi: plaintext; }
   .markdown-editor .cm-line { padding: 0; unicode-bidi: plaintext; }
   .markdown-editor .cm-placeholder { color: var(--pi-dim); }
   .markdown-editor .cm-focused { outline: none; }
@@ -726,9 +733,9 @@ export const promptEditorStyles = css`
   .resting { gap: 6px; padding-block: 7px; }
   .resting .markdown-editor .cm-editor { min-height: 38px; }
   .resting .markdown-editor .cm-content { min-height: 22px; padding-block: 6px; }
-  .resting .editor-attach { width: 26px; height: 26px; bottom: 6px; }
+
   .resting .model-capsule { display: none; }
-  .mode-hint { position: absolute; right: 46px; bottom: 8px; max-width: calc(100% - 54px); border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 2px 8px; font-size: 12px; pointer-events: none; }
+  .mode-hint { position: absolute; right: 8px; bottom: 8px; max-width: calc(100% - 54px); border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 2px 8px; font-size: 12px; pointer-events: none; }
   .attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
   .attachment-chip { position: relative; width: 56px; height: 56px; border: 1px solid var(--pi-border); border-radius: 8px; overflow: hidden; background: var(--pi-bg); }
   .attachment-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -785,4 +792,12 @@ export const controlSheetStyles = css`
   @keyframes control-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .control-sheet-grab { align-self: center; width: 34px; height: 4px; margin-bottom: 5px; border-radius: 2px; background: var(--pi-border); }
   .control-sheet-notifications { margin: 0; padding: 9px 12px 2px; color: var(--pi-muted); font-size: 12px; }
+  /* Three named groups — do this, know this, go there — so the sheet does not
+     read as one list once it carries the retired status readings. */
+  .control-sheet-section { margin: 0; padding: 9px 12px 2px; color: var(--pi-dim); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  .control-sheet-action { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; border-radius: 0; background: transparent; color: var(--pi-text); padding: 9px 12px; font: inherit; text-align: start; cursor: pointer; }
+  .control-sheet-action:hover, .control-sheet-action:focus-visible { background: var(--pi-selection-bg); }
+  .control-sheet-warning-icon { flex: 0 0 auto; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .control-sheet-readings { display: flex; flex-wrap: wrap; gap: 12px; padding: 2px 12px 4px; color: var(--pi-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .control-sheet-note { margin: 0; padding: 6px 12px; color: var(--pi-dim); font-size: 12px; }
 `;

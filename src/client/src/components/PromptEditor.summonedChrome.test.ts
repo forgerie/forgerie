@@ -12,16 +12,6 @@ describe("PromptEditor summoned chrome", () => {
     expect(templateText(renderCompactStatus(editor))).toContain("forgerie · main");
   });
 
-  it("offers the summon control that stands in for the retired bands", () => {
-    const editor = summonedEditor();
-    const onOpenControlSheet = vi.fn();
-    editor.onOpenControlSheet = onOpenControlSheet;
-
-    templateClickHandlerForText(renderCompactStatus(editor), "Show session controls")(new Event("click"));
-
-    expect(onOpenControlSheet).toHaveBeenCalledOnce();
-  });
-
   it("keeps archive one tap away so the triage loop survives the header's removal", () => {
     const editor = summonedEditor();
     const onArchiveAndNext = vi.fn();
@@ -49,7 +39,6 @@ describe("PromptEditor summoned chrome", () => {
     const rendered = templateText(renderCompactStatus(editor));
     expect(rendered).not.toContain("forgerie · main");
     expect(rendered).not.toContain("Archive");
-    expect(rendered).not.toContain("Show session controls");
   });
 });
 

@@ -83,3 +83,24 @@ export function restoreSessionWarnings(current: SessionWarningVisibilityState): 
 export function toggleSessionWarnings(current: SessionWarningVisibilityState): SessionWarningVisibilityState {
   return current.collapsed ? restoreSessionWarnings(current) : collapseSessionWarnings(current);
 }
+
+export interface SessionWarningControlContent {
+  /** Human summary, e.g. "2 warnings". */
+  summary: string;
+  accessibleLabel: string;
+}
+
+/**
+ * The label for a control that opens or closes the session's warning area.
+ *
+ * Absent when there is nothing to warn about, so callers render no control at
+ * all rather than a dead one reporting zero.
+ */
+export function sessionWarningControlContent(count: number, expanded: boolean): SessionWarningControlContent | undefined {
+  if (!Number.isInteger(count) || count <= 0) return undefined;
+  const summary = `${String(count)} ${count === 1 ? "warning" : "warnings"}`;
+  return {
+    summary,
+    accessibleLabel: expanded ? `Minimise ${summary}` : `Show ${summary} in the warning area`,
+  };
+}

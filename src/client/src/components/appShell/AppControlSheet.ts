@@ -2,8 +2,10 @@ import { LitElement, html, type TemplateResult } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { NavigationSection } from "../../appShell/navigationState";
 import type { AppState } from "../../appState";
-import type { Machine, Project, SessionInfo, Workspace } from "../../api";
-import { controlSheetStyles } from "../shared";
+import type { Machine, Project, SessionInfo, SessionStatus, Workspace } from "../../api";
+import { sessionWarningControlContent } from "../../sessionWarningVisibility";
+import { formatCost, formatTokenCount } from "../../utils/format";
+import { controlSheetStyles, renderSessionWarningIcon } from "../shared";
 import type { AppMobileMainTab } from "./AppMobileMainTabs";
 import "./AppContextBar";
 import "./AppMobileMainTabs";
@@ -20,6 +22,12 @@ import "./AppMobileMainTabs";
  * is always explicit — scrim, the summon control again, or choosing a
  * destination. Nothing here closes on a timer: the user is holding the device,
  * not watching from across the room.
+ *
+ * It is also where the retired status bar's readings live. Tokens, cost, queued
+ * count, and the warning control are consulted occasionally, so they are worth
+ * a sheet section and not a permanent row above the keyboard. The sections are
+ * named so the sheet reads as three groups — do this, know this, go there —
+ * rather than one list.
  */
 @customElement("app-control-sheet")
 export class AppControlSheet extends LitElement {
@@ -35,8 +43,13 @@ export class AppControlSheet extends LitElement {
   @property({ attribute: false }) tabs: AppMobileMainTab[] = [];
   @property({ attribute: false }) selectedView: AppState["mainView"] = "chat";
   @property({ type: Number }) notificationCount = 0;
+  @property({ attribute: false }) status?: SessionStatus;
+  @property({ type: Number }) warningCount = 0;
+  @property({ type: Boolean }) warningsExpanded = false;
   @property({ attribute: false }) onSelectView?: (view: AppState["mainView"]) => void;
   @property({ attribute: false }) onOpenSection?: (section: NavigationSection) => void;
+  @property({ attribute: false }) onToggleWarnings?: () => void;
+  @property({ attribute: false }) onAttachFiles?: () => void;
   @property({ attribute: false }) onClose?: () => void;
 
   /** Choosing a destination is a completed intent, so the sheet leaves with it. */
@@ -61,6 +74,9 @@ export class AppControlSheet extends LitElement {
       ></button>
       <section class="control-sheet" role="dialog" aria-modal="true" aria-label="Session controls">
         <span class="control-sheet-grab" aria-hidden="true"></span>
+        ${this.renderActions()}
+        ${this.renderSessionReadings()}
+        <p class="control-sheet-section" id="control-sheet-go">Go to</p>
         <app-context-bar
           .machines=${this.machines}
           .machine=${this.machine}
@@ -76,6 +92,50 @@ export class AppControlSheet extends LitElement {
         ></app-mobile-main-tabs>
         ${this.renderNotificationSummary()}
       </section>
+    `;
+  }
+
+  /** Attaching leaves with the sheet: the file picker must not open behind it. */
+  attachFiles(): void {
+    this.onAttachFiles?.();
+    this.onClose?.();
+  }
+
+  private renderActions() {
+    if (this.onAttachFiles === undefined) return null;
+    return html`
+      <p class="control-sheet-section">Do</p>
+      <button type="button" class="control-sheet-action" @click=${() => { this.attachFiles(); }}>Attach files</button>
+    `;
+  }
+
+  private renderSessionReadings() {
+    const status = this.status;
+    if (status === undefined) return html`<p class="control-sheet-note">No session status yet</p>`;
+    const tokens = status.tokens;
+    return html`
+      <p class="control-sheet-section">Session</p>
+      <div class="control-sheet-readings">
+        <span title="Input tokens">↑${formatTokenCount(tokens.input)}</span>
+        <span title="Output tokens">↓${formatTokenCount(tokens.output)}</span>
+        <span title="Session cost">${formatCost(status.cost)}</span>
+        ${status.pendingMessageCount > 0 ? html`<span>${String(status.pendingMessageCount)} queued</span>` : null}
+      </div>
+      ${this.renderWarningControl()}
+      ${this.renderNotificationSummary()}
+    `;
+  }
+
+  private renderWarningControl() {
+    const warnings = sessionWarningControlContent(this.warningCount, this.warningsExpanded);
+    if (warnings === undefined || this.onToggleWarnings === undefined) return null;
+    return html`
+      <button
+        type="button"
+        class="control-sheet-action"
+        aria-expanded=${String(this.warningsExpanded)}
+        @click=${() => { this.onToggleWarnings?.(); this.onClose?.(); }}
+      >${renderSessionWarningIcon("warning", "control-sheet-warning-icon")}${warnings.summary}</button>
     `;
   }
 

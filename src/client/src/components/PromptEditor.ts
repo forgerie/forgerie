@@ -17,7 +17,7 @@ import { loadAttachmentDelivery, saveAttachmentDelivery } from "../attachmentPre
 import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
-import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderSummonIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import "./AutocompleteMenu";
 import "./ContextUsageMeter";
@@ -50,6 +50,8 @@ export class PromptEditor extends LitElement {
   @property({ type: Boolean }) canArchive = false;
   @property({ attribute: false }) onArchiveAndNext?: () => void;
   @property({ attribute: false }) onOpenControlSheet?: () => void;
+  /** Warnings plus notifications waiting behind the island menu. */
+  @property({ type: Number }) attentionCount = 0;
   @property({ attribute: false }) availableThinkingLevels: readonly string[] = [];
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
   @query(".attachment-input") private attachmentInput?: HTMLInputElement;
@@ -139,13 +141,13 @@ export class PromptEditor extends LitElement {
         <div class="editor-wrap">
           <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label="Message pi" aria-disabled=${this.disabled ? "true" : "false"}></div>
           <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
-          <button class="editor-attach icon-button" ?disabled=${busy} title="Attach files" aria-label="Attach files" @click=${() => { this.attachmentInput?.click(); }}>${renderAttachIcon()}</button>
           ${shellMode ? html`<div class="mode-hint">Shell command${shellInputMode.excludeFromContext ? " · excluded from context" : ""}</div>` : null}
           ${this.isCompacting && !shellMode ? html`<div class="mode-hint">Compacting history · message will be queued</div>` : null}
           ${this.renderAttachments()}
           <autocomplete-menu .items=${this.completions} .selectedIndex=${this.selectedIndex} .onPick=${(item: CompletionItem) => { this.pick(item); }}></autocomplete-menu>
         </div>
         <div class="actions">
+          ${this.renderIslandMenuAction(busy)}
           ${this.renderCompactStatus()}
           ${this.renderPrimaryAction(rail)}
           <button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => this.onStop?.()}>${renderStopIcon()}</button>
@@ -173,6 +175,18 @@ export class PromptEditor extends LitElement {
 
   focusInput() {
     this.editor?.focus();
+  }
+
+  /**
+   * Open the file picker from outside the composer.
+   *
+   * The island menu lives in the sheet, so the sheet needs a way in that still
+   * honours the composer's own guard: an archived session, or one already
+   * sending, must not be able to start an attachment.
+   */
+  openAttachmentPicker(): void {
+    if (this.disabled || this.sending) return;
+    this.attachmentInput?.click();
   }
 
   replaceText(text: string): void {
@@ -265,7 +279,6 @@ export class PromptEditor extends LitElement {
           </button>
         </div>
         ${this.renderArchiveAction()}
-        ${this.renderSummonAction()}
       </div>
     `;
   }
@@ -295,15 +308,26 @@ export class PromptEditor extends LitElement {
     `;
   }
 
-  private renderSummonAction() {
-    if (!this.chromeSummoned) return null;
+  /**
+   * One way to everything the rail does not hold.
+   *
+   * Attachments and the session controls used to be two separate buttons in two
+   * places; the island has room for one. It also carries the count of what is
+   * waiting behind it, because a sheet nobody opens cannot report a warning.
+   */
+  private renderIslandMenuAction(busy: boolean) {
+    const waiting = this.attentionCount > 0;
+    const label = waiting
+      ? `Attachments and session controls, ${String(this.attentionCount)} waiting`
+      : "Attachments and session controls";
     return html`
       <button
-        class="composer-summon icon-button"
-        title="Show session controls"
-        aria-label="Show session controls"
+        class=${waiting ? "island-menu icon-button attention" : "island-menu icon-button"}
+        ?disabled=${busy}
+        title=${label}
+        aria-label=${label}
         @click=${() => this.onOpenControlSheet?.()}
-      >${renderSummonIcon()}</button>
+      >${renderAttachIcon()}${waiting ? html`<span class="island-menu-count" aria-hidden="true">${String(this.attentionCount)}</span>` : null}</button>
     `;
   }
 

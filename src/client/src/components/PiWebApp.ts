@@ -2577,10 +2577,25 @@ export class PiWebApp extends LitElement {
     return inbox === undefined ? 0 : notificationInboxTotalCount(inbox);
   }
 
+  /** Warnings plus notifications: what the island menu has to announce now the bar is gone. */
+  private selectedAttentionCount(state: AppState): number {
+    return this.sessionWarningVisibility.warningCount + this.selectedNotificationCount(state);
+  }
+
+  private readonly handleAttachFiles = (): void => {
+    this.promptEditor?.openAttachmentPicker();
+  };
+
   private renderControlSheet(state: AppState) {
+    const warningCount = this.sessionWarningVisibility.warningCount;
     return html`
       <app-control-sheet
         .open=${state.controlSheetOpen}
+        .status=${state.status}
+        .warningCount=${warningCount}
+        .warningsExpanded=${warningCount > 0 && !this.sessionWarningVisibility.collapsed}
+        .onToggleWarnings=${this.handleToggleWarnings}
+        .onAttachFiles=${this.handleAttachFiles}
         .machines=${state.machines}
         .machine=${state.selectedMachine}
         .project=${state.selectedProject}
@@ -2665,7 +2680,7 @@ export class PiWebApp extends LitElement {
           <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout ? this.renderNavigationPanel() : null}</div>
           ${state.selectedSession ? html`
             ${this.renderChatView(state, state.selectedSession)}
-            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
+            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .attentionCount=${this.selectedAttentionCount(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
             ${this.renderStatusBar(state)}
             ${this.renderControlSheet(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}

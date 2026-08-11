@@ -51,15 +51,6 @@ export function renderStopIcon(): TemplateResult {
  * levels) and whose fill reflects the current level's rank. Bars are laid out to
  * fill the 24x24 box regardless of count, so it adapts if pi changes the set.
  */
-/** Chevron marking the way back to the controls the chat surface gave up. */
-export function renderSummonIcon(): TemplateResult {
-  return svg`
-    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M7 14.5 12 9.5l5 5"></path>
-    </svg>
-  `;
-}
-
 export function renderThinkingGauge(gauge: ThinkingGauge): TemplateResult {
   const total = Math.max(gauge.total, 1);
   const gap = total > 1 ? 1.2 : 0;
