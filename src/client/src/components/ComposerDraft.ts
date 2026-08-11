@@ -85,6 +85,7 @@ export class ComposerDraft extends LitElement {
   @state() private completionError: ComposerDraftCompletionError | undefined = undefined;
   @state() private focused = false;
   private attachmentSeq = 0;
+  private attachmentGeneration = 0;
   private requestVersion = 0;
   private editor: EditorView | undefined;
   private promptHistoryState: PromptHistoryState = createPromptHistory();
@@ -105,6 +106,7 @@ export class ComposerDraft extends LitElement {
       const previousKey = changed.get("storageKey");
       if (typeof previousKey === "string" && previousKey !== "") saveDraft(previousKey, this.draft);
       this.draft = this.storageKey !== undefined && this.storageKey !== "" ? loadDraft(this.storageKey) : this.draft;
+      this.clearAttachmentOwnership();
       this.currentInputMode = inputModeForDraft(this.draft);
       this.completions = [];
       this.selectedIndex = 0;
@@ -134,6 +136,11 @@ export class ComposerDraft extends LitElement {
   }
 
   override disconnectedCallback(): void {
+    this.requestVersion += 1;
+    this.completions = [];
+    this.selectedIndex = 0;
+    this.completionError = undefined;
+    this.attachmentGeneration += 1;
     this.editor?.destroy();
     this.editor = undefined;
     super.disconnectedCallback();
@@ -244,11 +251,11 @@ export class ComposerDraft extends LitElement {
     }
     if (isPromiseLike(result)) {
       void result
-        .then((outcome) => { this.resolveSubmitOutcome(outcome, snapshot.text); })
+        .then((outcome) => { this.resolveSubmitOutcome(outcome, snapshot); })
         .catch(() => undefined);
       return;
     }
-    this.resolveSubmitOutcome(result, snapshot.text);
+    this.resolveSubmitOutcome(result, snapshot);
   }
 
   restoreSeed(seed: ComposerDraftSeed): boolean {
@@ -261,6 +268,7 @@ export class ComposerDraft extends LitElement {
   restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
     this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
     this.draft = snapshot.text;
+    this.attachmentGeneration += 1;
     this.attachments = (snapshot.attachments ?? []).map((attachment) => restoredPendingAttachment(attachment, `attachment-${String(++this.attachmentSeq)}`));
     if (snapshot.delivery !== undefined) this.attachmentDelivery = snapshot.delivery;
     this.attachmentError = undefined;
@@ -392,13 +400,14 @@ export class ComposerDraft extends LitElement {
     return attachments === undefined ? { text } : { text, attachments, delivery };
   }
 
-  private resolveSubmitOutcome(outcome: ComposerDraftSubmitOutcome, text: string): void {
+  private resolveSubmitOutcome(outcome: ComposerDraftSubmitOutcome, snapshot: ComposerDraftSubmitSnapshot): void {
     if (outcome !== "accepted") return;
-    this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, text);
-    this.resetComposer();
+    this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, snapshot.text);
+    if (submitSnapshotsEqual(this.currentSnapshot(), snapshot)) this.resetComposer();
   }
 
   private async handlePaste(event: ClipboardEvent): Promise<void> {
+    if (!this.canMutateAttachments()) return;
     const files = filesFromDataTransfer(event.clipboardData);
     if (files.length === 0) return;
     event.preventDefault();
@@ -406,11 +415,12 @@ export class ComposerDraft extends LitElement {
   }
 
   private handleDragOver(event: DragEvent): void {
-    if (event.dataTransfer === null) return;
+    if (!this.canMutateAttachments() || event.dataTransfer === null) return;
     if (dataTransferHasFiles(event.dataTransfer)) event.preventDefault();
   }
 
   private async handleDrop(event: DragEvent): Promise<void> {
+    if (!this.canMutateAttachments()) return;
     const files = filesFromDataTransfer(event.dataTransfer);
     if (files.length === 0) return;
     event.preventDefault();
@@ -418,15 +428,23 @@ export class ComposerDraft extends LitElement {
   }
 
   private async handleFileInput(event: Event): Promise<void> {
-    if (!(event.target instanceof HTMLInputElement) || event.target.files === null) return;
+    if (!(event.target instanceof HTMLInputElement)) return;
+    if (!this.canMutateAttachments()) {
+      event.target.value = "";
+      return;
+    }
+    if (event.target.files === null) return;
     const files = Array.from(event.target.files);
     event.target.value = "";
     await this.addAttachmentFiles(files);
   }
 
   private async addAttachmentFiles(files: File[]): Promise<void> {
+    if (!this.canMutateAttachments()) return;
+    const generation = this.attachmentGeneration;
     this.attachmentError = undefined;
     const { attachments, error } = await capturePromptAttachments(files, readFileAsBase64);
+    if (!this.canAcceptAttachmentResult(generation)) return;
     if (attachments.length > 0) {
       const previousTotal = this.attachments.length;
       const added = attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }));
@@ -439,6 +457,21 @@ export class ComposerDraft extends LitElement {
       this.attachmentError = error;
       this.announceAssertive(error);
     }
+  }
+
+  private canMutateAttachments(): boolean {
+    return this.isConnected && !this.disabled && !this.submissionDisabled;
+  }
+
+  private canAcceptAttachmentResult(generation: number): boolean {
+    return generation === this.attachmentGeneration && this.canMutateAttachments();
+  }
+
+  private clearAttachmentOwnership(): void {
+    this.attachmentGeneration += 1;
+    this.attachments = [];
+    this.attachmentError = undefined;
+    this.assertiveAnnouncement = "";
   }
 
   private currentAttachments(): PromptAttachment[] {
@@ -682,8 +715,7 @@ export class ComposerDraft extends LitElement {
     this.currentInputMode = { kind: "normal" };
     if (this.storageKey !== undefined && this.storageKey !== "") clearDraft(this.storageKey);
     this.completions = [];
-    this.attachments = [];
-    this.attachmentError = undefined;
+    this.clearAttachmentOwnership();
     this.completionError = undefined;
     this.syncEditorDoc();
     this.publishDisplayState();
@@ -814,6 +846,22 @@ function pendingToPromptAttachment(attachment: PendingAttachment): PromptAttachm
     return { kind: "image", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
   }
   return { kind: "file", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
+}
+
+function submitSnapshotsEqual(left: ComposerDraftSubmitSnapshot, right: ComposerDraftSubmitSnapshot): boolean {
+  const leftAttachments = left.attachments ?? [];
+  const rightAttachments = right.attachments ?? [];
+  return left.text === right.text
+    && left.delivery === right.delivery
+    && leftAttachments.length === rightAttachments.length
+    && leftAttachments.every((attachment, index) => promptAttachmentsEqual(attachment, rightAttachments[index]));
+}
+
+function promptAttachmentsEqual(left: PromptAttachment, right: PromptAttachment | undefined): boolean {
+  return right?.kind === left.kind
+    && right.mimeType === left.mimeType
+    && right.data === left.data
+    && right.name === left.name;
 }
 
 function fileExtensionLabel(name: string): string {

@@ -4,7 +4,7 @@ import { EditorSelection } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComposerRuntime } from "../composerRuntime";
 import type { PromptCompletionTrigger } from "../promptCompletions";
-import { loadDraft } from "../promptDraftStorage";
+import { loadDraft, saveDraft } from "../promptDraftStorage";
 import { pressKey } from "./modalSurfaceTestSupport";
 import type { AutocompleteMenu } from "./AutocompleteMenu";
 import { ComposerDraft, type ComposerDraftSubmitOutcome, type ComposerDraftSubmitSnapshot } from "./ComposerDraft";
@@ -122,6 +122,132 @@ describe("ComposerDraft", () => {
     expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1);
     expect(draft.querySelector(".attachment-error")?.textContent).toBe("Failed to read an attachment.");
     expect(draft.querySelector("[data-live='attachment-errors']")?.textContent).toBe("Failed to read an attachment.");
+  });
+
+  it("clears attachments, errors, and late attachment reads when the storage owner changes", async () => {
+    saveDraft("remote-a:session-2", "persisted session two");
+    const draft = await mountDraft({ storageKey: "remote-a:session-1" });
+    draft.replaceText("session one text");
+    await attachFile(draft, new File(["one"], "session-one.txt", { type: "text/plain" }));
+    const errorSpy = vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (this: FileReader) {
+      queueMicrotask(() => {
+        Object.defineProperty(this, "error", { configurable: true, value: new Error("read failed") });
+        this.dispatchEvent(new ProgressEvent("error"));
+      });
+    });
+    await attachFileExpectingError(draft, new File(["bad"], "broken.txt", { type: "text/plain" }));
+    errorSpy.mockRestore();
+    const reads = mockPendingFileReads();
+    startAttachFile(draft, new File(["late"], "late.txt", { type: "text/plain" }));
+    await vi.waitFor(() => { expect(reads).toHaveLength(1); });
+
+    draft.storageKey = "remote-a:session-2";
+    await draft.updateComplete;
+    reads[0]?.resolve("late");
+    await Promise.resolve();
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("persisted session two");
+    expect(loadDraft("remote-a:session-1")).toBe("session one text");
+    expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(0);
+    expect(draft.querySelector(".attachment-error")).toBeNull();
+  });
+
+  it("ignores attachment input and late reads after the draft stops owning the result", async () => {
+    const disabledDraft = await mountDraft();
+    disabledDraft.disabled = true;
+    await disabledDraft.updateComplete;
+    const disabledReads = mockPendingFileReads();
+    startAttachFile(disabledDraft, new File(["blocked"], "blocked.txt", { type: "text/plain" }));
+    await Promise.resolve();
+    expect(disabledReads).toHaveLength(0);
+
+    const submissionDisabledDraft = await mountDraft();
+    submissionDisabledDraft.submissionDisabled = true;
+    await submissionDisabledDraft.updateComplete;
+    const submissionDisabledReads = mockPendingFileReads();
+    startAttachFile(submissionDisabledDraft, new File(["blocked"], "blocked.txt", { type: "text/plain" }));
+    await Promise.resolve();
+    expect(submissionDisabledReads).toHaveLength(0);
+
+    const disabledLateDraft = await mountDraft();
+    const disabledLateReads = mockPendingFileReads();
+    startAttachFile(disabledLateDraft, new File(["late"], "disabled-late.txt", { type: "text/plain" }));
+    await vi.waitFor(() => { expect(disabledLateReads).toHaveLength(1); });
+    disabledLateDraft.disabled = true;
+    await disabledLateDraft.updateComplete;
+    disabledLateReads[0]?.resolve("late");
+    await Promise.resolve();
+    await disabledLateDraft.updateComplete;
+    expect(disabledLateDraft.querySelectorAll(".attachment-chip")).toHaveLength(0);
+
+    const submissionDisabledLateDraft = await mountDraft();
+    const submissionDisabledLateReads = mockPendingFileReads();
+    startAttachFile(submissionDisabledLateDraft, new File(["late"], "submission-disabled-late.txt", { type: "text/plain" }));
+    await vi.waitFor(() => { expect(submissionDisabledLateReads).toHaveLength(1); });
+    submissionDisabledLateDraft.submissionDisabled = true;
+    await submissionDisabledLateDraft.updateComplete;
+    submissionDisabledLateReads[0]?.resolve("late");
+    await Promise.resolve();
+    await submissionDisabledLateDraft.updateComplete;
+    expect(submissionDisabledLateDraft.querySelectorAll(".attachment-chip")).toHaveLength(0);
+
+    const discardedDraft = await mountDraft();
+    const discardedReads = mockPendingFileReads();
+    startAttachFile(discardedDraft, new File(["late"], "discarded.txt", { type: "text/plain" }));
+    await vi.waitFor(() => { expect(discardedReads).toHaveLength(1); });
+    discardedDraft.discardDraft();
+    discardedReads[0]?.resolve("late");
+    await Promise.resolve();
+    await discardedDraft.updateComplete;
+    expect(discardedDraft.querySelectorAll(".attachment-chip")).toHaveLength(0);
+
+    const resetDraft = await mountDraft();
+    const resetReads = mockPendingFileReads();
+    startAttachFile(resetDraft, new File(["late"], "reset.txt", { type: "text/plain" }));
+    await vi.waitFor(() => { expect(resetReads).toHaveLength(1); });
+    resetDraft.clearAfterAcceptance();
+    resetReads[0]?.resolve("late");
+    await Promise.resolve();
+    await resetDraft.updateComplete;
+    expect(resetDraft.querySelectorAll(".attachment-chip")).toHaveLength(0);
+
+    vi.restoreAllMocks();
+    const host = document.createElement("div");
+    const disconnectedDraft = await mountDraft({ host });
+    await attachFile(disconnectedDraft, new File(["owned"], "owned.txt", { type: "text/plain" }));
+    const disconnectedReads = mockPendingFileReads();
+    startAttachFile(disconnectedDraft, new File(["late"], "disconnected.txt", { type: "text/plain" }));
+    await vi.waitFor(() => { expect(disconnectedReads).toHaveLength(1); });
+    host.remove();
+    disconnectedReads[0]?.resolve("late");
+    await Promise.resolve();
+    document.body.append(host);
+    await disconnectedDraft.updateComplete;
+    expect(Array.from(disconnectedDraft.querySelectorAll(".attachment-file-name")).map((name) => name.textContent)).toEqual(["owned.txt"]);
+  });
+
+  it("keeps edits after an accepted delayed submit and records the submitted text in history", async () => {
+    const acceptance = deferred<"accepted">();
+    const onSubmit = vi.fn(() => acceptance.promise);
+    const draft = await mountDraft({ onSubmit });
+    draft.replaceText("submitted text");
+    await attachFile(draft, new File(["one"], "submitted.txt", { type: "text/plain" }));
+
+    draft.submit();
+    draft.replaceText("edited after submit");
+    await attachFile(draft, new File(["two"], "edited.txt", { type: "text/plain" }));
+    acceptance.resolve("accepted");
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledOnce(); });
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("edited after submit");
+    expect(Array.from(draft.querySelectorAll(".attachment-file-name")).map((name) => name.textContent)).toEqual(["submitted.txt", "edited.txt"]);
+
+    draft.replaceText("");
+    draft.view?.dispatch({ selection: EditorSelection.cursor(0) });
+    press(draft, "ArrowUp");
+    expect(draft.view?.state.doc.toString()).toBe("submitted text");
   });
 
   it("keeps an immutable submitted snapshot until the host accepts it", async () => {
@@ -276,6 +402,34 @@ describe("ComposerDraft", () => {
     expect(draft.querySelector(".completion-error")).toBeNull();
   });
 
+  it("clears shown and pending completion results across disconnect and reconnect", async () => {
+    const pending = deferred<readonly CompletionItem[]>();
+    let calls = 0;
+    const host = document.createElement("div");
+    const draft = await mountDraft({
+      host,
+      runtime: runtimeWith(({ from, to }) => {
+        calls += 1;
+        return calls === 1
+          ? [{ kind: "command", replaceFrom: from, replaceTo: to, insertText: "/shown", detail: "skill" }]
+          : pending.promise;
+      }),
+    });
+    setEditorText(draft, "/");
+    await waitForMenuItems(draft, 1);
+    setEditorText(draft, "/p");
+
+    host.remove();
+    pending.resolve([{ kind: "command", replaceFrom: 0, replaceTo: 2, insertText: "/stale", detail: "skill" }]);
+    await Promise.resolve();
+    document.body.append(host);
+    await draft.updateComplete;
+    await menu(draft)?.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("/p");
+    expect(menu(draft)?.items).toEqual([]);
+  });
+
   it("survives disconnect and reconnect without losing the draft", async () => {
     const host = document.createElement("div");
     const draft = await mountDraft({ host });
@@ -347,20 +501,40 @@ async function waitForMenuItems(draft: ComposerDraft, count: number): Promise<vo
 }
 
 async function attachFile(draft: ComposerDraft, file: File): Promise<void> {
-  const input = draft.querySelector<HTMLInputElement>(".attachment-input");
-  if (input === null) throw new Error("Expected attachment input");
   const previousCount = draft.querySelectorAll(".attachment-chip").length;
-  Object.defineProperty(input, "files", { configurable: true, value: [file] });
-  input.dispatchEvent(new Event("change"));
+  startAttachFile(draft, file);
   await vi.waitFor(() => { expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(previousCount + 1); });
 }
 
 async function attachFileExpectingError(draft: ComposerDraft, file: File): Promise<void> {
+  startAttachFile(draft, file);
+  await vi.waitFor(() => { expect(draft.querySelector(".attachment-error")).not.toBeNull(); });
+}
+
+function startAttachFile(draft: ComposerDraft, file: File): void {
   const input = draft.querySelector<HTMLInputElement>(".attachment-input");
   if (input === null) throw new Error("Expected attachment input");
   Object.defineProperty(input, "files", { configurable: true, value: [file] });
   input.dispatchEvent(new Event("change"));
-  await vi.waitFor(() => { expect(draft.querySelector(".attachment-error")).not.toBeNull(); });
+}
+
+interface PendingFileRead {
+  readonly file: File;
+  resolve: (contents: string) => void;
+}
+
+function mockPendingFileReads(): PendingFileRead[] {
+  const reads: PendingFileRead[] = [];
+  vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (this: FileReader, file: Blob) {
+    reads.push({
+      file: file instanceof File ? file : new File([file], "blob"),
+      resolve: (contents: string) => {
+        Object.defineProperty(this, "result", { configurable: true, value: `data:${file.type};base64,${btoa(contents)}` });
+        this.dispatchEvent(new ProgressEvent("load"));
+      },
+    });
+  });
+  return reads;
 }
 
 function deferred<T>() {
