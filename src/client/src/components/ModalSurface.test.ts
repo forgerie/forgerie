@@ -64,6 +64,13 @@ describe("modal-surface initial focus", () => {
 });
 
 describe("modal-surface refocus on request", () => {
+  it("ignores a focus request before the dialog section is available", () => {
+    const surface = new ModalSurface();
+    document.body.append(surface);
+
+    expect(() => { surface.focusDialog(); }).not.toThrow();
+  });
+
   it("moves focus back to the dialog section when asked", async () => {
     const surface = await mountSurface({ content: `<button>Inside</button>` });
     const outside = appendFocusTarget("Outside");
