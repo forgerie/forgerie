@@ -377,7 +377,11 @@ export const workspacePanelStyles = css`
   .empty-state h2 { margin: 0; color: var(--pi-text); font-size: 15px; line-height: 1.3; }
   .empty-state p { margin: 0; line-height: 1.45; }
   small, .muted { color: var(--pi-muted); }
-  @media (max-width: 1180px) { .workspace-header-scroll-frame { display: none; } }
+  /*
+   * Whether this panel carries its own tool strip is the shell's decision, not
+   * a width's: it depends on whether something else is already showing one.
+   * See WorkspacePanel.hideToolTabs, set by the composition root.
+   */
   .workspace-label { min-width: 0; display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; overflow: hidden; white-space: nowrap; }
   .workspace-label-base, .workspace-label-item, .workspace-label-render { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .workspace-label-item, .workspace-label-render, .workspace-label-separator { color: var(--pi-muted); }

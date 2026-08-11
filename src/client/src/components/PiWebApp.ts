@@ -1267,6 +1267,10 @@ export class PiWebApp extends LitElement {
    */
   private renderWorkspacePanel(placement: "docked" | "peeked" = "docked") {
     if (placement === "docked" && this.panelPeek.panel === "workspace") return null;
+    // The panel shows its own tool strip unless something else already shows
+    // one. Docked on a summoned shell, the shell's tab strip carries the tools;
+    // inside a peeked sheet nothing else does, so the panel must.
+    const hideToolTabs = placement === "docked" && this.appShell.isChromeSummoned;
     const workspace = this.state.selectedWorkspace;
     const panelContext = workspace === undefined ? undefined : this.createWorkspacePanelContext(workspace);
     const emptyState = workspace === undefined ? this.workspacePanelEmptyState() : undefined;
@@ -1278,6 +1282,7 @@ export class PiWebApp extends LitElement {
         .emptyState=${emptyState}
         .tool=${this.state.workspaceTool}
         .panels=${this.visibleWorkspacePanels()}
+        .hideToolTabs=${hideToolTabs}
         .onSelectTool=${(tool: QualifiedContributionId) => { this.openWorkspaceTool(tool); }}
         .onNewSession=${this.state.mainView === "chat" || this.state.mainView === "navigation" ? undefined : () => { this.openNewSessionComposer(); }}
       ></workspace-panel>
@@ -1493,6 +1498,11 @@ export class PiWebApp extends LitElement {
     const machineId = selectedMachineId(this.state);
     const isCurrentToken = () =>
       seq === this.navigationSelectionSeq && selectedMachineId(this.state) === machineId;
+
+    // A peeked list was summoned to answer one question. Choosing a session is
+    // the answer, so the sheet stands aside rather than covering what it opened.
+    // A pinned panel is docked, never peeked, so it is untouched by this.
+    this.panelPeek.close();
 
     // Independent navigation dismisses undo; Archive & next explicitly preserves it.
     if (options.preserveUndoToast !== true) this.inbox.dismissUndoToast();

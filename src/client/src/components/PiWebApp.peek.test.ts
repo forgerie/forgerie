@@ -5,6 +5,8 @@ import type { SessionInfo } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { PANEL_PEEK, peekSheetWidth } from "../appShell/panelPeek";
 import { PiWebApp } from "./PiWebApp";
+import { AppNavigationPanel } from "./appShell/AppNavigationPanel";
+import { WorkspacePanel } from "./WorkspacePanel";
 
 /** Folded portrait: nothing docks, so both sheets are worth peeking at. */
 const FOLDED_PORTRAIT = 499;
@@ -87,6 +89,30 @@ describe("PiWebApp panel peek", () => {
     expect(peekSheet(app)).not.toBeNull();
   });
 
+  it("stands aside once the list has answered the question it was summoned for", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+    await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+    expect(peekSheet(app)).not.toBeNull();
+
+    const panel = shadowRoot(app).querySelector(".peek-sheet app-navigation-panel");
+    if (!(panel instanceof AppNavigationPanel)) throw new Error("The sheet did not carry the session list");
+    void panel.onSelectSession?.(session());
+    await app.updateComplete;
+
+    expect(peekSheet(app)).toBeNull();
+  });
+
+  it("carries the workspace tools inside the sheet, where no other strip shows them", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+
+    await dragAcross(app, -peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+
+    const panel = shadowRoot(app).querySelector(".peek-sheet workspace-panel");
+    if (!(panel instanceof WorkspacePanel)) throw new Error("The sheet did not carry the workspace panel");
+
+    expect(panel.hideToolTabs).toBe(false);
+  });
+
   it("does not offer a panel that is already docked", async () => {
     const app = await mountApp(DESKTOP);
 
@@ -128,10 +154,11 @@ async function dragAcross(
   options: { release?: boolean; from?: Element } = {},
 ): Promise<void> {
   const source = options.from ?? shellElement(app);
-  const start = 40;
+  const start = distancePx < 0 ? 400 : 40;
+  const step = distancePx < 0 ? -(PANEL_PEEK.capturePx + 1) : PANEL_PEEK.capturePx + 1;
   source.dispatchEvent(pointerEvent("pointerdown", start, 200));
   // One step past the capture distance, then the rest, as a finger arrives.
-  source.dispatchEvent(pointerEvent("pointermove", start + PANEL_PEEK.capturePx + 1, 200));
+  source.dispatchEvent(pointerEvent("pointermove", start + step, 200));
   source.dispatchEvent(pointerEvent("pointermove", start + distancePx, 200));
   if (options.release === true) source.dispatchEvent(pointerEvent("pointerup", start + distancePx, 200));
   await app.updateComplete;

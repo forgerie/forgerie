@@ -1629,6 +1629,11 @@ export class ChatView extends LitElement {
 
   saveScrollPosition(sessionId = this.sessionId) {
     if (!sessionId) return;
+    // The shell can ask for a position while a route restore is still in flight,
+    // before this view has rendered. A view that has not rendered has no reading
+    // position to keep, and it has no render root either, so asking it for its
+    // anchors throws inside a promise nobody is waiting on.
+    if (!this.hasUpdated) return;
     this.scrollController.savePosition(sessionId, this.chat, this.scrollAnchorElements());
   }
 

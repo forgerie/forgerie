@@ -425,3 +425,15 @@ function queuedStatus(queuedMessages: QueuedSessionMessage[]): SessionStatus {
     cost: 0,
   };
 }
+
+describe("ChatView reading position", () => {
+  it("keeps nothing for a view that has not rendered, rather than throwing into a promise", () => {
+    // A route restore can ask for the reading position while this view is still
+    // being set up, or after it has been taken away. Before it throws inside an
+    // unawaited promise, it should simply have nothing to keep.
+    const view = new ChatView();
+    view.sessionId = "session-1";
+
+    expect(() => { view.saveScrollPosition(); }).not.toThrow();
+  });
+});
