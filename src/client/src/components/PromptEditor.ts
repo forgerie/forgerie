@@ -8,6 +8,7 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import { api, type FileSuggestion, type PromptAttachment, type SessionModel, type SessionStatus, type SlashCommand } from "../api";
 import type { PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePromptAttachment, promptAttachmentsCanUseInlineDelivery, type CapturedAttachment } from "../promptAttachmentCapture";
+import { composerRail, type ComposerRail } from "../composerRail";
 import { inputModeForDraft, inputModesEqual, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { detectPromptCompletionTrigger, fileCompletionInsertText, modelCompletionChoices, type PromptCompletionTrigger } from "../promptCompletions";
@@ -123,7 +124,7 @@ export class PromptEditor extends LitElement {
   override render() {
     const shellInputMode = this.currentInputMode.kind === "shell" ? this.currentInputMode : undefined;
     const shellMode = shellInputMode !== undefined;
-    const queuesInput = this.canSteer || this.isCompacting;
+    const rail = this.rail();
     const busy = this.disabled || this.sending;
     return html`
       <footer
@@ -146,9 +147,8 @@ export class PromptEditor extends LitElement {
         </div>
         <div class="actions">
           ${this.renderCompactStatus()}
-          <button class="icon-button send-button" ?disabled=${busy} title=${queuesInput ? "Queue until the current activity finishes" : "Send message"} aria-label=${queuesInput ? "Queue message" : "Send message"} @click=${() => { this.send("followUp"); }}>${queuesInput ? renderQueueIcon() : renderSendIcon()}</button>
-          ${this.canSteer && !this.isCompacting ? html`<button class="icon-button steer-button" ?disabled=${busy} title="Steer the current response before the next model call" aria-label="Steer current response" @click=${() => { this.send("steer"); }}>${renderSteerIcon()}</button>` : null}
-          <button class="icon-button stop-button" ?disabled=${this.disabled || !this.canStop} title=${this.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => this.onStop?.()}>${renderStopIcon()}</button>
+          ${this.renderPrimaryAction(rail)}
+          <button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => this.onStop?.()}>${renderStopIcon()}</button>
         </div>
       </footer>
     `;
@@ -201,6 +201,50 @@ export class PromptEditor extends LitElement {
   /** Get the underlying CM6 EditorView, or undefined if not yet mounted. */
   get view(): EditorView | undefined {
     return this.editor;
+  }
+
+  /**
+   * What the rail offers right now.
+   *
+   * `canSteer` arrives as "the agent is speaking"; the rail turns that plus
+   * compaction into the one question the controls actually ask.
+   */
+  private rail(): ComposerRail {
+    return composerRail({
+      disabled: this.disabled,
+      sending: this.sending,
+      isStreaming: this.canSteer,
+      isCompacting: this.isCompacting,
+      stoppable: this.canStop,
+    });
+  }
+
+  /**
+   * Send and queue are the same slot, not two controls: a session that is not
+   * working has nothing to queue behind. Steering joins the primary control as
+   * its second half while the agent is speaking, so the rail gains a target
+   * rather than a row.
+   */
+  private renderPrimaryAction(rail: ComposerRail) {
+    const queues = rail.primaryAction === "queue";
+    return html`
+      <div class="primary-action">
+        <button
+          class="icon-button send-button"
+          ?disabled=${!rail.canInvokePrimary}
+          title=${queues ? "Queue until the current activity finishes" : "Send message"}
+          aria-label=${queues ? "Queue message" : "Send message"}
+          @click=${() => { this.send("followUp"); }}
+        >${queues ? renderQueueIcon() : renderSendIcon()}</button>
+        ${rail.canSteer ? html`<button
+          class="icon-button steer-button"
+          ?disabled=${!rail.canInvokePrimary}
+          title="Steer the current response before the next model call"
+          aria-label="Steer current response"
+          @click=${() => { this.send("steer"); }}
+        >${renderSteerIcon()}</button>` : null}
+      </div>
+    `;
   }
 
   private renderCompactStatus() {
@@ -586,7 +630,7 @@ export class PromptEditor extends LitElement {
     const text = this.draft.trim();
     const pending = this.attachments;
     if (text === "" && pending.length === 0) return;
-    const behavior = this.canSteer || this.isCompacting ? streamingBehavior : undefined;
+    const behavior = this.rail().kind === "working" ? streamingBehavior : undefined;
     const attachments = pending.length > 0 ? this.currentAttachments() : undefined;
     const delivery = this.effectiveAttachmentDelivery();
     this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, text);
