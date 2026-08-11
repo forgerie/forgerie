@@ -85,19 +85,19 @@ describe("SessionController session guidance", () => {
     expect(state.status?.activeGuidanceIds).toEqual([]);
   });
 
-  it("keeps a newer live status that arrives while the mutation is pending", async () => {
+  it("keeps newer live fields while applying confirmed guidance", async () => {
     const request = deferred<SessionStatus>();
     let state = stateWithStatus(status(oldSession.id));
     const api: typeof defaultApi = { ...defaultApi, setGuidance: () => request.promise };
     const controller = controllerFor(() => state, (patch) => { state = { ...state, ...patch }; }, api);
     const changing = controller.setGuidance("technical-english", true);
-    const liveStatus = { ...status(oldSession.id), activeGuidanceIds: [] };
+    const liveStatus = { ...status(oldSession.id), cost: 4, activeGuidanceIds: [] };
 
     controller.applySessionStatus(liveStatus);
     request.resolve({ ...status(oldSession.id), activeGuidanceIds: ["technical-english"] });
 
     await expect(changing).resolves.toBe(true);
-    expect(state.status).toBe(liveStatus);
+    expect(state.status).toMatchObject({ cost: 4, activeGuidanceIds: ["technical-english"] });
   });
 
   it("reports failure and leaves current guidance available for retry", async () => {
