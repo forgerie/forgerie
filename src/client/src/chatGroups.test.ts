@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatTurns, foldMetaSources, groupChatMessages, summarizeChatGroup } from "./chatGroups";
+import { chatTurns, foldMetaSources, groupChatMessages, latestChatResponseStart, summarizeChatGroup } from "./chatGroups";
 import type { ChatLine } from "./components/shared";
 
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
@@ -264,6 +264,38 @@ describe("chatTurns", () => {
 
   it("returns no turns for an empty transcript", () => {
     expect(chatTurns([])).toEqual([]);
+  });
+});
+
+describe("latestChatResponseStart", () => {
+  it("selects the first rendered agent content in the newest complete turn", () => {
+    const groups = groupChatMessages([
+      text("user", "first question"),
+      text("assistant", "first answer"),
+      text("user", "latest question"),
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "inspect" }] },
+      text("assistant", "latest answer"),
+    ]);
+
+    expect(latestChatResponseStart(groups)).toEqual({
+      turn: chatTurns(groups)[1],
+      group: { kind: "message", index: 4, message: text("assistant", "latest answer") },
+    });
+  });
+
+  it("does not treat technical-only activity as an agent answer", () => {
+    const groups = groupChatMessages([
+      text("user", "question"),
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "inspect" }] },
+    ]);
+
+    expect(latestChatResponseStart(groups)).toBeUndefined();
+  });
+
+  it("waits when the loaded history begins inside a response", () => {
+    const groups = groupChatMessages([text("assistant", "partial loaded answer")], 100);
+
+    expect(latestChatResponseStart(groups)).toBeUndefined();
   });
 });
 

@@ -48,6 +48,27 @@ describe("PiWebApp session unread wiring", () => {
     });
   });
 
+  it("keeps the selected chat unread until its one-shot reading target is applied", async () => {
+    const fetchMock = stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
+    const app = createApp();
+    enableUnread(app);
+    const foreground = session("foreground");
+    const background = session("background");
+    setAppState(app, { ...initialAppState(), sessions: [foreground, background], selectedSession: foreground, mainView: "chat" });
+    handleRealtimeEvent(app, unreadEvent(1, unreadSummary(background, 1)));
+
+    const identity = JSON.stringify(["local", background.id, background.cwd]);
+    const target = { kind: "latest-response" as const, id: "reading-target-1" };
+    if (!Reflect.set(app, "pendingChatReadingTarget", { seq: 1, identity, target })) throw new Error("Could not install reading target");
+    setState(app, { selectedSession: background });
+    exposeSelectedChat(app);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    applyInitialReadingTarget(app, target);
+    await vi.waitFor(() => { expect(navigationUnreadSessionIds(app).size).toBe(0); });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("keeps the selected chat unread while hidden or unfocused, then acknowledges on a visible focus check", async () => {
     const fetchMock = stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
     const documentState = { visible: false, focused: false };
@@ -412,6 +433,12 @@ function exposeSelectedChat(app: PiWebApp): void {
     throw new Error("Could not mark selected chat ready");
   }
   invokeUpdated(app);
+}
+
+function applyInitialReadingTarget(app: PiWebApp, target: { readonly kind: "latest-response"; readonly id: string }): void {
+  const handler: unknown = Reflect.get(app, "handleInitialReadingTargetApplied");
+  if (typeof handler !== "function") throw new Error("Initial reading target handler is unavailable");
+  Reflect.apply(handler, app, [target]);
 }
 
 function setMobileNavigationLayout(app: PiWebApp, mobile: boolean): void {

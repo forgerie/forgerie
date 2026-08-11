@@ -6,6 +6,7 @@ import type { Project, SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { textMessage } from "../chatMessages";
 import { selectedChatFailed, selectedChatFreshReadable, selectedChatLiveReady, selectedChatLoading, selectedChatTarget } from "../selectedChatLoad";
+import { SessionUnreadController } from "../sessionUnread";
 import { PiWebApp } from "./PiWebApp";
 import type { ChatView } from "./ChatView";
 import type { PromptEditor } from "./PromptEditor";
@@ -51,6 +52,7 @@ describe("PiWebApp chat opening", () => {
     await chat.updateComplete;
     expect(chat.sessionId).toBe(target.id);
     expect(chat.messages).toEqual([]);
+    expect(chat.initialReadingTarget).toBeUndefined();
     expect(chat.shadowRoot?.textContent).toContain("Opening Target session");
     expect(chat.shadowRoot?.textContent).not.toContain("previous transcript must not show");
     expect(container.querySelector<PromptEditor>("prompt-editor")).toBeNull();
@@ -59,6 +61,85 @@ describe("PiWebApp chat opening", () => {
 
     frames.releaseAll();
     await vi.waitFor(() => { expect(selectSession).toHaveBeenCalledWith(target); });
+  });
+
+  it("carries a one-shot latest-response target when the selected inbox session is unread", async () => {
+    const app = new PiWebApp();
+    const previous = session("previous", "/repo", "Previous session");
+    const target = session("target", "/repo", "Target session");
+    setAppState(app, appState({ selectedSession: previous, sessions: [previous, target], inboxSessions: [previous, target] }));
+    markSessionUnread(app, target);
+    resolveAppUpdateComplete(app);
+    const joining = deferred<undefined>();
+    const selectSession = vi.spyOn(appSessionController(app), "selectSession").mockImplementation(async (selected) => {
+      appSetState(app, {
+        selectedSession: selected,
+        selectedChatLoad: selectedChatFreshReadable(selectedChatTarget("local", selected)),
+        messages: [textMessage("user", "question"), textMessage("assistant", "answer")],
+        messagePageStart: 0,
+        messagePageEnd: 2,
+        messagePageTotal: 2,
+      });
+      await joining.promise;
+    });
+    const frames = installHeldFrames();
+    const container = renderApp(app);
+
+    await clickInboxRow(container, target.id);
+    await Promise.resolve();
+    renderApp(app, container);
+
+    const chat = requiredElement(container.querySelector<ChatView>("chat-view"), "opening unread chat view");
+    await chat.updateComplete;
+    expect(chat.sessionId).toBe(target.id);
+    expect(chat.initialReadingTarget?.kind).toBe("latest-response");
+    expect(typeof chat.initialReadingTarget?.id).toBe("string");
+
+    frames.releaseAll();
+    await vi.waitFor(() => { expect(selectSession).toHaveBeenCalledWith(target); });
+    renderApp(app, container);
+    const selectedChat = requiredElement(container.querySelector<ChatView>("chat-view"), "selected unread chat view");
+    await selectedChat.updateComplete;
+    expect(selectedChat.initialReadingTarget?.id).toBe(chat.initialReadingTarget?.id);
+
+    const readingTarget = selectedChat.initialReadingTarget;
+    if (readingTarget === undefined) throw new Error("Expected unread reading target");
+    selectedChat.onInitialReadingTargetApplied?.(readingTarget);
+    renderApp(app, container);
+    expect(requiredElement(container.querySelector<ChatView>("chat-view"), "selected unread chat view").initialReadingTarget).toBeUndefined();
+  });
+
+  it("replaces a pending reading target when a newer completion arrives", async () => {
+    const app = new PiWebApp();
+    const previous = session("previous", "/repo", "Previous session");
+    const target = session("target", "/repo", "Target session");
+    setAppState(app, appState({ selectedSession: previous, sessions: [previous, target], inboxSessions: [previous, target] }));
+    markSessionUnread(app, target, 1);
+    resolveAppUpdateComplete(app);
+    vi.spyOn(appSessionController(app), "selectSession").mockImplementation(() => new Promise(() => undefined));
+    installHeldFrames();
+    const container = renderApp(app);
+
+    await clickInboxRow(container, target.id);
+    await Promise.resolve();
+    renderApp(app, container);
+    const firstTarget = requiredElement(container.querySelector<ChatView>("chat-view"), "first unread shell").initialReadingTarget;
+    if (firstTarget === undefined) throw new Error("Expected first reading target");
+
+    markSessionUnread(app, target, 2);
+    renderApp(app, container);
+    const secondChat = requiredElement(container.querySelector<ChatView>("chat-view"), "updated unread shell");
+    const secondTarget = secondChat.initialReadingTarget;
+    if (secondTarget === undefined) throw new Error("Expected replacement reading target");
+    expect(secondTarget.id).not.toBe(firstTarget.id);
+
+    secondChat.onInitialReadingTargetApplied?.(firstTarget);
+    renderApp(app, container);
+    expect(requiredElement(container.querySelector<ChatView>("chat-view"), "updated unread shell").initialReadingTarget?.id).toBe(secondTarget.id);
+
+    clearSessionUnread(app, target, 3);
+    renderApp(app, container);
+    expect(requiredElement(container.querySelector<ChatView>("chat-view"), "cleared unread shell").initialReadingTarget).toBeUndefined();
   });
 
   it("shows a cross-workspace target shell while the normal workspace cascade is still resolving", async () => {
@@ -154,6 +235,7 @@ describe("PiWebApp chat opening", () => {
     const alpha = session("alpha", "/repo", "Alpha session");
     const beta = session("beta", "/repo", "Beta session");
     setAppState(app, appState({ selectedSession: previous, sessions: [previous, alpha, beta], inboxSessions: [previous, alpha, beta], messages: [textMessage("assistant", "previous transcript")] }));
+    markSessionUnread(app, alpha);
     resolveAppUpdateComplete(app);
     vi.spyOn(appSessionController(app), "selectSession").mockImplementation(() => new Promise(() => undefined));
     installHeldFrames();
@@ -167,6 +249,7 @@ describe("PiWebApp chat opening", () => {
     const chat = requiredElement(container.querySelector<ChatView>("chat-view"), "opening chat view");
     await chat.updateComplete;
     expect(chat.sessionId).toBe(beta.id);
+    expect(chat.initialReadingTarget).toBeUndefined();
     expect(chat.shadowRoot?.textContent).toContain("Opening Beta session");
     expect(chat.shadowRoot?.textContent).not.toContain("Opening Alpha session");
     expect(chat.shadowRoot?.textContent).not.toContain("previous transcript");
@@ -477,6 +560,37 @@ function session(id: string, cwd: string, title: string): SessionInfo {
 function setAppState(app: PiWebApp, state: AppState): void {
   if (!Reflect.set(app, "state", state)) throw new Error("Could not set PiWebApp state");
 }
+
+function markSessionUnread(app: PiWebApp, target: SessionInfo, completionOrder = 1): void {
+  const controller: unknown = Reflect.get(app, "sessionUnread");
+  if (!(controller instanceof SessionUnreadController)) throw new Error("Session unread controller unavailable");
+  controller.applyEvent("local", {
+    type: "sessions.unread",
+    catalogId: "catalog-test",
+    catalogRevision: completionOrder,
+    sessionId: target.id,
+    cwd: target.cwd,
+    unread: {
+      sessionId: target.id,
+      cwd: target.cwd,
+      completionOrder,
+      completedAt: `2026-08-10T01:00:0${String(completionOrder)}.000Z`,
+    },
+  });
+}
+function clearSessionUnread(app: PiWebApp, target: SessionInfo, catalogRevision: number): void {
+  const controller: unknown = Reflect.get(app, "sessionUnread");
+  if (!(controller instanceof SessionUnreadController)) throw new Error("Session unread controller unavailable");
+  controller.applyEvent("local", {
+    type: "sessions.unread",
+    catalogId: "catalog-test",
+    catalogRevision,
+    sessionId: target.id,
+    cwd: target.cwd,
+    unread: null,
+  });
+}
+
 function appStateValue(app: PiWebApp): AppState {
   const state: unknown = Reflect.get(app, "state");
   if (!isAppState(state)) throw new Error("PiWebApp state unavailable");

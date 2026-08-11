@@ -116,6 +116,22 @@ export function chatTurns(groups: ChatGroup[]): ChatTurn[] {
   return turns;
 }
 
+export interface ChatResponseStart {
+  readonly turn: ChatTurn;
+  readonly group: ChatGroup;
+}
+
+/** The first rendered agent content in the newest turn whose human opener is loaded. */
+export function latestChatResponseStart(groups: ChatGroup[]): ChatResponseStart | undefined {
+  const turn = chatTurns(groups).at(-1);
+  if (turn?.openedByIndex === undefined) return undefined;
+  const group = turn.groups.slice(1).find((candidate) => (
+    candidate.kind === "tool-image"
+    || (candidate.kind === "message" && (candidate.message.role === "assistant" || candidate.message.role === "system"))
+  ));
+  return group === undefined ? undefined : { turn, group };
+}
+
 /**
  * Which reply's metadata each activity fold should carry, keyed by the fold's
  * start index.

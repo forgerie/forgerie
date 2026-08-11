@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
-import { chatTurns, foldMetaSources, groupChatMessages, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
+import { chatTurns, foldMetaSources, groupChatMessages, latestChatResponseStart, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
 import { livenessStep } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
@@ -15,7 +15,7 @@ import { anchoredTurnKey, followModeAfterReaderPullback, followModeAfterScroll, 
 import { ChatScrollController, distanceFromScrollBottom, isNearScrollBottom, type ChatAnchorScrollPosition, type ChatScrollRestoreResult } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
-import { selectedChatHasReadableHistory, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
+import { selectedChatHasReadableHistory, selectedChatNoTarget, selectedChatReadability, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
 import type { SessionLaunchRecovery } from "../controllers/sessionController";
 import type { ChatLine, ChatPart } from "./shared";
@@ -34,6 +34,11 @@ export interface QueuedMessageSection {
   heading: string;
   detail: string;
   messages: QueuedSessionMessage[];
+}
+
+export interface ChatInitialReadingTarget {
+  readonly kind: "latest-response";
+  readonly id: string;
 }
 
 export function chatQueuedMessageSections(
@@ -221,6 +226,8 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) onLoadMore?: () => void;
   @property({ attribute: false }) onRetry?: () => void;
   @property({ attribute: false }) onSelectedLoadPaint?: (load: SelectedChatLoad) => void;
+  @property({ attribute: false }) initialReadingTarget: ChatInitialReadingTarget | undefined;
+  @property({ attribute: false }) onInitialReadingTargetApplied?: (target: ChatInitialReadingTarget) => void;
   @query(".chat") private chat?: HTMLDivElement;
   @query(".chat-load-retry") private retryButton?: HTMLButtonElement;
   @query("dialog.image-zoom") private imageZoomDialog?: HTMLDialogElement;
@@ -248,6 +255,10 @@ export class ChatView extends LitElement {
   private alignAnchoredTurnFrame: number | undefined;
   private scrollToOpenAskFrame: number | undefined;
   private scrollToOpenDialogFrame: number | undefined;
+  private initialReadingTargetFrame: number | undefined;
+  private initialReadingTargetFrameTargetId: string | undefined;
+  private applyingInitialReadingTargetId: string | undefined;
+  private appliedInitialReadingTargetId: string | undefined;
   private groupedMessagesInput?: ChatLine[];
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
@@ -277,17 +288,18 @@ export class ChatView extends LitElement {
   private touchStartY: number | undefined;
   private pendingScrollRestoreSessionId: string | undefined;
   private pendingScrollRestorePosition: ChatAnchorScrollPosition | undefined;
+  private defaultScrollRestoreDeferred = false;
   private restoreScrollFrame: number | undefined;
   private prependRestoreToken = 0;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
-    if (this.followMode.kind === "tail") this.scrollToBottom();
+    if (this.followMode.kind === "tail" && this.initialReadingTarget === undefined && !this.defaultScrollRestoreDeferred) this.scrollToBottom();
     else if (this.followMode.kind === "turn") this.alignAnchoredTurn();
     else this.lastClientHeight = this.chat?.clientHeight ?? 0;
   };
   private readonly onImageLoad = (): void => {
-    if (this.followMode.kind === "tail") this.scrollToBottom();
+    if (this.followMode.kind === "tail" && this.initialReadingTarget === undefined && !this.defaultScrollRestoreDeferred) this.scrollToBottom();
     else if (this.followMode.kind === "turn") this.alignAnchoredTurn();
   };
   private readonly openImageZoom = (src: string, alt: string): void => {
@@ -338,6 +350,11 @@ export class ChatView extends LitElement {
       cancelAnimationFrame(this.scrollToOpenDialogFrame);
       this.scrollToOpenDialogFrame = undefined;
     }
+    if (this.initialReadingTargetFrame !== undefined) {
+      cancelAnimationFrame(this.initialReadingTargetFrame);
+      this.initialReadingTargetFrame = undefined;
+      this.initialReadingTargetFrameTargetId = undefined;
+    }
     this.cancelSelectedLoadPaintReport();
     window.removeEventListener("resize", this.onViewportResize);
     window.removeEventListener("pagehide", this.onPageHide);
@@ -357,6 +374,7 @@ export class ChatView extends LitElement {
     this.suppressLoadMoreRequests = false;
     this.pendingScrollRestoreSessionId = undefined;
     this.pendingScrollRestorePosition = undefined;
+    this.defaultScrollRestoreDeferred = false;
     this.retryFocusPending = false;
     this.prependRestoreToken += 1;
     this.selfScrollTop = undefined;
@@ -364,6 +382,8 @@ export class ChatView extends LitElement {
     this.lastSeenTurnCount = 0;
     this.sentFromHere = false;
     this.reservedTurnKey = undefined;
+    this.applyingInitialReadingTargetId = undefined;
+    this.appliedInitialReadingTargetId = undefined;
     if (this.alignAnchoredTurnFrame !== undefined) {
       cancelAnimationFrame(this.alignAnchoredTurnFrame);
       this.alignAnchoredTurnFrame = undefined;
@@ -379,6 +399,11 @@ export class ChatView extends LitElement {
     if (this.scrollToOpenDialogFrame !== undefined) {
       cancelAnimationFrame(this.scrollToOpenDialogFrame);
       this.scrollToOpenDialogFrame = undefined;
+    }
+    if (this.initialReadingTargetFrame !== undefined) {
+      cancelAnimationFrame(this.initialReadingTargetFrame);
+      this.initialReadingTargetFrame = undefined;
+      this.initialReadingTargetFrameTargetId = undefined;
     }
     this.cancelSelectedLoadPaintReport();
   }
@@ -452,7 +477,7 @@ export class ChatView extends LitElement {
     if (!changed.has("sessionId") && openedAsk && following) this.scrollToOpenAsk();
     else if (!changed.has("sessionId") && openedDialog && following) this.scrollToOpenDialog();
     else if (!changed.has("sessionId") && this.followMode.kind === "turn" && (contentChanged || changed.has("followMode"))) this.alignAnchoredTurn();
-    else if (!changed.has("sessionId") && contentChanged && this.followMode.kind === "tail") this.scrollToBottom();
+    else if (!changed.has("sessionId") && contentChanged && this.followMode.kind === "tail" && this.initialReadingTarget === undefined && !this.defaultScrollRestoreDeferred) this.scrollToBottom();
     if (changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) this.continuePendingScrollRestore();
     if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
     if (changed.has("zoomedImage")) this.syncImageZoomDialog();
@@ -464,6 +489,98 @@ export class ChatView extends LitElement {
       this.restoreRetryFocusAfterRetry();
       this.scheduleSelectedLoadPaintReport();
     }
+    if (changed.has("initialReadingTarget") || changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("selectedLoad")) {
+      if (this.initialReadingTarget === undefined && this.defaultScrollRestoreDeferred && selectedChatHasReadableHistory(this.currentSelectedLoad())) this.restoreScrollPosition();
+      else this.scheduleInitialReadingTarget();
+    }
+  }
+
+  private scheduleInitialReadingTarget(): void {
+    const target = this.initialReadingTarget;
+    if (target === undefined
+      || target.id === this.appliedInitialReadingTargetId
+      || target.id === this.applyingInitialReadingTargetId
+      || selectedChatReadability(this.currentSelectedLoad()) !== "fresh"
+      || this.loadingMore) return;
+
+    if (this.initialReadingTargetFrame !== undefined) {
+      if (this.initialReadingTargetFrameTargetId === target.id) return;
+      cancelAnimationFrame(this.initialReadingTargetFrame);
+      this.initialReadingTargetFrame = undefined;
+      this.initialReadingTargetFrameTargetId = undefined;
+    }
+    if (this.restoreScrollFrame !== undefined) {
+      cancelAnimationFrame(this.restoreScrollFrame);
+      this.restoreScrollFrame = undefined;
+    }
+    if (this.scrollToBottomFrame !== undefined) {
+      cancelAnimationFrame(this.scrollToBottomFrame);
+      this.scrollToBottomFrame = undefined;
+    }
+    this.initialReadingTargetFrameTargetId = target.id;
+    this.initialReadingTargetFrame = requestAnimationFrame(() => {
+      this.initialReadingTargetFrame = undefined;
+      this.initialReadingTargetFrameTargetId = undefined;
+      void this.applyInitialReadingTarget(target);
+    });
+  }
+
+  private async applyInitialReadingTarget(target: ChatInitialReadingTarget): Promise<void> {
+    if (this.initialReadingTarget?.id !== target.id || target.id === this.appliedInitialReadingTargetId) return;
+    this.applyingInitialReadingTargetId = target.id;
+    let restartAfterRender = false;
+    try {
+      let response = latestChatResponseStart(this.groupedMessages());
+      if (response === undefined) {
+        const latestTurn = this.turns().at(-1);
+        if (latestTurn?.openedByIndex === undefined && this.hasMore) {
+          this.requestLoadMore();
+          return;
+        }
+        this.restoreDefaultScrollPosition(this.sessionId);
+        this.finishInitialReadingTarget(target);
+        return;
+      }
+
+      const turnKey = this.turnRenderKey(response.turn);
+      if (this.reservedTurnKey !== turnKey) {
+        this.reservedTurnKey = turnKey;
+        await this.updateComplete;
+        if (!this.isCurrentInitialReadingTarget(target)) return;
+        const currentResponse = latestChatResponseStart(this.groupedMessages());
+        if (currentResponse === undefined || this.turnRenderKey(currentResponse.turn) !== turnKey) {
+          if (currentResponse !== undefined) this.reservedTurnKey = this.turnRenderKey(currentResponse.turn);
+          restartAfterRender = true;
+          return;
+        }
+        response = currentResponse;
+      }
+
+      const anchorId = this.groupRenderKeyFor(response.group);
+      const anchor = this.scrollAnchorElements().find((element) => element.dataset["scrollAnchorId"] === anchorId);
+      const chat = this.chat;
+      if (chat === undefined || anchor === undefined) return;
+      this.withSuppressedScrollSave(() => {
+        chat.scrollTop += anchor.getBoundingClientRect().top - chat.getBoundingClientRect().top;
+        this.syncScrollMetrics();
+        this.followMode = this.isNearBottom() ? FOLLOW_TAIL : FOLLOW_FREE;
+      });
+      this.cancelPrependRestore();
+      this.finishInitialReadingTarget(target);
+    } finally {
+      if (this.applyingInitialReadingTargetId === target.id) this.applyingInitialReadingTargetId = undefined;
+      if (restartAfterRender) this.scheduleInitialReadingTarget();
+    }
+  }
+
+  private isCurrentInitialReadingTarget(target: ChatInitialReadingTarget): boolean {
+    return this.initialReadingTarget?.id === target.id;
+  }
+
+  private finishInitialReadingTarget(target: ChatInitialReadingTarget): void {
+    this.defaultScrollRestoreDeferred = false;
+    this.appliedInitialReadingTargetId = target.id;
+    this.onInitialReadingTargetApplied?.(target);
   }
 
   private scheduleSelectedLoadPaintReport(): void {
@@ -1221,7 +1338,7 @@ export class ChatView extends LitElement {
     if (!chat) return;
     if (this.didChatHeightChange()) {
       this.lastClientHeight = chat.clientHeight;
-      if (this.followMode.kind === "tail") {
+      if (this.followMode.kind === "tail" && this.initialReadingTarget === undefined && !this.defaultScrollRestoreDeferred) {
         this.scrollToBottom();
         return;
       }
@@ -1391,17 +1508,28 @@ export class ChatView extends LitElement {
   }
 
   restoreScrollPosition() {
+    if (this.initialReadingTarget !== undefined) {
+      this.defaultScrollRestoreDeferred = true;
+      this.scheduleInitialReadingTarget();
+      return;
+    }
+    this.defaultScrollRestoreDeferred = false;
     const sessionId = this.sessionId;
     if (this.restoreScrollFrame !== undefined) cancelAnimationFrame(this.restoreScrollFrame);
     this.restoreScrollFrame = requestAnimationFrame(() => {
       this.restoreScrollFrame = undefined;
       if (this.sessionId !== sessionId) return;
-      this.withSuppressedScrollSave(() => {
-        if (this.pendingAsk !== undefined && this.scrollController.readPosition(sessionId) === undefined && this.alignOpenAskToTop()) return;
-        if (this.pendingDialogs.length > 0 && this.scrollController.readPosition(sessionId) === undefined && this.alignOpenDialogToTop()) return;
-        const result = this.scrollController.restorePosition(sessionId, this.chat, this.scrollAnchorElements(), { fallbackToBottom: this.shouldFallbackToBottomForMissingAnchor() });
-        this.handleScrollRestoreResult(sessionId, result);
-      });
+      this.restoreDefaultScrollPosition(sessionId);
+    });
+  }
+
+  private restoreDefaultScrollPosition(sessionId: string): void {
+    this.defaultScrollRestoreDeferred = false;
+    this.withSuppressedScrollSave(() => {
+      if (this.pendingAsk !== undefined && this.scrollController.readPosition(sessionId) === undefined && this.alignOpenAskToTop()) return;
+      if (this.pendingDialogs.length > 0 && this.scrollController.readPosition(sessionId) === undefined && this.alignOpenDialogToTop()) return;
+      const result = this.scrollController.restorePosition(sessionId, this.chat, this.scrollAnchorElements(), { fallbackToBottom: this.shouldFallbackToBottomForMissingAnchor() });
+      this.handleScrollRestoreResult(sessionId, result);
     });
   }
 
