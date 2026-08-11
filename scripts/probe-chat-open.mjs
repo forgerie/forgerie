@@ -373,7 +373,16 @@ async function clickSessionRowAndWaitForAttempt(cdp, ref, timeoutMs) {
 }
 
 async function clickSessionRow(cdp, ref) {
-  const clicked = await evaluate(cdp, `
+  let clicked = await clickVisibleSessionRow(cdp, ref);
+  if (!clicked) {
+    await revealCollapsedSessionGroups(cdp);
+    clicked = await clickVisibleSessionRow(cdp, ref);
+  }
+  if (!clicked) fail(`Could not find inbox row for ${describeRef(ref)} after expanding every non-archived inbox group. Pass explicit representative ids or open the target inbox.`);
+}
+
+async function clickVisibleSessionRow(cdp, ref) {
+  return await evaluate(cdp, `
     (() => {
       const row = window.__chatOpenProbe.row(${JSON.stringify(ref.id)});
       if (row === undefined) return false;
@@ -382,7 +391,19 @@ async function clickSessionRow(cdp, ref) {
       return true;
     })()
   `);
-  if (clicked !== true) fail(`Could not find inbox row for ${describeRef(ref)}. Pass explicit representative ids or open the target inbox.`);
+}
+
+async function revealCollapsedSessionGroups(cdp) {
+  await evaluate(cdp, `
+    (async () => {
+      const panel = window.__chatOpenProbe.walk(document, (element) => element.tagName === "SESSION-INBOX-PANEL");
+      if (panel === undefined) return false;
+      const headers = [...panel.shadowRoot.querySelectorAll(".group-header[aria-expanded='false']")];
+      for (const header of headers) header.click();
+      await panel.updateComplete;
+      return true;
+    })()
+  `);
 }
 
 async function clickRetry(cdp) {
