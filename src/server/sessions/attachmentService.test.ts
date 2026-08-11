@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +153,27 @@ describe("saveAttachmentsToWorkspace", () => {
       "attachment-20260613-120501-123-3-badname.txt",
       `attachment-20260613-120501-123-4-${"a".repeat(92)}.pdf`,
     ]);
+  });
+
+  it("removes earlier files when a later attachment write fails", async () => {
+    let writes = 0;
+    await expect(saveAttachmentsToWorkspace(
+      workspace,
+      [
+        { kind: "file", mimeType: "text/plain", data: "QUJD", name: "first.txt" },
+        { kind: "file", mimeType: "text/plain", data: "REVG", name: "second.txt" },
+      ],
+      {
+        now: () => new Date("2026-06-13T12:05:01.123Z"),
+        fileWriter: async (path, bytes, options) => {
+          writes += 1;
+          if (writes === 2) throw new Error("disk full");
+          await writeFile(path, bytes, options);
+        },
+      },
+    )).rejects.toThrow("disk full");
+
+    expect(await readdir(join(workspace, ".forgerie", "attachments"))).toEqual([]);
   });
 
   it("does not overwrite an existing attachment name", async () => {
