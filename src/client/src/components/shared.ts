@@ -137,29 +137,31 @@ export const appStyles = css`
   .shell.workspace-panel-collapsed .workspace-panel-edge-button { transform: translateX(calc(-50% + .5px)); }
   .navigation-panel-edge-icon, .workspace-panel-edge-icon { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   workspace-panel { grid-column: 5; min-width: 0; min-height: 0; overflow: hidden; }
-  @media (min-width: 1181px) {
-    .shell.navigation-panel-collapsed { --navigation-panel-width: 0px; }
-    .shell.navigation-panel-collapsed > aside { display: none; }
-    .shell.workspace-panel-collapsed { --workspace-panel-width: 0px; }
-    .shell.workspace-panel-collapsed > workspace-panel { display: none; }
-  }
-  @media (max-width: 1180px) {
-    .shell { grid-template-columns: var(--navigation-panel-width) 1px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-    .shell.navigation-panel-collapsed { --navigation-panel-width: 0px; }
-    .shell.navigation-panel-collapsed > aside { display: none; }
-    aside { grid-row: 1 / 3; }
-    .navigation-panel-edge { grid-row: 1 / 3; }
-    main { grid-column: 3; grid-row: 1 / 3; }
-    app-mobile-main-tabs { display: block; flex: 0 0 auto; min-width: 0; }
-    .mobile-tabs-frame { display: flex; }
-    .shell.workspace-view main { grid-row: 1; min-height: auto; }
-    .shell.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
-    .shell:not(.workspace-view) > workspace-panel { display: none; }
-    .workspace-panel-edge { display: none; }
-    main.workspace-view chat-view, main.workspace-view prompt-editor,
-    main.workspace-view .empty { display: none; }
-    main.workspace-view { overflow: hidden; }
-  }
+  /*
+   * Disclosure is measured from the shell's own box by AppShellController, not
+   * from the viewport. The bar is the sum of the three panes' content minimums
+   * (CHROME_RESIDENT_MIN_WIDTH), so the shell keeps three columns only while all
+   * three can actually be read.
+   */
+  .shell.chrome-resident.navigation-panel-collapsed { --navigation-panel-width: 0px; }
+  .shell.chrome-resident.navigation-panel-collapsed > aside { display: none; }
+  .shell.chrome-resident.workspace-panel-collapsed { --workspace-panel-width: 0px; }
+  .shell.chrome-resident.workspace-panel-collapsed > workspace-panel { display: none; }
+  .shell.chrome-summoned { grid-template-columns: var(--navigation-panel-width) 1px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .shell.chrome-summoned.navigation-panel-collapsed { --navigation-panel-width: 0px; }
+  .shell.chrome-summoned.navigation-panel-collapsed > aside { display: none; }
+  .shell.chrome-summoned aside { grid-row: 1 / 3; }
+  .shell.chrome-summoned .navigation-panel-edge { grid-row: 1 / 3; }
+  .shell.chrome-summoned main { grid-column: 3; grid-row: 1 / 3; }
+  .shell.chrome-summoned app-mobile-main-tabs { display: block; flex: 0 0 auto; min-width: 0; }
+  .shell.chrome-summoned .mobile-tabs-frame { display: flex; }
+  .shell.chrome-summoned.workspace-view main { grid-row: 1; min-height: auto; }
+  .shell.chrome-summoned.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
+  .shell.chrome-summoned:not(.workspace-view) > workspace-panel { display: none; }
+  .shell.chrome-summoned .workspace-panel-edge { display: none; }
+  .shell.chrome-summoned main.workspace-view chat-view, .shell.chrome-summoned main.workspace-view prompt-editor,
+  .shell.chrome-summoned main.workspace-view .empty { display: none; }
+  .shell.chrome-summoned main.workspace-view { overflow: hidden; }
   .shell.overlay-navigation { grid-template-columns: minmax(0, 1fr); }
   .shell.overlay-navigation > aside, .shell.overlay-navigation .navigation-panel-edge { display: none; }
   .shell.overlay-navigation main, .shell.overlay-navigation.workspace-view > workspace-panel { grid-column: 1; }

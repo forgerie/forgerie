@@ -1,7 +1,8 @@
+// @vitest-environment happy-dom
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { describe, expect, it } from "vitest";
 import { AppShellController } from "./appShellController";
-import { CHROME_RESIDENT_MIN_WIDTH } from "./shellLayoutMode";
+import { CHROME_RESIDENT_MIN_WIDTH, NAVIGATION_DOCK_MIN_WIDTH } from "./shellLayoutMode";
 
 /** CSS-pixel viewport widths for the acceptance device, see AGENTS.md. */
 const FOLD8 = {
@@ -35,6 +36,41 @@ describe("AppShellController chrome disclosure", () => {
 
     expect(controller.isMobileNavigationLayout).toBe(false);
     expect(controller.isChromeSummoned).toBe(true);
+  });
+
+  it("re-renders when only the disclosure bar is crossed", () => {
+    // Both widths dock navigation, so the layout mode never changes. Disclosure
+    // drives shell classes now, so a resize across it has to reach the host.
+    const host = new RecordingHost();
+    let width = CHROME_RESIDENT_MIN_WIDTH - 1;
+    const controller = new AppShellController(host, {
+      measureShellWidth: () => width,
+      pwaDisplayModeMedia: [],
+    });
+
+    expect(controller.isMobileNavigationLayout).toBe(false);
+    expect(controller.isChromeSummoned).toBe(true);
+
+    width = CHROME_RESIDENT_MIN_WIDTH;
+    host.controller?.hostUpdated?.();
+
+    expect(controller.isChromeSummoned).toBe(false);
+    expect(host.updateCount).toBeGreaterThan(0);
+  });
+
+  it("holds still while a resize stays inside one band", () => {
+    const host = new RecordingHost();
+    let width = NAVIGATION_DOCK_MIN_WIDTH;
+    const controller = new AppShellController(host, {
+      measureShellWidth: () => width,
+      pwaDisplayModeMedia: [],
+    });
+
+    width = NAVIGATION_DOCK_MIN_WIDTH + 40;
+    host.controller?.hostUpdated?.();
+
+    expect(controller.isChromeSummoned).toBe(true);
+    expect(host.updateCount).toBe(0);
   });
 });
 

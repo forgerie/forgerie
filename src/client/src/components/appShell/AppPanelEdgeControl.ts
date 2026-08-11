@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { clampPanelWidth, panelResizeConstraints, panelWidthFromDrag, panelWidthFromKeyboard, type PanelResizeConstraints, type ResizablePanelSide } from "../../appShell/panelResizeController";
+import type { ChromeDisclosure, ShellLayoutMode } from "../../appShell/shellLayoutMode";
 
 export type PanelEdgeSide = ResizablePanelSide;
 
@@ -20,6 +21,13 @@ const TAP_MOVE_TOLERANCE_PX = 4;
 export class AppPanelEdgeControl extends LitElement {
   @property({ reflect: true }) side: PanelEdgeSide = "navigation";
   @property({ type: Boolean, reflect: true }) collapsed = false;
+  /**
+   * The shell's measured bands, handed down because these rules place the
+   * control inside the shell's grid and a shadow root cannot read its parent's
+   * class. Never re-derived here from the viewport.
+   */
+  @property({ reflect: true }) disclosure: ChromeDisclosure = "resident";
+  @property({ reflect: true }) layout: ShellLayoutMode = "docked";
   @property({ type: Boolean }) resizable = false;
   @property({ type: Number }) panelWidth?: number;
   @property({ type: Number }) minWidth?: number;
@@ -212,12 +220,8 @@ export class AppPanelEdgeControl extends LitElement {
     :host([side="navigation"][collapsed]) .edge-button { transform: translateX(calc(50% - .5px)); }
     :host([side="workspace"][collapsed]) .edge-button { transform: translateX(calc(-50% + .5px)); }
     .edge-icon { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-    @media (max-width: 1180px) {
-      :host([side="navigation"]) { grid-row: 1 / 3; }
-      :host([side="workspace"]) { display: none; }
-    }
-    @media (max-width: 760px) {
-      :host([side="navigation"]) { display: none; }
-    }
+    :host([disclosure="summoned"][side="navigation"]) { grid-row: 1 / 3; }
+    :host([disclosure="summoned"][side="workspace"]) { display: none; }
+    :host([layout="overlay"][side="navigation"]) { display: none; }
   `;
 }

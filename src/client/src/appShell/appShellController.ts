@@ -1,7 +1,7 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import type { AppState } from "../appState";
 import { createPwaDisplayModeMedia, detectPwaDisplayMode } from "../pwaDisplayMode";
-import { chromeDisclosure, shellLayoutMode, type ShellLayoutMode } from "./shellLayoutMode";
+import { chromeDisclosure, shellLayoutMode, type ChromeDisclosure, type ShellLayoutMode } from "./shellLayoutMode";
 import { ViewportPositionRepairer } from "./viewportPositionRepair";
 
 export interface AppShellControllerOptions {
@@ -16,6 +16,7 @@ export class AppShellController implements ReactiveController {
   private readonly measureShellWidth: () => number;
   private readonly resizeObserver: ResizeObserver | undefined;
   layoutMode: ShellLayoutMode;
+  disclosure: ChromeDisclosure;
   isPwaDisplayMode: boolean;
 
   constructor(private readonly host: ReactiveControllerHost, options: AppShellControllerOptions = {}) {
@@ -25,6 +26,7 @@ export class AppShellController implements ReactiveController {
     this.measureShellWidth = options.measureShellWidth ?? (() => this.observedShellWidth());
     this.resizeObserver = createResizeObserver(this.onShellResize);
     this.layoutMode = shellLayoutMode(this.measureShellWidth());
+    this.disclosure = chromeDisclosure(this.measureShellWidth());
     this.isPwaDisplayMode = detectPwaDisplayMode(this.pwaDisplayModeMedia);
   }
 
@@ -44,7 +46,7 @@ export class AppShellController implements ReactiveController {
    * phone sits below that, so all of them get the conversation whole.
    */
   get isChromeSummoned(): boolean {
-    return chromeDisclosure(this.measureShellWidth()) === "summoned";
+    return this.disclosure === "summoned";
   }
 
   hostConnected(): void {
@@ -93,10 +95,18 @@ export class AppShellController implements ReactiveController {
     this.observedElement = element;
   }
 
+  /**
+   * Both bars are read from one measurement. Docking and disclosure sit at
+   * different widths, so a resize can cross either alone — and both drive shell
+   * classes, so either crossing has to reach the host.
+   */
   private applyMeasuredWidth(): void {
-    const mode = shellLayoutMode(this.measureShellWidth());
-    if (this.layoutMode === mode) return;
+    const width = this.measureShellWidth();
+    const mode = shellLayoutMode(width);
+    const disclosure = chromeDisclosure(width);
+    if (this.layoutMode === mode && this.disclosure === disclosure) return;
     this.layoutMode = mode;
+    this.disclosure = disclosure;
     this.host.requestUpdate();
   }
 

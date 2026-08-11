@@ -43,3 +43,7 @@ export function shellLayoutMode(availableWidth: number): ShellLayoutMode {
 export function shellLayoutModeClass(mode: ShellLayoutMode): string {
   return mode === "overlay" ? "overlay-navigation" : "docked-navigation";
 }
+
+export function chromeDisclosureClass(disclosure: ChromeDisclosure): string {
+  return disclosure === "summoned" ? "chrome-summoned" : "chrome-resident";
+}

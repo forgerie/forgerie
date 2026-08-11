@@ -32,6 +32,23 @@ describe("PiWebApp chrome disclosure", () => {
     expect(root.querySelector("app-mobile-main-tabs")).not.toBeNull();
   });
 
+  it("names its band on the shell so layout reads the measured box, not the viewport", async () => {
+    expect(shellClasses(await settledApp(1440))).toContain("chrome-resident");
+    expect(shellClasses(await settledApp(1100))).toContain("chrome-summoned");
+    expect(shellClasses(await settledApp(499))).toContain("chrome-summoned");
+  });
+
+  it("hands the measured bands to the panel edges, which cannot see the shell's class", async () => {
+    const docked = shadowRoot(await settledApp(1100)).querySelector("app-panel-edge-control[side='navigation']");
+
+    expect(docked?.getAttribute("disclosure")).toBe("summoned");
+    expect(docked?.getAttribute("layout")).toBe("docked");
+
+    const overlaid = shadowRoot(await settledApp(499)).querySelector("app-panel-edge-control[side='navigation']");
+
+    expect(overlaid?.getAttribute("layout")).toBe("overlay");
+  });
+
   it("retires the thread header at every size, since its action moved to the composer", async () => {
     for (const width of [499, 1440]) {
       const root = shadowRoot(await mountApp(width));
@@ -112,6 +129,21 @@ function session(): SessionInfo {
     messageCount: 2,
     firstMessage: "Initial prompt",
   };
+}
+
+/**
+ * The shell measures its own box in `hostUpdated`, so the first render still
+ * carries the pre-measurement guess. Layout assertions wait for the render that
+ * follows the measurement.
+ */
+async function settledApp(shellWidth: number): Promise<PiWebApp> {
+  const app = await mountApp(shellWidth);
+  await app.updateComplete;
+  return app;
+}
+
+function shellClasses(app: PiWebApp): string {
+  return shadowRoot(app).querySelector(".shell")?.className ?? "";
 }
 
 function shadowRoot(app: PiWebApp): ShadowRoot {

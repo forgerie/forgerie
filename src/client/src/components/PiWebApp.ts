@@ -51,7 +51,7 @@ import { BrowserResumeController } from "../appShell/browserResumeController";
 import { NavigationSectionsController, type NavigationSection } from "../appShell/navigationState";
 import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
 import { PanelCollapseController, mainViewClass } from "../appShell/panelCollapseController";
-import { shellLayoutModeClass } from "../appShell/shellLayoutMode";
+import { chromeDisclosureClass, shellLayoutModeClass } from "../appShell/shellLayoutMode";
 import { PanelResizeController, type PanelResizeConstraints, type ResizablePanelSide } from "../appShell/panelResizeController";
 import { readRoute, writeRoute, type AppRoute } from "../route";
 import { readSettingsSection, writeSettingsSection, type SettingsSection } from "../settingsRoute";
@@ -1229,6 +1229,8 @@ export class PiWebApp extends LitElement {
       <app-panel-edge-control
         side="navigation"
         controls="navigation-panel"
+        .disclosure=${this.appShell.disclosure}
+        .layout=${this.appShell.layoutMode}
         resizeLabel="Resize navigation panel"
         expandLabel="Expand navigation panel"
         collapseLabel="Collapse navigation panel"
@@ -1252,6 +1254,8 @@ export class PiWebApp extends LitElement {
       <app-panel-edge-control
         side="workspace"
         controls="workspace-panel"
+        .disclosure=${this.appShell.disclosure}
+        .layout=${this.appShell.layoutMode}
         resizeLabel="Resize workspace panel"
         expandLabel="Expand workspace panel"
         collapseLabel="Collapse workspace panel"
@@ -2775,7 +2779,7 @@ export class PiWebApp extends LitElement {
     const intent = this.chatNavigationIntent;
     const runtimeAvailable = this.selectedChatRuntimeAvailable();
     return html`
-      <div class=${`${this.panelCollapse.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)}`} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
+      <div class=${`${this.panelCollapse.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
         <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout ? null : this.renderNavigationPanel()}</aside>
         ${this.renderNavigationPanelEdgeControl()}
         <main class=${mainViewClass(state.mainView)}>
