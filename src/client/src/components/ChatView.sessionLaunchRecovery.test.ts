@@ -101,6 +101,23 @@ describe("ChatView session launch recovery wiring", () => {
     ]);
   });
 
+  it("uses recovery attachment metadata when rebuilding an unavailable first-prompt preview", async () => {
+    const view = new ChatView();
+    view.sessionId = "session-1";
+    view.clientQueuedMessages = [];
+    view.sessionLaunchRecovery = {
+      ...recovery("promptConfirmedUnsent"),
+      prompt: "Recover with file",
+      attachments: [{ name: "notes.txt", mimeType: "text/plain", size: 5 }],
+      delivery: "folder",
+    };
+    document.body.append(view);
+    await view.updateComplete;
+
+    expect(view.shadowRoot?.querySelector<HTMLElement & { text: string }>(".queued-message formatted-text")?.text).toBe("Recover with file\n\n[1 attachment queued: notes.txt]");
+    expect(JSON.stringify(view.sessionLaunchRecovery)).not.toContain("SGVsbG8=");
+  });
+
   it("keeps ordinary no-recovery queue copy and labels unchanged", async () => {
     const view = new ChatView();
     view.clientQueuedMessages = [{ kind: "followUp", text: "Ordinary queued prompt" }];
