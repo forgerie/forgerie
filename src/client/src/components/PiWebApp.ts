@@ -2998,6 +2998,7 @@ export class PiWebApp extends LitElement {
         @pointermove=${(event: PointerEvent) => { this.panelPeek.onPointerMove(event); }}
         @pointerup=${(event: PointerEvent) => { this.panelPeek.onPointerUp(event); }}
         @pointercancel=${() => { this.panelPeek.onPointerCancel(); }}
+        @touchmove=${(event: TouchEvent) => { this.panelPeek.onTouchMove(event); }}
         @wheel=${(event: WheelEvent) => { this.panelPeek.onWheel(event); }}
       >
         ${this.renderPeekSheet()}

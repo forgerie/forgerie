@@ -27,6 +27,17 @@ interface PeekOrigin {
 }
 
 /**
+ * The part of a touch move this controller needs. `TouchEvent` satisfies it, so
+ * the shell hands one straight over, and a test can hand over the same facts
+ * without a browser to make them in.
+ */
+export interface HorizontalClaim {
+  readonly touches: ArrayLike<{ readonly clientX: number; readonly clientY: number }>;
+  readonly cancelable: boolean;
+  preventDefault: () => void;
+}
+
+/**
  * Turns pointer and wheel travel into a peek.
  *
  * The same travel arrives from a finger and from two fingers on a trackpad, so
@@ -107,6 +118,33 @@ export class PanelPeekController implements ReactiveController {
   onPointerCancel(): void {
     this.disarm();
     this.setPeek(releasePeek(this.peek, this.config));
+  }
+
+  /**
+   * Claims a horizontal drag before the browser scrolls with it.
+   *
+   * Without this the compositor takes the gesture at its own slop distance and
+   * sends `pointercancel`, so the sheet never moves however good the arithmetic
+   * is. `touch-action: pan-y` would also stop the theft, but it intersects down
+   * the ancestor chain: a diff or a table inside the transcript could no longer
+   * be pushed sideways with a finger, and a child cannot re-enable what a
+   * parent forbade. Claiming per gesture keeps both.
+   *
+   * The claim is made on direction alone, before the capture distance, because
+   * the browser decides earlier than the sheet does.
+   */
+  onTouchMove(event: HorizontalClaim): void {
+    if (!this.claimsHorizontal(event)) return;
+    if (event.cancelable) event.preventDefault();
+  }
+
+  private claimsHorizontal(event: HorizontalClaim): boolean {
+    const origin = this.origin;
+    const touch = event.touches[0];
+    if (origin === undefined || touch === undefined) return false;
+    const dx = Math.abs(touch.clientX - origin.x);
+    const dy = Math.abs(touch.clientY - origin.y);
+    return dx > dy && dx > 0;
   }
 
   /**

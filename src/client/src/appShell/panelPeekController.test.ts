@@ -115,6 +115,28 @@ describe("PanelPeekController", () => {
     expect(controller.isTracking).toBe(false);
   });
 
+  it("claims a horizontal drag, or the browser scrolls with it and cancels the pointer", () => {
+    const { controller, drag } = harness();
+
+    drag.down(100, 100);
+
+    expect(touchMove(controller, 140, 104)).toBe(true);
+  });
+
+  it("leaves a vertical drag to the list it belongs to", () => {
+    const { controller, drag } = harness();
+
+    drag.down(100, 100);
+
+    expect(touchMove(controller, 108, 240)).toBe(false);
+  });
+
+  it("claims nothing when the gesture was never armed", () => {
+    const { controller } = harness();
+
+    expect(touchMove(controller, 300, 100)).toBe(false);
+  });
+
   it("closes on request without touching what the user asked of the panel", () => {
     const { controller, drag } = harness();
 
@@ -191,6 +213,21 @@ function pointerEvent(type: string, init: { clientX: number; clientY: number; po
   const event = new Event(type, { bubbles: true, composed: true });
   Object.assign(event, init, { pointerId: 1 });
   return event;
+}
+
+/**
+ * Whether the controller took the gesture from the browser. A real browser
+ * steals a horizontal drag inside a scrolling area at its own slop distance and
+ * sends `pointercancel`, so refusing to claim means the sheet never moves.
+ */
+function touchMove(controller: PanelPeekController, clientX: number, clientY: number): boolean {
+  let claimed = false;
+  controller.onTouchMove({
+    touches: [{ clientX, clientY }],
+    cancelable: true,
+    preventDefault: () => { claimed = true; },
+  });
+  return claimed;
 }
 
 function wheelEvent(deltaX: number, deltaY: number): Event {
