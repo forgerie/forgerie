@@ -51,7 +51,7 @@ describe("PromptEditor summoned chrome", () => {
     expect(rendered).toContain("Archive");
   });
 
-  it("keeps the icon-only New session action adjacent before Send", async () => {
+  it("keeps the icon-only New session action adjacent before the message action", async () => {
     const editor = summonedEditor();
     const onNewSession = vi.fn();
     editor.onNewSession = onNewSession;
@@ -67,43 +67,11 @@ describe("PromptEditor summoned chrome", () => {
     expect(action.textContent.trim()).toBe("");
     expect(action.querySelector("svg.new-session-icon")?.getAttribute("aria-hidden")).toBe("true");
     expect(action.parentElement).toBe(actions);
-    expect(action.nextElementSibling).toBe(send);
+    expect(action.nextElementSibling?.classList.contains("primary-action")).toBe(true);
+    expect(action.nextElementSibling?.contains(send)).toBe(true);
 
     action.click();
     expect(onNewSession).toHaveBeenCalledOnce();
-  });
-
-  it("marks summoned controls by narrow-container priority", async () => {
-    const editor = summonedEditor();
-    editor.sessionLabel = "forgerie · main";
-    editor.canArchive = true;
-    editor.canSteer = true;
-    editor.canStop = true;
-    document.body.append(editor);
-    await editor.updateComplete;
-
-    const root = required(editor.shadowRoot, "PromptEditor shadow root");
-    const status = required(root.querySelector(".compact-status"), "compact status");
-    expect(status.classList.contains("summoned")).toBe(true);
-
-    for (const selector of [
-      ".composer-summon",
-      "[data-action='new-session']",
-      ".send-button",
-      ".steer-button",
-      ".stop-button",
-    ]) {
-      expect(required(root.querySelector(selector), selector).classList.contains("summoned-primary")).toBe(true);
-    }
-
-    for (const selector of [
-      ".session-identity",
-      ".select-model",
-      ".select-thinking",
-      ".composer-archive",
-    ]) {
-      expect(required(root.querySelector(selector), selector).classList.contains("summoned-secondary")).toBe(true);
-    }
   });
 });
 

@@ -25,7 +25,7 @@ import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
 import { actionMenuPanelStyle } from "./actionMenu";
 import { renderBuiltinTabIcon } from "./tabIcons";
-import { NEW_SESSION_LABEL } from "./shared";
+import { NEW_SESSION_LABEL, renderNewSessionIcon } from "./shared";
 import "./SessionWorkingRuntime";
 import { isKeyEventInEditableContext } from "../keyboardContext";
 import { commitDistance, readSwipe } from "../rowSwipe";

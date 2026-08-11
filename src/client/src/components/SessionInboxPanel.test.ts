@@ -965,7 +965,7 @@ describe("new session callback", () => {
     expect(newBtn).not.toBeNull();
     expect(newBtn?.title).toBe(NEW_SESSION_LABEL);
     expect(newBtn?.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
-    expect(newBtn?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(newBtn?.textContent.trim()).toBe("+ New");
     newBtn?.click();
     await panel.updateComplete;
 
