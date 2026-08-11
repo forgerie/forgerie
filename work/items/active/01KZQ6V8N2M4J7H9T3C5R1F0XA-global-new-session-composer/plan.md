@@ -1,7 +1,7 @@
 ---
 title: Global New-Session Composer Implementation Plan
 type: feat
-status: active
+status: completed
 date: 2026-08-10
 origin: work/items/active/01KZQ6V8N2M4J7H9T3C5R1F0XA-global-new-session-composer/requirements.md
 verify_command: "npm run verify"
