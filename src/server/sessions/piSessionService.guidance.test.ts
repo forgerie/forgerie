@@ -124,7 +124,7 @@ describe("PiSessionService session guidance", () => {
     await service.dispose();
   });
 
-  it("restores prior guidance when replacement binding fails", async () => {
+  it("keeps replacement guidance when replacement binding fails after apply", async () => {
     const slot = createSessionGuidanceSlot();
     slot.replace(["technical-english"]);
     const original = fakeRuntime("original-failed-rebind");
@@ -150,6 +150,33 @@ describe("PiSessionService session guidance", () => {
     if (rebindSession === undefined) throw new Error("Expected runtime rebind callback");
     if (!Reflect.set(original.runtime, "session", replacement.session)) throw new Error("Could not replace runtime session");
     await expect(rebindSession(replacement.session)).rejects.toThrow("bind failed");
+
+    expect(slot.snapshot()).toEqual([]);
+    await service.dispose();
+  });
+
+  it("restores active guidance when an in-place reload fails after shutdown", async () => {
+    const slot = createSessionGuidanceSlot();
+    slot.replace(["technical-english"]);
+    const fake = fakeRuntime("failed-guidance-reload");
+    attachSlot(fake.runtime, slot);
+    fake.session.reload = () => {
+      slot.replace([]);
+      return Promise.reject(new Error("reload failed after shutdown"));
+    };
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.start("/workspace");
+    await expect(service.runCommand(sessionRef("failed-guidance-reload"), "/reload")).resolves.toMatchObject({
+      type: "unsupported",
+      message: "Reload failed: reload failed after shutdown",
+    });
 
     expect(slot.snapshot()).toEqual(["technical-english"]);
     await service.dispose();

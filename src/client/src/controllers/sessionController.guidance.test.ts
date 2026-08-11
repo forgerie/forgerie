@@ -100,6 +100,24 @@ describe("SessionController session guidance", () => {
     expect(state.status).toMatchObject({ cost: 4, activeGuidanceIds: ["technical-english"] });
   });
 
+  it("keeps confirmed guidance when an older buffered status flushes", async () => {
+    const request = deferred<SessionStatus>();
+    let state = stateWithStatus(status(oldSession.id));
+    const api: typeof defaultApi = { ...defaultApi, setGuidance: () => request.promise };
+    const controller = controllerFor(() => state, (patch) => { state = { ...state, ...patch }; }, api);
+    const changing = controller.setGuidance("technical-english", true);
+
+    controller.applyGlobalEvent({
+      type: "status.update",
+      status: { ...status(oldSession.id), cost: 7, activeGuidanceIds: [] },
+    });
+    request.resolve({ ...status(oldSession.id), activeGuidanceIds: ["technical-english"] });
+    await expect(changing).resolves.toBe(true);
+    controller.flushPendingUpdates();
+
+    expect(state.status).toMatchObject({ cost: 7, activeGuidanceIds: ["technical-english"] });
+  });
+
   it("reports failure and leaves current guidance available for retry", async () => {
     const currentStatus = { ...status(oldSession.id), activeGuidanceIds: [] };
     let state = stateWithStatus(currentStatus);

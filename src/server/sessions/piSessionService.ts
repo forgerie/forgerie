@@ -2511,6 +2511,8 @@ export class PiSessionService implements SessionRouteService {
       async () => {
         this.publishActivity(session, "reloading resources", "active");
         const priorGeneration = this.notificationGenerationBySession.get(session);
+        const guidanceSlot = this.active.get(session.sessionId)?.runtime.services?.sessionGuidanceSlot;
+        const previousGuidance = guidanceSlot?.snapshot() ?? [];
         let candidateGeneration: SessionNotificationGeneration | undefined;
         try {
           await session.reload(priorGeneration === undefined ? undefined : {
@@ -2526,6 +2528,7 @@ export class PiSessionService implements SessionRouteService {
           this.publishActivity(session, "resources reloaded", "idle");
           this.publishStatus(session);
         } catch (error: unknown) {
+          guidanceSlot?.replace(previousGuidance);
           if (candidateGeneration !== undefined) {
             this.publishNotificationMutations(this.notificationStore.abortReplacement(candidateGeneration, "candidate"));
             this.notificationGenerationBySession.set(session, candidateGeneration);
@@ -3377,8 +3380,10 @@ export class PiSessionService implements SessionRouteService {
         let candidateGeneration: SessionNotificationGeneration | undefined;
         const guidanceSlot = runtime.services?.sessionGuidanceSlot;
         const previousGuidance = guidanceSlot?.snapshot() ?? [];
+        const replacementGuidance = restoreSessionGuidance(session.sessionManager.getEntries?.() ?? []);
+        let replacementApplied = false;
         try {
-          guidanceSlot?.replace(restoreSessionGuidance(session.sessionManager.getEntries?.() ?? []));
+          guidanceSlot?.replace(replacementGuidance);
           await this.prepareUnreadRuntimeRebind(boundSession, session);
           await this.recoverSubsessionTrackingForOpenedSession(session);
           if (priorGeneration !== undefined) {
@@ -3389,6 +3394,7 @@ export class PiSessionService implements SessionRouteService {
           this.bindProcessBridge(runtime, session);
           this.bindSessionTitleBridge(runtime, session);
           this.bindRuntime(active, session);
+          replacementApplied = true;
           // The runtime being replaced parked every dialog the store still
           // holds for this session; settle those waits before the new
           // runtime's extensions can open fresh dialogs under the same id.
@@ -3400,7 +3406,7 @@ export class PiSessionService implements SessionRouteService {
             notificationGeneration = candidateGeneration;
           }
         } catch (error: unknown) {
-          guidanceSlot?.replace(previousGuidance);
+          guidanceSlot?.replace(replacementApplied ? replacementGuidance : previousGuidance);
           if (candidateGeneration !== undefined) {
             this.publishNotificationMutations(this.notificationStore.abortReplacement(candidateGeneration, "candidate"));
             notificationGeneration = candidateGeneration;

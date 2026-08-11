@@ -1204,9 +1204,14 @@ export class SessionController {
     try {
       const status = await this.api.setGuidance(session, entryId, enabled, machineId);
       if (!this.isCurrentSessionSelection(session.id, machineId, selectionSeq) || mutationSeq !== this.guidanceMutationSeq) return false;
+      const confirmedGuidanceIds = status.activeGuidanceIds ?? [];
+      const pendingStatus = this.pendingStatusBySession.get(status.sessionId);
+      if (pendingStatus !== undefined) {
+        this.pendingStatusBySession.set(status.sessionId, { ...pendingStatus, activeGuidanceIds: confirmedGuidanceIds });
+      }
       const currentStatus = this.getState().status;
       this.applyStatus(currentStatus?.sessionId === status.sessionId
-        ? { ...currentStatus, activeGuidanceIds: status.activeGuidanceIds ?? [] }
+        ? { ...currentStatus, activeGuidanceIds: confirmedGuidanceIds }
         : status);
       return true;
     } catch (error) {
