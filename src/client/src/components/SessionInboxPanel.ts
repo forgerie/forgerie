@@ -19,10 +19,11 @@
  *  - No viewport breakpoints; no device or user-agent sniffing.
  */
 
-import { LitElement, css, html, nothing, svg, type TemplateResult } from "lit";
+import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
+import { actionMenuPanelStyle } from "./actionMenu";
 import { renderBuiltinTabIcon } from "./tabIcons";
 import "./SessionWorkingRuntime";
 import { isKeyEventInEditableContext } from "../keyboardContext";
@@ -102,12 +103,12 @@ function writeCollapsedGroups(machineId: string, collapsed: ReadonlySet<string>)
 // Board view types
 // ---------------------------------------------------------------------------
 
-/**
- * Workspace-management mark: two overlapping panes. Icon-only, because the
- * word 'Workspaces' cost more header width than the action earns — the label
- * survives as the button's tooltip and accessible name.
- */
-const workspacesIcon = svg`<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><rect x="1.6" y="2.6" width="9" height="7" rx="1.6" /><rect x="5.4" y="6.4" width="9" height="7" rx="1.6" /></svg>`;
+/** Which of the header's two disclosures is open. Only ever one at a time. */
+type InboxMenu = "group-by" | "board";
+
+function groupByLabel(mode: "state" | "project"): string {
+  return mode === "project" ? "Project" : "State";
+}
 
 /** Location shown for a cwd that belongs to no registered project. */
 function unknownLocation(cwd: string): InboxLocation {
@@ -159,6 +160,17 @@ export class SessionInboxPanel extends LitElement {
   @property({ attribute: false }) onRestoreSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onNewSession?: () => void;
   /**
+   * Opens the app-wide action palette. Rendered inside the header's overflow
+   * menu, which is the only place the board keeps app-level commands.
+   */
+  @property({ attribute: false }) onShowActions?: () => void;
+  /**
+   * App refresh control, supplied by the shell in the display modes that need
+   * one. Passed through rather than rebuilt, so reload behaviour stays owned
+   * by the shell.
+   */
+  @property({ attribute: false }) refreshControl?: unknown;
+  /**
    * Active undo toast state. Set by the controller after a successful archive.
    * Cleared by the controller's 5-second timer, by explicit dismissal, or on
    * navigation / dispose. When `undefined`, no toast is shown.
@@ -202,6 +214,8 @@ export class SessionInboxPanel extends LitElement {
   @state() private groupBy: "state" | "project" = "state";
   @state() private collapsedGroups = new Set<string>(DEFAULT_COLLAPSED);
   @state() private showArchived = false;
+  @state() private openMenu: InboxMenu | undefined;
+  @state() private menuStyle = "";
 
   /** Previous machine id — used to detect machine switches and reload prefs. */
   private loadedMachineId: string | undefined;
@@ -224,12 +238,20 @@ export class SessionInboxPanel extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener("keydown", this.onBoardKeyDown);
+    document.addEventListener("click", this.onDocumentClick);
   }
 
   override disconnectedCallback(): void {
     window.removeEventListener("keydown", this.onBoardKeyDown);
+    document.removeEventListener("click", this.onDocumentClick);
     super.disconnectedCallback();
   }
+
+  /** A click anywhere outside this board closes whichever menu is open. */
+  private readonly onDocumentClick = (event: MouseEvent) => {
+    if (event.composedPath().includes(this)) return;
+    this.openMenu = undefined;
+  };
 
   /**
    * Board-local shortcuts from the design prototype. `E` (archive) stays with
@@ -238,6 +260,11 @@ export class SessionInboxPanel extends LitElement {
    */
   private readonly onBoardKeyDown = (event: KeyboardEvent): void => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    if (event.key === "Escape" && this.openMenu !== undefined) {
+      event.preventDefault();
+      this.openMenu = undefined;
+      return;
+    }
     if (isKeyEventInEditableContext(event)) return;
     switch (event.key.toLowerCase()) {
       case "j":
@@ -434,12 +461,16 @@ export class SessionInboxPanel extends LitElement {
   }
 
   /**
-   * Title, view controls, actions. Deliberately carries no attention summary:
-   * the group headers below already report what is waiting, and say which kind.
+   * Identity, grouping, and the one action that starts work — in a single row
+   * at every pane width. Grouping belongs to the title because it names how
+   * the board below is arranged; as a separate chip it read as a row filter.
+   * Everything secondary sits behind the overflow menu. Deliberately carries
+   * no attention summary: the group headers below already report what is
+   * waiting, and say which kind.
    */
   private renderHeader(): TemplateResult {
     return html`
-      <div class="board-title-row">
+      <div class="board-identity">
         ${this.compact && this.onCloseOverlay !== undefined ? html`
           <button
             class="overlay-back-btn"
@@ -449,37 +480,79 @@ export class SessionInboxPanel extends LitElement {
             @click=${() => { this.onCloseOverlay?.(); }}
           >←</button>
         ` : nothing}
-        <h2 class="board-title">Inbox</h2>
+        <h2 class="board-title-row">
+          <button
+            class="board-title-btn"
+            data-action="group-by-menu"
+            aria-haspopup="menu"
+            aria-expanded=${String(this.openMenu === "group-by")}
+            aria-controls="inbox-group-by-menu"
+            title="Change grouping"
+            @click=${(event: MouseEvent) => { this.toggleMenu("group-by", event.currentTarget); }}
+          >
+            <span class="board-title">Inbox</span>
+            <span class="board-grouping">Grouped by <span class="board-grouping-value">${groupByLabel(this.groupBy)}</span><span class="board-caret" aria-hidden="true">▾</span></span>
+          </button>
+        </h2>
       </div>
       <div class="board-actions">
         <button
-          class="icon-btn"
-          data-action="manage-workspaces"
-          title="Manage workspaces"
-          aria-label="Manage workspaces"
-          @click=${() => { this.onManageWorkspaces?.(); }}
-        >${workspacesIcon}</button>
-        <button
-          class="icon-btn"
+          class="new-session-btn"
           data-action="new-session"
           title="Start a new session"
           aria-label="Start a new session"
           @click=${() => { this.onNewSession?.(); }}
-        >+</button>
+        >+ New</button>
+        ${this.refreshControl}
+        <button
+          class="icon-btn"
+          data-action="board-menu"
+          aria-haspopup="menu"
+          aria-expanded=${String(this.openMenu === "board")}
+          aria-controls="inbox-board-menu"
+          title="More inbox commands"
+          aria-label="More inbox commands"
+          @click=${(event: MouseEvent) => { this.toggleMenu("board", event.currentTarget); }}
+        >⋯</button>
       </div>
-      <div class="board-controls">
-        <div class="segmented" role="group" aria-label="Group by">
+      ${this.renderGroupByMenu()}
+      ${this.renderBoardMenu()}
+    `;
+  }
+
+  private renderGroupByMenu(): TemplateResult | typeof nothing {
+    if (this.openMenu !== "group-by") return nothing;
+    const modes: readonly ("state" | "project")[] = ["state", "project"];
+    return html`
+      <div class="menu-panel" id="inbox-group-by-menu" role="menu" aria-label="Group sessions by" style=${this.menuStyle}>
+        ${modes.map((mode) => html`
           <button
-            data-group-by="state"
-            aria-pressed=${String(this.groupBy === "state")}
-            @click=${() => { this.setGroupBy("state"); }}
-          >State</button>
+            role="menuitemradio"
+            data-group-by=${mode}
+            aria-checked=${String(this.groupBy === mode)}
+            @click=${() => { this.chooseGroupBy(mode); }}
+          >${groupByLabel(mode)}</button>
+        `)}
+      </div>
+    `;
+  }
+
+  private renderBoardMenu(): TemplateResult | typeof nothing {
+    if (this.openMenu !== "board") return nothing;
+    return html`
+      <div class="menu-panel" id="inbox-board-menu" role="menu" aria-label="Inbox commands" style=${this.menuStyle}>
+        <button
+          role="menuitem"
+          data-action="manage-workspaces"
+          @click=${() => { this.runMenuCommand(this.onManageWorkspaces); }}
+        >Manage workspaces</button>
+        ${this.onShowActions === undefined ? nothing : html`
           <button
-            data-group-by="project"
-            aria-pressed=${String(this.groupBy === "project")}
-            @click=${() => { this.setGroupBy("project"); }}
-          >Project</button>
-        </div>
+            role="menuitem"
+            data-action="show-actions"
+            @click=${() => { this.runMenuCommand(this.onShowActions); }}
+          >Actions</button>
+        `}
       </div>
     `;
   }
@@ -814,6 +887,26 @@ export class SessionInboxPanel extends LitElement {
     if (machineId !== undefined) writeGroupBy(machineId, mode);
   }
 
+  private chooseGroupBy(mode: "state" | "project"): void {
+    this.openMenu = undefined;
+    this.setGroupBy(mode);
+  }
+
+  /** Close first, then run: a command that opens a dialog must not leave a menu behind it. */
+  private runMenuCommand(command: (() => void) | undefined): void {
+    this.openMenu = undefined;
+    command?.();
+  }
+
+  private toggleMenu(menu: InboxMenu, target: EventTarget | null): void {
+    if (this.openMenu === menu) {
+      this.openMenu = undefined;
+      return;
+    }
+    this.menuStyle = actionMenuPanelStyle(target, { constrainTo: "viewport" });
+    this.openMenu = menu;
+  }
+
   // -------------------------------------------------------------------------
   // Styles
   // -------------------------------------------------------------------------
@@ -851,89 +944,144 @@ export class SessionInboxPanel extends LitElement {
     /* ---- header ---- */
 
     /*
-     * Two rows when the pane is narrow (title and actions share the first,
-     * view controls take the second), one row once there is width for all
-     * three. The threshold is where the controls stop fitting beside the
-     * title, measured from the pane, not the viewport.
+     * One row at every pane width. Identity and grouping read as a single
+     * block on the left; the actions that start or reach work sit on the
+     * right. Nothing here keys off a width threshold: the title truncates and
+     * the controls keep their size, so folding or rotating never re-flows the
+     * toolbar into a different shape.
      */
     .board-header {
       flex: 0 0 auto;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      grid-template-areas:
-        "title actions"
-        "controls controls";
+      display: flex;
       align-items: center;
-      gap: 8px 12px;
-      padding: 10px 12px;
+      gap: 8px;
+      padding: 6px 12px;
       border-bottom: 1px solid var(--pi-border);
       background: var(--pi-surface, #101527);
     }
 
-    @container (min-width: 330px) {
-      .board-header {
-        grid-template-columns: auto minmax(0, 1fr) auto;
-        grid-template-areas: "title controls actions";
-      }
-
-      .board-controls { justify-content: flex-end; }
-    }
-
-    .board-title-row {
-      grid-area: title;
+    .board-identity {
+      flex: 1 1 auto;
       display: flex;
-      align-items: baseline;
-      gap: 8px;
+      align-items: center;
+      gap: 4px;
       min-width: 0;
     }
 
+    .board-title-row {
+      flex: 1 1 auto;
+      min-width: 0;
+      margin: 0;
+      font: inherit;
+    }
+
+    /*
+     * The whole two-line block is the grouping control, so the target is a
+     * full-height row rather than the width of the word 'State'. It stops at
+     * its own text: the menu below is anchored to the trigger's edge, and a
+     * full-width trigger would push the menu away from the words it changes.
+     */
+    .board-title-btn {
+      display: grid;
+      justify-items: start;
+      gap: 1px;
+      width: fit-content;
+      max-width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      margin-inline-start: -6px;
+      padding: 2px 6px;
+      font: inherit;
+      color: inherit;
+      text-align: start;
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .board-title-btn:hover { background: var(--pi-surface-hover, #151b31); }
+    .board-title-btn:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+
+    .board-title,
+    .board-grouping {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .board-title {
+      font-size: clamp(1rem, 0.98rem + 0.12cqi, 1.0625rem);
+      font-weight: 650;
+      line-height: 1.15;
+      color: var(--pi-text-bright, #fff);
+    }
+
+    .board-grouping {
+      font-size: clamp(0.75rem, 0.73rem + 0.1cqi, 0.8125rem);
+      line-height: 1.2;
+      color: var(--pi-muted, #aaa4bd);
+    }
+
+    .board-grouping-value { color: var(--pi-text, #f7f4ff); font-weight: 600; }
+    .board-caret { margin-inline-start: 3px; }
+
     .board-actions {
-      grid-area: actions;
+      flex: 0 0 auto;
       display: flex;
       align-items: center;
       gap: 6px;
     }
 
-    .board-title {
-      margin: 0;
-      font-size: clamp(1rem, 0.98rem + 0.12cqi, 1.0625rem);
-      font-weight: 650;
-      color: var(--pi-text-bright, #fff);
-    }
-
-    .board-controls {
-      grid-area: controls;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-
-    .segmented {
-      display: inline-flex;
-      padding: 2px;
-      gap: 2px;
-      background: var(--pi-bg, #070912);
-      border: 1px solid var(--pi-border, #26304f);
-      border-radius: 999px;
-    }
-
-    .segmented button {
-      padding: 4px 10px;
+    .new-session-btn {
+      display: inline-grid;
+      place-items: center;
+      min-height: 40px;
+      padding: 0 12px;
       font: inherit;
       font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-muted, #aaa4bd);
-      background: none;
-      border: none;
-      border-radius: 999px;
+      color: var(--pi-text, #f7f4ff);
+      white-space: nowrap;
+      background: var(--pi-surface, #101527);
+      border: 1px solid var(--pi-border, #26304f);
+      border-radius: 8px;
       cursor: pointer;
-      transition: background 120ms ease, color 120ms ease;
     }
 
-    .segmented button[aria-pressed="true"] {
-      background: var(--pi-selection-bg, #1d2547);
-      color: var(--pi-text-bright, #fff);
+    .new-session-btn:hover { background: var(--pi-surface-hover, #151b31); }
+
+    /* Fixed to the viewport, like every other action menu in the shell. */
+    .menu-panel {
+      position: fixed;
+      z-index: 50;
+      box-sizing: border-box;
+      min-width: min(180px, calc(100vw - 16px));
+      overflow: auto;
+      padding: 4px;
+      border: 1px solid var(--pi-border);
+      border-radius: 8px;
+      background: var(--pi-surface);
+      box-shadow: 0 8px 24px var(--pi-shadow);
     }
+
+    .menu-panel button {
+      display: block;
+      width: 100%;
+      min-height: 36px;
+      padding: 6px 10px;
+      font: inherit;
+      color: var(--pi-text);
+      text-align: start;
+      white-space: nowrap;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .menu-panel button:hover { background: var(--pi-surface-hover, #151b31); }
+    .menu-panel button[aria-checked="true"] { color: var(--pi-text-bright, #fff); background: var(--pi-selection-bg, #1d2547); }
 
     .overlay-back-btn {
       display: inline-grid;

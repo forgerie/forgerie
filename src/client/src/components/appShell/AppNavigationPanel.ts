@@ -80,9 +80,8 @@ export class AppNavigationPanel extends LitElement {
     const machineId = this.selectedMachine?.id;
 
     return html`
-      <header>
-        <strong>Forgerie</strong>
-        ${shouldShowMachinesSection(this.machines) ? html`
+      ${!this.compact && shouldShowMachinesSection(this.machines) ? html`
+        <header>
           <machine-switcher
             .machines=${this.machines}
             .selected=${this.selectedMachine}
@@ -93,12 +92,8 @@ export class AppNavigationPanel extends LitElement {
             .onRemove=${(machine: Machine) => this.onRemoveMachine?.(machine)}
             .onCancelKeyboardNavigation=${() => { this.cancelKeyboardNavigation(); }}
           ></machine-switcher>
-        ` : null}
-        <div class="header-actions">
-          ${this.refreshControl}
-          <button title="Show Actions" aria-label="Show Actions" @click=${() => { this.onShowActions?.(); }}>Actions</button>
-        </div>
-      </header>
+        </header>
+      ` : null}
       ${this.compact && shouldShowMachinesSection(this.machines) ? html`
         <machine-list
           .machines=${this.machines}
@@ -125,6 +120,8 @@ export class AppNavigationPanel extends LitElement {
         .onRestoreSession=${this.onRestoreSession}
         .onNewSession=${this.onNewSession}
         .onManageWorkspaces=${this.onManageWorkspaces}
+        .onShowActions=${this.onShowActions}
+        .refreshControl=${this.refreshControl}
         .undoToast=${this.undoToast}
         .onUndoArchive=${this.onUndoArchive}
         .onDismissUndoToast=${this.onDismissUndoToast}
@@ -143,14 +140,11 @@ export class AppNavigationPanel extends LitElement {
   static override styles = css`
     :host { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     :host([compact]) { flex: 1 1 auto; }
-    header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
-    header strong { flex: 0 0 auto; }
+    /* Only drawn when there is a machine choice to make; a single machine gets the space back. */
+    header { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--pi-border); }
     machine-switcher { flex: 1 1 auto; min-width: 0; }
-    :host([compact]) header { display: none; }
-    .header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
     machine-list { flex: 0 0 auto; overflow: hidden; border-bottom: 1px solid var(--pi-border-muted); }
     session-inbox-panel { flex: 1 1 0px; min-height: 0; overflow: hidden; }
-    button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   `;
 }
 

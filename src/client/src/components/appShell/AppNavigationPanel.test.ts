@@ -31,27 +31,33 @@ describe("shouldShowMachinesSection", () => {
 });
 
 describe("machine unread presence wiring", () => {
-  it("feeds the machine unread slice to the machine-switcher and machine-list", async () => {
-    const unreadPresence: UnreadPresence = {
-      machines: new Set(["remote-a"]),
-      projects: new Set(["project-1"]),
-      workspaces: new Set(["ws-1"]),
-    };
+  it("feeds the machine unread slice to the machine-switcher when docked", async () => {
+    const panel = await mountPanel({ compact: false });
+
+    const switcher = panel.shadowRoot?.querySelector("machine-switcher");
+    if (!(switcher instanceof MachineSwitcher)) throw new Error("Expected machine-switcher");
+
+    expect(switcher.unreadMachineIds).toBe(unreadPresence.machines);
+    expect(panel.shadowRoot?.querySelector("machine-list")).toBeNull();
+  });
+
+  it("feeds the machine unread slice to the machine-list when compact", async () => {
+    const panel = await mountPanel({ compact: true });
+
+    const machineList = panel.shadowRoot?.querySelector("machine-list");
+    if (!(machineList instanceof MachineList)) throw new Error("Expected machine-list");
+
+    expect(machineList.unreadMachineIds).toBe(unreadPresence.machines);
+    expect(panel.shadowRoot?.querySelector("machine-switcher")).toBeNull();
+  });
+
+  it("spends no header row on a single machine", async () => {
     const panel = new AppNavigationPanel();
-    panel.compact = true;
-    panel.machines = [machine("local"), machine("remote-a")];
-    panel.selectedMachine = machine("local");
-    panel.unreadPresence = unreadPresence;
+    panel.machines = [machine("local")];
     document.body.append(panel);
     await panel.updateComplete;
 
-    const switcher = panel.shadowRoot?.querySelector("machine-switcher");
-    const machineList = panel.shadowRoot?.querySelector("machine-list");
-    if (!(switcher instanceof MachineSwitcher)) throw new Error("Expected machine-switcher");
-    if (!(machineList instanceof MachineList)) throw new Error("Expected machine-list");
-
-    expect(switcher.unreadMachineIds).toBe(unreadPresence.machines);
-    expect(machineList.unreadMachineIds).toBe(unreadPresence.machines);
+    expect(panel.shadowRoot?.querySelector("header")).toBeNull();
   });
 
   it("renders session-inbox-panel as the primary navigation content", async () => {
@@ -64,6 +70,23 @@ describe("machine unread presence wiring", () => {
     expect(inbox).not.toBeNull();
   });
 });
+
+const unreadPresence: UnreadPresence = {
+  machines: new Set(["remote-a"]),
+  projects: new Set(["project-1"]),
+  workspaces: new Set(["ws-1"]),
+};
+
+async function mountPanel(props: { compact: boolean }): Promise<AppNavigationPanel> {
+  const panel = new AppNavigationPanel();
+  panel.compact = props.compact;
+  panel.machines = [machine("local"), machine("remote-a")];
+  panel.selectedMachine = machine("local");
+  panel.unreadPresence = unreadPresence;
+  document.body.append(panel);
+  await panel.updateComplete;
+  return panel;
+}
 
 function machine(id: string): Machine {
   return {

@@ -124,6 +124,19 @@ function clickSelector(root: ShadowRoot | Element, selector: string): void {
   if (el instanceof HTMLElement) el.click();
 }
 
+/** Pick a grouping mode the way a reader does: open the title menu, then choose. */
+async function chooseGroupBy(panel: SessionInboxPanel, mode: "state" | "project"): Promise<void> {
+  clickSelector(shadowRoot(panel), "[data-action='group-by-menu']");
+  await panel.updateComplete;
+  clickSelector(shadowRoot(panel), `[data-group-by='${mode}']`);
+  await panel.updateComplete;
+}
+
+/** The grouping the title reports, e.g. 'State'. */
+function groupingValue(panel: SessionInboxPanel): string | undefined {
+  return shadowRoot(panel).querySelector(".board-grouping-value")?.textContent.trim();
+}
+
 /** Reveal the archive, which is opt-in: the toggle also expands the group. */
 async function revealArchived(panel: SessionInboxPanel): Promise<void> {
   clickSelector(shadowRoot(panel), "[data-action='toggle-archived']");
@@ -398,18 +411,14 @@ describe("localStorage persistence", () => {
     const gs = mkGlobalSessions(sessions);
 
     const panel = await mountPanel({ globalSessions: gs });
-    const root = shadowRoot(panel);
 
     // Switch to project view.
-    clickSelector(root, "[data-group-by='project']");
-    await panel.updateComplete;
+    await chooseGroupBy(panel, "project");
 
     panel.remove();
 
     const panel2 = await mountPanel({ globalSessions: gs });
-    const root2 = shadowRoot(panel2);
-    const projectBtn = root2.querySelector("[data-group-by='project']");
-    expect(projectBtn?.getAttribute("aria-pressed")).toBe("true");
+    expect(groupingValue(panel2)).toBe("Project");
   });
 });
 
@@ -582,16 +591,13 @@ describe("selected session group auto-expand", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group-by='project']");
-    await panel.updateComplete;
+    await chooseGroupBy(panel, "project");
     clickSelector(root, "[data-group='proj-1'] > button");
     await panel.updateComplete;
     expect(root.querySelector("[data-group='proj-1']")?.getAttribute("aria-expanded")).toBe("false");
 
-    clickSelector(root, "[data-group-by='state']");
-    await panel.updateComplete;
-    clickSelector(root, "[data-group-by='project']");
-    await panel.updateComplete;
+    await chooseGroupBy(panel, "state");
+    await chooseGroupBy(panel, "project");
     await panel.updateComplete;
 
     expect(root.querySelector("[data-group='proj-1']")?.getAttribute("aria-expanded")).toBe("true");
@@ -964,6 +970,84 @@ describe("new session callback", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
+
+describe("header", () => {
+  it("names the current grouping in the title", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+
+    expect(groupingValue(panel)).toBe("State");
+
+    await chooseGroupBy(panel, "project");
+    expect(groupingValue(panel)).toBe("Project");
+  });
+
+  it("marks the grouping menu closed until the title is used", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    const root = shadowRoot(panel);
+
+    expect(root.querySelector("[data-action='group-by-menu']")?.getAttribute("aria-expanded")).toBe("false");
+    expect(root.querySelector("[data-group-by='project']")).toBeNull();
+
+    clickSelector(root, "[data-action='group-by-menu']");
+    await panel.updateComplete;
+
+    expect(root.querySelector("[data-action='group-by-menu']")?.getAttribute("aria-expanded")).toBe("true");
+    expect(root.querySelector("[data-group-by='state']")?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("reaches workspace management and app actions through the overflow menu", async () => {
+    const opened: string[] = [];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("open-one")]),
+      onManageWorkspaces: () => { opened.push("workspaces"); },
+      onShowActions: () => { opened.push("actions"); },
+    });
+    const root = shadowRoot(panel);
+
+    expect(root.querySelector("[data-action='manage-workspaces']")).toBeNull();
+
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+    clickSelector(root, "[data-action='manage-workspaces']");
+    await panel.updateComplete;
+
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+    clickSelector(root, "[data-action='show-actions']");
+    await panel.updateComplete;
+
+    expect(opened).toEqual(["workspaces", "actions"]);
+    expect(root.querySelector("[data-action='manage-workspaces']")).toBeNull();
+  });
+
+  it("omits app actions when the shell offers none", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    const root = shadowRoot(panel);
+
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+
+    expect(root.querySelector("[data-action='manage-workspaces']")).not.toBeNull();
+    expect(root.querySelector("[data-action='show-actions']")).toBeNull();
+  });
+
+  it("closes an open menu on Escape", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    const root = shadowRoot(panel);
+
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+    expect(root.querySelector("#inbox-board-menu")).not.toBeNull();
+
+    await pressKey(panel, "Escape");
+
+    expect(root.querySelector("#inbox-board-menu")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Archived visibility toggle
 // ---------------------------------------------------------------------------
 
@@ -987,8 +1071,7 @@ describe("archived visibility toggle", () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group-by='project']");
-    await panel.updateComplete;
+    await chooseGroupBy(panel, "project");
     expect(root.querySelector("[data-session='archived-one']")).toBeNull();
 
     await revealArchived(panel);
@@ -1077,7 +1160,7 @@ describe("board shortcuts", () => {
     const root = shadowRoot(panel);
 
     await pressKey(panel, "g");
-    expect(root.querySelector("[data-group-by='project']")?.getAttribute("aria-pressed")).toBe("true");
+    expect(groupingValue(panel)).toBe("Project");
 
     await pressKey(panel, "a");
     expect(root.querySelector("[data-session='archived-one']")).not.toBeNull();
