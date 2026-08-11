@@ -3,12 +3,12 @@ import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText
 
 describe("prompt resource command policy", () => {
   it("parses only offset-zero slash commands and preserves the text after the first whitespace separator", () => {
-    expect(parseLeadingSlashCommand("/skill:review  --flag  value")).toEqual({ name: "skill:review", args: " --flag  value" });
+    expect(parseLeadingSlashCommand("/skill:review  --flag  value")).toEqual({ kind: "command", name: "skill:review", args: " --flag  value" });
     expect(parseLeadingSlashCommand(" /skill:review")).toEqual({ kind: "not-command" });
     expect(parseLeadingSlashCommand("/")).toEqual({ kind: "invalid", reason: "missing-name" });
     expect(parseLeadingSlashCommand("/ skill:review")).toEqual({ kind: "invalid", reason: "missing-name" });
-    expect(parseLeadingSlashCommand("/skill:review\nnext")).toEqual({ name: "skill:review", args: "next" });
-    expect(parseLeadingSlashCommand("/skill:review\t\tquoted  text")).toEqual({ name: "skill:review", args: "\tquoted  text" });
+    expect(parseLeadingSlashCommand("/skill:review\nnext")).toEqual({ kind: "command", name: "skill:review", args: "next" });
+    expect(parseLeadingSlashCommand("/skill:review\t\tquoted  text")).toEqual({ kind: "command", name: "skill:review", args: "\tquoted  text" });
   });
 
   it("uses exact code points and content in opaque fingerprints", async () => {

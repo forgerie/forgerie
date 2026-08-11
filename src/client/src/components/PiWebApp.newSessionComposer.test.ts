@@ -324,7 +324,7 @@ describe("PiWebApp New session composer root", () => {
 
     const draftElement = required(composer.shadowRoot?.querySelector("composer-draft"), "shared composer draft");
     if (!(draftElement instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
-    await vi.waitFor(() => { expect(draftElement.currentSnapshot()).toEqual({ text: "Edited through root", delivery: "inline" }); });
+    await vi.waitFor(() => { expect(draftElement.currentSnapshot()).toEqual({ text: "Edited through root" }); });
     expect(appState(app).clientQueuedSessionMessages[failed.id]).toBeUndefined();
   });
 

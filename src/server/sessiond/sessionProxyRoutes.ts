@@ -14,7 +14,9 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
       reply.code(upstream.statusCode);
       const contentType = upstream.headers["content-type"];
       if (contentType !== undefined && contentType !== "") reply.header("content-type", contentType);
-      return upstream.body !== "" ? parseJson(upstream.body) : undefined;
+      if (upstream.body === "") return undefined;
+      const value: unknown = JSON.parse(upstream.body);
+      return value;
     } catch (error) {
       requestFailed(reply, error);
       return undefined;
@@ -48,11 +50,6 @@ function stripPrefix(url: string, prefix: string): string {
   const query = url.slice(path.length);
   const stripped = path.startsWith(prefix) ? `${path.slice(prefix.length)}${query}` : url;
   return stripped === "" ? "/" : stripped;
-}
-
-function parseJson(text: string): unknown {
-  const value: unknown = JSON.parse(text);
-  return value;
 }
 
 function requestFailed(reply: FastifyReply, error: unknown): void {

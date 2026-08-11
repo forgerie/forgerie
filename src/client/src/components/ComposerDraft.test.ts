@@ -19,8 +19,8 @@ afterEach(() => {
 describe("ComposerDraft", () => {
   it("mounts in chat and modal hosts with the same runtime contract", async () => {
     const runtime = runtimeWith(({ kind, from, to }) => kind === "command" ? [{ kind: "command", replaceFrom: from, replaceTo: to, insertText: "/skill:review", detail: "skill" }] : []);
-    const chatSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => void>();
-    const modalSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => void>();
+    const chatSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const modalSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
     const chat = await mountDraft({ runtime, onSubmit: chatSubmit, host: document.createElement("footer") });
     const modalHost = document.createElement("section");
     modalHost.setAttribute("role", "dialog");
@@ -56,7 +56,7 @@ describe("ComposerDraft", () => {
   });
 
   it("submits text, attachment-only, and delivery snapshots through one public callback", async () => {
-    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => void>();
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
     const draft = await mountDraft({ onSubmit });
 
     await attachFile(draft, new File(["hello"], "note.txt", { type: "text/plain" }));

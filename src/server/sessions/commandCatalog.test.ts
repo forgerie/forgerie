@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources, expandPromptResourceCommand, resolveCanonicalCommandSource, resolvePromptResourceIdentity } from "./commandCatalog.js";
+import { buildActiveCommandCatalog, buildActiveCommandList, buildPromptResourceCatalogFromResources, expandPromptResourceCommand, resolveCanonicalCommandSource, resolvePromptResourceIdentity } from "./commandCatalog.js";
 
 describe("canonical command catalog", () => {
   it("projects active commands with current precedence and prompt-resource eligibility", async () => {
@@ -29,6 +29,22 @@ describe("canonical command catalog", () => {
       "skill:skill:audit",
     ]);
     expect(catalog.firstPromptCommands[0]?.identity.fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("projects active command descriptors without requiring prompt-resource bodies or identities", () => {
+    const commands = buildActiveCommandList({
+      builtins: [{ name: "tree", source: "builtin" }],
+      extensions: [{ name: "skill:audit", source: "extension", description: "extension wins" }],
+      prompts: [{ name: "review", description: "Review", origin: "prompt:a" }],
+      skills: [{ name: "audit", description: "Audit", origin: "skill:a" }],
+    });
+
+    expect(commands).toEqual([
+      { name: "review", source: "prompt", description: "Review" },
+      { name: "skill:audit", source: "extension", description: "extension wins" },
+      { name: "tree", source: "builtin" },
+    ]);
+    expect(JSON.stringify(commands)).not.toContain("fingerprint");
   });
 
   it("refuses a prevalidated resource identity when an active extension wins the same command name", async () => {

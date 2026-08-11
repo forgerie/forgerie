@@ -4,6 +4,8 @@ import { fingerprintPromptResourceCommand, parseLeadingSlashCommand, type Prompt
 
 export type CommandSource = SlashCommand["source"];
 
+type SlashCommandWithOrigin = SlashCommand & { origin?: string };
+
 export interface CanonicalBuiltinCommandInput {
   name: string;
   description?: string | undefined;
@@ -37,10 +39,14 @@ export interface ActiveCommandCatalogInput {
 
 export interface CanonicalRuntimePromptInput {
   name: string;
+  description?: string | undefined;
+  origin?: string | undefined;
 }
 
 export interface CanonicalRuntimeSkillInput {
   name: string;
+  description?: string | undefined;
+  origin?: string | undefined;
 }
 
 export interface CanonicalCommandNameInput {
@@ -100,13 +106,17 @@ export async function buildPromptResourceCatalogFromResources(input: { prompts: 
   return { available: true, commands, diagnostics: [...input.diagnostics ?? []] };
 }
 
+export function buildActiveCommandList(input: CanonicalCommandNameInput): SlashCommand[] {
+  return sortCommands(canonicalWinners(canonicalNameCandidates(input)).map(toClientCommand));
+}
+
 export function resolveCanonicalCommandSource(input: CanonicalCommandNameInput, name: string): CommandSource | undefined {
   return canonicalWinners(canonicalNameCandidates(input)).find((command) => command.name === name)?.source;
 }
 
 export function resolvePromptResourceIdentity(catalog: ActiveCommandCatalog, text: string, identity: PromptResourceCommandIdentity): PromptResourceIdentityResolution {
   const parsed = parseLeadingSlashCommand(text);
-  if ("kind" in parsed) return { kind: "unsupported", reason: parsed.kind === "not-command" ? "not-command" : "invalid" };
+  if (parsed.kind !== "command") return { kind: "unsupported", reason: parsed.kind === "not-command" ? "not-command" : "invalid" };
   const command = catalog.resourceCommands.find((candidate) => candidate.name === parsed.name);
   if (command === undefined) return { kind: "unsupported", reason: "unknown" };
   if (command.identity.source !== identity.source || command.identity.name !== identity.name || command.identity.fingerprint !== identity.fingerprint) {
@@ -117,6 +127,10 @@ export function resolvePromptResourceIdentity(catalog: ActiveCommandCatalog, tex
 
 function clientCommand(name: string, source: CommandSource, description: string | undefined): SlashCommand {
   return { name, source, ...(description === undefined || description === "" ? {} : { description }) };
+}
+
+function clientCommandWithOrigin(name: string, source: CommandSource, description: string | undefined, origin: string | undefined): SlashCommandWithOrigin {
+  return { ...clientCommand(name, source, description), ...(origin === undefined ? {} : { origin }) };
 }
 
 async function promptResourceRecordsFromPrompts(prompts: readonly CanonicalPromptResourceInput[]): Promise<PromptResourceCommandRecord[]> {
@@ -158,12 +172,12 @@ async function promptResourceRecord(input: { source: PromptResourceCommandSource
   };
 }
 
-function canonicalNameCandidates(input: CanonicalCommandNameInput): SlashCommand[] {
+function canonicalNameCandidates(input: CanonicalCommandNameInput): SlashCommandWithOrigin[] {
   return [
     ...input.builtins.map((command) => clientCommand(command.name, "builtin", command.description)),
     ...input.extensions.map((command) => clientCommand(command.name, "extension", command.description)),
-    ...input.skills.map((skill) => clientCommand(`skill:${skill.name}`, "skill", undefined)),
-    ...input.prompts.map((prompt) => clientCommand(prompt.name, "prompt", undefined)),
+    ...input.skills.map((skill) => clientCommandWithOrigin(`skill:${skill.name}`, "skill", skill.description, skill.origin)),
+    ...input.prompts.map((prompt) => clientCommandWithOrigin(prompt.name, "prompt", prompt.description, prompt.origin)),
   ];
 }
 

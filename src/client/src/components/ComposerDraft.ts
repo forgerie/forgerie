@@ -6,6 +6,7 @@ import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { html, LitElement, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
+import { base64ByteLength } from "../../../shared/promptAttachments";
 import type { ComposerRuntime } from "../composerRuntime";
 import { loadAttachmentDelivery, saveAttachmentDelivery } from "../attachmentPreferences";
 import { inputModeForDraft, inputModesEqual, type InputMode } from "../inputModes";
@@ -32,9 +33,7 @@ export interface ComposerDraftSubmitSnapshot {
   delivery?: PromptAttachmentDelivery;
 }
 
-// `void` keeps existing chat hosts source-compatible; only explicit `"rejected"` preserves the draft.
-// eslint-disable-next-line @typescript-eslint/no-invalid-void-type
-export type ComposerDraftSubmitOutcome = "accepted" | "rejected" | void;
+export type ComposerDraftSubmitOutcome = "accepted" | "rejected";
 
 export interface ComposerDraftSeed {
   id: string;
@@ -207,8 +206,7 @@ export class ComposerDraft extends LitElement {
     const attachments = this.attachments.length > 0 ? this.currentAttachments() : undefined;
     return {
       text: this.draft,
-      ...(attachments === undefined ? {} : { attachments }),
-      delivery: this.effectiveAttachmentDelivery(),
+      ...(attachments === undefined ? {} : { attachments, delivery: this.effectiveAttachmentDelivery() }),
     };
   }
 
@@ -222,7 +220,7 @@ export class ComposerDraft extends LitElement {
     if (snapshot === undefined) return;
     let result: ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
     try {
-      result = this.onSubmit?.(snapshot, this.working ? streamingBehavior : undefined);
+      result = this.onSubmit?.(snapshot, this.working ? streamingBehavior : undefined) ?? "rejected";
     } catch {
       return;
     }
@@ -335,7 +333,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private resolveSubmitOutcome(outcome: ComposerDraftSubmitOutcome, text: string): void {
-    if (outcome === "rejected") return;
+    if (outcome !== "accepted") return;
     this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, text);
     this.resetComposer();
   }
@@ -679,11 +677,6 @@ function pendingToPromptAttachment(attachment: PendingAttachment): PromptAttachm
     return { kind: "image", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
   }
   return { kind: "file", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
-}
-
-function base64ByteLength(data: string): number {
-  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
 }
 
 function fileExtensionLabel(name: string): string {

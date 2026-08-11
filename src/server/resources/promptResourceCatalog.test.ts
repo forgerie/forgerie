@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildActiveCommandCatalog } from "../sessions/commandCatalog.js";
+import { canonicalPromptResourceOrigin } from "../sessions/promptResourceOrigin.js";
 import { createDefaultPromptResourceLoader, enforcePromptResourceCatalogLimits, PROMPT_RESOURCE_CATALOG_LIMITS, PromptResourceCatalogService, promptResourceCatalogUnavailable, type PromptResourceLoader } from "./promptResourceCatalog.js";
 import type { PromptResourceCatalogAvailable, PromptResourceCatalogResponse } from "../../shared/promptResourceCommand.js";
 
@@ -43,13 +44,14 @@ describe("PromptResourceCatalogService", () => {
     expect(JSON.stringify(response)).not.toContain(agentDir);
   });
 
-  it("projects the same prompt and skill metadata as the active command catalog", async () => {
+  it("projects the same prompt and skill metadata as the active command catalog without leaking paths", async () => {
     const root = await tempRoot();
     const workspace = join(root, "workspace");
+    const promptPath = join(workspace, ".pi", "prompts", "review.md");
     const skillPath = join(workspace, ".pi", "skills", "audit", "SKILL.md");
     const skillBody = "---\ndescription: Audit\n---\nAudit body\n";
     const resources = {
-      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", filePath: join(workspace, ".pi", "prompts", "review.md"), sourceInfo: sourceInfo(join(workspace, ".pi", "prompts", "review.md")) }],
+      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", filePath: "review.md", sourceInfo: sourceInfo(promptPath) }],
       skills: [{ name: "audit", description: "Audit", filePath: skillPath, baseDir: join(workspace, ".pi", "skills", "audit"), sourceInfo: sourceInfo(skillPath), disableModelInvocation: false }],
       diagnostics: [],
     };
@@ -60,11 +62,13 @@ describe("PromptResourceCatalogService", () => {
     const active = await buildActiveCommandCatalog({
       builtins: [],
       extensions: [],
-      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", origin: `prompt:project:top-level:local:${join(workspace, ".pi", "prompts", "review.md")}` }],
-      skills: [{ name: "audit", description: "Audit", content: skillBody, origin: `skill:project:top-level:local:${skillPath}`, baseDir: join(workspace, ".pi", "skills", "audit"), filePath: skillPath }],
+      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", origin: canonicalPromptResourceOrigin("prompt", "review.md", sourceInfo(promptPath)) }],
+      skills: [{ name: "audit", description: "Audit", content: skillBody, origin: canonicalPromptResourceOrigin("skill", skillPath, sourceInfo(skillPath)), baseDir: join(workspace, ".pi", "skills", "audit"), filePath: skillPath }],
     });
 
     expect(response).toEqual({ available: true, commands: active.firstPromptCommands, diagnostics: [] });
+    expect(JSON.stringify(response)).not.toContain(workspace);
+    expect(JSON.stringify(response)).not.toContain(skillPath);
   });
 
   it("uses canonical origins, not public basenames, in command identities", async () => {

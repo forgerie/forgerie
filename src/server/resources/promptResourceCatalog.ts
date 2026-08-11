@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { DefaultResourceLoader, type PromptTemplate, type ResourceDiagnostic, type Skill, type SourceInfo } from "@earendil-works/pi-coding-agent";
+import { DefaultResourceLoader, type PromptTemplate, type ResourceDiagnostic, type Skill } from "@earendil-works/pi-coding-agent";
 import { buildPromptResourceCatalogFromResources } from "../sessions/commandCatalog.js";
+import { canonicalPromptResourceOrigin } from "../sessions/promptResourceOrigin.js";
 import type { PromptResourceCatalogAvailable, PromptResourceCatalogResponse } from "../../shared/promptResourceCommand.js";
 
 export interface PromptResourceCatalogLimits {
@@ -131,13 +132,13 @@ export class PromptResourceCatalogService {
           name: prompt.name,
           description: prompt.description,
           content: prompt.content,
-          origin: safeOrigin("prompt", prompt.filePath, prompt.sourceInfo),
+          origin: canonicalPromptResourceOrigin("prompt", prompt.filePath, prompt.sourceInfo),
         })),
         skills: await Promise.all(resources.skills.map(async (skill) => ({
           name: skill.name,
           description: skill.description,
           content: await readFile(skill.filePath, "utf8"),
-          origin: safeOrigin("skill", skill.filePath, skill.sourceInfo),
+          origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
           baseDir: skill.baseDir,
           filePath: skill.filePath,
         }))),
@@ -191,18 +192,6 @@ export function promptResourceCatalogUnavailable(reason: PromptResourceCatalogUn
 
 function serializedByteLength(response: PromptResourceCatalogAvailable): number {
   return Buffer.byteLength(JSON.stringify(response), "utf8");
-}
-
-function safeOrigin(kind: "prompt" | "skill", filePath: string | undefined, sourceInfo: SourceInfo | undefined): string {
-  const sourceInfoPath = sourceInfoPathValue(sourceInfo);
-  const canonicalPath = sourceInfoPath ?? filePath;
-  return `${kind}:${sourceInfo?.scope ?? "unknown"}:${sourceInfo?.origin ?? "unknown"}:${sourceInfo?.source ?? "unknown"}:${canonicalPath === undefined ? "unknown" : resolve(canonicalPath)}`;
-}
-
-function sourceInfoPathValue(sourceInfo: SourceInfo | undefined): string | undefined {
-  if (sourceInfo === undefined) return undefined;
-  if (!("path" in sourceInfo)) return undefined;
-  return typeof sourceInfo.path === "string" ? sourceInfo.path : undefined;
 }
 
 function safeDiagnostic(diagnostic: ResourceDiagnostic): string {

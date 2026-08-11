@@ -1,4 +1,5 @@
 import { api, workspacesApi, type SessionModel, type SlashCommand } from "./api";
+import type { PromptResourceCommandDescriptor } from "../../shared/promptResourceCommand";
 import { fileCompletionInsertText, modelCompletionChoices, type PromptCompletionTrigger } from "./promptCompletions";
 import type { CompletionItem } from "./components/shared";
 
@@ -17,10 +18,13 @@ export interface SessionComposerRuntimeOptions {
   workspaceId?: string;
 }
 
+export type PreSessionPromptResourceCatalogResolver = (projectId: string, workspaceId: string, machineId: string) => Promise<Awaited<ReturnType<typeof workspacesApi.promptResourceCatalog>>>;
+
 export interface PreSessionComposerRuntimeOptions {
   machineId: string;
   projectId?: string;
   workspaceId?: string;
+  promptResourceCatalog?: PreSessionPromptResourceCatalogResolver;
 }
 
 export class ComposerCompletionProviderError extends Error {
@@ -63,21 +67,26 @@ async function resolveSessionCommands(trigger: Extract<PromptCompletionTrigger, 
   return commands
     .filter((command) => command.name.toLowerCase().includes(trigger.query.toLowerCase()))
     .slice(0, 12)
-    .map((command) => ({
-      kind: "command",
-      replaceFrom: trigger.from,
-      replaceTo: trigger.to,
-      insertText: `/${command.name}`,
-      detail: command.source,
-      ...(command.description === undefined ? {} : { description: command.description }),
-    }));
+    .map((command) => formatCommandCompletion(command, trigger));
+}
+
+function formatCommandCompletion(command: SlashCommand | PromptResourceCommandDescriptor, trigger: Extract<PromptCompletionTrigger, { kind: "command" }>): CompletionItem {
+  return {
+    kind: "command",
+    replaceFrom: trigger.from,
+    replaceTo: trigger.to,
+    insertText: `/${command.name}`,
+    detail: command.source,
+    ...("identity" in command ? { promptResourceCommandIdentity: command.identity } : {}),
+    ...(command.description === undefined ? {} : { description: command.description }),
+  };
 }
 
 async function resolvePreSessionCommands(trigger: Extract<PromptCompletionTrigger, { kind: "command" }>, options: PreSessionComposerRuntimeOptions): Promise<CompletionItem[]> {
   if (!hasDestinationContext(options)) return [];
   let catalog: Awaited<ReturnType<typeof workspacesApi.promptResourceCatalog>>;
   try {
-    catalog = await workspacesApi.promptResourceCatalog(options.projectId, options.workspaceId, options.machineId);
+    catalog = await (options.promptResourceCatalog ?? workspacesApi.promptResourceCatalog)(options.projectId, options.workspaceId, options.machineId);
   } catch (error) {
     throw new ComposerCompletionProviderError("command", errorMessage(error, "Prompt-resource catalog unavailable."));
   }
@@ -85,15 +94,7 @@ async function resolvePreSessionCommands(trigger: Extract<PromptCompletionTrigge
   return catalog.commands
     .filter((command) => command.name.toLowerCase().includes(trigger.query.toLowerCase()))
     .slice(0, 12)
-    .map((command) => ({
-      kind: "command",
-      replaceFrom: trigger.from,
-      replaceTo: trigger.to,
-      insertText: `/${command.name}`,
-      detail: command.source,
-      promptResourceCommandIdentity: command.identity,
-      ...(command.description === undefined ? {} : { description: command.description }),
-    }));
+    .map((command) => formatCommandCompletion(command, trigger));
 }
 
 async function resolveWorkspaceFiles(trigger: Extract<PromptCompletionTrigger, { kind: "file" }>, options: SessionComposerRuntimeOptions): Promise<CompletionItem[]> {

@@ -228,7 +228,7 @@ function newSessionSubmissionIsEmpty(submission: NewSessionComposerSnapshot): bo
 
 function requiresPromptResourceIdentity(submission: NewSessionComposerSnapshot): boolean {
   const parsed = parseLeadingSlashCommand(submission.text);
-  return (!("kind" in parsed) || parsed.kind !== "not-command") && submission.promptResourceCommandIdentity === undefined;
+  return parsed.kind !== "not-command" && submission.promptResourceCommandIdentity === undefined;
 }
 
 function copyNewSessionSubmission(submission: NewSessionComposerSnapshot): NewSessionFirstPromptSubmission {

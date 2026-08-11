@@ -43,7 +43,7 @@ async function proxyPromptResourceCatalogRequest(daemon: PromptResourceCatalogPr
     const contentType = upstream.headers["content-type"];
     if (contentType !== undefined && contentType !== "") reply.header("content-type", contentType);
     if (upstream.body === "") return await reply.send();
-    return await reply.send(parseJson(upstream.body));
+    return await reply.send(JSON.parse(upstream.body));
   } catch (error) {
     if (error instanceof PromptResourceCatalogProxyTimeoutError) {
       return reply.code(504).send({ error: "Prompt-resource catalog request timed out" });
@@ -72,10 +72,6 @@ function requestWithDeadline(daemon: PromptResourceCatalogProxyDaemon, method: s
       rejectRequest(error instanceof Error ? error : new Error(String(error)));
     });
   });
-}
-
-function parseJson(text: string): unknown {
-  return JSON.parse(text);
 }
 
 class PromptResourceCatalogProxyTimeoutError extends Error {

@@ -649,7 +649,7 @@ describe("new-session-composer modal lifetime", () => {
 
     button(composer, "[data-action='cancel']").click();
 
-    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "/review src", promptResourceCommandIdentity: identity });
   });
 
   it("focusExisting returns focus to the same draft without reinitializing it", async () => {

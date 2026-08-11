@@ -26,7 +26,8 @@ import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
-import { buildActiveCommandCatalog, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
+import { buildActiveCommandCatalog, buildActiveCommandList, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
+import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
 import { SessionCommandService } from "./sessionCommandService.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
 import { SessionArchiveStore, type ArchivedSessionRecord, type ArchiveSessionInput } from "./sessionArchiveStore.js";
@@ -2234,7 +2235,20 @@ export class PiSessionService implements SessionRouteService {
 
   async commands(ref: PiSessionRef): Promise<ClientCommand[]> {
     const session = await this.getOrOpen(ref);
-    return (await this.activeCommandCatalog(session)).commands;
+    return buildActiveCommandList({
+      builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, ...(command.description === undefined ? {} : { description: command.description }), source: "builtin" as const })),
+      extensions: session.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" as const })),
+      prompts: session.promptTemplates.map((template) => ({
+        name: template.name,
+        ...(template.description === undefined ? {} : { description: template.description }),
+        origin: canonicalPromptResourceOrigin("prompt", template.filePath, template.sourceInfo),
+      })),
+      skills: session.resourceLoader.getSkills().skills.map((skill) => ({
+        name: skill.name,
+        ...(skill.description === undefined ? {} : { description: skill.description }),
+        origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
+      })),
+    });
   }
 
   private async activeCommandCatalog(session: PiAgentSession): Promise<ActiveCommandCatalog> {
@@ -2245,13 +2259,13 @@ export class PiSessionService implements SessionRouteService {
         name: template.name,
         ...(template.description === undefined ? {} : { description: template.description }),
         content: template.content ?? "",
-        origin: resourceOrigin("prompt", template.filePath, template.sourceInfo),
+        origin: canonicalPromptResourceOrigin("prompt", template.filePath, template.sourceInfo),
       })),
       skills: await Promise.all(session.resourceLoader.getSkills().skills.map(async (skill) => ({
         name: skill.name,
         ...(skill.description === undefined ? {} : { description: skill.description }),
         content: skill.filePath === undefined ? "" : await readResourceContent(skill.filePath),
-        origin: resourceOrigin("skill", skill.filePath, skill.sourceInfo),
+        origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
         baseDir: skill.baseDir ?? "",
         ...(skill.filePath === undefined ? {} : { filePath: skill.filePath }),
       }))),
@@ -4784,10 +4798,6 @@ function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: Imag
   if (images.length > 0) options.images = images;
   if (!expandPromptTemplates) options.expandPromptTemplates = false;
   return Object.keys(options).length > 0 ? options : undefined;
-}
-
-function resourceOrigin(kind: "prompt" | "skill", path: string | undefined, sourceInfo: { source: string; scope: string; origin: string } | undefined): string {
-  return `${kind}:${sourceInfo?.scope ?? "unknown"}:${sourceInfo?.origin ?? "unknown"}:${sourceInfo?.source ?? "unknown"}:${path ?? "unknown"}`;
 }
 
 async function readResourceContent(path: string): Promise<string> {

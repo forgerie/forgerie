@@ -129,7 +129,7 @@ export class PromptEditor extends LitElement {
           .runtime=${this.runtime()}
           .promptHistory=${this.promptHistory}
           .storageKey=${this.draftStorageKey()}
-          .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => { this.sendSnapshot(snapshot, streamingBehavior); }}
+          .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => this.sendSnapshot(snapshot, streamingBehavior)}
           .onEscape=${(context: ComposerDraftEscapeContext) => this.handleDraftEscape(context)}
           .onDisplayStateChange=${(state: ComposerDraftDisplayState) => { this.updateDraftDisplayState(state); }}
         ></composer-draft>
@@ -420,8 +420,9 @@ export class PromptEditor extends LitElement {
     this.draftElement.replaceText(text);
   }
 
-  private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): void {
+  private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): "accepted" {
     void this.onSend?.(snapshot.text, streamingBehavior, snapshot.attachments, snapshot.delivery);
+    return "accepted";
   }
 
   private handleDraftEscape(context: ComposerDraftEscapeContext): boolean {

@@ -15,6 +15,7 @@ import {
   createNewSessionComposerState,
   refreshNewSessionCatalog,
   rejectNewSessionSubmission,
+  isNewSessionMachineAvailable,
   resolveNewSessionMachines,
   resolveNewSessionProjects,
   resolveNewSessionWorkspaces,
@@ -205,13 +206,13 @@ export class NewSessionComposer extends LitElement {
     }
     if (catalog.kind === "error") return this.renderCatalogProblem("machine-error", catalog.message, "refresh-machines", "Refresh machines");
     if (catalog.kind === "empty") return this.renderCatalogProblem("machine-empty", "No machines are available.", "refresh-machines", "Refresh machines");
-    const hasAvailableMachine = catalog.items.some(isMachineAvailable);
+    const hasAvailableMachine = catalog.items.some(isNewSessionMachineAvailable);
     return html`
       ${hasAvailableMachine ? nothing : this.renderCatalogProblem("machine-unavailable", "No machines are currently available.", "refresh-machines", "Refresh")}
       <ul class="catalog-list" aria-label="Machines">
         ${catalog.items.map((machine) => html`
           <li>
-            <button class="catalog-item" type="button" data-machine-id=${machine.id} ?disabled=${!isMachineAvailable(machine)} @click=${() => { this.selectMachine(machine); }}>
+            <button class="catalog-item" type="button" data-machine-id=${machine.id} ?disabled=${!isNewSessionMachineAvailable(machine)} @click=${() => { this.selectMachine(machine); }}>
               <span class="catalog-item-copy"><strong>${machine.name}</strong><small>${machine.statusMessage ?? machine.id}</small></span>
               <span class="catalog-meta">${machineAvailabilityLabel(machine)}</span>
             </button>
@@ -288,6 +289,7 @@ export class NewSessionComposer extends LitElement {
       machineId: destination.machine.id,
       projectId: destination.project.id,
       workspaceId: destination.workspace.id,
+      promptResourceCatalog: this.promptResourceCatalog,
     });
   }
 
@@ -344,8 +346,8 @@ export class NewSessionComposer extends LitElement {
 
   private async validatePromptResourceCommand(snapshot: ComposerDraftSubmitSnapshot, destination: NewSessionCompleteDestination): Promise<NewSessionFirstPromptSubmission | undefined> {
     const parsed = parseLeadingSlashCommand(snapshot.text);
-    if ("kind" in parsed && parsed.kind === "not-command") return snapshot;
-    if ("kind" in parsed) {
+    if (parsed.kind === "not-command") return snapshot;
+    if (parsed.kind !== "command") {
       this.slashValidationError = { message: "Enter a prompt resource command name after / before starting a session.", retryable: false };
       return undefined;
     }
@@ -532,10 +534,6 @@ function initialFocusSelector(state: NewSessionComposerState): string {
   return "composer-draft";
 }
 
-function isMachineAvailable(machine: Machine): boolean {
-  return machine.status !== "offline" && machine.status !== "error";
-}
-
 function machineAvailabilityLabel(machine: Machine): string {
   if (machine.status === "offline") return "Offline";
   if (machine.status === "error") return "Unavailable";
@@ -546,7 +544,7 @@ function machineAvailabilityLabel(machine: Machine): string {
 function promptResourceIdentityApplies(text: string, identity: NewSessionFirstPromptSubmission["promptResourceCommandIdentity"]): boolean {
   if (identity === undefined) return false;
   const parsed = parseLeadingSlashCommand(text);
-  return !("kind" in parsed) && parsed.name === identity.name;
+  return parsed.kind === "command" && parsed.name === identity.name;
 }
 
 function errorMessage(error: unknown, fallback = "New session could not be started."): string {

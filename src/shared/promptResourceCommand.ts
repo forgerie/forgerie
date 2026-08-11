@@ -1,6 +1,7 @@
 export type PromptResourceCommandSource = "prompt" | "skill";
 
 export interface ParsedPromptResourceCommand {
+  kind: "command";
   name: string;
   args: string;
 }
@@ -49,7 +50,7 @@ export function parseLeadingSlashCommand(input: string): LeadingSlashCommandPars
   const name = match === null ? afterSlash : afterSlash.slice(0, match.index);
   if (name === "") return { kind: "invalid", reason: "missing-name" };
   const args = match === null ? "" : afterSlash.slice(match.index + match[0].length);
-  return { name, args };
+  return { kind: "command", name, args };
 }
 
 export async function fingerprintPromptResourceCommand(input: PromptResourceCommandFingerprintInput): Promise<string> {

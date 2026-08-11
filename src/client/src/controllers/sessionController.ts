@@ -26,6 +26,7 @@ import {
 } from "../selectedChatLoad";
 import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
+import { base64ByteLength } from "../../../shared/promptAttachments";
 import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
@@ -2461,14 +2462,7 @@ ${references}`;
 function recoverySubmissionProjection(queued: FirstPromptQueuedSend): Pick<SessionLaunchRecovery, "attachments" | "delivery" | "promptResourceCommandIdentity"> {
   return {
     ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
-    ...(queued.attachments === undefined || queued.attachments.length === 0 ? {} : {
-      delivery: queued.delivery,
-      attachments: queued.attachments.map((attachment) => ({
-        ...(attachment.name === undefined ? {} : { name: attachment.name }),
-        mimeType: attachment.mimeType,
-        size: base64ByteSize(attachment.data),
-      })),
-    }),
+    ...recoveryAttachmentProjection(queued),
   };
 }
 
@@ -2503,13 +2497,7 @@ function payloadFreeClaimedCreationRecovery(recovery: SessionLaunchRecovery, que
     retrying: recovery.retrying,
     delivery: queued.delivery,
     ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
-    ...(queued.attachments === undefined || queued.attachments.length === 0 ? {} : {
-      attachments: queued.attachments.map((attachment) => ({
-        ...(attachment.name === undefined ? {} : { name: attachment.name }),
-        mimeType: attachment.mimeType,
-        size: base64ByteSize(attachment.data),
-      })),
-    }),
+    ...recoveryAttachmentProjection(queued),
   };
 }
 
@@ -2553,9 +2541,21 @@ function creationRecoveryWithQueuedSubmission(recovery: SessionLaunchRecovery, q
   };
 }
 
-function base64ByteSize(data: string): number {
-  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor(data.length * 3 / 4) - padding);
+function recoveryAttachmentProjection(queued: FirstPromptQueuedSend): Pick<SessionLaunchRecovery, "attachments" | "delivery"> {
+  return queued.attachments === undefined || queued.attachments.length === 0
+    ? {}
+    : {
+        delivery: queued.delivery,
+        attachments: queued.attachments.map(promptAttachmentMetadata),
+      };
+}
+
+function promptAttachmentMetadata(attachment: PromptAttachment): NonNullable<SessionLaunchRecovery["attachments"]>[number] {
+  return {
+    ...(attachment.name === undefined ? {} : { name: attachment.name }),
+    mimeType: attachment.mimeType,
+    size: base64ByteLength(attachment.data),
+  };
 }
 
 async function initialPromptRecoveryAccepted(page: MessagePage, recovery: SessionLaunchRecovery, queued: QueuedPendingSessionSend | undefined): Promise<boolean> {

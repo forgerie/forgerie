@@ -95,7 +95,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     const active = await this.getActive(sessionId);
     const session = active.runtime.session;
     const parsed = parseLeadingSlashCommand(text);
-    if ("kind" in parsed) {
+    if (parsed.kind !== "command") {
       return parsed.kind === "not-command"
         ? { type: "unsupported", message: "Command must start with / at offset zero" }
         : { type: "unsupported", message: "Command name is required" };
