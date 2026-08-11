@@ -722,6 +722,9 @@ export class ChatView extends LitElement {
     if (load.kind === "cached-readable") {
       return this.renderUpdatingLoadNotice("Showing cached transcript", "Checking for fresh history.");
     }
+    if (load.kind === "preview-readable") {
+      return this.renderUpdatingLoadNotice("Showing quick transcript preview", "Loading complete history.");
+    }
     if (load.kind === "fresh-readable") {
       if (this.messages.length === 0 && this.messageTotal === 0) return null;
       return this.renderUpdatingLoadNotice("Transcript ready", "Opening live controls.");

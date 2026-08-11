@@ -37,6 +37,27 @@ describe("PromptEditor read-only control availability", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
 
+  it("keeps drafting and submission available while runtime-only controls load", async () => {
+    const onSend = vi.fn();
+    const editor = await renderPromptEditor({ runtimeControlsAvailable: false });
+    editor.onSend = onSend;
+    editor.replaceText("queue this immediately");
+    await editor.updateComplete;
+
+    const send = button(editor, ".send-button");
+    const model = button(editor, ".select-model");
+    const thinking = button(editor, ".select-thinking");
+
+    expect(editor.view?.state.readOnly).toBe(false);
+    expect(send.disabled).toBe(false);
+    expect(model.disabled).toBe(true);
+    expect(thinking.disabled).toBe(true);
+
+    send.click();
+
+    expect(onSend).toHaveBeenCalledWith("queue this immediately", undefined, undefined, undefined);
+  });
+
   it("keeps archive and control-sheet summon available while the editor is read-only", async () => {
     const onArchiveAndNext = vi.fn();
     const onOpenControlSheet = vi.fn();
@@ -68,12 +89,14 @@ async function renderPromptEditor(options: {
   canArchive?: boolean;
   onArchiveAndNext?: () => void;
   onOpenControlSheet?: () => void;
+  runtimeControlsAvailable?: boolean;
 }): Promise<PromptEditor> {
   const editor = new PromptEditor();
   editor.sessionId = "session-1";
   editor.machineId = "local";
   editor.status = status();
   editor.disabled = options.disabled ?? false;
+  editor.runtimeControlsAvailable = options.runtimeControlsAvailable ?? true;
   editor.canStop = options.canStop ?? false;
   editor.chromeSummoned = options.chromeSummoned ?? false;
   editor.canArchive = options.canArchive ?? false;

@@ -16,7 +16,7 @@ import { MachineController } from "../controllers/machineController";
 import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
-import { SessionController, type SessionLaunchRecovery } from "../controllers/sessionController";
+import { SessionController, type SessionLaunchRecovery, type SessionTranscriptPreview } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
 import { WorkspaceController, canDeleteWorkspace } from "../controllers/workspaceController";
@@ -36,7 +36,7 @@ import { promptHistoryEntries } from "../promptHistory";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
 import { notificationInboxTotalCount, selectedNotificationView } from "../sessionNotifications";
 import { createChatOpenTiming } from "../chatOpenTiming";
-import { selectedChatCanUseRuntime, selectedChatLoading, selectedChatTarget, selectedChatTargetsEqual, type SelectedChatLoad } from "../selectedChatLoad";
+import { selectedChatCanUseRuntime, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget, selectedChatTargetsEqual, type SelectedChatLoad } from "../selectedChatLoad";
 import { SessionUnreadController } from "../sessionUnread";
 import { deriveUnreadPresence, EMPTY_UNREAD_PRESENCE, sameUnreadPresence, type UnreadPresence } from "../unreadPresence";
 import { initialSessionWarningVisibilityState, reconcileSessionWarningVisibility, toggleSessionWarnings } from "../sessionWarningVisibility";
@@ -174,6 +174,7 @@ export class PiWebApp extends LitElement {
   @state() private unreadSessionIds: ReadonlySet<string> = this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), this.state.sessions);
   @state() private unreadPresence: UnreadPresence = EMPTY_UNREAD_PRESENCE;
   @state() private chatNavigationIntent: ChatNavigationIntent = { kind: "none" };
+  @state() private openingChatPreview: { readonly identity: string; readonly view: SessionTranscriptPreview } | undefined;
   @state() private cachedUnreadCompletedAt: Readonly<Record<string, string>> = {};
   private pendingChatReadingTarget: PendingChatReadingTarget | undefined;
   private unreadConnected = false;
@@ -1514,10 +1515,16 @@ export class PiWebApp extends LitElement {
     this.chatOpenTiming.begin(timingTarget);
     this.pendingChatReadingTarget = this.createPendingChatReadingTarget(seq, machineId, session);
     this.chatNavigationIntent = { kind: "opening", seq, machineId, session };
+    this.openingChatPreview = undefined;
+    void this.sessions.previewSession(session, machineId).then((view) => {
+      if (!isCurrentToken() || this.chatNavigationIntent.kind !== "opening" || this.chatNavigationIntent.seq !== seq) return;
+      this.openingChatPreview = { identity: unreadChatIdentity(machineId, session), view };
+    }).catch(() => undefined);
     if (this.state.error !== "") this.setState({ error: "" });
     await this.openChatForNavigationIntent();
     if (isCurrentToken()) this.chatOpenTiming.markShellPainted(timingTarget);
     if (!isCurrentToken()) {
+      this.recoverSupersededOpeningSends(machineId, session);
       this.clearChatNavigationIntentForToken(seq);
       return;
     }
@@ -1554,12 +1561,14 @@ export class PiWebApp extends LitElement {
         { token: seq, isCurrentToken },
       );
     } catch (error: unknown) {
+      const recovery = this.recoverOpeningSends(machineId, session);
       this.clearChatNavigationIntentForToken(seq);
-      if (isCurrentToken()) this.setState({ error: `Unable to open workspace: ${String(error)}` });
+      if (isCurrentToken()) this.setState({ error: `Unable to open workspace: ${String(error)}.${recovery}` });
       return;
     }
 
     if (!isCurrentToken()) {
+      this.recoverSupersededOpeningSends(machineId, session);
       this.clearChatNavigationIntentForToken(seq);
       return;
     }
@@ -1574,7 +1583,9 @@ export class PiWebApp extends LitElement {
       if (!this.selectedSessionMatchesNavigationTarget(machineId, session)) this.clearChatNavigationIntentForToken(seq);
       await this.openChat();
     } else if (result === "unavailable") {
+      const recovery = this.recoverOpeningSends(machineId, session);
       this.clearChatNavigationIntentForToken(seq);
+      if (recovery !== "") this.setState({ error: `Unable to open ${sessionDisplayLabel(session)}.${recovery}` });
       // All projects exhausted with no match: mark the cwd unavailable so the
       // row renders as disabled in the inbox panel.
       if (!this.unavailableCwds.has(session.cwd)) {
@@ -1588,6 +1599,21 @@ export class PiWebApp extends LitElement {
    * Restore a session from the inbox and navigate to it.
    * Like `selectNavigationItem` for restores: select session, then open chat.
    */
+  private recoverSupersededOpeningSends(machineId: string, session: SessionInfo): void {
+    const target = selectedChatTarget(machineId, session);
+    const current = this.chatNavigationIntent;
+    if (current.kind === "opening" && selectedChatTargetsEqual(selectedChatTarget(current.machineId, current.session), target)) return;
+    if (this.state.selectedSession?.id === session.id && selectedMachineId(this.state) === machineId) return;
+    this.sessions.recoverReadinessSends(session, machineId);
+  }
+
+  private recoverOpeningSends(machineId: string, session: SessionInfo): string {
+    const recovery = this.sessions.recoverReadinessSends(session, machineId);
+    if (recovery === undefined) return "";
+    const attachmentNotice = recovery.attachmentsNeedReattaching ? " Reattach files before sending." : "";
+    return ` ${String(recovery.count)} queued ${recovery.count === 1 ? "message was" : "messages were"} restored to this session's draft.${attachmentNotice}`;
+  }
+
   private async restoreInboxSession(session: SessionInfo): Promise<void> {
     const seq = ++this.navigationSelectionSeq;
     const machineId = selectedMachineId(this.state);
@@ -2697,7 +2723,11 @@ export class PiWebApp extends LitElement {
   private sendPrompt(text: string, streamingBehavior?: "steer" | "followUp", attachments?: import("../api").PromptAttachment[], delivery?: import("../../../shared/apiTypes").PromptAttachmentDelivery): void {
     const hasAttachments = attachments !== undefined && attachments.length > 0;
     if (!hasAttachments && streamingBehavior === undefined && this.auth.handleSlashCommand(text)) return;
-    if (!this.selectedChatRuntimeAvailable()) return;
+    const intent = this.chatNavigationIntent;
+    if (intent.kind === "opening") {
+      void this.sessions.sendToSession(intent.session, intent.machineId, text, streamingBehavior, attachments, delivery);
+      return;
+    }
     void this.sessions.send(text, streamingBehavior, attachments, delivery);
   }
 
@@ -2706,6 +2736,10 @@ export class PiWebApp extends LitElement {
   // bindings each time the app re-renders; bound class fields keep them constant.
   private readonly handleSendPrompt = (text: string, streamingBehavior?: "steer" | "followUp", attachments?: import("../api").PromptAttachment[], delivery?: import("../../../shared/apiTypes").PromptAttachmentDelivery): void => {
     this.sendPrompt(text, streamingBehavior, attachments, delivery);
+  };
+
+  private readonly handleNewSessionFromComposer = (): void => {
+    this.openNewSessionComposer();
   };
 
   private readonly handleStopActiveWork = (): void => {
@@ -2881,8 +2915,26 @@ export class PiWebApp extends LitElement {
 
   private renderOpeningChatIntent(intent: Extract<ChatNavigationIntent, { kind: "opening" }>) {
     const target = selectedChatTarget(intent.machineId, intent.session);
-    const load = selectedChatLoading(target);
-    return html`<chat-view .sessionId=${intent.session.id} .sessionTitle=${sessionDisplayLabel(intent.session)} .selectedMachineId=${intent.machineId} .sessionCwd=${intent.session.cwd} .selectedLoad=${load} .messages=${[]} .messageStart=${0} .messageEnd=${0} .messageTotal=${0} .initialReadingTarget=${this.initialReadingTargetFor(intent.machineId, intent.session)} .onInitialReadingTargetApplied=${this.handleInitialReadingTargetApplied}></chat-view>`;
+    const preview = this.openingChatPreview?.identity === unreadChatIdentity(intent.machineId, intent.session)
+      ? this.openingChatPreview.view
+      : undefined;
+    const load = preview === undefined ? selectedChatLoading(target) : selectedChatPreviewReadable(target);
+    return html`<chat-view .sessionId=${intent.session.id} .sessionTitle=${sessionDisplayLabel(intent.session)} .selectedMachineId=${intent.machineId} .sessionCwd=${intent.session.cwd} .selectedLoad=${load} .messages=${preview?.messages ?? []} .messageStart=${preview?.messagePageStart ?? 0} .messageEnd=${preview?.messagePageEnd ?? 0} .messageTotal=${preview?.messagePageTotal ?? 0} .clientQueuedMessages=${this.state.clientQueuedSessionMessages[intent.session.id] ?? []} .initialReadingTarget=${this.initialReadingTargetFor(intent.machineId, intent.session)} .onInitialReadingTargetApplied=${this.handleInitialReadingTargetApplied} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>`;
+  }
+
+  private renderOpeningComposer(intent: Extract<ChatNavigationIntent, { kind: "opening" }>) {
+    const workspace = workspaceForSessionCwd(this.state, intent.session.cwd);
+    return html`<prompt-editor .sessionId=${intent.session.id} .cwd=${intent.session.cwd} .machineId=${intent.machineId} .projectId=${workspace?.projectId} .workspaceId=${workspace?.id} .promptHistory=${[]} .disabled=${intent.session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${false} .canSteer=${false} .isCompacting=${false} .canStop=${false} .status=${undefined} .contextUsage=${undefined} .availableThinkingLevels=${[]} .sending=${this.state.sendingPrompts[intent.session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerWorkspaceLabel(workspace)} .canArchive=${false} .attentionCount=${0} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
+  }
+
+  private renderSelectedComposer(state: AppState, session: SessionInfo, runtimeAvailable: boolean) {
+    return html`<prompt-editor .sessionId=${session.id} .cwd=${state.selectedWorkspace?.path ?? session.cwd} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${runtimeAvailable} .canSteer=${runtimeAvailable && state.status?.isStreaming === true} .isCompacting=${runtimeAvailable && state.status?.isCompacting === true} .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .attentionCount=${this.selectedAttentionCount(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
+  }
+
+  private composerWorkspaceLabel(workspace: Workspace | undefined): string | undefined {
+    if (workspace === undefined) return undefined;
+    const branch = workspace.branch;
+    return branch === undefined || branch === "" ? workspace.label : `${workspace.label} · ${branch}`;
   }
 
   private initialReadingTargetFor(machineId: string, session: Pick<SessionInfo, "id" | "cwd">): ChatInitialReadingTarget | undefined {
@@ -3124,9 +3176,10 @@ export class PiWebApp extends LitElement {
           <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout ? this.renderNavigationPanel() : null}</div>
           ${intent.kind === "opening" ? html`
             ${this.renderOpeningChatIntent(intent)}
+            ${this.renderOpeningComposer(intent)}
           ` : state.selectedSession ? html`
             ${this.renderChatView(state, state.selectedSession)}
-            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${state.selectedSession.archived === true || !runtimeAvailable} .runtimeControlsAvailable=${runtimeAvailable} .canSteer=${runtimeAvailable && state.status?.isStreaming === true} .isCompacting=${runtimeAvailable && state.status?.isCompacting === true} .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${runtimeAvailable && state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .attentionCount=${this.selectedAttentionCount(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onNewSession=${() => { this.openNewSessionComposer(); }} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>
+            ${this.renderSelectedComposer(state, state.selectedSession, runtimeAvailable)}
             ${this.renderControlSheet(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
             ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}

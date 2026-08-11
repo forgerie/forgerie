@@ -9,11 +9,12 @@ export function machineGitDiffPath(machineId: string, projectId: string, workspa
   return `api/machines/${encodeURIComponent(machineId)}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}/git/diff${query ? `?${query}` : ""}`;
 }
 
-export function messagePath(session: SessionRef, options?: { limit?: number; before?: number }, machineId = "local"): string {
+export function messagePath(session: SessionRef, options?: { limit?: number; before?: number; preview?: boolean }, machineId = "local"): string {
   const params = new URLSearchParams();
   params.set("cwd", session.cwd);
   if (options?.limit !== undefined) params.set("limit", String(options.limit));
   if (options?.before !== undefined) params.set("before", String(options.before));
+  if (options?.preview === true) params.set("preview", "1");
   return `api/machines/${encodeURIComponent(machineId)}/sessions/${encodeURIComponent(session.id)}/messages?${params.toString()}`;
 }
 

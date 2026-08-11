@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type AskUserAnswer, type AskUserSubmission, type ExtensionDialogAnswerRequest, type ExtensionDialogCancelRequest, type SessionBulkMutationRequest, type SessionBulkMutationRef, type SessionCleanupRequest, type SessionTreeForkRequest, type SessionTreeNavigateRequest, type SessionTreeSummaryChoice, type SessionUnreadAcknowledgeRequest } from "../../shared/apiTypes.js";
-import { projectBrowserMessageResponse } from "../browserMessageProjection.js";
+import { projectBrowserMessagePreviewResponse, projectBrowserMessageResponse } from "../browserMessageProjection.js";
 import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
@@ -13,6 +13,7 @@ interface SessionQuery {
 interface MessageQuery extends SessionQuery {
   before?: string;
   limit?: string;
+  preview?: string;
 }
 
 interface PromptRequestBody {
@@ -184,7 +185,9 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     try {
       const page = { ...optionalField("before", optionalNumber(request.query.before)), ...optionalField("limit", optionalNumber(request.query.limit)) };
       const messages = await sessions.messages(ref, page);
-      return projectBrowserMessageResponse(messages);
+      return request.query.preview === "1"
+        ? projectBrowserMessagePreviewResponse(messages)
+        : projectBrowserMessageResponse(messages);
     } catch (error) {
       return reply.code(404).send({ error: errorMessage(error) });
     }

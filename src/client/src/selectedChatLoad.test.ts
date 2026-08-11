@@ -9,6 +9,7 @@ import {
   selectedChatLiveReady,
   selectedChatLoading,
   selectedChatNoTarget,
+  selectedChatPreviewReadable,
   selectedChatReadOnly,
   selectedChatReadability,
   selectedChatTarget,
@@ -28,6 +29,7 @@ describe("SelectedChatLoad", () => {
       selectedChatLoading(selected),
       selectedChatLoading(selected, "cached"),
       selectedChatCachedReadable(selected),
+      selectedChatPreviewReadable(selected),
       selectedChatFreshReadable(selected),
       selectedChatLiveReady(selected),
       selectedChatReadOnly(selected, "fresh"),
@@ -41,6 +43,7 @@ describe("SelectedChatLoad", () => {
       "loading-without-content",
       "loading-with-readable-history",
       "cached-readable",
+      "preview-readable",
       "fresh-readable",
       "live-ready",
       "read-only",
@@ -56,6 +59,7 @@ describe("SelectedChatLoad", () => {
       selectedChatLoading(selected),
       selectedChatLoading(selected, "fresh"),
       selectedChatCachedReadable(selected),
+      selectedChatPreviewReadable(selected),
       selectedChatFreshReadable(selected),
       selectedChatLiveReady(selected),
       selectedChatReadOnly(selected, "fresh"),
@@ -80,6 +84,7 @@ describe("SelectedChatLoad", () => {
     expect(selectedChatReadability(selectedChatLoading(selected))).toBe("absent");
     expect(selectedChatReadability(selectedChatLoading(selected, "cached"))).toBe("cached");
     expect(selectedChatReadability(selectedChatCachedReadable(selected))).toBe("cached");
+    expect(selectedChatReadability(selectedChatPreviewReadable(selected))).toBe("cached");
     expect(selectedChatReadability(selectedChatFreshReadable(selected))).toBe("fresh");
     expect(selectedChatReadability(selectedChatReadOnly(selected, "fresh"))).toBe("fresh");
     expect(selectedChatReadability(selectedChatFailed(selected, "cached", "failed"))).toBe("cached");

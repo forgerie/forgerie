@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coldWarmComparisonFailures, historyCacheKey, measuresForAttempt, newestIntentAttemptId } from "./probe-chat-open.mjs";
+import { coldWarmComparisonFailures, gateScenario, historyCacheKey, measuresForAttempt, newestIntentAttemptId } from "./probe-chat-open.mjs";
 
 describe("probe-chat-open attempt helpers", () => {
   it("uses the same machine-scoped history cache key as the app", () => {
@@ -37,19 +37,33 @@ describe("probe-chat-open attempt helpers", () => {
     ]);
   });
 
-  it("fails warm comparison when cache is absent or slower than cold fresh readability", () => {
-    const cold = [measure("fresh-transcript-painted", 11, "same", "/repo", 240, 240)];
-    const warmMissing = [measure("fresh-transcript-painted", 12, "same", "/repo", 240, 240)];
-    const warmSlower = [measure("cached-transcript-painted", 13, "same", "/repo", 260, 260)];
-    const warmFaster = [measure("cached-transcript-painted", 14, "same", "/repo", 24, 24)];
+  it("gates every usable-chat milestone at 100 ms", () => {
+    const target = { id: "same", sessionId: "same", cwd: "/repo", machineId: "local" };
+    const result = {
+      label: "same-workspace-cold",
+      target,
+      attemptId: 9,
+      measures: [measure("shell-painted", 9, "same", "/repo", 20, 20), measure("cached-transcript-painted", 9, "same", "/repo", 80, 80)],
+      interaction: { composerMs: 25, acceptedSendMs: 30, editable: true, targeted: true, accepted: true },
+      oldFlash: false,
+    };
 
-    expect(coldWarmComparisonFailures(cold, warmMissing)).toEqual([
-      "same-workspace-warm did not record cached-transcript-painted after cold populated cache",
+    expect(gateScenario(result, { shellBudgetMs: 100 })).toEqual([]);
+    expect(gateScenario({ ...result, interaction: { ...result.interaction, acceptedSendMs: 101 } }, { shellBudgetMs: 100 })).toEqual([
+      "same-workspace-cold accepted Send 101.0ms exceeds 100 ms for attempt 9 local:same cwd=/repo",
     ]);
-    expect(coldWarmComparisonFailures(cold, warmSlower)).toEqual([
-      "same-workspace warm first-readable latency 260.0ms did not improve over cold fresh-readable latency 240.0ms",
+  });
+
+  it("accepts either cached or bounded fresh content as the first-readable milestone", () => {
+    const cold = [measure("fresh-transcript-painted", 11, "same", "/repo", 80, 80)];
+    const warmFresh = [measure("fresh-transcript-painted", 12, "same", "/repo", 70, 70)];
+    const warmCached = [measure("cached-transcript-painted", 13, "same", "/repo", 20, 20)];
+
+    expect(coldWarmComparisonFailures(cold, [])).toEqual([
+      "same-workspace-warm did not record a first-readable transcript milestone",
     ]);
-    expect(coldWarmComparisonFailures(cold, warmFaster)).toEqual([]);
+    expect(coldWarmComparisonFailures(cold, warmFresh)).toEqual([]);
+    expect(coldWarmComparisonFailures(cold, warmCached)).toEqual([]);
   });
 });
 

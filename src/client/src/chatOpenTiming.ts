@@ -5,6 +5,7 @@ export type ChatOpenMilestone =
   | "intent"
   | "shell-painted"
   | "cached-transcript-painted"
+  | "preview-transcript-painted"
   | "fresh-transcript-painted"
   | "live-ready"
   | "read-only-ready"
@@ -17,6 +18,7 @@ export const CHAT_OPEN_TIMING_MARKS: Readonly<Record<ChatOpenMilestone, string>>
   intent: `${CHAT_OPEN_TIMING_NAMESPACE}.mark.intent`,
   "shell-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.mark.shell-painted`,
   "cached-transcript-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.mark.cached-transcript-painted`,
+  "preview-transcript-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.mark.preview-transcript-painted`,
   "fresh-transcript-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.mark.fresh-transcript-painted`,
   "live-ready": `${CHAT_OPEN_TIMING_NAMESPACE}.mark.live-ready`,
   "read-only-ready": `${CHAT_OPEN_TIMING_NAMESPACE}.mark.read-only-ready`,
@@ -28,6 +30,7 @@ export const CHAT_OPEN_TIMING_MEASURES: Readonly<Record<ChatOpenMilestone, strin
   intent: `${CHAT_OPEN_TIMING_NAMESPACE}.measure.intent`,
   "shell-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.measure.shell-painted`,
   "cached-transcript-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.measure.cached-transcript-painted`,
+  "preview-transcript-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.measure.preview-transcript-painted`,
   "fresh-transcript-painted": `${CHAT_OPEN_TIMING_NAMESPACE}.measure.fresh-transcript-painted`,
   "live-ready": `${CHAT_OPEN_TIMING_NAMESPACE}.measure.live-ready`,
   "read-only-ready": `${CHAT_OPEN_TIMING_NAMESPACE}.measure.read-only-ready`,
@@ -125,6 +128,9 @@ export class ChatOpenTiming {
     switch (load.kind) {
       case "cached-readable":
         this.markActive(load.target, "cached-transcript-painted");
+        return;
+      case "preview-readable":
+        this.markActive(load.target, "preview-transcript-painted");
         return;
       case "fresh-readable":
         this.markActive(load.target, "fresh-transcript-painted");

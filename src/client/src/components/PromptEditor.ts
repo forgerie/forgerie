@@ -29,6 +29,7 @@ type PendingAttachment = CapturedAttachment & { id: string };
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
   @property({ type: Boolean }) disabled = false;
+  @property({ type: Boolean }) submissionAvailable = true;
   @property({ type: Boolean }) runtimeControlsAvailable = true;
   @property() sessionId?: string;
   @property() cwd?: string;
@@ -261,7 +262,7 @@ export class PromptEditor extends LitElement {
    */
   private rail(): ComposerRail {
     return composerRail({
-      disabled: this.disabled || !this.runtimeControlsAvailable,
+      disabled: this.disabled || !this.submissionAvailable,
       sending: this.sending || this.guidancePending,
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
@@ -675,10 +676,10 @@ export class PromptEditor extends LitElement {
 
   private handleEditorEscape(): boolean {
     if (this.closeCompletions()) return true;
-    if (this.disabled || !this.runtimeControlsAvailable) return false;
+    if (this.disabled) return false;
 
     const status = this.status;
-    if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true) {
+    if (this.runtimeControlsAvailable && (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true)) {
       this.stop();
       return true;
     }
@@ -797,7 +798,7 @@ export class PromptEditor extends LitElement {
   }
 
   private send(streamingBehavior?: "steer" | "followUp") {
-    if (this.disabled || !this.runtimeControlsAvailable || this.sending || this.guidancePending) return;
+    if (this.disabled || !this.submissionAvailable || this.sending || this.guidancePending) return;
     const text = this.draft.trim();
     const pending = this.attachments;
     if (text === "" && pending.length === 0) return;

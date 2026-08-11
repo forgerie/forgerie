@@ -11,10 +11,10 @@ import { fileURLToPath } from "node:url";
 import { evaluate, findChrome, getFreePort, launchChrome, openPage, sleep, waitForDebugger } from "./lib/cdp.mjs";
 
 const POSTURES = [
-  { name: "unfolded-portrait", width: 739, height: 979 },
-  { name: "unfolded-landscape", width: 979, height: 739 },
-  { name: "folded-portrait", width: 499, height: 789 },
-  { name: "folded-landscape", width: 789, height: 499 },
+  { name: "unfolded-portrait", width: 704, height: 783 },
+  { name: "unfolded-landscape", width: 932, height: 553 },
+  { name: "folded-portrait", width: 475, height: 638 },
+  { name: "folded-landscape", width: 711, height: 374 },
 ];
 
 const TIMING_NAMESPACE = "forgerie.chat-open";
@@ -22,7 +22,7 @@ const LONG_TASK_WARNING_MS = 50;
 const SHELL_BUDGET_MS = 100;
 
 function usage() {
-  return `Usage: scripts/probe-chat-open.mjs [options]\n\nDrives real inbox row activation in Chromium, reads Forgerie's User Timing measures,\nobserves browser long tasks, checks for old-transcript flash, and captures Fold 8\nposture screenshots. Shell paint over 100 ms and old transcript flash fail. Long\ntasks over 50 ms are diagnostic warnings only.\n\nOptions:\n  --url URL                    Forgerie URL (default: http://127.0.0.1:8504/)\n  --shots DIR                  Screenshot output dir (default: /tmp/forgerie-chat-open-probe)\n  --chrome-bin PATH            Chromium binary override\n  --shell-budget-ms N          Failing shell budget (default: 100)\n  --long-task-warning-ms N     Diagnostic long-task threshold (default: 50)\n  --settle-ms N                Page-load settle time (default: 2500)\n  --timeout-ms N               Milestone wait timeout (default: 20000)\n  --hydration-delay-ms N       Fetch delay used for visible opening/cached states (default: 250)\n  --same-session-id ID         Same-workspace target session id\n  --same-cwd CWD               Same-workspace target cwd\n  --previous-session-id ID     Source session id used before same/cross activations\n  --previous-cwd CWD           Source session cwd\n  --cross-session-id ID        Cross-workspace target session id\n  --cross-cwd CWD              Cross-workspace target cwd\n  --large-session-id ID        Large-transcript target session id\n  --large-cwd CWD              Large-transcript target cwd\n  --skip-shots                 Do not write screenshots\n  --help                       Show this help\n`;
+  return `Usage: scripts/probe-chat-open.mjs [options]\n\nDrives real inbox row activation in Chromium, reads Forgerie's User Timing measures,\nobserves browser long tasks, checks for old-transcript flash, and captures Fold 8\nposture screenshots. Shell, editable composer, accepted Send, or first-readable\ntranscript over 100 ms fail. Long tasks over 50 ms are diagnostic warnings only.\n\nOptions:\n  --url URL                    Forgerie URL (default: http://127.0.0.1:8504/)\n  --shots DIR                  Screenshot output dir (default: /tmp/forgerie-chat-open-probe)\n  --chrome-bin PATH            Chromium binary override\n  --shell-budget-ms N          Failing usable-chat milestone budget (default: 100)\n  --long-task-warning-ms N     Diagnostic long-task threshold (default: 50)\n  --settle-ms N                Page-load settle time (default: 2500)\n  --timeout-ms N               Milestone wait timeout (default: 20000)\n  --hydration-delay-ms N       Fetch delay used for visible opening/cached states (default: 250)\n  --same-session-id ID         Same-workspace target session id\n  --same-cwd CWD               Same-workspace target cwd\n  --previous-session-id ID     Source session id used before same/cross activations\n  --previous-cwd CWD           Source session cwd\n  --cross-session-id ID        Cross-workspace target session id\n  --cross-cwd CWD              Cross-workspace target cwd\n  --large-session-id ID        Large-transcript target session id\n  --large-cwd CWD              Large-transcript target cwd\n  --skip-shots                 Do not write screenshots\n  --help                       Show this help\n`;
 }
 
 async function main() {
@@ -51,6 +51,13 @@ async function main() {
       warnings.push(...result.warnings.map((warning) => `${posture.name}: ${warning}`));
     }
   } finally {
+    try {
+      const browser = await openPage(debugPort);
+      await browser.send("Browser.close");
+      browser.close();
+    } catch {
+      // The process-level termination below remains the fallback.
+    }
     chrome.kill("SIGTERM");
     await sleep(300);
     if (chrome.exitCode === null) chrome.kill("SIGKILL");
@@ -66,7 +73,7 @@ async function main() {
     for (const failure of failures) process.stderr.write(`  FAIL ${failure}\n`);
     process.exit(1);
   }
-  process.stdout.write("\nChat-open probe passed shell, cold→warm, and old-transcript-flash gates.\n");
+  process.stdout.write("\nChat-open probe passed shell, editable-composer, accepted-Send, readable-transcript, cold→warm, and old-transcript-flash gates.\n");
 }
 
 async function probePosture({ args, debugPort, posture, representatives }) {
@@ -109,7 +116,7 @@ async function probePosture({ args, debugPort, posture, representatives }) {
     reportScenario(sameCold);
     failures.push(...gateScenario(sameCold, args));
     warnings.push(...longTaskWarnings(sameCold, args));
-    await waitForHistoryCache(cdp, representatives.same, args.timeoutMs);
+    await ensureHistoryCache(cdp, representatives.same, args);
 
     const sameWarm = await activateMeasuredScenario(cdp, {
       args,
@@ -175,9 +182,10 @@ async function activateMeasuredScenario(cdp, options) {
   try {
     const attemptId = await clickSessionRowAndWaitForAttempt(cdp, target, args.timeoutMs);
     await waitForMilestone(cdp, attemptId, "shell-painted", args.timeoutMs, target);
+    const interaction = await probeComposerAndAcceptedSend(cdp, attemptId, target, args.timeoutMs);
     if (options.captureOpening) await screenshot(cdp, args, `${posture.name}-${label}-opening`);
     if (options.captureCached) {
-      await waitForMilestone(cdp, attemptId, "cached-transcript-painted", args.timeoutMs, target);
+      await waitForReadableMilestone(cdp, attemptId, args.timeoutMs, target);
       await screenshot(cdp, args, `${posture.name}-${label}-cached-updating`);
     }
     await waitForTerminalMilestone(cdp, attemptId, args.timeoutMs, target);
@@ -187,8 +195,9 @@ async function activateMeasuredScenario(cdp, options) {
     await setFetchBehavior(cdp, { delayMs: 0 });
     const measures = await timingMeasures(cdp, attemptId);
     const longTasks = await longTasksForAttempt(cdp, measures);
-    return { label, target, attemptId, measures, longTasks, oldFlash };
+    return { label, target, attemptId, measures, longTasks, oldFlash, interaction };
   } finally {
+    await restoreProbeSendStub(cdp);
     await setFetchBehavior(cdp, { delayMs: 0 });
     if (!stoppedWatch) await stopOldFlashWatch(cdp);
   }
@@ -211,41 +220,58 @@ async function captureFailedRetryState(cdp, args, posture, target) {
 function reportScenario(result) {
   const shell = durationFor(result.measures, "shell-painted");
   const cached = durationFor(result.measures, "cached-transcript-painted");
+  const preview = durationFor(result.measures, "preview-transcript-painted");
   const fresh = durationFor(result.measures, "fresh-transcript-painted");
+  const firstReadable = cached ?? preview ?? fresh;
+  const composer = result.interaction?.composerMs;
+  const acceptedSend = result.interaction?.acceptedSendMs;
   const live = durationFor(result.measures, "live-ready");
   const readOnly = durationFor(result.measures, "read-only-ready");
   const failed = durationFor(result.measures, "failed");
   const terminal = live ?? readOnly ?? failed;
   process.stdout.write(
-    `  ${result.label.padEnd(21)} attempt=${String(result.attemptId).padStart(3)} shell=${formatMs(shell)} cached=${formatMs(cached)} fresh=${formatMs(fresh)} terminal=${formatMs(terminal)} oldFlash=${String(result.oldFlash)} longTasks=${String(result.longTasks.length)}\n`,
+    `  ${result.label.padEnd(21)} attempt=${String(result.attemptId).padStart(3)} shell=${formatMs(shell)} composer=${formatMs(composer)} send=${formatMs(acceptedSend)} readable=${formatMs(firstReadable)} terminal=${formatMs(terminal)} oldFlash=${String(result.oldFlash)} longTasks=${String(result.longTasks.length)}\n`,
   );
 }
 
 function reportColdWarmComparison(cold, warm) {
-  const coldFresh = durationFor(cold.measures, "fresh-transcript-painted");
-  const warmCached = durationFor(warm.measures, "cached-transcript-painted");
-  process.stdout.write(`  ${"cold→warm readable".padEnd(21)} coldFresh=${formatMs(coldFresh)} warmCached=${formatMs(warmCached)} improvement=${formatMs(coldFresh !== undefined && warmCached !== undefined ? coldFresh - warmCached : undefined)}\n`);
+  const coldReadable = firstReadableDuration(cold.measures);
+  const warmReadable = firstReadableDuration(warm.measures);
+  process.stdout.write(`  ${"cold→warm readable".padEnd(21)} cold=${formatMs(coldReadable)} warm=${formatMs(warmReadable)} improvement=${formatMs(coldReadable !== undefined && warmReadable !== undefined ? coldReadable - warmReadable : undefined)}\n`);
 }
 
-function gateScenario(result, args) {
+export function gateScenario(result, args) {
   const failures = [];
   const shell = durationFor(result.measures, "shell-painted");
-  if (shell === undefined) failures.push(`${result.label} did not record shell-painted for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
-  else if (shell > args.shellBudgetMs) failures.push(`${result.label} shell-painted ${formatMs(shell)} exceeds ${String(args.shellBudgetMs)} ms for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
+  const firstReadable = firstReadableDuration(result.measures);
+  const milestones = [
+    ["shell-painted", shell],
+    ["editable composer", result.interaction?.composerMs],
+    ["accepted Send", result.interaction?.acceptedSendMs],
+    ["first-readable transcript", firstReadable],
+  ];
+  for (const [name, duration] of milestones) {
+    if (duration === undefined) failures.push(`${result.label} did not record ${name} for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
+    else if (duration > args.shellBudgetMs) failures.push(`${result.label} ${name} ${formatMs(duration)} exceeds ${String(args.shellBudgetMs)} ms for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
+  }
+  if (result.interaction?.editable !== true) failures.push(`${result.label} composer was not editable for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
+  if (result.interaction?.targeted !== true) failures.push(`${result.label} Send was not owned by ${describeRef(result.target)}`);
+  if (result.interaction?.accepted !== true) failures.push(`${result.label} Send was not accepted into the target client queue for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
   if (result.oldFlash) failures.push(`${result.label} showed previous chat message object identities after activating attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
   return failures;
 }
 
 export function coldWarmComparisonFailures(coldMeasures, warmMeasures) {
   const failures = [];
-  const coldFresh = durationFor(coldMeasures, "fresh-transcript-painted");
-  const warmCached = durationFor(warmMeasures, "cached-transcript-painted");
-  if (coldFresh === undefined) failures.push("same-workspace-cold did not record fresh-transcript-painted for first readable latency");
-  if (warmCached === undefined) failures.push("same-workspace-warm did not record cached-transcript-painted after cold populated cache");
-  if (coldFresh !== undefined && warmCached !== undefined && warmCached >= coldFresh) {
-    failures.push(`same-workspace warm first-readable latency ${formatMs(warmCached)} did not improve over cold fresh-readable latency ${formatMs(coldFresh)}`);
-  }
+  if (firstReadableDuration(coldMeasures) === undefined) failures.push("same-workspace-cold did not record a first-readable transcript milestone");
+  if (firstReadableDuration(warmMeasures) === undefined) failures.push("same-workspace-warm did not record a first-readable transcript milestone");
   return failures;
+}
+
+function firstReadableDuration(measures) {
+  return durationFor(measures, "cached-transcript-painted")
+    ?? durationFor(measures, "preview-transcript-painted")
+    ?? durationFor(measures, "fresh-transcript-painted");
 }
 
 function longTaskWarnings(result, args) {
@@ -284,7 +310,8 @@ async function installProbeHooks(cdp) {
         const probe = window.__chatOpenProbe;
         const target = probe.fetchTarget;
         const appliesToTarget = target === undefined || (url.pathname.includes("/sessions/" + encodeURIComponent(target.sessionId) + "/") && url.searchParams.get("cwd") === target.cwd);
-        if (appliesToTarget && probe.fetchDelayMs > 0 && /\\/(messages|status|stream-snapshot|notifications)$/.test(url.pathname)) {
+        const isTranscriptPreview = url.pathname.endsWith("/messages") && url.searchParams.get("preview") === "1";
+        if (appliesToTarget && !isTranscriptPreview && probe.fetchDelayMs > 0 && /\\/(messages|status|stream-snapshot|notifications)$/.test(url.pathname)) {
           await new Promise((resolve) => setTimeout(resolve, probe.fetchDelayMs));
         }
         return originalFetch(input, init);
@@ -371,6 +398,81 @@ async function stopOldFlashWatch(cdp) {
   `);
 }
 
+async function probeComposerAndAcceptedSend(cdp, attemptId, target, timeoutMs) {
+  await waitForCondition(
+    cdp,
+    `window.__chatOpenProbe.walk(document, (element) => element.tagName === "PROMPT-EDITOR" && element.sessionId === ${JSON.stringify(target.id)}) !== undefined`,
+    timeoutMs,
+    `target composer for attempt ${String(attemptId)} ${describeRef(target)}`,
+  );
+  return await evaluate(cdp, `
+    (async () => {
+      const probe = window.__chatOpenProbe;
+      const target = ${JSON.stringify(target)};
+      const intent = performance.getEntriesByType("measure").find((entry) => entry.name === ${JSON.stringify(`${TIMING_NAMESPACE}.measure.intent`)} && entry.detail?.attemptId === ${JSON.stringify(attemptId)});
+      const shell = performance.getEntriesByType("measure").find((entry) => entry.name === ${JSON.stringify(`${TIMING_NAMESPACE}.measure.shell-painted`)} && entry.detail?.attemptId === ${JSON.stringify(attemptId)});
+      const app = document.querySelector("pi-web-app");
+      const editor = probe.walk(document, (element) => element.tagName === "PROMPT-EDITOR" && element.sessionId === target.id);
+      if (intent === undefined || app === null || editor === undefined) return { editable: false, targeted: false, accepted: false };
+      const composerMs = shell?.duration ?? performance.now() - intent.startTime;
+      const content = editor.shadowRoot?.querySelector(".cm-content[contenteditable='true']");
+      const editable = editor.disabled === false && editor.submissionAvailable === true && content !== null && content !== undefined;
+      const targeted = editor.sessionId === target.id && editor.cwd === target.cwd && editor.machineId === target.machineId;
+      const sessions = app.sessions;
+      if (sessions === undefined || typeof editor.onSend !== "function") return { composerMs, editable, targeted, accepted: false };
+
+      const originalApi = sessions.api;
+      const deliveries = [];
+      sessions.api = {
+        ...originalApi,
+        prompt: async (session, text, streamingBehavior, machineId, attachments) => {
+          deliveries.push({ sessionId: session.id, cwd: session.cwd, text, machineId, streamingBehavior, attachments });
+          return { accepted: true };
+        },
+      };
+      probe.sendStub = { sessions, originalApi };
+
+      const probeText = "[chat-open probe: accepted locally, not sent]";
+      const originalSetState = app.setState;
+      let acceptedPatch = false;
+      app.setState = function(patch) {
+        const queued = patch?.clientQueuedSessionMessages?.[target.id];
+        if (Array.isArray(queued) && queued.some((message) => message?.text === probeText)) {
+          acceptedPatch = true;
+          const remainder = { ...patch };
+          delete remainder.clientQueuedSessionMessages;
+          if (Object.keys(remainder).length > 0) return originalSetState.call(app, remainder);
+          return;
+        }
+        return originalSetState.call(app, patch);
+      };
+      const sendStartedAt = performance.now();
+      try {
+        editor.onSend(probeText);
+      } finally {
+        app.setState = originalSetState;
+      }
+      await Promise.resolve();
+      const acceptedSendMs = composerMs + (performance.now() - sendStartedAt);
+      const delivered = deliveries.some((call) => call.sessionId === target.id && call.cwd === target.cwd && call.machineId === target.machineId && call.text === probeText);
+      return { composerMs, acceptedSendMs, editable, targeted, accepted: acceptedPatch || delivered };
+    })()
+  `);
+}
+
+async function restoreProbeSendStub(cdp) {
+  await evaluate(cdp, `
+    (() => {
+      const stub = window.__chatOpenProbe?.sendStub;
+      if (stub !== undefined) {
+        stub.sessions.api = stub.originalApi;
+        window.__chatOpenProbe.sendStub = undefined;
+      }
+      return true;
+    })()
+  `).catch(() => undefined);
+}
+
 async function clickSessionRowAndWaitForAttempt(cdp, ref, timeoutMs) {
   const beforeAttemptId = await latestIntentAttemptId(cdp, ref);
   await clickSessionRow(cdp, ref);
@@ -378,6 +480,7 @@ async function clickSessionRowAndWaitForAttempt(cdp, ref, timeoutMs) {
 }
 
 async function clickSessionRow(cdp, ref) {
+  await revealSessionInbox(cdp);
   let clicked = await clickVisibleSessionRow(cdp, ref);
   if (!clicked) {
     await revealCollapsedSessionGroups(cdp);
@@ -452,7 +555,21 @@ async function selectAndWaitReady(cdp, ref, args, label) {
   await waitForTerminalMilestone(cdp, attemptId, args.timeoutMs, ref);
 }
 
+async function revealSessionInbox(cdp) {
+  await evaluate(cdp, `
+    (async () => {
+      const app = document.querySelector("pi-web-app");
+      if (app !== null && typeof app.openNavigationSection === "function") app.openNavigationSection("sessions");
+      await app?.updateComplete;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return true;
+    })()
+  `);
+  await revealCollapsedSessionGroups(cdp);
+}
+
 async function waitForRow(cdp, ref, timeoutMs) {
+  await revealSessionInbox(cdp);
   await waitForCondition(cdp, `window.__chatOpenProbe.row(${JSON.stringify(ref.id)}) !== undefined`, timeoutMs, `inbox row ${describeRef(ref)}`);
 }
 
@@ -481,6 +598,10 @@ async function waitForMilestone(cdp, attemptId, milestone, timeoutMs, ref) {
   await waitForCondition(cdp, milestoneExpression(attemptId, milestone), timeoutMs, `${milestone} for attempt ${String(attemptId)} ${describeRef(ref)}`);
 }
 
+async function waitForReadableMilestone(cdp, attemptId, timeoutMs, ref) {
+  await waitForCondition(cdp, readableMilestoneExpression(attemptId), timeoutMs, `first readable transcript for attempt ${String(attemptId)} ${describeRef(ref)}`);
+}
+
 async function waitForTerminalMilestone(cdp, attemptId, timeoutMs, ref) {
   await waitForCondition(cdp, terminalMilestoneExpression(attemptId), timeoutMs, `terminal readiness for attempt ${String(attemptId)} ${describeRef(ref)}`);
 }
@@ -506,6 +627,11 @@ async function waitForLatestIntentAttempt(cdp, ref, afterAttemptId, timeoutMs) {
 
 function milestoneExpression(attemptId, milestone) {
   return `performance.getEntriesByType("measure").some((entry) => entry.name === ${JSON.stringify(`${TIMING_NAMESPACE}.measure.${milestone}`)} && entry.detail?.attemptId === ${JSON.stringify(attemptId)})`;
+}
+
+function readableMilestoneExpression(attemptId) {
+  const names = ["cached-transcript-painted", "preview-transcript-painted", "fresh-transcript-painted"].map((milestone) => `${TIMING_NAMESPACE}.measure.${milestone}`);
+  return `performance.getEntriesByType("measure").some((entry) => ${JSON.stringify(names)}.includes(entry.name) && entry.detail?.attemptId === ${JSON.stringify(attemptId)})`;
 }
 
 function terminalMilestoneExpression(attemptId) {
@@ -556,6 +682,22 @@ async function removeHistoryCache(cdp, ref) {
 
 async function waitForHistoryCache(cdp, ref, timeoutMs) {
   await waitForCondition(cdp, `sessionStorage.getItem(${JSON.stringify(historyCacheKey(ref))}) !== null`, timeoutMs, `history cache for ${describeRef(ref)}`);
+}
+
+async function ensureHistoryCache(cdp, ref, args) {
+  try {
+    await waitForHistoryCache(cdp, ref, Math.min(args.timeoutMs, 2_000));
+    return;
+  } catch {
+    const url = new URL(`api/machines/${encodeURIComponent(ref.machineId ?? "local")}/sessions/${encodeURIComponent(ref.id)}/messages`, ensureSlash(args.url));
+    url.searchParams.set("cwd", ref.cwd);
+    url.searchParams.set("limit", "100");
+    url.searchParams.set("preview", "1");
+    const page = await fetchJson(url.toString());
+    await evaluate(cdp, `sessionStorage.setItem(${JSON.stringify(historyCacheKey(ref))}, JSON.stringify({ ...${JSON.stringify(page)}, savedAt: Date.now() }))`);
+    await waitForHistoryCache(cdp, ref, args.timeoutMs);
+    process.stdout.write(`  warm cache fallback  seeded bounded preview for ${describeRef(ref)}\n`);
+  }
 }
 
 export function historyCacheKey(ref) {

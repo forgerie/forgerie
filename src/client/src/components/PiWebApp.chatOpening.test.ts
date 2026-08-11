@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { render } from "lit";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project, SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { textMessage } from "../chatMessages";
@@ -20,6 +20,10 @@ interface Deferred<T> {
   readonly reject: (error: unknown) => void;
 }
 
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ messages: [], start: 0, total: 0 }), { status: 200, headers: { "content-type": "application/json" } }))));
+});
+
 afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
@@ -30,14 +34,18 @@ afterEach(() => {
 });
 
 describe("PiWebApp chat opening", () => {
-  it("shows a same-workspace target shell before selection joins, without the previous transcript or editor focus", async () => {
+  it("shows a same-workspace target shell and editable target composer before selection joins", async () => {
     const app = new PiWebApp();
     const previous = session("previous", "/repo", "Previous session");
     const target = session("target", "/repo", "Target session");
     setAppState(app, appState({ selectedSession: previous, sessions: [previous, target], inboxSessions: [previous, target], messages: [textMessage("assistant", "previous transcript must not show")] }));
     resolveAppUpdateComplete(app);
     const selecting = deferred<undefined>();
-    const selectSession = vi.spyOn(appSessionController(app), "selectSession").mockImplementation(async (selected) => {
+    const previewing = deferred<{ messages: ReturnType<typeof textMessage>[]; messagePageStart: number; messagePageEnd: number; messagePageTotal: number }>();
+    const controller = appSessionController(app);
+    vi.spyOn(controller, "previewSession").mockReturnValue(previewing.promise);
+    const sendToSession = vi.spyOn(controller, "sendToSession").mockResolvedValue(undefined);
+    const selectSession = vi.spyOn(controller, "selectSession").mockImplementation(async (selected) => {
       appSetState(app, { selectedSession: selected, selectedChatLoad: selectedChatLoading(selectedChatTarget("local", selected)), messages: [], messagePageStart: 0, messagePageEnd: 0, messagePageTotal: 0 });
       await selecting.promise;
     });
@@ -55,9 +63,22 @@ describe("PiWebApp chat opening", () => {
     expect(chat.initialReadingTarget).toBeUndefined();
     expect(chat.shadowRoot?.textContent).toContain("Opening Target session");
     expect(chat.shadowRoot?.textContent).not.toContain("previous transcript must not show");
-    expect(container.querySelector<PromptEditor>("prompt-editor")).toBeNull();
+    const editor = requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "opening target prompt editor");
+    await editor.updateComplete;
+    expect(editor.sessionId).toBe(target.id);
+    expect(editor.cwd).toBe(target.cwd);
+    expect(editor.disabled).toBe(false);
+    expect(editor.submissionAvailable).toBe(true);
+    expect(editor.runtimeControlsAvailable).toBe(false);
     expect(document.activeElement?.localName).not.toBe("prompt-editor");
+    void editor.onSend?.("queued for target");
+    expect(sendToSession).toHaveBeenCalledWith(target, "local", "queued for target", undefined, undefined, undefined);
     expect(selectSession).not.toHaveBeenCalled();
+
+    previewing.resolve({ messages: [textMessage("assistant", "target preview")], messagePageStart: 9, messagePageEnd: 10, messagePageTotal: 10 });
+    await app.updateComplete;
+    renderApp(app, container);
+    expect(requiredElement(container.querySelector<ChatView>("chat-view"), "preview chat view").messages).toEqual([textMessage("assistant", "target preview")]);
 
     frames.releaseAll();
     await vi.waitFor(() => { expect(selectSession).toHaveBeenCalledWith(target); });
@@ -173,14 +194,19 @@ describe("PiWebApp chat opening", () => {
     expect(chat.sessionId).toBe(target.id);
     expect(chat.shadowRoot?.textContent).toContain("Opening Target session");
     expect(chat.shadowRoot?.textContent).not.toContain("previous cross-workspace transcript");
-    expect(container.querySelector<PromptEditor>("prompt-editor")).toBeNull();
+    const editor = requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "cross-workspace opening prompt editor");
+    await editor.updateComplete;
+    expect(editor.sessionId).toBe(target.id);
+    expect(editor.cwd).toBe(target.cwd);
+    expect(editor.disabled).toBe(false);
+    expect(editor.runtimeControlsAvailable).toBe(false);
     expect(selectWorkspace).not.toHaveBeenCalled();
 
     frames.releaseAll();
     await vi.waitFor(() => { expect(selectWorkspace).toHaveBeenCalledWith(targetWorkspace, expect.objectContaining({ sessionId: target.id })); });
   });
 
-  it("keeps a selected loading chat readable with a read-only composer", async () => {
+  it("keeps a selected loading chat readable with an editable composer", async () => {
     const app = new PiWebApp();
     const selected = session("selected", "/repo", "Selected session");
     const state = appState({ selectedSession: selected, sessions: [selected], inboxSessions: [selected], messages: [textMessage("assistant", "readable while opening")] });
@@ -193,7 +219,23 @@ describe("PiWebApp chat opening", () => {
     await editor.updateComplete;
 
     expect(chat.messages).toEqual([textMessage("assistant", "readable while opening")]);
-    expect(editor.disabled).toBe(true);
+    expect(editor.disabled).toBe(false);
+    expect(editor.runtimeControlsAvailable).toBe(false);
+  });
+
+  it("keeps the composer New session handler stable across transcript renders", () => {
+    const app = new PiWebApp();
+    const selected = session("selected", "/repo", "Selected session");
+    const state = appState({ selectedSession: selected, sessions: [selected], inboxSessions: [selected] });
+    setAppState(app, { ...state, mainView: "chat", selectedChatLoad: selectedChatLiveReady(selectedChatTarget("local", selected)) });
+    const container = renderApp(app);
+    const editor = requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "prompt editor");
+    const firstHandler = editor.onNewSession;
+
+    appSetState(app, { messages: [textMessage("assistant", "streamed update")] });
+    renderApp(app, container);
+
+    expect(requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "updated prompt editor").onNewSession).toBe(firstHandler);
   });
 
   it("gates runtime-dependent app handlers until the selected chat is live-ready", async () => {
@@ -212,7 +254,7 @@ describe("PiWebApp chat opening", () => {
     await openModelDialog(app);
     await openThinkingDialog(app);
 
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledOnce();
     expect(stop).not.toHaveBeenCalled();
     expect(listModels).not.toHaveBeenCalled();
     expect(listThinkingLevels).not.toHaveBeenCalled();
@@ -223,7 +265,7 @@ describe("PiWebApp chat opening", () => {
     await openModelDialog(app);
     await openThinkingDialog(app);
 
-    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledTimes(2);
     expect(stop).toHaveBeenCalledOnce();
     expect(listModels).toHaveBeenCalledOnce();
     expect(listThinkingLevels).toHaveBeenCalledOnce();
@@ -237,14 +279,21 @@ describe("PiWebApp chat opening", () => {
     setAppState(app, appState({ selectedSession: previous, sessions: [previous, alpha, beta], inboxSessions: [previous, alpha, beta], messages: [textMessage("assistant", "previous transcript")] }));
     markSessionUnread(app, alpha);
     resolveAppUpdateComplete(app);
-    vi.spyOn(appSessionController(app), "selectSession").mockImplementation(() => new Promise(() => undefined));
-    installHeldFrames();
+    const alphaPreview = deferred<{ messages: ReturnType<typeof textMessage>[]; messagePageStart: number; messagePageEnd: number; messagePageTotal: number }>();
+    const betaPreview = deferred<{ messages: ReturnType<typeof textMessage>[]; messagePageStart: number; messagePageEnd: number; messagePageTotal: number }>();
+    const controller = appSessionController(app);
+    vi.spyOn(controller, "previewSession").mockImplementation((selected) => selected.id === alpha.id ? alphaPreview.promise : betaPreview.promise);
+    vi.spyOn(controller, "selectSession").mockImplementation(() => new Promise(() => undefined));
+    const recoverReadinessSends = vi.spyOn(controller, "recoverReadinessSends");
+    const frames = installHeldFrames();
     const container = renderApp(app);
 
     await clickInboxRow(container, alpha.id);
     await clickInboxRow(container, beta.id);
+    frames.releaseAll();
     await Promise.resolve();
     renderApp(app, container);
+    await vi.waitFor(() => { expect(recoverReadinessSends).toHaveBeenCalledWith(alpha, "local"); });
 
     const chat = requiredElement(container.querySelector<ChatView>("chat-view"), "opening chat view");
     await chat.updateComplete;
@@ -253,8 +302,34 @@ describe("PiWebApp chat opening", () => {
     expect(chat.shadowRoot?.textContent).toContain("Opening Beta session");
     expect(chat.shadowRoot?.textContent).not.toContain("Opening Alpha session");
     expect(chat.shadowRoot?.textContent).not.toContain("previous transcript");
+
+    betaPreview.resolve({ messages: [textMessage("assistant", "beta preview")], messagePageStart: 0, messagePageEnd: 1, messagePageTotal: 1 });
+    await Promise.resolve();
+    alphaPreview.resolve({ messages: [textMessage("assistant", "stale alpha preview")], messagePageStart: 0, messagePageEnd: 1, messagePageTotal: 1 });
+    await Promise.resolve();
+    renderApp(app, container);
+    const latest = requiredElement(container.querySelector<ChatView>("chat-view"), "latest opening chat view");
+    expect(latest.sessionId).toBe(beta.id);
+    expect(latest.messages).toEqual([textMessage("assistant", "beta preview")]);
   });
 
+
+  it("preserves a queued send when an older same-target opening is superseded", async () => {
+    const app = new PiWebApp();
+    const target = session("target", "/repo", "Target session");
+    setAppState(app, {
+      ...appState({ selectedSession: target, sessions: [target], inboxSessions: [target] }),
+      selectedChatLoad: selectedChatLoading(selectedChatTarget("local", target)),
+    });
+    const controller = appSessionController(app);
+
+    await controller.sendToSession(target, "local", "keep queued for target");
+    const recover: unknown = Reflect.get(app, "recoverSupersededOpeningSends");
+    if (typeof recover !== "function") throw new Error("recoverSupersededOpeningSends unavailable");
+    Reflect.apply(recover, app, ["local", target]);
+
+    expect(appStateValue(app).clientQueuedSessionMessages[target.id]).toEqual([{ kind: "followUp", text: "keep queued for target" }]);
+  });
 
   it("clears an old inbox intent after a non-inbox navigation supersedes it", async () => {
     const app = new PiWebApp();
@@ -405,7 +480,7 @@ describe("PiWebApp chat opening", () => {
     expect(unknownContextText).not.toContain("Old Workspace");
   });
 
-  it("checks selected live-ready identity before allowing runtime app handlers", () => {
+  it("accepts sends while still checking selected live-ready identity for stop", () => {
     const app = new PiWebApp();
     const selected = session("selected", "/repo", "Selected session");
     const state = appState({ selectedSession: selected, sessions: [selected], inboxSessions: [selected] });
@@ -417,7 +492,7 @@ describe("PiWebApp chat opening", () => {
     sendPrompt(app, "hello");
     stopActiveWork(app);
 
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledOnce();
     expect(stop).not.toHaveBeenCalled();
   });
 
@@ -432,7 +507,8 @@ describe("PiWebApp chat opening", () => {
     sendPrompt(app, "hello");
 
     expect(appStateValue(app).authDialog).toEqual({ step: "method" });
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith("hello", undefined, undefined, undefined);
   });
 
   it("uses first message when a session name is empty", async () => {
@@ -501,7 +577,8 @@ describe("PiWebApp chat opening", () => {
     expect(chat.sessionId).toBe(target.id);
     expect(chat.messages).toEqual([textMessage("assistant", "target readable before join")]);
     expect(chat.shadowRoot?.textContent).toContain("Updating transcript");
-    expect(editor.disabled).toBe(true);
+    expect(editor.disabled).toBe(false);
+    expect(editor.runtimeControlsAvailable).toBe(false);
     joining.resolve(undefined);
   });
 });
@@ -613,7 +690,10 @@ function appSetState(app: PiWebApp, patch: Partial<AppState>): void {
 }
 
 interface AppSessionControllerForTest {
+  previewSession: (session: SessionInfo, machineId: string) => Promise<{ messages: ReturnType<typeof textMessage>[]; messagePageStart: number; messagePageEnd: number; messagePageTotal: number }>;
   selectSession: (session: SessionInfo, options?: { updateUrl?: boolean }) => Promise<void>;
+  sendToSession: (session: SessionInfo, machineId: string, text: string, streamingBehavior?: "steer" | "followUp", attachments?: never[], delivery?: "inline" | "workspace") => Promise<void>;
+  recoverReadinessSends: (session: SessionInfo, machineId: string) => unknown;
   send: (text: string) => Promise<void>;
   stopActiveWork: () => Promise<void>;
   listModels: () => Promise<readonly unknown[]>;
@@ -629,7 +709,10 @@ function appSessionController(app: PiWebApp): AppSessionControllerForTest {
 function isAppSessionController(value: unknown): value is AppSessionControllerForTest {
   return typeof value === "object"
     && value !== null
+    && typeof Reflect.get(value, "previewSession") === "function"
     && typeof Reflect.get(value, "selectSession") === "function"
+    && typeof Reflect.get(value, "sendToSession") === "function"
+    && typeof Reflect.get(value, "recoverReadinessSends") === "function"
     && typeof Reflect.get(value, "send") === "function"
     && typeof Reflect.get(value, "stopActiveWork") === "function"
     && typeof Reflect.get(value, "listModels") === "function"

@@ -5,17 +5,19 @@ import { normalizeMessages, textMessage } from "../chatMessages";
 import { machineSessionKey } from "../machineKeys";
 import { clearDraft, loadDraft, moveDraft, saveDraft } from "../promptDraftStorage";
 import { clearAskDraft } from "../askDrafts";
-import { ChatTranscriptStore } from "../chatTranscriptStore";
+import { ChatTranscriptStore, transcriptViewFromHistory, type ChatTranscriptView } from "../chatTranscriptStore";
 import { isShellInput } from "../inputModes";
 import { fileCompletionInsertText } from "../promptCompletions";
 import { SessionSocket, type GlobalSessionEvent, type SessionUiEvent } from "../sessionSocket";
 import { isArchivableSessionInfo, isTransientNewSessionInfo } from "../sessionPersistence";
 import {
   selectedChatCachedReadable,
+  selectedChatCanUseRuntime,
   selectedChatFailed,
   selectedChatFreshReadable,
   selectedChatLiveReady,
   selectedChatLoading,
+  selectedChatPreviewReadable,
   selectedChatNoTarget,
   selectedChatReadOnly,
   selectedChatReadability,
@@ -64,6 +66,14 @@ export interface SelectedSessionReady {
   session: SessionInfo;
 }
 
+export type SessionTranscriptPreview = ChatTranscriptView;
+
+export interface ReadinessSendRecovery {
+  readonly count: number;
+  readonly attachmentsNeedReattaching: boolean;
+  readonly restoredText: string;
+}
+
 export interface SessionControllerDependencies {
   api?: typeof defaultApi;
   socket?: SessionEventSocket;
@@ -92,6 +102,12 @@ type QueuedPendingSessionSendInput =
   | { type: "command"; text: string };
 
 type QueuedPendingSessionSend = QueuedPendingSessionSendInput & { id: string };
+
+interface ReadinessQueuedSends {
+  readonly session: SessionInfo;
+  readonly machineId: string;
+  readonly sends: QueuedPendingSessionSend[];
+}
 
 export interface SessionLaunchDestination {
   readonly machineId: string;
@@ -168,6 +184,8 @@ export class SessionController {
   private pendingSessionStartSeq = 0;
   private pendingQueuedSendSeq = 0;
   private readonly pendingSessionStarts = new Map<string, PendingSessionStart>();
+  private readonly readinessQueuedSends = new Map<string, ReadinessQueuedSends>();
+  private readonly transcriptPreviewRequests = new Map<string, Promise<MessagePage>>();
   private readonly sessionLaunchRecoveries = new Map<string, SessionLaunchRecoveryRecord>();
   private readonly suppressedCreatedSessions = new Map<string, SuppressedCreatedSession>();
   private readonly selectedSessionRefreshes = new TrailingRefreshCoordinator<string>();
@@ -206,8 +224,11 @@ export class SessionController {
     this.selectionSeq += 1;
     this.socket.close();
     this.clearPendingUpdates();
+    for (const queue of this.readinessQueuedSends.values()) this.restoreReadinessQueueDraft(queue);
+    this.readinessQueuedSends.clear();
+    this.transcriptPreviewRequests.clear();
     this.transcripts.dispose();
-    this.setState({ selectedChatLoad: selectedChatNoTarget() });
+    this.setState({ selectedChatLoad: selectedChatNoTarget(), clientQueuedSessionMessages: {} });
   }
 
   clearActiveSession() {
@@ -418,6 +439,23 @@ export class SessionController {
     return selectPreferredSession(sessions, { targetSessionId, latestSessionId: this.sessionSelection.latestSessionId(this.workspaceSelectionKey(cwd)) });
   }
 
+  async previewSession(session: SessionInfo, machineId: string): Promise<SessionTranscriptPreview> {
+    const key = machineSessionKey(machineId, session.id);
+    for (const pendingKey of this.transcriptPreviewRequests.keys()) {
+      if (pendingKey !== key) this.transcriptPreviewRequests.delete(pendingKey);
+    }
+    let request = this.transcriptPreviewRequests.get(key);
+    if (request === undefined) {
+      request = this.api.messages(session, { limit: MESSAGE_PAGE_SIZE, preview: true }, machineId);
+      this.transcriptPreviewRequests.set(key, request);
+      const pending = request;
+      void request.catch(() => {
+        if (this.transcriptPreviewRequests.get(key) === pending) this.transcriptPreviewRequests.delete(key);
+      });
+    }
+    return transcriptViewFromHistory(await request);
+  }
+
   async selectSession(session: SessionInfo, options?: { updateUrl?: boolean | undefined; preserveTreeDialog?: boolean | undefined; propagateRefreshError?: boolean | undefined }) {
     if (this.disposed) return;
     if (isClientPendingStartSessionInfo(session)) {
@@ -434,11 +472,14 @@ export class SessionController {
     const transcriptKey = this.sessionCacheKey(session.id);
     const target = selectedChatTarget(machineId, session);
     const cached = this.transcripts.cachedView(transcriptKey);
-    const cachedReadability = this.transcripts.rawHistoryPage(transcriptKey) === undefined ? "absent" : "cached";
+    const hasCachedHistory = this.transcripts.rawHistoryPage(transcriptKey) !== undefined;
+    const previewPending = this.transcriptPreviewRequests.has(transcriptKey);
+    const showCachedImmediately = hasCachedHistory && !previewPending;
+    const openingView = showCachedImmediately ? cached : transcriptViewFromHistory(undefined);
     this.setState({
       selectedSession: session,
-      selectedChatLoad: cachedReadability === "cached" ? selectedChatCachedReadable(target) : selectedChatLoading(target),
-      ...cached,
+      selectedChatLoad: showCachedImmediately ? selectedChatCachedReadable(target) : selectedChatLoading(target),
+      ...openingView,
       isLoadingEarlierMessages: false,
       ...(options?.preserveTreeDialog === true ? {} : { treeDialog: undefined }),
       status: session.archived === true ? undefined : this.getState().sessionStatuses[session.id],
@@ -456,6 +497,7 @@ export class SessionController {
         const history = this.transcripts.mergeHistory(transcriptKey, page);
         this.setState({ ...history, selectedChatLoad: selectedChatReadOnly(target, "fresh"), isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] });
         this.transcripts.schedulePersist(transcriptKey);
+        this.transcriptPreviewRequests.delete(transcriptKey);
         this.onSelectedSessionReady?.({ machineId, session });
         if (options?.updateUrl !== false) this.updateUrl();
         return;
@@ -480,6 +522,7 @@ export class SessionController {
       this.onSelectedSessionReady?.({ machineId, session });
       if (options?.updateUrl !== false) this.updateUrl();
     } catch (error) {
+      this.transcriptPreviewRequests.delete(transcriptKey);
       if (seq !== this.selectionSeq || this.getState().selectedSession?.id !== session.id) {
         // Tree navigation still needs to know when a same-session reselection's
         // shared trailing refresh failed, even though this selection is stale.
@@ -505,7 +548,8 @@ export class SessionController {
         }
         this.socket.setHandler((event) => { this.applyEvent(event); });
       }
-      this.setState({ selectedChatLoad: selectedChatFailed(target, this.currentSelectedChatReadability(target), error), error: String(error) });
+      const failure = this.recoverReadinessFailure(session, machineId, error);
+      this.setState({ selectedChatLoad: selectedChatFailed(target, this.currentSelectedChatReadability(target), failure), error: failure });
       if (options?.propagateRefreshError === true) throw error;
     }
   }
@@ -529,16 +573,85 @@ export class SessionController {
     }
   }
 
+  private restoreReadinessQueueDraft(queue: ReadinessQueuedSends): ReadinessSendRecovery {
+    const key = machineSessionKey(queue.machineId, queue.session.id);
+    const recoveredText = queue.sends.map((send) => send.text).filter((text) => text.trim() !== "").join("\n\n");
+    const restoredDraft = [recoveredText, loadDraft(key)].filter((text) => text.trim() !== "").join("\n\n");
+    if (restoredDraft !== "") saveDraft(key, restoredDraft);
+    return {
+      count: queue.sends.length,
+      attachmentsNeedReattaching: queue.sends.some((send) => send.type === "prompt" && (send.attachments?.length ?? 0) > 0),
+      restoredText: restoredDraft,
+    };
+  }
+
+  recoverReadinessSends(session: SessionInfo, machineId: string): ReadinessSendRecovery | undefined {
+    const key = machineSessionKey(machineId, session.id);
+    const queue = this.readinessQueuedSends.get(key);
+    if (queue === undefined || queue.sends.length === 0) return undefined;
+    const recovery = this.restoreReadinessQueueDraft(queue);
+    this.readinessQueuedSends.delete(key);
+    const state = this.getState();
+    this.setState({ clientQueuedSessionMessages: omitKey(state.clientQueuedSessionMessages, session.id) });
+    if (state.selectedSession?.id === session.id && selectedMachineId(state) === machineId && this.replacePromptEditorText !== undefined) {
+      void this.replaceRecoveredReadinessDraft(session, machineId, recovery.restoredText);
+    }
+    return recovery;
+  }
+
+  private recoverReadinessFailure(session: SessionInfo, machineId: string, error: unknown): string {
+    const recovery = this.recoverReadinessSends(session, machineId);
+    const attachmentNotice = recovery?.attachmentsNeedReattaching === true ? " Reattach files before retrying." : "";
+    const recoveryNotice = recovery === undefined
+      ? ""
+      : ` ${String(recovery.count)} queued ${recovery.count === 1 ? "message was" : "messages were"} restored to the draft for explicit retry.${attachmentNotice}`;
+    return `${String(error)}${recoveryNotice}`;
+  }
+
+  private async replaceRecoveredReadinessDraft(session: SessionInfo, machineId: string, text: string): Promise<void> {
+    try {
+      const replaced = await this.replacePromptEditorText?.({ machineId, sessionId: session.id, text });
+      if (replaced === false) throw new Error("the mounted editor no longer owns this session");
+    } catch (error) {
+      const state = this.getState();
+      if (state.selectedSession?.id === session.id && selectedMachineId(state) === machineId) {
+        this.setState({ error: `Queued messages remain saved in this session's draft. Reopen the session to retry. ${String(error)}` });
+      }
+    }
+  }
+
+  async sendToSession(session: SessionInfo, machineId: string, text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery: PromptAttachmentDelivery = "inline"): Promise<void> {
+    const state = this.getState();
+    const selected = state.selectedSession;
+    if (selected?.id === session.id && selectedMachineId(state) === machineId && !this.shouldQueueUntilReady(session, machineId)) {
+      await this.send(text, streamingBehavior, attachments, delivery);
+      return;
+    }
+    if (session.archived === true) return;
+    const trimmed = text.trim();
+    const hasAttachments = attachments !== undefined && attachments.length > 0;
+    if (!hasAttachments && trimmed.startsWith("/")) this.enqueueReadinessSend(session, machineId, { type: "command", text });
+    else if (!hasAttachments && isShellInput(text)) this.enqueueReadinessSend(session, machineId, { type: "shell", text });
+    else this.enqueueReadinessSend(session, machineId, { type: "prompt", text, streamingBehavior, attachments, delivery });
+  }
+
   async send(text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery: PromptAttachmentDelivery = "inline") {
     const session = this.getState().selectedSession;
     if (!session || session.archived === true) return;
 
     const trimmed = text.trim();
     const hasAttachments = attachments !== undefined && attachments.length > 0;
+    const machineId = selectedMachineId(this.getState());
     if (isClientPendingStartSessionInfo(session)) {
       if (!hasAttachments && trimmed.startsWith("/")) this.enqueuePendingSessionSend(session, { type: "command", text });
       else if (!hasAttachments && isShellInput(text)) this.enqueuePendingSessionSend(session, { type: "shell", text });
       else this.enqueuePendingSessionSend(session, { type: "prompt", text, streamingBehavior, attachments, delivery });
+      return;
+    }
+    if (this.shouldQueueUntilReady(session, machineId)) {
+      if (!hasAttachments && trimmed.startsWith("/")) this.enqueueReadinessSend(session, machineId, { type: "command", text });
+      else if (!hasAttachments && isShellInput(text)) this.enqueueReadinessSend(session, machineId, { type: "shell", text });
+      else this.enqueueReadinessSend(session, machineId, { type: "prompt", text, streamingBehavior, attachments, delivery });
       return;
     }
     if (!hasAttachments && trimmed.startsWith("/")) return this.runCommand(text);
@@ -547,7 +660,7 @@ export class SessionController {
     // Capture the originating session/machine before any await so the request
     // and its sending indicator stay bound to the right session even if the
     // user navigates elsewhere mid-upload.
-    await this.deliverPromptToSession(session, text, streamingBehavior, attachments, delivery, selectedMachineId(this.getState()), { markSending: hasAttachments });
+    await this.deliverPromptToSession(session, text, streamingBehavior, attachments, delivery, machineId, { markSending: hasAttachments });
   }
 
   private markSendingPrompt(sessionId: string, sending: boolean): void {
@@ -566,7 +679,12 @@ export class SessionController {
       this.enqueuePendingSessionSend(session, { type: "shell", text });
       return;
     }
-    await this.deliverShellToSession(session, text, selectedMachineId(this.getState()), { optimisticLine: true });
+    const machineId = selectedMachineId(this.getState());
+    if (this.shouldQueueUntilReady(session, machineId)) {
+      this.enqueueReadinessSend(session, machineId, { type: "shell", text });
+      return;
+    }
+    await this.deliverShellToSession(session, text, machineId, { optimisticLine: true });
   }
 
   async runCommand(text: string) {
@@ -576,7 +694,59 @@ export class SessionController {
       this.enqueuePendingSessionSend(session, { type: "command", text });
       return;
     }
-    await this.deliverCommandToSession(session, text, selectedMachineId(this.getState()), { applyResult: true });
+    const machineId = selectedMachineId(this.getState());
+    if (this.shouldQueueUntilReady(session, machineId)) {
+      this.enqueueReadinessSend(session, machineId, { type: "command", text });
+      return;
+    }
+    await this.deliverCommandToSession(session, text, machineId, { applyResult: true });
+  }
+
+  private shouldQueueUntilReady(session: SessionInfo, machineId: string): boolean {
+    const key = machineSessionKey(machineId, session.id);
+    if (this.readinessQueuedSends.has(key)) return true;
+    const load = this.getState().selectedChatLoad;
+    // `no-target` is also used by controller-only callers that have not begun a
+    // chat-open transition. Preserve their direct-send behavior; a real opening
+    // always installs a target-bearing loading state before it exposes Send.
+    if (load.kind === "no-target") return false;
+    return !selectedChatCanUseRuntime(load)
+      || !selectedChatTargetsEqual(load.target, selectedChatTarget(machineId, session));
+  }
+
+  private enqueueReadinessSend(session: SessionInfo, machineId: string, input: QueuedPendingSessionSendInput): void {
+    const key = machineSessionKey(machineId, session.id);
+    const queue = this.readinessQueuedSends.get(key) ?? { session, machineId, sends: [] };
+    const queued: QueuedPendingSessionSend = { ...input, id: `readiness-send-${String(++this.pendingQueuedSendSeq)}` };
+    queue.sends.push(queued);
+    this.readinessQueuedSends.set(key, queue);
+    const state = this.getState();
+    const visible = state.clientQueuedSessionMessages[session.id] ?? [];
+    this.setState({
+      clientQueuedSessionMessages: { ...state.clientQueuedSessionMessages, [session.id]: [...visible, queuedSessionMessagePreview(queued)] },
+      error: "",
+    });
+  }
+
+  private async flushReadinessSends(session: SessionInfo, machineId: string): Promise<void> {
+    const key = machineSessionKey(machineId, session.id);
+    const queue = this.readinessQueuedSends.get(key);
+    if (queue === undefined) return;
+    while (queue.sends.length > 0) {
+      const queued = queue.sends[0];
+      if (queued === undefined) return;
+      if (!await this.deliverQueuedPendingSend(session, machineId, queued)) {
+        const recovery = this.recoverReadinessSends(session, machineId);
+        if (recovery !== undefined) {
+          const attachmentNotice = recovery.attachmentsNeedReattaching ? " Reattach files before retrying." : "";
+          this.setState({ error: `Queued message delivery is uncertain. ${String(recovery.count)} ${recovery.count === 1 ? "message was" : "messages were"} restored to the draft for explicit retry.${attachmentNotice}` });
+        }
+        return;
+      }
+      queue.sends.shift();
+      this.dropNextQueuedSessionMessage(session.id);
+    }
+    this.readinessQueuedSends.delete(key);
   }
 
   private enqueuePendingSessionSend(session: ClientPendingStartSessionInfo, input: QueuedPendingSessionSendInput): void {
@@ -1382,7 +1552,8 @@ export class SessionController {
     return this.requestSelectedSessionRefresh(target).catch((error: unknown) => {
       if (this.isCurrentRefreshTarget(target)) {
         const selectedTarget = selectedChatTarget(target.machineId, target.session);
-        this.setState({ selectedChatLoad: selectedChatFailed(selectedTarget, this.currentSelectedChatReadability(selectedTarget), error), error: String(error) });
+        const failure = this.recoverReadinessFailure(target.session, target.machineId, error);
+        this.setState({ selectedChatLoad: selectedChatFailed(selectedTarget, this.currentSelectedChatReadability(selectedTarget), failure), error: failure });
       }
     });
   }
@@ -1397,6 +1568,14 @@ export class SessionController {
       const historyPromise = this.api.messages(target.session, { limit: MESSAGE_PAGE_SIZE }, target.machineId);
       const statusPromise = this.api.status(target.session, target.machineId);
       const streamSnapshotPromise = this.api.streamSnapshot(target.session, target.machineId);
+      const previewRequest = this.transcriptPreviewRequests.get(key);
+      if (previewRequest !== undefined && this.currentSelectedChatReadability(selectedTarget) === "absent") {
+        void previewRequest.then((page) => {
+          if (!this.isCurrentRefreshTarget(target) || this.currentSelectedChatReadability(selectedTarget) !== "absent") return;
+          const preview = transcriptViewFromHistory(page);
+          this.setState({ ...preview, selectedChatLoad: selectedChatPreviewReadable(selectedTarget), isLoadingEarlierMessages: false });
+        }).catch(() => undefined);
+      }
       void this.notifications?.refreshSelectedSession(target.session, target.machineId).catch(() => undefined);
 
       const historyViewPromise = historyPromise.then((page) => {
@@ -1441,12 +1620,14 @@ export class SessionController {
         activity: this.getState().sessionActivities[target.session.id],
       });
       this.applyStatus(status);
+      await this.flushReadinessSends(target.session, target.machineId);
+      this.transcriptPreviewRequests.delete(key);
     });
   }
 
   private markSelectedChatRefreshing(target: SelectedChatTarget): void {
     const state = this.getState();
-    if (state.selectedChatLoad.kind === "cached-readable" || state.selectedChatLoad.kind === "fresh-readable") return;
+    if (state.selectedChatLoad.kind === "cached-readable" || state.selectedChatLoad.kind === "preview-readable" || state.selectedChatLoad.kind === "fresh-readable") return;
     if (state.selectedChatLoad.kind === "loading-without-content" || state.selectedChatLoad.kind === "loading-with-readable-history") return;
     const readability = this.currentSelectedChatReadability(target);
     this.setState({ selectedChatLoad: selectedChatLoading(target, readability) });

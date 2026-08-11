@@ -13,6 +13,7 @@ export type SelectedChatLoad =
   | { readonly kind: "loading-without-content"; readonly target: SelectedChatTarget }
   | { readonly kind: "loading-with-readable-history"; readonly target: SelectedChatTarget; readonly readability: Exclude<SelectedChatReadability, "absent"> }
   | { readonly kind: "cached-readable"; readonly target: SelectedChatTarget }
+  | { readonly kind: "preview-readable"; readonly target: SelectedChatTarget }
   | { readonly kind: "fresh-readable"; readonly target: SelectedChatTarget }
   | { readonly kind: "live-ready"; readonly target: SelectedChatTarget }
   | { readonly kind: "read-only"; readonly target: SelectedChatTarget; readonly readability: SelectedChatReadability }
@@ -41,6 +42,10 @@ export function selectedChatCachedReadable(target: SelectedChatTarget): Selected
   return { kind: "cached-readable", target };
 }
 
+export function selectedChatPreviewReadable(target: SelectedChatTarget): SelectedChatLoad {
+  return { kind: "preview-readable", target };
+}
+
 export function selectedChatFreshReadable(target: SelectedChatTarget): SelectedChatLoad {
   return { kind: "fresh-readable", target };
 }
@@ -65,6 +70,7 @@ export function selectedChatReadability(load: SelectedChatLoad): SelectedChatRea
     case "loading-with-readable-history":
       return load.readability;
     case "cached-readable":
+    case "preview-readable":
       return "cached";
     case "fresh-readable":
     case "live-ready":

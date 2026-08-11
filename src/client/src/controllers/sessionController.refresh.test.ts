@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../appState";
 import { ChatTranscriptStore } from "../chatTranscriptStore";
+import { textMessage } from "../chatMessages";
 import { SessionController } from "./sessionController";
 import { defaultApi, deferred, EmitSocket, FakeSocket, oldSession, replacementSession, sessionLookupId, status, workspace, type AppState, type MessagePage, type SessionStatus, type SessionStreamSnapshot } from "./sessionController.testSupport";
 
@@ -48,6 +49,300 @@ describe("SessionController selected-session refresh", () => {
 
     expect(state.selectedChatLoad).toMatchObject({ kind: "live-ready", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
     expect(ready).toEqual([`local:${oldSession.id}`]);
+  });
+
+  it("paints a bounded prefetched transcript before canonical history and runtime readiness", async () => {
+    const preview = deferred<MessagePage>();
+    const canonical = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    const requests: { preview?: boolean }[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, options) => {
+        requests.push({ ...(options?.preview === undefined ? {} : { preview: options.preview }) });
+        return options?.preview === true ? preview.promise : canonical.promise;
+      },
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    const prefetched = controller.previewSession(oldSession, "local");
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    preview.resolve(page("readable preview", 1));
+    await prefetched;
+    await Promise.resolve();
+
+    expect(state.messages).toEqual([textMessage("assistant", "readable preview")]);
+    expect(state.selectedChatLoad.kind).toBe("preview-readable");
+    expect(requests).toEqual([{ preview: true }, {}]);
+
+    canonical.resolve(page("canonical history", 1));
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.resolve({ seq: 0, partial: null });
+    await selecting;
+
+    expect(state.messages).toEqual([textMessage("assistant", "canonical history")]);
+    expect(state.selectedChatLoad.kind).toBe("live-ready");
+  });
+
+  it("does not let a stalled preview block canonical readiness or queued delivery", async () => {
+    const stalledPreview = deferred<MessagePage>();
+    const delivered: string[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, options) => options?.preview === true ? stalledPreview.promise : Promise.resolve(page("canonical", 1)),
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
+      prompt: (_session, text) => { delivered.push(text); return Promise.resolve({ accepted: true }); },
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    void controller.previewSession(oldSession, "local");
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    await controller.send("deliver without preview");
+    await selecting;
+
+    expect(state.selectedChatLoad.kind).toBe("live-ready");
+    expect(delivered).toEqual(["deliver without preview"]);
+  });
+
+  it("does not synchronously render an oversized warm cache ahead of its bounded preview", async () => {
+    const preview = deferred<MessagePage>();
+    const canonical = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, options) => options?.preview === true ? preview.promise : canonical.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const transcripts = new ChatTranscriptStore();
+    transcripts.mergeHistory("local:old-session", {
+      messages: Array.from({ length: 30 }, (_, index) => ({ role: "assistant", content: `cached ${String(index)}` })),
+      start: 0,
+      total: 30,
+    });
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), transcripts },
+    );
+
+    const prefetched = controller.previewSession(oldSession, "local");
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+
+    expect(state.messages).toEqual([]);
+    expect(state.selectedChatLoad.kind).toBe("loading-without-content");
+
+    preview.resolve(page("bounded preview", 30));
+    await prefetched;
+    await Promise.resolve();
+    expect(state.messages).toEqual([textMessage("assistant", "bounded preview")]);
+
+    canonical.resolve(page("canonical", 30));
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.resolve({ seq: 0, partial: null });
+    await selecting;
+  });
+
+  it("keeps an opening send owned by its non-selected target until that target is live", async () => {
+    const messages = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    const delivered: { id: string; text: string; machineId: string | undefined }[] = [];
+    let state: AppState = {
+      ...initialAppState(),
+      selectedWorkspace: workspace,
+      selectedSession: replacementSession,
+      sessions: [replacementSession, oldSession],
+      selectedChatLoad: { kind: "live-ready", target: { machineId: "local", sessionId: replacementSession.id, cwd: replacementSession.cwd } },
+    };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => messages.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      prompt: (session, text, _streamingBehavior, machineId) => { delivered.push({ id: session.id, text, machineId }); return Promise.resolve({ accepted: true }); },
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.sendToSession(oldSession, "local", "owned by target");
+    expect(delivered).toEqual([]);
+    expect(state.clientQueuedSessionMessages[oldSession.id]).toEqual([{ kind: "followUp", text: "owned by target" }]);
+
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    messages.resolve(page("history", 1));
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.resolve({ seq: 0, partial: null });
+    await selecting;
+
+    expect(delivered).toEqual([{ id: oldSession.id, text: "owned by target", machineId: "local" }]);
+  });
+
+  it("accepts and visibly queues a send before live readiness, then delivers it in order", async () => {
+    const messages = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    const delivered: string[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => messages.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      prompt: (_session, text) => { delivered.push(text); return Promise.resolve({ accepted: true }); },
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    await Promise.resolve();
+    await controller.send("first queued");
+    await controller.send("second queued");
+    await controller.send("third queued");
+
+    expect(delivered).toEqual([]);
+    expect(state.clientQueuedSessionMessages[oldSession.id]).toEqual([
+      { kind: "followUp", text: "first queued" },
+      { kind: "followUp", text: "second queued" },
+      { kind: "followUp", text: "third queued" },
+    ]);
+
+    messages.resolve(page("history", 1));
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.resolve({ seq: 0, partial: null });
+    await selecting;
+
+    expect(delivered).toEqual(["first queued", "second queued", "third queued"]);
+    expect(state.clientQueuedSessionMessages[oldSession.id]).toBeUndefined();
+  });
+
+  it("restores an ambiguous failed delivery instead of retrying it automatically", async () => {
+    let promptCalls = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => Promise.resolve(page("history", 1)),
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
+      prompt: () => { promptCalls += 1; return Promise.reject(new Error("response lost")); },
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const replacePromptEditorText = vi.fn(() => true);
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), replacePromptEditorText },
+    );
+
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    await Promise.resolve();
+    await controller.send("uncertain send");
+    await selecting;
+    await controller.refreshSelectedSession();
+
+    expect(promptCalls).toBe(1);
+    expect(state.error).toContain("delivery is uncertain");
+    expect(state.clientQueuedSessionMessages[oldSession.id]).toBeUndefined();
+    expect(replacePromptEditorText).toHaveBeenCalledWith({ machineId: "local", sessionId: oldSession.id, text: "uncertain send" });
+  });
+
+  it("restores queued sends when refresh runtime readiness fails", async () => {
+    const selectedStatus = deferred<SessionStatus>();
+    let state: AppState = {
+      ...initialAppState(),
+      selectedWorkspace: workspace,
+      selectedSession: oldSession,
+      sessions: [oldSession],
+      selectedChatLoad: { kind: "live-ready", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } },
+    };
+    const replacePromptEditorText = vi.fn(() => true);
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => Promise.resolve(page("history", 1)),
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), replacePromptEditorText },
+    );
+
+    const refreshing = controller.refreshSelectedSession();
+    await vi.waitFor(() => { expect(state.selectedChatLoad.kind).toBe("fresh-readable"); });
+    await controller.send("recover after readiness failure");
+    selectedStatus.reject(new Error("status unavailable"));
+    await refreshing;
+
+    expect(state.selectedChatLoad.kind).toBe("failed");
+    expect(state.error).toContain("restored to the draft");
+    expect(state.clientQueuedSessionMessages[oldSession.id]).toBeUndefined();
+    expect(replacePromptEditorText).toHaveBeenCalledWith({ machineId: "local", sessionId: oldSession.id, text: "recover after readiness failure" });
+  });
+
+  it("restores queued opening sends when navigation cannot reach the target", async () => {
+    let state: AppState = {
+      ...initialAppState(),
+      selectedWorkspace: workspace,
+      selectedSession: oldSession,
+      sessions: [oldSession],
+      selectedChatLoad: { kind: "loading-without-content", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api: defaultApi, socket: new FakeSocket() },
+    );
+
+    await controller.send("recover me", undefined, [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }]);
+    const recovery = controller.recoverReadinessSends(oldSession, "local");
+
+    expect(recovery).toEqual({ count: 1, attachmentsNeedReattaching: true, restoredText: "recover me" });
+    expect(state.clientQueuedSessionMessages[oldSession.id]).toBeUndefined();
   });
 
   it("keeps cached history readable and controls ineligible when the fresh history request fails", async () => {

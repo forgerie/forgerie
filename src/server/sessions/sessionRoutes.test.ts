@@ -737,6 +737,35 @@ describe("session routes", () => {
     }
   });
 
+  it("serves a bounded transcript preview when requested", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    const huge = "x".repeat(100_000);
+    routeService.messagesResponse = {
+      messages: [{ role: "toolResult", content: [{ type: "text", text: huge }, { type: "image", mimeType: "image/png", data: huge }] }],
+      start: 6,
+      total: 7,
+    };
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const response = await routeApp.inject({ method: "GET", url: `/sessions/session-1/messages?cwd=${encodeURIComponent("/repo")}&limit=20&preview=1` });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body.length).toBeLessThan(2_000);
+      expect(response.json()).toEqual({
+        messages: [{ role: "toolResult", content: [{ type: "text", text: `${huge.slice(0, 512)}\n\n[Preview truncated; full content is loading…]` }] }],
+        start: 6,
+        total: 7,
+      });
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("forwards prompt attachments and supports the save-attachments route", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);

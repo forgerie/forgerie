@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CHAT_OPEN_TIMING_MARKS, CHAT_OPEN_TIMING_MEASURES, ChatOpenTiming, type ChatOpenPerformanceLike } from "./chatOpenTiming";
-import { selectedChatCachedReadable, selectedChatFailed, selectedChatFreshReadable, selectedChatLiveReady, selectedChatReadOnly, selectedChatTarget, type SelectedChatTarget } from "./selectedChatLoad";
+import { selectedChatCachedReadable, selectedChatFailed, selectedChatFreshReadable, selectedChatLiveReady, selectedChatPreviewReadable, selectedChatReadOnly, selectedChatTarget, type SelectedChatTarget } from "./selectedChatLoad";
 import type { SessionInfo } from "./api";
 
 interface RecordedEntry {
@@ -81,6 +81,18 @@ describe("ChatOpenTiming", () => {
     timing.markSelectedLoadPainted(selectedChatFreshReadable(target));
 
     expect(measureMilestones(performance)).toEqual(["intent", "cached-transcript-painted", "fresh-transcript-painted"]);
+  });
+
+  it("records a bounded network preview separately from a cache hit", () => {
+    const performance = new RecordingPerformance();
+    const timing = new ChatOpenTiming({ performance });
+    const target = targetFor("preview");
+
+    timing.begin(target);
+    performance.advance(6);
+    timing.markSelectedLoadPainted(selectedChatPreviewReadable(target));
+
+    expect(measureMilestones(performance)).toEqual(["intent", "preview-transcript-painted"]);
   });
 
   it("ends read-only selections without inventing live-ready", () => {
