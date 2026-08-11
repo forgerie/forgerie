@@ -796,7 +796,7 @@ export const promptEditorStyles = css`
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px;
     margin: 0 clamp(6px, 2cqi, 12px) max(8px, env(safe-area-inset-bottom));
     padding: 10px;
-    overflow: hidden;
+    overflow: visible;
     border: 1px solid var(--pi-border);
     border-radius: 16px;
     background: var(--pi-bg);

@@ -22,4 +22,8 @@ describe("composer island styles", () => {
   it("keeps the context reading on the island's own edge", () => {
     expect(islandCss).toMatch(/context-usage-meter\s*{[^}]*position:\s*absolute/);
   });
+
+  it("lets completion menus extend above the island", () => {
+    expect(islandCss).toMatch(/footer\s*{[^}]*overflow:\s*visible/);
+  });
 });
