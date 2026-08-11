@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type AskUserAnswer, type AskUserSubmission, type ExtensionDialogAnswerRequest, type ExtensionDialogCancelRequest, type SessionBulkMutationRequest, type SessionBulkMutationRef, type SessionCleanupRequest, type SessionTreeForkRequest, type SessionTreeNavigateRequest, type SessionTreeSummaryChoice, type SessionUnreadAcknowledgeRequest } from "../../shared/apiTypes.js";
+import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type AskUserAnswer, type AskUserSubmission, type ExtensionDialogAnswerRequest, type ExtensionDialogCancelRequest, type PromptResourceCommandIdentity, type SessionBulkMutationRequest, type SessionBulkMutationRef, type SessionCleanupRequest, type SessionTreeForkRequest, type SessionTreeNavigateRequest, type SessionTreeSummaryChoice, type SessionUnreadAcknowledgeRequest } from "../../shared/apiTypes.js";
 import { projectBrowserMessageResponse } from "../browserMessageProjection.js";
 import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
@@ -20,6 +20,10 @@ interface PromptRequestBody {
   text?: unknown;
   streamingBehavior?: unknown;
   attachments?: unknown;
+}
+
+interface PromptResourceCommandRequestBody extends PromptRequestBody {
+  identity?: unknown;
 }
 
 interface AttachmentsRequestBody {
@@ -300,6 +304,15 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
       const body = optionalRecord(request.body);
       await sessions.prompt(sessionRefFromBody(request.params.sessionId, body), body["text"], body["streamingBehavior"], body["attachments"]);
       return { accepted: true };
+    } catch (error) {
+      return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.post<{ Params: { sessionId: string }; Body: PromptResourceCommandRequestBody | undefined }>(`${prefix}/sessions/:sessionId/prompt-resource-command`, async (request, reply) => {
+    try {
+      const body = optionalRecord(request.body);
+      return await sessions.runPromptResourceCommand(sessionRefFromBody(request.params.sessionId, body), requireString(body, "text"), requirePromptResourceCommandIdentity(body["identity"]), body["streamingBehavior"], body["attachments"]);
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
     }
@@ -683,6 +696,16 @@ function requireNonEmptyString(record: Record<string, unknown>, field: string): 
   const value = requireString(record, field);
   if (value.trim() === "") throw new Error(`${field} field must not be empty`);
   return value;
+}
+
+function requirePromptResourceCommandIdentity(value: unknown): PromptResourceCommandIdentity {
+  const record = requireRecord(value);
+  const source = requireString(record, "source");
+  if (source !== "prompt" && source !== "skill") throw new Error("identity source must be prompt or skill");
+  const name = requireNonEmptyString(record, "name");
+  const fingerprint = requireString(record, "fingerprint");
+  if (!/^[a-f0-9]{64}$/u.test(fingerprint)) throw new Error("identity fingerprint must be a SHA-256 hex digest");
+  return { source, name, fingerprint };
 }
 
 function requireNullableString(record: Record<string, unknown>, field: string): string | null {

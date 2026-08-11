@@ -988,6 +988,11 @@ export interface SlashCommand {
 
 export type { PromptResourceCatalogResponse, PromptResourceCommandDescriptor, PromptResourceCommandIdentity } from "./promptResourceCommand.js";
 
+export interface PromptResourceCommandRunResponse {
+  accepted: true;
+  deliveryFingerprint: string;
+}
+
 export interface FileSuggestion {
   path: string;
   kind: "tracked" | "untracked" | "other";

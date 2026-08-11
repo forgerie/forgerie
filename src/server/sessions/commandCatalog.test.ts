@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources, resolveCanonicalCommandSource, resolvePromptResourceIdentity } from "./commandCatalog.js";
+import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources, expandPromptResourceCommand, resolveCanonicalCommandSource, resolvePromptResourceIdentity } from "./commandCatalog.js";
 
 describe("canonical command catalog", () => {
   it("projects active commands with current precedence and prompt-resource eligibility", async () => {
@@ -75,6 +75,32 @@ describe("canonical command catalog", () => {
     expect(catalog.commands).toHaveLength(1);
     expect(catalog.commands[0]).toMatchObject({ name: "review", source: "prompt", description: "Wins" });
     expect(catalog.commands[0]).not.toHaveProperty("origin");
+  });
+
+  it("expands prompt and skill arguments the same way the installed Pi runtime does", () => {
+    expect(expandPromptResourceCommand({
+      name: "review",
+      source: "prompt",
+      identity: { source: "prompt", name: "review", fingerprint: "a".repeat(64) },
+      content: "Review $1 then ${2:-fallback}; all=$ARGUMENTS; tail=${@:2}",
+      origin: "prompt:review",
+    }, "src 'quoted value'")).toBe("Review src then quoted value; all=src quoted value; tail=quoted value");
+
+    expect(expandPromptResourceCommand({
+      name: "skill:audit",
+      source: "skill",
+      identity: { source: "skill", name: "skill:audit", fingerprint: "b".repeat(64) },
+      content: "---\ndescription: Audit\n---\nUse tools\n",
+      origin: "skill:audit",
+      baseDir: "/repo/.pi/skills/audit",
+      filePath: "/repo/.pi/skills/audit/SKILL.md",
+    }, " src ")).toBe(`<skill name="audit" location="/repo/.pi/skills/audit/SKILL.md">
+References are relative to /repo/.pi/skills/audit.
+
+Use tools
+</skill>
+
+src`);
   });
 
   it("resolves runtime command names through the same exact precedence policy", () => {

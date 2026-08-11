@@ -1,3 +1,4 @@
+import { stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import type { SlashCommand } from "../../shared/apiTypes.js";
 import { fingerprintPromptResourceCommand, parseLeadingSlashCommand, type PromptResourceCatalogAvailable, type PromptResourceCommandDescriptor, type PromptResourceCommandIdentity, type PromptResourceCommandSource } from "../../shared/promptResourceCommand.js";
 
@@ -81,8 +82,8 @@ export async function buildActiveCommandCatalog(input: ActiveCommandCatalogInput
   candidates.push(...await promptResourceRecordsFromPrompts(input.prompts));
 
   const winners = canonicalWinners(candidates);
-  const commands = sortCommands(winners.map(toClientCommand));
   const resourceCommands = sortResourceCommands(winners.filter(isPromptResourceCommandRecord));
+  const commands = sortCommands(winners.map(toClientCommand));
   return {
     commands,
     firstPromptCommands: resourceCommands.map(toPromptResourceDescriptor),
@@ -124,6 +125,23 @@ async function promptResourceRecordsFromPrompts(prompts: readonly CanonicalPromp
 
 async function promptResourceRecordsFromSkills(skills: readonly CanonicalSkillResourceInput[]): Promise<PromptResourceCommandRecord[]> {
   return Promise.all(skills.map((skill) => promptResourceRecord({ source: "skill", name: `skill:${skill.name}`, description: skill.description, content: skill.content, origin: skill.origin, baseDir: skill.baseDir, filePath: skill.filePath })));
+}
+
+export function expandPromptResourceCommand(command: PromptResourceCommandRecord, argsText: string): string {
+  if (command.source === "prompt") return substituteArgs(command.content, parseCommandArgs(argsText));
+  const skillName = command.name.startsWith("skill:") ? command.name.slice("skill:".length) : command.name;
+  const body = stripFrontmatter(command.content).trim();
+  const location = command.filePath ?? command.origin;
+  const baseDir = command.baseDir ?? "";
+  const skillBlock = `<skill name="${skillName}" location="${location}">
+References are relative to ${baseDir}.
+
+${body}
+</skill>`;
+  const args = argsText.trim();
+  return args === "" ? skillBlock : `${skillBlock}
+
+${args}`;
 }
 
 async function promptResourceRecord(input: { source: PromptResourceCommandSource; name: string; description?: string | undefined; content: string; origin: string; baseDir?: string | undefined; filePath?: string | undefined }): Promise<PromptResourceCommandRecord> {
@@ -199,4 +217,45 @@ function codePointCompare(a: string, b: string): number {
 
 function isPromptResourceCommandRecord(command: SlashCommand | PromptResourceCommandRecord): command is PromptResourceCommandRecord {
   return command.source === "prompt" || command.source === "skill";
+}
+
+function parseCommandArgs(argsString: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inQuote: string | undefined;
+  for (const char of argsString) {
+    if (inQuote !== undefined) {
+      if (char === inQuote) inQuote = undefined;
+      else current += char;
+    } else if (char === "\"" || char === "'") {
+      inQuote = char;
+    } else if (/\s/u.test(char)) {
+      if (current !== "") {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+  if (current !== "") args.push(current);
+  return args;
+}
+
+function substituteArgs(content: string, args: string[]): string {
+  const allArgs = args.join(" ");
+  return content.replace(/\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/gu, (_match, defaultTarget: string | undefined, defaultValue: string | undefined, sliceStart: string | undefined, sliceLength: string | undefined, simple: string | undefined) => {
+    if (defaultTarget !== undefined) {
+      const value = defaultTarget === "@" || defaultTarget === "ARGUMENTS" ? allArgs : args[Number.parseInt(defaultTarget, 10) - 1];
+      return value !== undefined && value !== "" ? value : defaultValue ?? "";
+    }
+    if (sliceStart !== undefined) {
+      const start = Math.max(0, Number.parseInt(sliceStart, 10) - 1);
+      if (sliceLength !== undefined) return args.slice(start, start + Number.parseInt(sliceLength, 10)).join(" ");
+      return args.slice(start).join(" ");
+    }
+    if (simple === "ARGUMENTS" || simple === "@") return allArgs;
+    if (simple !== undefined) return args[Number.parseInt(simple, 10) - 1] ?? "";
+    return "";
+  });
 }

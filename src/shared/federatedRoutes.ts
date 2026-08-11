@@ -75,6 +75,7 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "POST", path: "/sessions/:sessionId/thinking-level/cycle" },
   { method: "GET", path: "/sessions/:sessionId/commands" },
   { method: "POST", path: "/sessions/:sessionId/prompt" },
+  { method: "POST", path: "/sessions/:sessionId/prompt-resource-command" },
   { method: "POST", path: "/sessions/:sessionId/queue/clear" },
   { method: "POST", path: "/sessions/:sessionId/guidance" },
   { method: "POST", path: "/sessions/:sessionId/ask/submit" },

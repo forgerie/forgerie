@@ -280,6 +280,20 @@ describe("session API compatibility", () => {
     expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo", text: "hello" });
   });
 
+  it("posts identity-bound prompt-resource invocations with cwd, identity, delivery mode, and attachments", async () => {
+    const fetchMock = stubJsonFetch({ accepted: true, deliveryFingerprint: "a".repeat(64) });
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "b".repeat(64) };
+    const attachments = [{ kind: "image" as const, mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+
+    await expect(sessionsApi.runPromptResourceCommand({ id: "s 1", cwd: "/repo" }, "/review src", identity, "followUp", "remote a", attachments)).resolves.toEqual({ accepted: true, deliveryFingerprint: "a".repeat(64) });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchCall(fetchMock, 0);
+    expect(url).toBe("https://pi.example.test/api/machines/remote%20a/sessions/s%201/prompt-resource-command");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo", text: "/review src", identity, streamingBehavior: "followUp", attachments });
+  });
+
   it("writes process stdin with the server's input field through the selected machine", async () => {
     const fetchMock = stubJsonFetch({ ok: true });
 

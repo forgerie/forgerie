@@ -1,5 +1,6 @@
 import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, EXTENSION_DIALOG_OPTION_LIMIT, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_COMPLETED_AT_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_LIMIT, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type ArchiveSessionsResponse, type AskUserCloseReason, type AskUserCloseResponse, type AskUserOutcome, type AskUserQuestion, type AskUserQuestionOption, type AskUserQuestionRecord, type PendingAskUser, type PendingExtensionDialog, type AuthProviderOption, type AuthProviderStatus, type AuthProvidersResponse, type AuthStatusSource, type AuthType, type CommandOption, type CommandResult, type DeleteWorkspaceFileResponse, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogKind, type ExtensionDialogOutcome, type FileContentResponse, type FileSuggestion, type FileTreeEntry, type FileTreeResponse, type GitDiffResponse, type GitFileState, type GitStatusFile, type GitStatusResponse, type GlobalSessionEvent, type Machine, type MachineHealth, type MachineKind, type MachineRuntime, type MachineStatus, type MessagePage, type ModelSelectionResponse, type MoveWorkspaceFileResponse, type OAuthFlowState, type PiWebAgentDirEnvSource, type PiWebCapability, type PiWebComponentStatus, type PiWebConfigEnvOverrides, type PiWebConfigResponse, type PiWebConfigValues, type PiWebInstallationInfo, type PiWebPluginConfigMap, type PiWebPluginInfo, type PiWebPluginsResponse, type PiWebPluginScope, type PiWebReleaseStatus, type PiWebRuntimeComponent, type PiWebRuntimeResponse, type PiWebServiceComponent, type PiWebShortcutConfig, type PiWebStatusMessage, type PiWebStatusResponse, type PiWebStatusSeverity, type Project, type QueuedSessionMessage, type SavedPromptAttachment, type SessionBulkArchiveResponse, type SessionBulkDeleteArchivedResponse, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupProjectSummary, type SessionCleanupThresholds, type SessionCleanupTotals, type SessionInfo, type SessionModel, type SessionNotification, type SessionNotificationClearReason, type SessionNotificationDismissThrough, type SessionNotificationInboxDelta, type SessionNotificationInboxEvent, type SessionNotificationInboxSnapshot, type SessionNotificationSeverity, type SessionNotificationSummary, type SessionStatus, type SessionStreamSnapshot, type SessionUiEvent, type SessionUnreadCatalogSnapshot, type SessionUnreadEvent, type SessionUnreadSummary, type SessionWarning, type SessionWarningSeverity, type SlashCommand, type TerminalCommandRun, type TerminalCommandRunStatus, type TerminalInfo, type TerminalUiEvent, type ThinkingLevelsResponse, type WriteWorkspaceFileResponse, type Workspace, type WorkspaceEffectiveConfig, type WorkspaceActivity, type WorkspaceActivityUiEvent, type WorkspaceActivityResponse } from "../../../shared/apiTypes";
 import type { PromptResourceCatalogResponse, PromptResourceCommandDescriptor, PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
+import type { PromptResourceCommandRunResponse } from "../../../shared/apiTypes";
 import type { DoubleEscapeAction, ManagedProcessEndReason, ManagedProcessInfo, ManagedProcessKillResult, ManagedProcessLogLine, ManagedProcessOutputResult, ManagedProcessesSnapshot, ManagedProcessSignal, ManagedProcessStatus, ManagedProcessWriteResult, PiPackageInfo, PiPackageMutationAction, PiPackageMutationResponse, PiPackageScope, PiPackagesResponse, SessionAbortResult, SessionActivity, SessionStartupProgressEvent, SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeNode, SessionTreeNodeKind, SessionTreeSnapshot } from "../../../shared/apiTypes";
 import type { MachineSessionListingSnapshot, SessionAskCatalogEntry, SessionAskCatalogSnapshot } from "../../../shared/apiTypes";
 import { parseActiveAgentProfileDescriptor } from "../../../shared/activeAgentProfile";
@@ -1362,6 +1363,14 @@ export function parsePromptResourceCatalogResponse(value: unknown): PromptResour
   };
 }
 
+export function parsePromptResourceCommandRunResponse(value: unknown): PromptResourceCommandRunResponse {
+  const record = requireRecord(value);
+  if (record["accepted"] !== true) throw new Error("Expected prompt-resource command accepted response");
+  const deliveryFingerprint = requireString(record, "deliveryFingerprint");
+  if (!/^[a-f0-9]{64}$/u.test(deliveryFingerprint)) throw new Error("Invalid prompt-resource command delivery fingerprint");
+  return { accepted: true, deliveryFingerprint };
+}
+
 function parsePromptResourceCommandDescriptor(value: unknown): PromptResourceCommandDescriptor {
   const record = requireRecord(value);
   const source = requireString(record, "source");
@@ -1378,7 +1387,9 @@ function parsePromptResourceCommandIdentity(value: unknown): PromptResourceComma
   if (source !== "prompt" && source !== "skill") throw new Error("Invalid prompt-resource identity source");
   const fingerprint = requireString(record, "fingerprint");
   if (!/^[a-f0-9]{64}$/u.test(fingerprint)) throw new Error("Invalid prompt-resource identity fingerprint");
-  return { source, name: requireString(record, "name"), fingerprint };
+  const name = requireString(record, "name");
+  if (name === "") throw new Error("Invalid prompt-resource identity name");
+  return { source, name, fingerprint };
 }
 
 export function parseFileSuggestion(value: unknown): FileSuggestion {

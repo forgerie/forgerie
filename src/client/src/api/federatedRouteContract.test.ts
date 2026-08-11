@@ -161,6 +161,7 @@ describe("federated route contract", () => {
       ignoreParseFailure(sessionsApi.cycleThinkingLevel(session, machineId)),
       ignoreParseFailure(sessionsApi.commands(session, machineId)),
       ignoreParseFailure(sessionsApi.prompt(session, "hello", "followUp", machineId)),
+      ignoreParseFailure(sessionsApi.runPromptResourceCommand(session, "/review src", { source: "prompt", name: "review", fingerprint: "a".repeat(64) }, "followUp", machineId, [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }])),
       ignoreParseFailure(sessionsApi.saveAttachments(session, [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }], machineId, "uploads")),
       ignoreParseFailure(sessionsApi.shell(session, "ls", machineId)),
       ignoreParseFailure(sessionsApi.runCommand(session, "/help", machineId)),
