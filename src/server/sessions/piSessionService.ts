@@ -2301,20 +2301,30 @@ export class PiSessionService implements SessionRouteService {
       this.enqueuePromptDuringCompaction(session, promptText, behavior ?? "followUp", images, echoUserMessage);
       return;
     }
-    void this.submitPrompt(session, promptText, behavior, images, echoUserMessage);
+    const accepted = await this.submitPromptUntilPreflight(session, promptText, behavior, images, echoUserMessage);
+    if (!accepted) throw new Error("Prompt delivery was rejected before agent start.");
   }
 
-  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): Promise<void> {
+  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void): Promise<boolean> {
     this.publishActivity(session, behavior === "steer" ? "steering queued" : behavior === "followUp" ? "message queued" : "prompt accepted", "active");
     if (behavior === undefined && echoUserMessage) this.events.publish(session.sessionId, { type: "message.append", message: userMessage(text, images) });
-    const promptOptions = buildPromptOptions(behavior, images, expandPromptTemplates);
-    const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).catch((error: unknown) => {
+    const promptOptions = buildPromptOptions(behavior, images, expandPromptTemplates, preflightResult);
+    const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).then(() => true).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       this.publishActivity(session, "error", "error", message);
       this.events.publish(session.sessionId, { type: "session.error", message });
+      return false;
     });
     void promptPromise;
     return promptPromise;
+  }
+
+  private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): Promise<boolean> {
+    let resolvePreflight!: (accepted: boolean) => void;
+    const preflight = new Promise<boolean>((resolve) => { resolvePreflight = resolve; });
+    const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, resolvePreflight);
+    void completion.then(resolvePreflight);
+    return await preflight;
   }
 
   private enqueuePromptDuringCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): void {
@@ -2345,7 +2355,10 @@ export class PiSessionService implements SessionRouteService {
     }
     await this.voidOpenAskForUserMessage(session);
     if (session.isCompacting) this.enqueuePromptDuringCompaction(session, expanded, behavior ?? "followUp", images, true, false);
-    else void this.submitPrompt(session, expanded, behavior, images, true, false);
+    else {
+      const accepted = await this.submitPromptUntilPreflight(session, expanded, behavior, images, true, false);
+      if (!accepted) throw new Error("Prompt-resource command delivery was rejected before agent start.");
+    }
     return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
   }
 
@@ -4792,11 +4805,12 @@ function userMessage(text: string, images: ImageContent[]): { role: "user"; cont
   return { role: "user", content };
 }
 
-function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: ImageContent[], expandPromptTemplates = true): { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean } | undefined {
-  const options: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean } = {};
+function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: ImageContent[], expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void): { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: (accepted: boolean) => void } | undefined {
+  const options: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: (accepted: boolean) => void } = {};
   if (behavior !== undefined) options.streamingBehavior = behavior;
   if (images.length > 0) options.images = images;
   if (!expandPromptTemplates) options.expandPromptTemplates = false;
+  if (preflightResult !== undefined) options.preflightResult = preflightResult;
   return Object.keys(options).length > 0 ? options : undefined;
 }
 

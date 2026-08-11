@@ -12,6 +12,13 @@ import { CapturingSessionEventHub, createTestModelRuntime, fakeRuntime, runtimeC
 
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
 
+function promptPreflightResult(options: unknown): ((accepted: boolean) => void) | undefined {
+  if (typeof options !== "object" || options === null || !("preflightResult" in options)) return undefined;
+  const preflightResult = options.preflightResult;
+  if (typeof preflightResult !== "function") return undefined;
+  return (accepted) => { Reflect.apply(preflightResult, undefined, [accepted]); };
+}
+
 beforeEach(() => {
   // Pi 0.82 uses PI_OFFLINE for refreshes after runtime creation. These tests
   // exercise local model/auth behavior and must never fetch provider catalogs.
@@ -93,6 +100,36 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     expect(response).toEqual({ accepted: true, deliveryFingerprint: await fingerprintPromptResourceDeliveryText("Review src") });
     expect(JSON.stringify(response)).not.toContain("Review src");
     expect(fake.calls.prompt).toEqual([{ text: "Review src", options: { expandPromptTemplates: false } }]);
+    await service.dispose();
+  });
+
+  it("does not return a delivery receipt when Pi rejects prompt preflight", async () => {
+    const fake = fakeRuntime("prompt-resource-rejected-session", {
+      promptTemplates: [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }],
+      prompt: (_text, options) => {
+        promptPreflightResult(options)?.(false);
+        return Promise.reject(new Error("model unavailable"));
+      },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-rejected-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({
+        source: "prompt",
+        name: "review",
+        origin: "prompt:unknown:unknown:unknown:unknown",
+        content: "Review $ARGUMENTS",
+      }),
+    };
+
+    await expect(service.runPromptResourceCommand(sessionRef("prompt-resource-rejected-session"), "/review src", identity)).rejects.toThrow("rejected before agent start");
     await service.dispose();
   });
 

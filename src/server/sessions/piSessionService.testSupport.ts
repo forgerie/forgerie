@@ -128,6 +128,20 @@ const testExtensionUiContext: ExtensionUIContext = {
   setToolsExpanded() { /* no-op */ },
 };
 
+function capturePromptOptions(options: unknown): { recorded: unknown; preflightResult?: ((accepted: boolean) => void) | undefined } {
+  if (!isUnknownRecord(options)) return { recorded: options };
+  const preflightResult = options["preflightResult"];
+  const recorded = Object.fromEntries(Object.entries(options).filter(([key]) => key !== "preflightResult"));
+  return {
+    recorded: Object.keys(recorded).length === 0 ? undefined : recorded,
+    ...(typeof preflightResult === "function" ? { preflightResult: (accepted: boolean) => { Reflect.apply(preflightResult, undefined, [accepted]); } } : {}),
+  };
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export function testModel(): NonNullable<PiAgentSession["model"]> {
   const model = testModelRuntime.getModel(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
   if (model === undefined) throw new Error("test model not found");
@@ -185,7 +199,9 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
     },
     prompt: (text: string, options: unknown) => {
       sessionTitleBridgeSlot.publish({ type: "intent.accepted", text });
-      calls.prompt.push({ text, options });
+      const captured = capturePromptOptions(options);
+      captured.preflightResult?.(true);
+      calls.prompt.push({ text, options: captured.recorded });
       return Promise.resolve();
     },
     sendCustomMessage: (message: { customType: string; content: string; display: boolean; details?: unknown }, options: unknown) => {
