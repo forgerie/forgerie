@@ -23,6 +23,15 @@ export interface PanelPeekControllerOptions {
   readonly peekable: (panel: ShellPanel) => boolean;
   /** How wide the sheet is when fully pulled. */
   readonly sheetWidth: (panel: ShellPanel) => number;
+  /**
+   * Writes travel straight to the sheet.
+   *
+   * Travel changes on every frame of a drag. Asking the host to re-render that
+   * often re-renders the whole application with it, and the sheet then arrives
+   * a frame or more behind the finger. The host is asked to render only when a
+   * sheet appears or settles; in between, the travel is written to the element.
+   */
+  readonly applyProgress?: ((panel: ShellPanel, progress: number) => void) | undefined;
 }
 
 interface PeekOrigin {
@@ -222,11 +231,18 @@ export class PanelPeekController implements ReactiveController {
   }
 
   private setPeek(peek: PanelPeek): void {
-    if (peek === this.peek) return;
-    if (peek.kind === this.peek.kind && peekedPanel(peek) === peekedPanel(this.peek)
-      && peekProgressOf(peek) === peekProgressOf(this.peek)) return;
+    const before = this.peek;
+    if (peek.kind === before.kind && peekedPanel(peek) === peekedPanel(before)
+      && peekProgressOf(peek) === peekProgressOf(before)) return;
     this.peek = peek;
-    this.host.requestUpdate();
+
+    const panel = peekedPanel(peek);
+    const settled = peek.kind !== before.kind || panel !== peekedPanel(before);
+    if (settled || panel === undefined || this.options.applyProgress === undefined) {
+      this.host.requestUpdate();
+      return;
+    }
+    this.options.applyProgress(panel, peekProgressOf(peek));
   }
 }
 
@@ -235,14 +251,32 @@ function peekProgressOf(peek: PanelPeek): number {
 }
 
 /**
+ * Slack below this is rounding, not content. Sub-pixel layout leaves a pixel or
+ * two on ordinary elements that have nowhere to scroll.
+ */
+const HORIZONTAL_SLACK_TOLERANCE_PX = 2;
+
+/**
  * Whether anything under the pointer scrolls sideways and has somewhere to go.
  *
  * A drag that reaches the end of such an element does not carry on into the
  * sheet: chaining would open a panel every time a reader ran out of diff, so
  * the sheet asks for a gesture of its own.
+ *
+ * Wider content is not a scroller. An element whose overflow is visible spills
+ * past its box and cannot be scrolled at all, and transcript turns do exactly
+ * that -- so comparing widths alone hands every turn in the conversation a
+ * gesture it has no way to use, and the sheet never arms over the transcript.
  */
 export function ownsHorizontalScroll(elements: readonly Element[]): boolean {
-  return elements.some((element) => element.scrollWidth > element.clientWidth);
+  return elements.some(scrollsHorizontally);
+}
+
+function scrollsHorizontally(element: Element): boolean {
+  if (element.scrollWidth - element.clientWidth <= HORIZONTAL_SLACK_TOLERANCE_PX) return false;
+  if (typeof window === "undefined" || typeof window.getComputedStyle !== "function") return false;
+  const overflowX = window.getComputedStyle(element).overflowX;
+  return overflowX === "auto" || overflowX === "scroll";
 }
 
 function composedElements(event: Event): readonly Element[] {

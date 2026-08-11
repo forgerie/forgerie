@@ -73,6 +73,20 @@ describe("PiWebApp panel peek", () => {
     expect(peekSheet(app)).toBeNull();
   });
 
+  it("arms over a transcript turn, whose content spills but cannot scroll", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+    const shell = shellElement(app);
+    const turn = document.createElement("div");
+    turn.style.overflowX = "visible";
+    Object.defineProperty(turn, "scrollWidth", { value: 900, configurable: true });
+    Object.defineProperty(turn, "clientWidth", { value: 300, configurable: true });
+    shell.append(turn);
+
+    await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.5, { from: turn });
+
+    expect(peekSheet(app)).not.toBeNull();
+  });
+
   it("does not offer a panel that is already docked", async () => {
     const app = await mountApp(DESKTOP);
 
@@ -84,7 +98,9 @@ describe("PiWebApp panel peek", () => {
   it("gives a drag that starts in a sideways scroller back to it", async () => {
     const app = await mountApp(FOLDED_PORTRAIT);
     const shell = shellElement(app);
+    // A diff or a table: wider than its box *and* able to scroll to the rest.
     const scroller = document.createElement("div");
+    scroller.style.overflowX = "auto";
     Object.defineProperty(scroller, "scrollWidth", { value: 900, configurable: true });
     Object.defineProperty(scroller, "clientWidth", { value: 300, configurable: true });
     shell.append(scroller);

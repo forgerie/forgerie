@@ -228,7 +228,12 @@ export const appStyles = css`
     box-shadow: 0 0 24px var(--pi-shadow);
     transition: transform 180ms ease;
   }
-  .peek-sheet[data-tracking] { transition: none; }
+  /*
+   * While a finger is down the sheet has no transition and is promoted to its
+   * own layer: easing makes it lag the hand, and a layer keeps the travel on
+   * the compositor instead of asking for paint on every frame.
+   */
+  .peek-sheet[data-tracking] { transition: none; will-change: transform; }
   .peek-sheet[data-side="navigation"] { inset-inline-start: 0; transform: translateX(calc((var(--peek-progress, 0) - 1) * 100%)); }
   .peek-sheet[data-side="workspace"] { inset-inline-end: 0; transform: translateX(calc((1 - var(--peek-progress, 0)) * 100%)); }
   /*

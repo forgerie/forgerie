@@ -291,7 +291,24 @@ export class PiWebApp extends LitElement {
   private readonly panelPeek = new PanelPeekController(this, {
     peekable: (panel) => !this.panelIntent.isDocked(panel),
     sheetWidth: () => peekSheetWidth(this.clientWidth),
+    applyProgress: (_panel, progress) => { this.writePeekProgress(progress); },
   });
+
+  /**
+   * Puts the sheet where the finger is without a render.
+   *
+   * Travel arrives every frame. A render here is a render of the whole
+   * application, which lands the sheet behind the hand; the element takes the
+   * number directly instead, and the compositor moves it.
+   */
+  private writePeekProgress(progress: number): void {
+    const root = this.shadowRoot;
+    if (root === null) return;
+    const sheet = root.querySelector(".peek-sheet");
+    if (sheet instanceof HTMLElement) sheet.style.setProperty("--peek-progress", String(progress));
+    const scrim = root.querySelector(".peek-scrim");
+    if (scrim instanceof HTMLElement) scrim.style.opacity = String(progress);
+  }
   private readonly panelResize = new PanelResizeController(this);
   private readonly navigationSections = new NavigationSectionsController(
     this,

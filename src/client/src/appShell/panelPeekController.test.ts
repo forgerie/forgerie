@@ -163,11 +163,21 @@ describe("PanelPeekController", () => {
 
 describe("ownsHorizontalScroll", () => {
   it("finds a diff that still has somewhere to go", () => {
-    expect(ownsHorizontalScroll([elementWithScroll(900, 400)])).toBe(true);
+    expect(ownsHorizontalScroll([elementWithScroll(900, 400, "auto")])).toBe(true);
   });
 
   it("passes over content that fits", () => {
-    expect(ownsHorizontalScroll([elementWithScroll(400, 400)])).toBe(false);
+    expect(ownsHorizontalScroll([elementWithScroll(400, 400, "auto")])).toBe(false);
+  });
+
+  it("passes over a turn whose content spills but cannot scroll", () => {
+    // Every transcript turn looks like this. Reading width alone hands each one
+    // a gesture it has no way to use, and the sheet never arms over a session.
+    expect(ownsHorizontalScroll([elementWithScroll(900, 400, "visible")])).toBe(false);
+  });
+
+  it("treats a pixel or two of sub-pixel rounding as nothing to scroll", () => {
+    expect(ownsHorizontalScroll([elementWithScroll(402, 400, "auto")])).toBe(false);
   });
 
   it("passes over an empty path", () => {
@@ -175,10 +185,12 @@ describe("ownsHorizontalScroll", () => {
   });
 });
 
-function elementWithScroll(scrollWidth: number, clientWidth: number): Element {
+function elementWithScroll(scrollWidth: number, clientWidth: number, overflowX = "auto"): Element {
   const element = document.createElement("div");
+  element.style.overflowX = overflowX;
   Object.defineProperty(element, "scrollWidth", { value: scrollWidth, configurable: true });
   Object.defineProperty(element, "clientWidth", { value: clientWidth, configurable: true });
+  document.body.append(element);
   return element;
 }
 
