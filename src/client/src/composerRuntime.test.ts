@@ -91,12 +91,15 @@ describe("session composer runtime", () => {
     expect(models).toHaveBeenCalledWith({ id: "session-1", cwd: "/repo" }, "remote-a");
   });
 
-  it("clears completions on resolver failures or missing context", async () => {
+  it("distinguishes session provider failures from missing context", async () => {
+    vi.spyOn(api, "commands").mockRejectedValue(new Error("commands unavailable"));
     vi.spyOn(api, "models").mockRejectedValue(new Error("models unavailable"));
     const runtime = createSessionComposerRuntime({ sessionId: "session-1", cwd: "/repo", machineId: "local" });
     const noSessionRuntime = createSessionComposerRuntime({ machineId: "local" });
 
-    await expect(runtime.resolveCompletion({ kind: "model", query: "cla", from: 0, to: 4 })).resolves.toEqual([]);
+    await expect(runtime.resolveCompletion(commandTrigger("/tr", "tr"))).rejects.toThrow("commands unavailable");
+    await expect(runtime.resolveCompletion({ kind: "model", query: "cla", from: 0, to: 4 })).rejects.toThrow("models unavailable");
+    await expect(noSessionRuntime.resolveCompletion(commandTrigger("/tr", "tr"))).resolves.toEqual([]);
     await expect(noSessionRuntime.resolveCompletion({ kind: "model", query: "cla", from: 0, to: 4 })).resolves.toEqual([]);
   });
 });

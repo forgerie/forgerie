@@ -1,4 +1,4 @@
-import { api, workspacesApi, type SessionModel, type SlashCommand } from "./api";
+import { api, workspacesApi, type SlashCommand } from "./api";
 import type { PromptResourceCommandDescriptor } from "../../shared/promptResourceCommand";
 import { fileCompletionInsertText, modelCompletionChoices, type PromptCompletionTrigger } from "./promptCompletions";
 import type { CompletionItem } from "./components/shared";
@@ -63,7 +63,9 @@ export function createPreSessionComposerRuntime(options: PreSessionComposerRunti
 
 async function resolveSessionCommands(trigger: Extract<PromptCompletionTrigger, { kind: "command" }>, options: SessionComposerRuntimeOptions): Promise<CompletionItem[]> {
   if (!hasSessionContext(options)) return [];
-  const commands = await api.commands({ id: options.sessionId, cwd: options.cwd }, options.machineId).catch(emptySlashCommands);
+  const commands = await api.commands({ id: options.sessionId, cwd: options.cwd }, options.machineId).catch((error: unknown) => {
+    throw new ComposerCompletionProviderError("command", errorMessage(error, "Session commands unavailable."));
+  });
   return commands
     .filter((command) => command.name.toLowerCase().includes(trigger.query.toLowerCase()))
     .slice(0, 12)
@@ -119,7 +121,9 @@ async function resolveWorkspaceFiles(trigger: Extract<PromptCompletionTrigger, {
 
 async function resolveSessionModels(trigger: Extract<PromptCompletionTrigger, { kind: "model" }>, options: SessionComposerRuntimeOptions): Promise<CompletionItem[]> {
   if (!hasSessionContext(options)) return [];
-  const models = await api.models({ id: options.sessionId, cwd: options.cwd }, options.machineId).then((response) => response.models).catch(emptySessionModels);
+  const models = await api.models({ id: options.sessionId, cwd: options.cwd }, options.machineId).then((response) => response.models).catch((error: unknown) => {
+    throw new ComposerCompletionProviderError("model", errorMessage(error, "Session models unavailable."));
+  });
   return modelCompletionChoices(models, trigger.query).map((choice) => ({
     kind: "model",
     replaceFrom: trigger.from,
@@ -136,14 +140,7 @@ function hasDestinationContext(options: PreSessionComposerRuntimeOptions): optio
   return options.projectId !== undefined && options.projectId !== "" && options.workspaceId !== undefined && options.workspaceId !== "";
 }
 
-function emptySlashCommands(): SlashCommand[] {
-  return [];
-}
-
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }
 
-function emptySessionModels(): SessionModel[] {
-  return [];
-}
