@@ -37,8 +37,8 @@ describe("PromptEditor rail reveals", () => {
     expect(css).toMatch(/\.session-identity\s*{\s*display:\s*none/);
     expect(css).toMatch(/\.composer-archive\s*{\s*display:\s*none/);
     expect(css).toMatch(/\.compact-status\s*>\s*\.guidance-trigger\s*{[^}]*flex:\s*0 0 auto/);
-    expect(css).toMatch(/@container \(min-width: 760px\)\s*{\s*\.session-identity/);
-    expect(css).toMatch(/@container \(min-width: 920px\)\s*{\s*\.composer-archive/);
+    expect(css).toMatch(/@container \(min-width: 560px\)\s*{\s*\.session-identity/);
+    expect(css).toMatch(/@container \(min-width: 700px\)\s*{\s*\.composer-archive/);
   });
 });
 

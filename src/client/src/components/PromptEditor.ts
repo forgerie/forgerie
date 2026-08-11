@@ -101,11 +101,9 @@ export class PromptEditor extends LitElement {
       this.currentInputMode = inputModeForDraft(this.draft);
       this.completions = [];
       this.selectedIndex = 0;
-      this.guidanceRequestVersion += 1;
-      this.guidanceOpen = false;
-      this.guidancePending = false;
-      this.guidanceError = undefined;
+      this.resetGuidanceDisclosure();
     }
+    if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) this.resetGuidanceDisclosure();
     if (sessionChanged || changed.has("promptHistory")) {
       this.promptHistoryState = createPromptHistory(this.promptHistory);
     }
@@ -132,6 +130,7 @@ export class PromptEditor extends LitElement {
   }
 
   override disconnectedCallback(): void {
+    this.resetGuidanceDisclosure();
     this.editor?.destroy();
     this.editor = undefined;
     super.disconnectedCallback();
@@ -372,7 +371,19 @@ export class PromptEditor extends LitElement {
     if (!this.guidanceOpen || (this.guidancePending && !force)) return;
     this.guidanceOpen = false;
     this.guidanceError = undefined;
-    if (restoreFocus) void this.updateComplete.then(() => { this.guidanceTrigger?.focus(); });
+    if (!restoreFocus) return;
+    const requestVersion = this.guidanceRequestVersion;
+    const trigger = this.guidanceTrigger;
+    void this.updateComplete.then(() => {
+      if (this.isConnected && requestVersion === this.guidanceRequestVersion && trigger === this.guidanceTrigger) trigger?.focus();
+    });
+  }
+
+  private resetGuidanceDisclosure(): void {
+    this.guidanceRequestVersion += 1;
+    this.guidanceOpen = false;
+    this.guidancePending = false;
+    this.guidanceError = undefined;
   }
 
   private async setGuidance(entryId: string, enabled: boolean): Promise<void> {

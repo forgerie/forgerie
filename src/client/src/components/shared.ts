@@ -828,10 +828,10 @@ export const promptEditorStyles = css`
    */
   .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
   .composer-archive { display: none; flex: 0 0 auto; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-muted); padding: 5px 9px; font-size: inherit; }
-  @container (min-width: 760px) {
+  @container (min-width: 560px) {
     .session-identity { display: inline; }
   }
-  @container (min-width: 920px) {
+  @container (min-width: 700px) {
     .composer-archive { display: inline-flex; }
   }
   .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }

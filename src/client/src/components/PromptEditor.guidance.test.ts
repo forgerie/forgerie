@@ -35,8 +35,10 @@ describe("PromptEditor session guidance", () => {
   it("blocks send and duplicate selection while pending but leaves stop available", async () => {
     const request = deferred<boolean>();
     const calls: { entryId: string; enabled: boolean }[] = [];
+    const onSend = vi.fn();
     const editor = await mountEditor(status([]));
     editor.canStop = true;
+    editor.onSend = onSend;
     editor.onSetGuidance = (entryId, enabled) => {
       calls.push({ entryId, enabled });
       return request.promise;
@@ -53,9 +55,13 @@ describe("PromptEditor session guidance", () => {
     expect(required(editor.shadowRoot?.querySelector<HTMLButtonElement>(".send-button")).disabled).toBe(true);
     expect(required(editor.shadowRoot?.querySelector<HTMLButtonElement>(".stop-button")).disabled).toBe(false);
 
+    editor.replaceText("do not send yet");
+    editor.view?.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onSend).not.toHaveBeenCalled();
+
     request.resolve(true);
     await request.promise;
-    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    await Promise.resolve();
     await editor.updateComplete;
 
     expect(editor.shadowRoot?.querySelector("guidance-picker")).toBeNull();
@@ -69,14 +75,14 @@ describe("PromptEditor session guidance", () => {
     guidanceTrigger(editor).click();
     await editor.updateComplete;
     guidanceOption(editor).click();
-    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    await Promise.resolve();
     await editor.updateComplete;
 
     const picker = required(editor.shadowRoot?.querySelector<HTMLElement>("guidance-picker"));
     expect(picker.shadowRoot?.textContent).toContain("Could not update guidance. Try again.");
   });
 
-  it("closes on Escape and session changes", async () => {
+  it("closes on Escape, runtime loss, and session changes", async () => {
     const editor = await mountEditor(status([]));
     guidanceTrigger(editor).click();
     await editor.updateComplete;
@@ -88,7 +94,16 @@ describe("PromptEditor session guidance", () => {
 
     guidanceTrigger(editor).click();
     await editor.updateComplete;
+    editor.runtimeControlsAvailable = false;
+    await editor.updateComplete;
+    expect(editor.shadowRoot?.querySelector("guidance-picker")).toBeNull();
+
+    editor.runtimeControlsAvailable = true;
     editor.sessionId = "session-2";
+    await editor.updateComplete;
+    guidanceTrigger(editor).click();
+    await editor.updateComplete;
+    editor.sessionId = "session-3";
     await editor.updateComplete;
     expect(editor.shadowRoot?.querySelector("guidance-picker")).toBeNull();
   });
