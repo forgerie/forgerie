@@ -180,7 +180,7 @@ export class SettingsPackagesPanel extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; }
+    :host { display: block; container-type: inline-size; }
     .package-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
     .package-toolbar > div, .package-main { display: grid; gap: 6px; min-width: 0; }
     h3, p { margin: 0; }
@@ -207,7 +207,7 @@ export class SettingsPackagesPanel extends LitElement {
     .package-actions { display: flex; align-items: center; gap: 8px; }
     code { border: 1px solid var(--pi-border-muted); border-radius: 5px; background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 
-    @media (max-width: 760px) {
+    @container (max-width: 760px) {
       .package-toolbar { display: grid; gap: 12px; }
       .package-toolbar .secondary { justify-self: start; }
       .install-row, .package-card { grid-template-columns: minmax(0, 1fr); align-items: start; }

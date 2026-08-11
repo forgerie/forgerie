@@ -249,7 +249,7 @@ export class SettingsGeneralPanel extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; }
+    :host { display: block; container-type: inline-size; }
     .card-heading { display: grid; gap: 6px; min-width: 0; }
     h3, p { margin: 0; }
     h3 { font-size: 13px; line-height: 1.3; }
@@ -284,7 +284,7 @@ export class SettingsGeneralPanel extends LitElement {
     .form-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
     .primary { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-text-bright); }
 
-    @media (max-width: 760px) {
+    @container (max-width: 760px) {
       .effective-card dl > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
     }
   `;

@@ -678,14 +678,24 @@ export class TerminalPanel extends LitElement {
   }
 
   static override styles = css`
-    :host { flex: 1 1 auto; min-height: 0; display: flex; }
+    :host { flex: 1 1 auto; min-height: 0; display: flex; container-type: inline-size; }
     .terminal-shell { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--pi-terminal-bg); }
     .terminal-tabs { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; padding: 6px; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-bg); overflow: auto; }
     .terminal-tabs > button { box-sizing: border-box; height: 30px; line-height: 16px; }
     /* Desktop xterm already has mouse selection and hardware keys; keep touch controls to touch/narrow layouts. */
     .copy-mode-toggle, .soft-keys-toggle, terminal-soft-keys { display: none; }
     .copy-mode-toggle.selected { display: inline-flex; }
-    @media (pointer: coarse), (max-width: 760px) {
+    /*
+     * Two different questions that happened to share a block. Whether the input
+     * is coarse is about the hand; whether the terminal is narrow is about the
+     * space it has, so it asks its own box rather than the window. A terminal
+     * docked into a side panel is narrow on any screen.
+     */
+    @media (pointer: coarse) {
+      .copy-mode-toggle, .soft-keys-toggle { display: inline-flex; }
+      terminal-soft-keys { display: block; }
+    }
+    @container (max-width: 760px) {
       .copy-mode-toggle, .soft-keys-toggle { display: inline-flex; }
       terminal-soft-keys { display: block; }
     }

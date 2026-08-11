@@ -520,7 +520,7 @@ export class SessionTreeNavigator extends LitElement {
   }
 
   static override styles = css`
-    :host { position: fixed; inset: 0; z-index: 40; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+    :host { position: fixed; inset: 0; z-index: 40; color: var(--pi-text); font: 14px system-ui, sans-serif; container-type: inline-size; }
     * { box-sizing: border-box; }
     /* Full-viewport shell: the surface's centered-card defaults are overridden
        so the dialog keeps covering the whole viewport. */
@@ -605,7 +605,7 @@ export class SessionTreeNavigator extends LitElement {
     button.danger { color: var(--pi-danger); }
     .footer-spacer { flex: 1; }
 
-    @media (max-width: 760px) {
+    @container (max-width: 760px) {
       header { padding-top: max(12px, env(safe-area-inset-top)); }
       .tree-step { padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)); }
       .tree-intro { padding-inline: 4px; }

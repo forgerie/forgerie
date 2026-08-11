@@ -219,7 +219,7 @@ export class SettingsSessiondPanel extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; }
+    :host { display: block; container-type: inline-size; }
     h3 { margin: 0; font-size: 13px; line-height: 1.3; }
     button, input { font: inherit; }
     button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
@@ -260,7 +260,7 @@ export class SettingsSessiondPanel extends LitElement {
     dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
     .muted { color: var(--pi-muted); }
 
-    @media (max-width: 760px) {
+    @container (max-width: 760px) {
       .effective-card dl > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
     }
   `;

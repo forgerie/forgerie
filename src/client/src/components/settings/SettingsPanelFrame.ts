@@ -91,7 +91,7 @@ export class SettingsPanelFrame extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; }
+    :host { display: block; container-type: inline-size; }
     .panel { display: block; }
     .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
     .heading-copy { display: grid; gap: 6px; min-width: 0; }
@@ -114,7 +114,7 @@ export class SettingsPanelFrame extends LitElement {
     .content { display: grid; gap: 14px; min-width: 0; }
     .content ::slotted(*) { min-width: 0; }
 
-    @media (max-width: 760px) {
+    @container (max-width: 760px) {
       .section-heading { display: grid; gap: 12px; }
       .heading-actions { justify-self: start; }
     }

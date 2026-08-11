@@ -93,7 +93,7 @@ export class SettingsPluginsPanel extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; }
+    :host { display: block; container-type: inline-size; }
     input { font: inherit; }
     input:disabled { opacity: .55; cursor: not-allowed; }
     .loading-card, .plugin-note, .plugin-card { border: 1px solid var(--pi-border); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
@@ -108,7 +108,7 @@ export class SettingsPluginsPanel extends LitElement {
     .toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
     .toggle input { width: 18px; height: 18px; accent-color: var(--pi-accent); }
 
-    @media (max-width: 760px) {
+    @container (max-width: 760px) {
       .plugin-card { grid-template-columns: minmax(0, 1fr); align-items: start; }
       .toggle { justify-self: start; }
     }

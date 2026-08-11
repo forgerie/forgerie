@@ -342,7 +342,7 @@ export class SettingsShortcutsPanel extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; }
+    :host { display: block; container-type: inline-size; }
     h3, p { margin: 0; }
     h3 { font-size: 13px; line-height: 1.3; }
     p { color: var(--pi-muted); line-height: 1.45; }
@@ -392,7 +392,7 @@ export class SettingsShortcutsPanel extends LitElement {
     .unassigned { color: var(--pi-muted); font-size: 12px; }
     .recording-hint { color: var(--pi-accent); font-size: 12px; }
 
-    @media (max-width: 760px) {
+    @container (max-width: 760px) {
       .prompt-enter-card { grid-template-columns: minmax(0, 1fr); }
       .shortcut-row { grid-template-columns: minmax(0, 1fr); align-items: start; }
       .shortcut-status, .shortcut-actions { justify-content: flex-start; }
