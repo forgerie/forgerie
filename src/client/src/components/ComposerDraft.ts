@@ -59,6 +59,7 @@ export class ComposerDraft extends LitElement {
   @property({ type: Boolean }) compacting = false;
   @property({ type: Boolean }) resting = false;
   @property() placeholderText = "Message pi... Use / for commands, @ for tracked files, @ space for all files, # for models";
+  @property() editorLabel = "Message pi";
   @property({ attribute: false }) runtime?: ComposerRuntime;
   @property({ attribute: false }) promptHistory: readonly string[] = [];
   @property() storageKey?: string;
@@ -66,6 +67,7 @@ export class ComposerDraft extends LitElement {
   @property({ attribute: false }) onEscape?: (context: ComposerDraftEscapeContext) => boolean;
   @property({ attribute: false }) onDisplayStateChange?: (state: ComposerDraftDisplayState) => void;
   @property({ attribute: false }) onCompletionError?: (error: ComposerDraftCompletionError) => void;
+  @property({ attribute: false }) onDraftEdited?: () => void;
 
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
   @query(".attachment-input") private attachmentInput?: HTMLInputElement;
@@ -155,7 +157,7 @@ export class ComposerDraft extends LitElement {
         @dragover=${(event: DragEvent) => { this.handleDragOver(event); }}
         @drop=${(event: DragEvent) => { void this.handleDrop(event); }}
       >
-        <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label="Message pi" aria-disabled=${this.disabled ? "true" : "false"}></div>
+        <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label=${this.editorLabel} aria-disabled=${this.disabled ? "true" : "false"}></div>
         <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
         ${shellMode ? html`<div class="mode-hint">Shell command${shellInputMode.excludeFromContext ? " · excluded from context" : ""}</div>` : null}
         ${this.compacting && !shellMode ? html`<div class="mode-hint">Compacting history · message will be queued</div>` : null}
@@ -305,16 +307,19 @@ export class ComposerDraft extends LitElement {
     }
     this.attachmentDelivery = requested;
     saveAttachmentDelivery(this.attachmentDelivery);
+    this.onDraftEdited?.();
   }
 
   private removeAttachment(id: string): void {
     this.attachments = this.attachments.filter((attachment) => attachment.id !== id);
+    this.onDraftEdited?.();
+    this.publishDisplayState();
   }
 
   private createSubmitSnapshot(): ComposerDraftSubmitSnapshot | undefined {
-    const text = this.draft.trim();
+    const text = this.draft;
     const pending = this.attachments;
-    if (text === "" && pending.length === 0) return undefined;
+    if (text.trim() === "" && pending.length === 0) return undefined;
     const attachments = pending.length > 0 ? this.currentAttachments() : undefined;
     const delivery = this.effectiveAttachmentDelivery();
     return attachments === undefined ? { text } : { text, attachments, delivery };
@@ -357,6 +362,8 @@ export class ComposerDraft extends LitElement {
     const { attachments, error } = await capturePromptAttachments(files, readFileAsBase64);
     if (attachments.length > 0) {
       this.attachments = [...this.attachments, ...attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }))];
+      this.onDraftEdited?.();
+      this.publishDisplayState();
     }
     if (error !== undefined) this.attachmentError = error;
   }
@@ -439,6 +446,7 @@ export class ComposerDraft extends LitElement {
     const nextInputMode = inputModeForDraft(this.draft);
     if (!inputModesEqual(nextInputMode, this.currentInputMode)) this.currentInputMode = nextInputMode;
     this.publishDisplayState();
+    this.onDraftEdited?.();
     void this.refreshCompletions();
   }
 

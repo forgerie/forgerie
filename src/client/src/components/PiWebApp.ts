@@ -1734,7 +1734,7 @@ export class PiWebApp extends LitElement {
   // New-session composer and workspace management
   // -------------------------------------------------------------------------
 
-  private openNewSessionComposer(initialPrompt = ""): void {
+  private openNewSessionComposer(): void {
     if (this.state.newSessionComposer.kind === "open") {
       this.newSessionComposer?.focusExisting();
       return;
@@ -1744,7 +1744,6 @@ export class PiWebApp extends LitElement {
       newSessionComposer: {
         kind: "open",
         ...(initialDestination === undefined ? {} : { initialDestination }),
-        initialPrompt,
       },
     });
   }
@@ -1786,7 +1785,7 @@ export class PiWebApp extends LitElement {
       newSessionComposer: {
         kind: "open",
         ...(initialDestination === undefined ? {} : { initialDestination }),
-        initialPrompt: recovery.prompt,
+        recoverySeedId: sessionId,
         replacesFailedSessionId: sessionId,
       },
     });
@@ -3125,10 +3124,11 @@ export class PiWebApp extends LitElement {
         ${this.renderWorkspacePanel()}
         ${state.newSessionComposer.kind === "open" ? html`<new-session-composer
           .initialDestination=${state.newSessionComposer.initialDestination}
-          .initialPrompt=${state.newSessionComposer.initialPrompt}
+          .recoverySeedId=${state.newSessionComposer.recoverySeedId}
           .catalog=${this.newSessionDestinationCatalog}
           .onCancel=${() => { this.closeNewSessionComposer(); }}
           .onSubmit=${(intent: NewSessionLaunchIntent) => this.submitNewSession(intent)}
+          .onClaimRecoveryDraft=${(recoverySeedId: string) => this.sessions.claimSessionLaunchRecoveryDraft(recoverySeedId)}
         ></new-session-composer>` : null}
         ${state.workspaceManagementDialog !== undefined ? html`<workspace-management-dialog
           .dialogState=${state.workspaceManagementDialog}

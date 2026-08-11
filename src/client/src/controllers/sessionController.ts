@@ -102,6 +102,11 @@ export interface FirstPromptSubmission {
   readonly promptResourceCommandIdentity?: PromptResourceCommandIdentity | undefined;
 }
 
+export interface SessionLaunchRecoveryDraftSeed {
+  readonly id: string;
+  readonly snapshot: FirstPromptSubmission;
+}
+
 export interface SessionLaunchDestination {
   readonly machineId: string;
   readonly workspaceId: string;
@@ -187,6 +192,7 @@ export class SessionController {
   private pendingQueuedSendSeq = 0;
   private readonly pendingSessionStarts = new Map<string, PendingSessionStart>();
   private readonly sessionLaunchRecoveries = new Map<string, SessionLaunchRecoveryRecord>();
+  private readonly claimedSessionLaunchRecoveryDrafts = new Set<string>();
   private readonly suppressedCreatedSessions = new Map<string, SuppressedCreatedSession>();
   private readonly selectedSessionRefreshes = new TrailingRefreshCoordinator<string>();
 
@@ -265,9 +271,8 @@ export class SessionController {
     await this.startPendingSession(pending);
   }
 
-  async launchSession(firstPrompt: string | FirstPromptSubmission): Promise<void> {
+  async launchSession(submission: FirstPromptSubmission): Promise<void> {
     const workspace = this.getState().selectedWorkspace;
-    const submission = normalizeFirstPromptSubmission(firstPrompt);
     if (workspace === undefined || firstPromptSubmissionIsEmpty(submission)) return;
     const promptResourceIdentity = submission.promptResourceCommandIdentity;
     if (submission.text.startsWith("/") && promptResourceIdentity === undefined) return;
@@ -285,6 +290,24 @@ export class SessionController {
 
   getSessionLaunchRecovery(sessionId: string): SessionLaunchRecovery | undefined {
     return this.sessionLaunchRecoveries.get(sessionId)?.recovery;
+  }
+
+  claimSessionLaunchRecoveryDraft(sessionId: string): SessionLaunchRecoveryDraftSeed | undefined {
+    if (this.claimedSessionLaunchRecoveryDrafts.has(sessionId)) return undefined;
+    const record = this.sessionLaunchRecoveries.get(sessionId);
+    if (record?.recovery.stage !== "creationFailed") return undefined;
+    const queued = record.queuedSends[0];
+    if (queued === undefined || (queued.type !== "prompt" && queued.type !== "promptResource")) return undefined;
+    this.claimedSessionLaunchRecoveryDrafts.add(sessionId);
+    return {
+      id: sessionId,
+      snapshot: {
+        text: queued.text,
+        ...(queued.attachments === undefined ? {} : { attachments: queued.attachments.map((attachment) => ({ ...attachment })) }),
+        delivery: queued.delivery,
+        ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
+      },
+    };
   }
 
   mergeCreationFailedSessionStarts(cwd: string, listedSessions: SessionInfo[], machineId: string): SessionInfo[] {
@@ -2374,10 +2397,6 @@ function isInitialPromptRetryActivity(activity: SessionActivity | undefined): bo
   return activity?.phase === "active"
     && activity.label === INITIAL_PROMPT_RETRY_ACTIVITY_LABEL
     && activity.detail === "Retry in progress";
-}
-
-function normalizeFirstPromptSubmission(input: string | FirstPromptSubmission): Required<Pick<FirstPromptSubmission, "text">> & Omit<FirstPromptSubmission, "text"> {
-  return typeof input === "string" ? { text: input } : input;
 }
 
 function firstPromptSubmissionIsEmpty(submission: FirstPromptSubmission): boolean {

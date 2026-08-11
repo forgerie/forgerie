@@ -336,9 +336,9 @@ export const newSessionComposerStyles = css`
   .catalog-item-copy strong, .catalog-item-copy small { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
   .catalog-item-copy small, .catalog-meta { color: var(--pi-muted); }
   .catalog-back { display: flex; justify-content: flex-start; padding: 0.5rem 0.75rem; border-top: 1px solid var(--pi-border-muted); }
-  textarea { box-sizing: border-box; width: 100%; min-height: clamp(5rem, 12cqb, 7rem); resize: vertical; padding: 0.75rem; border: 1px solid var(--pi-border); border-radius: 0.5rem; background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.45 var(--pi-control-font-family, system-ui, sans-serif); }
-  textarea:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
-  textarea:disabled { color: var(--pi-muted); cursor: wait; }
+  composer-draft { display: block; min-width: 0; }
+  composer-draft .markdown-editor .cm-editor { min-height: clamp(5rem, 12cqb, 7rem); max-height: min(18rem, 42cqb); }
+  composer-draft .markdown-editor .cm-scroller { max-height: min(18rem, 42cqb); }
   .submission-error { margin: 0.75rem 0 0; padding: 0.75rem; border: 1px solid var(--pi-danger); border-radius: 0.5rem; background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-surface)); color: var(--pi-text); overflow-wrap: anywhere; }
   .dialog-footer { flex: 0 0 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; padding: clamp(0.625rem, 2cqi, 0.875rem) clamp(0.875rem, 2.5cqi, 1.25rem); border-top: 1px solid var(--pi-border); background: var(--pi-bg); }
   button { min-height: 2.75rem; border: 1px solid var(--pi-border); border-radius: 0.5rem; background: var(--pi-surface); color: var(--pi-text); padding: 0 1rem; font: inherit; cursor: pointer; }

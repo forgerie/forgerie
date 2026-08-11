@@ -20,7 +20,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    const launch = controller.launchSession("Build the feature");
+    const launch = controller.launchSession({ text: "Build the feature" });
     const temporaryId = state.selectedSession?.id;
 
     expect(temporaryId).toMatch(/^pending-session-/);
@@ -378,7 +378,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Recover this prompt");
+    await controller.launchSession({ text: "Recover this prompt" });
     const temporaryId = state.selectedSession?.id;
     if (temporaryId === undefined) throw new Error("Expected a failed pending session");
 
@@ -418,7 +418,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    const launch = controller.launchSession("Recover after returning");
+    const launch = controller.launchSession({ text: "Recover after returning" });
     const temporaryId = state.selectedSession?.id;
     const pendingRow = state.selectedSession;
     if (temporaryId === undefined || pendingRow === undefined) throw new Error("Expected a pending session");
@@ -480,13 +480,13 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Recover after refresh");
+    await controller.launchSession({ text: "Recover after refresh" });
     const failedId = state.selectedSession?.id;
     const failedRow = state.selectedSession;
     if (failedId === undefined || failedRow === undefined) throw new Error("Expected a failed pending session");
 
     state = { ...state, selectedWorkspace: otherWorkspace, selectedSession: undefined, sessions: [], activity: undefined };
-    await controller.launchSession("Keep this recovery elsewhere");
+    await controller.launchSession({ text: "Keep this recovery elsewhere" });
     const otherFailedId = state.selectedSession?.id;
     if (otherFailedId === undefined) throw new Error("Expected another failed pending session");
 
@@ -539,7 +539,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    const launch = controller.launchSession("Discard this prompt");
+    const launch = controller.launchSession({ text: "Discard this prompt" });
     const temporaryId = state.selectedSession?.id;
     if (temporaryId === undefined) throw new Error("Expected a pending session");
     await controller.deleteCachedNewSession(state.selectedSession);
@@ -565,7 +565,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Move this prompt");
+    await controller.launchSession({ text: "Move this prompt" });
     const failedId = state.selectedSession?.id;
     if (failedId === undefined) throw new Error("Expected a failed pending session");
     const failedSession = state.selectedSession;
@@ -605,7 +605,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Recover creation");
+    await controller.launchSession({ text: "Recover creation" });
     const temporaryId = state.selectedSession?.id;
     if (temporaryId === undefined) throw new Error("Expected a failed pending session");
 
@@ -653,7 +653,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("The accepted prompt");
+    await controller.launchSession({ text: "The accepted prompt" });
 
     expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
@@ -723,7 +723,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Retry this prompt");
+    await controller.launchSession({ text: "Retry this prompt" });
 
     expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
       stage: "promptConfirmedUnsent",
@@ -772,7 +772,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Retry this prompt");
+    await controller.launchSession({ text: "Retry this prompt" });
     const retry = controller.retrySessionLaunch(started.id);
     expect(state.sessionActivities[started.id]).toMatchObject({ phase: "active", label: "Sending first prompt" });
 
@@ -814,7 +814,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Retry this prompt");
+    await controller.launchSession({ text: "Retry this prompt" });
     const retry = controller.retrySessionLaunch(started.id);
     const newerActivity = { sessionId: started.id, phase: "active" as const, label: "Running tool", detail: "Still active", at: "later" };
     state = {
@@ -861,7 +861,7 @@ describe("SessionController session launch", () => {
       },
     );
 
-    await controller.launchSession("Inspect before resending");
+    await controller.launchSession({ text: "Inspect before resending" });
 
     expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
       stage: "promptDeliveryAmbiguous",
@@ -930,7 +930,7 @@ describe("SessionController session launch", () => {
       },
     );
 
-    const launch = controller.launchSession("Ambiguous first prompt");
+    const launch = controller.launchSession({ text: "Ambiguous first prompt" });
     await controller.runShell("!pwd");
     await controller.send("Continue after restore");
     startRequest.resolve(started);
@@ -994,7 +994,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket(), replacePromptEditorText: () => undefined },
     );
 
-    const launch = controller.launchSession("Ambiguous first prompt");
+    const launch = controller.launchSession({ text: "Ambiguous first prompt" });
     await controller.runShell("!pwd");
     await controller.send("Do not deliver after tail failure");
     startRequest.resolve(started);
@@ -1028,7 +1028,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket(), replacePromptEditorText: () => replacement.promise },
     );
 
-    await controller.launchSession("Keep this prompt after navigation");
+    await controller.launchSession({ text: "Keep this prompt after navigation" });
     const restore = controller.restoreSessionLaunchPrompt(started.id);
     state = { ...state, selectedSession: { ...oldSession, id: "different-session" } };
     replacement.resolve(false);
@@ -1062,7 +1062,7 @@ describe("SessionController session launch", () => {
       },
     );
 
-    await controller.launchSession("Keep this prompt");
+    await controller.launchSession({ text: "Keep this prompt" });
 
     await expect(controller.restoreSessionLaunchPrompt(started.id)).rejects.toThrow("editor unavailable");
 
@@ -1095,7 +1095,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Accepted before refresh");
+    await controller.launchSession({ text: "Accepted before refresh" });
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.selectedSession).toHaveProperty("browserCachedNew", true);
 
@@ -1143,7 +1143,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    const launch = controller.launchSession("Accepted after timeout");
+    const launch = controller.launchSession({ text: "Accepted after timeout" });
     await controller.runShell("!pwd");
     await controller.runCommand("/help");
     await controller.send("Continue after recovery");
@@ -1206,7 +1206,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    const launch = controller.launchSession("Accepted first prompt");
+    const launch = controller.launchSession({ text: "Accepted first prompt" });
     await controller.runShell("!pwd");
     await controller.send("Do not deliver after refresh tail failure");
     startRequest.resolve(started);
@@ -1247,7 +1247,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Refresh without resending");
+    await controller.launchSession({ text: "Refresh without resending" });
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
 
     transcriptIsIdle = true;
@@ -1290,7 +1290,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Do not resend this prompt");
+    await controller.launchSession({ text: "Do not resend this prompt" });
     reconciliationShouldFail = true;
 
     await controller.refreshSessionLaunchRecovery(started.id);
@@ -1324,7 +1324,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Never persist this recovery prompt");
+    await controller.launchSession({ text: "Never persist this recovery prompt" });
 
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptConfirmedUnsent");
     const durableValues = Array.from({ length: storage.length }, (_, index) => storage.getItem(storage.key(index) ?? "") ?? "");
@@ -1359,7 +1359,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Do not retain after archive");
+    await controller.launchSession({ text: "Do not retain after archive" });
     const persisted = { ...started, persisted: true };
     state = {
       ...state,
@@ -1404,7 +1404,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Do not retain after delete");
+    await controller.launchSession({ text: "Do not retain after delete" });
     const archived = { ...started, archived: true, archivedAt: "now" };
     const recoveryActivity = state.activity;
     state = {
@@ -1450,7 +1450,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Do not retain after cleanup");
+    await controller.launchSession({ text: "Do not retain after cleanup" });
     state = {
       ...state,
       selectedSession: nextSession,
@@ -1498,7 +1498,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    await controller.launchSession("Keep local recovery");
+    await controller.launchSession({ text: "Keep local recovery" });
     state = { ...state, sendingPrompts: { [started.id]: true }, error: "Keep this error" };
     const recoveryActivity = state.sessionActivities[started.id];
 
@@ -1543,7 +1543,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    const launch = controller.launchSession("First prompt");
+    const launch = controller.launchSession({ text: "First prompt" });
     await controller.runShell("!pwd");
     await controller.runCommand("/help");
     await controller.send("Later prompt");
@@ -1583,7 +1583,7 @@ describe("SessionController session launch", () => {
       { api, socket: new FakeSocket() },
     );
 
-    const launch = controller.launchSession("Build the feature");
+    const launch = controller.launchSession({ text: "Build the feature" });
     const temporaryId = state.selectedSession?.id;
     startRequest.resolve(started);
     await launch;

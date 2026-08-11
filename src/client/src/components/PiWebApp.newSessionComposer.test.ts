@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { EditorSelection } from "@codemirror/state";
 import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Machine, Project, SessionInfo, Workspace } from "../api";
@@ -7,6 +8,7 @@ import { initialAppState, type AppState } from "../appState";
 import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination, type NewSessionLaunchIntent } from "../newSessionComposer";
 import { PiWebApp } from "./PiWebApp";
 import type { AppNavigationPanel } from "./appShell/AppNavigationPanel";
+import { ComposerDraft } from "./ComposerDraft";
 import type { NewSessionComposer } from "./NewSessionComposer";
 import type { ChatView } from "./ChatView";
 import type { WorkspacePanel } from "./WorkspacePanel";
@@ -65,7 +67,7 @@ describe("PiWebApp New session composer root", () => {
 
     invoke(app, "openNewSessionComposer");
 
-    expect(composerRequest(app)).toEqual({ kind: "open", initialPrompt: "" });
+    expect(composerRequest(app)).toEqual({ kind: "open" });
   });
 
   it("focuses the mounted composer and preserves the existing request on repeated activation", () => {
@@ -219,9 +221,7 @@ describe("PiWebApp New session composer root", () => {
     const composer = required(container.querySelector<NewSessionComposer>("new-session-composer"), "new-session composer");
     expect(composer.initialDestination).toEqual(destination);
     await elementUpdateComplete(composer);
-    const prompt = required(composer.shadowRoot?.querySelector<HTMLTextAreaElement>("textarea[data-field='prompt']"), "first prompt");
-    prompt.value = "Build through the real controller";
-    prompt.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+    setComposerText(composer, "Build through the real controller");
     await elementUpdateComplete(composer);
 
     required(composer.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='send']"), "Send button").click();
@@ -275,7 +275,7 @@ describe("PiWebApp New session composer root", () => {
     expect(composerRequest(app)).toEqual({
       kind: "open",
       initialDestination: completeNewSessionDestination(localMachine, project, mainWorkspace),
-      initialPrompt: "Move this prompt",
+      recoverySeedId: failed.id,
       replacesFailedSessionId: failed.id,
     });
     expect(appState(app).sessions).toEqual([other, failed]);
@@ -317,7 +317,7 @@ describe("PiWebApp New session composer root", () => {
     });
     Reflect.set(controller, "api", { ...api, startSession });
 
-    await controller.launchSession("Move this prompt");
+    await controller.launchSession({ text: "Move this prompt" });
     const failed = required(appState(app).selectedSession, "failed pending session");
     const failedId = failed.id;
     invoke(app, "openSessionLaunchDestinationComposer", failedId);
@@ -421,8 +421,8 @@ describe("PiWebApp New session composer root", () => {
       return Promise.resolve(true);
     });
     Reflect.set(app, "navigateToNewSessionDestination", navigate);
-    const launchSession = vi.fn((prompt: string | FirstPromptSubmission) => {
-      const text = typeof prompt === "string" ? prompt : prompt.text;
+    const launchSession = vi.fn((prompt: FirstPromptSubmission) => {
+      const text = prompt.text;
       const pending = { ...session("pending", remoteWorkspace.path), clientPendingStart: true, machineId: remoteMachine.id };
       patchAppState(app, {
         selectedSession: pending,
@@ -558,7 +558,7 @@ function composerRequest(app: PiWebApp): unknown {
 }
 
 interface SessionLaunchController {
-  launchSession: (prompt: string | FirstPromptSubmission) => Promise<void>;
+  launchSession: (prompt: FirstPromptSubmission) => Promise<void>;
   getSessionLaunchRecovery: (sessionId: string) => SessionLaunchRecovery | undefined;
   retrySessionLaunch: (sessionId: string) => Promise<void>;
   acceptSessionLaunchReplacement: (failedSessionId: string, replacementSessionId: string) => void;
@@ -643,6 +643,13 @@ async function elementUpdateComplete(element: HTMLElement): Promise<void> {
   const updateComplete: unknown = Reflect.get(element, "updateComplete");
   if (!(updateComplete instanceof Promise)) throw new Error("Expected Lit updateComplete");
   await updateComplete;
+}
+
+function setComposerText(composer: NewSessionComposer, text: string): void {
+  const element = required(composer.shadowRoot?.querySelector("composer-draft"), "shared composer draft");
+  if (!(element instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
+  const view = required(element.view, "CodeMirror view");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: EditorSelection.cursor(text.length) });
 }
 
 function required<T>(value: T | null | undefined, label: string): T {

@@ -157,7 +157,7 @@ export interface ClosedExtensionDialog {
 
 export type NewSessionComposerRequest =
   | { kind: "closed" }
-  | { kind: "open"; initialDestination?: NewSessionCompleteDestination; initialPrompt: string; replacesFailedSessionId?: string };
+  | { kind: "open"; initialDestination?: NewSessionCompleteDestination; recoverySeedId?: string; replacesFailedSessionId?: string };
 
 /** Workspace-management dialog state. Session creation uses NewSessionComposer. */
 export type WorkspaceManagementDialogState =

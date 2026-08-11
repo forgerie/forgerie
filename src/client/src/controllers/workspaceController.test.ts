@@ -97,7 +97,7 @@ describe("WorkspaceController.selectWorkspace", () => {
       { api },
     );
 
-    const launch = sessions.launchSession("Recover through workspace navigation");
+    const launch = sessions.launchSession({ text: "Recover through workspace navigation" });
     const temporaryId = state.selectedSession?.id;
     if (temporaryId === undefined) throw new Error("Expected a pending session");
     await workspaces.selectWorkspace(other);
