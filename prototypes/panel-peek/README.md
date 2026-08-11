@@ -160,8 +160,11 @@ easing makes the sheet lag the hand and the peek stops feeling direct.
 | rest window | 400ms | a still finger is selecting text or holding a row |
 | wheel settle | 120ms | a trackpad sends travel in pieces and never releases |
 
-**All five are estimates.** They are numbers on glass. None of them is right
-until a hand on the acceptance device says so.
+| exit slide | 180ms | a dismissed sheet leaves the way it arrived |
+
+**All five were estimates. They have now been used on the acceptance device and
+kept**, so they are chosen values rather than guesses. Change them from a hand on
+glass, not from reasoning on this page.
 
 The same pipeline serves the desktop: a trackpad two-finger horizontal `wheel`
 with `deltaX` is the same drag and earns the same rubber-band peek. The
@@ -224,3 +227,24 @@ Measured with real touch, reading the scroller's own position:
 
 The claim is made on direction and re-read on every move, so a slip claims one
 frame and the scroll still starts. `check-vertical-scroll.mjs` repeats this.
+
+## Decisions taken after using it
+
+| Question | Answer |
+|---|---|
+| Pin on a narrow shell | Docking floors read from what the panel and the session need together, not from the widest arrangement. A pin acts wherever it is reasonable and lies dormant below that. On the acceptance device the workspace panel docks unfolded-landscape (979) and not folded (499/739), because 560 + 360 = 920. |
+| Peeking a panel with nothing to show | Left as is. An empty state is still an answer, and refusing the gesture would read like the flakiness we removed. `availability` stays modelled and unimplemented. |
+| Fork-point viewport breakpoints | Migrated. Zero `@media (max-width:)` rules remain in the client. |
+| Rename and fork on a session row | Not built. The row menu holds only what the server can do. |
+| The five gesture numbers | Kept as measured on the device. Chosen, not estimated. |
+
+### Still open
+
+- One drag-quality run scored 25/30 at one screen height and did not reproduce
+  across three later runs. One `npm run verify` reported a single unhandled error
+  that did not reproduce across five later runs. Both are unexplained rather than
+  fixed.
+- `01KZS6EP74` — a docked panel's 42vw preferred width can shave a few pixels off
+  the session's comfortable measure, so the fit and the layout disagree slightly.
+- `01KZQB09HT` — the shell measures itself after its first render, so a narrow
+  screen paints the wrong layout for one frame.

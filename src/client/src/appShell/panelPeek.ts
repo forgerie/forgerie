@@ -52,6 +52,10 @@ export interface PeekConfig {
  * capture distance is short because the sheet follows the finger from the
  * moment it captures, and an early follow reads as responsive rather than
  * twitchy.
+ *
+ * These were estimates. They have since been used on the acceptance device and
+ * kept, so they are chosen values now. Change them from a hand on glass, not
+ * from reasoning here.
  */
 export const PANEL_PEEK: PeekConfig = { capturePx: 10, maxAngleDegrees: 30, commitFraction: 0.4 };
 
