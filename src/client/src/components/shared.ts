@@ -683,7 +683,14 @@ export const promptEditorStyles = css`
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }
   .compact-status > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .select-model { max-width: min(42cqi, 320px); }
+  .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; }
+  .model-capsule .select-model { max-width: min(42cqi, 320px); border-start-end-radius: 0; border-end-end-radius: 0; }
+  .model-capsule .select-thinking { width: auto; min-width: 34px; margin-inline-start: -1px; padding-inline: 6px; border-start-start-radius: 0; border-end-start-radius: 0; }
+  /* The gauge carries the level; the word joins it only where the rail has room. */
+  .thinking-level { display: none; margin-inline-start: 4px; font-size: 11.5px; }
+  @container (min-width: 560px) {
+    .thinking-level { display: inline; }
+  }
   /* Identity, archive, and the summon control only appear once the chrome bands are gone. */
   .session-identity { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
   .composer-archive { flex: 0 0 auto; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-muted); padding: 5px 9px; font-size: inherit; }
@@ -720,7 +727,7 @@ export const promptEditorStyles = css`
   .resting .markdown-editor .cm-editor { min-height: 38px; }
   .resting .markdown-editor .cm-content { min-height: 22px; padding-block: 6px; }
   .resting .editor-attach { width: 26px; height: 26px; bottom: 6px; }
-  .resting .select-model, .resting .select-thinking { display: none; }
+  .resting .model-capsule { display: none; }
   .mode-hint { position: absolute; right: 46px; bottom: 8px; max-width: calc(100% - 54px); border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 2px 8px; font-size: 12px; pointer-events: none; }
   .attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
   .attachment-chip { position: relative; width: 56px; height: 56px; border: 1px solid var(--pi-border); border-radius: 8px; overflow: hidden; background: var(--pi-bg); }

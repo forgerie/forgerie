@@ -252,11 +252,18 @@ export class PromptEditor extends LitElement {
     if (status === undefined) return null;
     const model = status.model?.id ?? "no model";
     const provider = status.model?.provider !== undefined && status.model.provider !== "" ? `${status.model.provider}/` : "";
+    const thinking = thinkingLevelLabel(status.thinkingLevel);
     return html`
       <div class="compact-status" aria-label="Session status">
         ${this.renderSessionIdentity()}
-        <button class="select-model" title="Select model" @click=${() => this.onSelectModel?.()}>${provider}${model}</button>
-        <button class="select-thinking icon-button" title=${`Thinking level: ${thinkingLevelLabel(status.thinkingLevel)}`} aria-label=${`Thinking level: ${thinkingLevelLabel(status.thinkingLevel)}`} @click=${() => this.onSelectThinking?.()}>${renderThinkingGauge(thinkingGauge(status.thinkingLevel, this.availableThinkingLevels))}</button>
+        <!-- Model and thinking level are read together and set together, so they
+             share one capsule instead of spending two slots on the rail. -->
+        <div class="model-capsule">
+          <button class="select-model" title="Select model" @click=${() => this.onSelectModel?.()}>${provider}${model}</button>
+          <button class="select-thinking icon-button" title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => this.onSelectThinking?.()}>
+            ${renderThinkingGauge(thinkingGauge(status.thinkingLevel, this.availableThinkingLevels))}<span class="thinking-level">${thinking}</span>
+          </button>
+        </div>
         ${this.renderArchiveAction()}
         ${this.renderSummonAction()}
       </div>
