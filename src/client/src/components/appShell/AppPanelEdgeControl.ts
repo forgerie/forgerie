@@ -221,7 +221,12 @@ export class AppPanelEdgeControl extends LitElement {
     :host([side="workspace"][collapsed]) .edge-button { transform: translateX(calc(-50% + .5px)); }
     .edge-icon { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     :host([disclosure="summoned"][side="navigation"]) { grid-row: 1 / 3; }
-    :host([disclosure="summoned"][side="workspace"]) { display: none; }
+    /*
+     * Hidden only while the panel is away. A docked panel has no sheet, so this
+     * control is the only way back out of it; hiding it whenever the shell is
+     * summoned stranded a pinned panel with no way to unpin it.
+     */
+    :host([disclosure="summoned"][side="workspace"][collapsed]) { display: none; }
     :host([layout="overlay"][side="navigation"]) { display: none; }
   `;
 }

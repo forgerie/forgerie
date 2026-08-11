@@ -148,6 +148,30 @@ describe("PiWebApp panel peek", () => {
     expect(panel.hideToolTabs).toBe(false);
   });
 
+  it("always leaves a way to undock a panel it docked", async () => {
+    // A docked panel has no sheet, so its edge control is the only way back out.
+    // Losing it strands the panel exactly as a stored pin once did.
+    localStorage.setItem("pi-web-panel-intents", JSON.stringify({ navigation: "auto", workspace: "pinned" }));
+    const app = await mountApp(979);
+
+    const edge = shadowRoot(app).querySelector("app-panel-edge-control[side='workspace']");
+    if (!(edge instanceof HTMLElement)) throw new Error("The shell rendered no workspace edge control");
+
+    expect(edge.hasAttribute("collapsed")).toBe(false);
+    expect(getComputedStyle(edge).display).not.toBe("none");
+  });
+
+  it("leaves a way out of every panel a three-pane shell docks", async () => {
+    const app = await mountApp(DESKTOP);
+
+    for (const side of ["navigation", "workspace"] as const) {
+      const edge = shadowRoot(app).querySelector(`app-panel-edge-control[side='${side}']`);
+      if (!(edge instanceof HTMLElement)) throw new Error(`The shell rendered no ${side} edge control`);
+      expect(edge.hasAttribute("collapsed")).toBe(false);
+      expect(getComputedStyle(edge).display).not.toBe("none");
+    }
+  });
+
   it("does not offer a panel that is already docked", async () => {
     const app = await mountApp(DESKTOP);
 
