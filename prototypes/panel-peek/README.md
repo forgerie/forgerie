@@ -27,6 +27,16 @@ presentation = f(intent, capacity, availability)
 | `capacity` | available inline size vs content minimums | recomputed continuously | single- / two- / three-surface |
 | `availability` | the selected session's content | per session | no workspace → nothing to show |
 
+**Built:** intent and capacity, in `src/client/src/appShell/panelIntent.ts` and
+`panelIntentController.ts`. Seating is a fit rather than the table below:
+pinned panels are seated before never-touched ones, cheapest first, while the
+session keeps a readable measure. The table is what that fit produces.
+
+**Not built:** `availability`. Nothing varies it today — the workspace panel
+shows a useful empty state when no workspace is selected, so it is honestly
+available — and a parameter no caller varies is a guess about the future.
+Add it when a panel genuinely has nothing to show.
+
 `PanelPresentation` is `Docked` \| `Peeked(progress)` \| `Hidden`, derived, never
 stored. `Peeked` carries a 0–1 progress because the finger drives it; it is
 discarded on dismiss, navigation, and reload.
@@ -59,6 +69,7 @@ the device unfolds, rotates, or opens on a desktop.
 | `Pinned` where only one surface fits | **Degrade to `Auto`** | "This is my home surface" — one word, two meanings, the exact paradigm flip the intrinsic rule exists to prevent |
 | Two pinned panels, one dockable slot | **Pinned is just pinned.** Panels dock in content-minimum order until space runs out; the one that cannot fit stays peekable and re-docks when space returns | Fixed arbitrary priority; most-recently-pinned (needs a stored timestamp driving layout) |
 | Horizontal drag already means "archive" on inbox rows | **The sheet wins.** Row actions move to a long-press menu | Row-wins (two gesture vocabularies in one surface); direction split (left archives, right peeks — indistinguishable mid-drag) |
+| Where intent is stored | **`localStorage`, per browser.** It is the only client persistence this app has | A server-side per-user store — no such seam exists, and intent is inert on a phone anyway, so the split costs nothing today |
 
 ## Control surface
 
@@ -121,6 +132,6 @@ Conflict rules, because the transcript is full of horizontal scrollers:
 
 | Where | What |
 |---|---|
-| `SessionInboxPanel.ts` | Swipe-to-archive on rows must be removed and rebuilt as a long-press menu. `actionMenu.ts` already provides placement. The `E` shortcut and the controller-owned undo toast are unaffected. Net gain, not just cost: a swipe exposed one action, a menu exposes archive plus rename, fork, delete, and mark-unread |
-| `PanelCollapseController.ts` | Holds exactly the boolean-per-panel shape this model replaces, and does not persist |
+| `SessionInboxPanel.ts` | **Resolved.** Swipe-to-archive is gone; a hold (or right-click) opens the row's commands. The `E` shortcut and the undo toast are unaffected. The menu holds only what the server can actually do — there is no rename or fork endpoint, so those were not invented |
+| `PanelCollapseController.ts` | **Resolved.** Replaced by `PanelIntentController` |
 | `shared.ts`, `PiWebApp.ts`, `AppMobileMainTabs.ts`, `AppPanelEdgeControl.ts`, `SettingsPanelFrame.ts`, `TerminalPanel.ts`, `SessionTreeNavigator.ts` | Viewport breakpoints at 1180/1181 and 760 survive from the fork point. Both sit inside or beside the 499–979 posture range. `shellLayoutMode.ts` has the right model; these components have not migrated to it. Seamlessness does not arrive until they do |
