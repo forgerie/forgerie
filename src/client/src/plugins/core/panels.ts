@@ -1,11 +1,14 @@
 import { html, type TemplateResult } from "lit";
 import { renderBuiltinTabIcon } from "../../components/tabIcons";
 import { deriveDelegatedRuns } from "../../delegatedAgents";
+import { notificationInboxTotalCount, selectedNotificationView } from "../../sessionNotifications";
+import "../../components/SessionNotificationsPanel";
 import "../../components/WorkspaceAgentsPanel";
 import "../../components/WorkspaceFilesPanel";
 import "../../components/WorkspaceGitPanel";
 import type { WorkspacePanelContribution, WorkspacePanelContext } from "../types";
 
+const NOTIFICATIONS_PANEL_ID = "workspace.notifications";
 const AGENTS_PANEL_ID = "workspace.agents";
 
 export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
@@ -34,6 +37,18 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
       render: renderTerminal,
     },
     {
+      id: NOTIFICATIONS_PANEL_ID,
+      title: "Notifications",
+      icon: renderBuiltinTabIcon("notifications"),
+      order: 40,
+      visible: (context) => notificationCount(context) > 0 || isOpenTool(context, NOTIFICATIONS_PANEL_ID),
+      badge: (context) => {
+        const count = notificationCount(context);
+        return count > 0 ? count : undefined;
+      },
+      render: renderNotifications,
+    },
+    {
       id: AGENTS_PANEL_ID,
       title: "Agents",
       icon: renderBuiltinTabIcon("agents"),
@@ -43,7 +58,7 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
       // A session that delegated nothing should not carry a permanently empty
       // tab. The open-tool clause keeps the panel from vanishing from under
       // someone who is reading it when the last run scrolls out of the window.
-      visible: (context) => agentsWorking(context).total > 0 || isOpenTool(context),
+      visible: (context) => agentsWorking(context).total > 0 || isOpenTool(context, AGENTS_PANEL_ID),
       // Only what is running now. A total-agent badge would never clear once a
       // session had delegated anything, which is noise rather than signal.
       badge: (context) => {
@@ -65,8 +80,13 @@ function agentsWorking(context: WorkspacePanelContext): { total: number; running
   return { total, running };
 }
 
-function isOpenTool(context: WorkspacePanelContext): boolean {
-  return context.state.workspaceTool === `core:${AGENTS_PANEL_ID}`;
+function notificationCount(context: WorkspacePanelContext): number {
+  const inbox = selectedNotificationView(context.state.selectedNotificationInbox);
+  return inbox === undefined ? 0 : notificationInboxTotalCount(inbox);
+}
+
+function isOpenTool(context: WorkspacePanelContext, panelId: string): boolean {
+  return context.state.workspaceTool === `core:${panelId}`;
 }
 
 function renderFiles(context: WorkspacePanelContext): TemplateResult {
@@ -80,6 +100,16 @@ function renderTerminal(context: WorkspacePanelContext): TemplateResult {
 
 function renderGit(context: WorkspacePanelContext): TemplateResult {
   return html`<workspace-git-panel .context=${context}></workspace-git-panel>`;
+}
+
+function renderNotifications(context: WorkspacePanelContext): TemplateResult {
+  return html`
+    <session-notifications-panel
+      .inbox=${selectedNotificationView(context.state.selectedNotificationInbox)}
+      .onDismissNotification=${context.onDismissNotification}
+      .onDismissAllNotifications=${context.onDismissAllNotifications}
+    ></session-notifications-panel>
+  `;
 }
 
 function renderAgents(context: WorkspacePanelContext): TemplateResult {

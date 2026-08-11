@@ -1,20 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../../appState";
 import type { AppState } from "../../appState";
+import type { SelectedSessionNotificationInbox } from "../../sessionNotifications";
 import type { ChatLine, ToolExecutionPart } from "../../components/shared";
 import type { WorkspacePanelContext } from "../types";
 import { createCoreWorkspacePanels } from "./panels";
 
 describe("core workspace panels", () => {
-  it("places Agents after Terminal, leaving room for the Processes plugin", () => {
+  it("places Notifications before Processes and Agents", () => {
     const orders = createCoreWorkspacePanels().map((panel) => ({ id: panel.id, order: panel.order }));
 
     expect(orders).toEqual([
       { id: "workspace.files", order: 10 },
       { id: "workspace.git", order: 20 },
       { id: "workspace.terminal", order: 30 },
+      { id: "workspace.notifications", order: 40 },
       { id: "workspace.agents", order: 60 },
     ]);
+  });
+
+  describe("notifications panel", () => {
+    it("appears with the full inbox count when notifications are waiting", () => {
+      const panelContext = context({ messages: [], selectedNotificationInbox: notificationInbox() });
+
+      expect(notificationsVisible(panelContext)).toBe(true);
+      expect(notificationsBadge(panelContext)).toBe(4);
+    });
+
+    it("stays open after the final notification is cleared, then leaves the strip", () => {
+      const open = context({ messages: [], workspaceTool: "core:workspace.notifications" });
+      const closed = context({ messages: [] });
+
+      expect(notificationsVisible(open)).toBe(true);
+      expect(notificationsVisible(closed)).toBe(false);
+      expect(notificationsBadge(open)).toBeUndefined();
+    });
   });
 
   describe("agents panel", () => {
@@ -36,6 +56,20 @@ describe("core workspace panels", () => {
     });
   });
 });
+
+function notificationsPanel() {
+  const panel = createCoreWorkspacePanels().find((entry) => entry.id === "workspace.notifications");
+  if (panel === undefined) throw new Error("notifications panel is not registered");
+  return panel;
+}
+
+function notificationsBadge(panelContext: WorkspacePanelContext) {
+  return notificationsPanel().badge?.(panelContext);
+}
+
+function notificationsVisible(panelContext: WorkspacePanelContext) {
+  return notificationsPanel().visible?.(panelContext);
+}
 
 function agentsPanel() {
   const panel = createCoreWorkspacePanels().find((entry) => entry.id === "workspace.agents");
@@ -87,11 +121,38 @@ function finishedRun(): ToolExecutionPart {
   };
 }
 
-function context(patch: { messages: ChatLine[]; workspaceTool?: AppState["workspaceTool"] }): WorkspacePanelContext {
+function notificationInbox(): SelectedSessionNotificationInbox {
+  return {
+    machineId: "local",
+    sessionId: "session-1",
+    cwd: "/tmp/project",
+    status: "fresh",
+    daemonInstanceId: "daemon-a",
+    catalogRevision: 1,
+    summary: {
+      sessionId: "session-1",
+      cwd: "/tmp/project",
+      inboxRevision: 1,
+      retainedCount: 2,
+      discardedCount: 2,
+      highestSeverity: "warning",
+    },
+    notifications: [
+      { id: "daemon-a:2", message: "new", truncated: false, severity: "warning", receivedAt: "2026-08-10T10:02:00.000Z", order: 2 },
+      { id: "daemon-a:1", message: "old", truncated: false, severity: "info", receivedAt: "2026-08-10T10:01:00.000Z", order: 1 },
+    ],
+    dismissThrough: { order: 0, overflowWatermark: 0 },
+    optimisticDismissedIds: [],
+    announcements: [],
+  };
+}
+
+function context(patch: { messages: ChatLine[]; workspaceTool?: AppState["workspaceTool"]; selectedNotificationInbox?: SelectedSessionNotificationInbox }): WorkspacePanelContext {
   const state: AppState = {
     ...initialAppState(),
     messages: patch.messages,
     ...(patch.workspaceTool === undefined ? {} : { workspaceTool: patch.workspaceTool }),
+    ...(patch.selectedNotificationInbox === undefined ? {} : { selectedNotificationInbox: patch.selectedNotificationInbox }),
   };
   return {
     machine: { id: "local", name: "Local", kind: "local" },

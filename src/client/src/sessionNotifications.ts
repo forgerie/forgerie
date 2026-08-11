@@ -206,7 +206,7 @@ export function notificationInboxTotalCount(inbox: Pick<SelectedSessionNotificat
   return inbox.retainedCount + inbox.discardedCount;
 }
 
-export function notificationTrayHeading(inbox: Pick<SelectedSessionNotificationView, "retainedCount" | "discardedCount">): string {
+export function notificationPanelHeading(inbox: Pick<SelectedSessionNotificationView, "retainedCount" | "discardedCount">): string {
   return `Notifications (${String(notificationInboxTotalCount(inbox))})`;
 }
 
@@ -232,32 +232,6 @@ export function notificationFocusTargetAfterDismiss(notifications: readonly Sess
 
 export function notificationTargetKey(target: SessionNotificationTarget): string {
   return JSON.stringify([target.machineId, target.cwd, target.sessionId]);
-}
-
-/**
- * Per-target tray preference. Absent means "no explicit choice yet", which
- * falls back to {@link notificationTrayDefaultCollapsed}.
- */
-export type NotificationTrayPreferences = ReadonlyMap<string, boolean>;
-
-export type NotificationTrayTarget = SessionNotificationTarget & Pick<SelectedSessionNotificationView, "notifications">;
-
-/**
- * The transcript owns the session view. Only errors interrupt it unasked;
- * info and warning notifications wait behind the collapsed tray header.
- */
-export function notificationTrayDefaultCollapsed(target: Pick<NotificationTrayTarget, "notifications">): boolean {
-  return !target.notifications.some((notification) => notification.severity === "error");
-}
-
-export function notificationTrayIsCollapsed(preferences: NotificationTrayPreferences, target: NotificationTrayTarget): boolean {
-  return preferences.get(notificationTargetKey(target)) ?? notificationTrayDefaultCollapsed(target);
-}
-
-export function setNotificationTrayCollapsed(preferences: NotificationTrayPreferences, target: SessionNotificationTarget, collapsed: boolean): NotificationTrayPreferences {
-  const next = new Map(preferences);
-  next.set(notificationTargetKey(target), collapsed);
-  return next;
 }
 
 export function notificationInboxOverflowLabel(discardedCount: number): string {

@@ -187,6 +187,9 @@ export interface WorkspacePanelContext extends WorkspaceContext {
   onOpenSessionFile?: (sessionFile: string) => void;
   /** Return a delegated child to the inbox as a session of its own. */
   onPromoteSpawnedSession?: (sessionFile: string) => void;
+  /** Core host actions for the selected session notification inbox. */
+  onDismissNotification?: (notificationId: string) => void;
+  onDismissAllNotifications?: () => void;
   onSelectTerminal: (terminalId: string | undefined, options?: { replace?: boolean | undefined }) => void;
 }
 
