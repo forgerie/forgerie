@@ -180,3 +180,23 @@ there: 979px seats the panel by arithmetic and cannot lay it out.
 Docking now has a floor per panel: the width below which the shell has nowhere
 to put it. A pin below the floor stays a request and the panel stays reachable.
 **A pin must never be able to hide a panel from its owner.**
+
+## Up and down still belongs to the list
+
+The shell takes horizontal drags away from the browser. Most vertical drags
+begin with a sideways slip, so the claim has to let go the moment a gesture
+turns downward — otherwise lists stop scrolling under the finger at random,
+which is indistinguishable from the app being broken.
+
+Measured with real touch, reading the scroller's own position:
+
+| Where | Gesture | Scrolled | Sheet |
+|---|---|---|---|
+| inside an open sheet | straight down | 245px | stays open |
+| inside an open sheet | straight up | 225px | stays open |
+| inside an open sheet | 7px sideways slip, then down | 246px | stays open |
+| transcript, no sheet | straight up | 349px | stays closed |
+| transcript, no sheet | 7px sideways slip, then up | 352px | stays closed |
+
+The claim is made on direction and re-read on every move, so a slip claims one
+frame and the scroll still starts. `check-vertical-scroll.mjs` repeats this.

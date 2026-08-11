@@ -150,6 +150,32 @@ describe("PanelPeekController", () => {
     expect(touchMove(controller, 300, 100)).toBe(false);
   });
 
+  it("gives a drag back once it turns downward, so a list keeps scrolling", () => {
+    const { controller, drag } = harness();
+    drag.down(100, 100);
+
+    // The sideways slip a thumb makes before it commits to going down.
+    expect(touchMove(controller, 107, 98)).toBe(true);
+    // Once it is plainly a scroll, the shell stops taking it.
+    expect(touchMove(controller, 107, 160)).toBe(false);
+    expect(touchMove(controller, 107, 300)).toBe(false);
+  });
+
+  it("leaves the sheet where it is while a finger scrolls inside it", () => {
+    const { controller, drag } = harness();
+    drag.down(100, 100);
+    drag.move(100 + SHEET, 100);
+    drag.up();
+
+    // Straight down, inside the open sheet.
+    drag.down(100, 600);
+    drag.move(100, 400);
+    drag.up();
+
+    expect(controller.isOpen).toBe(true);
+    expect(controller.progress("navigation")).toBe(1);
+  });
+
   it("claims nothing when the gesture was never armed", () => {
     const { controller } = harness();
 
