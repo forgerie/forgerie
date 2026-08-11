@@ -2,6 +2,16 @@ import { css, svg, type TemplateResult } from "lit";
 import type { AskUserOutcome, ProcessNotificationDetails } from "../../../shared/apiTypes";
 import type { SessionWarningSeverity } from "../api";
 
+export const NEW_SESSION_LABEL = "New session";
+
+export function renderNewSessionIcon(): TemplateResult {
+  return svg`
+    <svg class="new-session-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M8 2.5v11M2.5 8h11"></path>
+    </svg>
+  `;
+}
+
 export function renderSessionWarningIcon(severity: SessionWarningSeverity, className: string): TemplateResult {
   if (severity === "error") {
     return svg`
@@ -195,7 +205,9 @@ export const appStyles = css`
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
-  .empty { margin: auto; color: var(--pi-muted); }
+  .empty { margin: auto; display: grid; justify-items: center; gap: 12px; padding: 24px; color: var(--pi-muted); text-align: center; }
+  .empty-session-action { display: inline-flex; align-items: center; gap: 6px; color: var(--pi-text); }
+  .empty-session-action .new-session-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
   .error { padding: 10px 16px; border-bottom: 1px solid var(--pi-border); color: var(--pi-danger); }
 
 `;
@@ -252,8 +264,10 @@ export const newSessionComposerStyles = css`
 
 export const workspacePanelStyles = css`
   :host { display: flex; flex-direction: column; min-height: 0; color: var(--pi-text); background: var(--pi-bg); font: 13px system-ui, sans-serif; container-type: inline-size; }
-  header { flex: 0 0 auto; min-width: 0; border-bottom: 1px solid var(--pi-border); }
-  .workspace-header-scroll-frame { position: relative; min-width: 0; background: var(--pi-bg); }
+  header { flex: 0 0 auto; min-width: 0; display: flex; align-items: stretch; border-bottom: 1px solid var(--pi-border); }
+  .workspace-header-scroll-frame { position: relative; flex: 1 1 auto; min-width: 0; background: var(--pi-bg); }
+  .workspace-header-action { flex: 0 0 auto; align-self: center; margin: 8px; margin-left: auto; white-space: nowrap; }
+  .workspace-header-action .new-session-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
   .workspace-header-scroll-frame::before, .workspace-header-scroll-frame::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 18px; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
   .workspace-header-scroll-frame::before { left: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .workspace-header-scroll-frame::after { right: 0; background: linear-gradient(270deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
@@ -271,14 +285,14 @@ export const workspacePanelStyles = css`
   .tab-badge { flex: 0 0 auto; display: inline-block; min-width: 14px; border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 0 5px; font-size: 11px; line-height: 16px; text-align: center; }
   @container (max-width: 430px) {
     .tabs button.icon-tab { justify-content: center; padding-inline: 7px; }
-    .tabs button.icon-tab .tab-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+    .tabs button.icon-tab .tab-label, .workspace-header-action-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
   }
   .panel-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
   .empty-state { box-sizing: border-box; width: min(100%, 380px); margin: auto; padding: 24px; display: grid; gap: 8px; color: var(--pi-muted); text-align: center; }
   .empty-state h2 { margin: 0; color: var(--pi-text); font-size: 15px; line-height: 1.3; }
   .empty-state p { margin: 0; line-height: 1.45; }
   small, .muted { color: var(--pi-muted); }
-  @media (max-width: 1180px) { header { display: none; } }
+  @media (max-width: 1180px) { .workspace-header-scroll-frame { display: none; } }
   .workspace-label { min-width: 0; display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; overflow: hidden; white-space: nowrap; }
   .workspace-label-base, .workspace-label-item, .workspace-label-render { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .workspace-label-item, .workspace-label-render, .workspace-label-separator { color: var(--pi-muted); }
@@ -762,7 +776,7 @@ export const promptEditorStyles = css`
   .primary-action { flex: 0 0 auto; display: inline-flex; align-items: center; }
   .primary-action:has(.steer-button) .send-button { border-start-end-radius: 0; border-end-end-radius: 0; }
   .primary-action .steer-button { margin-inline-start: -1px; border-start-start-radius: 0; border-end-start-radius: 0; }
-  .icon-button .prompt-action-icon, .icon-button .prompt-thinking-gauge { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .icon-button .prompt-action-icon, .icon-button .prompt-thinking-gauge, .icon-button .new-session-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .icon-button .prompt-action-icon-filled { fill: currentColor; stroke: none; }
   .send-button:not(:disabled) { color: var(--pi-accent, var(--pi-text)); }
   .stop-button:not(:disabled) { color: var(--pi-danger); }

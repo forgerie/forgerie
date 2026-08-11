@@ -9,6 +9,8 @@ import { PiWebApp } from "./PiWebApp";
 import type { AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import type { NewSessionComposer } from "./NewSessionComposer";
 import type { ChatView } from "./ChatView";
+import type { WorkspacePanel } from "./WorkspacePanel";
+import { NEW_SESSION_LABEL } from "./shared";
 import type { SessionLaunchRecovery } from "../controllers/sessionController";
 
 afterEach(() => {
@@ -111,6 +113,31 @@ describe("PiWebApp New session composer root", () => {
 
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
     expect(appState(app).newSessionDialog).toBeUndefined();
+  });
+
+  it("routes the workspace header trigger through the same root open path", () => {
+    const app = new PiWebApp();
+    const container = renderApp(app);
+    const workspace = required(container.querySelector<WorkspacePanel>("workspace-panel"), "workspace panel");
+
+    workspace.onNewSession?.();
+
+    expect(composerRequest(app)).toMatchObject({ kind: "open" });
+  });
+
+  it("shows the shared New session action when no chat composer exists", () => {
+    const app = new PiWebApp();
+    setAppState(app, { selectedWorkspace: mainWorkspace, selectedSession: undefined });
+    const container = renderApp(app);
+    const action = required(container.querySelector<HTMLButtonElement>(".empty [data-action='new-session']"), "empty-state New session action");
+
+    expect(action.textContent).toContain(NEW_SESSION_LABEL);
+    expect(action.title).toBe(NEW_SESSION_LABEL);
+    expect(action.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
+    expect(action.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+
+    action.click();
+    expect(composerRequest(app)).toMatchObject({ kind: "open" });
   });
 
   it("cancel closes without changing navigation sequencing or the selected location", () => {

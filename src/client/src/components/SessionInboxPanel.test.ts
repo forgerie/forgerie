@@ -14,6 +14,7 @@ import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace } 
 import type { GlobalSessionsState } from "../appState";
 import * as inboxLocation from "../inboxLocation";
 import * as sessionBoard from "../sessionBoard";
+import { NEW_SESSION_LABEL } from "./shared";
 import { SessionInboxPanel } from "./SessionInboxPanel";
 import { SessionWorkingRuntime } from "./SessionWorkingRuntime";
 
@@ -952,20 +953,43 @@ describe("undo toast", () => {
 // ---------------------------------------------------------------------------
 
 describe("new session callback", () => {
-  it("fires onNewSession when the new-session button is clicked", async () => {
-    let called = false;
+  it("fires onNewSession when the header action is clicked", async () => {
+    const onNewSession = vi.fn();
     const panel = await mountPanel({
       globalSessions: mkGlobalSessions([]),
-      onNewSession: () => { called = true; },
+      onNewSession,
     });
     const root = shadowRoot(panel);
 
-    const newBtn = root.querySelector("[data-action='new-session']");
+    const newBtn = root.querySelector<HTMLButtonElement>(".board-actions [data-action='new-session']");
     expect(newBtn).not.toBeNull();
-    if (newBtn instanceof HTMLElement) newBtn.click();
+    expect(newBtn?.title).toBe(NEW_SESSION_LABEL);
+    expect(newBtn?.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
+    expect(newBtn?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    newBtn?.click();
     await panel.updateComplete;
 
-    expect(called).toBe(true);
+    expect(onNewSession).toHaveBeenCalledOnce();
+  });
+
+  it("uses the exact shared New session contract for the empty-inbox CTA", async () => {
+    const onNewSession = vi.fn();
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([]),
+      onNewSession,
+    });
+
+    const action = shadowRoot(panel).querySelector<HTMLButtonElement>("[data-state='empty'] [data-action='new-session']");
+    expect(action).not.toBeNull();
+    expect(action?.textContent.trim()).toBe(NEW_SESSION_LABEL);
+    expect(action?.title).toBe(NEW_SESSION_LABEL);
+    expect(action?.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
+    expect(action?.querySelector("svg.new-session-icon")?.getAttribute("aria-hidden")).toBe("true");
+
+    action?.click();
+    await panel.updateComplete;
+
+    expect(onNewSession).toHaveBeenCalledOnce();
   });
 });
 

@@ -17,7 +17,7 @@ import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
 import { loadAttachmentDelivery, saveAttachmentDelivery } from "../attachmentPreferences";
 import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
-import { promptEditorStyles, type CompletionItem } from "./shared";
+import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon, type CompletionItem } from "./shared";
 import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import "./AutocompleteMenu";
@@ -153,6 +153,13 @@ export class PromptEditor extends LitElement {
         <div class="actions">
           ${this.renderIslandMenuAction(busy)}
           ${this.renderCompactStatus()}
+          <button
+            class="icon-button new-session-button"
+            data-action="new-session"
+            title=${NEW_SESSION_LABEL}
+            aria-label=${NEW_SESSION_LABEL}
+            @click=${() => { this.onNewSession?.(); }}
+          >${renderNewSessionIcon()}</button>
           ${this.renderPrimaryAction(rail)}
           <button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>
         </div>
@@ -272,7 +279,7 @@ export class PromptEditor extends LitElement {
     const provider = status.model?.provider !== undefined && status.model.provider !== "" ? `${status.model.provider}/` : "";
     const thinking = thinkingLevelLabel(status.thinkingLevel);
     return html`
-      <div class="compact-status" aria-label="Session status">
+      <div class=${`compact-status${this.chromeSummoned ? " summoned" : ""}`} aria-label="Session status">
         ${this.renderSessionIdentity()}
         <!-- Model and thinking level are read together and set together, so they
              share one capsule instead of spending two slots on the rail. -->
@@ -298,7 +305,7 @@ export class PromptEditor extends LitElement {
   private renderSessionIdentity() {
     const label = this.sessionLabel;
     if (label === undefined || label === "") return null;
-    return html`<span class="session-identity" title=${label}>${label}</span>`;
+    return html`<span class="session-identity summoned-secondary" title=${label}>${label}</span>`;
   }
 
   private stop(): void {
@@ -320,7 +327,7 @@ export class PromptEditor extends LitElement {
     if (!this.canArchive) return null;
     return html`
       <button
-        class="composer-archive"
+        class="composer-archive summoned-secondary"
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
         @click=${() => this.onArchiveAndNext?.()}

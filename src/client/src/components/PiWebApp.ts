@@ -95,7 +95,7 @@ import { navigateToInboxSession, type InboxNavigationResult } from "../controlle
 import { deriveSessionInboxBoard } from "../sessionBoard";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
-import { appStyles, type ChatLine } from "./shared";
+import { appStyles, NEW_SESSION_LABEL, renderNewSessionIcon, type ChatLine } from "./shared";
 
 
 const PI_WEB_STATUS_REFRESH_MS = 15 * 60 * 1000;
@@ -1227,6 +1227,7 @@ export class PiWebApp extends LitElement {
         .tool=${this.state.workspaceTool}
         .panels=${this.visibleWorkspacePanels()}
         .onSelectTool=${(tool: QualifiedContributionId) => { this.openWorkspaceTool(tool); }}
+        .onNewSession=${() => { this.openNewSessionComposer(); }}
       ></workspace-panel>
     `;
   }
@@ -2052,6 +2053,21 @@ export class PiWebApp extends LitElement {
     if (this.state.selectedProject !== undefined) return "Select a workspace to start a session.";
     if (this.state.projects.length === 0) return "Add a project to start a session.";
     return "Select a project and workspace to start a session.";
+  }
+
+  private renderSessionEmptyState() {
+    return html`
+      <div class="empty">
+        <span>${this.sessionEmptyMessage()}</span>
+        <button
+          class="empty-session-action"
+          data-action="new-session"
+          title=${NEW_SESSION_LABEL}
+          aria-label=${NEW_SESSION_LABEL}
+          @click=${() => { this.openNewSessionComposer(); }}
+        >${renderNewSessionIcon()}<span>${NEW_SESSION_LABEL}</span></button>
+      </div>
+    `;
   }
 
   private mobilePanelBadge(panel: QualifiedWorkspacePanelContribution): unknown {
@@ -2951,7 +2967,7 @@ export class PiWebApp extends LitElement {
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
             ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}
             ${state.thinkingDialog !== undefined ? html`<command-picker title=${state.thinkingDialog.title} .options=${state.thinkingDialog.options} .selectedValue=${state.thinkingDialog.selectedValue} .onPick=${(value: string) => { void this.pickThinking(value); }} .onCancel=${() => { this.setState({ thinkingDialog: undefined }); }}></command-picker>` : null}
-          ` : html`<div class="empty">${this.sessionEmptyMessage()}</div>`}
+          ` : this.renderSessionEmptyState()}
         </main>
         ${this.renderWorkspacePanelEdgeControl()}
         ${this.renderWorkspacePanel()}

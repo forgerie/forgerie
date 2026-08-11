@@ -2,7 +2,7 @@ import { LitElement, html, type TemplateResult } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { Workspace } from "../api";
 import type { QualifiedContributionId, QualifiedWorkspacePanelContribution, WorkspacePanelContext } from "../plugins/types";
-import { workspacePanelStyles } from "./shared";
+import { NEW_SESSION_LABEL, renderNewSessionIcon, workspacePanelStyles } from "./shared";
 
 export interface WorkspacePanelEmptyState {
   title: string;
@@ -20,6 +20,7 @@ export class WorkspacePanel extends LitElement {
   @property({ attribute: false }) panels: QualifiedWorkspacePanelContribution[] = [];
   @property({ type: Boolean }) hideToolTabs = false;
   @property({ attribute: false }) onSelectTool: (tool: QualifiedContributionId) => void = () => undefined;
+  @property({ attribute: false }) onNewSession?: () => void;
   @query(".workspace-header-strip") private workspaceHeaderStrip?: HTMLElement | null;
   @state() private workspaceHeaderCanScrollLeft = false;
   @state() private workspaceHeaderCanScrollRight = false;
@@ -61,8 +62,8 @@ export class WorkspacePanel extends LitElement {
     const visiblePanels = this.panels;
     const selectedPanel = visiblePanels.find((panel) => panel.id === this.tool) ?? visiblePanels[0];
     return html`
-      ${this.hideToolTabs ? null : html`
-        <header>
+      <header>
+        ${this.hideToolTabs ? null : html`
           <div class=${this.workspaceHeaderFrameClass()}>
             <div class="workspace-header-strip" @scroll=${this.onWorkspaceHeaderScroll}>
               <div class="tabs">
@@ -79,8 +80,15 @@ export class WorkspacePanel extends LitElement {
               </div>
             </div>
           </div>
-        </header>
-      `}
+        `}
+        <button
+          class="workspace-header-action"
+          data-action="new-session"
+          title=${NEW_SESSION_LABEL}
+          aria-label=${NEW_SESSION_LABEL}
+          @click=${() => { this.onNewSession?.(); }}
+        >${renderNewSessionIcon()}<span class="workspace-header-action-label">${NEW_SESSION_LABEL}</span></button>
+      </header>
       ${selectedPanel === undefined ? this.renderEmptyState({
         title: "No workspace tools available",
         body: "No tools are available for this workspace.",

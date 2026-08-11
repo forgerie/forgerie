@@ -25,6 +25,7 @@ import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
 import { actionMenuPanelStyle } from "./actionMenu";
 import { renderBuiltinTabIcon } from "./tabIcons";
+import { NEW_SESSION_LABEL } from "./shared";
 import "./SessionWorkingRuntime";
 import { isKeyEventInEditableContext } from "../keyboardContext";
 import { commitDistance, readSwipe } from "../rowSwipe";
@@ -422,9 +423,12 @@ export class SessionInboxPanel extends LitElement {
         <div class="board-state" data-state="empty">
           <p>No sessions yet.</p>
           ${this.onNewSession !== undefined ? html`
-            <button data-action="new-session" @click=${() => { this.onNewSession?.(); }}>
-              Start a session
-            </button>
+            <button
+              data-action="new-session"
+              title=${NEW_SESSION_LABEL}
+              aria-label=${NEW_SESSION_LABEL}
+              @click=${() => { this.onNewSession?.(); }}
+            >${renderNewSessionIcon()}${NEW_SESSION_LABEL}</button>
           ` : nothing}
         </div>
       `;
@@ -499,8 +503,8 @@ export class SessionInboxPanel extends LitElement {
         <button
           class="new-session-btn"
           data-action="new-session"
-          title="Start a new session"
-          aria-label="Start a new session"
+          title=${NEW_SESSION_LABEL}
+          aria-label=${NEW_SESSION_LABEL}
           @click=${() => { this.onNewSession?.(); }}
         >+ New</button>
         ${this.refreshControl}
@@ -1138,6 +1142,10 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .board-state button {
+      display: inline-flex;
+      align-items: center;
+      justify-self: center;
+      gap: 6px;
       padding: 8px 16px;
       font: inherit;
       color: var(--pi-text-bright, #fff);
@@ -1145,6 +1153,15 @@ export class SessionInboxPanel extends LitElement {
       border: 1px solid var(--pi-accent-border, #5a47b0);
       border-radius: 8px;
       cursor: pointer;
+    }
+
+    .board-state button .new-session-icon {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
     }
 
     .stale-notice {
