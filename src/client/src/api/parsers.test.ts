@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH } from "../../../shared/apiTypes";
-import { parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
+import { parseAborted, parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
 import { parseMachineSessionListingSnapshot, parseSessionAskCatalogSnapshot } from "./parsers";
 
 describe("API parsers", () => {
@@ -481,6 +481,7 @@ describe("API parsers", () => {
       model: { provider: "p", id: "m", contextWindow: 100, reasoning: { effort: "low" } },
       contextUsage: { tokens: null, contextWindow: 100, percent: 0.5 },
       thinkingLevel: "medium",
+      doubleEscapeAction: "fork",
     })).toEqual({
       sessionId: "s1",
       persisted: true,
@@ -496,7 +497,28 @@ describe("API parsers", () => {
       model: { provider: "p", id: "m", contextWindow: 100, reasoning: { effort: "low" } },
       contextUsage: { tokens: null, contextWindow: 100, percent: 0.5 },
       thinkingLevel: "medium",
+      doubleEscapeAction: "fork",
     });
+    expect(parseSessionStatus(statusWire()).doubleEscapeAction).toBeUndefined();
+    expect(() => parseSessionStatus({ ...statusWire(), doubleEscapeAction: "open" })).toThrow("Invalid double Escape action");
+  });
+
+  it("parses abort results with messages restored in server order", () => {
+    expect(parseAborted({
+      aborted: true,
+      restoredMessages: [
+        { kind: "steer", text: "adjust" },
+        { kind: "followUp", text: "continue" },
+      ],
+    })).toEqual({
+      aborted: true,
+      restoredMessages: [
+        { kind: "steer", text: "adjust" },
+        { kind: "followUp", text: "continue" },
+      ],
+    });
+    expect(parseAborted({ aborted: true })).toEqual({ aborted: true, restoredMessages: [] });
+    expect(() => parseAborted({ aborted: true, restoredMessages: [{ kind: "later", text: "wrong" }] })).toThrow("Invalid queued message kind");
   });
 
   it("normalizes session guidance IDs and accepts omission from older daemons", () => {

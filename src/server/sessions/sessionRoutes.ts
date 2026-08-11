@@ -421,8 +421,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
 
   app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/abort`, async (request, reply) => {
     try {
-      await sessions.abort(sessionRefFromBody(request.params.sessionId, optionalRecord(request.body)));
-      return { aborted: true };
+      return await sessions.abort(sessionRefFromBody(request.params.sessionId, optionalRecord(request.body)));
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
     }

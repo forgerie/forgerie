@@ -3,7 +3,7 @@ import type { AppState, ClosedExtensionDialog } from "../appState";
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
 import { normalizeMessages, textMessage } from "../chatMessages";
 import { machineSessionKey } from "../machineKeys";
-import { clearDraft, moveDraft, saveDraft } from "../promptDraftStorage";
+import { clearDraft, loadDraft, moveDraft, saveDraft } from "../promptDraftStorage";
 import { clearAskDraft } from "../askDrafts";
 import { ChatTranscriptStore } from "../chatTranscriptStore";
 import { isShellInput } from "../inputModes";
@@ -1350,12 +1350,24 @@ export class SessionController {
   }
 
   async stopActiveWork() {
-    const session = this.getState().selectedSession;
+    const state = this.getState();
+    const session = state.selectedSession;
     if (!session) return;
+    const machineId = selectedMachineId(state);
+    const selectionSeq = this.selectionSeq;
     try {
-      await this.api.abort(session, selectedMachineId(this.getState()));
+      const result = await this.api.abort(session, machineId);
+      const text = result.restoredMessages.map((message) => message.text).join("\n\n");
+      if (text === "") return;
+      const cacheKey = machineSessionKey(machineId, session.id);
+      const restoredDraft = [text, loadDraft(cacheKey)].filter((part) => part.trim() !== "").join("\n\n");
+      saveDraft(cacheKey, restoredDraft);
+      if (!this.isCurrentSessionSelection(session.id, machineId, selectionSeq)) return;
+      if (this.replacePromptEditorText === undefined) throw new Error("Queued messages could not be restored to the prompt editor");
+      const restored = await this.replacePromptEditorText({ machineId, sessionId: session.id, text: restoredDraft });
+      if (restored === false) throw new Error("Queued messages could not be restored to the prompt editor");
     } catch (error) {
-      this.setState({ error: String(error) });
+      if (this.isCurrentSessionSelection(session.id, machineId, selectionSeq)) this.setState({ error: String(error) });
     }
   }
 

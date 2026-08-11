@@ -480,6 +480,14 @@ export interface QueuedSessionMessage {
   text: string;
 }
 
+export type DoubleEscapeAction = "fork" | "tree" | "none";
+
+export interface SessionAbortResult {
+  aborted: true;
+  /** Messages removed from Pi's queues, ordered as the TUI restores them. */
+  restoredMessages: QueuedSessionMessage[];
+}
+
 /**
  * `customType` of the follow-up custom message that carries a closed ask back to
  * the model and into the transcript. Its `details` are an {@link AskUserOutcome}.
@@ -932,6 +940,8 @@ export interface SessionStatus {
   runningProcesses?: number;
   pendingMessageCount: number;
   queuedMessages: QueuedSessionMessage[];
+  /** Pi's configured action for two Escape presses with an empty idle editor. */
+  doubleEscapeAction?: DoubleEscapeAction;
   /** Ordered IDs for the session guidance that applies at the next agent start. */
   activeGuidanceIds?: string[];
   messageCount?: number;

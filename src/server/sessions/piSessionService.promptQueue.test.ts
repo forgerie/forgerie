@@ -425,6 +425,11 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
       pendingMessageCount: 2,
       getSteeringMessages: () => ["adjust this turn"],
       getFollowUpMessages: () => ["then do this"],
+      settingsManager: {
+        getWarnings: () => ({}),
+        setWarnings: () => undefined,
+        getDoubleEscapeAction: () => "fork",
+      },
     });
     const service = new PiSessionService(new CapturingSessionEventHub(), {
       agentDir: TEST_AGENT_DIR,
@@ -437,6 +442,7 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await expect(service.status(sessionRef("status-session"))).resolves.toMatchObject({
       pendingMessageCount: 2,
       queuedMessages: [{ kind: "steer", text: "adjust this turn" }, { kind: "followUp", text: "then do this" }],
+      doubleEscapeAction: "fork",
       messageCount: 2,
     });
     await service.dispose();
@@ -621,8 +627,22 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await service.dispose();
   });
 
-  it("clears queued messages when aborting active work", async () => {
-    const fake = fakeRuntime("abort-session");
+  it("atomically returns queued messages when aborting active work", async () => {
+    const steeringMessages = ["adjust this turn"];
+    const followUpMessages = ["then summarize"];
+    const fake = fakeRuntime("abort-session", {
+      isStreaming: true,
+      pendingMessageCount: 2,
+      getSteeringMessages: () => steeringMessages,
+      getFollowUpMessages: () => followUpMessages,
+      clearQueue: () => {
+        fake.calls.clearQueue += 1;
+        steeringMessages.length = 0;
+        followUpMessages.length = 0;
+        fake.session.pendingMessageCount = 0;
+        return { steering: ["adjust this turn"], followUp: ["then summarize"] };
+      },
+    });
     const service = new PiSessionService(new CapturingSessionEventHub(), {
       agentDir: TEST_AGENT_DIR,
       modelRuntime: testModelRuntime,
@@ -632,8 +652,15 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     });
 
     await service.status(sessionRef("abort-session"));
-    await service.abort(sessionRef("abort-session"));
+    const result = await service.abort(sessionRef("abort-session"));
 
+    expect(result).toEqual({
+      aborted: true,
+      restoredMessages: [
+        { kind: "steer", text: "adjust this turn" },
+        { kind: "followUp", text: "then summarize" },
+      ],
+    });
     expect(fake.calls.clearQueue).toBe(1);
     expect(fake.calls.abort).toBe(1);
     await service.dispose();
@@ -651,8 +678,12 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
 
     await service.prompt(sessionRef("abort-compaction-session"), "Do not deliver after abort", "followUp");
     await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 1 });
-    await service.abort(sessionRef("abort-compaction-session"));
+    const result = await service.abort(sessionRef("abort-compaction-session"));
 
+    expect(result).toEqual({
+      aborted: true,
+      restoredMessages: [{ kind: "followUp", text: "Do not deliver after abort" }],
+    });
     expect(fake.calls.clearQueue).toBe(1);
     expect(fake.calls.prompt).toEqual([]);
     await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 0, queuedMessages: [] });

@@ -47,6 +47,7 @@ import type {
   ExtensionDialogOutcome,
   MachineSessionListingSnapshot,
   SavedPromptAttachment,
+  SessionAbortResult,
   SessionAskCatalogSnapshot,
   SessionBulkArchiveResponse,
   SessionBulkDeleteArchivedResponse,
@@ -413,6 +414,7 @@ export interface PiAgentSession {
   settingsManager: {
     getWarnings(): { anthropicExtraUsage?: boolean };
     setWarnings(warnings: { anthropicExtraUsage?: boolean }): void;
+    getDoubleEscapeAction?(): "fork" | "tree" | "none";
   };
   sessionManager: PiSessionManager;
   scopedModels: readonly { model: AgentModel; thinkingLevel?: ClientThinkingLevel }[];
@@ -2943,12 +2945,14 @@ export class PiSessionService implements SessionRouteService {
     return this.statusFromSession(session);
   }
 
-  async abort(ref: PiSessionRef): Promise<void> {
+  async abort(ref: PiSessionRef): Promise<SessionAbortResult> {
     const active = this.activeForRef(ref);
-    if (active === undefined) return;
-    const sessionId = active.runtime.session.sessionId;
+    if (active === undefined) return { aborted: true, restoredMessages: [] };
+    const session = active.runtime.session;
+    const sessionId = session.sessionId;
+    const restoredMessages = queuedMessagesFromSession(session, this.compactionQueuedMessages(sessionId));
     this.clearCompactionPromptQueue(sessionId);
-    clearSessionQueue(active.runtime.session);
+    clearSessionQueue(session);
     // Settle run-scoped dialogs now, at abort-request time: pi's agent loop
     // waits for a parked `tool_call` dialog handler before it can emit
     // `agent_end`, so leaving settlement to the `agent_end` observer would
@@ -2956,15 +2960,16 @@ export class PiSessionService implements SessionRouteService {
     // also means a failing or hung abort cannot strand the parked waiter.
     this.abortRunScopedExtensionDialogs(sessionId);
     try {
-      await this.abortSessionOperations(active.runtime.session);
-      this.publishActivity(active.runtime.session, "stopped", "idle");
+      await this.abortSessionOperations(session);
+      this.publishActivity(session, "stopped", "idle");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.publishActivity(active.runtime.session, "stop failed", "error", message);
       throw error;
     } finally {
-      this.publishStatus(active.runtime.session);
+      this.publishStatus(session);
     }
+    return { aborted: true, restoredMessages };
   }
 
   async stop(ref: PiSessionRef): Promise<void> {
@@ -4165,6 +4170,7 @@ export class PiSessionService implements SessionRouteService {
       ...this.liveWorkCounts(session),
       pendingMessageCount: this.pendingMessageCount(session),
       queuedMessages: queuedMessagesFromSession(session, this.compactionQueuedMessages(session.sessionId)),
+      doubleEscapeAction: session.settingsManager.getDoubleEscapeAction?.() ?? "tree",
       activeGuidanceIds: this.sessionGuidanceForSession(session),
       messageCount: session.messages.length,
       tokens: stats.tokens,

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { textMessage } from "../chatMessages";
+import { SessionController } from "../controllers/sessionController";
 import { selectedChatLiveReady, selectedChatTarget } from "../selectedChatLoad";
 import { AuthDialog } from "./AuthDialog";
 import { ChatView } from "./ChatView";
@@ -20,6 +21,7 @@ afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
   sessionStorage.clear();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -82,6 +84,30 @@ describe("PiWebApp global shortcut modality boundary", () => {
     expect(newSessionComposerIsOpen(app)).toBe(false);
     expect(onSend).toHaveBeenCalledWith("send with existing behavior", undefined, undefined, undefined);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("runs the configured idle double-Escape action through the session command flow", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const { app, editor } = await renderChatEditor({});
+    editor.status = {
+      sessionId: "session-shortcut",
+      isStreaming: false,
+      isCompacting: false,
+      isBashRunning: false,
+      pendingMessageCount: 0,
+      queuedMessages: [],
+      doubleEscapeAction: "fork",
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: 0,
+    };
+    const runCommand = vi.spyOn(appSessionController(app), "runCommand").mockResolvedValue(undefined);
+
+    dispatchEditorKeyThroughApp(app, editor, "Escape", {});
+    vi.advanceTimersByTime(499);
+    dispatchEditorKeyThroughApp(app, editor, "Escape", {});
+
+    expect(runCommand).toHaveBeenCalledExactlyOnceWith("/fork");
   });
 
   it("opens New session through the global dispatcher with a configured alternate shortcut", async () => {
@@ -386,6 +412,12 @@ function newSessionComposerIsOpen(app: PiWebApp): boolean {
 
 function setAppState(app: PiWebApp, patch: Partial<AppState>): void {
   if (!Reflect.set(app, "state", { ...initialAppState(), ...patch })) throw new Error("Could not set PiWebApp state");
+}
+
+function appSessionController(app: PiWebApp): SessionController {
+  const controller: unknown = Reflect.get(app, "sessions");
+  if (!(controller instanceof SessionController)) throw new Error("PiWebApp SessionController was unavailable");
+  return controller;
 }
 
 function setOnScreenKeyboardOpen(app: PiWebApp, open: boolean): void {

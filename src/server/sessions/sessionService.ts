@@ -15,6 +15,7 @@ import type {
   SessionNotificationInboxSnapshot,
   SessionUnreadAcknowledgeRequest,
   SessionUnreadCatalogSnapshot,
+  SessionAbortResult,
 } from "../../shared/apiTypes.js";
 import type {
   ClientArchiveSessionsResponse,
@@ -89,7 +90,7 @@ export interface SessionRouteService {
   respondToCommand(ref: SessionRouteRef, requestId: string, value: string): Promise<ClientCommandResult>;
   navigateTree(ref: SessionRouteRef, request: ClientSessionTreeNavigateRequest): Promise<ClientSessionTreeNavigateResult>;
   forkFromTree(ref: SessionRouteRef, request: ClientSessionTreeForkRequest): Promise<ClientSessionTreeForkResult>;
-  abort(ref: SessionRouteRef): Promise<void>;
+  abort(ref: SessionRouteRef): Promise<SessionAbortResult>;
   stop(ref: SessionRouteRef): void | Promise<void>;
   archive(ref: SessionRouteRef): Promise<void>;
   archiveTree(ref: SessionRouteRef): Promise<ClientArchiveSessionsResponse>;

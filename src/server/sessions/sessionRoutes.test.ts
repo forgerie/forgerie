@@ -20,6 +20,7 @@ import type {
   SessionNotificationInboxSnapshot,
   SessionRef,
   SessionStatus,
+  SessionAbortResult,
   SessionStreamSnapshot,
   SessionTreeForkRequest,
   SessionTreeForkResult,
@@ -889,6 +890,26 @@ describe("session routes", () => {
     }
   });
 
+  it("returns messages atomically restored by an abort", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const requestCwd = resolve("/repo");
+      const response = await routeApp.inject({ method: "POST", url: "/sessions/session-1/abort", payload: { cwd: requestCwd } });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual(routeService.abortResponse);
+      expect(routeService.abortCalls).toEqual([{ id: "session-1", cwd: requestCwd }]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("changes session guidance with workspace context and validates the desired state", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1092,6 +1113,11 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly calls: unknown[] = [];
   readonly reloadCalls: SessionRouteRef[] = [];
   readonly clearQueueCalls: SessionRouteRef[] = [];
+  readonly abortCalls: SessionRouteRef[] = [];
+  readonly abortResponse: SessionAbortResult = {
+    aborted: true,
+    restoredMessages: [{ kind: "followUp", text: "continue after review" }],
+  };
   readonly dismissWarningCalls: { lookup: SessionRouteRef; dismissId: string }[] = [];
   readonly guidanceCalls: { lookup: SessionRouteRef; entryId: string; enabled: boolean }[] = [];
   readonly notificationInboxCalls: SessionRef[] = [];
@@ -1335,7 +1361,10 @@ class CapturingRouteSessionService implements SessionRouteService {
       promptDraft: "draft this",
     });
   }
-  abort(): never { throw unusedRouteMethod("abort"); }
+  abort(lookup: SessionRouteRef): Promise<SessionAbortResult> {
+    this.abortCalls.push(lookup);
+    return Promise.resolve(this.abortResponse);
+  }
   stop(): never { throw unusedRouteMethod("stop"); }
   archive(): never { throw unusedRouteMethod("archive"); }
   archiveTree(): never { throw unusedRouteMethod("archiveTree"); }

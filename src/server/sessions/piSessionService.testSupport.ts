@@ -155,7 +155,7 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
     isBashRunning: false,
     pendingMessageCount: 0,
     sessionManager: fakeSessionManager(),
-    settingsManager: { getWarnings: () => ({}), setWarnings: () => undefined },
+    settingsManager: { getWarnings: () => ({}), setWarnings: () => undefined, getDoubleEscapeAction: () => "tree" },
     modelRuntime: testModelRuntime,
     scopedModels: [],
     extensionRunner: {

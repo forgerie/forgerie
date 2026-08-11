@@ -6,7 +6,7 @@ import { defaultHighlightStyle, indentOnInput, indentUnit, syntaxHighlighting } 
 import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { api, type FileSuggestion, type PromptAttachment, type SessionModel, type SessionStatus, type SlashCommand } from "../api";
-import type { PromptAttachmentDelivery } from "../../../shared/apiTypes";
+import type { DoubleEscapeAction, PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import { sessionGuidanceSummary } from "../../../shared/sessionGuidance";
 import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePromptAttachment, promptAttachmentsCanUseInlineDelivery, type CapturedAttachment } from "../promptAttachmentCapture";
 import { composerRail, type ComposerRail } from "../composerRail";
@@ -45,6 +45,7 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false, hasChanged: promptHistoryChanged }) promptHistory: readonly string[] = [];
   @property({ attribute: false }) onSend?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => void | Promise<void>;
   @property({ attribute: false }) onStop?: () => void;
+  @property({ attribute: false }) onDoubleEscapeAction?: (action: Exclude<DoubleEscapeAction, "none">) => void;
   @property({ attribute: false }) onSelectModel?: () => void;
   @property({ attribute: false }) onSelectThinking?: () => void;
   @property({ attribute: false }) onSetGuidance?: (entryId: string, enabled: boolean) => Promise<boolean>;
@@ -88,6 +89,7 @@ export class PromptEditor extends LitElement {
   private readonly readOnlyCompartment = new Compartment();
   private readonly mobilePromptEnterMedia = createMobilePromptEnterMedia();
   private explicitShiftKeyActive = false;
+  private lastEscapeTime = 0;
 
   protected override willUpdate(changed: PropertyValues<this>) {
     const sessionChanged = changed.has("sessionId") || changed.has("machineId");
@@ -101,6 +103,7 @@ export class PromptEditor extends LitElement {
       this.currentInputMode = inputModeForDraft(this.draft);
       this.completions = [];
       this.selectedIndex = 0;
+      this.lastEscapeTime = 0;
       this.resetGuidanceDisclosure();
     }
     if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) this.resetGuidanceDisclosure();
@@ -562,7 +565,7 @@ export class PromptEditor extends LitElement {
             { any: (view, event) => this.handleEditorKeyDown(event, view) },
             { key: "ArrowDown", run: (view) => this.moveCompletion(1) || this.movePromptHistory(view, "newer") },
             { key: "ArrowUp", run: (view) => this.moveCompletion(-1) || this.movePromptHistory(view, "older") },
-            { key: "Escape", run: () => this.closeCompletions() },
+            { key: "Escape", run: () => this.handleEditorEscape() },
             { key: "Tab", run: (view) => this.handleEditorTab(view) },
             { key: "Shift-Tab", run: (view) => indentWithTab.shift?.(view) ?? false },
             { key: "Backspace", run: (view) => deleteMarkupBackward(view) },
@@ -667,6 +670,33 @@ export class PromptEditor extends LitElement {
   private closeCompletions(): boolean {
     if (!this.completions.length) return false;
     this.completions = [];
+    return true;
+  }
+
+  private handleEditorEscape(): boolean {
+    if (this.closeCompletions()) return true;
+    if (this.disabled || !this.runtimeControlsAvailable) return false;
+
+    const status = this.status;
+    if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true) {
+      this.stop();
+      return true;
+    }
+    if (this.currentInputMode.kind === "shell") {
+      this.replaceText("");
+      return true;
+    }
+    if (this.draft.trim() !== "") return false;
+
+    const action = status?.doubleEscapeAction ?? "tree";
+    if (action === "none") return true;
+    const now = Date.now();
+    if (now - this.lastEscapeTime < 500) {
+      this.lastEscapeTime = 0;
+      this.onDoubleEscapeAction?.(action);
+    } else {
+      this.lastEscapeTime = now;
+    }
     return true;
   }
 
