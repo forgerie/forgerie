@@ -126,7 +126,7 @@ describe("PiWebApp global shortcut modality boundary", () => {
 });
 
 describe("PiWebApp on-screen keyboard layout", () => {
-  it("keeps the composer and omits the session status strip while the keyboard is open", () => {
+  it("keeps the composer, the only thing left below the transcript, while the keyboard is open", () => {
     const app = new PiWebApp();
     const selectedSession = session("session-keyboard");
     setAppState(app, { selectedSession, sessions: [selectedSession], mainView: "chat" });
@@ -136,6 +136,7 @@ describe("PiWebApp on-screen keyboard layout", () => {
 
     expect(container.querySelector("prompt-editor")).not.toBeNull();
     expect(container.querySelector("status-bar")).toBeNull();
+    expect(container.querySelector("app-control-sheet")).not.toBeNull();
   });
 
   it("gives the composer the selected session's user prompt history", () => {

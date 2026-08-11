@@ -13,24 +13,24 @@ afterEach(() => {
 });
 
 describe("PiWebApp session-warning visibility wiring", () => {
-  it("keeps the warning control present and toggles the warning area from the status bar", () => {
+  it("keeps the warning control present and toggles the warning area from the island menu's sheet", () => {
     const app = createApp();
     const state = stateWithWarnings();
     setAppState(app, state);
     syncWarningVisibility(app);
 
-    const visibleStatusBar = renderStatusBar(app, state);
+    const visibleSheet = renderControlSheet(app, state);
     expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(true);
-    expect(templateValueAfterMarker(visibleStatusBar, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(visibleStatusBar, ".warningsExpanded=")).toBe(true);
+    expect(templateValueAfterMarker(visibleSheet, ".warningCount=")).toBe(2);
+    expect(templateValueAfterMarker(visibleSheet, ".warningsExpanded=")).toBe(true);
 
-    const toggle = templateCallbackAfterMarker(visibleStatusBar, ".onToggleWarnings=");
+    const toggle = templateCallbackAfterMarker(visibleSheet, ".onToggleWarnings=");
     toggle();
 
-    const collapsedStatusBar = renderStatusBar(app, state);
+    const collapsedSheet = renderControlSheet(app, state);
     expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(false);
-    expect(templateValueAfterMarker(collapsedStatusBar, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(collapsedStatusBar, ".warningsExpanded=")).toBe(false);
+    expect(templateValueAfterMarker(collapsedSheet, ".warningCount=")).toBe(2);
+    expect(templateValueAfterMarker(collapsedSheet, ".warningsExpanded=")).toBe(false);
 
     const otherState = stateWithWarnings("session-2");
     setAppState(app, otherState);
@@ -41,26 +41,26 @@ describe("PiWebApp session-warning visibility wiring", () => {
     setAppState(app, returningState);
     syncWarningVisibility(app);
     expect(templateValueAfterMarker(renderChatView(app, returningState), ".warningsVisible=")).toBe(true);
-    expect(templateValueAfterMarker(renderStatusBar(app, returningState), ".warningCount=")).toBe(0);
+    expect(templateValueAfterMarker(renderControlSheet(app, returningState), ".warningCount=")).toBe(0);
 
     setAppState(app, state);
     syncWarningVisibility(app);
-    const returnedStatusBar = renderStatusBar(app, state);
+    const returnedSheet = renderControlSheet(app, state);
     expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(false);
-    expect(templateValueAfterMarker(returnedStatusBar, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(returnedStatusBar, ".warningsExpanded=")).toBe(false);
+    expect(templateValueAfterMarker(returnedSheet, ".warningCount=")).toBe(2);
+    expect(templateValueAfterMarker(returnedSheet, ".warningsExpanded=")).toBe(false);
 
-    templateCallbackAfterMarker(returnedStatusBar, ".onToggleWarnings=")();
+    templateCallbackAfterMarker(returnedSheet, ".onToggleWarnings=")();
 
-    const restoredStatusBar = renderStatusBar(app, state);
+    const restoredSheet = renderControlSheet(app, state);
     expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(true);
-    expect(templateValueAfterMarker(restoredStatusBar, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(restoredStatusBar, ".warningsExpanded=")).toBe(true);
+    expect(templateValueAfterMarker(restoredSheet, ".warningCount=")).toBe(2);
+    expect(templateValueAfterMarker(restoredSheet, ".warningsExpanded=")).toBe(true);
   });
 });
 
 type RenderChatView = (this: PiWebApp, state: AppState, session: SessionInfo) => TemplateResult;
-type RenderStatusBar = (this: PiWebApp, state: AppState) => TemplateResult;
+type RenderControlSheet = (this: PiWebApp, state: AppState) => TemplateResult;
 type SyncWarningVisibility = (this: PiWebApp) => void;
 type WarningVisibilityCallback = () => void;
 
@@ -126,9 +126,9 @@ function renderChatView(app: PiWebApp, state: AppState): TemplateResult {
   return method.call(app, state, session);
 }
 
-function renderStatusBar(app: PiWebApp, state: AppState): TemplateResult {
-  const method: unknown = Reflect.get(app, "renderStatusBar");
-  if (!isRenderStatusBar(method)) throw new Error("PiWebApp.renderStatusBar is not callable");
+function renderControlSheet(app: PiWebApp, state: AppState): TemplateResult {
+  const method: unknown = Reflect.get(app, "renderControlSheet");
+  if (!isRenderControlSheet(method)) throw new Error("PiWebApp.renderControlSheet is not callable");
   return method.call(app, state);
 }
 
@@ -142,7 +142,7 @@ function isRenderChatView(value: unknown): value is RenderChatView {
   return typeof value === "function";
 }
 
-function isRenderStatusBar(value: unknown): value is RenderStatusBar {
+function isRenderControlSheet(value: unknown): value is RenderControlSheet {
   return typeof value === "function";
 }
 

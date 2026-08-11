@@ -67,7 +67,6 @@ import type { ChatView } from "./ChatView";
 import "./ContextUsageMeter";
 import "./PromptEditor";
 import type { PromptEditor } from "./PromptEditor";
-import "./StatusBar";
 import "./CommandPicker";
 import "./ActionPalette";
 import "./AuthDialog";
@@ -2557,14 +2556,6 @@ export class PiWebApp extends LitElement {
     `;
   }
 
-  private renderStatusBar(state: AppState) {
-    if (this.onScreenKeyboard.isOpen) return null;
-    const warningCount = this.sessionWarningVisibility.warningCount;
-    return html`
-      <status-bar .status=${state.status} .activity=${state.activity} .isSendingPrompt=${state.selectedSession !== undefined && state.sendingPrompts[state.selectedSession.id] === true} .warningCount=${warningCount} .warningsExpanded=${warningCount > 0 && !this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings}></status-bar>
-    `;
-  }
-
   /** Dismisses the summoned navigation overlay by returning to the session underneath. */
   private renderNavigationScrim(state: AppState) {
     if (!this.appShell.isMobileNavigationLayout || state.mainView !== "navigation") return null;
@@ -2681,7 +2672,6 @@ export class PiWebApp extends LitElement {
           ${state.selectedSession ? html`
             ${this.renderChatView(state, state.selectedSession)}
             <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .attentionCount=${this.selectedAttentionCount(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
-            ${this.renderStatusBar(state)}
             ${this.renderControlSheet(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
             ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}

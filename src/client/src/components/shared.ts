@@ -156,7 +156,7 @@ export const appStyles = css`
     .shell.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
     .shell:not(.workspace-view) > workspace-panel { display: none; }
     .workspace-panel-edge { display: none; }
-    main.workspace-view chat-view, main.workspace-view prompt-editor, main.workspace-view status-bar,
+    main.workspace-view chat-view, main.workspace-view prompt-editor,
     main.workspace-view .empty { display: none; }
     main.workspace-view { overflow: hidden; }
   }
@@ -190,7 +190,6 @@ export const appStyles = css`
   }
   .navigation-scrim { display: none; }
   @keyframes navigation-overlay-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-  status-bar { flex: 0 0 auto; }
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
@@ -626,23 +625,6 @@ export const formattedTextStyles = css`
   table { border-collapse: collapse; width: max-content; min-width: 100%; max-width: none; }
   th, td { border: 1px solid var(--pi-border); padding: 4px 8px; max-width: 48ch; overflow-wrap: anywhere; }
   th { background: var(--pi-surface); }
-`;
-
-export const statusBarStyles = css`
-  :host { display: block; color: var(--pi-muted); font: 12px system-ui, sans-serif; }
-  .bar { display: flex; justify-content: flex-end; gap: 12px; align-items: center; min-width: 0; padding: 7px 12px; border-top: 1px solid var(--pi-border); background: var(--pi-bg); white-space: nowrap; overflow: hidden; }
-  span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .warning-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: inherit; padding: 0; font: inherit; line-height: 1; white-space: nowrap; cursor: pointer; }
-  .warning-toggle:first-child { margin-right: auto; }
-  .warning-toggle:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
-  .warning-toggle-icon { flex: 0 0 auto; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .activity { flex: 0 1 auto; min-width: 0; margin-right: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--pi-muted); }
-  .activity-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .activity.active { color: var(--pi-success); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .45; flex: 0 0 auto; }
-  .activity.active .dot { animation: pulse 1s ease-in-out infinite; opacity: 1; }
-  .muted { color: var(--pi-dim); }
-  @keyframes pulse { 0%, 100% { transform: scale(.75); opacity: .55; } 50% { transform: scale(1.2); opacity: 1; } }
 `;
 
 export const autocompleteStyles = css`
