@@ -2564,7 +2564,7 @@ async function initialPromptRecoveryAccepted(page: MessagePage, recovery: Sessio
       ? await canonicalTranscriptContainsDeliveryReceipt(page, queued.deliveryReceipt)
       : false;
   }
-  return canonicalTranscriptContainsPrompt(page, recovery.prompt);
+  return canonicalTranscriptContainsPrompt(page, queued?.deliveredText ?? recovery.prompt);
 }
 
 async function queuedInitialPromptAccepted(page: MessagePage, queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Promise<boolean> {

@@ -845,6 +845,40 @@ describe("SessionController session launch", () => {
     expect(state.error).toBe("");
   });
 
+  it("refreshes ordinary folder-delivery recovery against the rewritten canonical body", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const attachments: PromptAttachment[] = [{ kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" }];
+    const deliveredBody = "Read notes\n\n@.forgerie/attachments/notes.txt";
+    let exposeDeliveredTranscript = false;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      saveAttachments: () => Promise.resolve([{ path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 }]),
+      messages: () => exposeDeliveredTranscript
+        ? Promise.resolve({ messages: [{ role: "user", content: deliveredBody }], start: 0, total: 1 })
+        : Promise.reject(new Error("transcript unavailable")),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => Promise.reject(new Error("response lost")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "Read notes", attachments, delivery: "folder" });
+    expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
+
+    exposeDeliveredTranscript = true;
+    await controller.refreshSessionLaunchRecovery(started.id);
+
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+  });
+
   it("offers one guarded retry when delivery is confirmed unsent", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     const retryRequest = deferred<{ accepted: true }>();
