@@ -35,7 +35,17 @@ session keeps a readable measure. The table is what that fit produces.
 **Not built:** `availability`. Nothing varies it today — the workspace panel
 shows a useful empty state when no workspace is selected, so it is honestly
 available — and a parameter no caller varies is a guess about the future.
-Add it when a panel genuinely has nothing to show.
+Add it when a panel genuinely has nothing to show. The captured
+`folded-portrait-workspace.png` shows the cost plainly: peeking the workspace
+panel with no workspace selected spends a full sheet on "Select a project".
+
+### Promotion, as built
+
+The pin sits alone in a slim band at the top of the sheet. It carries no title:
+the panel underneath already names itself, and a sheet reading "Sessions" over
+a panel reading "Inbox" is two vocabularies for one concept. It is the only
+route from a look to a decision — a regression test asserts that dragging a
+sheet fully open leaves the stored intent at `auto`.
 
 `PanelPresentation` is `Docked` \| `Peeked(progress)` \| `Hidden`, derived, never
 stored. `Peeked` carries a 0–1 progress because the finger drives it; it is
@@ -113,6 +123,21 @@ What makes swipe-anywhere safe is not that it is anywhere; it is that it is
 **drag-tracked**. The sheet follows the finger, so a 15% peek can be abandoned
 for free. Ship that property first. A tap-toggle bound to a whole-surface
 gesture has the blast radius with none of the reversibility.
+
+**Built**, in `panelPeek.ts` (the arithmetic) and `panelPeekController.ts` (the
+events). The sheet drops its CSS transition while a finger is down, because
+easing makes the sheet lag the hand and the peek stops feeling direct.
+
+| Number | Value | Why |
+|---|---|---|
+| capture distance | 10px | short, so the sheet follows early and reads responsive |
+| angle gate | 30° | a thumb travels in an arc, not a line |
+| commit share | 0.4 | past this, letting go opens |
+| rest window | 400ms | a still finger is selecting text or holding a row |
+| wheel settle | 120ms | a trackpad sends travel in pieces and never releases |
+
+**All five are estimates.** They are numbers on glass. None of them is right
+until a hand on the acceptance device says so.
 
 The same pipeline serves the desktop: a trackpad two-finger horizontal `wheel`
 with `deltaX` is the same drag and earns the same rubber-band peek. The
