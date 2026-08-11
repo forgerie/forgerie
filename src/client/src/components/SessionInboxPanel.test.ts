@@ -14,6 +14,7 @@ import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace } 
 import type { GlobalSessionsState } from "../appState";
 import * as inboxLocation from "../inboxLocation";
 import * as sessionBoard from "../sessionBoard";
+import { ROW_PRESS } from "../rowPress";
 import { NEW_SESSION_LABEL } from "./shared";
 import { SessionInboxPanel } from "./SessionInboxPanel";
 import { SessionWorkingRuntime } from "./SessionWorkingRuntime";
@@ -1389,70 +1390,78 @@ function sendPointer(
   row.dispatchEvent(event);
 }
 
-async function mountRowForSwipe(
-  onArchiveSession: (session: SessionInfo) => void,
-  onSelectSession: (session: SessionInfo) => void = noop,
-): Promise<{ panel: SessionInboxPanel; row: HTMLElement }> {
+async function mountRowForPress(options: {
+  onArchiveSession?: (session: SessionInfo) => void;
+  onSelectSession?: (session: SessionInfo) => void;
+  onDeleteSession?: (session: SessionInfo) => void;
+  onRestoreSession?: (session: SessionInfo) => void;
+  session?: SessionInfo;
+} = {}): Promise<{ panel: SessionInboxPanel; row: HTMLElement }> {
+  const session = options.session ?? mkSession("open-one");
+  const group = session.archived === true ? "archived" : "open";
   const panel = await mountPanel({
-    globalSessions: mkGlobalSessions([mkSession("open-one")]),
-    onArchiveSession,
-    onSelectSession,
+    globalSessions: mkGlobalSessions([session]),
+    onArchiveSession: options.onArchiveSession ?? noop,
+    onSelectSession: options.onSelectSession ?? noop,
+    onDeleteSession: options.onDeleteSession ?? noop,
+    onRestoreSession: options.onRestoreSession ?? noop,
   });
   const root = shadowRoot(panel);
-  clickSelector(root, "[data-group='open'] button");
+  if (group === "archived") {
+    const shelf = root.querySelector("[data-archive-shelf]");
+    if (shelf instanceof HTMLElement) shelf.click();
+    await panel.updateComplete;
+  }
+  const disclosure = root.querySelector(`[data-group='${group}'] button`);
+  if (disclosure instanceof HTMLElement) disclosure.click();
   await panel.updateComplete;
 
-  const row = root.querySelector("[data-session='open-one']");
+  const row = root.querySelector(`[data-session='${session.id}']`);
   if (!(row instanceof HTMLElement)) throw new Error("No row");
-  // No layout in happy-dom: give the row a width so the commit distance is real.
-  row.getBoundingClientRect = () => new DOMRect(0, 0, 340, 56);
   row.setPointerCapture = noop;
+  row.hasPointerCapture = () => false;
+  row.releasePointerCapture = noop;
   return { panel, row };
 }
 
-describe("swipe to archive", () => {
-  it("archives when a finger carries the row past the commit distance", async () => {
-    const archived: string[] = [];
-    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+/** Hold a finger on the row for long enough that the commands open. */
+async function holdRow(panel: SessionInboxPanel, row: HTMLElement, travelPx = 0): Promise<void> {
+  sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+  if (travelPx !== 0) sendPointer(row, "pointermove", { pointerType: "touch", clientX: 300 + travelPx, clientY: 100 });
+  await new Promise((resolve) => { setTimeout(resolve, ROW_PRESS.holdMs + 40); });
+  await panel.updateComplete;
+}
 
-    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
-    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 160, clientY: 100 });
-    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 160, clientY: 100 });
+function rowMenuItem(panel: SessionInboxPanel, action: string): HTMLElement | null {
+  const item = shadowRoot(panel).querySelector(`#inbox-row-menu [data-action='${action}']`);
+  return item instanceof HTMLElement ? item : null;
+}
+
+describe("row commands", () => {
+  it("opens a row's commands when a finger holds still on it", async () => {
+    const { panel, row } = await mountRowForPress();
+
+    await holdRow(panel, row);
+
+    expect(rowMenuItem(panel, "menu-archive")).not.toBeNull();
+    expect(rowMenuItem(panel, "menu-copy-path")).not.toBeNull();
+  });
+
+  it("archives from the commands rather than from a swipe", async () => {
+    const archived: string[] = [];
+    const { panel, row } = await mountRowForPress({ onArchiveSession: (s) => { archived.push(s.id); } });
+
+    await holdRow(panel, row);
+    rowMenuItem(panel, "menu-archive")?.click();
 
     expect(archived).toEqual(["open-one"]);
   });
 
-  it("returns the row and archives nothing when the finger stops short", async () => {
-    const archived: string[] = [];
-    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
-
-    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
-    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 270, clientY: 100 });
-    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 270, clientY: 100 });
-
-    expect(archived).toEqual([]);
-    expect(row.parentElement?.style.getPropertyValue("--swipe-x")).toBe("0px");
-  });
-
-  it("leaves the row alone when the finger scrolls the list", async () => {
-    const archived: string[] = [];
-    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
-
-    // Down the list, with the sideways drift a real finger produces.
-    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 400 });
-    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 270, clientY: 200 });
-    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 270, clientY: 200 });
-
-    expect(archived).toEqual([]);
-  });
-
-  it("does not open the session after a swipe", async () => {
+  it("does not open the session when the hold opened the commands", async () => {
     const selected: string[] = [];
-    const { row } = await mountRowForSwipe(noop, (s) => { selected.push(s.id); });
+    const { panel, row } = await mountRowForPress({ onSelectSession: (s) => { selected.push(s.id); } });
 
-    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
-    sendPointer(row, "pointermove", { pointerType: "touch", clientX: 160, clientY: 100 });
-    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 160, clientY: 100 });
+    await holdRow(panel, row);
     row.click();
 
     expect(selected).toEqual([]);
@@ -1460,34 +1469,84 @@ describe("swipe to archive", () => {
 
   it("still opens the session on a tap", async () => {
     const selected: string[] = [];
-    const { row } = await mountRowForSwipe(noop, (s) => { selected.push(s.id); });
+    const { panel, row } = await mountRowForPress({ onSelectSession: (s) => { selected.push(s.id); } });
 
     sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
     sendPointer(row, "pointerup", { pointerType: "touch", clientX: 300, clientY: 100 });
     row.click();
+    await panel.updateComplete;
 
     expect(selected).toEqual(["open-one"]);
+    expect(rowMenuItem(panel, "menu-archive")).toBeNull();
   });
 
-  it("ignores a mouse drag, which has its own action row", async () => {
-    const archived: string[] = [];
-    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+  it("gives a scrolling finger back to the list", async () => {
+    const { panel, row } = await mountRowForPress();
 
-    sendPointer(row, "pointerdown", { pointerType: "mouse", clientX: 300, clientY: 100 });
-    sendPointer(row, "pointermove", { pointerType: "mouse", clientX: 100, clientY: 100 });
-    sendPointer(row, "pointerup", { pointerType: "mouse", clientX: 100, clientY: 100 });
+    await holdRow(panel, row, ROW_PRESS.moveTolerancePx + 20);
 
-    expect(archived).toEqual([]);
+    expect(rowMenuItem(panel, "menu-archive")).toBeNull();
   });
 
-  it("archives nothing when the gesture is cancelled", async () => {
+  it("leaves horizontal travel to the shell instead of acting on the row", async () => {
     const archived: string[] = [];
-    const { row } = await mountRowForSwipe((s) => { archived.push(s.id); });
+    const { panel, row } = await mountRowForPress({ onArchiveSession: (s) => { archived.push(s.id); } });
 
+    // The swipe that used to archive. It now belongs to the side panels.
     sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
     sendPointer(row, "pointermove", { pointerType: "touch", clientX: 160, clientY: 100 });
-    sendPointer(row, "pointercancel", { pointerType: "touch", clientX: 160, clientY: 100 });
+    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 160, clientY: 100 });
+    await panel.updateComplete;
 
     expect(archived).toEqual([]);
+    expect(rowMenuItem(panel, "menu-archive")).toBeNull();
+  });
+
+  it("opens nothing when the press is cancelled", async () => {
+    const { panel, row } = await mountRowForPress();
+
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+    sendPointer(row, "pointercancel", { pointerType: "touch", clientX: 300, clientY: 100 });
+    await new Promise((resolve) => { setTimeout(resolve, ROW_PRESS.holdMs + 40); });
+    await panel.updateComplete;
+
+    expect(rowMenuItem(panel, "menu-archive")).toBeNull();
+  });
+
+  it("reaches the same commands from a mouse, which cannot hold", async () => {
+    const { panel, row } = await mountRowForPress();
+
+    row.dispatchEvent(new Event("contextmenu", { bubbles: true, composed: true }));
+    await panel.updateComplete;
+
+    expect(rowMenuItem(panel, "menu-archive")).not.toBeNull();
+  });
+
+  it("offers an archived row its way back, and its way out", async () => {
+    const { panel, row } = await mountRowForPress({ session: mkSession("gone-one", { archived: true }) });
+
+    await holdRow(panel, row);
+
+    expect(rowMenuItem(panel, "menu-restore")).not.toBeNull();
+    expect(rowMenuItem(panel, "menu-delete")).not.toBeNull();
+    expect(rowMenuItem(panel, "menu-archive")).toBeNull();
+  });
+
+  it("asks twice before deleting, because deleting has no undo", async () => {
+    const deleted: string[] = [];
+    const { panel, row } = await mountRowForPress({
+      session: mkSession("gone-one", { archived: true }),
+      onDeleteSession: (s) => { deleted.push(s.id); },
+    });
+
+    await holdRow(panel, row);
+    rowMenuItem(panel, "menu-delete")?.click();
+    await panel.updateComplete;
+
+    expect(deleted).toEqual([]);
+
+    rowMenuItem(panel, "menu-delete-confirm")?.click();
+
+    expect(deleted).toEqual(["gone-one"]);
   });
 });

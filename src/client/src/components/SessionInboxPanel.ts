@@ -28,7 +28,8 @@ import { renderBuiltinTabIcon } from "./tabIcons";
 import { NEW_SESSION_LABEL } from "./shared";
 import "./SessionWorkingRuntime";
 import { isKeyEventInEditableContext } from "../keyboardContext";
-import { commitDistance, readSwipe } from "../rowSwipe";
+import { ROW_PRESS, pressTravel, readRowPress } from "../rowPress";
+
 import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
 import {
   attentionCount,
@@ -70,19 +71,14 @@ function writeGroupBy(machineId: string, groupBy: "state" | "project"): void {
 
 const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["open", "archived"]);
 
-/**
- * Travel before a movement counts as a swipe rather than a touch. A finger
- * rests on a few pixels of movement, so a smaller number opens a row by
- * accident.
- */
-const SWIPE_ENGAGE_PX = 12;
-
-/** Where a finger went down, and what the row under it needs to commit. */
-interface SwipeOrigin {
+/** Where a finger went down on a row, and when. */
+interface RowPressOrigin {
   readonly x: number;
   readonly y: number;
-  readonly slot: HTMLElement;
-  readonly commitPx: number;
+  readonly at: number;
+  readonly session: SessionInfo;
+  readonly pointerId: number;
+  readonly row: HTMLElement;
 }
 
 function readCollapsedGroups(machineId: string): Set<string> {
@@ -105,7 +101,7 @@ function writeCollapsedGroups(machineId: string, collapsed: ReadonlySet<string>)
 // ---------------------------------------------------------------------------
 
 /** Which of the header's two disclosures is open. Only ever one at a time. */
-type InboxMenu = "group-by" | "board";
+type InboxMenu = "group-by" | "board" | "row";
 
 function groupByLabel(mode: "state" | "project"): string {
   return mode === "project" ? "Project" : "State";
@@ -159,6 +155,7 @@ export class SessionInboxPanel extends LitElement {
   @property({ attribute: false }) onSelectSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onArchiveSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onRestoreSession?: (session: SessionInfo) => void;
+  @property({ attribute: false }) onDeleteSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onNewSession?: () => void;
   /**
    * Opens the app-wide action palette. Rendered inside the header's overflow
@@ -217,6 +214,9 @@ export class SessionInboxPanel extends LitElement {
   @state() private showArchived = false;
   @state() private openMenu: InboxMenu | undefined;
   @state() private menuStyle = "";
+  @state() private rowMenuSession: SessionInfo | undefined;
+  /** Deleting is the one command with no undo, so it asks twice in place. */
+  @state() private rowMenuConfirmingDelete = false;
 
   /** Previous machine id — used to detect machine switches and reload prefs. */
   private loadedMachineId: string | undefined;
@@ -263,7 +263,7 @@ export class SessionInboxPanel extends LitElement {
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     if (event.key === "Escape" && this.openMenu !== undefined) {
       event.preventDefault();
-      this.openMenu = undefined;
+      this.closeRowMenu();
       return;
     }
     if (isKeyEventInEditableContext(event)) return;
@@ -444,6 +444,7 @@ export class SessionInboxPanel extends LitElement {
           <p>All clear — nothing waiting for you.</p>
         </div>
         ${this.renderBoardScroll(board, resolveLocation)}
+        ${this.renderRowMenu()}
       `;
     }
 
@@ -453,6 +454,7 @@ export class SessionInboxPanel extends LitElement {
       </div>
       ${gs.status === "stale" ? html`<div class="stale-notice" data-state="stale" role="status">Reconnecting…</div>` : nothing}
       ${this.renderBoardScroll(board, resolveLocation)}
+      ${this.renderRowMenu()}
     `;
   }
 
@@ -514,6 +516,52 @@ export class SessionInboxPanel extends LitElement {
       ${this.renderGroupByMenu()}
       ${this.renderBoardMenu()}
     `;
+  }
+
+  /**
+   * A row's own commands. Archived rows can come back or go for good; every
+   * other row can be put away. The workspace path is here because it is the one
+   * thing a reader routinely wants out of the inbox and into a terminal.
+   */
+  private renderRowMenu(): TemplateResult | typeof nothing {
+    const session = this.rowMenuSession;
+    if (this.openMenu !== "row" || session === undefined) return nothing;
+    const archived = session.archived === true;
+    return html`
+      <div class="menu-panel" id="inbox-row-menu" role="menu" aria-label="Session commands" style=${this.menuStyle}>
+        <div class="menu-heading" aria-hidden="true">${session.name ?? (session.firstMessage || session.id)}</div>
+        ${archived
+          ? html`
+              <button role="menuitem" data-action="menu-restore" @click=${() => { this.runRowCommand(this.onRestoreSession); }}>Restore</button>
+              ${this.rowMenuConfirmingDelete
+                ? html`<button class="danger" role="menuitem" data-action="menu-delete-confirm" @click=${() => { this.runRowCommand(this.onDeleteSession); }}>Delete for good?</button>`
+                : html`<button class="danger" role="menuitem" data-action="menu-delete" @click=${() => { this.rowMenuConfirmingDelete = true; }}>Delete permanently</button>`}
+            `
+          : html`<button role="menuitem" data-action="menu-archive" @click=${() => { this.runRowCommand(this.onArchiveSession); }}>Archive</button>`}
+        <button role="menuitem" data-action="menu-copy-path" @click=${() => { void this.copyWorkspacePath(session); }}>Copy workspace path</button>
+      </div>
+    `;
+  }
+
+  private runRowCommand(command: ((session: SessionInfo) => void) | undefined): void {
+    const session = this.rowMenuSession;
+    this.closeRowMenu();
+    if (session !== undefined) command?.(session);
+  }
+
+  private async copyWorkspacePath(session: SessionInfo): Promise<void> {
+    this.closeRowMenu();
+    try {
+      await navigator.clipboard.writeText(session.cwd);
+    } catch {
+      // A refused clipboard is not worth an error banner; the path is on the row.
+    }
+  }
+
+  private closeRowMenu(): void {
+    this.openMenu = undefined;
+    this.rowMenuSession = undefined;
+    this.rowMenuConfirmingDelete = false;
   }
 
   private renderGroupByMenu(): TemplateResult | typeof nothing {
@@ -711,10 +759,10 @@ export class SessionInboxPanel extends LitElement {
 
     const handleRowClick = () => {
       if (isDeleted) return;
-      // A swipe ends with a click. The row opens on a tap, so a gesture that
-      // travelled must not also open the session.
-      if (this.swipeConsumedClick) {
-        this.swipeConsumedClick = false;
+      // A hold ends with a click. The row opens on a tap, so a press that asked
+      // for the commands must not also open the session.
+      if (this.pressConsumedClick) {
+        this.pressConsumedClick = false;
         return;
       }
       this.onSelectSession?.(session);
@@ -730,19 +778,17 @@ export class SessionInboxPanel extends LitElement {
       this.onRestoreSession?.(session);
     };
 
-    const archivable = kind !== "archived" && !isDeleted;
-
     return html`
       <div class="row-slot">
-        ${archivable ? html`<div class="row-behind" aria-hidden="true">✓</div>` : nothing}
       <div
         class="row"
         role="option"
         tabindex=${isDeleted ? "-1" : "0"}
-        @pointerdown=${archivable ? (e: PointerEvent) => { this.onRowPointerDown(e); } : nothing}
-        @pointermove=${archivable ? (e: PointerEvent) => { this.onRowPointerMove(e); } : nothing}
-        @pointerup=${archivable ? (e: PointerEvent) => { this.onRowPointerUp(e, session); } : nothing}
-        @pointercancel=${archivable ? (e: PointerEvent) => { this.onRowPointerUp(e, session); } : nothing}
+        @pointerdown=${isDeleted ? nothing : (e: PointerEvent) => { this.onRowPointerDown(e, session); }}
+        @pointermove=${isDeleted ? nothing : (e: PointerEvent) => { this.onRowPointerMove(e); }}
+        @pointerup=${isDeleted ? nothing : (e: PointerEvent) => { this.onRowPointerUp(e); }}
+        @pointercancel=${isDeleted ? nothing : () => { this.cancelRowPress(); }}
+        @contextmenu=${isDeleted ? nothing : (e: MouseEvent) => { this.onRowContextMenu(e, session); }}
         data-session=${session.id}
         data-state=${kind}
         style="--row-tone: var(--tone-${kind}, var(--pi-dim))"
@@ -787,69 +833,73 @@ export class SessionInboxPanel extends LitElement {
   }
 
   // -------------------------------------------------------------------------
-  // Swipe to archive
+  // Press to open a row's commands
   //
-  // Only a finger swipes. The pointer event carries `pointerType`, so the
-  // handler reads the interaction itself and asks nothing about the device.
+  // Only a finger holds. A pointer carries its own type, so the handler reads
+  // the interaction and asks nothing about the device; a mouse arrives at the
+  // same commands through the context menu.
   //
-  // The travel is written straight to the slot rather than held as component
-  // state, because state would re-render the whole list on every move.
+  // Horizontal travel is deliberately not read here. It belongs to the shell,
+  // which pulls its side panels in, so the row never gives one gesture two
+  // meanings.
   // -------------------------------------------------------------------------
 
-  private swipeOrigin: SwipeOrigin | undefined;
-  private swipeArmed = false;
-  private swipeConsumedClick = false;
+  private pressOrigin: RowPressOrigin | undefined;
+  private pressTimer: ReturnType<typeof setTimeout> | undefined;
+  private pressConsumedClick = false;
 
-  private onRowPointerDown(event: PointerEvent): void {
+  private onRowPointerDown(event: PointerEvent, session: SessionInfo): void {
     if (event.pointerType !== "touch") return;
     const row = event.currentTarget;
     if (!(row instanceof HTMLElement)) return;
-    const slot = row.parentElement;
-    if (slot === null) return;
 
-    slot.removeAttribute("data-releasing");
-    this.swipeArmed = false;
-    this.swipeOrigin = {
-      x: event.clientX,
-      y: event.clientY,
-      slot,
-      commitPx: commitDistance(row.getBoundingClientRect().width),
-    };
-    // Keep the moves coming even when the finger leaves the row.
-    row.setPointerCapture(event.pointerId);
+    this.cancelRowPress();
+    this.pressOrigin = { x: event.clientX, y: event.clientY, at: Date.now(), session, pointerId: event.pointerId, row };
+    // The hold has to land while the finger is still down, so it is a timer
+    // rather than a reading taken on release.
+    this.pressTimer = setTimeout(() => { this.openRowCommandsFromPress(); }, ROW_PRESS.holdMs);
   }
 
   private onRowPointerMove(event: PointerEvent): void {
-    const origin = this.swipeOrigin;
+    const origin = this.pressOrigin;
     if (origin === undefined || event.pointerType !== "touch") return;
-
-    const reading = readSwipe(
-      event.clientX - origin.x,
-      event.clientY - origin.y,
-      { engagePx: SWIPE_ENGAGE_PX, commitPx: origin.commitPx },
-    );
-    if (reading.engaged) this.swipeConsumedClick = true;
-    this.swipeArmed = reading.willArchive;
-
-    origin.slot.style.setProperty("--swipe-x", `${String(reading.offset)}px`);
-    origin.slot.style.setProperty("--swipe-w", `${String(-reading.offset)}px`);
-    const mark = origin.slot.querySelector(".row-behind");
-    if (mark instanceof HTMLElement) mark.dataset["armed"] = String(reading.willArchive);
+    const travel = pressTravel(event.clientX - origin.x, event.clientY - origin.y);
+    if (readRowPress(travel, Date.now() - origin.at, ROW_PRESS) === "abandoned") this.cancelRowPress();
   }
 
-  private onRowPointerUp(event: PointerEvent, session: SessionInfo): void {
-    const origin = this.swipeOrigin;
-    if (origin === undefined || event.pointerType !== "touch") return;
-    this.swipeOrigin = undefined;
+  private onRowPointerUp(event: PointerEvent): void {
+    if (event.pointerType !== "touch") return;
+    this.cancelRowPress();
+  }
 
-    const archive = this.swipeArmed && event.type === "pointerup";
-    this.swipeArmed = false;
+  private cancelRowPress(): void {
+    if (this.pressTimer !== undefined) clearTimeout(this.pressTimer);
+    this.pressTimer = undefined;
+    this.pressOrigin = undefined;
+  }
 
-    origin.slot.dataset["releasing"] = "true";
-    origin.slot.style.setProperty("--swipe-x", "0px");
-    origin.slot.style.setProperty("--swipe-w", "0px");
+  private openRowCommandsFromPress(): void {
+    const origin = this.pressOrigin;
+    this.cancelRowPress();
+    if (origin === undefined) return;
+    // The release still fires a click; the row must not also open the session.
+    this.pressConsumedClick = true;
+    // The finger is still down. Releasing capture keeps the row from swallowing
+    // the tap that dismisses or chooses from the menu.
+    if (origin.row.hasPointerCapture(origin.pointerId)) origin.row.releasePointerCapture(origin.pointerId);
+    this.openRowCommands(origin.session, origin.row);
+  }
 
-    if (archive) this.onArchiveSession?.(session);
+  private onRowContextMenu(event: MouseEvent, session: SessionInfo): void {
+    event.preventDefault();
+    this.openRowCommands(session, event.currentTarget);
+  }
+
+  private openRowCommands(session: SessionInfo, target: EventTarget | null): void {
+    this.rowMenuSession = session;
+    this.rowMenuConfirmingDelete = false;
+    this.menuStyle = actionMenuPanelStyle(target, { constrainTo: "viewport" });
+    this.openMenu = "row";
   }
 
   // -------------------------------------------------------------------------
@@ -1078,6 +1128,20 @@ export class SessionInboxPanel extends LitElement {
 
     .menu-panel button:hover { background: var(--pi-surface-hover, #151b31); }
     .menu-panel button[aria-checked="true"] { color: var(--pi-text-bright, #fff); background: var(--pi-selection-bg, #1d2547); }
+    .menu-panel button.danger { color: var(--pi-danger); }
+
+    /* Which row the commands belong to, since a held finger covers the row. */
+    .menu-heading {
+      max-width: min(240px, calc(100vw - 32px));
+      padding: 4px 10px 6px;
+      border-bottom: 1px solid var(--pi-border-muted);
+      margin-bottom: 4px;
+      color: var(--pi-muted);
+      font-size: 12px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
 
     .overlay-back-btn {
       display: inline-grid;
@@ -1251,49 +1315,9 @@ export class SessionInboxPanel extends LitElement {
 
     /* ---- rows ---- */
 
-    /*
-     * The slot holds the row still while the row itself travels. The travel
-     * lives in a custom property rather than in the row's style attribute,
-     * because Lit owns that attribute and rewrites it whole whenever the row's
-     * state changes. A rewrite during a gesture would drop the row back.
-     */
     .row-slot {
       position: relative;
-      overflow: hidden;
     }
-
-    /*
-     * The mark occupies the strip the row uncovers, and nothing more, so it
-     * never sits behind the row. The row can stay transparent at rest.
-     */
-    .row-behind {
-      position: absolute;
-      inset-block: 0;
-      inset-inline-end: 0;
-      width: var(--swipe-w, 0px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      /*
-       * The mark is zero wide until a finger uncovers it. A centred glyph in a
-       * zero-wide box still paints, half on each side of the edge, which puts a
-       * clipped tick on every row. Clip the mark to its own width.
-       */
-      overflow: hidden;
-      background: var(--pi-surface, #101527);
-      color: var(--pi-dim, #6b7394);
-      font-size: 15px;
-      pointer-events: none;
-      border-bottom: 1px solid var(--pi-border-muted, #1b2340);
-    }
-
-    /* Armed: a release from here archives the row, so the mark commits to it. */
-    .row-behind[data-armed="true"] {
-      background: var(--tone-archived, var(--pi-selection-bg, #1d2547));
-      color: var(--pi-fg, #e6e9f5);
-    }
-
-    .row-slot[data-releasing="true"] .row { transition: transform 160ms ease; }
 
     .row {
       position: relative;
@@ -1307,12 +1331,13 @@ export class SessionInboxPanel extends LitElement {
       border-bottom: 1px solid var(--pi-border-muted, #1b2340);
       cursor: pointer;
       transition: background 120ms ease;
-      transform: translateX(var(--swipe-x, 0px));
       /*
-       * The browser keeps the vertical scroll and hands over the horizontal
-       * movement, so the gesture never competes with the list.
+       * The list keeps its vertical scroll and hands the horizontal movement to
+       * the shell, which pulls its side panels in. A hold on a still finger is
+       * what opens this row's commands, and holding does not scroll.
        */
       touch-action: pan-y;
+      -webkit-touch-callout: none;
     }
 
     .row:hover { background: var(--pi-surface, #101527); }
@@ -1454,10 +1479,12 @@ export class SessionInboxPanel extends LitElement {
 
     .row-actions {
       /*
-       * A finger removes these controls rather than hiding them: it archives
-       * by swiping the row, so a button on every row is a column of noise. The
-       * value arrives from the root, written by observeInputMode from the
-       * input in use -- not from a query about what the device supports.
+       * A finger removes these controls rather than hiding them: it reaches a
+       * row's commands by holding it, so a button on every row is a column of
+       * noise. A pointer keeps them, because a pointer has hover and reveals
+       * them for free. The value arrives from the root, written by
+       * observeInputMode from the input in use -- not from a query about what
+       * the device supports.
        *
        * Removed, not made transparent: a transparent control still answers a
        * tap, and on iOS a hover rule stays active after a tap, so a transparent
