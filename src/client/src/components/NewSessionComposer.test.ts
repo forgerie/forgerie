@@ -405,7 +405,26 @@ describe("new-session-composer destination choice", () => {
 });
 
 describe("new-session-composer presentation contracts", () => {
-  it("uses semantic button lists and lets destination labels and paths wrap", async () => {
+  it("keeps the accessible modal name without a visible duplicate titlebar or close action", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+
+    expect(dialogSection(composer).getAttribute("aria-label")).toBe("New session");
+    expect(root(composer).querySelector(".dialog-header, h1, [data-action='close']")).toBeNull();
+  });
+
+  it("shows one concise destination identity without status or path detail", async () => {
+    const destination = completeNewSessionDestination(machine("remote"), project("forge"), workspace("main", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+    const summary = root(composer).querySelector("[data-destination-summary] .destination-copy");
+    if (summary === null) throw new Error("Expected a destination summary");
+
+    expect(summary.textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge · main · Machine remote");
+    expect(summary.textContent).not.toContain("Online");
+    expect(summary.textContent).not.toContain("/repos/forge/main");
+  });
+
+  it("uses semantic button lists, keeps the summary to one line, and lets chooser detail wrap", async () => {
     const catalog = new InMemoryNewSessionDestinationCatalog({
       machines: [machine("remote")],
       projectsByMachine: { remote: [project("forge")] },
@@ -429,7 +448,8 @@ describe("new-session-composer presentation contracts", () => {
     expect(root(composer).querySelector("[role='listbox'], [role='option']")).toBeNull();
 
     const styles = newSessionComposerStyles.cssText.replaceAll(/\s+/g, " ");
-    expect(styles).toContain(".destination-copy strong, .destination-copy span { min-width: 0; overflow-wrap: anywhere; white-space: normal;");
+    expect(styles).toContain(".destination-identity { min-width: 0; display: flex; align-items: baseline; white-space: nowrap;");
+    expect(styles).toContain(".destination-part { min-width: 0; overflow: hidden; text-overflow: ellipsis;");
     expect(styles).toContain(".catalog-item-copy strong, .catalog-item-copy small { min-width: 0; overflow-wrap: anywhere; white-space: normal;");
   });
 

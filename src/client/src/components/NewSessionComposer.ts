@@ -79,19 +79,6 @@ export class NewSessionComposer extends LitElement {
         .onClose=${() => { this.requestCancel(); }}
       >
         <form class="composer" @submit=${(event: SubmitEvent) => { this.handleSubmit(event); }}>
-          <header class="dialog-header">
-            <h1>New session</h1>
-            <button
-              class="icon-button"
-              type="button"
-              data-action="close"
-              aria-label="Close New session"
-              title="Close"
-              ?disabled=${submitting}
-              @click=${() => { this.requestCancel(); }}
-            >×</button>
-          </header>
-
           <div class="dialog-scroll">
             <section class="field" aria-labelledby="new-session-destination-label">
               <h2 class="field-label" id="new-session-destination-label">Destination</h2>
@@ -104,6 +91,7 @@ export class NewSessionComposer extends LitElement {
                 id="new-session-prompt"
                 data-field="prompt"
                 aria-label="First prompt"
+                rows="3"
                 .value=${state.prompt}
                 ?disabled=${submitting}
                 @input=${(event: InputEvent) => { this.updatePrompt(event); }}
@@ -132,9 +120,13 @@ export class NewSessionComposer extends LitElement {
         ${destination.kind === "complete"
           ? html`
               <span class="destination-copy">
-                <strong>${destination.project.name} · ${destination.workspace.label}</strong>
-                <span>${destination.machine.name} · ${machineAvailabilityLabel(destination.machine)}</span>
-                <small>${destination.workspace.path}</small>
+                <strong class="destination-identity">
+                  <span class="destination-part destination-project">${destination.project.name}</span>
+                  <span class="destination-separator">·</span>
+                  <span class="destination-part destination-workspace">${destination.workspace.label}</span>
+                  <span class="destination-separator">·</span>
+                  <span class="destination-part destination-machine">${destination.machine.name}</span>
+                </strong>
               </span>
             `
           : html`<span class="destination-copy destination-required"><strong>Destination required</strong><small>Choose a machine, project, and workspace.</small></span>`}
