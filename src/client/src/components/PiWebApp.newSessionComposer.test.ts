@@ -11,7 +11,7 @@ import type { NewSessionComposer } from "./NewSessionComposer";
 import type { ChatView } from "./ChatView";
 import type { WorkspacePanel } from "./WorkspacePanel";
 import { NEW_SESSION_LABEL } from "./shared";
-import type { SessionLaunchRecovery } from "../controllers/sessionController";
+import type { FirstPromptSubmission, SessionLaunchRecovery } from "../controllers/sessionController";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -421,12 +421,13 @@ describe("PiWebApp New session composer root", () => {
       return Promise.resolve(true);
     });
     Reflect.set(app, "navigateToNewSessionDestination", navigate);
-    const launchSession = vi.fn((prompt: string) => {
+    const launchSession = vi.fn((prompt: string | FirstPromptSubmission) => {
+      const text = typeof prompt === "string" ? prompt : prompt.text;
       const pending = { ...session("pending", remoteWorkspace.path), clientPendingStart: true, machineId: remoteMachine.id };
       patchAppState(app, {
         selectedSession: pending,
         sessions: [pending],
-        clientQueuedSessionMessages: { [pending.id]: [{ kind: "followUp", text: prompt }] },
+        clientQueuedSessionMessages: { [pending.id]: [{ kind: "followUp", text }] },
       });
       return new Promise<void>(() => undefined);
     });
@@ -438,7 +439,7 @@ describe("PiWebApp New session composer root", () => {
     const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Build it" } satisfies NewSessionLaunchIntent);
 
     expect(navigate).toHaveBeenCalledWith(destination, expect.any(Function));
-    expect(launchSession).toHaveBeenCalledWith("Build it");
+    expect(launchSession).toHaveBeenCalledWith({ text: "Build it", delivery: "inline" });
     expect(composerRequest(app)).toMatchObject({ kind: "closed" });
     expect(openChat).toHaveBeenCalledOnce();
     expect(outcome).toEqual({ kind: "accepted" });
@@ -557,7 +558,7 @@ function composerRequest(app: PiWebApp): unknown {
 }
 
 interface SessionLaunchController {
-  launchSession: (prompt: string) => Promise<void>;
+  launchSession: (prompt: string | FirstPromptSubmission) => Promise<void>;
   getSessionLaunchRecovery: (sessionId: string) => SessionLaunchRecovery | undefined;
   retrySessionLaunch: (sessionId: string) => Promise<void>;
   acceptSessionLaunchReplacement: (failedSessionId: string, replacementSessionId: string) => void;

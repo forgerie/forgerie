@@ -47,7 +47,7 @@ export function chatQueuedMessageSections(
   sessionLaunchRecovery?: SessionLaunchRecovery,
 ): QueuedMessageSection[] {
   const recoveryClientQueued = sessionLaunchRecovery !== undefined && clientQueued.length === 0
-    ? [{ kind: "followUp" as const, text: sessionLaunchRecovery.prompt }]
+    ? [{ kind: "followUp" as const, text: sessionLaunchRecoveryPreviewText(sessionLaunchRecovery) }]
     : clientQueued;
   const clientSection = sessionLaunchRecovery === undefined
     ? { source: "client" as const, heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: recoveryClientQueued }
@@ -56,6 +56,24 @@ export function chatQueuedMessageSections(
     recoveryClientQueued.length === 0 ? undefined : clientSection,
     serverQueued.length === 0 ? undefined : { source: "server", heading: "Queued messages", detail: `${String(serverQueued.length)} pending`, messages: serverQueued },
   ].filter((section): section is QueuedMessageSection => section !== undefined);
+}
+
+function sessionLaunchRecoveryPreviewText(recovery: SessionLaunchRecovery): string {
+  const attachmentText = sessionLaunchRecoveryAttachmentSummary(recovery.attachments);
+  if (attachmentText === undefined) return recovery.prompt;
+  const trimmed = recovery.prompt.trim();
+  return trimmed === "" ? attachmentText : `${recovery.prompt}\n\n${attachmentText}`;
+}
+
+function sessionLaunchRecoveryAttachmentSummary(attachments: SessionLaunchRecovery["attachments"]): string | undefined {
+  if (attachments === undefined || attachments.length === 0) return undefined;
+  const names = attachments.map((attachment) => attachment.name?.trim()).filter((name): name is string => name !== undefined && name !== "");
+  const count = attachments.length;
+  const label = `${String(count)} ${count === 1 ? "attachment" : "attachments"}`;
+  if (names.length === 0) return `[${label} queued]`;
+  const shownNames = names.slice(0, 3).join(", ");
+  const suffix = names.length > 3 ? `, +${String(names.length - 3)} more` : "";
+  return `[${label} queued: ${shownNames}${suffix}]`;
 }
 
 export type ChatSessionLaunchRecoveryActionKind = "retry" | "changeDestination" | "refresh" | "restore";
