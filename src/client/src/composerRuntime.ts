@@ -1,4 +1,4 @@
-import { api, workspacesApi, type FileSuggestion, type SessionModel, type SlashCommand } from "./api";
+import { api, workspacesApi, type SessionModel, type SlashCommand } from "./api";
 import { fileCompletionInsertText, modelCompletionChoices, type PromptCompletionTrigger } from "./promptCompletions";
 import type { CompletionItem } from "./components/shared";
 
@@ -23,6 +23,16 @@ export interface PreSessionComposerRuntimeOptions {
   workspaceId?: string;
 }
 
+export class ComposerCompletionProviderError extends Error {
+  constructor(
+    readonly kind: ComposerCompletionKind,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ComposerCompletionProviderError";
+  }
+}
+
 export function createSessionComposerRuntime(options: SessionComposerRuntimeOptions): ComposerRuntime {
   return {
     supportedCompletionKinds: new Set<ComposerCompletionKind>(["command", "file", "model"]),
@@ -35,9 +45,11 @@ export function createSessionComposerRuntime(options: SessionComposerRuntimeOpti
 }
 
 export function createPreSessionComposerRuntime(options: PreSessionComposerRuntimeOptions): ComposerRuntime {
+  const completeDestination = hasDestinationContext(options);
   return {
-    supportedCompletionKinds: new Set<ComposerCompletionKind>(["command", "file"]),
+    supportedCompletionKinds: completeDestination ? new Set<ComposerCompletionKind>(["command", "file"]) : new Set<ComposerCompletionKind>(),
     async resolveCompletion(trigger: PromptCompletionTrigger): Promise<readonly CompletionItem[]> {
+      if (!completeDestination) return [];
       if (trigger.kind === "command") return resolvePreSessionCommands(trigger, options);
       if (trigger.kind === "file") return resolveWorkspaceFiles(trigger, options);
       return [];
@@ -62,9 +74,14 @@ async function resolveSessionCommands(trigger: Extract<PromptCompletionTrigger, 
 }
 
 async function resolvePreSessionCommands(trigger: Extract<PromptCompletionTrigger, { kind: "command" }>, options: PreSessionComposerRuntimeOptions): Promise<CompletionItem[]> {
-  if (options.projectId === undefined || options.workspaceId === undefined) return [];
-  const catalog = await workspacesApi.promptResourceCatalog(options.projectId, options.workspaceId, options.machineId).catch(() => undefined);
-  if (catalog?.available !== true) return [];
+  if (!hasDestinationContext(options)) return [];
+  let catalog: Awaited<ReturnType<typeof workspacesApi.promptResourceCatalog>>;
+  try {
+    catalog = await workspacesApi.promptResourceCatalog(options.projectId, options.workspaceId, options.machineId);
+  } catch (error) {
+    throw new ComposerCompletionProviderError("command", errorMessage(error, "Prompt-resource catalog unavailable."));
+  }
+  if (!catalog.available) throw new ComposerCompletionProviderError("command", catalog.message);
   return catalog.commands
     .filter((command) => command.name.toLowerCase().includes(trigger.query.toLowerCase()))
     .slice(0, 12)
@@ -74,13 +91,16 @@ async function resolvePreSessionCommands(trigger: Extract<PromptCompletionTrigge
       replaceTo: trigger.to,
       insertText: `/${command.name}`,
       detail: command.source,
+      promptResourceCommandIdentity: command.identity,
       ...(command.description === undefined ? {} : { description: command.description }),
     }));
 }
 
 async function resolveWorkspaceFiles(trigger: Extract<PromptCompletionTrigger, { kind: "file" }>, options: SessionComposerRuntimeOptions): Promise<CompletionItem[]> {
-  if (options.projectId === undefined || options.workspaceId === undefined) return [];
-  const files = await api.files(trigger.query, { scope: trigger.fileScope, machineId: options.machineId, projectId: options.projectId, workspaceId: options.workspaceId }).catch(emptyFileSuggestions);
+  if (!hasDestinationContext(options)) return [];
+  const files = await api.files(trigger.query, { scope: trigger.fileScope, machineId: options.machineId, projectId: options.projectId, workspaceId: options.workspaceId }).catch((error: unknown) => {
+    throw new ComposerCompletionProviderError("file", errorMessage(error, "Workspace files unavailable."));
+  });
   return files
     .slice(0, 12)
     .map((file) => {
@@ -111,12 +131,16 @@ function hasSessionContext(options: SessionComposerRuntimeOptions): options is S
   return options.sessionId !== undefined && options.sessionId !== "" && options.cwd !== undefined && options.cwd !== "";
 }
 
+function hasDestinationContext(options: PreSessionComposerRuntimeOptions): options is PreSessionComposerRuntimeOptions & { projectId: string; workspaceId: string } {
+  return options.projectId !== undefined && options.projectId !== "" && options.workspaceId !== undefined && options.workspaceId !== "";
+}
+
 function emptySlashCommands(): SlashCommand[] {
   return [];
 }
 
-function emptyFileSuggestions(): FileSuggestion[] {
-  return [];
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }
 
 function emptySessionModels(): SessionModel[] {

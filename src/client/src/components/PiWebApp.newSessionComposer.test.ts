@@ -328,7 +328,7 @@ describe("PiWebApp New session composer root", () => {
       { kind: "followUp", text: "Move this prompt" },
     ]);
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Move this prompt" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Move this prompt" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toEqual({ kind: "accepted" });
     const replacement = required(appState(app).selectedSession, "replacement pending session");
@@ -436,7 +436,7 @@ describe("PiWebApp New session composer root", () => {
     const openChat = vi.fn(() => Promise.resolve());
     Reflect.set(app, "openChat", openChat);
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Build it" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Build it" } } satisfies NewSessionLaunchIntent);
 
     expect(navigate).toHaveBeenCalledWith(destination, expect.any(Function));
     expect(launchSession).toHaveBeenCalledWith({ text: "Build it", delivery: "inline" });
@@ -487,7 +487,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(app, "navigateToNewSessionDestination", vi.fn(navigate));
     const launch = vi.spyOn(sessionController(app), "launchSession");
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Keep me" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toMatchObject({ kind: "rejected", reason: "destination-unavailable" });
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
@@ -503,7 +503,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(app, "navigateToNewSessionDestination", navigate);
     const launch = vi.spyOn(sessionController(app), "launchSession");
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Keep me" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toMatchObject({ kind: "rejected", reason: "destination-unavailable" });
     expect(composerRequest(app)).toMatchObject({ kind: "open" });

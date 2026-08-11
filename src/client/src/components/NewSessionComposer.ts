@@ -17,7 +17,6 @@ import {
   resolveNewSessionProjects,
   resolveNewSessionWorkspaces,
   startNewSessionDestinationChoice,
-  updateNewSessionPrompt,
   type NewSessionCompleteDestination,
   type NewSessionComposerState,
   type NewSessionDestinationCatalog,
@@ -43,12 +42,14 @@ export class NewSessionComposer extends LitElement {
   private initialized = false;
   private requestGeneration = 0;
   private focusRegion = "";
+  private textareaPrompt = "";
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
     if (this.initialized) return;
     this.initialized = true;
-    this.composerState = createNewSessionComposerState(this.initialDestination, this.initialPrompt);
+    this.textareaPrompt = this.initialPrompt;
+    this.composerState = createNewSessionComposerState(this.initialDestination);
   }
 
   protected override updated(): void {
@@ -92,7 +93,7 @@ export class NewSessionComposer extends LitElement {
                 data-field="prompt"
                 aria-label="First prompt"
                 rows="3"
-                .value=${state.prompt}
+                .value=${this.textareaPrompt}
                 ?disabled=${submitting}
                 @input=${(event: InputEvent) => { this.updatePrompt(event); }}
               ></textarea>
@@ -106,7 +107,7 @@ export class NewSessionComposer extends LitElement {
           <footer class="dialog-footer">
             ${submitting ? html`<span class="busy-label" role="status">Checking destination…</span>` : nothing}
             <button type="button" data-action="cancel" ?disabled=${submitting} @click=${() => { this.requestCancel(); }}>Cancel</button>
-            <button class="primary" type="submit" data-action="send" ?disabled=${!canSubmitNewSession(state)}>${submitting ? "Sending…" : "Send"}</button>
+            <button class="primary" type="submit" data-action="send" ?disabled=${!canSubmitNewSession(state, this.currentSnapshot())}>${submitting ? "Sending…" : "Send"}</button>
           </footer>
         </form>
       </modal-surface>
@@ -266,7 +267,12 @@ export class NewSessionComposer extends LitElement {
   private updatePrompt(event: InputEvent): void {
     const target = event.currentTarget;
     if (!(target instanceof HTMLTextAreaElement)) return;
-    this.composerState = updateNewSessionPrompt(this.composerState, target.value);
+    this.textareaPrompt = target.value;
+    this.requestUpdate();
+  }
+
+  private currentSnapshot() {
+    return { text: this.textareaPrompt };
   }
 
   private openDestinationChoice(): void {
@@ -372,7 +378,7 @@ export class NewSessionComposer extends LitElement {
 
   private handleSubmit(event: SubmitEvent): void {
     event.preventDefault();
-    const next = beginNewSessionSubmission(this.composerState);
+    const next = beginNewSessionSubmission(this.composerState, this.currentSnapshot());
     if (next.kind !== "submitting" || next === this.composerState) return;
     this.requestGeneration += 1;
     this.composerState = next;
@@ -389,7 +395,7 @@ export class NewSessionComposer extends LitElement {
     state: Extract<NewSessionComposerState, { kind: "submitting" }>,
   ): Promise<void> {
     try {
-      const outcome = await callback({ destination: state.destination, prompt: state.prompt });
+      const outcome = await callback({ destination: state.destination, firstPrompt: state.submission });
       if (!this.isConnected || outcome.kind === "accepted") return;
       this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
     } catch (error) {

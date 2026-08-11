@@ -32,6 +32,20 @@ export interface ComposerDraftSubmitSnapshot {
   delivery?: PromptAttachmentDelivery;
 }
 
+// `void` keeps existing chat hosts source-compatible; only explicit `"rejected"` preserves the draft.
+// eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+export type ComposerDraftSubmitOutcome = "accepted" | "rejected" | void;
+
+export interface ComposerDraftSeed {
+  id: string;
+  snapshot: ComposerDraftSubmitSnapshot;
+}
+
+export interface ComposerDraftCompletionError {
+  kind: PromptCompletionTrigger["kind"];
+  message: string;
+}
+
 export interface ComposerDraftEscapeContext {
   draft: string;
   inputMode: InputMode;
@@ -48,9 +62,10 @@ export class ComposerDraft extends LitElement {
   @property({ attribute: false }) runtime?: ComposerRuntime;
   @property({ attribute: false }) promptHistory: readonly string[] = [];
   @property() storageKey?: string;
-  @property({ attribute: false }) onSubmit?: (snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => void | Promise<void>;
+  @property({ attribute: false }) onSubmit?: (snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
   @property({ attribute: false }) onEscape?: (context: ComposerDraftEscapeContext) => boolean;
   @property({ attribute: false }) onDisplayStateChange?: (state: ComposerDraftDisplayState) => void;
+  @property({ attribute: false }) onCompletionError?: (error: ComposerDraftCompletionError) => void;
 
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
   @query(".attachment-input") private attachmentInput?: HTMLInputElement;
@@ -62,6 +77,7 @@ export class ComposerDraft extends LitElement {
   @state() private attachments: PendingAttachment[] = [];
   @state() private attachmentDelivery: PromptAttachmentDelivery = loadAttachmentDelivery();
   @state() private attachmentError: string | undefined = undefined;
+  @state() private completionError: ComposerDraftCompletionError | undefined = undefined;
   @state() private focused = false;
   private attachmentSeq = 0;
   private requestVersion = 0;
@@ -73,6 +89,7 @@ export class ComposerDraft extends LitElement {
   private readonly mobilePromptEnterMedia = createMobilePromptEnterMedia();
   private explicitShiftKeyActive = false;
   private lastDisplayState: ComposerDraftDisplayState | undefined;
+  private readonly restoredSeedIds = new Set<string>();
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     if (changed.has("storageKey")) {
@@ -82,6 +99,7 @@ export class ComposerDraft extends LitElement {
       this.currentInputMode = inputModeForDraft(this.draft);
       this.completions = [];
       this.selectedIndex = 0;
+      this.completionError = undefined;
       this.requestVersion += 1;
     }
     if (changed.has("promptHistory")) this.promptHistoryState = createPromptHistory(this.promptHistory);
@@ -89,6 +107,7 @@ export class ComposerDraft extends LitElement {
       this.requestVersion += 1;
       this.completions = [];
       this.selectedIndex = 0;
+      this.completionError = undefined;
     }
   }
 
@@ -142,6 +161,7 @@ export class ComposerDraft extends LitElement {
         ${this.compacting && !shellMode ? html`<div class="mode-hint">Compacting history · message will be queued</div>` : null}
         ${this.renderAttachments()}
         <autocomplete-menu .items=${this.completions} .selectedIndex=${this.selectedIndex} .onPick=${(item: CompletionItem) => { this.pick(item); }}></autocomplete-menu>
+        ${this.completionError === undefined ? null : html`<div class="completion-error" role="alert">${this.completionError.message}</div>`}
       </div>
     `;
   }
@@ -173,6 +193,7 @@ export class ComposerDraft extends LitElement {
     this.currentInputMode = inputModeForDraft(text);
     this.completions = [];
     this.selectedIndex = 0;
+    this.completionError = undefined;
     this.publishDisplayState();
   }
 
@@ -186,15 +207,52 @@ export class ComposerDraft extends LitElement {
 
   submit(streamingBehavior?: "steer" | "followUp"): void {
     if (this.disabled || this.submissionDisabled) return;
-    const text = this.draft.trim();
-    const pending = this.attachments;
-    if (text === "" && pending.length === 0) return;
-    const attachments = pending.length > 0 ? this.currentAttachments() : undefined;
-    const delivery = this.effectiveAttachmentDelivery();
-    const snapshot: ComposerDraftSubmitSnapshot = attachments === undefined ? { text } : { text, attachments, delivery };
-    this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, text);
+    const snapshot = this.createSubmitSnapshot();
+    if (snapshot === undefined) return;
+    let result: ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
+    try {
+      result = this.onSubmit?.(snapshot, this.working ? streamingBehavior : undefined);
+    } catch {
+      return;
+    }
+    if (isPromiseLike(result)) {
+      void result
+        .then((outcome) => { this.resolveSubmitOutcome(outcome, snapshot.text); })
+        .catch(() => undefined);
+      return;
+    }
+    this.resolveSubmitOutcome(result, snapshot.text);
+  }
+
+  restoreSeed(seed: ComposerDraftSeed): boolean {
+    if (this.restoredSeedIds.has(seed.id)) return false;
+    this.restoredSeedIds.add(seed.id);
+    this.restoreSnapshot(seed.snapshot);
+    return true;
+  }
+
+  restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
+    this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
+    this.draft = snapshot.text;
+    this.attachments = (snapshot.attachments ?? []).map((attachment) => restoredPendingAttachment(attachment, `attachment-${String(++this.attachmentSeq)}`));
+    if (snapshot.delivery !== undefined) this.attachmentDelivery = snapshot.delivery;
+    this.attachmentError = undefined;
+    this.completionError = undefined;
+    if (this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, this.draft);
+    this.requestVersion += 1;
+    this.currentInputMode = inputModeForDraft(this.draft);
+    this.completions = [];
+    this.selectedIndex = 0;
+    this.syncEditorDoc();
+    this.publishDisplayState();
+  }
+
+  clearAfterAcceptance(): void {
     this.resetComposer();
-    void this.onSubmit?.(snapshot, this.working ? streamingBehavior : undefined);
+  }
+
+  discardDraft(): void {
+    this.resetComposer();
   }
 
   private releaseFocus(event: FocusEvent): void {
@@ -251,6 +309,21 @@ export class ComposerDraft extends LitElement {
 
   private removeAttachment(id: string): void {
     this.attachments = this.attachments.filter((attachment) => attachment.id !== id);
+  }
+
+  private createSubmitSnapshot(): ComposerDraftSubmitSnapshot | undefined {
+    const text = this.draft.trim();
+    const pending = this.attachments;
+    if (text === "" && pending.length === 0) return undefined;
+    const attachments = pending.length > 0 ? this.currentAttachments() : undefined;
+    const delivery = this.effectiveAttachmentDelivery();
+    return attachments === undefined ? { text } : { text, attachments, delivery };
+  }
+
+  private resolveSubmitOutcome(outcome: ComposerDraftSubmitOutcome, text: string): void {
+    if (outcome === "rejected") return;
+    this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, text);
+    this.resetComposer();
   }
 
   private async handlePaste(event: ClipboardEvent): Promise<void> {
@@ -373,14 +446,22 @@ export class ComposerDraft extends LitElement {
     const trigger = this.currentTrigger();
     const version = ++this.requestVersion;
     this.selectedIndex = 0;
+    this.completionError = undefined;
     const runtime = this.runtime;
     if (trigger === undefined || runtime?.supportedCompletionKinds.has(trigger.kind) !== true) {
       this.completions = [];
       return;
     }
-    const completions = await runtime.resolveCompletion(trigger).catch((): readonly CompletionItem[] => []);
-    if (version !== this.requestVersion) return;
-    this.completions = [...completions];
+    try {
+      const completions = await runtime.resolveCompletion(trigger);
+      if (version !== this.requestVersion) return;
+      this.completions = [...completions];
+    } catch (error) {
+      if (version !== this.requestVersion) return;
+      this.completions = [];
+      this.completionError = { kind: trigger.kind, message: errorMessage(error, "Completions unavailable.") };
+      this.onCompletionError?.(this.completionError);
+    }
   }
 
   private currentTrigger(): PromptCompletionTrigger | undefined {
@@ -512,6 +593,7 @@ export class ComposerDraft extends LitElement {
     this.completions = [];
     this.attachments = [];
     this.attachmentError = undefined;
+    this.completionError = undefined;
     this.syncEditorDoc();
     this.publishDisplayState();
   }
@@ -564,11 +646,27 @@ function dataTransferHasFiles(data: DataTransfer): boolean {
   return Array.from(data.types).includes("Files");
 }
 
+function restoredPendingAttachment(attachment: PromptAttachment, id: string): PendingAttachment {
+  return {
+    id,
+    kind: attachment.kind,
+    mimeType: attachment.mimeType,
+    data: attachment.data,
+    name: attachment.name ?? "attachment",
+    size: base64ByteLength(attachment.data),
+  };
+}
+
 function pendingToPromptAttachment(attachment: PendingAttachment): PromptAttachment {
   if (attachment.kind === "image") {
     return { kind: "image", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
   }
   return { kind: "file", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
+}
+
+function base64ByteLength(data: string): number {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
 }
 
 function fileExtensionLabel(name: string): string {
@@ -580,6 +678,14 @@ function fileExtensionLabel(name: string): string {
 
 function usesHappyDom(): boolean {
   return navigator.userAgent.includes("HappyDOM");
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<ComposerDraftSubmitOutcome> {
+  return typeof value === "object" && value !== null && "then" in value && typeof value.then === "function";
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }
 
 function readFileAsBase64(file: File): Promise<string> {

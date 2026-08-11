@@ -1,5 +1,6 @@
 import { css, svg, type TemplateResult } from "lit";
 import type { AskUserOutcome, ProcessNotificationDetails } from "../../../shared/apiTypes";
+import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import type { SessionWarningSeverity } from "../api";
 
 export const NEW_SESSION_LABEL = "New session";
@@ -94,6 +95,7 @@ export interface CompletionItem {
   detail: string;
   description?: string;
   cursorOffset?: number;
+  promptResourceCommandIdentity?: PromptResourceCommandIdentity;
 }
 
 export const appStyles = css`

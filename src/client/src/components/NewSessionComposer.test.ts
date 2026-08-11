@@ -94,7 +94,7 @@ describe("new-session-composer editing and submission", () => {
     button(composer, "[data-action='send']").click();
     await composer.updateComplete;
 
-    expect(onSubmit).toHaveBeenCalledWith({ destination, prompt: "  exact prompt  " });
+    expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "  exact prompt  " } });
     expect(dialogSurface(composer).busy).toBe(true);
     expect(button(composer, "[data-action='cancel']").disabled).toBe(true);
     surfaceBackdrop(composer).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
@@ -183,7 +183,7 @@ describe("new-session-composer destination choice", () => {
     expect(submittedIntent.destination.machine.id).toBe("remote");
     expect(submittedIntent.destination.project.id).toBe("forge");
     expect(submittedIntent.destination.workspace.id).toBe("feature");
-    expect(submittedIntent.prompt).toBe("draft survives");
+    expect(submittedIntent.firstPrompt.text).toBe("draft survives");
   });
 
   it("renders stage-specific loading, empty, error, refresh, and Back actions", async () => {

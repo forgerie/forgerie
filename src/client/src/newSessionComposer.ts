@@ -1,5 +1,7 @@
 import type { Machine, Project, Workspace } from "./api";
 import { machinesApi, projectsApi, workspacesApi } from "./api";
+import type { PromptAttachment, PromptAttachmentDelivery } from "../../shared/apiTypes";
+import { parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand";
 
 export interface NewSessionCompleteDestination {
   kind: "complete";
@@ -14,9 +16,18 @@ export interface NewSessionRequiredDestination {
 
 export type NewSessionDestination = NewSessionCompleteDestination | NewSessionRequiredDestination;
 
+export interface NewSessionFirstPromptSubmission {
+  readonly text: string;
+  readonly attachments?: readonly PromptAttachment[] | undefined;
+  readonly delivery?: PromptAttachmentDelivery | undefined;
+  readonly promptResourceCommandIdentity?: PromptResourceCommandIdentity | undefined;
+}
+
+export type NewSessionComposerSnapshot = NewSessionFirstPromptSubmission;
+
 export interface NewSessionLaunchIntent {
   destination: NewSessionCompleteDestination;
-  prompt: string;
+  firstPrompt: NewSessionFirstPromptSubmission;
 }
 
 export type NewSessionSubmissionOutcome =
@@ -44,33 +55,27 @@ export type NewSessionDestinationChoice =
   | { step: "project"; machine: Machine; catalog: NewSessionCatalogState<Project> }
   | { step: "workspace"; machine: Machine; project: Project; catalog: NewSessionCatalogState<Workspace> };
 
-interface NewSessionComposerDraft {
-  prompt: string;
-  destination: NewSessionDestination;
-}
-
 export type NewSessionComposerState =
-  | (NewSessionComposerDraft & { kind: "editing"; submissionError?: NewSessionSubmissionOutcome & { kind: "rejected" } })
-  | (NewSessionComposerDraft & { kind: "choosing"; choice: NewSessionDestinationChoice })
-  | { kind: "submitting"; prompt: string; destination: NewSessionCompleteDestination };
+  | { kind: "editing"; destination: NewSessionDestination; submissionError?: NewSessionSubmissionOutcome & { kind: "rejected" } }
+  | { kind: "choosing"; destination: NewSessionDestination; choice: NewSessionDestinationChoice }
+  | { kind: "submitting"; destination: NewSessionCompleteDestination; submission: NewSessionFirstPromptSubmission };
 
 export function completeNewSessionDestination(machine: Machine, project: Project, workspace: Workspace): NewSessionCompleteDestination {
   return { kind: "complete", machine, project, workspace };
 }
 
-export function createNewSessionComposerState(destination?: NewSessionCompleteDestination, prompt = ""): NewSessionComposerState {
-  return { kind: "editing", destination: destination ?? { kind: "required" }, prompt };
+export function createNewSessionComposerState(destination?: NewSessionCompleteDestination): NewSessionComposerState {
+  return { kind: "editing", destination: destination ?? { kind: "required" } };
 }
 
-export function updateNewSessionPrompt(state: NewSessionComposerState, prompt: string): NewSessionComposerState {
-  if (state.kind === "submitting") return state;
-  return { ...state, prompt };
-}
-
-export function canSubmitNewSession(state: NewSessionComposerState): state is Extract<NewSessionComposerState, { kind: "editing" }> & { destination: NewSessionCompleteDestination } {
+export function canSubmitNewSession(
+  state: NewSessionComposerState,
+  snapshot: NewSessionComposerSnapshot,
+): state is Extract<NewSessionComposerState, { kind: "editing" }> & { destination: NewSessionCompleteDestination } {
   return state.kind === "editing"
-    && state.prompt.trim().length > 0
-    && isValidNewSessionDestination(state.destination);
+    && isValidNewSessionDestination(state.destination)
+    && !newSessionSubmissionIsEmpty(snapshot)
+    && !requiresPromptResourceIdentity(snapshot);
 }
 
 export function isValidNewSessionDestination(destination: NewSessionDestination): destination is NewSessionCompleteDestination {
@@ -87,9 +92,12 @@ export function isNewSessionMachineAvailable(machine: Machine): boolean {
   return machine.status !== "offline" && machine.status !== "error";
 }
 
-export function beginNewSessionSubmission(state: NewSessionComposerState): NewSessionComposerState {
-  if (!canSubmitNewSession(state)) return state;
-  return { kind: "submitting", destination: state.destination, prompt: state.prompt };
+export function beginNewSessionSubmission(
+  state: NewSessionComposerState,
+  snapshot: NewSessionComposerSnapshot,
+): NewSessionComposerState {
+  if (!canSubmitNewSession(state, snapshot)) return state;
+  return { kind: "submitting", destination: state.destination, submission: copyNewSessionSubmission(snapshot) };
 }
 
 export function rejectNewSessionSubmission(
@@ -97,7 +105,7 @@ export function rejectNewSessionSubmission(
   rejection: Extract<NewSessionSubmissionOutcome, { kind: "rejected" }>,
 ): NewSessionComposerState {
   if (state.kind !== "submitting") return state;
-  return { kind: "editing", destination: state.destination, prompt: state.prompt, submissionError: rejection };
+  return { kind: "editing", destination: state.destination, submissionError: rejection };
 }
 
 export function startNewSessionDestinationChoice(state: NewSessionComposerState, requestId: number): NewSessionComposerState {
@@ -105,7 +113,6 @@ export function startNewSessionDestinationChoice(state: NewSessionComposerState,
   return {
     kind: "choosing",
     destination: state.destination,
-    prompt: state.prompt,
     choice: { step: "machine", catalog: { kind: "loading", requestId } },
   };
 }
@@ -117,7 +124,6 @@ export function chooseNewSessionMachine(state: NewSessionComposerState, machine:
   return {
     kind: "choosing",
     destination: state.destination,
-    prompt: state.prompt,
     choice: { step: "project", machine: availableMachine, catalog: { kind: "loading", requestId } },
   };
 }
@@ -129,7 +135,6 @@ export function chooseNewSessionProject(state: NewSessionComposerState, project:
   return {
     kind: "choosing",
     destination: state.destination,
-    prompt: state.prompt,
     choice: { step: "workspace", machine: state.choice.machine, project: availableProject, catalog: { kind: "loading", requestId } },
   };
 }
@@ -142,7 +147,6 @@ export function chooseNewSessionWorkspace(state: NewSessionComposerState, worksp
   return {
     kind: "editing",
     destination: completeNewSessionDestination(machine, project, availableWorkspace),
-    prompt: state.prompt,
   };
 }
 
@@ -151,7 +155,6 @@ export function backToMachineChoice(state: NewSessionComposerState, requestId: n
   return {
     kind: "choosing",
     destination: state.destination,
-    prompt: state.prompt,
     choice: { step: "machine", catalog: { kind: "loading", requestId } },
   };
 }
@@ -161,7 +164,6 @@ export function backToProjectChoice(state: NewSessionComposerState, requestId: n
   return {
     kind: "choosing",
     destination: state.destination,
-    prompt: state.prompt,
     choice: { step: "project", machine: state.choice.machine, catalog: { kind: "loading", requestId } },
   };
 }
@@ -218,6 +220,25 @@ function resolvedCatalog<T>(requestId: number, resolution: NewSessionCatalogReso
   return resolution.items.length === 0
     ? { kind: "empty", requestId }
     : { kind: "ready", requestId, items: resolution.items };
+}
+
+function newSessionSubmissionIsEmpty(submission: NewSessionComposerSnapshot): boolean {
+  return submission.text.trim() === "" && (submission.attachments === undefined || submission.attachments.length === 0);
+}
+
+function requiresPromptResourceIdentity(submission: NewSessionComposerSnapshot): boolean {
+  const parsed = parseLeadingSlashCommand(submission.text);
+  return (!("kind" in parsed) || parsed.kind !== "not-command") && submission.promptResourceCommandIdentity === undefined;
+}
+
+function copyNewSessionSubmission(submission: NewSessionComposerSnapshot): NewSessionFirstPromptSubmission {
+  const attachments = submission.attachments === undefined ? undefined : submission.attachments.map((attachment) => ({ ...attachment }));
+  return {
+    text: submission.text,
+    ...(attachments === undefined ? {} : { attachments }),
+    ...(submission.delivery === undefined ? {} : { delivery: submission.delivery }),
+    ...(submission.promptResourceCommandIdentity === undefined ? {} : { promptResourceCommandIdentity: { ...submission.promptResourceCommandIdentity } }),
+  };
 }
 
 export function createApiNewSessionDestinationCatalog(): NewSessionDestinationCatalog {

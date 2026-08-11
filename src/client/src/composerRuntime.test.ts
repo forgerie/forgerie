@@ -12,11 +12,12 @@ afterEach(() => {
 
 describe("pre-session composer runtime", () => {
   it("lists destination prompt resources and files but not models", async () => {
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "a".repeat(64) };
     const catalog = vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValue({
       available: true,
       diagnostics: [],
       commands: [
-        { name: "review", source: "prompt", description: "Review code", identity: { source: "prompt", name: "review", fingerprint: "a".repeat(64) } },
+        { name: "review", source: "prompt", description: "Review code", identity },
         { name: "audit", source: "skill", identity: { source: "skill", name: "audit", fingerprint: "b".repeat(64) } },
       ],
     });
@@ -24,7 +25,7 @@ describe("pre-session composer runtime", () => {
     const runtime = createPreSessionComposerRuntime({ machineId: "remote-a", projectId: "project-1", workspaceId: "workspace-1" });
 
     await expect(runtime.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([
-      { kind: "command", replaceFrom: 0, replaceTo: 3, insertText: "/review", detail: "prompt", description: "Review code" },
+      { kind: "command", replaceFrom: 0, replaceTo: 3, insertText: "/review", detail: "prompt", description: "Review code", promptResourceCommandIdentity: identity },
     ]);
     await expect(runtime.resolveCompletion({ kind: "file", query: "src", from: 5, to: 9, fileScope: "tracked" })).resolves.toEqual([
       { kind: "file", replaceFrom: 5, replaceTo: 9, insertText: "@src/index.ts", detail: "tracked" },
@@ -36,13 +37,26 @@ describe("pre-session composer runtime", () => {
     expect(files).toHaveBeenCalledWith("src", { scope: "tracked", machineId: "remote-a", projectId: "project-1", workspaceId: "workspace-1" });
   });
 
-  it("returns empty pre-session completions without a complete destination or with unavailable resources", async () => {
-    vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValue({ available: false, reason: "busy", message: "busy" });
-    const missingDestination = createPreSessionComposerRuntime({ machineId: "local" });
-    const unavailableResources = createPreSessionComposerRuntime({ machineId: "local", projectId: "project-1", workspaceId: "workspace-1" });
+  it("exposes no destination providers until the destination is complete", async () => {
+    const catalog = vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValue({ available: true, commands: [], diagnostics: [] });
+    const files = vi.spyOn(api, "files").mockResolvedValue([]);
+    const runtime = createPreSessionComposerRuntime({ machineId: "local" });
 
-    await expect(missingDestination.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([]);
-    await expect(unavailableResources.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([]);
+    expect(runtime.supportedCompletionKinds).toEqual(new Set());
+    await expect(runtime.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([]);
+    await expect(runtime.resolveCompletion({ kind: "file", query: "src", from: 5, to: 9, fileScope: "tracked" })).resolves.toEqual([]);
+    expect(catalog).not.toHaveBeenCalled();
+    expect(files).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes provider failure from successful zero matches", async () => {
+    vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValueOnce({ available: true, commands: [], diagnostics: [] });
+    const runtime = createPreSessionComposerRuntime({ machineId: "local", projectId: "project-1", workspaceId: "workspace-1" });
+
+    await expect(runtime.resolveCompletion(commandTrigger("/re", "re"))).resolves.toEqual([]);
+
+    vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValueOnce({ available: false, reason: "busy", message: "busy" });
+    await expect(runtime.resolveCompletion(commandTrigger("/re", "re"))).rejects.toThrow("busy");
   });
 });
 

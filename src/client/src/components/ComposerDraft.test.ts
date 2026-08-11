@@ -7,7 +7,7 @@ import type { PromptCompletionTrigger } from "../promptCompletions";
 import { loadDraft } from "../promptDraftStorage";
 import { pressKey } from "./modalSurfaceTestSupport";
 import type { AutocompleteMenu } from "./AutocompleteMenu";
-import { ComposerDraft, type ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import { ComposerDraft, type ComposerDraftSubmitOutcome, type ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import type { CompletionItem } from "./shared";
 
 afterEach(() => {
@@ -72,6 +72,48 @@ describe("ComposerDraft", () => {
     expect(draft.querySelector(".attachment-chip")).toBeNull();
   });
 
+  it("keeps an immutable submitted snapshot until the host accepts it", async () => {
+    const acceptance = deferred<"accepted" | "rejected">();
+    const onSubmit = vi.fn((snapshot: ComposerDraftSubmitSnapshot) => acceptance.promise.then((outcome) => {
+      expect(snapshot.text).toBe("validate me");
+      return outcome;
+    }));
+    const draft = await mountDraft({ onSubmit });
+
+    draft.replaceText("validate me");
+    draft.submit();
+    draft.replaceText("edited while validating");
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("edited while validating");
+    acceptance.resolve("rejected");
+    await vi.waitFor(() => { expect(draft.view?.state.doc.toString()).toBe("edited while validating"); });
+
+    const second = deferred<"accepted">();
+    onSubmit.mockImplementationOnce(() => second.promise);
+    draft.submit();
+    expect(draft.view?.state.doc.toString()).toBe("edited while validating");
+    second.resolve("accepted");
+    await vi.waitFor(() => { expect(draft.view?.state.doc.toString()).toBe(""); });
+  });
+
+  it("restores one-shot seed snapshots and exposes explicit clear/discard operations", async () => {
+    const draft = await mountDraft();
+    const seed = { id: "recovery-1", snapshot: { text: "restore me" } };
+
+    expect(draft.restoreSeed(seed)).toBe(true);
+    expect(draft.view?.state.doc.toString()).toBe("restore me");
+    draft.replaceText("changed");
+    expect(draft.restoreSeed(seed)).toBe(false);
+    expect(draft.view?.state.doc.toString()).toBe("changed");
+
+    draft.clearAfterAcceptance();
+    expect(draft.view?.state.doc.toString()).toBe("");
+    draft.replaceText("discard me");
+    draft.discardDraft();
+    expect(draft.view?.state.doc.toString()).toBe("");
+  });
+
   it("keeps completion navigation ahead of prompt history", async () => {
     const draft = await mountDraft({
       promptHistory: ["previous"],
@@ -132,6 +174,25 @@ describe("ComposerDraft", () => {
     setEditorText(draft, "/missing");
     await vi.waitFor(() => { expect(resolve).toHaveBeenCalledOnce(); });
     expect(menu(draft)?.items).toEqual([]);
+    expect(draft.querySelector(".completion-error")).toBeNull();
+  });
+
+  it("surfaces completion provider failure without clearing the draft", async () => {
+    const onCompletionError = vi.fn();
+    const draft = await mountDraft({
+      runtime: { supportedCompletionKinds: new Set(["command"]), resolveCompletion: () => Promise.reject(new Error("Catalog failed")) },
+      onCompletionError,
+    });
+
+    setEditorText(draft, "/review");
+
+    await vi.waitFor(() => { expect(draft.querySelector(".completion-error")?.textContent).toContain("Catalog failed"); });
+    expect(onCompletionError).toHaveBeenCalledWith({ kind: "command", message: "Catalog failed" });
+    expect(draft.view?.state.doc.toString()).toBe("/review");
+
+    draft.runtime = runtimeWith(() => []);
+    await draft.updateComplete;
+    expect(draft.querySelector(".completion-error")).toBeNull();
   });
 
   it("survives disconnect and reconnect without losing the draft", async () => {
@@ -153,7 +214,8 @@ async function mountDraft(options: {
   runtime?: ComposerRuntime;
   storageKey?: string;
   promptHistory?: readonly string[];
-  onSubmit?: (snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => void;
+  onSubmit?: (snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
+  onCompletionError?: (error: { kind: string; message: string }) => void;
   host?: HTMLElement;
 } = {}): Promise<ComposerDraft> {
   const host = options.host ?? document.createElement("div");
@@ -162,6 +224,7 @@ async function mountDraft(options: {
   if (options.storageKey !== undefined) draft.storageKey = options.storageKey;
   if (options.promptHistory !== undefined) draft.promptHistory = options.promptHistory;
   if (options.onSubmit !== undefined) draft.onSubmit = options.onSubmit;
+  if (options.onCompletionError !== undefined) draft.onCompletionError = options.onCompletionError;
   host.append(draft);
   document.body.append(host);
   await draft.updateComplete;

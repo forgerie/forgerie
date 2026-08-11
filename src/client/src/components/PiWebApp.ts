@@ -1833,10 +1833,14 @@ export class PiWebApp extends LitElement {
     }
 
     const previouslySelectedSessionId = this.state.selectedSession?.id;
-    const launch = this.sessions.launchSession({ text: intent.prompt, delivery: "inline" });
+    const launch = this.sessions.launchSession({
+      ...intent.firstPrompt,
+      attachments: intent.firstPrompt.attachments === undefined ? undefined : [...intent.firstPrompt.attachments],
+      delivery: intent.firstPrompt.delivery ?? "inline",
+    });
     const pending = this.state.selectedSession;
     const queued = pending === undefined ? undefined : this.state.clientQueuedSessionMessages[pending.id];
-    if (pending === undefined || pending.id === previouslySelectedSessionId || queued?.some((message) => message.text === intent.prompt) !== true) {
+    if (pending === undefined || pending.id === previouslySelectedSessionId || queued?.some((message) => message.text === intent.firstPrompt.text) !== true) {
       void launch.catch((error: unknown) => { if (isCurrentToken()) this.setState({ error: String(error) }); });
       return { kind: "rejected", reason: "launch-rejected", message: "New session could not be queued." };
     }
