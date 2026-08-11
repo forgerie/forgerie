@@ -1,8 +1,14 @@
+// @vitest-environment happy-dom
+
 import type { TemplateResult } from "lit";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "../api";
-import { isTemplateResult, templateClickHandlerForText, templateText } from "../templateInspection.testSupport";
+import { isTemplateResult, templateText } from "../templateInspection.testSupport";
 import { PromptEditor } from "./PromptEditor";
+
+afterEach(() => {
+  document.body.replaceChildren();
+});
 
 describe("PromptEditor control rail", () => {
   it("offers one send control while the session is idle", () => {
@@ -27,42 +33,42 @@ describe("PromptEditor control rail", () => {
     expect(rendered).not.toContain("Steer current response");
   });
 
-  it("steers the running reply rather than queueing behind it", () => {
+  it("steers the running reply rather than queueing behind it", async () => {
     const onSend = vi.fn();
-    const composer = editor({ canSteer: true, canStop: true, onSend });
-    setDraft(composer, "use the second approach");
+    const composer = await mountEditor({ canSteer: true, canStop: true, onSend });
+    composer.replaceText("use the second approach");
 
-    templateClickHandlerForText(render(composer), "Steer current response")(new Event("click"));
+    button(composer, ".steer-button").click();
 
     expect(onSend).toHaveBeenCalledWith("use the second approach", "steer", undefined, undefined);
   });
 
-  it("queues the message when the primary control is used mid-stream", () => {
+  it("queues the message when the primary control is used mid-stream", async () => {
     const onSend = vi.fn();
-    const composer = editor({ canSteer: true, canStop: true, onSend });
-    setDraft(composer, "and then run the tests");
+    const composer = await mountEditor({ canSteer: true, canStop: true, onSend });
+    composer.replaceText("and then run the tests");
 
-    templateClickHandlerForText(render(composer), "Queue message")(new Event("click"));
+    button(composer, ".send-button").click();
 
     expect(onSend).toHaveBeenCalledWith("and then run the tests", "followUp", undefined, undefined);
   });
 
-  it("sends straight through when nothing is running", () => {
+  it("sends straight through when nothing is running", async () => {
     const onSend = vi.fn();
-    const composer = editor({ onSend });
-    setDraft(composer, "start here");
+    const composer = await mountEditor({ onSend });
+    composer.replaceText("start here");
 
-    templateClickHandlerForText(render(composer), "Send message")(new Event("click"));
+    button(composer, ".send-button").click();
 
     expect(onSend).toHaveBeenCalledWith("start here", undefined, undefined, undefined);
   });
 
-  it("accepts nothing from a session that cannot be used", () => {
+  it("accepts nothing from a session that cannot be used", async () => {
     const onSend = vi.fn();
-    const composer = editor({ disabled: true, canSteer: true, canStop: true, onSend });
-    setDraft(composer, "too late");
+    const composer = await mountEditor({ disabled: true, canSteer: true, canStop: true, onSend });
+    composer.replaceText("too late");
 
-    templateClickHandlerForText(render(composer), "Queue message")(new Event("click"));
+    button(composer, ".send-button").click();
 
     expect(onSend).not.toHaveBeenCalled();
   });
@@ -75,8 +81,18 @@ function editor(overrides: Partial<PromptEditor> = {}): PromptEditor {
   return composer;
 }
 
-function setDraft(composer: PromptEditor, text: string): void {
-  if (!Reflect.set(composer, "draft", text)) throw new Error("Could not seed the composer draft");
+async function mountEditor(overrides: Partial<PromptEditor> = {}): Promise<PromptEditor> {
+  const composer = editor(overrides);
+  document.body.append(composer);
+  await composer.updateComplete;
+  if (composer.view === undefined) throw new Error("Expected CodeMirror to mount");
+  return composer;
+}
+
+function button(composer: PromptEditor, selector: string): HTMLButtonElement {
+  const found = composer.shadowRoot?.querySelector<HTMLButtonElement>(selector);
+  if (found === null || found === undefined) throw new Error(`Expected ${selector}`);
+  return found;
 }
 
 function render(composer: PromptEditor): TemplateResult {

@@ -1,40 +1,40 @@
+// @vitest-environment happy-dom
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, type SessionModel } from "../api";
 import { PromptEditor } from "./PromptEditor";
+import type { AutocompleteMenu } from "./AutocompleteMenu";
 
 const sonnet: SessionModel = { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" };
 const gpt: SessionModel = { provider: "openai", id: "gpt-5.2" };
 
 afterEach(() => {
+  document.body.replaceChildren();
   vi.restoreAllMocks();
 });
 
 describe("PromptEditor model completions", () => {
-  it("requests models for the session and maps a # token to model completions", async () => {
+  it("requests models for the session and maps a # token to model completions through the shared draft", async () => {
     const models = vi.spyOn(api, "models").mockResolvedValue({ models: [sonnet, gpt] });
-    const editor = new PromptEditor();
-    editor.sessionId = "session-1";
-    editor.cwd = "/repo";
-    editor.machineId = "remote-a";
+    const editor = await mountEditor({ machineId: "remote-a" });
 
-    await refreshCompletions(editor, "please use #cla");
+    setEditorText(editor, "please use #cla");
+    const menu = await waitForMenuItems(editor, 1);
 
     expect(models).toHaveBeenCalledWith({ id: "session-1", cwd: "/repo" }, "remote-a");
-    expect(currentCompletions(editor)).toEqual([
+    expect(menu.items).toEqual([
       { kind: "model", replaceFrom: 11, replaceTo: 15, insertText: "#anthropic/claude-sonnet-4-5", detail: "anthropic", description: "Claude Sonnet 4.5" },
     ]);
-    expect(Reflect.get(editor, "selectedIndex")).toBe(0);
   });
 
   it("lists every model for a bare # token", async () => {
     vi.spyOn(api, "models").mockResolvedValue({ models: [sonnet, gpt] });
-    const editor = new PromptEditor();
-    editor.sessionId = "session-1";
-    editor.cwd = "/repo";
+    const editor = await mountEditor();
 
-    await refreshCompletions(editor, "#");
+    setEditorText(editor, "#");
+    const menu = await waitForMenuItems(editor, 2);
 
-    expect(currentCompletions(editor)).toEqual([
+    expect(menu.items).toEqual([
       { kind: "model", replaceFrom: 0, replaceTo: 1, insertText: "#anthropic/claude-sonnet-4-5", detail: "anthropic", description: "Claude Sonnet 4.5" },
       { kind: "model", replaceFrom: 0, replaceTo: 1, insertText: "#openai/gpt-5.2", detail: "openai" },
     ]);
@@ -42,40 +42,50 @@ describe("PromptEditor model completions", () => {
 
   it("clears completions when the models request fails", async () => {
     vi.spyOn(api, "models").mockRejectedValue(new Error("models unavailable"));
-    const editor = new PromptEditor();
-    editor.sessionId = "session-1";
-    editor.cwd = "/repo";
+    const editor = await mountEditor();
 
-    await refreshCompletions(editor, "#cla");
-
-    expect(currentCompletions(editor)).toEqual([]);
+    setEditorText(editor, "#cla");
+    await vi.waitFor(() => { expect(modelsMenu(editor)?.items).toEqual([]); });
   });
 
   it("does not request models without session context", async () => {
     const models = vi.spyOn(api, "models").mockResolvedValue({ models: [sonnet] });
     const editor = new PromptEditor();
+    document.body.append(editor);
+    await editor.updateComplete;
 
-    await refreshCompletions(editor, "#cla");
+    setEditorText(editor, "#cla");
+    await Promise.resolve();
 
     expect(models).not.toHaveBeenCalled();
-    expect(currentCompletions(editor)).toEqual([]);
+    expect(modelsMenu(editor)?.items).toEqual([]);
   });
 });
 
-// refreshCompletions is private and driven by CodeMirror updates in production;
-// invoking it through Reflect mirrors the PromptEditor.draft.test.ts seam and
-// keeps the wiring test at the component boundary without a DOM harness.
-async function refreshCompletions(editor: PromptEditor, draft: string): Promise<void> {
-  Reflect.set(editor, "draft", draft);
-  const refresh: unknown = Reflect.get(editor, "refreshCompletions");
-  if (!isRefreshCompletions(refresh)) throw new Error("PromptEditor.refreshCompletions is not callable");
-  await refresh.call(editor);
+function setEditorText(editor: PromptEditor, text: string): void {
+  const view = editor.view;
+  if (view === undefined) throw new Error("Expected CodeMirror to mount");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: text.length } });
 }
 
-function isRefreshCompletions(value: unknown): value is (this: PromptEditor) => Promise<void> {
-  return typeof value === "function";
+async function mountEditor(options: { machineId?: string } = {}): Promise<PromptEditor> {
+  const editor = new PromptEditor();
+  editor.sessionId = "session-1";
+  editor.cwd = "/repo";
+  editor.machineId = options.machineId ?? "local";
+  document.body.append(editor);
+  await editor.updateComplete;
+  if (editor.view === undefined) throw new Error("Expected CodeMirror to mount");
+  return editor;
 }
 
-function currentCompletions(editor: PromptEditor): unknown {
-  return Reflect.get(editor, "completions");
+async function waitForMenuItems(editor: PromptEditor, count: number): Promise<AutocompleteMenu> {
+  const menu = modelsMenu(editor);
+  if (menu === null || menu === undefined) throw new Error("Expected autocomplete menu");
+  await vi.waitFor(() => { expect(menu.items).toHaveLength(count); });
+  return menu;
+}
+
+function modelsMenu(editor: PromptEditor): AutocompleteMenu | null | undefined {
+  return editor.shadowRoot?.querySelector("composer-draft")?.querySelector<AutocompleteMenu>("autocomplete-menu");
 }

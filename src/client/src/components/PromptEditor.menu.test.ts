@@ -46,7 +46,7 @@ describe("PromptEditor island menu", () => {
 });
 
 function seedAttachmentInput(composer: PromptEditor, click: () => void): void {
-  Object.defineProperty(composer, "attachmentInput", { configurable: true, value: { click } });
+  Object.defineProperty(composer, "draftElement", { configurable: true, value: { openAttachmentPicker: click } });
 }
 
 function render(composer: PromptEditor): TemplateResult {

@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionStatus } from "../api";
+import { api, type SessionStatus } from "../api";
+import type { AutocompleteMenu } from "./AutocompleteMenu";
 import { pressKey } from "./modalSurfaceTestSupport";
 import { PromptEditor } from "./PromptEditor";
 
@@ -14,13 +15,19 @@ afterEach(() => {
 
 describe("PromptEditor Escape behavior", () => {
   it("closes autocomplete before stopping active work", async () => {
+    vi.spyOn(api, "commands").mockResolvedValue([{ name: "tree", source: "builtin" }]);
     const onStop = vi.fn();
     const editor = await mountEditor({ status: status({ isStreaming: true }), canStop: true, onStop });
-    Reflect.set(editor, "completions", [{ kind: "command", insertText: "/tree", replaceFrom: 0, replaceTo: 0 }]);
+    setEditorText(editor, "/");
+    const menu = autocompleteMenu(editor);
+    if (menu === null || menu === undefined) throw new Error("Expected autocomplete menu");
+    await vi.waitFor(() => { expect(menu.items).toHaveLength(1); });
 
     const event = pressEscape(editor);
+    await editor.updateComplete;
+    await menu.updateComplete;
 
-    expect(Reflect.get(editor, "completions")).toEqual([]);
+    expect(menu.items).toEqual([]);
     expect(onStop).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(true);
   });
@@ -124,6 +131,16 @@ function pressEscape(editor: PromptEditor): KeyboardEvent {
   const view = editor.view;
   if (view === undefined) throw new Error("Expected CodeMirror to mount");
   return pressKey(view.contentDOM, "Escape");
+}
+
+function autocompleteMenu(editor: PromptEditor): AutocompleteMenu | null | undefined {
+  return editor.shadowRoot?.querySelector("composer-draft")?.querySelector<AutocompleteMenu>("autocomplete-menu");
+}
+
+function setEditorText(editor: PromptEditor, text: string): void {
+  const view = editor.view;
+  if (view === undefined) throw new Error("Expected CodeMirror to mount");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: text.length } });
 }
 
 function status(patch: Partial<SessionStatus> = {}): SessionStatus {

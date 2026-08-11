@@ -42,7 +42,7 @@ describe("PromptEditor prompt history", () => {
     ]);
     const editor = await mountEditor(["previous"]);
     editor.view?.dispatch({ changes: { from: 0, insert: "/" }, selection: EditorSelection.cursor(1) });
-    const menu = editor.shadowRoot?.querySelector<AutocompleteMenu>("autocomplete-menu");
+    const menu = autocompleteMenu(editor);
     if (menu === null || menu === undefined) throw new Error("Expected the autocomplete menu");
     await vi.waitFor(() => { expect(menu.items).toHaveLength(2); });
 
@@ -105,4 +105,8 @@ function press(editor: PromptEditor, key: "ArrowUp" | "ArrowDown"): void {
   const view = editor.view;
   if (view === undefined) throw new Error("Expected CodeMirror to mount");
   pressKey(view.contentDOM, key);
+}
+
+function autocompleteMenu(editor: PromptEditor): AutocompleteMenu | null | undefined {
+  return editor.shadowRoot?.querySelector("composer-draft")?.querySelector<AutocompleteMenu>("autocomplete-menu");
 }

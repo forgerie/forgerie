@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionStatus } from "../api";
+import { api, type SessionStatus } from "../api";
+import type { AutocompleteMenu } from "./AutocompleteMenu";
 import { PromptEditor } from "./PromptEditor";
 
 afterEach(() => {
@@ -20,15 +21,21 @@ describe("PromptEditor session guidance", () => {
   });
 
   it("opens above the composer, clears completions, and keeps CodeMirror mounted", async () => {
+    vi.spyOn(api, "commands").mockResolvedValue([{ name: "help", source: "builtin" }]);
     const editor = await mountEditor(status([]));
+    editor.cwd = "/repo";
+    await editor.updateComplete;
     const view = editor.view;
-    Reflect.set(editor, "completions", [{ kind: "command", replaceFrom: 0, replaceTo: 1, insertText: "/help", detail: "builtin" }]);
+    setEditorText(editor, "/");
+    const menu = autocompleteMenu(editor);
+    if (menu === null || menu === undefined) throw new Error("Expected autocomplete menu");
+    await vi.waitFor(() => { expect(menu.items).toHaveLength(1); });
 
     guidanceTrigger(editor).click();
     await editor.updateComplete;
 
     expect(editor.shadowRoot?.querySelector("guidance-picker")).not.toBeNull();
-    expect(Reflect.get(editor, "completions")).toEqual([]);
+    expect(menu.items).toEqual([]);
     expect(editor.view).toBe(view);
   });
 
@@ -165,6 +172,16 @@ function guidanceTrigger(editor: PromptEditor): HTMLButtonElement {
 function guidanceOption(editor: PromptEditor): HTMLButtonElement {
   const picker = required(editor.shadowRoot?.querySelector<HTMLElement>("guidance-picker"));
   return required(picker.shadowRoot?.querySelector<HTMLButtonElement>("[data-guidance-id='technical-english']"));
+}
+
+function autocompleteMenu(editor: PromptEditor): AutocompleteMenu | null | undefined {
+  return editor.shadowRoot?.querySelector("composer-draft")?.querySelector<AutocompleteMenu>("autocomplete-menu");
+}
+
+function setEditorText(editor: PromptEditor, text: string): void {
+  const view = editor.view;
+  if (view === undefined) throw new Error("Expected CodeMirror to mount");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: text.length } });
 }
 
 function status(activeGuidanceIds: string[]): SessionStatus {

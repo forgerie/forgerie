@@ -1,30 +1,19 @@
-import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewlineAndIndent } from "@codemirror/commands";
-import { markdown, deleteMarkupBackward, insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
-import { EditorSelection, EditorState, Compartment } from "@codemirror/state";
-import { EditorView, keymap, placeholder } from "@codemirror/view";
-import { defaultHighlightStyle, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
-import { LitElement, html, type PropertyValues } from "lit";
+import { EditorView } from "@codemirror/view";
+import { html, LitElement, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
-import { api, type FileSuggestion, type PromptAttachment, type SessionModel, type SessionStatus, type SlashCommand } from "../api";
-import type { DoubleEscapeAction, PromptAttachmentDelivery } from "../../../shared/apiTypes";
+import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery, SessionStatus } from "../../../shared/apiTypes";
 import { sessionGuidanceSummary } from "../../../shared/sessionGuidance";
-import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePromptAttachment, promptAttachmentsCanUseInlineDelivery, type CapturedAttachment } from "../promptAttachmentCapture";
-import { composerRail, type ComposerRail } from "../composerRail";
-import { inputModeForDraft, inputModesEqual, type InputMode } from "../inputModes";
-import { machineSessionKey } from "../machineKeys";
-import { detectPromptCompletionTrigger, fileCompletionInsertText, modelCompletionChoices, type PromptCompletionTrigger } from "../promptCompletions";
-import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
-import { loadAttachmentDelivery, saveAttachmentDelivery } from "../attachmentPreferences";
-import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
-import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
-import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon, type CompletionItem } from "./shared";
-import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
-import "./AutocompleteMenu";
+import { createSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
+import { composerRail, type ComposerRail } from "../composerRail";
+import { inputModeForDraft, type InputMode } from "../inputModes";
+import { machineSessionKey } from "../machineKeys";
+import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
+import { renderAttachIcon, renderQueueIcon, renderSendIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import type { ComposerDraft, ComposerDraftDisplayState, ComposerDraftEscapeContext, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import "./ComposerDraft";
 import "./ContextUsageMeter";
 import "./GuidancePicker";
-
-type PendingAttachment = CapturedAttachment & { id: string };
 
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
@@ -59,57 +48,30 @@ export class PromptEditor extends LitElement {
   @property({ type: Number }) attentionCount = 0;
   @property({ attribute: false }) onNewSession?: () => void;
   @property({ attribute: false }) availableThinkingLevels: readonly string[] = [];
-  @query(".markdown-editor") private editorHost?: HTMLDivElement;
-  @query(".attachment-input") private attachmentInput?: HTMLInputElement;
+
+  @query("composer-draft") private draftElement?: ComposerDraft | null;
   @query(".guidance-trigger") private guidanceTrigger?: HTMLButtonElement;
-  // `draft` is the live document text but is intentionally NOT reactive: it
-  // changes on every keystroke and the visible text is owned by CodeMirror, not
-  // by Lit's render. Re-rendering the surrounding template on each keystroke is
-  // wasted work and, on iOS, can interrupt an in-progress touch gesture (the
-  // long-press edit/paste callout). Only `currentInputMode` (shell vs. normal)
-  // is reactive, since that is the only draft-derived value the template shows.
-  private draft = "";
+
   @state() private composerFocused = false;
   @state() private currentInputMode: InputMode = { kind: "normal" };
-  @state() private completions: CompletionItem[] = [];
-  @state() private selectedIndex = 0;
-  @state() private attachments: PendingAttachment[] = [];
-  @state() private attachmentDelivery: PromptAttachmentDelivery = loadAttachmentDelivery();
-  @state() private attachmentError: string | undefined = undefined;
+  @state() private draftEmpty = true;
+  @state() private attachmentCount = 0;
   @state() private guidanceOpen = false;
   @state() private guidancePending = false;
   @state() private guidanceError: string | undefined = undefined;
   private guidanceRequestVersion = 0;
-  private attachmentSeq = 0;
-  private requestVersion = 0;
-  private editor: EditorView | undefined;
-  private promptHistoryState: PromptHistoryState = createPromptHistory();
-  private applyingPromptHistory = false;
-  private readonly editableCompartment = new Compartment();
-  private readonly readOnlyCompartment = new Compartment();
-  private readonly mobilePromptEnterMedia = createMobilePromptEnterMedia();
-  private explicitShiftKeyActive = false;
   private lastEscapeTime = 0;
+  private pendingReplacement: string | undefined;
+  private cachedRuntimeKey = "";
+  private cachedRuntime: ComposerRuntime = createSessionComposerRuntime({ machineId: "local" });
 
-  protected override willUpdate(changed: PropertyValues<this>) {
+  protected override willUpdate(changed: PropertyValues<this>): void {
     const sessionChanged = changed.has("sessionId") || changed.has("machineId");
     if (sessionChanged) {
-      const previousSessionId = changed.has("sessionId") ? changed.get("sessionId") : this.sessionId;
-      const previousMachineId = changed.has("machineId") ? changed.get("machineId") : this.machineId;
-      const previousKey = draftStorageKey(previousMachineId, previousSessionId);
-      if (previousKey !== undefined) saveDraft(previousKey, this.draft);
-      const currentKey = draftStorageKey(this.machineId, this.sessionId);
-      this.draft = currentKey !== undefined ? loadDraft(currentKey) : "";
-      this.currentInputMode = inputModeForDraft(this.draft);
-      this.completions = [];
-      this.selectedIndex = 0;
       this.lastEscapeTime = 0;
       this.resetGuidanceDisclosure();
     }
     if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) this.resetGuidanceDisclosure();
-    if (sessionChanged || changed.has("promptHistory")) {
-      this.promptHistoryState = createPromptHistory(this.promptHistory);
-    }
   }
 
   protected override shouldUpdate(changed: PropertyValues<this>): boolean {
@@ -123,19 +85,12 @@ export class PromptEditor extends LitElement {
     return true;
   }
 
-  override firstUpdated(): void {
-    this.createEditor();
-  }
-
-  protected override updated(changed: PropertyValues) {
-    if (changed.has("disabled")) this.updateEditorDisabledState();
-    if (changed.has("sessionId") || changed.has("machineId")) this.syncEditorDoc();
+  protected override updated(): void {
+    this.flushPendingReplacement();
   }
 
   override disconnectedCallback(): void {
     this.resetGuidanceDisclosure();
-    this.editor?.destroy();
-    this.editor = undefined;
     super.disconnectedCallback();
   }
 
@@ -144,6 +99,7 @@ export class PromptEditor extends LitElement {
     const shellMode = shellInputMode !== undefined;
     const rail = this.rail();
     const busy = this.sending || this.guidancePending;
+    const resting = this.isResting();
     return html`
       ${this.guidanceOpen ? html`
         <guidance-picker
@@ -159,22 +115,24 @@ export class PromptEditor extends LitElement {
         ></guidance-picker>
       ` : null}
       <footer
-        class=${this.footerClass(shellMode)}
+        class=${this.footerClass(shellMode, resting)}
         @focusin=${() => { this.composerFocused = true; }}
         @focusout=${(event: FocusEvent) => { this.releaseComposerFocus(event); }}
-        @paste=${(event: ClipboardEvent) => { void this.handlePaste(event); }}
-        @dragover=${(event: DragEvent) => { this.handleDragOver(event); }}
-        @drop=${(event: DragEvent) => { void this.handleDrop(event); }}
       >
         <context-usage-meter .contextUsage=${this.contextUsage}></context-usage-meter>
-        <div class="editor-wrap">
-          <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label="Message pi" aria-disabled=${this.disabled ? "true" : "false"}></div>
-          <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
-          ${shellMode ? html`<div class="mode-hint">Shell command${shellInputMode.excludeFromContext ? " · excluded from context" : ""}</div>` : null}
-          ${this.isCompacting && !shellMode ? html`<div class="mode-hint">Compacting history · message will be queued</div>` : null}
-          ${this.renderAttachments()}
-          <autocomplete-menu .items=${this.completions} .selectedIndex=${this.selectedIndex} .onPick=${(item: CompletionItem) => { this.pick(item); }}></autocomplete-menu>
-        </div>
+        <composer-draft
+          .disabled=${this.disabled}
+          .submissionDisabled=${busy || !this.runtimeControlsAvailable}
+          .working=${rail.kind === "working"}
+          .compacting=${this.isCompacting}
+          .resting=${resting}
+          .runtime=${this.runtime()}
+          .promptHistory=${this.promptHistory}
+          .storageKey=${this.draftStorageKey()}
+          .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => { this.sendSnapshot(snapshot, streamingBehavior); }}
+          .onEscape=${(context: ComposerDraftEscapeContext) => this.handleDraftEscape(context)}
+          .onDisplayStateChange=${(state: ComposerDraftDisplayState) => { this.updateDraftDisplayState(state); }}
+        ></composer-draft>
         <div class="actions">
           ${this.renderIslandMenuAction(busy)}
           ${this.renderCompactStatus()}
@@ -192,14 +150,36 @@ export class PromptEditor extends LitElement {
     `;
   }
 
-  private footerClass(shellMode: boolean): string {
-    const resting = promptComposerIsResting({
+  private runtime(): ComposerRuntime {
+    const key = JSON.stringify({ sessionId: this.sessionId, cwd: this.cwd, machineId: this.machineId, projectId: this.projectId, workspaceId: this.workspaceId });
+    if (key !== this.cachedRuntimeKey) {
+      this.cachedRuntimeKey = key;
+      this.cachedRuntime = createSessionComposerRuntime({
+        ...(this.sessionId === undefined ? {} : { sessionId: this.sessionId }),
+        ...(this.cwd === undefined ? {} : { cwd: this.cwd }),
+        machineId: this.machineId,
+        ...(this.projectId === undefined ? {} : { projectId: this.projectId }),
+        ...(this.workspaceId === undefined ? {} : { workspaceId: this.workspaceId }),
+      });
+    }
+    return this.cachedRuntime;
+  }
+
+  private draftStorageKey(): string | undefined {
+    return draftStorageKey(this.machineId, this.sessionId);
+  }
+
+  private footerClass(shellMode: boolean, resting: boolean): string {
+    return [shellMode ? "shell-mode" : "", resting ? "resting" : ""].filter((name) => name !== "").join(" ");
+  }
+
+  private isResting(): boolean {
+    return promptComposerIsResting({
       chromeSummoned: this.chromeSummoned,
       focused: this.composerFocused,
-      draft: this.draft,
-      attachmentCount: this.attachments.length,
+      draft: this.draftEmpty ? "" : "draft",
+      attachmentCount: this.attachmentCount,
     });
-    return [shellMode ? "shell-mode" : "", resting ? "resting" : ""].filter((name) => name !== "").join(" ");
   }
 
   /** Focus moving between the editor and its own buttons must not collapse the composer. */
@@ -209,8 +189,8 @@ export class PromptEditor extends LitElement {
     this.composerFocused = false;
   }
 
-  focusInput() {
-    this.editor?.focus();
+  focusInput(): void {
+    this.draftElement?.focusInput();
   }
 
   /**
@@ -222,35 +202,22 @@ export class PromptEditor extends LitElement {
    */
   openAttachmentPicker(): void {
     if (this.disabled || this.sending) return;
-    this.attachmentInput?.click();
+    this.draftElement?.openAttachmentPicker();
   }
 
   replaceText(text: string): void {
-    this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
-    this.draft = text;
-    const key = draftStorageKey(this.machineId, this.sessionId);
-    if (key !== undefined) saveDraft(key, text);
-
-    const editor = this.editor;
-    if (editor !== undefined) {
-      const current = editor.state.doc.toString();
-      editor.dispatch({
-        ...(current === text ? {} : { changes: { from: 0, to: current.length, insert: text } }),
-        selection: EditorSelection.cursor(text.length),
-      });
+    if (this.draftElement === undefined || this.draftElement === null) {
+      this.pendingReplacement = text;
+      this.currentInputMode = inputModeForDraft(text);
+      this.draftEmpty = text.trim() === "";
+      return;
     }
-
-    // Invalidate completion requests started for either the previous document or
-    // the replacement dispatch, then return the editor to a clean completion state.
-    this.requestVersion += 1;
-    this.currentInputMode = inputModeForDraft(text);
-    this.completions = [];
-    this.selectedIndex = 0;
+    this.draftElement.replaceText(text);
   }
 
   /** Get the underlying CM6 EditorView, or undefined if not yet mounted. */
   get view(): EditorView | undefined {
-    return this.editor;
+    return this.draftElement?.view;
   }
 
   /**
@@ -284,14 +251,14 @@ export class PromptEditor extends LitElement {
           ?disabled=${!rail.canInvokePrimary}
           title=${queues ? "Queue until the current activity finishes" : "Send message"}
           aria-label=${queues ? "Queue message" : "Send message"}
-          @click=${() => { this.send("followUp"); }}
+          @click=${() => { this.submitDraft("followUp"); }}
         >${queues ? renderQueueIcon() : renderSendIcon()}</button>
         ${rail.canSteer ? html`<button
           class="icon-button steer-button"
           ?disabled=${!rail.canInvokePrimary}
           title="Steer the current response before the next model call"
           aria-label="Steer current response"
-          @click=${() => { this.send("steer"); }}
+          @click=${() => { this.submitDraft("steer"); }}
         >${renderSteerIcon()}</button>` : null}
       </div>
     `;
@@ -363,9 +330,7 @@ export class PromptEditor extends LitElement {
       this.closeGuidance(true);
       return;
     }
-    this.requestVersion += 1;
-    this.completions = [];
-    this.selectedIndex = 0;
+    this.draftElement?.closeCompletionMenu();
     this.guidanceError = undefined;
     this.guidanceOpen = true;
   }
@@ -444,237 +409,22 @@ export class PromptEditor extends LitElement {
     `;
   }
 
-  private renderAttachments() {
-    if (this.attachments.length === 0 && this.attachmentError === undefined) return null;
-    const canUseInlineDelivery = promptAttachmentsCanUseInlineDelivery(this.attachments);
-    const delivery = this.effectiveAttachmentDelivery();
-    return html`
-      <div class="attachments" aria-label="Pending attachments">
-        ${this.attachments.map((attachment) => html`
-          <div class=${`attachment-chip ${isInlinePromptAttachment(attachment) ? "attachment-chip-image" : "attachment-chip-file"}`} title=${attachment.name}>
-            ${this.renderAttachmentPreview(attachment)}
-            <button type="button" class="attachment-remove" title="Remove attachment" aria-label=${`Remove ${attachment.name}`} @click=${() => { this.removeAttachment(attachment.id); }}>×</button>
-          </div>
-        `)}
-        ${this.attachments.length > 0 ? html`
-          <label class="attachment-delivery" title=${canUseInlineDelivery ? "How attachments are delivered to the agent" : "General files are saved and mentioned from the workspace"}>
-            <select .value=${delivery} @change=${(event: Event) => { this.changeDelivery(event); }}>
-              <option value="inline" ?disabled=${!canUseInlineDelivery}>Attach to message${canUseInlineDelivery ? "" : " (images only)"}</option>
-              <option value="folder">Save to .forgerie/attachments</option>
-            </select>
-          </label>
-        ` : null}
-        ${this.attachmentError !== undefined ? html`<div class="attachment-error">${this.attachmentError}</div>` : null}
-      </div>
-    `;
+  private submitDraft(streamingBehavior?: "steer" | "followUp"): void {
+    this.draftElement?.submit(streamingBehavior);
   }
 
-  private renderAttachmentPreview(attachment: PendingAttachment) {
-    if (isInlinePromptAttachment(attachment)) {
-      return html`<img src=${`data:${attachment.mimeType};base64,${attachment.data}`} alt=${attachment.name} />`;
-    }
-    return html`
-      <div class="attachment-file-preview" aria-hidden="true">${fileExtensionLabel(attachment.name)}</div>
-      <span class="attachment-file-name">${attachment.name}</span>
-    `;
+  private flushPendingReplacement(): void {
+    if (this.pendingReplacement === undefined || this.draftElement === undefined || this.draftElement === null) return;
+    const text = this.pendingReplacement;
+    this.pendingReplacement = undefined;
+    this.draftElement.replaceText(text);
   }
 
-  private changeDelivery(event: Event) {
-    if (!(event.target instanceof HTMLSelectElement)) return;
-    const requested = event.target.value === "folder" ? "folder" : "inline";
-    if (requested === "inline" && !promptAttachmentsCanUseInlineDelivery(this.attachments)) {
-      event.target.value = "folder";
-      return;
-    }
-    this.attachmentDelivery = requested;
-    saveAttachmentDelivery(this.attachmentDelivery);
+  private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): void {
+    void this.onSend?.(snapshot.text, streamingBehavior, snapshot.attachments, snapshot.delivery);
   }
 
-  private removeAttachment(id: string) {
-    this.attachments = this.attachments.filter((attachment) => attachment.id !== id);
-  }
-
-  private async handlePaste(event: ClipboardEvent) {
-    const files = filesFromDataTransfer(event.clipboardData);
-    if (files.length === 0) return;
-    event.preventDefault();
-    await this.addAttachmentFiles(files);
-  }
-
-  private handleDragOver(event: DragEvent) {
-    if (event.dataTransfer === null) return;
-    if (dataTransferHasFiles(event.dataTransfer)) event.preventDefault();
-  }
-
-  private async handleDrop(event: DragEvent) {
-    const files = filesFromDataTransfer(event.dataTransfer);
-    if (files.length === 0) return;
-    event.preventDefault();
-    await this.addAttachmentFiles(files);
-  }
-
-  private async handleFileInput(event: Event) {
-    if (!(event.target instanceof HTMLInputElement) || event.target.files === null) return;
-    const files = Array.from(event.target.files);
-    event.target.value = "";
-    await this.addAttachmentFiles(files);
-  }
-
-  private async addAttachmentFiles(files: File[]) {
-    this.attachmentError = undefined;
-    const { attachments, error } = await capturePromptAttachments(files, readFileAsBase64);
-    if (attachments.length > 0) {
-      this.attachments = [...this.attachments, ...attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }))];
-    }
-    if (error !== undefined) this.attachmentError = error;
-  }
-
-  private currentAttachments(): PromptAttachment[] {
-    return this.attachments.map((attachment) => pendingToPromptAttachment(attachment));
-  }
-
-  private effectiveAttachmentDelivery(): PromptAttachmentDelivery {
-    return effectivePromptAttachmentDelivery(this.attachmentDelivery, this.attachments);
-  }
-
-  private createEditor() {
-    if (!this.editorHost || this.editor !== undefined) return;
-    this.editor = new EditorView({
-      parent: this.editorHost,
-      state: EditorState.create({
-        doc: this.draft,
-        extensions: [
-          history(),
-          markdown(),
-          indentOnInput(),
-          indentUnit.of("  "),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          EditorView.lineWrapping,
-          EditorView.contentAttributes.of((view) => inputAssistanceContentAttributes(view.state.sliceDoc(0, view.state.selection.main.head))),
-          EditorView.domEventHandlers({
-            keyup: (event) => this.handleEditorKeyUp(event),
-            blur: () => this.resetEditorModifierState(),
-          }),
-          placeholder("Message pi... Use / for commands, @ for tracked files, @ space for all files, # for models"),
-          this.editableCompartment.of(EditorView.editable.of(!this.disabled)),
-          this.readOnlyCompartment.of(EditorState.readOnly.of(this.disabled)),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) this.updateDraft(update.state.doc.toString());
-          }),
-          keymap.of([
-            { any: (view, event) => this.handleEditorKeyDown(event, view) },
-            { key: "ArrowDown", run: (view) => this.moveCompletion(1) || this.movePromptHistory(view, "newer") },
-            { key: "ArrowUp", run: (view) => this.moveCompletion(-1) || this.movePromptHistory(view, "older") },
-            { key: "Escape", run: () => this.handleEditorEscape() },
-            { key: "Tab", run: (view) => this.handleEditorTab(view) },
-            { key: "Shift-Tab", run: (view) => indentWithTab.shift?.(view) ?? false },
-            { key: "Backspace", run: (view) => deleteMarkupBackward(view) },
-            ...historyKeymap,
-            ...defaultKeymap,
-          ]),
-        ],
-      }),
-    });
-  }
-
-  private syncEditorDoc() {
-    const editor = this.editor;
-    if (!editor) return;
-    const current = editor.state.doc.toString();
-    if (current === this.draft) return;
-    editor.dispatch({
-      changes: { from: 0, to: current.length, insert: this.draft },
-      selection: EditorSelection.cursor(this.draft.length),
-    });
-  }
-
-  private updateEditorDisabledState() {
-    this.editor?.dispatch({
-      effects: [
-        this.editableCompartment.reconfigure(EditorView.editable.of(!this.disabled)),
-        this.readOnlyCompartment.reconfigure(EditorState.readOnly.of(this.disabled)),
-      ],
-    });
-  }
-
-  private updateDraft(value: string) {
-    if (!this.applyingPromptHistory) this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
-    this.draft = value;
-    const key = draftStorageKey(this.machineId, this.sessionId);
-    if (key !== undefined) saveDraft(key, this.draft);
-    const nextInputMode = inputModeForDraft(this.draft);
-    if (!inputModesEqual(nextInputMode, this.currentInputMode)) this.currentInputMode = nextInputMode;
-    void this.refreshCompletions();
-  }
-
-  private async refreshCompletions() {
-    const trigger = this.currentTrigger();
-    const version = ++this.requestVersion;
-    this.selectedIndex = 0;
-    if (trigger === undefined) {
-      this.completions = [];
-      return;
-    }
-    if (trigger.kind === "command" && this.sessionId !== undefined && this.sessionId !== "" && this.cwd !== undefined && this.cwd !== "") {
-      const commands = await api.commands({ id: this.sessionId, cwd: this.cwd }, this.machineId).catch(emptySlashCommands);
-      if (version !== this.requestVersion) return;
-      this.completions = commands
-        .filter((command) => command.name.toLowerCase().includes(trigger.query.toLowerCase()))
-        .slice(0, 12)
-        .map((command) => ({
-          kind: "command",
-          replaceFrom: trigger.from,
-          replaceTo: trigger.to,
-          insertText: `/${command.name}`,
-          detail: command.source,
-          ...(command.description === undefined ? {} : { description: command.description }),
-        }));
-    } else if (trigger.kind === "file" && this.projectId !== undefined && this.workspaceId !== undefined) {
-      const files = await api.files(trigger.query, { scope: trigger.fileScope, machineId: this.machineId, projectId: this.projectId, workspaceId: this.workspaceId }).catch(emptyFileSuggestions);
-      if (version !== this.requestVersion) return;
-      this.completions = files
-        .slice(0, 12)
-        .map((file) => {
-          const insertText = fileCompletionInsertText(file.path, trigger.quoted === true, file.path.endsWith("/") ? trigger.allPrefix : undefined);
-          return {
-            kind: "file",
-            replaceFrom: trigger.from,
-            replaceTo: trigger.to,
-            insertText,
-            detail: file.kind,
-            ...(file.path.endsWith("/") && insertText.endsWith("\"") ? { cursorOffset: insertText.length - 1 } : {}),
-          };
-        });
-    } else if (trigger.kind === "model" && this.sessionId !== undefined && this.sessionId !== "" && this.cwd !== undefined && this.cwd !== "") {
-      const models = await api.models({ id: this.sessionId, cwd: this.cwd }, this.machineId).then((response) => response.models).catch(emptySessionModels);
-      if (version !== this.requestVersion) return;
-      this.completions = modelCompletionChoices(models, trigger.query).map((choice) => ({
-        kind: "model",
-        replaceFrom: trigger.from,
-        replaceTo: trigger.to,
-        ...choice,
-      }));
-    }
-  }
-
-  private currentTrigger(): PromptCompletionTrigger | undefined {
-    return detectPromptCompletionTrigger(this.draft, this.editor?.state.selection.main.head ?? this.draft.length);
-  }
-
-  private moveCompletion(delta: number): boolean {
-    if (!this.completions.length) return false;
-    this.selectedIndex = (this.selectedIndex + delta + this.completions.length) % this.completions.length;
-    return true;
-  }
-
-  private closeCompletions(): boolean {
-    if (!this.completions.length) return false;
-    this.completions = [];
-    return true;
-  }
-
-  private handleEditorEscape(): boolean {
-    if (this.closeCompletions()) return true;
+  private handleDraftEscape(context: ComposerDraftEscapeContext): boolean {
     if (this.disabled || !this.runtimeControlsAvailable) return false;
 
     const status = this.status;
@@ -682,11 +432,8 @@ export class PromptEditor extends LitElement {
       this.stop();
       return true;
     }
-    if (this.currentInputMode.kind === "shell") {
-      this.replaceText("");
-      return true;
-    }
-    if (this.draft.trim() !== "") return false;
+    if (context.inputMode.kind === "shell") return false;
+    if (context.draft.trim() !== "") return false;
 
     const action = status?.doubleEscapeAction ?? "tree";
     if (action === "none") return true;
@@ -700,146 +447,14 @@ export class PromptEditor extends LitElement {
     return true;
   }
 
-  private movePromptHistory(view: EditorView, direction: "older" | "newer"): boolean {
-    const selection = view.state.selection.main;
-    if (!selection.empty || this.promptHistoryState.entries.length === 0) return false;
-    if (direction === "newer" && this.promptHistoryState.position.kind === "draft") return false;
-    if (direction === "older" && this.promptHistoryState.position.kind === "draft" && view.state.doc.length > 0 && selection.head !== 0) return false;
-    if (!isOnPromptBoundaryLine(view, selection.head, direction === "older" ? "top" : "bottom")) return false;
-
-    const navigation = navigatePromptHistory(this.promptHistoryState, direction, {
-      text: view.state.doc.toString(),
-      selection: { anchor: selection.anchor, head: selection.head },
-      atTop: direction === "older",
-      atBottom: direction === "newer",
-    });
-    if (navigation === undefined) return false;
-
-    this.promptHistoryState = navigation.state;
-    this.applyingPromptHistory = true;
-    try {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: navigation.editor.text },
-        selection: EditorSelection.range(navigation.editor.selection.anchor, navigation.editor.selection.head),
-        scrollIntoView: true,
-      });
-    } finally {
-      this.applyingPromptHistory = false;
-    }
-    return true;
-  }
-
-  private handleEditorKeyDown(event: KeyboardEvent, view: EditorView): boolean {
-    if (event.key === "Shift") {
-      this.explicitShiftKeyActive = true;
-      return false;
-    }
-    if (event.defaultPrevented || event.isComposing || view.composing) return false;
-    if (event.key !== "Enter") {
-      this.explicitShiftKeyActive = false;
-      return false;
-    }
-
-    const shiftKey = shouldUsePromptEnterShiftShortcut(event.shiftKey, this.explicitShiftKeyActive, this.mobilePromptEnterMedia);
-    this.explicitShiftKeyActive = false;
-    return this.handleEditorEnter(view, shiftKey);
-  }
-
-  private handleEditorKeyUp(event: KeyboardEvent): boolean {
-    if (event.key === "Shift") this.explicitShiftKeyActive = false;
-    return false;
-  }
-
-  private resetEditorModifierState(): boolean {
-    this.explicitShiftKeyActive = false;
-    return false;
-  }
-
-  private handleEditorEnter(view: EditorView, shiftKey: boolean): boolean {
-    if (!shiftKey && this.completions.length) {
-      const completion = this.completions[this.selectedIndex];
-      if (completion !== undefined) this.pick(completion);
-      return true;
-    }
-    if (!shouldSendPromptOnEnterShortcut(shiftKey, this.mobilePromptEnterMedia, readPromptEnterPreference())) {
-      return insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
-    }
-    this.send(this.canSteer || this.isCompacting ? "followUp" : undefined);
-    return true;
-  }
-
-  private handleEditorTab(view: EditorView): boolean {
-    if (this.completions.length) {
-      const completion = this.completions[this.selectedIndex];
-      if (completion !== undefined) this.pick(completion);
-      return true;
-    }
-    const trigger = this.currentTrigger();
-    if (trigger?.kind === "file") {
-      void this.refreshCompletions();
-      return true;
-    }
-    return indentWithTab.run?.(view) ?? false;
-  }
-
-  private pick(item: CompletionItem) {
-    const editor = this.editor;
-    if (!editor) return;
-    const suffix = item.kind === "file" && (item.insertText.endsWith("/") || item.cursorOffset !== undefined) ? "" : " ";
-    const cursor = item.replaceFrom + (item.cursorOffset ?? item.insertText.length) + suffix.length;
-    const replaceTo = item.insertText.endsWith("\"") && this.draft.slice(item.replaceTo).startsWith("\"") ? item.replaceTo + 1 : item.replaceTo;
-    editor.dispatch({
-      changes: { from: item.replaceFrom, to: replaceTo, insert: `${item.insertText}${suffix}` },
-      selection: EditorSelection.cursor(cursor),
-      scrollIntoView: true,
-    });
-    this.completions = [];
-  }
-
-  private send(streamingBehavior?: "steer" | "followUp") {
-    if (this.disabled || !this.runtimeControlsAvailable || this.sending || this.guidancePending) return;
-    const text = this.draft.trim();
-    const pending = this.attachments;
-    if (text === "" && pending.length === 0) return;
-    const behavior = this.rail().kind === "working" ? streamingBehavior : undefined;
-    const attachments = pending.length > 0 ? this.currentAttachments() : undefined;
-    const delivery = this.effectiveAttachmentDelivery();
-    this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, text);
-    this.resetComposer();
-    // Sending is owned by the controller (it drives the chat activity dock and,
-    // for folder mode, orchestrates the upload + reference rewrite), so this is
-    // fire-and-forget here.
-    void this.onSend?.(text, behavior, attachments, attachments === undefined ? undefined : delivery);
-  }
-
-  private resetComposer() {
-    this.draft = "";
-    this.currentInputMode = { kind: "normal" };
-    const key = draftStorageKey(this.machineId, this.sessionId);
-    if (key !== undefined) clearDraft(key);
-    this.completions = [];
-    this.attachments = [];
-    this.attachmentError = undefined;
-    // `draft` is not reactive, so the cleared text will not flow to CodeMirror
-    // via `updated()`; push it to the editor document explicitly.
-    this.syncEditorDoc();
+  private updateDraftDisplayState(state: ComposerDraftDisplayState): void {
+    this.currentInputMode = state.inputMode;
+    this.draftEmpty = state.empty;
+    this.attachmentCount = state.attachmentCount;
+    this.composerFocused = state.focused || this.composerFocused;
   }
 
   static override styles = promptEditorStyles;
-}
-
-function isOnPromptBoundaryLine(view: EditorView, position: number, boundary: "top" | "bottom"): boolean {
-  const line = view.state.doc.lineAt(position);
-  const isDocumentBoundary = boundary === "top" ? line.number === 1 : line.number === view.state.doc.lines;
-  if (!isDocumentBoundary) return false;
-
-  const boundaryPosition = boundary === "top" ? line.from : line.to;
-  const cursorCoords = view.coordsAtPos(position);
-  const boundaryCoords = view.coordsAtPos(boundaryPosition);
-  if (cursorCoords === null || boundaryCoords === null) return true;
-  const cursorEdge = boundary === "top" ? cursorCoords.top : cursorCoords.bottom;
-  const boundaryEdge = boundary === "top" ? boundaryCoords.top : boundaryCoords.bottom;
-  return Math.abs(cursorEdge - boundaryEdge) < 1;
 }
 
 function promptHistoryChanged(value: readonly string[], previous: readonly string[] | undefined): boolean {
@@ -871,79 +486,6 @@ function draftStorageKey(machineId: unknown, sessionId: unknown): string | undef
   if (typeof sessionId !== "string" || sessionId === "") return undefined;
   return machineSessionKey(machineId, sessionId);
 }
-
-function emptySlashCommands(): SlashCommand[] {
-  return [];
-}
-
-function emptyFileSuggestions(): FileSuggestion[] {
-  return [];
-}
-
-function emptySessionModels(): SessionModel[] {
-  return [];
-}
-
-function filesFromDataTransfer(data: DataTransfer | null): File[] {
-  if (data === null) return [];
-  return Array.from(data.files);
-}
-
-function dataTransferHasFiles(data: DataTransfer): boolean {
-  const items = Array.from(data.items);
-  if (items.length > 0) return items.some((item) => item.kind === "file");
-  return Array.from(data.types).includes("Files");
-}
-
-function pendingToPromptAttachment(attachment: PendingAttachment): PromptAttachment {
-  if (attachment.kind === "image") {
-    return { kind: "image", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
-  }
-  return { kind: "file", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
-}
-
-function fileExtensionLabel(name: string): string {
-  const trimmed = name.trim();
-  const dotIndex = trimmed.lastIndexOf(".");
-  if (dotIndex >= 0 && dotIndex < trimmed.length - 1) return trimmed.slice(dotIndex + 1, dotIndex + 5).toUpperCase();
-  return "FILE";
-}
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => { reject(reader.error ?? new Error("Failed to read file")); };
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== "string") { reject(new Error("Unexpected file reader result")); return; }
-      const commaIndex = result.indexOf(",");
-      resolve(commaIndex === -1 ? result : result.slice(commaIndex + 1));
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-const proseInputAssistanceAttributes: Record<string, string> = {
-  spellcheck: "true",
-  autocorrect: "on",
-  autocapitalize: "sentences",
-  writingsuggestions: "true",
-  dir: "auto",
-};
-
-const codeLikeInputAssistanceAttributes: Record<string, string> = {
-  spellcheck: "false",
-  autocorrect: "off",
-  autocapitalize: "off",
-  writingsuggestions: "false",
-  dir: "auto",
-};
-
-function inputAssistanceContentAttributes(draftBeforeCursor: string): Record<string, string> {
-  // CodeMirror is optimized for code and disables these by default, but the chat prompt is usually prose.
-  return inputModeForDraft(draftBeforeCursor).kind === "normal" ? proseInputAssistanceAttributes : codeLikeInputAssistanceAttributes;
-}
-
 
 export interface PromptComposerRestingInput {
   chromeSummoned: boolean;

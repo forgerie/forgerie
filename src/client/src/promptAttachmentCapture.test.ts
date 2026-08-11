@@ -1,7 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment happy-dom
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PromptEditor } from "./components/PromptEditor";
 import { capturePromptAttachments, DEFAULT_FILE_MIME_TYPE, effectivePromptAttachmentDelivery, READ_FAILURE_MESSAGE, type CapturableFile } from "./promptAttachmentCapture";
-import { templateEventHandlerAfterMarker, templateEventHandlerAfterValue } from "./templateInspection.testSupport";
+
+afterEach(() => {
+  document.body.replaceChildren();
+  vi.restoreAllMocks();
+});
 
 function file(name: string, type: string, size = 10): CapturableFile {
   return { name, type, size };
@@ -83,37 +89,28 @@ describe("effectivePromptAttachmentDelivery", () => {
 });
 
 describe("PromptEditor attachment wiring", () => {
-  // TemplateResult handler extraction (via the shared escape hatch) verifies the paste/remove/send
-  // event wiring here; this repo runs Vitest without a DOM environment, so a full custom-element +
-  // FileReader render harness would add disproportionate setup for this narrow wiring check. Each
-  // assertion observes a component effect (the injected `onSend` callback and its captured
-  // attachments), not Lit template internals. Rendered content/error text is covered at the pure
-  // layer by the `capturePromptAttachments` tests above.
   it("captures pasted files, strips data URL prefixes, and keeps successful reads when others fail", async () => {
-    const editor = new PromptEditor();
     const onSend = vi.fn<NonNullable<PromptEditor["onSend"]>>();
-    editor.onSend = onSend;
-    setPromptEditorPrivate(editor, "draft", "inspect attachments");
+    const editor = await mountPromptEditor(onSend, "inspect attachments");
     const restoreFileReader = installFileReaderStub([
       { kind: "load", result: "data:image/png;base64,UE5H" },
       { kind: "error", error: new DOMException("File unavailable", "NotReadableError") },
     ]);
 
     try {
-      const paste = templateEventHandlerAfterMarker(editor.render(), "@paste=");
       const pasteEvent = pasteEventWithFiles([
         new File(["png"], "shot.png", { type: "image/png" }),
         new File(["pdf"], "report.pdf", { type: "application/pdf" }),
       ]);
       const preventDefault = vi.spyOn(pasteEvent, "preventDefault");
 
-      paste(pasteEvent);
+      pasteTarget(editor).dispatchEvent(pasteEvent);
       await flushMicrotasks();
+      await editor.updateComplete;
 
       expect(preventDefault).toHaveBeenCalledOnce();
 
-      const send = templateEventHandlerAfterMarker(editor.render(), "send-button");
-      send(new Event("click"));
+      sendButton(editor).click();
 
       // report.pdf failed to read, so only the successfully-read image survives to onSend — proving
       // the paste is wired to capture, the data URL prefix is stripped, and a failed read does not
@@ -127,28 +124,35 @@ describe("PromptEditor attachment wiring", () => {
     }
   });
 
-  it("removes a pending attachment chip before sending the remaining attachments", () => {
-    const editor = new PromptEditor();
+  it("removes a pending attachment chip before sending the remaining attachments", async () => {
     const onSend = vi.fn<NonNullable<PromptEditor["onSend"]>>();
-    editor.onSend = onSend;
-    setPromptEditorPrivate(editor, "draft", "please review");
-    setPromptEditorPrivate(editor, "attachments", [
-      { id: "attachment-1", kind: "file", name: "report.pdf", mimeType: "application/pdf", data: "UkVQT1JU", size: 6 },
-      { id: "attachment-2", kind: "image", name: "shot.png", mimeType: "image/png", data: "UE5H", size: 3 },
+    const editor = await mountPromptEditor(onSend, "please review");
+    const restoreFileReader = installFileReaderStub([
+      { kind: "load", result: "data:application/pdf;base64,UkVQT1JU" },
+      { kind: "load", result: "data:image/png;base64,UE5H" },
     ]);
 
-    const removeReport = templateEventHandlerAfterValue(editor.render(), "Remove report.pdf", "@click=");
-    removeReport(new Event("click"));
+    try {
+      pasteTarget(editor).dispatchEvent(pasteEventWithFiles([
+        new File(["report"], "report.pdf", { type: "application/pdf" }),
+        new File(["png"], "shot.png", { type: "image/png" }),
+      ]));
+      await flushMicrotasks();
+      await editor.updateComplete;
 
-    const send = templateEventHandlerAfterMarker(editor.render(), "send-button");
-    send(new Event("click"));
+      removeButton(editor, "Remove report.pdf").click();
+      await editor.updateComplete;
+      sendButton(editor).click();
 
-    // onSend receives only the image, proving the remove handler dropped report.pdf while leaving
-    // shot.png queued (folder delivery is not forced because no generic file remains).
-    expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("please review", undefined, [
-      { kind: "image", mimeType: "image/png", data: "UE5H", name: "shot.png" },
-    ], "inline");
+      // onSend receives only the image, proving the remove handler dropped report.pdf while leaving
+      // shot.png queued (folder delivery is not forced because no generic file remains).
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend).toHaveBeenCalledWith("please review", undefined, [
+        { kind: "image", mimeType: "image/png", data: "UE5H", name: "shot.png" },
+      ], "inline");
+    } finally {
+      restoreFileReader();
+    }
   });
 });
 
@@ -156,8 +160,32 @@ type StubFileReaderOutcome =
   | { kind: "load"; result: string }
   | { kind: "error"; error: DOMException };
 
-function setPromptEditorPrivate(editor: PromptEditor, property: string, value: unknown): void {
-  if (!Reflect.set(editor, property, value)) throw new Error(`Failed to set PromptEditor ${property}`);
+async function mountPromptEditor(onSend: NonNullable<PromptEditor["onSend"]>, text: string): Promise<PromptEditor> {
+  const editor = new PromptEditor();
+  editor.onSend = onSend;
+  document.body.append(editor);
+  await editor.updateComplete;
+  editor.replaceText(text);
+  return editor;
+}
+
+function pasteTarget(editor: PromptEditor): HTMLElement {
+  const target = editor.shadowRoot?.querySelector<HTMLElement>("composer-draft .editor-wrap");
+  if (target === null || target === undefined) throw new Error("Expected composer paste target");
+  return target;
+}
+
+function sendButton(editor: PromptEditor): HTMLButtonElement {
+  const button = editor.shadowRoot?.querySelector<HTMLButtonElement>(".send-button");
+  if (button === null || button === undefined) throw new Error("Expected send button");
+  return button;
+}
+
+function removeButton(editor: PromptEditor, label: string): HTMLButtonElement {
+  const buttons = Array.from(editor.shadowRoot?.querySelectorAll<HTMLButtonElement>("composer-draft .attachment-remove") ?? []);
+  const button = buttons.find((candidate) => candidate.getAttribute("aria-label") === label);
+  if (button === undefined) throw new Error(`Expected ${label}`);
+  return button;
 }
 
 function installFileReaderStub(outcomes: StubFileReaderOutcome[]): () => void {
