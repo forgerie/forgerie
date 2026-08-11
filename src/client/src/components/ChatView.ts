@@ -199,10 +199,7 @@ export class ChatView extends LitElement {
   @property({ type: Number }) pendingMessageCount = 0;
   @property({ attribute: false }) clientQueuedMessages: QueuedSessionMessage[] = [];
   @property({ attribute: false }) sessionLaunchRecovery?: SessionLaunchRecovery;
-  @property({ attribute: false }) onRetrySessionLaunch?: (sessionId: string) => void;
-  @property({ attribute: false }) onChangeSessionLaunchDestination?: (sessionId: string) => void;
-  @property({ attribute: false }) onRefreshSessionLaunchRecovery?: (sessionId: string) => void;
-  @property({ attribute: false }) onRestoreSessionLaunchPrompt?: (sessionId: string) => void;
+  @property({ attribute: false }) onSessionLaunchRecoveryAction?: (sessionId: string, action: ChatSessionLaunchRecoveryActionKind) => void;
   @property({ attribute: false }) status?: SessionStatus;
   @property({ attribute: false }) activity?: SessionActivity;
   @property({ attribute: false }) pendingAsk?: PendingAskUser;
@@ -846,10 +843,7 @@ export class ChatView extends LitElement {
   }
 
   private activateSessionLaunchRecovery(action: ChatSessionLaunchRecoveryActionKind, sessionId: string): void {
-    if (action === "retry") this.onRetrySessionLaunch?.(sessionId);
-    else if (action === "changeDestination") this.onChangeSessionLaunchDestination?.(sessionId);
-    else if (action === "refresh") this.onRefreshSessionLaunchRecovery?.(sessionId);
-    else this.onRestoreSessionLaunchPrompt?.(sessionId);
+    this.onSessionLaunchRecoveryAction?.(sessionId, action);
   }
 
   private renderOpenAsk() {

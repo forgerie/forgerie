@@ -325,7 +325,7 @@ export class SessionController {
       ]);
       if (this.sessionLaunchRecoveries.get(sessionId) !== record || !this.isSelectedSessionIdentity(sessionId, machineId)) return;
       const history = this.transcripts.mergeHistory(machineSessionKey(machineId, sessionId), page);
-      this.setState({ ...history, status });
+      this.setState(history);
       this.applyStatus(status);
       if (canonicalTranscriptContainsPrompt(page, record.recovery.prompt)) {
         const retainedQueuedSends = record.queuedSends.slice(1);
@@ -564,9 +564,7 @@ export class SessionController {
   }
 
   private async flushQueuedPendingSends(session: SessionInfo, machineId: string, queuedSends: readonly QueuedPendingSessionSend[], destination?: SessionLaunchDestination): Promise<void> {
-    for (let index = 0; index < queuedSends.length; index += 1) {
-      const queued = queuedSends[index];
-      if (queued === undefined) continue;
+    for (const [index, queued] of queuedSends.entries()) {
       const delivered = await this.deliverQueuedPendingSend(session, machineId, queued);
       if (delivered) {
         this.dropNextQueuedSessionMessage(session.id);
@@ -836,6 +834,7 @@ export class SessionController {
     try {
       const response = await this.api.archiveWithDescendants(session, machineId);
       const archivedIds = response.sessionIds !== undefined && response.sessionIds.length > 0 ? response.sessionIds : [session.id];
+      this.clearSessionLaunchRecoveryLifecycleState(archivedIds, machineId);
       const archivedAt = new Date().toISOString();
       const state = this.getState();
       const sessions = markSessionsArchived(state.sessions, archivedIds, archivedAt);
@@ -858,6 +857,7 @@ export class SessionController {
       const machineId = selectedMachineId(this.getState());
       const { succeededIds: archivedIds, failures, generatedAt } = await this.archiveSessionBatch(candidates, machineId);
       if (archivedIds.length > 0) {
+        this.clearSessionLaunchRecoveryLifecycleState(archivedIds, machineId);
         const archivedAt = generatedAt ?? new Date().toISOString();
         const state = this.getState();
         const nextSessions = markSessionsArchived(state.sessions, archivedIds, archivedAt);
@@ -882,6 +882,7 @@ export class SessionController {
     try {
       const { succeededIds: deletedIds, failures } = await this.deleteArchivedSessionBatch(candidates, machineId);
       if (deletedIds.length > 0) {
+        this.clearSessionLaunchRecoveryLifecycleState(deletedIds, machineId);
         const deletedIdSet = new Set(deletedIds);
         const state = this.getState();
         const nextSessions = state.sessions.filter((session) => !deletedIdSet.has(session.id));
@@ -910,20 +911,23 @@ export class SessionController {
   }
 
   async applySessionCleanupResult(result: SessionCleanupExecuteResponse, machineId = selectedMachineId(this.getState())): Promise<void> {
-    if (selectedMachineId(this.getState()) !== machineId) return;
     const archivedIds = result.archivedSessionIds;
     const deletedIds = result.deletedSessionIds;
-    if (archivedIds.length > 0 || deletedIds.length > 0) {
+    const affectedIds = [...archivedIds, ...deletedIds];
+    this.clearSessionLaunchRecoveryLifecycleState(affectedIds, machineId);
+    if (selectedMachineId(this.getState()) !== machineId) return;
+    if (affectedIds.length > 0) {
       const state = this.getState();
       const deletedIdSet = new Set(deletedIds);
-      const affectedIds = [...archivedIds, ...deletedIds];
       const nextSessions = markSessionsArchived(state.sessions, archivedIds, result.generatedAt).filter((session) => !deletedIdSet.has(session.id));
       const selectedAffected = state.selectedSession !== undefined && affectedIds.includes(state.selectedSession.id);
+      const selectedActivityAffected = state.activity !== undefined && affectedIds.includes(state.activity.sessionId);
       this.setState({
         sessions: nextSessions,
         sessionStatuses: omitKeys(state.sessionStatuses, affectedIds),
         sessionActivities: omitKeys(state.sessionActivities, affectedIds),
-        ...(selectedAffected ? { status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] } : {}),
+        ...(selectedAffected ? { status: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] } : {}),
+        ...(selectedActivityAffected ? { activity: undefined } : {}),
       });
       if (archivedIds.length > 0) this.inbox?.notifyBulkArchived(machineId, archivedIds, result.generatedAt);
       if (deletedIds.length > 0) this.inbox?.notifyDeleted(machineId, deletedIds);
@@ -978,7 +982,7 @@ export class SessionController {
         // Best-effort cleanup for transient sessions that may not exist server-side anymore.
       });
     }
-    this.sessionLaunchRecoveries.delete(session.id);
+    this.clearSessionLaunchRecoveryLifecycleState([session.id], machineId);
     forgetCachedNewSession(session.id, machineId);
     clearDraft(this.sessionCacheKey(session.id));
     const state = this.getState();
@@ -1395,6 +1399,27 @@ export class SessionController {
     this.setState({ error: `${action} failed for ${String(failures.length)} session${failures.length === 1 ? "" : "s"}: ${failures.join("; ")}` });
   }
 
+  private clearSessionLaunchRecoveryLifecycleState(sessionIds: readonly string[], machineId: string): void {
+    const affectedIds: string[] = [];
+    for (const sessionId of new Set(sessionIds)) {
+      const record = this.sessionLaunchRecoveries.get(sessionId);
+      if (record?.recovery.destination.machineId !== machineId) continue;
+      this.sessionLaunchRecoveries.delete(sessionId);
+      affectedIds.push(sessionId);
+    }
+    if (affectedIds.length === 0) return;
+
+    const state = this.getState();
+    if (selectedMachineId(state) !== machineId) return;
+    const clearsSelectedActivity = state.activity !== undefined && affectedIds.includes(state.activity.sessionId);
+    this.setState({
+      clientQueuedSessionMessages: omitKeys(state.clientQueuedSessionMessages, affectedIds),
+      sessionActivities: omitKeys(state.sessionActivities, affectedIds),
+      sendingPrompts: omitKeys(state.sendingPrompts, affectedIds),
+      ...(clearsSelectedActivity ? { activity: undefined } : {}),
+    });
+  }
+
   /**
    * Core archive logic shared by archiveSession and archiveSessionThrowing.
    * Handles transient sessions, archivability checks, the API call, state
@@ -1413,6 +1438,7 @@ export class SessionController {
     if (!isArchivableSessionInfo(session, status)) return undefined;
     const machineId = selectedMachineId(this.getState());
     await this.api.archive(session, machineId);
+    this.clearSessionLaunchRecoveryLifecycleState([session.id], machineId);
     const archivedAt = new Date().toISOString();
     const state = this.getState();
     // The server mutation belongs to the captured machine/workspace. Never
@@ -1640,12 +1666,14 @@ export class SessionController {
   }
 
   private hasPendingStartFor(cwd: string, machineId: string): boolean {
-    return Array.from(this.pendingSessionStarts.values()).some((pending) => pending.cwd === cwd && pending.machineId === machineId);
+    return Array.from(this.pendingSessionStarts.values()).some((pending) => sessionPathsEqual(pending.cwd, cwd) && pending.machineId === machineId);
   }
 
   private isSuppressedCreatedSession(session: SessionInfo, machineId: string): boolean {
     const suppressed = this.suppressedCreatedSessions.get(session.id);
-    return suppressed?.session.cwd === session.cwd && suppressed.machineId === machineId;
+    return suppressed !== undefined
+      && sessionPathsEqual(suppressed.session.cwd, session.cwd)
+      && suppressed.machineId === machineId;
   }
 
   private takeSuppressedCreatedSessionsFor(cwd: string, machineId: string, resolvedSessionId?: string): SessionInfo[] {
@@ -1653,7 +1681,7 @@ export class SessionController {
     if (this.hasPendingStartFor(cwd, machineId)) return [];
     const released: SessionInfo[] = [];
     for (const [sessionId, suppressed] of this.suppressedCreatedSessions) {
-      if (suppressed.session.cwd !== cwd || suppressed.machineId !== machineId) continue;
+      if (!sessionPathsEqual(suppressed.session.cwd, cwd) || suppressed.machineId !== machineId) continue;
       this.suppressedCreatedSessions.delete(sessionId);
       released.push(suppressed.session);
     }
@@ -1664,14 +1692,15 @@ export class SessionController {
     if (sessions.length === 0 || selectedMachineId(this.getState()) !== machineId) return;
     const state = this.getState();
     if (state.selectedWorkspace === undefined) return;
+    const workspacePath = state.selectedWorkspace.path;
     const existingIds = new Set(state.sessions.map((session) => session.id));
-    const released = sessions.filter((session) => session.cwd === state.selectedWorkspace?.path && !existingIds.has(session.id));
+    const released = sessions.filter((session) => sessionPathsEqual(session.cwd, workspacePath) && !existingIds.has(session.id));
     if (released.length === 0) return;
     this.setState({ sessions: [...released.reverse(), ...state.sessions] });
   }
 
   private mergePendingStartSessions(cwd: string, sessions: SessionInfo[], machineId: string): SessionInfo[] {
-    const pending = this.getState().sessions.filter((session): session is ClientPendingStartSessionInfo => isClientPendingStartSessionInfo(session) && session.cwd === cwd && session.machineId === machineId);
+    const pending = this.getState().sessions.filter((session): session is ClientPendingStartSessionInfo => isClientPendingStartSessionInfo(session) && sessionPathsEqual(session.cwd, cwd) && session.machineId === machineId);
     if (pending.length === 0) return sessions;
     const pendingIds = new Set(pending.map((session) => session.id));
     return [...pending, ...sessions.filter((session) => !pendingIds.has(session.id))];
@@ -1725,7 +1754,7 @@ export class SessionController {
     // A session created in another workspace is not listed here, but it may be a
     // child of one that is: keep that parent's cross-workspace child count live
     // instead of leaving it stale until the next listing.
-    if (state.selectedWorkspace?.path !== session.cwd) {
+    if (state.selectedWorkspace === undefined || !sessionPathsEqual(state.selectedWorkspace.path, session.cwd)) {
       const patch = childElsewhereCountPatch(state, session);
       if (patch !== undefined) this.setState(patch);
       return;
@@ -2163,12 +2192,19 @@ function failedPendingSessionActivity(sessionId: string, message: string, queued
   };
 }
 
+const INITIAL_PROMPT_CONFIRMED_UNSENT_ACTIVITY_LABEL = "First prompt was not sent";
+const INITIAL_PROMPT_AMBIGUOUS_ACTIVITY_LABEL = "First prompt delivery is unclear";
+const INITIAL_PROMPT_RECOVERY_ACTIVITY_LABELS = new Set([
+  INITIAL_PROMPT_CONFIRMED_UNSENT_ACTIVITY_LABEL,
+  INITIAL_PROMPT_AMBIGUOUS_ACTIVITY_LABEL,
+]);
+
 function failedInitialPromptActivity(sessionId: string, stage: SessionLaunchRecovery["stage"]): SessionActivity {
   const confirmedUnsent = stage === "promptConfirmedUnsent";
   return {
     sessionId,
     phase: "error",
-    label: confirmedUnsent ? "First prompt was not sent" : "First prompt delivery is unclear",
+    label: confirmedUnsent ? INITIAL_PROMPT_CONFIRMED_UNSENT_ACTIVITY_LABEL : INITIAL_PROMPT_AMBIGUOUS_ACTIVITY_LABEL,
     detail: confirmedUnsent
       ? "The session was created, but its first prompt was confirmed unsent."
       : "The session was created, but the first prompt may have been accepted. Inspect the transcript before sending it again.",
@@ -2181,8 +2217,7 @@ function sessionLaunchDestination(pending: PendingSessionStart): SessionLaunchDe
 }
 
 function isInitialPromptRecoveryActivity(activity: SessionActivity | undefined): boolean {
-  return activity?.phase === "error"
-    && (activity.label === "First prompt was not sent" || activity.label === "First prompt delivery is unclear");
+  return activity?.phase === "error" && INITIAL_PROMPT_RECOVERY_ACTIVITY_LABELS.has(activity.label);
 }
 
 function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): boolean {

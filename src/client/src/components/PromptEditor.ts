@@ -10,7 +10,6 @@ import type { PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePromptAttachment, promptAttachmentsCanUseInlineDelivery, type CapturedAttachment } from "../promptAttachmentCapture";
 import { composerRail, type ComposerRail } from "../composerRail";
 import { inputModeForDraft, inputModesEqual, type InputMode } from "../inputModes";
-import { keyboardEventMatchesShortcut } from "../keyboardShortcuts";
 import { machineSessionKey } from "../machineKeys";
 import { detectPromptCompletionTrigger, fileCompletionInsertText, modelCompletionChoices, type PromptCompletionTrigger } from "../promptCompletions";
 import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
@@ -54,7 +53,6 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) onOpenControlSheet?: () => void;
   /** Warnings plus notifications waiting behind the island menu. */
   @property({ type: Number }) attentionCount = 0;
-  @property({ attribute: false }) newSessionShortcut?: string;
   @property({ attribute: false }) onNewSession?: () => void;
   @property({ attribute: false }) availableThinkingLevels: readonly string[] = [];
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
@@ -622,11 +620,6 @@ export class PromptEditor extends LitElement {
       return false;
     }
     if (event.defaultPrevented || event.isComposing || view.composing) return false;
-    if (keyboardEventMatchesShortcut(event, this.newSessionShortcut)) {
-      this.explicitShiftKeyActive = false;
-      this.onNewSession?.();
-      return true;
-    }
     if (event.key !== "Enter") {
       this.explicitShiftKeyActive = false;
       return false;

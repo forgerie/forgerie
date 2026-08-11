@@ -48,17 +48,56 @@ describe("PiWebApp global shortcut modality boundary", () => {
   });
 
   it.each([
-    { name: "remapped", shortcuts: { "core:session.start": "alt+n" }, expected: "alt+n" },
-    { name: "disabled", shortcuts: { "core:session.start": null }, expected: undefined },
-  ])("passes the $name effective New session binding to PromptEditor", ({ shortcuts, expected }) => {
-    const app = new PiWebApp();
-    const selectedSession = session("session-shortcut");
-    setAppState(app, { selectedSession, sessions: [selectedSession], mainView: "chat" });
-    Reflect.set(app, "shortcutConfig", shortcuts);
+    { modifier: "Control", keys: { ctrlKey: true } },
+    { modifier: "Meta", keys: { metaKey: true } },
+  ])("opens New session before CodeMirror handles Mod+Enter with $modifier and preserves the chat draft", async ({ keys }) => {
+    const { app, editor } = await renderChatEditor({});
+    const onSend = vi.fn();
+    const editorKeyDown = vi.fn();
+    editor.onSend = onSend;
+    editor.replaceText("keep this chat draft");
+    editor.view?.contentDOM.addEventListener("keydown", editorKeyDown);
 
-    const editor = requiredElement(renderApp(app).querySelector<PromptEditor>("prompt-editor"), "prompt editor");
+    const event = dispatchEditorKeyThroughApp(app, editor, "Enter", keys);
 
-    expect(editor.newSessionShortcut).toBe(expected);
+    expect(newSessionComposerIsOpen(app)).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorKeyDown).not.toHaveBeenCalled();
+    expect(editor.view?.state.doc.toString()).toBe("keep this chat draft");
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it.each([
+    { name: "remapped", shortcuts: { "core:session.start": "alt+n" } },
+    { name: "disabled", shortcuts: { "core:session.start": null } },
+  ])("honors a $name New session preference from editor focus", async ({ shortcuts }) => {
+    const { app, editor } = await renderChatEditor(shortcuts);
+    const onSend = vi.fn();
+    editor.onSend = onSend;
+    editor.replaceText("send with existing behavior");
+
+    const event = dispatchEditorKeyThroughApp(app, editor, "Enter", { ctrlKey: true });
+
+    expect(newSessionComposerIsOpen(app)).toBe(false);
+    expect(onSend).toHaveBeenCalledWith("send with existing behavior", undefined, undefined, undefined);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("opens New session through the global dispatcher with a configured alternate shortcut", async () => {
+    const { app, editor } = await renderChatEditor({ "core:session.start": "alt+n" });
+    const onSend = vi.fn();
+    const editorKeyDown = vi.fn();
+    editor.onSend = onSend;
+    editor.replaceText("alternate shortcut draft");
+    editor.view?.contentDOM.addEventListener("keydown", editorKeyDown);
+
+    const event = dispatchEditorKeyThroughApp(app, editor, "n", { altKey: true });
+
+    expect(newSessionComposerIsOpen(app)).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorKeyDown).not.toHaveBeenCalled();
+    expect(editor.view?.state.doc.toString()).toBe("alternate shortcut draft");
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("leaves capture-phase keyboard handling with a rendered shared modal", async () => {
@@ -191,13 +230,13 @@ function dispatchShortcutThroughApp(app: PiWebApp, target: HTMLElement): Keyboar
   return dispatchKeyThroughApp(app, target, "k");
 }
 
-function dispatchKeyThroughApp(app: PiWebApp, target: HTMLElement, key: string): KeyboardEvent {
+function dispatchKeyThroughApp(app: PiWebApp, target: HTMLElement, key: string, modifiers: Partial<KeyboardEventInit> = { ctrlKey: true }): KeyboardEvent {
   const handler: unknown = Reflect.get(app, "onKeyDown");
   if (!isAppKeyDownHandler(handler)) throw new Error("PiWebApp shortcut handler was unavailable");
   window.addEventListener("keydown", handler, { capture: true });
   const event = new KeyboardEvent("keydown", {
     key,
-    ctrlKey: true,
+    ...modifiers,
     bubbles: true,
     cancelable: true,
     composed: true,
@@ -208,6 +247,27 @@ function dispatchKeyThroughApp(app: PiWebApp, target: HTMLElement, key: string):
     window.removeEventListener("keydown", handler, { capture: true });
   }
   return event;
+}
+
+function dispatchEditorKeyThroughApp(
+  app: PiWebApp,
+  editor: PromptEditor,
+  key: string,
+  modifiers: Partial<KeyboardEventInit>,
+): KeyboardEvent {
+  const contentDOM = editor.view?.contentDOM;
+  if (contentDOM === undefined) throw new Error("Expected CodeMirror contentDOM");
+  return dispatchKeyThroughApp(app, contentDOM, key, modifiers);
+}
+
+async function renderChatEditor(shortcuts: Record<string, string | null>): Promise<{ app: PiWebApp; editor: PromptEditor }> {
+  const app = new PiWebApp();
+  const selectedSession = session("session-shortcut");
+  setAppState(app, { selectedSession, sessions: [selectedSession], mainView: "chat" });
+  Reflect.set(app, "shortcutConfig", shortcuts);
+  const editor = requiredElement(renderApp(app).querySelector<PromptEditor>("prompt-editor"), "prompt editor");
+  await editor.updateComplete;
+  return { app, editor };
 }
 
 async function openAuthenticationDialog(app: PiWebApp): Promise<HTMLElement> {

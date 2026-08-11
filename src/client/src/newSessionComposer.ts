@@ -80,8 +80,11 @@ export function isValidNewSessionDestination(destination: NewSessionDestination)
     && destination.workspace.id.trim().length > 0
     && destination.workspace.path.trim().length > 0
     && destination.workspace.projectId === destination.project.id
-    && destination.machine.status !== "offline"
-    && destination.machine.status !== "error";
+    && isNewSessionMachineAvailable(destination.machine);
+}
+
+export function isNewSessionMachineAvailable(machine: Machine): boolean {
+  return machine.status !== "offline" && machine.status !== "error";
 }
 
 export function beginNewSessionSubmission(state: NewSessionComposerState): NewSessionComposerState {
@@ -110,7 +113,7 @@ export function startNewSessionDestinationChoice(state: NewSessionComposerState,
 export function chooseNewSessionMachine(state: NewSessionComposerState, machine: Machine, requestId: number): NewSessionComposerState {
   if (state.kind !== "choosing" || state.choice.step !== "machine" || state.choice.catalog.kind !== "ready") return state;
   const availableMachine = state.choice.catalog.items.find((item) => item.id === machine.id);
-  if (availableMachine === undefined || !isMachineAvailable(availableMachine)) return state;
+  if (availableMachine === undefined || !isNewSessionMachineAvailable(availableMachine)) return state;
   return {
     kind: "choosing",
     destination: state.destination,
@@ -200,10 +203,6 @@ export function resolveNewSessionWorkspaces(
 ): NewSessionComposerState {
   if (!isActiveCatalogRequest(state, "workspace", requestId)) return state;
   return { ...state, choice: { step: "workspace", machine: state.choice.machine, project: state.choice.project, catalog: resolvedCatalog(requestId, resolution) } };
-}
-
-function isMachineAvailable(machine: Machine): boolean {
-  return machine.status !== "offline" && machine.status !== "error";
 }
 
 function isActiveCatalogRequest<S extends NewSessionDestinationChoice["step"]>(

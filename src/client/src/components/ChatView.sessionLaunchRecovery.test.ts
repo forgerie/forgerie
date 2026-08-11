@@ -52,16 +52,14 @@ describe("chatSessionLaunchRecoveryPresentation", () => {
 describe("ChatView session launch recovery wiring", () => {
   it("attaches recovery to the first prompt before the queued tail and binds its actions to the rendered session", async () => {
     const view = new ChatView();
-    const onRetry = vi.fn();
-    const onChangeDestination = vi.fn();
+    const onAction = vi.fn();
     view.sessionId = "pending-session-1";
     view.clientQueuedMessages = [
       { kind: "followUp", text: "Recover this exact prompt" },
       { kind: "followUp", text: "Wait behind recovery" },
     ];
     view.sessionLaunchRecovery = recovery("creationFailed");
-    view.onRetrySessionLaunch = onRetry;
-    view.onChangeSessionLaunchDestination = onChangeDestination;
+    view.onSessionLaunchRecoveryAction = onAction;
     document.body.append(view);
     await view.updateComplete;
 
@@ -80,8 +78,10 @@ describe("ChatView session launch recovery wiring", () => {
     buttons[0]?.click();
     buttons[1]?.click();
 
-    expect(onRetry).toHaveBeenCalledExactlyOnceWith("pending-session-1");
-    expect(onChangeDestination).toHaveBeenCalledExactlyOnceWith("pending-session-1");
+    expect(onAction.mock.calls).toEqual([
+      ["pending-session-1", "retry"],
+      ["pending-session-1", "changeDestination"],
+    ]);
   });
 
   it("keeps ordinary no-recovery queue copy and labels unchanged", async () => {

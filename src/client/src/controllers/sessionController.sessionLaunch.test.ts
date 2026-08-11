@@ -419,6 +419,7 @@ describe("SessionController session launch", () => {
     await controller.refreshSessionLaunchRecovery(started.id);
 
     expect(promptCalls).toEqual(["Refresh without resending"]);
+    expect(state.status).toEqual(status(started.id));
     expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
       stage: "promptConfirmedUnsent",
       prompt: "Refresh without resending",
@@ -500,6 +501,189 @@ describe("SessionController session launch", () => {
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
     expect(state.sessionActivities[started.id]).toBeUndefined();
     expect(state.sessions.some((session) => session.id === started.id)).toBe(false);
+  });
+
+  it("clears delivery recovery projections when the session is archived", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const nextSession: SessionInfo = { ...oldSession, id: "next-session", path: "/tmp/next-session.jsonl" };
+    const unrelatedActivity = { sessionId: nextSession.id, phase: "active" as const, label: "Other activity", at: "now" };
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => Promise.reject(new Error("confirmed unsent")),
+      archive: () => Promise.resolve({ archived: true }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Do not retain after archive");
+    const persisted = { ...started, persisted: true };
+    state = {
+      ...state,
+      selectedSession: nextSession,
+      sessions: [persisted, nextSession],
+      sendingPrompts: { [started.id]: true },
+      sessionActivities: { ...state.sessionActivities, [nextSession.id]: unrelatedActivity },
+      activity: unrelatedActivity,
+      error: "Keep this error",
+    };
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeDefined();
+
+    await controller.archiveSession(persisted);
+
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    expect(state.sessionActivities[started.id]).toBeUndefined();
+    expect(state.sendingPrompts[started.id]).toBeUndefined();
+    expect(state.sessionActivities[nextSession.id]).toBe(unrelatedActivity);
+    expect(state.activity).toBe(unrelatedActivity);
+    expect(state.error).toBe("Keep this error");
+  });
+
+  it("clears delivery recovery projections when an archived session is deleted", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const nextSession: SessionInfo = { ...oldSession, id: "next-session", path: "/tmp/next-session.jsonl" };
+    const unrelatedActivity = { sessionId: nextSession.id, phase: "active" as const, label: "Other activity", at: "now" };
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => Promise.reject(new Error("confirmed unsent")),
+      deleteArchivedMany: (sessions) => Promise.resolve({ deleted: true, deletedSessionIds: sessions.map(sessionLookupId), failures: [], generatedAt: "now" }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Do not retain after delete");
+    const archived = { ...started, archived: true, archivedAt: "now" };
+    const recoveryActivity = state.activity;
+    state = {
+      ...state,
+      selectedSession: nextSession,
+      sessions: [archived, nextSession],
+      sendingPrompts: { [started.id]: true },
+      sessionActivities: { ...state.sessionActivities, [nextSession.id]: unrelatedActivity },
+      activity: recoveryActivity,
+      error: "Keep this error",
+    };
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeDefined();
+
+    await controller.deleteArchivedSessions([archived]);
+
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    expect(state.sessionActivities[started.id]).toBeUndefined();
+    expect(state.sendingPrompts[started.id]).toBeUndefined();
+    expect(state.sessionActivities[nextSession.id]).toBe(unrelatedActivity);
+    expect(state.activity).toBeUndefined();
+    expect(state.error).toBe("Keep this error");
+  });
+
+  it("clears delivery recovery projections when session cleanup archives the session", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const nextSession: SessionInfo = { ...oldSession, id: "next-session", path: "/tmp/next-session.jsonl" };
+    const unrelatedActivity = { sessionId: nextSession.id, phase: "active" as const, label: "Other activity", at: "now" };
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => Promise.reject(new Error("confirmed unsent")),
+      sessions: () => Promise.resolve([nextSession]),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Do not retain after cleanup");
+    state = {
+      ...state,
+      selectedSession: nextSession,
+      sessions: [started, nextSession],
+      sendingPrompts: { [started.id]: true },
+      sessionActivities: { ...state.sessionActivities, [nextSession.id]: unrelatedActivity },
+      activity: unrelatedActivity,
+      error: "Keep this error",
+    };
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeDefined();
+
+    await controller.applySessionCleanupResult({
+      generatedAt: "now",
+      thresholds: { archiveIdleDays: 30, deleteArchivedDays: 60 },
+      projects: [{ cwd: workspace.path, archiveCount: 1, deleteCount: 0 }],
+      totals: { archiveCount: 1, deleteCount: 0 },
+      archivedSessionIds: [started.id],
+      deletedSessionIds: [],
+    });
+
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    expect(state.sessionActivities[started.id]).toBeUndefined();
+    expect(state.sendingPrompts[started.id]).toBeUndefined();
+    expect(state.sessionActivities[nextSession.id]).toBe(unrelatedActivity);
+    expect(state.activity).toBe(unrelatedActivity);
+    expect(state.error).toBe("Keep this error");
+  });
+
+  it("preserves local recovery projections when cleanup belongs to another machine", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => Promise.reject(new Error("confirmed unsent")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Keep local recovery");
+    state = { ...state, sendingPrompts: { [started.id]: true }, error: "Keep this error" };
+    const recoveryActivity = state.sessionActivities[started.id];
+
+    await controller.applySessionCleanupResult({
+      generatedAt: "now",
+      thresholds: { archiveIdleDays: 30, deleteArchivedDays: 60 },
+      projects: [{ cwd: workspace.path, archiveCount: 1, deleteCount: 0 }],
+      totals: { archiveCount: 1, deleteCount: 0 },
+      archivedSessionIds: [started.id],
+      deletedSessionIds: [],
+    }, "remote");
+
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeDefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toEqual([
+      { kind: "followUp", text: "Keep local recovery" },
+    ]);
+    expect(state.sessionActivities[started.id]).toBe(recoveryActivity);
+    expect(state.activity).toBe(recoveryActivity);
+    expect(state.sendingPrompts[started.id]).toBe(true);
+    expect(state.error).toBe("Keep this error");
   });
 
   it("keeps prompts, shell input, and commands queued after the initial prompt in their original order", async () => {

@@ -15,7 +15,7 @@ describe("SessionInboxNewSessionDialog workspace management", () => {
   it("renders no session-start mode and opens the selected workspace for management", async () => {
     const onConfirmManage = vi.fn();
     const dialog = await mount({
-      dialogState: { step: "workspace", project, mode: "manage", workspaces: [workspace], loading: false, error: undefined },
+      dialogState: { step: "workspace", project, workspaces: [workspace], loading: false, error: undefined },
       onConfirmManage,
     });
 
@@ -29,7 +29,7 @@ describe("SessionInboxNewSessionDialog workspace management", () => {
   it("preserves project selection, loading, error, back, and cancel contracts", async () => {
     const onSelectProject = vi.fn();
     const onCancel = vi.fn();
-    const dialog = await mount({ dialogState: { step: "project", mode: "manage" }, onSelectProject, onCancel });
+    const dialog = await mount({ dialogState: { step: "project" }, onSelectProject, onCancel });
     const root = required(dialog.shadowRoot, "shadow root");
 
     required(root.querySelector<HTMLButtonElement>("[data-project-id='project']"), "project button").click();
@@ -37,13 +37,13 @@ describe("SessionInboxNewSessionDialog workspace management", () => {
     expect(onSelectProject).toHaveBeenCalledWith(project);
     expect(onCancel).toHaveBeenCalledOnce();
 
-    dialog.dialogState = { step: "workspace", project, mode: "manage", workspaces: [], loading: true, error: undefined };
+    dialog.dialogState = { step: "workspace", project, workspaces: [], loading: true, error: undefined };
     await dialog.updateComplete;
     expect(root.querySelector("[data-state='workspace-loading']")).not.toBeNull();
 
     const onBack = vi.fn();
     dialog.onBack = onBack;
-    dialog.dialogState = { step: "workspace", project, mode: "manage", workspaces: [], loading: false, error: "Unavailable" };
+    dialog.dialogState = { step: "workspace", project, workspaces: [], loading: false, error: "Unavailable" };
     await dialog.updateComplete;
     expect(root.querySelector("[data-state='workspace-error']")?.textContent).toContain("Unavailable");
     required(root.querySelector<HTMLButtonElement>("[data-action='back']"), "back button").click();

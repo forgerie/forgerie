@@ -161,11 +161,10 @@ export type NewSessionComposerRequest =
 
 /** Workspace-management dialog state. Session creation uses NewSessionComposer. */
 export type NewSessionDialogState =
-  | { step: "project"; mode: "manage" }
+  | { step: "project" }
   | {
       step: "workspace";
       project: Project;
-      mode: "manage";
       workspaces: readonly Workspace[];
       loading: boolean;
       error: string | undefined;

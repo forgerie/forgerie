@@ -3,7 +3,7 @@
  * Session creation is owned by NewSessionComposer.
  *
  * State discipline:
- *   All step/mode/loading/error state is owned by the parent (PiWebApp) via
+ *   All step/loading/error state is owned by the parent (PiWebApp) via
  *   the `dialogState` property.  This component is purely presentational and
  *   fires callbacks for every user interaction.
  *

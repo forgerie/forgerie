@@ -176,13 +176,6 @@ export function shortcutTokenFromEvent(event: ShortcutKeyEvent): string | undefi
   return modifiers.join("+");
 }
 
-/** Matches one complete configured chord. Shortcut sequences stay with the global dispatcher. */
-export function keyboardEventMatchesShortcut(event: ShortcutKeyEvent, shortcut: string | undefined): boolean {
-  if (shortcut === undefined) return false;
-  const tokens = normalizeShortcut(shortcut);
-  return tokens.length === 1 && shortcutTokenFromEvent(event) === tokens[0];
-}
-
 export function isShortcutSequenceStarter(token: string): boolean {
   return token.split("+").includes("mod") || token.split("+").includes("alt");
 }

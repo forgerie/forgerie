@@ -10,6 +10,7 @@ import {
   chooseNewSessionWorkspace,
   completeNewSessionDestination,
   createNewSessionComposerState,
+  isNewSessionMachineAvailable,
   refreshNewSessionCatalog,
   resolveNewSessionMachines,
   resolveNewSessionProjects,
@@ -41,6 +42,15 @@ const workspace = (id: string, projectId: string): Workspace => ({
 });
 
 describe("new-session composer state", () => {
+  it.each([
+    { status: "online" as const, available: true },
+    { status: "unknown" as const, available: true },
+    { status: "offline" as const, available: false },
+    { status: "error" as const, available: false },
+  ])("reports $status machines as available=$available", ({ status: machineStatus, available }) => {
+    expect(isNewSessionMachineAvailable(machine("remote", machineStatus))).toBe(available);
+  });
+
   it("requires a structurally complete, available destination and a non-empty prompt", () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     let state = createNewSessionComposerState(destination);
