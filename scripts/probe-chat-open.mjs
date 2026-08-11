@@ -88,6 +88,10 @@ async function probePosture({ args, debugPort, posture, representatives }) {
     await sleep(args.settleMs);
     await installProbeHooks(cdp);
     await waitForRow(cdp, representatives.previous, args.timeoutMs);
+    const largeTarget = await visibleLargeRepresentative(cdp, representatives.largeCandidates);
+    if (!sameSessionRef(largeTarget, representatives.large)) {
+      process.stdout.write(`  large fallback       ${describeRef(largeTarget)} (preferred catalog entry is not an inbox row)\n`);
+    }
 
     await selectAndWaitReady(cdp, representatives.previous, args, "baseline-previous");
     await removeHistoryCache(cdp, representatives.same);
@@ -137,12 +141,12 @@ async function probePosture({ args, debugPort, posture, representatives }) {
     failures.push(...gateScenario(cross, args));
     warnings.push(...longTaskWarnings(cross, args));
 
-    const largeSource = sourceForTarget(representatives.large, [representatives.previous, representatives.same, representatives.cross]);
+    const largeSource = sourceForTarget(largeTarget, [representatives.previous, representatives.same, representatives.cross]);
     const large = await activateMeasuredScenario(cdp, {
       args,
       posture,
       source: largeSource,
-      target: representatives.large,
+      target: largeTarget,
       label: "large-transcript",
       delayHydration: false,
       captureOpening: false,
@@ -560,7 +564,14 @@ async function representativeSessions(args) {
   const previous = explicitPrevious ?? sessionRef(sameGroup[0] ?? sessions[0]);
   const same = explicitSame ?? sessionRef(sameGroup.find((session) => session.id !== previous.id) ?? sessions.find((session) => session.cwd === previous.cwd && session.id !== previous.id));
   const cross = explicitCross ?? sessionRef(sessions.find((session) => session.cwd !== previous.cwd));
-  const large = explicitLarge ?? sessionRef([...sessions].sort((left, right) => (right.messageCount ?? 0) - (left.messageCount ?? 0))[0]);
+  const largeCandidates = explicitLarge === undefined
+    ? [...sessions]
+      .sort((left, right) => (right.messageCount ?? 0) - (left.messageCount ?? 0))
+      .slice(0, 100)
+      .map(sessionRef)
+      .filter((candidate) => candidate !== undefined)
+    : [explicitLarge];
+  const large = largeCandidates[0];
 
   if (same === undefined) fail("Could not discover a same-workspace target. Pass --same-session-id and --same-cwd.");
   if (cross === undefined) fail("Could not discover a cross-workspace target. Pass --cross-session-id and --cross-cwd.");
@@ -570,7 +581,19 @@ async function representativeSessions(args) {
   process.stdout.write(`  same-workspace  ${describeRef(same)}\n`);
   process.stdout.write(`  cross-workspace ${describeRef(cross)}\n`);
   process.stdout.write(`  large           ${describeRef(large)}\n`);
-  return { previous, same, cross, large };
+  return { previous, same, cross, large, largeCandidates };
+}
+
+async function visibleLargeRepresentative(cdp, candidates) {
+  await revealCollapsedSessionGroups(cdp);
+  const visible = await evaluate(cdp, `
+    (() => {
+      const candidates = ${JSON.stringify(candidates)};
+      return candidates.find((candidate) => window.__chatOpenProbe.row(candidate.id) !== undefined);
+    })()
+  `);
+  if (visible === undefined) fail("Could not find any of the 100 largest non-archived catalog sessions as an inbox row. Pass an explicit visible --large-session-id and --large-cwd.");
+  return visible;
 }
 
 function sourceForTarget(target, candidates) {
