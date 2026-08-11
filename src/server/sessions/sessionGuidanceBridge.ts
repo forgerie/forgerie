@@ -25,8 +25,9 @@ export function createSessionGuidanceSlot(): SessionGuidanceSlot {
 
 export function createSessionGuidanceBridgeHandlers(slot: SessionGuidanceSlot) {
   return {
-    sessionStart(entries: readonly unknown[]) {
-      slot.replace(restoreSessionGuidance(entries));
+    sessionStart(getEntries: () => readonly unknown[]) {
+      slot.replace([]);
+      slot.replace(restoreSessionGuidance(getEntries()));
     },
     beforeAgentStart(systemPrompt: string): { systemPrompt: string } | undefined {
       const block = sessionGuidancePromptBlock(slot.snapshot());
@@ -46,7 +47,7 @@ export function createSessionGuidanceBridgeExtension(slot: SessionGuidanceSlot):
     factory(pi: ExtensionAPI) {
       const handlers = createSessionGuidanceBridgeHandlers(slot);
       pi.on("session_start", (_event, context) => {
-        handlers.sessionStart(context.sessionManager.getEntries());
+        handlers.sessionStart(() => context.sessionManager.getEntries());
       });
       pi.on("before_agent_start", (event) => handlers.beforeAgentStart(event.systemPrompt));
       pi.on("session_shutdown", () => {

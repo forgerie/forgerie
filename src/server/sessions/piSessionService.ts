@@ -1205,6 +1205,7 @@ export class PiSessionService implements SessionRouteService {
       try {
         await this.abortSessionOperations(active.runtime.session);
       } finally {
+        active.runtime.services?.sessionGuidanceSlot?.dispose();
         await active.runtime.dispose();
       }
     }));
@@ -2106,6 +2107,7 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     const slot = this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot;
     if (slot === undefined) throw new Error("Session guidance is unavailable");
+    this.assertTreeNavigationInactive(session, "change session guidance");
     const change = setSessionGuidance(slot.snapshot(), entryId, enabled);
     if (!change.changed) return this.statusFromSession(session);
     const sessionManager = session.sessionManager;
@@ -3362,6 +3364,7 @@ export class PiSessionService implements SessionRouteService {
       runtime.setRebindSession(async (session) => {
         const priorGeneration = notificationGeneration;
         let candidateGeneration: SessionNotificationGeneration | undefined;
+        runtime.services?.sessionGuidanceSlot?.replace([]);
         try {
           await this.prepareUnreadRuntimeRebind(boundSession, session);
           await this.recoverSubsessionTrackingForOpenedSession(session);

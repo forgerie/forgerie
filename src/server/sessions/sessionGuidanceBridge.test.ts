@@ -6,7 +6,7 @@ describe("session guidance bridge", () => {
   it("restores saved guidance before the first agent start and chains the prompt", () => {
     const slot = createSessionGuidanceSlot();
     const handlers = createSessionGuidanceBridgeHandlers(slot);
-    handlers.sessionStart([{
+    handlers.sessionStart(() => [{
       type: "custom",
       customType: SESSION_GUIDANCE_CUSTOM_TYPE,
       data: persistedSessionGuidance(["technical-english"]),
@@ -20,10 +20,36 @@ describe("session guidance bridge", () => {
     expect(second?.systemPrompt).toMatch(/^Different base\n\nSession guidance:/);
   });
 
+  it("applies slot changes only at the next agent-start boundary", () => {
+    const slot = createSessionGuidanceSlot();
+    const handlers = createSessionGuidanceBridgeHandlers(slot);
+    slot.replace(["technical-english"]);
+
+    const activeResponsePrompt = handlers.beforeAgentStart("Base prompt");
+    slot.replace([]);
+
+    expect(activeResponsePrompt?.systemPrompt).toContain("ASD-STE100 Simplified Technical English");
+    expect(handlers.beforeAgentStart("Next prompt")).toBeUndefined();
+  });
+
   it("leaves the effective prompt byte-for-byte unchanged when guidance is empty", () => {
     const handlers = createSessionGuidanceBridgeHandlers(createSessionGuidanceSlot());
 
     expect(handlers.beforeAgentStart("Base prompt")).toBeUndefined();
+  });
+
+  it("clears state before reading entries at session start", () => {
+    const slot = createSessionGuidanceSlot();
+    slot.replace(["technical-english"]);
+    const handlers = createSessionGuidanceBridgeHandlers(slot);
+
+    expect(() => {
+      handlers.sessionStart(() => {
+        expect(slot.snapshot()).toEqual([]);
+        throw new Error("entries unavailable");
+      });
+    }).toThrow("entries unavailable");
+    expect(slot.snapshot()).toEqual([]);
   });
 
   it("clears state on session start, shutdown, and disposal", () => {
@@ -31,7 +57,7 @@ describe("session guidance bridge", () => {
     slot.replace(["technical-english"]);
     const handlers = createSessionGuidanceBridgeHandlers(slot);
 
-    handlers.sessionStart([]);
+    handlers.sessionStart(() => []);
     expect(slot.snapshot()).toEqual([]);
     slot.replace(["technical-english"]);
     handlers.sessionShutdown();
