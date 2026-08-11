@@ -35,6 +35,7 @@ import { deterministicSessionName, fallbackSessionName, generateShortSessionName
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
+import { SESSION_GUIDANCE_ENTRIES, setSessionGuidance } from "../../shared/sessionGuidance.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
 import type {
   AskUserCloseResponse,
@@ -67,6 +68,8 @@ import type {
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
 import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
+import { SESSION_GUIDANCE_CUSTOM_TYPE, persistedSessionGuidance, restoreSessionGuidance } from "./sessionGuidance.js";
+import { createSessionGuidanceBridgeExtension, createSessionGuidanceSlot, type SessionGuidanceSlot } from "./sessionGuidanceBridge.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 
 import { type AuthChange } from "./authService.js";
@@ -475,6 +478,7 @@ type RuntimeResourceWarnings = NonNullable<RuntimeWarningSources["services"]>;
 type PiWebRuntimeServices = RuntimeResourceWarnings & {
   processBridgeSlot?: ProcessBridgeSlot;
   sessionTitleBridgeSlot?: SessionTitleBridgeSlot;
+  sessionGuidanceSlot?: SessionGuidanceSlot;
 };
 type PiWebAgentSessionServices = AgentSessionServices & PiWebRuntimeServices;
 
@@ -750,6 +754,7 @@ function createDefaultRuntimeFactory(
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled }) => {
     const processBridgeSlot = createProcessBridgeSlot();
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
+    const sessionGuidanceSlot = createSessionGuidanceSlot();
     const baseServices = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -759,10 +764,11 @@ function createDefaultRuntimeFactory(
         extensionFactories: [
           createProcessBridgeExtension(processBridgeSlot),
           createSessionTitleBridgeExtension(sessionTitleBridgeSlot),
+          createSessionGuidanceBridgeExtension(sessionGuidanceSlot),
         ],
       },
     });
-    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
+    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot, sessionGuidanceSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser);
@@ -2093,6 +2099,29 @@ export class PiSessionService implements SessionRouteService {
     return this.statusFromSession(await this.sessionForStatusOrDialogClose(ref));
   }
 
+  async setGuidance(ref: PiSessionRef, entryId: string, enabled: unknown): Promise<ClientSessionStatus> {
+    if (!SESSION_GUIDANCE_ENTRIES.some((entry) => entry.id === entryId)) throw new Error(`Unknown guidance entry: ${entryId}`);
+    if (typeof enabled !== "boolean") throw new Error("Guidance state must be Boolean");
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
+    const slot = this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot;
+    if (slot === undefined) throw new Error("Session guidance is unavailable");
+    const change = setSessionGuidance(slot.snapshot(), entryId, enabled);
+    if (!change.changed) return this.statusFromSession(session);
+    const sessionManager = session.sessionManager;
+    if (sessionManager.appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
+    await this.runSessionEntryMutation(session, "change session guidance", () => {
+      sessionManager.appendCustomEntry?.(
+        SESSION_GUIDANCE_CUSTOM_TYPE,
+        persistedSessionGuidance(change.activeIds),
+      );
+      slot.replace(change.activeIds);
+      return Promise.resolve();
+    });
+    this.publishStatus(session);
+    return this.statusFromSession(session);
+  }
+
   async processes(ref: PiSessionRef): Promise<ManagedProcessesSnapshot> {
     const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
     return bridge?.snapshot() ?? { available: false, writeSupported: false, processes: [] };
@@ -2386,6 +2415,7 @@ export class PiSessionService implements SessionRouteService {
     if (session.sessionManager.getLeafId() !== request.expectedLeafId) {
       throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
     }
+    const inheritedGuidanceIds = this.sessionGuidanceForSession(session);
 
     this.publishActivity(session, "forking session from entry", "active");
     this.publishStatus(session);
@@ -2405,6 +2435,7 @@ export class PiSessionService implements SessionRouteService {
 
       const forkedSession = this.active.get(result.session.id)?.runtime.session;
       if (forkedSession !== undefined && this.isCurrentActiveSession(forkedSession)) {
+        await this.inheritSessionGuidance(forkedSession, inheritedGuidanceIds);
         this.publishActivity(forkedSession, "session forked", "idle");
         this.publishStatus(forkedSession);
       }
@@ -2423,6 +2454,21 @@ export class PiSessionService implements SessionRouteService {
       }
       throw error;
     }
+  }
+
+  private async inheritSessionGuidance(session: PiAgentSession, inheritedIds: readonly string[]): Promise<void> {
+    const slot = this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot;
+    if (slot === undefined || arraysEqual(slot.snapshot(), inheritedIds)) return;
+    const sessionManager = session.sessionManager;
+    if (sessionManager.appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
+    await this.runSessionEntryMutation(session, "inherit session guidance", () => {
+      sessionManager.appendCustomEntry?.(
+        SESSION_GUIDANCE_CUSTOM_TYPE,
+        persistedSessionGuidance(inheritedIds),
+      );
+      slot.replace(inheritedIds);
+      return Promise.resolve();
+    });
   }
 
   /**
@@ -3079,6 +3125,7 @@ export class PiSessionService implements SessionRouteService {
       await this.abortSessionOperations(active.runtime.session);
     } finally {
       this.cancelSessionTitleGeneration(active.runtime.session);
+      active.runtime.services?.sessionGuidanceSlot?.dispose();
       active.runtime.services?.sessionTitleBridgeSlot?.dispose();
       active.runtime.services?.processBridgeSlot?.dispose();
       await active.runtime.dispose();
@@ -3381,6 +3428,7 @@ export class PiSessionService implements SessionRouteService {
         await runtime.session.abort();
       } finally {
         this.cancelSessionTitleGeneration(runtime.session);
+        runtime.services?.sessionGuidanceSlot?.dispose();
         runtime.services?.sessionTitleBridgeSlot?.dispose();
         runtime.services?.processBridgeSlot?.dispose();
         await runtime.dispose();
@@ -4094,6 +4142,7 @@ export class PiSessionService implements SessionRouteService {
       ...this.liveWorkCounts(session),
       pendingMessageCount: this.pendingMessageCount(session),
       queuedMessages: queuedMessagesFromSession(session, this.compactionQueuedMessages(session.sessionId)),
+      activeGuidanceIds: this.sessionGuidanceForSession(session),
       messageCount: session.messages.length,
       tokens: stats.tokens,
       cost: stats.cost,
@@ -4102,6 +4151,11 @@ export class PiSessionService implements SessionRouteService {
       ...(pendingAsk === undefined ? {} : { pendingAsk }),
       ...(pendingDialogs.length === 0 ? {} : { pendingDialogs }),
     };
+  }
+
+  private sessionGuidanceForSession(session: PiAgentSession): string[] {
+    return this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot?.snapshot()
+      ?? restoreSessionGuidance(session.sessionManager.getEntries?.() ?? []);
   }
 
   /**
@@ -4171,6 +4225,10 @@ function findSessionByIdOrPrefix(sessions: readonly PiSessionListEntry[], sessio
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function errorMessage(error: unknown): string {

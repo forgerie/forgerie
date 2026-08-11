@@ -932,6 +932,8 @@ export interface SessionStatus {
   runningProcesses?: number;
   pendingMessageCount: number;
   queuedMessages: QueuedSessionMessage[];
+  /** Ordered IDs for the session guidance that applies at the next agent start. */
+  activeGuidanceIds?: string[];
   messageCount?: number;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
   cost: number;
