@@ -71,6 +71,28 @@ describe("SessionCommandService", () => {
     expect(prompt).toHaveBeenNthCalledWith(3, "s1", "/skill:skill-a arg");
   });
 
+  it("uses the offset-zero slash parser before forwarding runtime commands", async () => {
+    const active = activeSession();
+    const prompt = vi.fn(promptAccepted);
+    const service = new SessionCommandService(() => getActive(active), prompt, eventPublisher());
+
+    await expect(service.run("s1", " /template arg")).resolves.toEqual({ type: "unsupported", message: "Command must start with / at offset zero" });
+    await expect(service.run("s1", "/ template arg")).resolves.toEqual({ type: "unsupported", message: "Command name is required" });
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("lets the canonical policy keep builtins ahead of same-name runtime commands", async () => {
+    const active = activeSession({ extensionRunner: { getRegisteredCommands: () => [{ invocationName: "session" }] } });
+    const prompt = vi.fn(promptAccepted);
+    const service = new SessionCommandService(() => getActive(active), prompt, eventPublisher());
+
+    const result = await service.run("s1", "/session");
+
+    if (result.type !== "done") throw new Error("Expected done result");
+    expect(result.message).toContain("Session: s1");
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
   it("replaces an existing generated name whenever the user runs /name", async () => {
     const active = activeSession({ sessionName: "Forgerie Title Ownership" });
     const events = eventPublisher();

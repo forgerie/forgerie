@@ -26,6 +26,7 @@ import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
+import { buildActiveCommandCatalog } from "./commandCatalog.js";
 import { SessionCommandService } from "./sessionCommandService.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
 import { SessionArchiveStore, type ArchivedSessionRecord, type ArchiveSessionInput } from "./sessionArchiveStore.js";
@@ -2231,17 +2232,23 @@ export class PiSessionService implements SessionRouteService {
 
   async commands(ref: PiSessionRef): Promise<ClientCommand[]> {
     const session = await this.getOrOpen(ref);
-    const commands: ClientCommand[] = [...BUILTIN_COMMANDS];
-    for (const command of session.extensionRunner.getRegisteredCommands()) {
-      commands.push({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" });
-    }
-    for (const template of session.promptTemplates) {
-      commands.push({ name: template.name, ...(template.description === undefined ? {} : { description: template.description }), source: "prompt" });
-    }
-    for (const skill of session.resourceLoader.getSkills().skills) {
-      commands.push({ name: `skill:${skill.name}`, ...(skill.description === undefined ? {} : { description: skill.description }), source: "skill" });
-    }
-    return commands.sort((a, b) => a.name.localeCompare(b.name));
+    return (await buildActiveCommandCatalog({
+      builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, ...(command.description === undefined ? {} : { description: command.description }), source: "builtin" as const })),
+      extensions: session.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" as const })),
+      prompts: session.promptTemplates.map((template) => ({
+        name: template.name,
+        ...(template.description === undefined ? {} : { description: template.description }),
+        content: "",
+        origin: `prompt:${template.name}`,
+      })),
+      skills: session.resourceLoader.getSkills().skills.map((skill) => ({
+        name: skill.name,
+        ...(skill.description === undefined ? {} : { description: skill.description }),
+        content: "",
+        origin: `skill:${skill.name}`,
+        baseDir: "",
+      })),
+    })).commands;
   }
 
   async prompt(ref: PiSessionRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown, options?: { echoUserMessage?: boolean }): Promise<void> {
