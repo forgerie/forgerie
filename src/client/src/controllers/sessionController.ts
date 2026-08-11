@@ -301,7 +301,7 @@ export class SessionController {
 
   async restoreSessionLaunchPrompt(sessionId: string): Promise<void> {
     const record = this.sessionLaunchRecoveries.get(sessionId);
-    if (record?.recovery.stage !== "promptDeliveryAmbiguous" || this.replacePromptEditorText === undefined) return;
+    if (record?.recovery.stage !== "promptDeliveryAmbiguous" || record.session === undefined || this.replacePromptEditorText === undefined) return;
     if (!this.isSelectedSessionIdentity(sessionId, record.recovery.destination.machineId)) return;
     await this.replacePromptEditorText({
       machineId: record.recovery.destination.machineId,
@@ -309,9 +309,11 @@ export class SessionController {
       text: record.recovery.prompt,
     });
     if (this.sessionLaunchRecoveries.get(sessionId) !== record) return;
+    const retainedQueuedSends = record.queuedSends.slice(1);
     this.sessionLaunchRecoveries.delete(sessionId);
     this.dropNextQueuedSessionMessage(sessionId);
     this.clearInitialPromptRecoveryProjection(sessionId);
+    await this.flushQueuedPendingSends(record.session, record.recovery.destination.machineId, retainedQueuedSends, record.recovery.destination);
   }
 
   async refreshSessionLaunchRecovery(sessionId: string): Promise<void> {

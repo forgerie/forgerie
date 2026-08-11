@@ -293,6 +293,83 @@ describe("SessionController session launch", () => {
     expect(state.error).toBe("");
   });
 
+  it("restores only the ambiguous first prompt and flushes later queued sends", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const startRequest = deferred<SessionInfo>();
+    const shellRequest = deferred<{ accepted: true }>();
+    const shellStarted = deferred<undefined>();
+    const promptCalls: string[] = [];
+    const shellCalls: string[] = [];
+    const replacements: string[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => startRequest.promise,
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve({ ...status(sessionLookupId(session)), isStreaming: true }),
+      prompt: (_session, text) => {
+        promptCalls.push(text);
+        return text === "Ambiguous first prompt"
+          ? Promise.reject(new Error("delivery timed out"))
+          : Promise.resolve({ accepted: true });
+      },
+      shell: (_session, text) => {
+        shellCalls.push(text);
+        shellStarted.resolve(undefined);
+        return shellRequest.promise;
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      {
+        api,
+        socket: new FakeSocket(),
+        replacePromptEditorText: ({ text }) => {
+          replacements.push(text);
+          return Promise.resolve(undefined);
+        },
+      },
+    );
+
+    const launch = controller.launchSession("Ambiguous first prompt");
+    await controller.runShell("!pwd");
+    await controller.send("Continue after restore");
+    startRequest.resolve(started);
+    await launch;
+
+    expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
+    expect(state.clientQueuedSessionMessages[started.id]).toEqual([
+      { kind: "followUp", text: "Ambiguous first prompt" },
+      { kind: "followUp", text: "!pwd" },
+      { kind: "followUp", text: "Continue after restore" },
+    ]);
+
+    const restore = controller.restoreSessionLaunchPrompt(started.id);
+    await shellStarted.promise;
+
+    expect(replacements).toEqual(["Ambiguous first prompt"]);
+    expect(promptCalls).toEqual(["Ambiguous first prompt"]);
+    expect(shellCalls).toEqual(["!pwd"]);
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toEqual([
+      { kind: "followUp", text: "!pwd" },
+      { kind: "followUp", text: "Continue after restore" },
+    ]);
+
+    shellRequest.resolve({ accepted: true });
+    await restore;
+
+    expect(promptCalls).toEqual(["Ambiguous first prompt", "Continue after restore"]);
+    expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    expect(state.sessionActivities[started.id]).toBeUndefined();
+    expect(state.activity).toBeUndefined();
+    expect(state.error).toBe("");
+  });
+
   it("keeps ambiguous recovery and its queued preview when editor replacement fails", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
