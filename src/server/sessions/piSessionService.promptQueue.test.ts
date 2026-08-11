@@ -256,6 +256,45 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await service.dispose();
   });
 
+  it("generates a signal-dense name from skill request text", async () => {
+    const model = testModel();
+    let titleContext: Parameters<StreamFn>[1] | undefined;
+    const fake = fakeRuntime("skill-request-name-session", {
+      model,
+      agent: { streamFunction: (_streamModel, context) => {
+        titleContext = context;
+        const stream = createAssistantMessageEventStream();
+        const message: AssistantMessage = {
+          role: "assistant",
+          content: [{ type: "text", text: "Escape Key Parity" }],
+          api: "anthropic-messages",
+          provider: "anthropic",
+          model: model.id,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: "stop",
+          timestamp: Date.now(),
+        };
+        stream.push({ type: "done", reason: "stop", message });
+        stream.end(message);
+        return stream;
+      } },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("skill-request-name-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    await service.status(sessionRef("skill-request-name-session"));
+
+    fake.titleBridge.publish({ type: "intent.accepted", text: "/skill:se-debug Make Escape behave like the TUI" });
+
+    await vi.waitFor(() => { expect(fake.session.sessionName).toBe("Escape Key Parity"); });
+    expect(titleContext?.messages[0]?.content).toContain("/skill:se-debug Make Escape behave like the TUI");
+    await service.dispose();
+  });
+
   it("aborts stale generation when the session lifecycle resets", async () => {
     const model = testModel();
     const titleStream = createAssistantMessageEventStream();

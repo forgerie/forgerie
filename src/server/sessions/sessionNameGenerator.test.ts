@@ -77,11 +77,11 @@ describe("sessionNameGenerator", () => {
     expect(cleanSessionName(`${"x".repeat(50)} two three four five`)).toBeUndefined();
   });
 
-  it("builds deterministic names from skill commands without reading expanded skill instructions", () => {
+  it("builds deterministic names only for skill commands without request text", () => {
     expect(deterministicSessionName("/skill:se-architecture-improvement"))
       .toBe("Architecture Improvement");
     expect(deterministicSessionName("/skill:se-riffrec-feedback-analysis session.zip"))
-      .toBe("Riffrec Feedback Analysis");
+      .toBeUndefined();
   });
 
   it("builds deterministic names for relay handoff prompts", () => {

@@ -9,7 +9,7 @@ const FALLBACK_FILLER_WORDS = new Set([
   "a", "an", "about", "can", "check", "could", "explore", "fix", "help", "i", "implement", "investigate", "me", "my", "now", "our", "please", "the", "to", "understand", "update", "we", "with", "would", "you", "your",
 ]);
 const RELAY_HANDOFF_FIRST_LINE = /^Relay\s+"([^"\n]+)"\s+leg\s+(\d+)\s+begins now\.?\s*(?:\n|$)/;
-const SKILL_COMMAND = /^\/skill:([a-z0-9][a-z0-9_-]*)(?:\s|$)/i;
+const SKILL_COMMAND = /^\/skill:([a-z0-9][a-z0-9_-]*)\s*$/i;
 
 export function deterministicSessionName(firstMessage: unknown): string | undefined {
   if (typeof firstMessage !== "string") return undefined;
