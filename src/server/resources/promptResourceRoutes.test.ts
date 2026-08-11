@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProjectService } from "../projects/projectService.js";
 import { ProjectStore } from "../storage/projectStore.js";
 import type { Project, WorkspaceListing } from "../types.js";
@@ -69,6 +69,42 @@ describe("prompt-resource sessiond routes", () => {
       expect(response.json()).toEqual({ available: true, commands: [], diagnostics: [] });
       expect(requests).toEqual([{ method: "GET", path: "/prompt-resource-catalog?cwd=%2Frepo" }]);
     } finally {
+      await app.close();
+    }
+  });
+
+  it("maps sessiond failures to a bounded gateway response", async () => {
+    const app = Fastify({ logger: false });
+    registerPromptResourceCatalogProxyRoutes(app, inMemoryProjects(project), inMemoryWorkspaces([workspace]), {
+      request: () => Promise.reject(new Error("socket unavailable")),
+    }, "/api");
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/api/projects/p1/workspaces/w1/prompt-resource-catalog" });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toEqual({ error: "Session daemon unavailable" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("times out when sessiond does not settle the catalog request", async () => {
+    vi.useFakeTimers();
+    const app = Fastify({ logger: false });
+    registerPromptResourceCatalogProxyRoutes(app, inMemoryProjects(project), inMemoryWorkspaces([workspace]), {
+      request: () => new Promise(() => undefined),
+    }, "/api");
+
+    try {
+      const pendingResponse = app.inject({ method: "GET", url: "/api/projects/p1/workspaces/w1/prompt-resource-catalog" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      const response = await pendingResponse;
+
+      expect(response.statusCode).toBe(504);
+      expect(response.json()).toEqual({ error: "Prompt-resource catalog request timed out" });
+    } finally {
+      vi.useRealTimers();
       await app.close();
     }
   });
