@@ -93,20 +93,19 @@ Physical panels:
 - Unfolded (main): 2448 × 1848 px, 7.6", 4:3
 - Folded (cover): 1972 × 1248 px, 5.5", ~10:16
 
-CSS-pixel viewports for testing (working assumption DPR 2.5 — verify against
-the real device once and correct here if it differs):
+CSS-pixel viewports measured on the physical device (DPR 2.625):
 
 | Posture | CSS viewport (w × h) |
 |---|---|
-| Unfolded portrait | 739 × 979 |
-| Unfolded landscape | 979 × 739 |
-| Folded portrait | 499 × 789 |
-| Folded landscape | 789 × 499 |
+| Unfolded portrait | 704 × 783 |
+| Unfolded landscape | 932 × 553 |
+| Folded portrait | 475 × 638 |
+| Folded landscape | 711 × 374 |
 
 Headless capture (chromium is on PATH on zao):
 
 ```bash
-chromium --headless=new --disable-gpu --window-size=739,979 \
+chromium --headless=new --disable-gpu --window-size=704,783 \
   --screenshot=/tmp/forgerie-unfolded-portrait.png \
   --virtual-time-budget=8000 http://127.0.0.1:8504/
 ```
@@ -132,11 +131,11 @@ them (fold/unfold, rotate). The same surface must not flip between unrelated
 layout paradigms across adjacent postures.
 
 Known upstream defect (fork point): a viewport-width breakpoint near ~768px
-splits this device's posture matrix — 739px (unfolded portrait) renders the
-phone layout while 789px (folded landscape) renders the desktop layout.
+splits this device's posture matrix — 704px (unfolded portrait) renders the
+phone layout while 932px (unfolded landscape) renders the desktop layout.
 Rotating the unfolded device swaps the entire UI paradigm. Removing this
 cliff is a standing UX goal; do not add new width breakpoints that fall
-inside or near the 499–979px posture range.
+inside or near the 475–932px posture range.
 
 ### Intrinsic design rules
 

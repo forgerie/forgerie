@@ -1,16 +1,14 @@
 // @vitest-environment happy-dom
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { describe, expect, it } from "vitest";
+import {
+  FOLD8_FOLDED_LANDSCAPE,
+  FOLD8_FOLDED_PORTRAIT,
+  FOLD8_UNFOLDED_LANDSCAPE,
+  FOLD8_UNFOLDED_PORTRAIT,
+} from "../../../../scripts/lib/fold8-postures.mjs";
 import { AppShellController } from "./appShellController";
 import { CHROME_RESIDENT_MIN_WIDTH, NAVIGATION_DOCK_MIN_WIDTH } from "./shellLayoutMode";
-
-/** CSS-pixel viewport widths for the acceptance device, see AGENTS.md. */
-const FOLD8 = {
-  unfoldedPortrait: 739,
-  unfoldedLandscape: 979,
-  foldedPortrait: 499,
-  foldedLandscape: 789,
-} as const;
 
 describe("AppShellController chrome disclosure", () => {
   it("summons chrome until every pane can sit side by side", () => {
@@ -19,10 +17,10 @@ describe("AppShellController chrome disclosure", () => {
   });
 
   it("gives the conversation the whole screen in every phone posture, folded or not", () => {
-    expect(controllerAtWidth(FOLD8.foldedPortrait).isChromeSummoned).toBe(true);
-    expect(controllerAtWidth(FOLD8.foldedLandscape).isChromeSummoned).toBe(true);
-    expect(controllerAtWidth(FOLD8.unfoldedPortrait).isChromeSummoned).toBe(true);
-    expect(controllerAtWidth(FOLD8.unfoldedLandscape).isChromeSummoned).toBe(true);
+    expect(controllerAtWidth(FOLD8_FOLDED_PORTRAIT.width).isChromeSummoned).toBe(true);
+    expect(controllerAtWidth(FOLD8_FOLDED_LANDSCAPE.width).isChromeSummoned).toBe(true);
+    expect(controllerAtWidth(FOLD8_UNFOLDED_PORTRAIT.width).isChromeSummoned).toBe(true);
+    expect(controllerAtWidth(FOLD8_UNFOLDED_LANDSCAPE.width).isChromeSummoned).toBe(true);
   });
 
   it("leaves chrome resident on a true multi-pane workspace", () => {
@@ -32,7 +30,7 @@ describe("AppShellController chrome disclosure", () => {
 
   it("summons chrome on a docked shell that is still phone-shaped", () => {
     // Wide enough for navigation to dock, too narrow to also afford the bands.
-    const controller = controllerAtWidth(FOLD8.unfoldedLandscape);
+    const controller = controllerAtWidth(FOLD8_UNFOLDED_LANDSCAPE.width);
 
     expect(controller.isMobileNavigationLayout).toBe(false);
     expect(controller.isChromeSummoned).toBe(true);

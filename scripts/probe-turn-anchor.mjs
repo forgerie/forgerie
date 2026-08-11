@@ -11,13 +11,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluate, findChrome, getFreePort, launchChrome, openPage, sleep, waitForDebugger } from "./lib/cdp.mjs";
-
-const POSTURES = [
-  { name: "unfolded-portrait", width: 739, height: 979 },
-  { name: "unfolded-landscape", width: 979, height: 739 },
-  { name: "folded-portrait", width: 499, height: 789 },
-  { name: "folded-landscape", width: 789, height: 499 },
-];
+import { FOLD8_DPR, FOLD8_POSTURES } from "./lib/fold8-postures.mjs";
 
 const SETUP = `
   (() => {
@@ -166,7 +160,7 @@ async function main() {
 
   try {
     await waitForDebugger(debugPort);
-    for (const posture of POSTURES) {
+    for (const posture of FOLD8_POSTURES) {
       process.stdout.write(`\n== ${posture.name} (${posture.width}x${posture.height})\n`);
       await probePosture({ debugPort, posture, args });
     }
@@ -186,7 +180,7 @@ async function probePosture({ debugPort, posture, args }) {
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: posture.width,
       height: posture.height,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: FOLD8_DPR,
       mobile: true,
     });
     const loaded = cdp.waitForEvent("Page.loadEventFired", 20000).catch(() => undefined);

@@ -17,14 +17,9 @@ import {
   sleep,
   waitForDebugger,
 } from "./lib/cdp.mjs";
+import { FOLD8_DPR, FOLD8_POSTURES } from "./lib/fold8-postures.mjs";
 
-/** CSS-pixel viewports for the Galaxy Z Fold 8 (non-Ultra). See AGENTS.md. */
-export const FOLD8_POSTURES = [
-  { name: "unfolded-portrait", width: 739, height: 979 },
-  { name: "unfolded-landscape", width: 979, height: 739 },
-  { name: "folded-portrait", width: 499, height: 789 },
-  { name: "folded-landscape", width: 789, height: 499 },
-];
+export { FOLD8_POSTURES };
 
 const DEEP_QUERY = `
   (() => {
@@ -79,7 +74,7 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: posture.width,
       height: posture.height,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: FOLD8_DPR,
       mobile: true,
     });
 
