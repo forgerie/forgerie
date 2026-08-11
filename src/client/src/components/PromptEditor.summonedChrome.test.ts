@@ -30,15 +30,18 @@ describe("PromptEditor summoned chrome", () => {
     expect(templateText(renderCompactStatus(editor))).not.toContain("Archive");
   });
 
-  it("leaves the docked composer as it was, chrome still living in the bands", () => {
+  it("keeps identity and archive on the rail even where the shell still has bands", () => {
     const editor = summonedEditor();
     editor.chromeSummoned = false;
     editor.sessionLabel = "forgerie · main";
     editor.canArchive = true;
 
+    // Which of them the rail actually shows is the island's own width to
+    // decide (see PromptEditor.reveal.test.ts); the composer no longer keys
+    // them off whether the shell kept its chrome bands.
     const rendered = templateText(renderCompactStatus(editor));
-    expect(rendered).not.toContain("forgerie · main");
-    expect(rendered).not.toContain("Archive");
+    expect(rendered).toContain("forgerie · main");
+    expect(rendered).toContain("Archive");
   });
 });
 

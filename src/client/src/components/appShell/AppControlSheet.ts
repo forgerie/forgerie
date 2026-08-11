@@ -48,8 +48,10 @@ export class AppControlSheet extends LitElement {
   @property({ type: Boolean }) warningsExpanded = false;
   @property({ attribute: false }) onSelectView?: (view: AppState["mainView"]) => void;
   @property({ attribute: false }) onOpenSection?: (section: NavigationSection) => void;
+  @property({ type: Boolean }) canArchive = false;
   @property({ attribute: false }) onToggleWarnings?: () => void;
   @property({ attribute: false }) onAttachFiles?: () => void;
+  @property({ attribute: false }) onArchiveAndNext?: () => void;
   @property({ attribute: false }) onClose?: () => void;
 
   /** Choosing a destination is a completed intent, so the sheet leaves with it. */
@@ -102,10 +104,12 @@ export class AppControlSheet extends LitElement {
   }
 
   private renderActions() {
-    if (this.onAttachFiles === undefined) return null;
+    const canArchive = this.canArchive && this.onArchiveAndNext !== undefined;
+    if (this.onAttachFiles === undefined && !canArchive) return null;
     return html`
       <p class="control-sheet-section">Do</p>
-      <button type="button" class="control-sheet-action" @click=${() => { this.attachFiles(); }}>Attach files</button>
+      ${this.onAttachFiles === undefined ? null : html`<button type="button" class="control-sheet-action" @click=${() => { this.attachFiles(); }}>Attach files</button>`}
+      ${canArchive ? html`<button type="button" class="control-sheet-action" @click=${() => { this.onArchiveAndNext?.(); this.onClose?.(); }}>Archive &amp; next</button>` : null}
     `;
   }
 

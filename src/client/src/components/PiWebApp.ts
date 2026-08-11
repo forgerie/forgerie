@@ -2587,6 +2587,8 @@ export class PiWebApp extends LitElement {
         .warningsExpanded=${warningCount > 0 && !this.sessionWarningVisibility.collapsed}
         .onToggleWarnings=${this.handleToggleWarnings}
         .onAttachFiles=${this.handleAttachFiles}
+        .canArchive=${this.canArchiveSelectedSession(state)}
+        .onArchiveAndNext=${this.handleArchiveAndNext}
         .machines=${state.machines}
         .machine=${state.selectedMachine}
         .project=${state.selectedProject}

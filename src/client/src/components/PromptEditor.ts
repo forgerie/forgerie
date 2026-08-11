@@ -284,20 +284,21 @@ export class PromptEditor extends LitElement {
   }
 
   /**
-   * Identity, archive, and the summon control only appear once the chat surface
-   * has given up its chrome bands. The composer is the one row that survives at
-   * every size, so it inherits what the bands used to carry: where you are,
-   * the action that ends a turn, and the way back to everything else.
+   * Where you are, and the action that ends a turn.
+   *
+   * The chrome bands used to carry these; the composer inherits them rather
+   * than reviving a band. Both are rendered whenever they mean something and
+   * revealed by the island's own width, so a narrow composer spends its row on
+   * the controls that must always work and leaves these to the sheet.
    */
   private renderSessionIdentity() {
-    if (!this.chromeSummoned) return null;
     const label = this.sessionLabel;
     if (label === undefined || label === "") return null;
     return html`<span class="session-identity" title=${label}>${label}</span>`;
   }
 
   private renderArchiveAction() {
-    if (!this.chromeSummoned || !this.canArchive) return null;
+    if (!this.canArchive) return null;
     return html`
       <button
         class="composer-archive"

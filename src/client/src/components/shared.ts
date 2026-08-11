@@ -673,9 +673,20 @@ export const promptEditorStyles = css`
   @container (min-width: 560px) {
     .thinking-level { display: inline; }
   }
-  /* Identity, archive, and the summon control only appear once the chrome bands are gone. */
-  .session-identity { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
-  .composer-archive { flex: 0 0 auto; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-muted); padding: 5px 9px; font-size: inherit; }
+  /*
+   * The rail has one row and a fixed order of importance: the menu, the model,
+   * the primary action, and stop always fit. Identity and archive are revealed
+   * by the island's own width, and stay reachable from the sheet when they are
+   * not on the rail.
+   */
+  .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
+  .composer-archive { display: none; flex: 0 0 auto; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-muted); padding: 5px 9px; font-size: inherit; }
+  @container (min-width: 560px) {
+    .session-identity { display: inline; }
+  }
+  @container (min-width: 700px) {
+    .composer-archive { display: inline-flex; }
+  }
   .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
   .composer-summon { flex: 0 0 auto; }
   .icon-button { flex: 0 0 auto; display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; }
