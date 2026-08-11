@@ -1,7 +1,7 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { ROW_PRESS } from "../rowPress";
 import type { ShellPanel } from "./panelIntent";
-import { PANEL_PEEK, PEEK_CLOSED, peekProgress, peekedPanel, releasePeek, trackPeek, type PanelPeek, type PeekConfig } from "./panelPeek";
+import { PANEL_PEEK, PEEK_CLOSED, PEEK_EXIT_MS, peekProgress, peekedPanel, releasePeek, trackPeek, type PanelPeek, type PeekConfig } from "./panelPeek";
 
 /**
  * How long a still finger may rest before the drag is given up.
@@ -67,6 +67,7 @@ export class PanelPeekController implements ReactiveController {
   private stillTimer: ReturnType<typeof setTimeout> | undefined;
   private wheelTravel = 0;
   private wheelTimer: ReturnType<typeof setTimeout> | undefined;
+  private exitTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly host: ReactiveControllerHost, private readonly options: PanelPeekControllerOptions) {
     host.addController(this);
@@ -80,6 +81,7 @@ export class PanelPeekController implements ReactiveController {
   hostDisconnected(): void {
     this.disarm();
     this.clearWheel();
+    this.clearExitTimer();
   }
 
   get panel(): ShellPanel | undefined {
@@ -99,9 +101,11 @@ export class PanelPeekController implements ReactiveController {
     return this.peek.kind === "tracking";
   }
 
+  /** Sends the sheet back the way it came rather than taking it off screen. */
   close(): void {
     this.disarm();
-    this.setPeek(PEEK_CLOSED);
+    const panel = peekedPanel(this.peek);
+    this.setPeek(panel === undefined ? PEEK_CLOSED : { kind: "closing", panel });
   }
 
   /**
@@ -258,6 +262,12 @@ export class PanelPeekController implements ReactiveController {
       && peekProgressOf(peek) === peekProgressOf(before)) return;
     this.peek = peek;
 
+    // A sheet on its way out stays mounted until its slide has run.
+    this.clearExitTimer();
+    if (peek.kind === "closing") {
+      this.exitTimer = setTimeout(() => { this.setPeek(PEEK_CLOSED); }, PEEK_EXIT_MS);
+    }
+
     const panel = peekedPanel(peek);
     const settled = peek.kind !== before.kind || panel !== peekedPanel(before);
     if (settled || panel === undefined || this.options.applyProgress === undefined) {
@@ -265,6 +275,11 @@ export class PanelPeekController implements ReactiveController {
       return;
     }
     this.options.applyProgress(panel, peekProgressOf(peek));
+  }
+
+  private clearExitTimer(): void {
+    if (this.exitTimer !== undefined) clearTimeout(this.exitTimer);
+    this.exitTimer = undefined;
   }
 }
 

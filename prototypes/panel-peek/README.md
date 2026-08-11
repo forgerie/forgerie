@@ -39,7 +39,31 @@ Add it when a panel genuinely has nothing to show. The captured
 `folded-portrait-workspace.png` shows the cost plainly: peeking the workspace
 panel with no workspace selected spends a full sheet on "Select a project".
 
+### One set of panels, not two
+
+The sheet does not build its own copies. It moves the existing panel into
+itself, and the docked copy renders nothing while it is peeked. Counted live in
+both postures, at rest and with a sheet open: **one** navigation panel, **one**
+workspace panel, **one** inbox. These panels supersede the old ones rather than
+sitting beside them.
+
+### Leaving takes time
+
+A sheet that arrived by following a finger has to leave the same way, so
+"closing" is a state of its own rather than an absence. The sheet stays mounted
+and fully retracted while it slides, then leaves the document. Measured in a
+browser, the sheet's right edge on dismissal:
+
+    360 → 266 → 192 → 130 → 85 → 53 → 15 → 6 → gone
+
 ### Promotion, as built
+
+The pin appears **only where pinning could move something** — at or above the
+panel's dock floor. Below it a pin would store a preference and change nothing
+on screen, which is the lie this model exists to avoid. On the acceptance device
+neither panel can dock, so neither offers a pin; there is no layout there to
+have an opinion about. Verified: at 1240px the pin docks the workspace panel
+(521px wide, collapse class gone); at 499px there is no pin.
 
 The pin sits alone in a slim band at the top of the sheet. It carries no title:
 the panel underneath already names itself, and a sheet reading "Sessions" over

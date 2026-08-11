@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { SessionInfo } from "../api";
 import { initialAppState, type AppState } from "../appState";
-import { PANEL_PEEK, peekSheetWidth } from "../appShell/panelPeek";
+import { PANEL_PEEK, PEEK_EXIT_MS, peekSheetWidth } from "../appShell/panelPeek";
 import { PiWebApp } from "./PiWebApp";
 import { AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -37,10 +37,32 @@ describe("PiWebApp panel peek", () => {
     expect(peekSheet(app)?.hasAttribute("data-tracking")).toBe(true);
   });
 
-  it("lets an abandoned look cost nothing", async () => {
+  it("sends an abandoned look back the way it came, rather than deleting it", async () => {
     const app = await mountApp(FOLDED_PORTRAIT);
 
     await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.2, { release: true });
+
+    // Still mounted and fully retracted, so the slide has something to run on.
+    const leaving = peekSheet(app);
+    expect(leaving).not.toBeNull();
+    expect(leaving?.hasAttribute("data-tracking")).toBe(false);
+    expect(leaving?.style.getPropertyValue("--peek-progress")).toBe("0");
+
+    await settle(app);
+
+    expect(peekSheet(app)).toBeNull();
+  });
+
+  it("takes the sheet off screen once it has finished leaving", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+    await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+
+    tapScrim(app);
+    await app.updateComplete;
+
+    expect(peekSheet(app)).not.toBeNull();
+
+    await settle(app);
 
     expect(peekSheet(app)).toBeNull();
   });
@@ -65,14 +87,27 @@ describe("PiWebApp panel peek", () => {
   });
 
   it("promotes a look to a decision only through the pin inside the sheet", async () => {
-    const app = await mountApp(FOLDED_PORTRAIT);
-    await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+    // Wide enough that navigation can dock, but dismissed, so it is peekable.
+    localStorage.setItem("pi-web-panel-intents", JSON.stringify({ navigation: "dismissed", workspace: "auto" }));
+    const app = await mountApp(1000);
+    await dragAcross(app, peekSheetWidth(1000) * 0.9, { release: true });
 
     pin(app)?.click();
-    await app.updateComplete;
+    await settle(app);
 
     expect(storedIntents().navigation).toBe("pinned");
     expect(peekSheet(app)).toBeNull();
+  });
+
+  it("offers no pin where pinning could not move anything", async () => {
+    // A phone has nowhere to dock either panel, so a pin would store a
+    // preference and change nothing on screen.
+    const app = await mountApp(FOLDED_PORTRAIT);
+
+    await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+
+    expect(peekSheet(app)).not.toBeNull();
+    expect(pin(app)).toBeNull();
   });
 
   it("arms over a transcript turn, whose content spills but cannot scroll", async () => {
@@ -97,7 +132,7 @@ describe("PiWebApp panel peek", () => {
     const panel = shadowRoot(app).querySelector(".peek-sheet app-navigation-panel");
     if (!(panel instanceof AppNavigationPanel)) throw new Error("The sheet did not carry the session list");
     void panel.onSelectSession?.(session());
-    await app.updateComplete;
+    await settle(app);
 
     expect(peekSheet(app)).toBeNull();
   });
@@ -174,6 +209,29 @@ function shellElement(app: PiWebApp): Element {
   const shell = shadowRoot(app).querySelector(".shell");
   if (shell === null) throw new Error("PiWebApp did not render a shell");
   return shell;
+}
+
+/** Waits out the slide a dismissed sheet runs before it leaves the document. */
+async function settle(app: PiWebApp): Promise<void> {
+  await new Promise((resolve) => { setTimeout(resolve, PEEK_EXIT_MS + 60); });
+  await app.updateComplete;
+}
+
+/**
+ * A tap as a browser delivers one: a press, a release, then the click. The
+ * press matters — it is what tells the shell this gesture has not travelled.
+ */
+function tapScrim(app: PiWebApp): void {
+  const target = scrim(app);
+  if (target === null) throw new Error("The sheet had no scrim to tap");
+  target.dispatchEvent(pointerEvent("pointerdown", 650, 480));
+  target.dispatchEvent(pointerEvent("pointerup", 650, 480));
+  target.click();
+}
+
+function scrim(app: PiWebApp): HTMLElement | null {
+  const el = shadowRoot(app).querySelector(".peek-scrim");
+  return el instanceof HTMLElement ? el : null;
 }
 
 function peekSheet(app: PiWebApp): HTMLElement | null {

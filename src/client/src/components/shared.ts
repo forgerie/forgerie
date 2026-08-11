@@ -268,8 +268,13 @@ export const appStyles = css`
   .peek-sheet-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .peek-sheet-body > * { flex: 1 1 auto; min-height: 0; }
 
-  /* Dims what the sheet covers, by exactly as much of the sheet as shows. */
+  /*
+   * Dims what the sheet covers, by exactly as much of the sheet as shows. It
+   * fades on the same clock the sheet slides on, so the two leave together;
+   * under a finger both are written directly and neither eases.
+   */
   .peek-scrim {
+    transition: opacity 180ms ease;
     position: absolute;
     inset: 0;
     z-index: 40;
@@ -282,8 +287,10 @@ export const appStyles = css`
     cursor: pointer;
   }
 
+  .peek-scrim[data-tracking] { transition: none; }
+
   @media (prefers-reduced-motion: reduce) {
-    .peek-sheet { transition: none; }
+    .peek-sheet, .peek-scrim { transition: none; }
   }
 
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }

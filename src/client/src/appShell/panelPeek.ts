@@ -26,6 +26,14 @@ export type PanelPeek =
   | { readonly kind: "closed" }
   /** A finger is down and the sheet is at `progress` of its width. */
   | { readonly kind: "tracking"; readonly panel: ShellPanel; readonly progress: number; readonly gesture: PeekGesture }
+  /**
+   * The sheet is on its way out and still on screen.
+   *
+   * A separate case because leaving takes time. Without it the sheet is taken
+   * out of the document the instant it is dismissed, and a thing that arrived
+   * by following a finger vanishes instead of going back the way it came.
+   */
+  | { readonly kind: "closing"; readonly panel: ShellPanel }
   | { readonly kind: "open"; readonly panel: ShellPanel };
 
 export const PEEK_CLOSED: PanelPeek = { kind: "closed" };
@@ -93,10 +101,12 @@ export function trackPeek(input: PeekTrackInput): PanelPeek {
   return { kind: "tracking", panel, progress: clampFraction(travel / sheetWidthPx), gesture: "opening" };
 }
 
-/** What letting go leaves on screen. */
+/** What letting go leaves on screen. A look that fell short leaves by sliding. */
 export function releasePeek(current: PanelPeek, config: PeekConfig): PanelPeek {
   if (current.kind !== "tracking") return current;
-  return current.progress >= config.commitFraction ? { kind: "open", panel: current.panel } : PEEK_CLOSED;
+  return current.progress >= config.commitFraction
+    ? { kind: "open", panel: current.panel }
+    : { kind: "closing", panel: current.panel };
 }
 
 /** How far the sheet is pulled, for the renderer. Open counts as fully pulled. */
@@ -109,6 +119,9 @@ export function peekProgress(peek: PanelPeek, panel: ShellPanel): number {
 export function peekedPanel(peek: PanelPeek): ShellPanel | undefined {
   return peek.kind === "closed" ? undefined : peek.panel;
 }
+
+/** How long a dismissed sheet stays mounted while it slides out. Matches the CSS. */
+export const PEEK_EXIT_MS = 180;
 
 /**
  * A drag back across the sheet pushes it out, and letting go part-way lets it

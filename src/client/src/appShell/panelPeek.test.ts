@@ -79,7 +79,7 @@ describe("trackPeek", () => {
   it("closes when the retreat carried the sheet most of the way out", () => {
     const pushed = track({ kind: "open", panel: "navigation" }, -SHEET * 0.8, 0);
 
-    expect(releasePeek(pushed, PANEL_PEEK)).toEqual(PEEK_CLOSED);
+    expect(releasePeek(pushed, PANEL_PEEK)).toEqual({ kind: "closing", panel: "navigation" });
   });
 
   it("holds still when the shell has not been measured", () => {
@@ -96,10 +96,12 @@ describe("releasePeek", () => {
     expect(releasePeek(peek, PANEL_PEEK)).toEqual({ kind: "open", panel: "navigation" });
   });
 
-  it("lets a half-hearted look fall back, which is what makes a peek free", () => {
+  it("sends a half-hearted look back the way it came, rather than deleting it", () => {
     const peek: PanelPeek = { kind: "tracking", panel: "navigation", progress: PANEL_PEEK.commitFraction - 0.01, gesture: "opening" };
 
-    expect(releasePeek(peek, PANEL_PEEK)).toEqual(PEEK_CLOSED);
+    // Still on screen, on its way out: a sheet that arrived by following a
+    // finger has to leave the same way.
+    expect(releasePeek(peek, PANEL_PEEK)).toEqual({ kind: "closing", panel: "navigation" });
   });
 
   it("leaves a settled sheet as it found it", () => {
@@ -111,6 +113,10 @@ describe("releasePeek", () => {
 });
 
 describe("peekProgress", () => {
+  it("reports a sheet on its way out as fully retracted", () => {
+    expect(peekProgress({ kind: "closing", panel: "navigation" }, "navigation")).toBe(0);
+  });
+
   it("reports nothing for the panel that is not being looked at", () => {
     expect(peekProgress({ kind: "open", panel: "navigation" }, "workspace")).toBe(0);
     expect(peekProgress(PEEK_CLOSED, "navigation")).toBe(0);

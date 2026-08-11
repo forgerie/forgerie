@@ -2,7 +2,7 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { afterEach, describe, expect, it } from "vitest";
 import { PanelPeekController, ownsHorizontalScroll } from "./panelPeekController";
-import { PANEL_PEEK } from "./panelPeek";
+import { PANEL_PEEK, PEEK_EXIT_MS } from "./panelPeek";
 
 const SHEET = 300;
 
@@ -35,12 +35,18 @@ describe("PanelPeekController", () => {
     expect(controller.isOpen).toBe(true);
   });
 
-  it("lets a half look fall back, which is what makes the gesture free", () => {
+  it("lets a half look fall back, which is what makes the gesture free", async () => {
     const { controller, drag } = harness();
 
     drag.down(100, 100);
     drag.move(100 + SHEET * 0.2, 100);
     drag.up();
+
+    // On its way out, still mounted so it can slide.
+    expect(controller.isOpen).toBe(false);
+    expect(controller.panel).toBe("navigation");
+
+    await wait(PEEK_EXIT_MS + 60);
 
     expect(controller.panel).toBeUndefined();
   });
@@ -205,13 +211,14 @@ describe("PanelPeekController", () => {
     expect(controller.consumedTap).toBe(false);
   });
 
-  it("closes on request without touching what the user asked of the panel", () => {
+  it("closes on request without touching what the user asked of the panel", async () => {
     const { controller, drag } = harness();
 
     drag.down(100, 100);
     drag.move(100 + SHEET, 100);
     drag.up();
     controller.close();
+    await wait(PEEK_EXIT_MS + 60);
 
     expect(controller.panel).toBeUndefined();
   });

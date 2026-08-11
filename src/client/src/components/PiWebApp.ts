@@ -56,7 +56,7 @@ import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardControll
 import { PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
 import { PanelPeekController } from "../appShell/panelPeekController";
 import { peekSheetWidth } from "../appShell/panelPeek";
-import type { ShellPanel } from "../appShell/panelIntent";
+import { canDockAt, type ShellPanel } from "../appShell/panelIntent";
 import { chromeDisclosureClass, shellLayoutModeClass } from "../appShell/shellLayoutMode";
 import { PanelResizeController, type PanelResizeConstraints, type ResizablePanelSide } from "../appShell/panelResizeController";
 import { readRoute, writeRoute, type AppRoute } from "../route";
@@ -2927,6 +2927,7 @@ export class PiWebApp extends LitElement {
         type="button"
         class="peek-scrim"
         aria-label=${`Close ${label.toLowerCase()}`}
+        ?data-tracking=${this.panelPeek.isTracking}
         style=${`opacity: ${String(progress)}`}
         @click=${() => { this.dismissPeekOnTap(); }}
       ></button>
@@ -2939,13 +2940,15 @@ export class PiWebApp extends LitElement {
         style=${`width: ${String(peekSheetWidth(this.clientWidth))}px; --peek-progress: ${String(progress)}`}
       >
         <div class="peek-sheet-head">
-          <button
-            type="button"
-            class="peek-pin"
-            title=${`Keep ${label.toLowerCase()} open`}
-            aria-label=${`Keep ${label.toLowerCase()} open`}
-            @click=${() => { this.pinPeekedPanel(panel); }}
-          >Pin</button>
+          ${canDockAt(this.clientWidth, panel) ? html`
+            <button
+              type="button"
+              class="peek-pin"
+              title=${`Keep ${label.toLowerCase()} open`}
+              aria-label=${`Keep ${label.toLowerCase()} open`}
+              @click=${() => { this.pinPeekedPanel(panel); }}
+            >Pin</button>
+          ` : null}
         </div>
         <div class="peek-sheet-body">
           ${panel === "navigation" ? this.renderNavigationPanel() : this.renderWorkspacePanel("peeked")}

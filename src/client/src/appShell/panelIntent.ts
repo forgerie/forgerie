@@ -85,6 +85,18 @@ export function isDocked(availableWidth: number, intents: PanelIntents, panel: S
 }
 
 /**
+ * Whether pinning this panel could change anything at this width.
+ *
+ * Below its floor the shell has nowhere to put the panel, so a pin is stored
+ * and nothing moves. A control that writes a preference and changes nothing is
+ * a lie; the pin is offered only where it can act.
+ */
+export function canDockAt(availableWidth: number, panel: ShellPanel): boolean {
+  if (!Number.isFinite(availableWidth) || availableWidth <= 0) return false;
+  return availableWidth >= DOCK_FLOOR_WIDTHS[panel];
+}
+
+/**
  * Toggling reads the shell rather than the stored value: the control says
  * "put this away" when the panel is on screen and "keep this" when it is not,
  * so one press always matches what the user sees.
