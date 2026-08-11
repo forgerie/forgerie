@@ -25,7 +25,7 @@ import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
 import { actionMenuPanelStyle } from "./actionMenu";
 import { renderBuiltinTabIcon } from "./tabIcons";
-import { NEW_SESSION_LABEL, renderNewSessionIcon } from "./shared";
+import { NEW_SESSION_LABEL } from "./shared";
 import "./SessionWorkingRuntime";
 import { isKeyEventInEditableContext } from "../keyboardContext";
 import { commitDistance, readSwipe } from "../rowSwipe";
@@ -422,14 +422,6 @@ export class SessionInboxPanel extends LitElement {
         </div>
         <div class="board-state" data-state="empty">
           <p>No sessions yet.</p>
-          ${this.onNewSession !== undefined ? html`
-            <button
-              data-action="new-session"
-              title=${NEW_SESSION_LABEL}
-              aria-label=${NEW_SESSION_LABEL}
-              @click=${() => { this.onNewSession?.(); }}
-            >${renderNewSessionIcon()}${NEW_SESSION_LABEL}</button>
-          ` : nothing}
         </div>
       `;
     }

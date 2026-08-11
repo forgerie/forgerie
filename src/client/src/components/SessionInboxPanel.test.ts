@@ -961,32 +961,15 @@ describe("new session callback", () => {
     });
     const root = shadowRoot(panel);
 
-    const newBtn = root.querySelector<HTMLButtonElement>(".board-actions [data-action='new-session']");
-    expect(newBtn).not.toBeNull();
-    expect(newBtn?.title).toBe(NEW_SESSION_LABEL);
-    expect(newBtn?.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
-    expect(newBtn?.textContent.trim()).toBe("+ New");
-    newBtn?.click();
-    await panel.updateComplete;
-
-    expect(onNewSession).toHaveBeenCalledOnce();
-  });
-
-  it("uses the exact shared New session contract for the empty-inbox CTA", async () => {
-    const onNewSession = vi.fn();
-    const panel = await mountPanel({
-      globalSessions: mkGlobalSessions([]),
-      onNewSession,
-    });
-
-    const action = shadowRoot(panel).querySelector<HTMLButtonElement>("[data-state='empty'] [data-action='new-session']");
-    expect(action).not.toBeNull();
-    expect(action?.textContent.trim()).toBe(NEW_SESSION_LABEL);
-    expect(action?.title).toBe(NEW_SESSION_LABEL);
-    expect(action?.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
-    expect(action?.querySelector("svg.new-session-icon")?.getAttribute("aria-hidden")).toBe("true");
-
-    action?.click();
+    const newButtons = root.querySelectorAll<HTMLButtonElement>("[data-action='new-session']");
+    expect(newButtons).toHaveLength(1);
+    const newBtn = newButtons.item(0);
+    expect(newBtn.closest(".board-actions")).not.toBeNull();
+    expect(newBtn.title).toBe(NEW_SESSION_LABEL);
+    expect(newBtn.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
+    expect(newBtn.textContent.trim()).toBe("+ New");
+    expect(root.querySelector("[data-state='empty'] [data-action='new-session']")).toBeNull();
+    newBtn.click();
     await panel.updateComplete;
 
     expect(onNewSession).toHaveBeenCalledOnce();
