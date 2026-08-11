@@ -94,6 +94,7 @@ export class ComposerDraft extends LitElement {
   private readonly readOnlyCompartment = new Compartment();
   private readonly mobilePromptEnterMedia = createMobilePromptEnterMedia();
   private explicitShiftKeyActive = false;
+  private mutationVersion = 0;
   private lastDisplayState: ComposerDraftDisplayState | undefined;
   private readonly restoredSeedIds = new Set<string>();
   private readonly instanceId = `composer-draft-${String(++composerDraftSequence)}`;
@@ -203,6 +204,7 @@ export class ComposerDraft extends LitElement {
 
   replaceText(text: string): void {
     this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
+    if (this.draft !== text) this.mutationVersion += 1;
     this.draft = text;
     if (this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, text);
 
@@ -243,6 +245,7 @@ export class ComposerDraft extends LitElement {
     if (this.disabled || this.submissionDisabled) return;
     const snapshot = this.createSubmitSnapshot();
     if (snapshot === undefined) return;
+    const submittedMutationVersion = this.mutationVersion;
     let result: ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
     try {
       result = this.onSubmit?.(snapshot, this.working ? streamingBehavior : undefined) ?? "rejected";
@@ -251,11 +254,11 @@ export class ComposerDraft extends LitElement {
     }
     if (isPromiseLike(result)) {
       void result
-        .then((outcome) => { this.resolveSubmitOutcome(outcome, snapshot); })
+        .then((outcome) => { this.resolveSubmitOutcome(outcome, snapshot, submittedMutationVersion); })
         .catch(() => undefined);
       return;
     }
-    this.resolveSubmitOutcome(result, snapshot);
+    this.resolveSubmitOutcome(result, snapshot, submittedMutationVersion);
   }
 
   restoreSeed(seed: ComposerDraftSeed): boolean {
@@ -267,6 +270,7 @@ export class ComposerDraft extends LitElement {
 
   restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
     this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
+    this.mutationVersion += 1;
     this.draft = snapshot.text;
     this.attachmentGeneration += 1;
     this.attachments = (snapshot.attachments ?? []).map((attachment) => restoredPendingAttachment(attachment, `attachment-${String(++this.attachmentSeq)}`));
@@ -374,6 +378,7 @@ export class ComposerDraft extends LitElement {
       this.announceAssertive(this.attachmentError);
       return;
     }
+    if (this.attachmentDelivery !== requested) this.mutationVersion += 1;
     this.attachmentDelivery = requested;
     saveAttachmentDelivery(this.attachmentDelivery);
     this.attachmentError = undefined;
@@ -386,6 +391,7 @@ export class ComposerDraft extends LitElement {
     const removed = index === -1 ? undefined : this.attachments[index];
     const total = this.attachments.length;
     this.attachments = this.attachments.filter((attachment) => attachment.id !== id);
+    if (removed !== undefined) this.mutationVersion += 1;
     if (removed !== undefined) this.announcePolite(`Removed ${attachmentAccessibleLabel(removed, index, total)}.`);
     this.onDraftEdited?.();
     this.publishDisplayState();
@@ -400,10 +406,10 @@ export class ComposerDraft extends LitElement {
     return attachments === undefined ? { text } : { text, attachments, delivery };
   }
 
-  private resolveSubmitOutcome(outcome: ComposerDraftSubmitOutcome, snapshot: ComposerDraftSubmitSnapshot): void {
+  private resolveSubmitOutcome(outcome: ComposerDraftSubmitOutcome, snapshot: ComposerDraftSubmitSnapshot, submittedMutationVersion: number): void {
     if (outcome !== "accepted") return;
     this.promptHistoryState = addPromptHistoryEntry(this.promptHistoryState, snapshot.text);
-    if (submitSnapshotsEqual(this.currentSnapshot(), snapshot)) this.resetComposer();
+    if (this.mutationVersion === submittedMutationVersion) this.resetComposer();
   }
 
   private async handlePaste(event: ClipboardEvent): Promise<void> {
@@ -449,6 +455,7 @@ export class ComposerDraft extends LitElement {
       const previousTotal = this.attachments.length;
       const added = attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }));
       this.attachments = [...this.attachments, ...added];
+      this.mutationVersion += 1;
       this.announcePolite(attachmentAddedAnnouncement(added, previousTotal, this.attachments.length));
       this.onDraftEdited?.();
       this.publishDisplayState();
@@ -469,6 +476,7 @@ export class ComposerDraft extends LitElement {
 
   private clearAttachmentOwnership(): void {
     this.attachmentGeneration += 1;
+    if (this.attachments.length > 0) this.mutationVersion += 1;
     this.attachments = [];
     this.attachmentError = undefined;
     this.assertiveAnnouncement = "";
@@ -549,6 +557,7 @@ export class ComposerDraft extends LitElement {
 
   private updateDraft(value: string): void {
     if (!this.applyingPromptHistory) this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
+    this.mutationVersion += 1;
     this.draft = value;
     if (this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, this.draft);
     const nextInputMode = inputModeForDraft(this.draft);
@@ -711,6 +720,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private resetComposer(): void {
+    this.mutationVersion += 1;
     this.draft = "";
     this.currentInputMode = { kind: "normal" };
     if (this.storageKey !== undefined && this.storageKey !== "") clearDraft(this.storageKey);
@@ -846,22 +856,6 @@ function pendingToPromptAttachment(attachment: PendingAttachment): PromptAttachm
     return { kind: "image", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
   }
   return { kind: "file", mimeType: attachment.mimeType, data: attachment.data, name: attachment.name };
-}
-
-function submitSnapshotsEqual(left: ComposerDraftSubmitSnapshot, right: ComposerDraftSubmitSnapshot): boolean {
-  const leftAttachments = left.attachments ?? [];
-  const rightAttachments = right.attachments ?? [];
-  return left.text === right.text
-    && left.delivery === right.delivery
-    && leftAttachments.length === rightAttachments.length
-    && leftAttachments.every((attachment, index) => promptAttachmentsEqual(attachment, rightAttachments[index]));
-}
-
-function promptAttachmentsEqual(left: PromptAttachment, right: PromptAttachment | undefined): boolean {
-  return right?.kind === left.kind
-    && right.mimeType === left.mimeType
-    && right.data === left.data
-    && right.name === left.name;
 }
 
 function fileExtensionLabel(name: string): string {

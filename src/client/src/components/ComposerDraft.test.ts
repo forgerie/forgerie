@@ -250,6 +250,23 @@ describe("ComposerDraft", () => {
     expect(draft.view?.state.doc.toString()).toBe("submitted text");
   });
 
+  it("does not clear text that changed away from and back to the submitted value", async () => {
+    const acceptance = deferred<"accepted">();
+    const onSubmit = vi.fn(() => acceptance.promise);
+    const draft = await mountDraft({ onSubmit });
+    draft.replaceText("same text");
+
+    draft.submit();
+    draft.replaceText("different text");
+    draft.replaceText("same text");
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledOnce(); });
+    acceptance.resolve("accepted");
+    await acceptance.promise;
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("same text");
+  });
+
   it("keeps an immutable submitted snapshot until the host accepts it", async () => {
     const acceptance = deferred<"accepted" | "rejected">();
     const onSubmit = vi.fn((snapshot: ComposerDraftSubmitSnapshot) => acceptance.promise.then((outcome) => {
