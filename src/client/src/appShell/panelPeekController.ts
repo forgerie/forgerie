@@ -1,13 +1,18 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
+import { ROW_PRESS } from "../rowPress";
 import type { ShellPanel } from "./panelIntent";
 import { PANEL_PEEK, PEEK_CLOSED, peekProgress, peekedPanel, releasePeek, trackPeek, type PanelPeek, type PeekConfig } from "./panelPeek";
 
 /**
- * How long a still finger may rest before the drag is given up. A press that
- * stays put is selecting text or opening a row's commands, not summoning a
- * panel, and both of those must win over a gesture that has not started.
+ * How long a still finger may rest before the drag is given up.
+ *
+ * Tied to the row hold rather than chosen separately: a shorter window leaves a
+ * gap where the peek has quit and the hold has not yet fired, and a press that
+ * lands in it does nothing at all. At this length the press is handed straight
+ * from one to the other, which is also the point where a long press has taken
+ * the text under it.
  */
-const PEEK_STILL_MS = 400;
+const PEEK_STILL_MS = ROW_PRESS.holdMs;
 
 /** A trackpad sends its horizontal travel in pieces; this ends the gesture. */
 const WHEEL_SETTLE_MS = 120;
@@ -94,6 +99,7 @@ export class PanelPeekController implements ReactiveController {
     this.disarm();
     // A drag that starts inside something that scrolls sideways belongs to it.
     if (ownsHorizontalScroll(composedElements(event))) return;
+    if (this.hasLiveSelection()) return;
 
     this.origin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     this.stillTimer = setTimeout(() => { this.disarm(); }, PEEK_STILL_MS);
@@ -102,6 +108,12 @@ export class PanelPeekController implements ReactiveController {
   onPointerMove(event: PointerEvent): void {
     const origin = this.origin;
     if (origin?.pointerId !== event.pointerId) return;
+    // A selection can appear part-way through a press. When it does, the drag is
+    // moving its handles and stops being the shell's.
+    if (this.hasLiveSelection()) {
+      this.disarm();
+      return;
+    }
     const dx = event.clientX - origin.x;
     const dy = event.clientY - origin.y;
     // Movement means this was never a resting press.
@@ -141,10 +153,21 @@ export class PanelPeekController implements ReactiveController {
   private claimsHorizontal(event: HorizontalClaim): boolean {
     const origin = this.origin;
     const touch = event.touches[0];
-    if (origin === undefined || touch === undefined) return false;
+    if (origin === undefined || touch === undefined || this.hasLiveSelection()) return false;
     const dx = Math.abs(touch.clientX - origin.x);
     const dy = Math.abs(touch.clientY - origin.y);
     return dx > dy && dx > 0;
+  }
+
+  /**
+   * A drag that is moving selection handles belongs to the selection. The peek
+   * asks the document rather than guessing from timing, because a long press
+   * that took the text is a fact and the delay before it is not.
+   */
+  private hasLiveSelection(): boolean {
+    if (typeof window === "undefined" || typeof window.getSelection !== "function") return false;
+    const selection = window.getSelection();
+    return selection !== null && !selection.isCollapsed;
   }
 
   /**

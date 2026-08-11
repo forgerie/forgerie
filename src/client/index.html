@@ -90,6 +90,13 @@
            the boundary between turns, so the two are told apart at a glance. */
         --calm-para-gap: 1rem;
       }
+      /*
+       * The shell reads horizontal drags to pull its side panels in. Without
+       * this, any drag the shell does not claim falls through to the browser's
+       * own back-and-forward swipe and navigates the app away mid-gesture.
+       * Vertical overscroll is left alone: pull-to-refresh is not in the way.
+       */
+      html { overscroll-behavior-x: none; }
       html, body { margin: 0; height: 100%; overflow: hidden; background: var(--pi-bg); color: var(--pi-text); }
       body { min-height: 100dvh; }
     </style>

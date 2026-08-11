@@ -131,6 +131,18 @@ describe("PanelPeekController", () => {
     expect(touchMove(controller, 108, 240)).toBe(false);
   });
 
+  it("yields to a selection that appears part-way through the press", () => {
+    const { controller, drag } = harness();
+    drag.down(100, 100);
+    drag.move(140, 100);
+    selectSomeText();
+
+    drag.move(260, 100);
+
+    expect(controller.progress("navigation")).toBeLessThan(0.2);
+    expect(touchMove(controller, 300, 100)).toBe(false);
+  });
+
   it("claims nothing when the gesture was never armed", () => {
     const { controller } = harness();
 
@@ -234,6 +246,18 @@ function wheelEvent(deltaX: number, deltaY: number): Event {
   const event = new Event("wheel", { bubbles: true, composed: true, cancelable: true });
   Object.assign(event, { deltaX, deltaY });
   return event;
+}
+
+/** A real selection over real text, which is what the controller asks about. */
+function selectSomeText(): void {
+  const paragraph = document.createElement("p");
+  paragraph.textContent = "selected words";
+  document.body.append(paragraph);
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
 }
 
 function wait(ms: number): Promise<void> {
