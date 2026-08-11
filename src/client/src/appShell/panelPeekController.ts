@@ -63,6 +63,7 @@ export class PanelPeekController implements ReactiveController {
   peek: PanelPeek = PEEK_CLOSED;
   private readonly config: PeekConfig;
   private origin: PeekOrigin | undefined;
+  private travelled = false;
   private stillTimer: ReturnType<typeof setTimeout> | undefined;
   private wheelTravel = 0;
   private wheelTimer: ReturnType<typeof setTimeout> | undefined;
@@ -103,6 +104,23 @@ export class PanelPeekController implements ReactiveController {
     this.setPeek(PEEK_CLOSED);
   }
 
+  /**
+   * Whether the gesture that just ended was a drag rather than a tap.
+   *
+   * A drag ends with a click like any other press. Without this, pushing a
+   * sheet part-way back and holding it open still dismissed it on release, and
+   * a sheet the user was working with vanished under their hand.
+   */
+  get consumedTap(): boolean {
+    return this.travelled;
+  }
+
+  takeConsumedTap(): boolean {
+    const consumed = this.travelled;
+    this.travelled = false;
+    return consumed;
+  }
+
   onPointerDown(event: PointerEvent): void {
     if (event.pointerType !== "touch") return;
     this.disarm();
@@ -110,6 +128,7 @@ export class PanelPeekController implements ReactiveController {
     if (ownsHorizontalScroll(composedElements(event))) return;
     if (this.hasLiveSelection()) return;
 
+    this.travelled = false;
     this.origin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     this.stillTimer = setTimeout(() => { this.disarm(); }, PEEK_STILL_MS);
   }
@@ -125,8 +144,11 @@ export class PanelPeekController implements ReactiveController {
     }
     const dx = event.clientX - origin.x;
     const dy = event.clientY - origin.y;
-    // Movement means this was never a resting press.
-    if (Math.abs(dx) >= this.config.capturePx) this.clearStillTimer();
+    // Movement means this was never a resting press, and never a tap.
+    if (Math.abs(dx) >= this.config.capturePx) {
+      this.clearStillTimer();
+      this.travelled = true;
+    }
     this.setPeek(this.track(dx, dy));
   }
 

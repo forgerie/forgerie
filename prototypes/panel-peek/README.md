@@ -160,3 +160,23 @@ Conflict rules, because the transcript is full of horizontal scrollers:
 | `SessionInboxPanel.ts` | **Resolved.** Swipe-to-archive is gone; a hold (or right-click) opens the row's commands. The `E` shortcut and the undo toast are unaffected. The menu holds only what the server can actually do — there is no rename or fork endpoint, so those were not invented |
 | `PanelCollapseController.ts` | **Resolved.** Replaced by `PanelIntentController` |
 | `shared.ts`, `PiWebApp.ts`, `AppMobileMainTabs.ts`, `AppPanelEdgeControl.ts`, `SettingsPanelFrame.ts`, `TerminalPanel.ts`, `SessionTreeNavigator.ts` | Viewport breakpoints at 1180/1181 and 760 survive from the fork point. Both sit inside or beside the 499–979 posture range. `shellLayoutMode.ts` has the right model; these components have not migrated to it. Seamlessness does not arrive until they do |
+
+## Postures where a pin used to strand a panel
+
+A pin asks for space. It cannot ask for a column the shell does not lay out.
+
+The workspace column exists only on a three-surface grid. Below that the
+stylesheet hides the panel — so marking it docked on a narrower shell hid it,
+and because a docked panel is not worth peeking at, the panel became
+unreachable by any gesture. Unfolding the acceptance device landed exactly
+there: 979px seats the panel by arithmetic and cannot lay it out.
+
+| Posture | `workspace: pinned` | Before | After |
+|---|---|---|---|
+| 739×979 unfolded portrait | cannot seat it | peekable | peekable |
+| 979×739 unfolded landscape | seats by arithmetic only | **stranded** | peekable |
+| 1440×900 | seats and lays out | docked | docked |
+
+Docking now has a floor per panel: the width below which the shell has nowhere
+to put it. A pin below the floor stays a request and the panel stays reachable.
+**A pin must never be able to hide a panel from its owner.**

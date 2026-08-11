@@ -2848,7 +2848,7 @@ export class PiWebApp extends LitElement {
         class="peek-scrim"
         aria-label=${`Close ${label.toLowerCase()}`}
         style=${`opacity: ${String(progress)}`}
-        @click=${() => { this.panelPeek.close(); }}
+        @click=${() => { this.dismissPeekOnTap(); }}
       ></button>
       <div
         class="peek-sheet"
@@ -2872,6 +2872,15 @@ export class PiWebApp extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * A tap beside the sheet puts it away. A drag that ended beside the sheet was
+   * the user moving it, and it keeps whatever position they left it in.
+   */
+  private dismissPeekOnTap(): void {
+    if (this.panelPeek.takeConsumedTap()) return;
+    this.panelPeek.close();
   }
 
   /** The only promotion from a look to a decision. */

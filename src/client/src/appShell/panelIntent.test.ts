@@ -38,9 +38,27 @@ describe("dockedPanels", () => {
 
   it("seats an explicit pin before a panel that was never touched", () => {
     // Room for the session and one panel. The pin asked; navigation only defaulted.
+    const intents: PanelIntents = { navigation: "pinned", workspace: "auto" };
+
+    expect(dockedPanels(1000, intents)).toEqual({ navigation: true, workspace: false });
+  });
+
+  it("never docks a panel the shell has no column for, however hard it is pinned", () => {
+    // The workspace column exists only on a three-surface grid. Marking it
+    // docked on a narrower shell hid it and made it unreachable by gesture,
+    // because a docked panel is not worth peeking at.
+    const intents: PanelIntents = { navigation: "dismissed", workspace: "pinned" };
+
+    expect(dockedPanels(CHROME_RESIDENT_MIN_WIDTH - 1, intents).workspace).toBe(false);
+    expect(dockedPanels(CHROME_RESIDENT_MIN_WIDTH, intents).workspace).toBe(true);
+  });
+
+  it("leaves a pinned workspace panel peekable on an unfolded landscape shell", () => {
+    // The posture where a pin used to strand the panel: wide enough to seat it
+    // by arithmetic, too narrow for the shell to lay it out.
     const intents: PanelIntents = { navigation: "auto", workspace: "pinned" };
 
-    expect(dockedPanels(1000, intents)).toEqual({ navigation: false, workspace: true });
+    expect(dockedPanels(FOLD8.unfoldedLandscape, intents).workspace).toBe(false);
   });
 
   it("gives the last slot to the cheaper panel when both are pinned", () => {
@@ -57,10 +75,10 @@ describe("dockedPanels", () => {
   });
 
   it("docks a pin below the width where the panel would dock on its own", () => {
-    const belowAuto = CHROME_RESIDENT_MIN_WIDTH - 1;
+    const belowAuto = NAVIGATION_DOCK_MIN_WIDTH + 10;
 
-    expect(dockedPanels(belowAuto, DEFAULT_PANEL_INTENTS).workspace).toBe(false);
-    expect(dockedPanels(belowAuto, { navigation: "dismissed", workspace: "pinned" }).workspace).toBe(true);
+    expect(dockedPanels(belowAuto, { navigation: "dismissed", workspace: "auto" }).navigation).toBe(false);
+    expect(dockedPanels(belowAuto, { navigation: "pinned", workspace: "auto" }).navigation).toBe(true);
   });
 
   it("treats an unmeasured shell as having no room", () => {

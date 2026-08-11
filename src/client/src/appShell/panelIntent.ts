@@ -45,6 +45,20 @@ const AUTO_DOCK_MIN_WIDTHS: Readonly<Record<ShellPanel, number>> = {
 };
 
 /**
+ * The width below which the shell has nowhere to put a docked panel at all.
+ *
+ * A pin asks for space; it cannot ask for a column that does not exist. The
+ * shell only lays out a workspace column on a three-surface grid, so pinning it
+ * on a narrower shell used to mark it docked while the stylesheet hid it -- and
+ * because a docked panel is not worth peeking at, the panel became unreachable
+ * by any gesture. A pin must never be able to hide a panel from its owner.
+ */
+const DOCK_FLOOR_WIDTHS: Readonly<Record<ShellPanel, number>> = {
+  navigation: NAVIGATION_DOCK_MIN_WIDTH,
+  workspace: CHROME_RESIDENT_MIN_WIDTH,
+};
+
+/**
  * Which panels dock in the width available.
  *
  * A pin is a claim on space, not a promise of it: panels are seated while the
@@ -81,7 +95,8 @@ export function toggledIntent(availableWidth: number, intents: PanelIntents, pan
 
 /** Panels that want space, pins ahead of defaults, cheapest first within each. */
 function seatingOrder(availableWidth: number, intents: PanelIntents): readonly ShellPanel[] {
-  const pinned = PANELS_BY_COST.filter((panel) => intents[panel] === "pinned");
-  const automatic = PANELS_BY_COST.filter((panel) => intents[panel] === "auto" && availableWidth >= AUTO_DOCK_MIN_WIDTHS[panel]);
+  const seatable = PANELS_BY_COST.filter((panel) => availableWidth >= DOCK_FLOOR_WIDTHS[panel]);
+  const pinned = seatable.filter((panel) => intents[panel] === "pinned");
+  const automatic = seatable.filter((panel) => intents[panel] === "auto" && availableWidth >= AUTO_DOCK_MIN_WIDTHS[panel]);
   return [...pinned, ...automatic];
 }

@@ -1,10 +1,17 @@
 // @vitest-environment happy-dom
 import type { ReactiveController, ReactiveControllerHost } from "lit";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { PanelPeekController, ownsHorizontalScroll } from "./panelPeekController";
 import { PANEL_PEEK } from "./panelPeek";
 
 const SHEET = 300;
+
+afterEach(() => {
+  // A selection outlives the test that made it, and the controller yields to
+  // one, so leaving it behind disarms every gesture that follows.
+  window.getSelection()?.removeAllRanges();
+  document.body.replaceChildren();
+});
 
 describe("PanelPeekController", () => {
   it("pulls a sheet in as the finger travels", () => {
@@ -147,6 +154,29 @@ describe("PanelPeekController", () => {
     const { controller } = harness();
 
     expect(touchMove(controller, 300, 100)).toBe(false);
+  });
+
+  it("marks a drag as having spent its tap, so releasing does not also dismiss", () => {
+    const { controller, drag } = harness();
+
+    drag.down(100, 100);
+    drag.move(100 + SHEET * 0.6, 100);
+    drag.up();
+
+    expect(controller.consumedTap).toBe(true);
+    expect(controller.takeConsumedTap()).toBe(true);
+    // Taken once: the next release is a tap again unless it also travels.
+    expect(controller.consumedTap).toBe(false);
+  });
+
+  it("leaves a still press as a tap, so a tap beside the sheet still dismisses", () => {
+    const { controller, drag } = harness();
+
+    drag.down(100, 100);
+    drag.move(103, 100);
+    drag.up();
+
+    expect(controller.consumedTap).toBe(false);
   });
 
   it("closes on request without touching what the user asked of the panel", () => {
