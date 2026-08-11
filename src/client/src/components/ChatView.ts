@@ -15,6 +15,7 @@ import { anchoredTurnKey, followModeAfterReaderPullback, followModeAfterScroll, 
 import { ChatScrollController, distanceFromScrollBottom, isNearScrollBottom, type ChatAnchorScrollPosition, type ChatScrollRestoreResult } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
+import { selectedChatHasReadableHistory, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
 import type { ChatLine, ChatPart } from "./shared";
 import { chatStyles, renderSessionWarningIcon } from "./shared";
@@ -139,6 +140,10 @@ function chatMessageModelLabel(message: ChatLine): string | undefined {
 export class ChatView extends LitElement {
   @property({ attribute: false }) messages: ChatLine[] = [];
   @property() sessionId = "";
+  @property() sessionTitle = "";
+  @property() selectedMachineId = "local";
+  @property() sessionCwd = "";
+  @property({ attribute: false }) selectedLoad: SelectedChatLoad = selectedChatNoTarget();
   @property({ type: Number }) messageStart = 0;
   @property({ type: Number }) messageEnd = 0;
   @property({ type: Number }) messageTotal = 0;
@@ -164,7 +169,10 @@ export class ChatView extends LitElement {
   @property({ type: Boolean }) warningsVisible = true;
   @property({ attribute: false }) onToggleWarnings?: () => void;
   @property({ attribute: false }) onLoadMore?: () => void;
+  @property({ attribute: false }) onRetry?: () => void;
+  @property({ attribute: false }) onSelectedLoadPaint?: (load: SelectedChatLoad) => void;
   @query(".chat") private chat?: HTMLDivElement;
+  @query(".chat-load-retry") private retryButton?: HTMLButtonElement;
   @query("dialog.image-zoom") private imageZoomDialog?: HTMLDialogElement;
   @state() private followMode: ChatFollowMode = FOLLOW_TAIL;
   /**
@@ -199,6 +207,9 @@ export class ChatView extends LitElement {
   private readonly messageCopyTextCache = new WeakMap<ChatLine, string>();
   private lastScrollTop = 0;
   private lastClientHeight = 0;
+  private selectedLoadPaintToken = 0;
+  private selectedLoadPaintFrame: number | undefined;
+  private selectedLoadPaintTask: number | undefined;
   /**
    * The offset the transcript last put the scroller at itself.
    *
@@ -219,6 +230,7 @@ export class ChatView extends LitElement {
   private restoreScrollFrame: number | undefined;
   private prependRestoreToken = 0;
   @state() private loadMoreRequested = false;
+  private retryFocusPending = false;
   private readonly onViewportResize = () => {
     if (this.followMode.kind === "tail") this.scrollToBottom();
     else if (this.followMode.kind === "turn") this.alignAnchoredTurn();
@@ -256,6 +268,7 @@ export class ChatView extends LitElement {
 
   protected override firstUpdated(): void {
     this.lastClientHeight = this.chat?.clientHeight ?? 0;
+    this.scheduleSelectedLoadPaintReport();
   }
 
   override disconnectedCallback(): void {
@@ -275,6 +288,7 @@ export class ChatView extends LitElement {
       cancelAnimationFrame(this.scrollToOpenDialogFrame);
       this.scrollToOpenDialogFrame = undefined;
     }
+    this.cancelSelectedLoadPaintReport();
     window.removeEventListener("resize", this.onViewportResize);
     window.removeEventListener("pagehide", this.onPageHide);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
@@ -293,6 +307,7 @@ export class ChatView extends LitElement {
     this.suppressLoadMoreRequests = false;
     this.pendingScrollRestoreSessionId = undefined;
     this.pendingScrollRestorePosition = undefined;
+    this.retryFocusPending = false;
     this.prependRestoreToken += 1;
     this.selfScrollTop = undefined;
     this.turnTrackingReady = false;
@@ -315,6 +330,7 @@ export class ChatView extends LitElement {
       cancelAnimationFrame(this.scrollToOpenDialogFrame);
       this.scrollToOpenDialogFrame = undefined;
     }
+    this.cancelSelectedLoadPaintReport();
   }
 
   protected override willUpdate(changed: Map<string, unknown>): void {
@@ -373,7 +389,10 @@ export class ChatView extends LitElement {
   protected override updated(changed: Map<string, unknown>): void {
     if (changed.has("loadingMore") && !this.loadingMore) this.loadMoreRequested = false;
     if (changed.has("hasMore") && !this.hasMore) this.loadMoreRequested = false;
-    if (changed.has("sessionId")) this.restoreScrollPosition();
+    if (changed.has("sessionId")) {
+      this.cancelSelectedLoadPaintReport();
+      this.restoreScrollPosition();
+    }
     const openedAsk = changed.has("pendingAsk") && this.isNewPendingAsk(changed.get("pendingAsk"));
     const openedDialog = changed.has("pendingDialogs") && this.isNewOpenDialog(changed.get("pendingDialogs"));
     const following = this.followMode.kind !== "free";
@@ -387,6 +406,50 @@ export class ChatView extends LitElement {
     if (changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) this.continuePendingScrollRestore();
     if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
     if (changed.has("zoomedImage")) this.syncImageZoomDialog();
+    if (changed.has("selectedMachineId") || changed.has("sessionCwd")) {
+      this.cancelSelectedLoadPaintReport();
+      if (!changed.has("selectedLoad")) this.scheduleSelectedLoadPaintReport();
+    }
+    if (changed.has("selectedLoad")) {
+      this.restoreRetryFocusAfterRetry();
+      this.scheduleSelectedLoadPaintReport();
+    }
+  }
+
+  private scheduleSelectedLoadPaintReport(): void {
+    const load = this.currentSelectedLoad();
+    if (load.kind === "no-target") {
+      this.cancelSelectedLoadPaintReport();
+      return;
+    }
+    const { selectedMachineId, sessionId, sessionCwd } = this;
+    const token = ++this.selectedLoadPaintToken;
+    this.cancelSelectedLoadPaintCallbacks();
+    this.selectedLoadPaintFrame = requestAnimationFrame(() => {
+      this.selectedLoadPaintFrame = undefined;
+      this.selectedLoadPaintTask = window.setTimeout(() => {
+        this.selectedLoadPaintTask = undefined;
+        if (this.selectedLoadPaintToken !== token || !this.isConnected) return;
+        if (this.selectedMachineId !== selectedMachineId || this.sessionId !== sessionId || this.sessionCwd !== sessionCwd || this.selectedLoad !== load) return;
+        this.onSelectedLoadPaint?.(load);
+      }, 0);
+    });
+  }
+
+  private cancelSelectedLoadPaintReport(): void {
+    this.selectedLoadPaintToken += 1;
+    this.cancelSelectedLoadPaintCallbacks();
+  }
+
+  private cancelSelectedLoadPaintCallbacks(): void {
+    if (this.selectedLoadPaintFrame !== undefined) {
+      cancelAnimationFrame(this.selectedLoadPaintFrame);
+      this.selectedLoadPaintFrame = undefined;
+    }
+    if (this.selectedLoadPaintTask !== undefined) {
+      window.clearTimeout(this.selectedLoadPaintTask);
+      this.selectedLoadPaintTask = undefined;
+    }
   }
 
   private syncImageZoomDialog(): void {
@@ -433,7 +496,9 @@ export class ChatView extends LitElement {
       ${this.renderNotificationLiveRegions()}
       <div class="chat-wrap">
         <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }}>
+          ${this.renderEmptyLoadState(turns.length)}
           ${this.renderHistoryBoundary()}
+          ${this.renderReadableLoadNotice()}
           ${repeat(turns, (turn) => this.turnRenderKey(turn), (turn, index) => this.renderTurn(turn, liveTailGroup, index === turns.length - 1))}
           ${turns.length === 0 ? this.renderRunningTurnTail() : null}
         </div>
@@ -456,6 +521,98 @@ export class ChatView extends LitElement {
       <div class="visually-hidden notification-live" aria-live="assertive" aria-atomic="false">${repeat(assertive, (announcement) => announcement.id, (announcement) => html`<span data-announcement-id=${announcement.id}>${notificationAnnouncementLabel(announcement)}</span>`)}</div>
     `;
   }
+
+  private renderEmptyLoadState(turnCount: number) {
+    const load = this.currentSelectedLoad();
+    if (turnCount !== 0) return null;
+    if (load.kind === "loading-without-content") {
+      return html`
+        <section class="chat-load-state empty opening" role="status" aria-live="polite" aria-atomic="true">
+          <strong>Opening ${this.chatTitle()}</strong>
+          <span>Preparing the transcript.</span>
+        </section>
+      `;
+    }
+    if (load.kind === "failed" && !selectedChatHasReadableHistory(load)) {
+      return this.renderChatLoadFailure("chat-load-state empty failure");
+    }
+    if (this.messageTotal === 0 && (load.kind === "fresh-readable" || load.kind === "read-only" || load.kind === "live-ready")) {
+      return html`
+        <section class="chat-empty-state">
+          <strong>No messages yet.</strong>
+          <span>This transcript is empty.</span>
+        </section>
+      `;
+    }
+    return null;
+  }
+
+  private renderReadableLoadNotice() {
+    const load = this.currentSelectedLoad();
+    if (load.kind === "loading-with-readable-history") {
+      return this.renderUpdatingLoadNotice("Updating transcript", "Keeping the readable history on screen.");
+    }
+    if (load.kind === "cached-readable") {
+      return this.renderUpdatingLoadNotice("Showing cached transcript", "Checking for fresh history.");
+    }
+    if (load.kind === "fresh-readable") {
+      if (this.messages.length === 0 && this.messageTotal === 0) return null;
+      return this.renderUpdatingLoadNotice("Transcript ready", "Opening live controls.");
+    }
+    if (load.kind === "failed" && selectedChatHasReadableHistory(load)) return this.renderChatLoadFailure("chat-load-state inline failure");
+    if (load.kind === "read-only") {
+      return html`<div class="chat-load-state inline read-only"><strong>Read-only transcript</strong><span>Archived sessions cannot use live controls.</span></div>`;
+    }
+    return null;
+  }
+
+  private renderUpdatingLoadNotice(heading: string, detail: string) {
+    return html`<div class="chat-load-state inline updating" role="status" aria-live="polite" aria-atomic="true"><strong>${heading}</strong><span>${detail}</span></div>`;
+  }
+
+  private renderChatLoadFailure(className: string) {
+    const load = this.currentSelectedLoad();
+    const detail = load.kind === "failed" && load.error !== "" ? load.error : "The selected session did not finish opening.";
+    return html`
+      <section class=${className} role="alert">
+        <strong>Could not finish opening ${this.chatTitle()}</strong>
+        <span>${detail}</span>
+        ${this.onRetry === undefined ? null : html`<button type="button" class="chat-load-retry" @click=${() => { this.retrySelectedChat(); }}>Retry</button>`}
+      </section>
+    `;
+  }
+
+  private retrySelectedChat(): void {
+    if (this.onRetry === undefined) return;
+    this.retryFocusPending = true;
+    this.onRetry();
+  }
+
+  private restoreRetryFocusAfterRetry(): void {
+    if (!this.retryFocusPending) return;
+    const load = this.currentSelectedLoad();
+    if (load.kind === "failed") {
+      this.retryFocusPending = false;
+      this.retryButton?.focus();
+      return;
+    }
+    if (load.kind === "live-ready" || load.kind === "read-only") this.retryFocusPending = false;
+  }
+
+  private currentSelectedLoad(): SelectedChatLoad {
+    const load = this.selectedLoad;
+    if (load.kind === "no-target") return load;
+    return load.target.machineId === this.selectedMachineId
+      && load.target.sessionId === this.sessionId
+      && load.target.cwd === this.sessionCwd
+      ? load
+      : selectedChatNoTarget();
+  }
+
+  private chatTitle(): string {
+    return this.sessionTitle === "" ? this.sessionId : this.sessionTitle;
+  }
+
 
   private renderWarnings() {
     const rows = chatSessionWarningRows(this.status);

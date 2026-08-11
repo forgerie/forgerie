@@ -22,6 +22,12 @@ export function selectedChatTarget(machineId: string, session: Pick<SessionInfo,
   return { machineId, sessionId: session.id, cwd: session.cwd };
 }
 
+export function selectedChatTargetsEqual(left: SelectedChatTarget, right: SelectedChatTarget): boolean {
+  return left.machineId === right.machineId
+    && left.sessionId === right.sessionId
+    && left.cwd === right.cwd;
+}
+
 export function selectedChatNoTarget(): SelectedChatLoad {
   return { kind: "no-target" };
 }
@@ -73,6 +79,6 @@ export function selectedChatHasReadableHistory(load: SelectedChatLoad): boolean 
   return selectedChatReadability(load) !== "absent";
 }
 
-export function selectedChatCanUseRuntime(load: SelectedChatLoad): boolean {
+export function selectedChatCanUseRuntime(load: SelectedChatLoad): load is Extract<SelectedChatLoad, { readonly kind: "live-ready" }> {
   return load.kind === "live-ready";
 }

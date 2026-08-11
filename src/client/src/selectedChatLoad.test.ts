@@ -12,6 +12,7 @@ import {
   selectedChatReadOnly,
   selectedChatReadability,
   selectedChatTarget,
+  selectedChatTargetsEqual,
   type SelectedChatLoad,
 } from "./selectedChatLoad";
 
@@ -62,6 +63,15 @@ describe("SelectedChatLoad", () => {
     ];
 
     expect(targetBearing.map((state) => "target" in state ? state.target : undefined)).toEqual(Array(targetBearing.length).fill(selected));
+  });
+
+  it("compares selected-chat targets by machine, session, and cwd", () => {
+    const selected = target();
+
+    expect(selectedChatTargetsEqual(selected, { ...selected })).toBe(true);
+    expect(selectedChatTargetsEqual(selected, { ...selected, machineId: "machine-2" })).toBe(false);
+    expect(selectedChatTargetsEqual(selected, { ...selected, sessionId: "session-2" })).toBe(false);
+    expect(selectedChatTargetsEqual(selected, { ...selected, cwd: "/other" })).toBe(false);
   });
 
   it("derives readability and runtime-control eligibility from the tagged state", () => {

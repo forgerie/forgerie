@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../appState";
-import { ChatTranscriptStore, type ChatTranscriptPersistScheduler } from "../chatTranscriptStore";
+import { ChatTranscriptStore } from "../chatTranscriptStore";
+import { ManualPersistScheduler } from "../chatTranscriptStore.testSupport";
 import { machineSessionKey } from "../machineKeys";
 import { loadDraft, saveDraft } from "../promptDraftStorage";
 import { SessionTreeForkUnavailableError, type CommandResult, type SessionTreeSnapshot } from "../api";
@@ -22,43 +23,6 @@ import {
   type MessagePage,
   type SessionStatus,
 } from "./sessionController.testSupport";
-
-class ManualPersistScheduler implements ChatTranscriptPersistScheduler {
-  private nextId = 1;
-  private readonly frames = new Map<number, () => void>();
-  private readonly timers = new Map<number, () => void>();
-
-  requestAnimationFrame(callback: () => void): number {
-    const id = this.nextId;
-    this.nextId += 1;
-    this.frames.set(id, callback);
-    return id;
-  }
-
-  cancelAnimationFrame(id: number): void {
-    this.frames.delete(id);
-  }
-
-  setTimeout(callback: () => void): number {
-    const id = this.nextId;
-    this.nextId += 1;
-    this.timers.set(id, callback);
-    return id;
-  }
-
-  clearTimeout(id: number): void {
-    this.timers.delete(id);
-  }
-
-  flush(): void {
-    const frames = [...this.frames.values()];
-    this.frames.clear();
-    for (const frame of frames) frame();
-    const timers = [...this.timers.values()];
-    this.timers.clear();
-    for (const timer of timers) timer();
-  }
-}
 
 const tree: SessionTreeSnapshot = {
   nodes: [

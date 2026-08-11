@@ -475,6 +475,14 @@ export const chatStyles = css`
   .group-msg.tool, .group-msg.tool-execution-shell, .group-msg.bash { color: var(--calm-ink-dim); }
   .group-msg.system { color: var(--calm-ink-muted); }
   .history-boundary { position: relative; z-index: 5; display: grid; gap: 3px; justify-items: center; margin: 0 0 14px; color: var(--pi-muted); font-size: 12px; text-align: center; }
+  .chat-empty-state, .chat-load-state { color: var(--pi-muted); font-size: 13px; line-height: 1.45; }
+  .chat-empty-state strong, .chat-load-state strong { color: var(--pi-text-secondary); font-weight: 600; }
+  .chat-empty-state { box-sizing: border-box; width: min(100%, 380px); margin: auto; padding: 24px; display: grid; gap: 4px; justify-items: center; text-align: center; }
+  .chat-load-state.empty { box-sizing: border-box; width: min(100%, 420px); margin: auto; padding: 24px; display: grid; gap: 6px; justify-items: center; text-align: center; }
+  .chat-load-state.inline { position: relative; z-index: 5; box-sizing: border-box; margin: 0 0 14px; padding: 8px 11px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; border: 1px solid var(--pi-border-muted); border-radius: 10px; background: var(--pi-bg-overlay); }
+  .chat-load-state.failure { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 8%, var(--pi-surface)); color: var(--pi-text); }
+  .chat-load-state.failure strong { color: var(--pi-text-bright); }
+  .chat-load-retry { padding: 5px 10px; border-radius: 999px; }
   .history-load-button { border: 1px solid var(--pi-border); border-radius: 999px; background: var(--pi-surface); color: var(--pi-text-secondary); padding: 5px 12px; font: 12px system-ui, sans-serif; cursor: pointer; }
   .history-load-button:hover, .history-load-button:focus { border-color: var(--pi-accent); color: var(--pi-text-bright); }
   .history-load-button:disabled { cursor: default; opacity: .55; }

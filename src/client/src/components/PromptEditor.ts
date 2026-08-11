@@ -27,6 +27,7 @@ type PendingAttachment = CapturedAttachment & { id: string };
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
   @property({ type: Boolean }) disabled = false;
+  @property({ type: Boolean }) runtimeControlsAvailable = true;
   @property() sessionId?: string;
   @property() cwd?: string;
   @property() machineId = "local";
@@ -127,7 +128,7 @@ export class PromptEditor extends LitElement {
     const shellInputMode = this.currentInputMode.kind === "shell" ? this.currentInputMode : undefined;
     const shellMode = shellInputMode !== undefined;
     const rail = this.rail();
-    const busy = this.disabled || this.sending;
+    const busy = this.sending;
     return html`
       <footer
         class=${this.footerClass(shellMode)}
@@ -150,7 +151,7 @@ export class PromptEditor extends LitElement {
           ${this.renderIslandMenuAction(busy)}
           ${this.renderCompactStatus()}
           ${this.renderPrimaryAction(rail)}
-          <button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => this.onStop?.()}>${renderStopIcon()}</button>
+          <button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>
         </div>
       </footer>
     `;
@@ -225,7 +226,7 @@ export class PromptEditor extends LitElement {
    */
   private rail(): ComposerRail {
     return composerRail({
-      disabled: this.disabled,
+      disabled: this.disabled || !this.runtimeControlsAvailable,
       sending: this.sending,
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
@@ -273,8 +274,8 @@ export class PromptEditor extends LitElement {
         <!-- Model and thinking level are read together and set together, so they
              share one capsule instead of spending two slots on the rail. -->
         <div class="model-capsule">
-          <button class="select-model" title="Select model" @click=${() => this.onSelectModel?.()}>${provider}${model}</button>
-          <button class="select-thinking icon-button" title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => this.onSelectThinking?.()}>
+          <button class="select-model" ?disabled=${this.disabled || !this.runtimeControlsAvailable} title="Select model" @click=${() => { this.selectModel(); }}>${provider}${model}</button>
+          <button class="select-thinking icon-button" ?disabled=${this.disabled || !this.runtimeControlsAvailable} title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => { this.selectThinking(); }}>
             ${renderThinkingGauge(thinkingGauge(status.thinkingLevel, this.availableThinkingLevels))}<span class="thinking-level">${thinking}</span>
           </button>
         </div>
@@ -295,6 +296,21 @@ export class PromptEditor extends LitElement {
     const label = this.sessionLabel;
     if (label === undefined || label === "") return null;
     return html`<span class="session-identity" title=${label}>${label}</span>`;
+  }
+
+  private stop(): void {
+    if (this.disabled || !this.runtimeControlsAvailable || !this.canStop) return;
+    this.onStop?.();
+  }
+
+  private selectModel(): void {
+    if (this.disabled || !this.runtimeControlsAvailable) return;
+    this.onSelectModel?.();
+  }
+
+  private selectThinking(): void {
+    if (this.disabled || !this.runtimeControlsAvailable) return;
+    this.onSelectThinking?.();
   }
 
   private renderArchiveAction() {
@@ -323,7 +339,7 @@ export class PromptEditor extends LitElement {
       : "Attachments and session controls";
     return html`
       <button
-        class=${waiting ? "island-menu icon-button attention" : "island-menu icon-button"}
+        class=${waiting ? "island-menu composer-summon icon-button attention" : "island-menu composer-summon icon-button"}
         ?disabled=${busy}
         title=${label}
         aria-label=${label}
@@ -658,7 +674,7 @@ export class PromptEditor extends LitElement {
   }
 
   private send(streamingBehavior?: "steer" | "followUp") {
-    if (this.disabled || this.sending) return;
+    if (this.disabled || !this.runtimeControlsAvailable || this.sending) return;
     const text = this.draft.trim();
     const pending = this.attachments;
     if (text === "" && pending.length === 0) return;

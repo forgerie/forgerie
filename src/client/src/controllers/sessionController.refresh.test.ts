@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { initialAppState } from "../appState";
 import { ChatTranscriptStore } from "../chatTranscriptStore";
 import { SessionController } from "./sessionController";
-import { defaultApi, deferred, FakeSocket, oldSession, replacementSession, sessionLookupId, status, workspace, type AppState, type MessagePage, type SessionStatus, type SessionStreamSnapshot } from "./sessionController.testSupport";
+import { defaultApi, deferred, EmitSocket, FakeSocket, oldSession, replacementSession, sessionLookupId, status, workspace, type AppState, type MessagePage, type SessionStatus, type SessionStreamSnapshot } from "./sessionController.testSupport";
 
 function page(text: string, total: number): MessagePage {
   return { messages: [{ role: "assistant", content: text }], start: 0, total };
@@ -76,6 +76,79 @@ describe("SessionController selected-session refresh", () => {
     expect(state.selectedChatLoad).toMatchObject({ kind: "failed", readability: "cached", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
     expect(state.error).toContain("history failed");
     expect(ready).toEqual([]);
+  });
+
+  it("does not replay initial buffered transcript events when the stream snapshot join fails", async () => {
+    const messages = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    const socket = new EmitSocket();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => messages.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket },
+    );
+
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    await Promise.resolve();
+    messages.resolve(page("fresh history", 1));
+    await Promise.resolve();
+    await Promise.resolve();
+    socket.emit({ type: "message.append", message: { role: "assistant", content: "buffered event after history" }, seq: 1 });
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.reject(new Error("snapshot failed"));
+    await selecting;
+
+    expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "fresh history" }] }]);
+    expect(state.selectedChatLoad).toMatchObject({ kind: "failed", readability: "fresh" });
+  });
+
+  it("uses a successful stream snapshot watermark to dedupe buffered events when status fails", async () => {
+    const messages = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    const socket = new EmitSocket();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => messages.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket },
+    );
+
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    await Promise.resolve();
+    messages.resolve(page("fresh history", 1));
+    await Promise.resolve();
+    await Promise.resolve();
+    socket.emit({ type: "message.append", message: { role: "assistant", content: "already in snapshot" }, seq: 2 });
+    socket.emit({ type: "status.update", status: { ...status(oldSession.id), pendingMessageCount: 3 }, seq: 2 });
+    snapshot.resolve({ seq: 2, partial: null });
+    selectedStatus.reject(new Error("status failed"));
+    await selecting;
+    controller.flushPendingUpdates();
+
+    expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "fresh history" }] }]);
+    expect(state.status?.pendingMessageCount).toBe(3);
+    expect(state.selectedChatLoad).toMatchObject({ kind: "failed", readability: "fresh" });
   });
 
   it("loads an archived selection as read-only without connecting a session socket", async () => {

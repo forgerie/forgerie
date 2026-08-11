@@ -1,46 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { initialAppState } from "../appState";
-import { ChatTranscriptStore, type ChatTranscriptPersistScheduler } from "../chatTranscriptStore";
+import { ChatTranscriptStore } from "../chatTranscriptStore";
+import { ManualPersistScheduler } from "../chatTranscriptStore.testSupport";
 import { SessionController } from "./sessionController";
 import { InMemorySessionSelectionMemory } from "./sessionSelection";
 import { defaultApi, emptyPage, FakeSocket, oldSession, sessionKey, sessionLookupId, status, workspace, type AppState, type MessagePage } from "./sessionController.testSupport";
-
-class ManualPersistScheduler implements ChatTranscriptPersistScheduler {
-  private nextId = 1;
-  private readonly frames = new Map<number, () => void>();
-  private readonly timers = new Map<number, () => void>();
-
-  requestAnimationFrame(callback: () => void): number {
-    const id = this.nextId;
-    this.nextId += 1;
-    this.frames.set(id, callback);
-    return id;
-  }
-
-  cancelAnimationFrame(id: number): void {
-    this.frames.delete(id);
-  }
-
-  setTimeout(callback: () => void): number {
-    const id = this.nextId;
-    this.nextId += 1;
-    this.timers.set(id, callback);
-    return id;
-  }
-
-  clearTimeout(id: number): void {
-    this.timers.delete(id);
-  }
-
-  flush(): void {
-    const frames = [...this.frames.values()];
-    this.frames.clear();
-    for (const frame of frames) frame();
-    const timers = [...this.timers.values()];
-    this.timers.clear();
-    for (const timer of timers) timer();
-  }
-}
 
 describe("SessionController reload and selection", () => {
   it("reloads the selected session from disk, discards the cached transcript, and re-fetches history", async () => {

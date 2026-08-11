@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ChatTranscriptStore, type ChatHistoryCacheAdapter, type ChatTranscriptPersistScheduler } from "./chatTranscriptStore";
+import { ChatTranscriptStore, type ChatHistoryCacheAdapter } from "./chatTranscriptStore";
 import type { RawMessagePage } from "./chatHistoryCache";
+import { ManualPersistScheduler } from "./chatTranscriptStore.testSupport";
 
 class MemoryChatHistoryCache implements ChatHistoryCacheAdapter {
   readonly pages = new Map<string, RawMessagePage>();
@@ -26,55 +27,6 @@ class ThrowingWriteChatHistoryCache extends MemoryChatHistoryCache {
   override write(sessionId: string, page: RawMessagePage): void {
     this.writes.push({ sessionId, page });
     throw new Error("quota exceeded");
-  }
-}
-
-class ManualPersistScheduler implements ChatTranscriptPersistScheduler {
-  private nextId = 1;
-  readonly frames = new Map<number, () => void>();
-  readonly timers = new Map<number, () => void>();
-  readonly cancelledFrames: number[] = [];
-  readonly clearedTimers: number[] = [];
-
-  requestAnimationFrame(callback: () => void): number {
-    const id = this.nextId;
-    this.nextId += 1;
-    this.frames.set(id, callback);
-    return id;
-  }
-
-  cancelAnimationFrame(id: number): void {
-    this.cancelledFrames.push(id);
-    this.frames.delete(id);
-  }
-
-  setTimeout(callback: () => void): number {
-    const id = this.nextId;
-    this.nextId += 1;
-    this.timers.set(id, callback);
-    return id;
-  }
-
-  clearTimeout(id: number): void {
-    this.clearedTimers.push(id);
-    this.timers.delete(id);
-  }
-
-  flushFrames(): void {
-    const callbacks = [...this.frames.entries()];
-    this.frames.clear();
-    for (const [, callback] of callbacks) callback();
-  }
-
-  flushTimers(): void {
-    const callbacks = [...this.timers.entries()];
-    this.timers.clear();
-    for (const [, callback] of callbacks) callback();
-  }
-
-  flush(): void {
-    this.flushFrames();
-    this.flushTimers();
   }
 }
 
@@ -121,18 +73,37 @@ describe("ChatTranscriptStore", () => {
     expect(store.cachedView("s3")).toBe(third);
   });
 
-  it("keeps the latest scheduled persistence when LRU eviction drops the hot view", () => {
+  it("cancels pending persistence when LRU eviction drops the hot view", () => {
     const cache = new MemoryChatHistoryCache();
     const scheduler = new ManualPersistScheduler();
     const store = new ChatTranscriptStore(cache, { capacity: 1, scheduler });
-    const evicted = page(0, 1, [{ role: "user", content: "persist me" }]);
 
-    store.mergeHistory("s1", evicted);
+    store.mergeHistory("s1", page(0, 1, [{ role: "user", content: "do not persist after eviction" }]));
     store.schedulePersist("s1");
     store.mergeHistory("s2", page(0, 1, [{ role: "user", content: "evict s1" }]));
     scheduler.flush();
 
-    expect(cache.writes).toEqual([{ sessionId: "s1", page: evicted }]);
+    expect(scheduler.cancelledFrames).toEqual([1]);
+    expect(cache.writes).toEqual([]);
+  });
+
+  it("disposes all pending transcript persistence without stale writes", () => {
+    const cache = new MemoryChatHistoryCache();
+    const scheduler = new ManualPersistScheduler();
+    const store = new ChatTranscriptStore(cache, { scheduler });
+
+    store.mergeHistory("s1", page(0, 1, [{ role: "user", content: "timer pending" }]));
+    store.schedulePersist("s1");
+    scheduler.flushFrames();
+    store.mergeHistory("s2", page(0, 1, [{ role: "user", content: "frame pending" }]));
+    store.schedulePersist("s2");
+
+    store.dispose();
+    scheduler.flush();
+
+    expect(scheduler.cancelledFrames).toEqual([3]);
+    expect(scheduler.clearedTimers).toEqual([2]);
+    expect(cache.writes).toEqual([]);
   });
 
   it("lets explicit discard cancel a pending persist after LRU eviction", () => {

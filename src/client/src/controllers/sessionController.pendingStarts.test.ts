@@ -249,6 +249,14 @@ describe("SessionController pending starts", () => {
     expect(state.sessions.map((session) => session.id)).toEqual([temporaryId]);
     expect(state.sessions[0]?.persisted).toBe(false);
     expect(state.activity).toMatchObject({ sessionId: temporaryId, phase: "error", label: "Session creation failed" });
+    expect(state.selectedChatLoad).toMatchObject({ kind: "failed", readability: "absent", target: { machineId: "local", sessionId: temporaryId, cwd: workspace.path } });
+    expect(state.error).toContain("backend unavailable");
+
+    const failedSession = state.sessions[0];
+    if (failedSession === undefined) throw new Error("Expected failed temporary session");
+    await controller.selectSession(failedSession, { updateUrl: false });
+
+    expect(state.selectedChatLoad).toMatchObject({ kind: "failed", readability: "absent", target: { sessionId: temporaryId } });
     expect(state.error).toContain("backend unavailable");
 
     await controller.deleteCachedNewSession(state.sessions[0]);

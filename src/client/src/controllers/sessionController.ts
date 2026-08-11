@@ -20,6 +20,7 @@ import {
   selectedChatReadOnly,
   selectedChatReadability,
   selectedChatTarget,
+  selectedChatTargetsEqual,
   type SelectedChatReadability,
   type SelectedChatTarget,
 } from "../selectedChatLoad";
@@ -179,6 +180,7 @@ export class SessionController {
     this.selectionSeq += 1;
     this.socket.close();
     this.clearPendingUpdates();
+    this.transcripts.dispose();
     this.setState({ selectedChatLoad: selectedChatNoTarget() });
   }
 
@@ -301,10 +303,18 @@ export class SessionController {
         return;
       }
       // A failed join refresh must not strand the socket on its temporary
-      // buffering callback. Apply what arrived and keep live events flowing so
-      // reconnect/trailing refresh can recover authoritatively.
+      // buffering callback. If the stream snapshot established a watermark,
+      // replay only events not already reflected by that snapshot. Without the
+      // snapshot there is no safe de-duplication anchor, so skip the initial
+      // buffer and let future live events or reconnect refresh recover.
       if (buffered !== undefined) {
-        for (const event of buffered) this.applyEvent(event);
+        if (this.hasStreamWatermark()) {
+          // A successful stream snapshot covers transcript content. A failed
+          // status request does not cover status, activity, asks, or dialogs,
+          // so replay those buffered projections without the transcript
+          // watermark while still deduplicating buffered transcript events.
+          for (const event of buffered) this.applyEvent(event, !isTranscriptContentEvent(event));
+        }
         this.socket.setHandler((event) => { this.applyEvent(event); });
       }
       this.setState({ selectedChatLoad: selectedChatFailed(target, this.currentSelectedChatReadability(target), error), error: String(error) });
@@ -1116,9 +1126,7 @@ export class SessionController {
       const history = await historyViewPromise;
       if (history === undefined || !this.isCurrentRefreshTarget(target)) return;
       const [statusResult, streamSnapshotResult] = await Promise.all([statusResultPromise, streamSnapshotResultPromise]);
-      if (!statusResult.ok) throw statusResult.error;
       if (!streamSnapshotResult.ok) throw streamSnapshotResult.error;
-      const { status } = statusResult;
       const { streamSnapshot } = streamSnapshotResult;
       // Seed the in-flight partial assistant message on top of committed history
       // and record the snapshot's sequence as the watermark. Buffered/live events
@@ -1128,6 +1136,11 @@ export class SessionController {
       // history cache, so it never persists.
       const messages = this.transcripts.seedStreamingPartial(history.messages, streamSnapshot.partial);
       this.streamWatermark = { sessionId: target.session.id, seq: streamSnapshot.seq };
+      if (!statusResult.ok) {
+        if (messages !== history.messages) this.setState({ ...history, messages });
+        throw statusResult.error;
+      }
+      const { status } = statusResult;
       this.setState({
         ...history,
         messages,
@@ -1149,13 +1162,14 @@ export class SessionController {
 
   private currentSelectedChatReadability(target: SelectedChatTarget): SelectedChatReadability {
     const state = this.getState();
-    if ("target" in state.selectedChatLoad
-      && state.selectedChatLoad.target.machineId === target.machineId
-      && state.selectedChatLoad.target.sessionId === target.sessionId
-      && state.selectedChatLoad.target.cwd === target.cwd) {
+    if ("target" in state.selectedChatLoad && selectedChatTargetsEqual(state.selectedChatLoad.target, target)) {
       return selectedChatReadability(state.selectedChatLoad);
     }
     return this.transcripts.rawHistoryPage(machineSessionKey(target.machineId, target.sessionId)) === undefined ? "absent" : "cached";
+  }
+
+  private hasStreamWatermark(): boolean {
+    return this.streamWatermark !== undefined;
   }
 
   private isCurrentRefreshTarget(target: SelectedSessionRefreshTarget): boolean {
@@ -1296,10 +1310,15 @@ export class SessionController {
     const state = this.getState();
     const pendingStart = this.pendingSessionStarts.get(session.id);
     const activity = options?.activity ?? state.sessionActivities[session.id] ?? (pendingStart !== undefined ? creatingPendingSessionActivity(session.id, pendingStart.queuedSends.length) : undefined);
+    const failedStart = pendingStart === undefined && activity?.phase === "error"
+      ? `Failed to start session: ${activity.detail ?? activity.label}`
+      : undefined;
     this.setState({
       ...(options?.sessions === undefined ? {} : { sessions: options.sessions }),
       selectedSession: session,
-      selectedChatLoad: selectedChatLoading(selectedChatTarget(session.machineId, session)),
+      selectedChatLoad: failedStart === undefined
+        ? selectedChatLoading(selectedChatTarget(session.machineId, session))
+        : selectedChatFailed(selectedChatTarget(session.machineId, session), "absent", failedStart),
       messages: [],
       messagePageStart: 0,
       messagePageEnd: 0,
@@ -1313,7 +1332,7 @@ export class SessionController {
       availableThinkingLevels: [],
       treeDialog: undefined,
       ...(activity === undefined ? {} : { sessionActivities: { ...state.sessionActivities, [session.id]: activity } }),
-      error: "",
+      error: failedStart ?? "",
     });
     // Re-selecting the row mid-startup re-establishes the constructing
     // session's subscription; the close above dropped it with the old selection.
@@ -1382,6 +1401,7 @@ export class SessionController {
     }
     const state = this.getState();
     const message = errorMessage(error);
+    const failure = `Failed to start session: ${message}`;
     const activity = failedPendingSessionActivity(tempId, message, pending.queuedSends.length);
     const hasPendingRow = state.sessions.some((session) => session.id === tempId);
     this.setState({
@@ -1390,8 +1410,11 @@ export class SessionController {
       activity: state.selectedSession?.id === tempId ? activity : state.activity,
       // Open cards on the failed row are dead: the create is gone, so no
       // answer could ever reach the daemon. Settled outcomes stay as history.
-      ...(state.selectedSession?.id === tempId ? { pendingDialogs: [] } : {}),
-      error: `Failed to start session: ${message}`,
+      ...(state.selectedSession?.id === tempId ? {
+        selectedChatLoad: selectedChatFailed(selectedChatTarget(pending.machineId, pending.session), "absent", failure),
+        pendingDialogs: [],
+      } : {}),
+      error: failure,
     });
     this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);
   }
@@ -1592,7 +1615,7 @@ export class SessionController {
     });
   }
 
-  private applyEvent(event: SessionUiEvent) {
+  private applyEvent(event: SessionUiEvent, ignoreStreamWatermark = false) {
     // Notification revisions use their own join snapshot. Handle them before the
     // transcript watermark so a notification event sharing an already-seeded
     // transcript sequence cannot be lost.
@@ -1607,7 +1630,7 @@ export class SessionController {
     // Drop events already reflected in the seeded join snapshot (committed
     // history + partial). Everything past the watermark applies exactly once,
     // so live content streams directly on top of the seeded partial.
-    if (this.isStreamEventBelowWatermark(event)) return;
+    if (!ignoreStreamWatermark && this.isStreamEventBelowWatermark(event)) return;
 
     // Status and activity arrive once per token (the server republishes them on
     // every transcript event). Buffer them alongside high-frequency transcript
@@ -2009,6 +2032,21 @@ function sessionMessageCountPatch(state: AppState, sessionId: string, messageCou
     ...(sessions === undefined ? {} : { sessions }),
     ...(selectedSession !== state.selectedSession ? { selectedSession } : {}),
   };
+}
+
+function isTranscriptContentEvent(event: SessionUiEvent): boolean {
+  return event.type === "message.append"
+    || event.type === "assistant.delta"
+    || event.type === "assistant.thinking.delta"
+    || event.type === "tool.start"
+    || event.type === "tool.update"
+    || event.type === "tool.end"
+    || event.type === "shell.start"
+    || event.type === "shell.chunk"
+    || event.type === "shell.end"
+    || event.type === "message.end"
+    || event.type === "command.output"
+    || event.type === "session.error";
 }
 
 function isHighFrequencyTranscriptEvent(event: SessionUiEvent): boolean {

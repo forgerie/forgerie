@@ -32,6 +32,8 @@ import { resolveParentSessionLocation, type ParentSessionLocation } from "../par
 import { promptHistoryEntries } from "../promptHistory";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
 import { notificationInboxTotalCount, selectedNotificationView } from "../sessionNotifications";
+import { createChatOpenTiming } from "../chatOpenTiming";
+import { selectedChatCanUseRuntime, selectedChatLoading, selectedChatTarget, selectedChatTargetsEqual, type SelectedChatLoad } from "../selectedChatLoad";
 import { SessionUnreadController } from "../sessionUnread";
 import { deriveUnreadPresence, EMPTY_UNREAD_PRESENCE, sameUnreadPresence, type UnreadPresence } from "../unreadPresence";
 import { initialSessionWarningVisibilityState, reconcileSessionWarningVisibility, toggleSessionWarnings } from "../sessionWarningVisibility";
@@ -117,6 +119,17 @@ interface SessionCleanupDialogState {
   error?: string | undefined;
 }
 
+type ChatNavigationIntent =
+  | { readonly kind: "none" }
+  | { readonly kind: "opening"; readonly seq: number; readonly machineId: string; readonly session: SessionInfo };
+
+interface AppContextBarLocation {
+  readonly machine: Machine | undefined;
+  readonly project: Project | undefined;
+  readonly workspace: Workspace | undefined;
+  readonly session: SessionInfo | undefined;
+}
+
 @customElement("pi-web-app")
 export class PiWebApp extends LitElement {
   @state() private state: AppState = initialAppState();
@@ -140,6 +153,7 @@ export class PiWebApp extends LitElement {
   });
   @state() private unreadSessionIds: ReadonlySet<string> = this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), this.state.sessions);
   @state() private unreadPresence: UnreadPresence = EMPTY_UNREAD_PRESENCE;
+  @state() private chatNavigationIntent: ChatNavigationIntent = { kind: "none" };
   @state() private cachedUnreadCompletedAt: Readonly<Record<string, string>> = {};
   private unreadConnected = false;
   private committedChatIdentity: string | undefined;
@@ -152,6 +166,7 @@ export class PiWebApp extends LitElement {
   } | undefined;
   private readonly managedProcessesListeners = new Set<(event: ManagedProcessesBrowserEvent) => void>();
   private readonly managedProcessesSnapshots = new Map<string, ManagedProcessesSnapshot>();
+  private readonly chatOpenTiming = createChatOpenTiming();
 
   private readonly notifications = new SessionNotificationController(
     () => this.state,
@@ -479,6 +494,8 @@ export class PiWebApp extends LitElement {
     if (this.workspaceDeletionPollTimer !== undefined) window.clearInterval(this.workspaceDeletionPollTimer);
     this.workspaceDeletionPollTimer = undefined;
     this.clearPendingRemoteRouteRestore();
+    this.chatNavigationIntent = { kind: "none" };
+    this.chatOpenTiming.supersedeActive();
     super.disconnectedCallback();
   }
 
@@ -496,6 +513,7 @@ export class PiWebApp extends LitElement {
     this.handleActivityTransition(previous, this.state);
     this.handleWorkspaceChange(previous, this.state);
     this.handleMachineChange(previous, this.state);
+    this.clearChatNavigationIntentForSelectedSession();
     if (machineActivitySubscriptionInputsChanged(previous, this.state)) this.syncMachineActivitySubscriptions();
     this.notifications.syncEnvironment(previous, this.state);
   }
@@ -1417,6 +1435,17 @@ export class PiWebApp extends LitElement {
     // Independent navigation dismisses undo; Archive & next explicitly preserves it.
     if (options.preserveUndoToast !== true) this.inbox.dismissUndoToast();
 
+    const timingTarget = selectedChatTarget(machineId, session);
+    this.chatOpenTiming.begin(timingTarget);
+    this.chatNavigationIntent = { kind: "opening", seq, machineId, session };
+    if (this.state.error !== "") this.setState({ error: "" });
+    await this.openChatForNavigationIntent();
+    if (isCurrentToken()) this.chatOpenTiming.markShellPainted(timingTarget);
+    if (!isCurrentToken()) {
+      this.clearChatNavigationIntentForToken(seq);
+      return;
+    }
+
     let result: InboxNavigationResult;
     try {
       result = await navigateToInboxSession(
@@ -1449,11 +1478,15 @@ export class PiWebApp extends LitElement {
         { token: seq, isCurrentToken },
       );
     } catch (error: unknown) {
+      this.clearChatNavigationIntentForToken(seq);
       if (isCurrentToken()) this.setState({ error: `Unable to open workspace: ${String(error)}` });
       return;
     }
 
-    if (!isCurrentToken()) return;
+    if (!isCurrentToken()) {
+      this.clearChatNavigationIntentForToken(seq);
+      return;
+    }
 
     if (result === "selected" || result === "workspace-switch" || result === "project-switch") {
       // Successful resolution: clear any stale unavailable mark for this cwd.
@@ -1462,8 +1495,10 @@ export class PiWebApp extends LitElement {
         next.delete(session.cwd);
         this.unavailableCwds = next;
       }
+      if (!this.selectedSessionMatchesNavigationTarget(machineId, session)) this.clearChatNavigationIntentForToken(seq);
       await this.openChat();
     } else if (result === "unavailable") {
+      this.clearChatNavigationIntentForToken(seq);
       // All projects exhausted with no match: mark the cwd unavailable so the
       // row renders as disabled in the inbox panel.
       if (!this.unavailableCwds.has(session.cwd)) {
@@ -1522,7 +1557,6 @@ export class PiWebApp extends LitElement {
   /**
    * Archive the selected session and advance to the next in the triage queue.
    *
-   * Called by the "Archive & next" button in the thread header.
    * If the queue is empty after the archive, the focus returns to the board.
    */
   private async archiveAndNext(): Promise<void> {
@@ -1589,6 +1623,8 @@ export class PiWebApp extends LitElement {
 
   private async selectNavigationItem(section: NavigationSection, nextTarget: NavigationFocusTarget, action: () => Promise<void>): Promise<void> {
     const seq = ++this.navigationSelectionSeq;
+    if (this.chatNavigationIntent.kind === "opening") this.chatOpenTiming.supersedeActive();
+    this.chatNavigationIntent = { kind: "none" };
     const isCurrentSelection = () => seq === this.navigationSelectionSeq;
 
     await this.withChatScrollTransition(async () => {
@@ -1779,6 +1815,11 @@ export class PiWebApp extends LitElement {
     if (this.state.mainView !== "chat") this.selectMainView("chat");
     await this.updateComplete;
     await nextFrame();
+  }
+
+  private async openChatForNavigationIntent(): Promise<void> {
+    await this.openChat();
+    await nextTask();
   }
 
   /** Explicit composer entry only — see `openChat` for why navigation never calls this. */
@@ -2165,7 +2206,7 @@ export class PiWebApp extends LitElement {
       },
       reloadSession: () => this.sessions.reloadSession(),
       deleteCachedNewSession: () => this.sessions.deleteCachedNewSession(),
-      stopActiveWork: () => this.sessions.stopActiveWork(),
+      stopActiveWork: () => { this.handleStopActiveWork(); },
     }, createContext);
     return createContext("core");
   }
@@ -2308,6 +2349,7 @@ export class PiWebApp extends LitElement {
   }
 
   private async openModelDialog() {
+    if (!this.selectedChatRuntimeAvailable()) return;
     const models = await this.sessions.listModels();
     const currentProvider = this.state.status?.model?.provider;
     const currentId = this.state.status?.model?.id;
@@ -2327,6 +2369,7 @@ export class PiWebApp extends LitElement {
 
   private async pickModel(value: string) {
     this.setState({ modelDialog: undefined });
+    if (!this.selectedChatRuntimeAvailable()) return;
     const slash = value.indexOf("/");
     if (slash <= 0) return;
     await this.sessions.setModel(value.slice(0, slash), value.slice(slash + 1));
@@ -2422,6 +2465,7 @@ export class PiWebApp extends LitElement {
   }
 
   private async openThinkingDialog() {
+    if (!this.selectedChatRuntimeAvailable()) return;
     const levels = await this.sessions.listThinkingLevels();
     const current = this.state.status?.thinkingLevel ?? "off";
     this.setState({
@@ -2435,12 +2479,14 @@ export class PiWebApp extends LitElement {
 
   private async pickThinking(value: string) {
     this.setState({ thinkingDialog: undefined });
+    if (!this.selectedChatRuntimeAvailable()) return;
     if (value !== "") await this.sessions.setThinkingLevel(value);
   }
 
   private sendPrompt(text: string, streamingBehavior?: "steer" | "followUp", attachments?: import("../api").PromptAttachment[], delivery?: import("../../../shared/apiTypes").PromptAttachmentDelivery): void {
     const hasAttachments = attachments !== undefined && attachments.length > 0;
     if (!hasAttachments && streamingBehavior === undefined && this.auth.handleSlashCommand(text)) return;
+    if (!this.selectedChatRuntimeAvailable()) return;
     void this.sessions.send(text, streamingBehavior, attachments, delivery);
   }
 
@@ -2452,6 +2498,7 @@ export class PiWebApp extends LitElement {
   };
 
   private readonly handleStopActiveWork = (): void => {
+    if (!this.selectedChatRuntimeAvailable()) return;
     void this.sessions.stopActiveWork();
   };
 
@@ -2537,7 +2584,6 @@ export class PiWebApp extends LitElement {
     return entries;
   }
 
-  /** Mirrors the thread header's old conditions so the action does not outlive its meaning. */
   private canArchiveSelectedSession(state: AppState): boolean {
     return state.selectedSession?.archived !== true && state.globalSessions !== undefined;
   }
@@ -2550,10 +2596,55 @@ export class PiWebApp extends LitElement {
     this.setState({ controlSheetOpen: true });
   };
 
+  private readonly handleRetrySelectedChat = (): void => {
+    const session = this.state.selectedSession;
+    if (session === undefined) return;
+    this.chatOpenTiming.begin(selectedChatTarget(selectedMachineId(this.state), session), { source: "retry" });
+    void this.sessions.selectSession(session, { updateUrl: false });
+  };
+
+  private readonly handleSelectedLoadPaint = (load: SelectedChatLoad): void => {
+    this.chatOpenTiming.markSelectedLoadPainted(load);
+  };
+
+  private selectedChatRuntimeAvailable(): boolean {
+    const load = this.state.selectedChatLoad;
+    const session = this.state.selectedSession;
+    if (!selectedChatCanUseRuntime(load) || session === undefined) return false;
+    return selectedChatTargetsEqual(load.target, selectedChatTarget(selectedMachineId(this.state), session));
+  }
+
   private renderChatView(state: AppState, session: SessionInfo) {
+    const machineId = selectedMachineId(state);
+    const retry = isClientPendingStartSession(session) ? undefined : this.handleRetrySelectedChat;
     return html`
-      <chat-view .sessionId=${session.id} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .pendingMessageCount=${state.status?.pendingMessageCount ?? 0} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(selectedMachineId(state), session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())}></chat-view>
+      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .sessionTitle=${sessionDisplayLabel(session)} .selectedMachineId=${machineId} .sessionCwd=${session.cwd} .selectedLoad=${state.selectedChatLoad} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .pendingMessageCount=${state.status?.pendingMessageCount ?? 0} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(machineId, session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())} .onRetry=${retry} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>
     `;
+  }
+
+  private renderOpeningChatIntent(intent: Extract<ChatNavigationIntent, { kind: "opening" }>) {
+    const target = selectedChatTarget(intent.machineId, intent.session);
+    const load = selectedChatLoading(target);
+    return html`<chat-view .sessionId=${intent.session.id} .sessionTitle=${sessionDisplayLabel(intent.session)} .selectedMachineId=${intent.machineId} .sessionCwd=${intent.session.cwd} .selectedLoad=${load} .messages=${[]} .messageStart=${0} .messageEnd=${0} .messageTotal=${0}></chat-view>`;
+  }
+
+  private clearChatNavigationIntentForToken(seq: number): void {
+    if (this.chatNavigationIntent.kind !== "opening" || this.chatNavigationIntent.seq !== seq) return;
+    this.chatNavigationIntent = { kind: "none" };
+    this.chatOpenTiming.supersedeActive();
+  }
+
+  private clearChatNavigationIntentForSelectedSession(): void {
+    const intent = this.chatNavigationIntent;
+    const session = this.state.selectedSession;
+    if (intent.kind !== "opening" || session === undefined) return;
+    if (this.selectedSessionMatchesNavigationTarget(intent.machineId, intent.session)) this.chatNavigationIntent = { kind: "none" };
+  }
+
+  private selectedSessionMatchesNavigationTarget(machineId: string, target: Pick<SessionInfo, "id" | "cwd">): boolean {
+    const session = this.state.selectedSession;
+    if (session === undefined) return false;
+    return selectedChatTargetsEqual(selectedChatTarget(selectedMachineId(this.state), session), selectedChatTarget(machineId, target));
   }
 
   /** Dismisses the summoned navigation overlay by returning to the session underneath. */
@@ -2607,18 +2698,38 @@ export class PiWebApp extends LitElement {
   private renderContextBar() {
     if (this.appShell.isChromeSummoned) return null;
     if (!this.appShell.isMobileNavigationLayout) return null;
+    const location = this.contextBarLocation();
     return html`
       <app-context-bar
         .machines=${this.state.machines}
-        .machine=${this.state.selectedMachine}
-        .project=${this.state.selectedProject}
-        .workspace=${this.state.selectedWorkspace}
-        .session=${this.state.selectedSession}
+        .machine=${location.machine}
+        .project=${location.project}
+        .workspace=${location.workspace}
+        .session=${location.session}
         .refreshControl=${this.appShell.shouldShowAppRefreshInContextBar() ? this.renderAppRefresh() : undefined}
         .onOpenSection=${(section: NavigationSection) => { this.openNavigationSection(section); }}
         .onShowActions=${() => { this.setState({ actionPaletteOpen: true }); }}
       ></app-context-bar>
     `;
+  }
+
+  private contextBarLocation(): AppContextBarLocation {
+    const intent = this.chatNavigationIntent;
+    if (intent.kind !== "opening") {
+      return {
+        machine: this.state.selectedMachine,
+        project: this.state.selectedProject,
+        workspace: this.state.selectedWorkspace,
+        session: this.state.selectedSession,
+      };
+    }
+    const workspace = workspaceForSessionCwd(this.state, intent.session.cwd);
+    return {
+      machine: machineForId(this.state, intent.machineId),
+      project: workspace === undefined ? undefined : projectForId(this.state, workspace.projectId),
+      workspace,
+      session: intent.session,
+    };
   }
 
   private renderMobileMainTabs() {
@@ -2661,6 +2772,8 @@ export class PiWebApp extends LitElement {
 
   override render() {
     const state = this.state;
+    const intent = this.chatNavigationIntent;
+    const runtimeAvailable = this.selectedChatRuntimeAvailable();
     return html`
       <div class=${`${this.panelCollapse.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)}`} style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}>
         <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout ? null : this.renderNavigationPanel()}</aside>
@@ -2668,12 +2781,14 @@ export class PiWebApp extends LitElement {
         <main class=${mainViewClass(state.mainView)}>
           ${this.renderContextBar()}
           ${this.renderMobileMainTabs()}
-          ${state.error ? html`<div class="error">${state.error}</div>` : null}
+          ${this.renderGlobalError(state)}
           ${this.renderNavigationScrim(state)}
           <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout ? this.renderNavigationPanel() : null}</div>
-          ${state.selectedSession ? html`
+          ${intent.kind === "opening" ? html`
+            ${this.renderOpeningChatIntent(intent)}
+          ` : state.selectedSession ? html`
             ${this.renderChatView(state, state.selectedSession)}
-            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${state.selectedSession.archived === true} .canSteer=${state.status?.isStreaming === true} .isCompacting=${state.status?.isCompacting === true} .canStop=${state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .attentionCount=${this.selectedAttentionCount(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
+            <prompt-editor .sessionId=${state.selectedSession.id} .cwd=${state.selectedWorkspace?.path} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${state.selectedSession.archived === true || !runtimeAvailable} .runtimeControlsAvailable=${runtimeAvailable} .canSteer=${runtimeAvailable && state.status?.isStreaming === true} .isCompacting=${runtimeAvailable && state.status?.isCompacting === true} .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${runtimeAvailable && state.sendingPrompts[state.selectedSession.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .attentionCount=${this.selectedAttentionCount(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking}></prompt-editor>
             ${this.renderControlSheet(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
             ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}
@@ -2708,6 +2823,12 @@ export class PiWebApp extends LitElement {
     `;
   }
 
+  private renderGlobalError(state: AppState) {
+    if (state.error === "") return null;
+    if (isSelectedChatFailureGlobalError(state)) return null;
+    return html`<div class="error">${state.error}</div>`;
+  }
+
   static override styles = appStyles;
 }
 
@@ -2722,6 +2843,40 @@ function pluginMachineFromState(state: Pick<AppState, "selectedMachine">): Plugi
   const machine = state.selectedMachine;
   if (machine !== undefined) return { id: machine.id, name: machine.name, kind: machine.kind };
   return { id: "local", name: "local", kind: "local" };
+}
+
+function sessionDisplayLabel(session: Pick<SessionInfo, "id" | "firstMessage" | "name">): string {
+  const name = session.name?.trim();
+  const firstMessage = session.firstMessage.trim();
+  return name !== undefined && name !== "" ? name : firstMessage !== "" ? firstMessage : session.id;
+}
+
+function isClientPendingStartSession(session: SessionInfo): boolean {
+  return "clientPendingStart" in session && session.clientPendingStart === true;
+}
+
+function isSelectedChatFailureGlobalError(state: Pick<AppState, "error" | "selectedChatLoad" | "selectedMachine" | "selectedSession">): boolean {
+  const load = state.selectedChatLoad;
+  const session = state.selectedSession;
+  return load.kind === "failed"
+    && session !== undefined
+    && state.error === load.error
+    && selectedChatTargetsEqual(load.target, selectedChatTarget(selectedMachineId(state), session));
+}
+
+function machineForId(state: Pick<AppState, "machines" | "selectedMachine">, machineId: string): Machine | undefined {
+  if (state.selectedMachine?.id === machineId) return state.selectedMachine;
+  return state.machines.find((machine) => machine.id === machineId);
+}
+
+function workspaceForSessionCwd(state: Pick<AppState, "workspaces" | "workspacesByProjectId">, cwd: string): Workspace | undefined {
+  const selectedWorkspace = state.workspaces.find((workspace) => workspace.path === cwd);
+  if (selectedWorkspace !== undefined) return selectedWorkspace;
+  return Object.values(state.workspacesByProjectId).flat().find((workspace) => workspace.path === cwd);
+}
+
+function projectForId(state: Pick<AppState, "projects">, projectId: string): Project | undefined {
+  return state.projects.find((project) => project.id === projectId);
 }
 
 function unreadChatIdentity(machineId: string, session: Pick<SessionInfo, "id" | "cwd">): string {
@@ -2798,6 +2953,10 @@ function omitWorkspaceDeletionRun(runs: Record<string, TerminalCommandRun>, work
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => { resolve(); }));
+}
+
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function thinkingDescription(level: string): string | undefined {

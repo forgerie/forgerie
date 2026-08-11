@@ -29,7 +29,6 @@ export interface ChatTranscriptPersistScheduler {
 export interface ChatTranscriptStoreOptions {
   capacity?: number | undefined;
   scheduler?: ChatTranscriptPersistScheduler | undefined;
-  persistDelayMs?: number | undefined;
 }
 
 interface HotTranscriptEntry {
@@ -46,7 +45,6 @@ interface PendingPersist {
 }
 
 export const DEFAULT_CHAT_TRANSCRIPT_HOT_CAPACITY = 5;
-const DEFAULT_PERSIST_DELAY_MS = 0;
 
 const browserChatHistoryCache: ChatHistoryCacheAdapter = {
   read: readChatHistoryCache,
@@ -74,7 +72,6 @@ export class ChatTranscriptStore {
   private readonly pendingPersists = new Map<string, PendingPersist>();
   private readonly capacity: number;
   private readonly scheduler: ChatTranscriptPersistScheduler;
-  private readonly persistDelayMs: number;
 
   constructor(
     private readonly cache: ChatHistoryCacheAdapter = browserChatHistoryCache,
@@ -82,7 +79,6 @@ export class ChatTranscriptStore {
   ) {
     this.capacity = validCapacity(options.capacity) ? options.capacity : DEFAULT_CHAT_TRANSCRIPT_HOT_CAPACITY;
     this.scheduler = options.scheduler ?? browserPersistScheduler;
-    this.persistDelayMs = options.persistDelayMs ?? DEFAULT_PERSIST_DELAY_MS;
   }
 
   cachedView(sessionId: string): ChatTranscriptView {
@@ -120,7 +116,7 @@ export class ChatTranscriptStore {
       pending.timerId = this.scheduler.setTimeout(() => {
         pending.timerId = undefined;
         this.runScheduledPersist(sessionId, pending);
-      }, this.persistDelayMs);
+      }, 0);
     });
     this.pendingPersists.set(sessionId, pending);
   }
@@ -146,6 +142,11 @@ export class ChatTranscriptStore {
     } catch {
       // Removing browser cache is best effort for the same reason writes are.
     }
+  }
+
+  dispose(): void {
+    for (const sessionId of [...this.pendingPersists.keys()]) this.clearScheduledPersist(sessionId);
+    this.hotEntries.clear();
   }
 
   rawHistoryPage(sessionId: string): RawMessagePage | undefined {
@@ -193,6 +194,7 @@ export class ChatTranscriptStore {
     while (this.hotEntries.size > this.capacity) {
       const oldest = this.hotEntries.keys().next().value;
       if (typeof oldest !== "string") return;
+      this.clearScheduledPersist(oldest);
       this.hotEntries.delete(oldest);
     }
   }
