@@ -995,7 +995,11 @@ export class SessionController {
       const listedSessions = mergeCachedNewSessions(workspace.path, await this.api.sessions(workspace.path, machineId), machineId)
         .filter((session) => !this.isSuppressedCreatedSession(session, machineId));
       if (selectedMachineId(this.getState()) !== machineId || this.getState().selectedWorkspace?.id !== workspace.id) return;
-      const sessions = this.mergePendingStartSessions(workspace.path, listedSessions, machineId);
+      const sessions = this.mergePendingStartSessions(
+        workspace.path,
+        this.mergeCreationFailedSessionStarts(workspace.path, listedSessions, machineId),
+        machineId,
+      );
       const selectedSession = this.getState().selectedSession;
       this.setState({ sessions });
       if (selectedSession === undefined) return;

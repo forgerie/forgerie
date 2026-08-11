@@ -132,6 +132,73 @@ describe("SessionController session launch", () => {
     });
   });
 
+  it("preserves a current-workspace creation failure across authoritative session refreshes", async () => {
+    const retryStart = deferred<SessionInfo>();
+    const otherWorkspace = { ...workspace, id: "workspace-2", path: "/other" };
+    const startCalls: { cwd: string; machineId: string | undefined; requestId: string | undefined }[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: (cwd, machineId, requestId) => {
+        startCalls.push({ cwd, machineId, requestId });
+        if (startCalls.length === 1) return Promise.reject(new Error("current workspace unavailable"));
+        if (startCalls.length === 2) return Promise.reject(new Error("other workspace unavailable"));
+        return retryStart.promise;
+      },
+      sessions: () => Promise.resolve([oldSession]),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession("Recover after refresh");
+    const failedId = state.selectedSession?.id;
+    const failedRow = state.selectedSession;
+    if (failedId === undefined || failedRow === undefined) throw new Error("Expected a failed pending session");
+
+    state = { ...state, selectedWorkspace: otherWorkspace, selectedSession: undefined, sessions: [], activity: undefined };
+    await controller.launchSession("Keep this recovery elsewhere");
+    const otherFailedId = state.selectedSession?.id;
+    if (otherFailedId === undefined) throw new Error("Expected another failed pending session");
+
+    state = {
+      ...state,
+      selectedWorkspace: { ...workspace, path: `${workspace.path}/` },
+      selectedSession: undefined,
+      sessions: [oldSession],
+      activity: undefined,
+    };
+    await controller.selectSession(failedRow, { updateUrl: false });
+    await controller.refreshCurrentWorkspaceSessions();
+
+    expect(state.sessions.map((session) => session.id)).toEqual([failedId, oldSession.id]);
+    expect(state.sessions.map((session) => session.id)).not.toContain(otherFailedId);
+    expect(state.selectedSession?.id).toBe(failedId);
+    expect(controller.getSessionLaunchRecovery(failedId)).toMatchObject({
+      stage: "creationFailed",
+      prompt: "Recover after refresh",
+      retrying: false,
+    });
+    expect(state.clientQueuedSessionMessages[failedId]).toEqual([
+      { kind: "followUp", text: "Recover after refresh" },
+    ]);
+
+    const retry = controller.retrySessionLaunch(failedId);
+
+    expect(startCalls.at(-1)).toEqual({ cwd: workspace.path, machineId: "local", requestId: failedId });
+    expect(controller.getSessionLaunchRecovery(failedId)?.retrying).toBe(true);
+    expect(state.clientQueuedSessionMessages[failedId]).toEqual([
+      { kind: "followUp", text: "Recover after refresh" },
+    ]);
+
+    retryStart.reject(new Error("stop retry"));
+    await retry;
+  });
+
   it("does not retain an off-workspace recovery for a discarded start", async () => {
     const startRequest = deferred<SessionInfo>();
     let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
