@@ -23,7 +23,6 @@ import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
-import { actionMenuPanelStyle } from "./actionMenu";
 import { renderBuiltinTabIcon } from "./tabIcons";
 import { NEW_SESSION_LABEL } from "./shared";
 import "./SessionWorkingRuntime";
@@ -214,7 +213,6 @@ export class SessionInboxPanel extends LitElement {
   @state() private collapsedGroups = new Set<string>(DEFAULT_COLLAPSED);
   @state() private showArchived = false;
   @state() private openMenu: InboxMenu | undefined;
-  @state() private menuStyle = "";
   @state() private rowMenuSession: SessionInfo | undefined;
   /** Deleting is the one command with no undo, so it asks twice in place. */
   @state() private rowMenuConfirmingDelete = false;
@@ -445,7 +443,6 @@ export class SessionInboxPanel extends LitElement {
           <p>All clear — nothing waiting for you.</p>
         </div>
         ${this.renderBoardScroll(board, resolveLocation)}
-        ${this.renderRowMenu()}
       `;
     }
 
@@ -455,7 +452,6 @@ export class SessionInboxPanel extends LitElement {
       </div>
       ${gs.status === "stale" ? html`<div class="stale-notice" data-state="stale" role="status">Reconnecting…</div>` : nothing}
       ${this.renderBoardScroll(board, resolveLocation)}
-      ${this.renderRowMenu()}
     `;
   }
 
@@ -478,7 +474,7 @@ export class SessionInboxPanel extends LitElement {
             aria-expanded=${String(this.openMenu === "group-by")}
             aria-controls="inbox-group-by-menu"
             title="Change grouping"
-            @click=${(event: MouseEvent) => { this.toggleMenu("group-by", event.currentTarget); }}
+            @click=${() => { this.toggleMenu("group-by"); }}
           >
             <span class="board-title">Inbox</span>
             <span class="board-grouping">Grouped by <span class="board-grouping-value">${groupByLabel(this.groupBy)}</span><span class="board-caret" aria-hidden="true">▾</span></span>
@@ -502,7 +498,7 @@ export class SessionInboxPanel extends LitElement {
           aria-controls="inbox-board-menu"
           title="More inbox commands"
           aria-label="More inbox commands"
-          @click=${(event: MouseEvent) => { this.toggleMenu("board", event.currentTarget); }}
+          @click=${() => { this.toggleMenu("board"); }}
         >⋯</button>
         ${this.panelControls}
       </div>
@@ -516,12 +512,19 @@ export class SessionInboxPanel extends LitElement {
    * other row can be put away. The workspace path is here because it is the one
    * thing a reader routinely wants out of the inbox and into a terminal.
    */
-  private renderRowMenu(): TemplateResult | typeof nothing {
-    const session = this.rowMenuSession;
-    if (this.openMenu !== "row" || session === undefined) return nothing;
+  /**
+   * The commands for one row, opened under that row.
+   *
+   * This used to be a floating panel placed at a screen coordinate. Inside a
+   * sheet that is transformed, a fixed panel is anchored to the sheet and clipped
+   * by it, so the commands went missing. A drawer is part of the list: it opens
+   * where it was asked for and cannot be cut off by anything.
+   */
+  private renderRowMenu(session: SessionInfo): TemplateResult | typeof nothing {
+    if (this.openMenu !== "row" || this.rowMenuSession?.id !== session.id) return nothing;
     const archived = session.archived === true;
     return html`
-      <div class="menu-panel" id="inbox-row-menu" role="menu" aria-label="Session commands" style=${this.menuStyle}>
+      <div class="menu-panel" id="inbox-row-menu" role="menu" aria-label="Session commands">
         <div class="menu-heading" aria-hidden="true">${session.name ?? (session.firstMessage || session.id)}</div>
         ${archived
           ? html`
@@ -561,7 +564,7 @@ export class SessionInboxPanel extends LitElement {
     if (this.openMenu !== "group-by") return nothing;
     const modes: readonly ("state" | "project")[] = ["state", "project"];
     return html`
-      <div class="menu-panel" id="inbox-group-by-menu" role="menu" aria-label="Group sessions by" style=${this.menuStyle}>
+      <div class="menu-panel" id="inbox-group-by-menu" role="menu" aria-label="Group sessions by">
         ${modes.map((mode) => html`
           <button
             role="menuitemradio"
@@ -577,7 +580,7 @@ export class SessionInboxPanel extends LitElement {
   private renderBoardMenu(): TemplateResult | typeof nothing {
     if (this.openMenu !== "board") return nothing;
     return html`
-      <div class="menu-panel" id="inbox-board-menu" role="menu" aria-label="Inbox commands" style=${this.menuStyle}>
+      <div class="menu-panel" id="inbox-board-menu" role="menu" aria-label="Inbox commands">
         <button
           role="menuitem"
           data-action="manage-workspaces"
@@ -821,6 +824,7 @@ export class SessionInboxPanel extends LitElement {
             : html`<button class="row-action" data-action="archive" title="Archive" aria-label="Archive session" @click=${handleArchive}>✓</button>`}
         </div>
       </div>
+      ${this.renderRowMenu(session)}
       </div>
     `;
   }
@@ -880,18 +884,17 @@ export class SessionInboxPanel extends LitElement {
     // The finger is still down. Releasing capture keeps the row from swallowing
     // the tap that dismisses or chooses from the menu.
     if (origin.row.hasPointerCapture(origin.pointerId)) origin.row.releasePointerCapture(origin.pointerId);
-    this.openRowCommands(origin.session, origin.row);
+    this.openRowCommands(origin.session);
   }
 
   private onRowContextMenu(event: MouseEvent, session: SessionInfo): void {
     event.preventDefault();
-    this.openRowCommands(session, event.currentTarget);
+    this.openRowCommands(session);
   }
 
-  private openRowCommands(session: SessionInfo, target: EventTarget | null): void {
+  private openRowCommands(session: SessionInfo): void {
     this.rowMenuSession = session;
     this.rowMenuConfirmingDelete = false;
-    this.menuStyle = actionMenuPanelStyle(target, { constrainTo: "viewport" });
     this.openMenu = "row";
   }
 
@@ -937,12 +940,11 @@ export class SessionInboxPanel extends LitElement {
     command?.();
   }
 
-  private toggleMenu(menu: InboxMenu, target: EventTarget | null): void {
+  private toggleMenu(menu: InboxMenu): void {
     if (this.openMenu === menu) {
       this.openMenu = undefined;
       return;
     }
-    this.menuStyle = actionMenuPanelStyle(target, { constrainTo: "viewport" });
     this.openMenu = menu;
   }
 
@@ -992,6 +994,8 @@ export class SessionInboxPanel extends LitElement {
     .board-header {
       flex: 0 0 auto;
       display: flex;
+      /* A drawer takes the row below the title rather than a seat beside it. */
+      flex-wrap: wrap;
       align-items: center;
       gap: 8px;
       padding: 6px 12px;
@@ -1091,13 +1095,21 @@ export class SessionInboxPanel extends LitElement {
     .new-session-btn:hover { background: var(--pi-surface-hover, #151b31); }
 
     /* Fixed to the viewport, like every other action menu in the shell. */
+    /*
+     * A drawer, not a pop-out. It opens under whatever asked for it and takes
+     * its share of the panel's height, so the list moves down to make room.
+     * Nothing is positioned against the screen, so nothing can be clipped by a
+     * sheet that is transformed.
+     */
+    @keyframes drawer-open { from { grid-template-rows: 0fr; opacity: 0; } to { grid-template-rows: 1fr; opacity: 1; } }
     .menu-panel {
-      position: fixed;
-      z-index: 50;
       box-sizing: border-box;
-      min-width: min(180px, calc(100vw - 16px));
-      overflow: auto;
+      /* Takes a whole row of the header rather than a place beside its title. */
+      flex: 1 0 100%;
+      width: 100%;
+      overflow: hidden;
       padding: 4px;
+      animation: drawer-open 160ms ease-out;
       border: 1px solid var(--pi-border);
       border-radius: 8px;
       background: var(--pi-surface);
