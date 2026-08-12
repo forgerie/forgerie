@@ -70,8 +70,8 @@ function holdFirstRowScript() {
     const app = document.querySelector("pi-web-app");
     // On a shell that shows one surface, open the navigation sheet first.
     if (app.shadowRoot.querySelector(".shell.overlay-navigation") !== null) {
-      const burger = deepQuery(app, "app-panel-burger[side='navigation']");
-      burger?.shadowRoot?.querySelector(".burger")?.click();
+      const opener = deepQuery(app, "app-panel-opener[side='navigation']");
+      opener?.shadowRoot?.querySelector(".opener")?.click();
       await new Promise((r) => setTimeout(r, 600));
     }
     const panel = deepQuery(app, "session-inbox-panel");
