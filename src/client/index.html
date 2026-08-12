@@ -81,6 +81,27 @@
            Raising the cap without raising the type would have pushed past it,
            which is the usual way a reading column is spoiled. */
         --calm-measure: clamp(20rem, 92cqi, 36rem);
+        /* The gutter either side of the content column. It is wide enough to
+           hold the composer's chrome -- island border and padding, draft border
+           and padding -- outside the column, because the composer aligns the
+           first character of the draft to the column and lets the box it is
+           drawn in hang into the gutter. A gutter narrower than that chrome
+           would make the alignment impossible to satisfy. */
+        --calm-gutter: 32px;
+        /* How far past the reading measure content that is not prose may reach,
+           per side. A table or a code block is not prose and was being clipped
+           while empty space sat beside it; this is that space, capped so a wide
+           monitor does not stretch a table to the horizon. */
+        --calm-wide-extra: 10rem;
+        /* The content column: one left edge for everything the eye tracks down
+           the page, transcript and composer alike.
+
+           Prose is still capped at the measure and sits at the column's start;
+           wide blocks take the whole column. Resolves against whichever
+           inline-size container the reader sits in -- the transcript scroller
+           and the composer island are both exactly the width of the main
+           region, so both arrive at the same number without sharing a box. */
+        --calm-column: min(100cqi - 2 * var(--calm-gutter), var(--calm-measure) + 2 * var(--calm-wide-extra));
         /* Wide on purpose. This is the only break in the transcript that has to
            be seen without being read, and it has to hold apart two things that
            look alike: the step count closing one turn and the question opening

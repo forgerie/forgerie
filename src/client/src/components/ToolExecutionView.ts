@@ -1,6 +1,5 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { writeClipboardText } from "../clipboard";
 import type { ToolExecutionPart } from "./shared";
 
 const MAX_COLLAPSED_DIFF_LINES = 180;
@@ -14,7 +13,6 @@ interface ToolTarget {
 export class ToolExecutionView extends LitElement {
   @property({ attribute: false }) execution: ToolExecutionPart | undefined;
   @state() private showFullDiff = false;
-  @state() private copied = false;
   @state() private diffOpen = true;
 
   override render() {
@@ -98,7 +96,6 @@ export class ToolExecutionView extends LitElement {
         ${this.renderExpandedTarget(target)}
         <div class="diff-toolbar">
           <span>${truncated ? `Showing ${String(visibleLines.length)} of ${String(lines.length)} lines` : "Full diff"}</span>
-          <button type="button" @click=${() => { void this.copyDiff(diff); }}>${this.copied ? "Copied" : "Copy diff"}</button>
         </div>
         <pre class="diff" aria-label=${label}><code class="diff-content">${visibleLines.map((line) => html`<span class=${diffLineClass(line)}>${line}</span>`)}</code></pre>
         ${truncated ? html`
@@ -113,16 +110,6 @@ export class ToolExecutionView extends LitElement {
   private onDiffToggle(event: Event): void {
     const details = event.currentTarget;
     if (details instanceof HTMLDetailsElement) this.diffOpen = details.open;
-  }
-
-  private async copyDiff(diff: string): Promise<void> {
-    const copied = await writeClipboardText(diff);
-    if (!copied) {
-      this.copied = false;
-      return;
-    }
-    this.copied = true;
-    window.setTimeout(() => { this.copied = false; }, 1200);
   }
 
   static override styles = css`

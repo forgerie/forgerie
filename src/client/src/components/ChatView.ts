@@ -7,7 +7,6 @@ import { livenessStep } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import "./TranscriptLivenessView";
-import { writeClipboardText } from "../clipboard";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
@@ -274,7 +273,6 @@ export class ChatView extends LitElement {
   @state() private expandedMetaKey: string | undefined;
   /** ISO time the current stretch of work began; undefined while idle. */
   @state() private activeSince: string | undefined;
-  @state() private copiedMessageKey: string | undefined;
   private imageZoomModalRegistration: RenderedModalRegistration | undefined;
   private readonly disclosures = new ChatDisclosureController();
   private readonly scrollController = new ChatScrollController();
@@ -295,7 +293,6 @@ export class ChatView extends LitElement {
   private turnsCache: ChatTurn[] = [];
   private foldMetaCache = new Map<number, ChatLine>();
   private readonly messageMetaCache = new WeakMap<ChatLine, string>();
-  private readonly messageCopyTextCache = new WeakMap<ChatLine, string>();
   private lastScrollTop = 0;
   private lastClientHeight = 0;
   private selectedLoadPaintToken = 0;
@@ -1148,7 +1145,7 @@ export class ChatView extends LitElement {
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
       <article class=${toolOnly || askUserRecordOnly ? shellClass : `msg ${message.role}`} data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
-        ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message, String(index))}
+        ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message)}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
     `;
@@ -1159,7 +1156,7 @@ export class ChatView extends LitElement {
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
       <article class="msg tool-image-output" data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
-        ${this.renderMessageHeader(message, String(index), label)}
+        ${this.renderMessageHeader(message, label)}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
     `;
@@ -1198,7 +1195,7 @@ export class ChatView extends LitElement {
           const toolOnly = this.isToolExecutionOnlyMessage(message);
           return html`
             <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventAnchorKey(startIndex + offset)}>
-              ${toolOnly ? null : this.renderMessageHeader(message, `${String(startIndex)}:${String(offset)}`)}
+              ${toolOnly ? null : this.renderMessageHeader(message)}
               ${message.parts.map((part) => this.renderPart(part, message))}
             </section>
           `;
@@ -1224,11 +1221,10 @@ export class ChatView extends LitElement {
    * the activity fold that closes the turn, where one line describes the whole
    * answer instead of repeating a constant above every paragraph.
    */
-  private renderMessageHeader(message: ChatLine, key: string, label: string = message.role) {
+  private renderMessageHeader(message: ChatLine, label: string = message.role) {
     return html`
       <div class="msg-header">
         <b class="label">${label}</b>
-        <div class="msg-header-trailing">${this.renderMessageActions(message, key)}</div>
       </div>
     `;
   }
@@ -1252,50 +1248,11 @@ export class ChatView extends LitElement {
     >${meta}</span>`;
   }
 
-  private renderMessageActions(message: ChatLine, key: string) {
-    if (!this.isCopyableMessage(message)) return null;
-    const copied = this.copiedMessageKey === key;
-    return html`
-      <div class="msg-actions" aria-label="Message actions">
-        <button type="button" class="msg-action" title=${copied ? "Copied" : "Copy message"} aria-label=${`${copied ? "Copied" : "Copy"} ${message.role} message`} @click=${(event: MouseEvent) => { void this.copyMessage(message, key, event); }}>
-          <span aria-hidden="true">${copied ? "✓" : "⧉"}</span>
-        </button>
-      </div>
-    `;
-  }
-
   private onMetaKeydown(event: KeyboardEvent, key: string, expanded: boolean) {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     this.expandedMetaKey = expanded ? undefined : key;
   }
-
-  private isCopyableMessage(message: ChatLine): boolean {
-    return (message.role === "user" || message.role === "assistant") && this.messageCopyText(message) !== "";
-  }
-
-  private messageCopyText(message: ChatLine): string {
-    const cached = this.messageCopyTextCache.get(message);
-    if (cached !== undefined) return cached;
-    const text = message.parts
-      .filter((part): part is Extract<ChatPart, { type: "text" }> => part.type === "text")
-      .map((part) => part.text.trim())
-      .filter((partText) => partText !== "")
-      .join("\n\n");
-    this.messageCopyTextCache.set(message, text);
-    return text;
-  }
-
-  private async copyMessage(message: ChatLine, key: string, event: MouseEvent): Promise<void> {
-    event.stopPropagation();
-    const copied = await writeClipboardText(this.messageCopyText(message));
-    if (!copied) return;
-    this.copiedMessageKey = key;
-    window.setTimeout(() => {
-      if (this.copiedMessageKey === key) this.copiedMessageKey = undefined;
-    }, 1200);
-  }
-
 
   private messageMetaLabel(message: ChatLine): string {
     const cached = this.messageMetaCache.get(message);

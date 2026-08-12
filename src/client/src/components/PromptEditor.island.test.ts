@@ -15,8 +15,25 @@ describe("composer island styles", () => {
 
   it("draws one inset surface rather than a full-width band", () => {
     expect(islandCss).toMatch(/border-radius:\s*16px/);
-    expect(islandCss).toContain("margin: 0 clamp(");
     expect(islandCss).not.toContain("--pi-composer-rule");
+  });
+
+  it("puts the first character of the draft on the transcript's content column", () => {
+    expect(islandCss).toContain("inline-size: min(100%, var(--calm-column) + 2 * var(--composer-text-inset))");
+    expect(islandCss).toContain("margin: 0 auto max(8px, env(safe-area-inset-bottom))");
+  });
+
+  it("keeps its chrome inside the arithmetic when the island tightens", () => {
+    expect(islandCss).not.toMatch(/footer\s*{\s*gap:\s*8px;\s*padding:/);
+    expect(islandCss).toContain("--composer-island-pad: 8px");
+  });
+
+  it("measures its text inset from the chrome it actually draws", () => {
+    expect(islandCss).toContain("--composer-text-inset: calc(var(--composer-island-edge) + var(--composer-island-pad) + var(--composer-draft-edge) + var(--composer-draft-pad))");
+    expect(islandCss).toContain("padding: var(--composer-island-pad)");
+    expect(islandCss).toContain("border: var(--composer-island-edge) solid var(--pi-border)");
+    expect(islandCss).toContain("padding: var(--composer-draft-pad, 8px)");
+    expect(islandCss).toContain("border: var(--composer-draft-edge, 1px) solid var(--pi-border)");
   });
 
   it("keeps the context reading on the island's own edge", () => {

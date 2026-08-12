@@ -298,11 +298,16 @@ export const appStyles = css`
 `;
 
 export const composerDraftStyles = css`
+  /* The draft's own chrome, named so the surface around it can do arithmetic
+     with the distance from its border to the first character. Declared on the
+     host of whichever composer embeds this sheet: the draft itself renders into
+     light DOM and has no host of its own. */
+  :host { --composer-draft-edge: 1px; --composer-draft-pad: 8px; }
   .editor-wrap { position: relative; min-width: 0; }
   .composer-live-region { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
-  .markdown-editor .cm-editor { box-sizing: border-box; width: 100%; min-height: 54px; max-height: 220px; overflow: hidden; border-radius: 8px; border: 1px solid var(--pi-border); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); }
+  .markdown-editor .cm-editor { box-sizing: border-box; width: 100%; min-height: 54px; max-height: 220px; overflow: hidden; border-radius: 8px; border: var(--composer-draft-edge, 1px) solid var(--pi-border); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); }
   .markdown-editor .cm-scroller { max-height: 220px; overflow-y: auto; font-family: var(--pi-control-font-family, system-ui, sans-serif); line-height: 1.4; }
-  .markdown-editor .cm-content { min-height: 38px; padding: 8px; caret-color: var(--pi-text); text-align: start; unicode-bidi: plaintext; }
+  .markdown-editor .cm-content { min-height: 38px; padding: var(--composer-draft-pad, 8px); caret-color: var(--pi-text); text-align: start; unicode-bidi: plaintext; }
   .markdown-editor .cm-line { padding: 0; unicode-bidi: plaintext; }
   .markdown-editor .cm-placeholder { color: var(--pi-dim); }
   .markdown-editor .cm-focused { outline: none; }
@@ -552,14 +557,24 @@ export const chatStyles = css`
      shorthands later in this sheet, which would silently reset margin-inline
      and left-align the column. The track owns the width, so child rules cannot
      fight it. */
-  /* How far content wider than prose may reach past the reading column.
+  /* The track is the content column, not the reading measure. Prose is capped
+     at the measure and sits at the column's start edge; content that is not
+     prose takes the whole column. One left edge for everything, and the
+     composer aligns its text to the same edge.
 
-     Prose is capped for reading, but a table or a code block is not prose: it
-     was being clipped and made to scroll sideways while empty space sat
-     immediately beside it. This is exactly the free space either side of the
-     centred column, so wide content can use it and never more, and it is capped
-     so a wide monitor does not stretch a table to the horizon. */
-  .chat { --calm-bleed: min(max(0px, (100cqi - 32px - var(--calm-measure)) / 2), 10rem); --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) 16px var(--pi-chat-pad-block-end); box-sizing: border-box; }
+     The measure is applied to the children rather than to the track, because a
+     track sized to prose leaves a table nowhere to grow into: the previous
+     arrangement had to pull wide blocks out with negative margins, which every
+     later margin shorthand quietly undid. */
+  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-column)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
+  /* Everything in the transcript reads at the measure unless it says otherwise.
+     Stated once on the track's items instead of per component, so a new kind of
+     message cannot arrive full-column by forgetting a rule. */
+  .chat > *, .turn-body > * { max-inline-size: min(100%, var(--calm-measure)); }
+  /* The run is stated as a distance past the reading measure rather than as an
+     absolute width, so a block nested inside a padded parent still stops on the
+     column's end edge instead of pushing the scroller sideways. */
+  .chat { --calm-wide-run: max(0px, var(--calm-column) - var(--calm-measure)); }
   /* One human message and its reply share a box. The box is what the reading
      position holds at the top of the viewport when a turn opens, and what
      reserves the space a streaming reply arrives into. It adds no spacing of
@@ -617,7 +632,7 @@ export const chatStyles = css`
   .msg.user, .msg.assistant { font-size: 15px; }
   .msg.user {
     /* A bubble is a container, not a page: content inside it stays inside it. */
-    --calm-bleed: 0px;
+    --calm-wide-run: 0px;
     width: fit-content;
     max-width: min(100%, 30rem);
     margin-inline-start: auto;
@@ -709,35 +724,24 @@ export const chatStyles = css`
      it belongs to and keeps the full gap below to open the next turn. While the
      turn runs, the liveness line joins it as one footer. */
 
-  /* No sticky header band. The row survives only to host the copy action and
-     the message id, both of which stay hidden until hover or focus. Kept in
-     flow rather than absolutely positioned: on touch the actions are always
-     visible (see the hover: none block below), and an overlay would sit on top
-     of the first line of every message. */
+  /* No sticky header band. The row survives only to carry the role label, and
+     collapses to nothing on the roles that hide it. */
   .msg-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 18px; margin-bottom: 2px; }
-  /* On the two roles whose label is hidden the row holds nothing but hover
-     affordances, so it collapses to zero height and lets them render into the
-     turn gap above the message instead of reserving a band of their own. */
+  /* On the two roles whose label is hidden the row holds nothing, so it
+     collapses to zero height instead of reserving a band of its own. */
   .msg.user > .msg-header, .msg.assistant > .msg-header { height: 0; min-height: 0; margin: 0; overflow: visible; }
-  .msg.user > .msg-header > *, .msg.assistant > .msg-header > * { transform: translateY(-50%); }
   /* Weight and position identify the speaker, so the role label is noise on
      the two roles that dominate the transcript. It is kept everywhere else,
      where it names something the reader cannot infer. */
   .msg.user > .msg-header .label, .msg.assistant > .msg-header .label { display: none; }
   .msg.tool > .msg-header .label, .msg.bash > .msg-header .label, .msg.skill > .msg-header .label, .msg.system > .msg-header .label, .msg.tool-image-output > .msg-header .label, .group-msg > .msg-header .label { color: var(--calm-ink-dim); }
-  .msg-header-trailing { min-width: 0; flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; }
-  .msg-actions { flex: 0 0 auto; display: inline-flex; gap: 6px; opacity: 0; transition: opacity .12s ease; }
-  .msg-action { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: var(--calm-ink-dim); padding: 0; font: 14px system-ui, sans-serif; line-height: 1; cursor: pointer; }
-  .msg-action:hover, .msg-action:focus { color: var(--calm-ink); }
-  .msg:hover > .msg-header .msg-actions, .msg:focus-within > .msg-header .msg-actions, .group-msg:hover > .msg-header .msg-actions, .group-msg:focus-within > .msg-header .msg-actions { opacity: 1; }
   .label { display: block; color: var(--calm-ink-dim); font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; }
   .msg-header .label { margin: 0; }
   .msg-meta { min-width: 0; opacity: .28; border: 0; background: transparent; color: var(--pi-dim); padding: 0; font: 11px system-ui, sans-serif; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .12s ease; cursor: pointer; user-select: text; -webkit-user-select: text; }
-  .msg:hover > .msg-header .msg-meta, .msg:focus-within > .msg-header .msg-meta, .group-msg:hover > .msg-header .msg-meta, .group-msg:focus-within > .msg-header .msg-meta, .msg-meta:focus, .msg-meta.expanded { opacity: 1; }
+  .msg-meta:focus, .msg-meta.expanded { opacity: 1; }
   .msg-meta.expanded { flex: 1 1 auto; max-width: 100%; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; }
   .msg-meta:focus { outline: 1px solid var(--pi-border); outline-offset: 3px; border-radius: 4px; }
   @media (hover: none) {
-    .msg-actions { opacity: 1; }
     .msg-meta { opacity: .75; max-width: 26px; }
     .msg-meta:not(.expanded) { display: inline-grid; width: 26px; height: 22px; place-items: center; font-size: 0; text-overflow: clip; }
     .msg-meta::before { content: "ⓘ"; font-size: 13px; }
@@ -790,29 +794,24 @@ export const transcriptLivenessStyles = css`
 export const formattedTextStyles = css`
   :host { display: block; }
   .formatted { white-space: normal; overflow-wrap: anywhere; line-height: 1.55; text-align: start; unicode-bidi: plaintext; }
-  p, ul, ol, pre, blockquote, .table-scroll, .code-block-wrapper { margin: 0 0 10px; }
-  :is(p, ul, ol, pre, blockquote, .table-scroll, .code-block-wrapper):last-child { margin-bottom: 0; }
+  p, ul, ol, pre, blockquote, .table-scroll { margin: 0 0 10px; }
+  :is(p, ul, ol, pre, blockquote, .table-scroll):last-child { margin-bottom: 0; }
   ul, ol { padding-left: 22px; }
   li + li { margin-top: 3px; }
   code { border: 1px solid var(--pi-border); border-radius: 4px; background: var(--pi-bg); padding: 1px 4px; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
-  .code-block-wrapper { position: relative; }
-  .code-block-wrapper pre { margin: 0; padding-right: 40px; }
   pre { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); padding: 10px; overflow-x: auto; overflow-y: hidden; direction: ltr; text-align: left; unicode-bidi: isolate; }
   pre code { border: 0; padding: 0; background: transparent; }
-  .code-copy-button { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--pi-border); border-radius: 6px; background: var(--pi-surface); color: var(--pi-muted); padding: 0; font: 14px system-ui, sans-serif; line-height: 1; cursor: pointer; }
-  .code-copy-button:hover, .code-copy-button:focus { color: var(--pi-text); border-color: var(--pi-accent); }
-  /* Content that is not prose may use the space beside the reading column.
-     Only a standalone pre bleeds: one inside a code-block wrapper would widen
-     twice, once for each box.
+  /* Content that is not prose takes the whole content column. It keeps the
+     column's start edge -- it is the prose beside it that is narrow, not this
+     that is offset -- and grows to the right into space the column already
+     owns. No negative margins: a later margin shorthand used to reset them and
+     silently undo the widening.
 
-     Declared after the margin shorthands above. A later margin shorthand resets
-     margin-inline to zero, so a bleed written before it silently does nothing --
-     which is exactly what happened the first time. The same trap caught the
-     width: a later max-width of 100% on .table-scroll left the negative margins
-     in force with no room to expand into, so a table slid sideways out of the
-     column instead of widening, and scrolled horizontally with empty space
-     beside it. Nothing below may cap the width of these three. */
-  .table-scroll, .code-block-wrapper, .formatted > pre { max-width: calc(100% + 2 * var(--calm-bleed, 0px)); margin-inline: calc(-1 * var(--calm-bleed, 0px)); }
+     Only a top-level pre widens: one nested inside a list item belongs to the
+     prose around it. Where the run is unknown (outside the transcript) or
+     deliberately withheld (inside a message bubble), the fallback keeps these
+     inside their parent. */
+  .table-scroll, .formatted > pre { inline-size: calc(100% + var(--calm-wide-run, 0px)); max-inline-size: calc(100% + var(--calm-wide-run, 0px)); }
   blockquote { border-left: 3px solid var(--pi-border); padding-left: 10px; color: var(--pi-muted); }
   a { color: var(--pi-accent); }
   /* A heading belongs to what follows it, so it sits far from the paragraph
@@ -859,13 +858,30 @@ export const promptEditorStyles = css`
    * It is its own container: nothing here keys off the viewport.
    */
   :host { position: relative; z-index: 5; display: block; container-type: inline-size; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+  /*
+   * The island is placed by where its text starts, not by where its box starts.
+   * A reader tracks one vertical line down the transcript and into the caret,
+   * so the draft takes the content column and the box around it grows outwards
+   * by its own chrome -- border, padding, and the draft's border and padding --
+   * each read from the property that draws it, so changing a padding moves the
+   * alignment with it and no number is written twice.
+   *
+   * The island's gap from the shell edge is the leftover: the column's gutter
+   * less the chrome that hangs into it. It is not chosen here, so the gap and
+   * the alignment cannot disagree.
+   */
   footer {
+    --composer-island-edge: 1px;
+    --composer-island-pad: 10px;
+    --composer-text-inset: calc(var(--composer-island-edge) + var(--composer-island-pad) + var(--composer-draft-edge) + var(--composer-draft-pad));
     position: relative;
+    box-sizing: border-box;
+    inline-size: min(100%, var(--calm-column) + 2 * var(--composer-text-inset));
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px;
-    margin: 0 clamp(6px, 2cqi, 12px) max(8px, env(safe-area-inset-bottom));
-    padding: 10px;
+    margin: 0 auto max(8px, env(safe-area-inset-bottom));
+    padding: var(--composer-island-pad);
     overflow: visible;
-    border: 1px solid var(--pi-border);
+    border: var(--composer-island-edge) solid var(--pi-border);
     border-radius: 16px;
     background: var(--pi-bg);
     box-shadow: 0 6px 18px var(--pi-shadow);
@@ -920,7 +936,7 @@ export const promptEditorStyles = css`
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   @container (max-width: 640px) {
-    footer { gap: 8px; padding: 8px; }
+    footer { gap: 8px; --composer-island-pad: 8px; }
     .actions { gap: 6px; }
     .compact-status { flex: 1 1 220px; gap: 4px; }
     .select-model { max-width: min(58cqi, 260px); }
