@@ -41,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
 });
 
@@ -170,6 +171,23 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
 
     await expect(service.runPromptResourceCommand(sessionRef("prompt-resource-stale-session"), "/review src", staleIdentity)).rejects.toThrow("no longer available");
     expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("bounds a prompt receipt when Pi never reports preflight or completion", async () => {
+    const fake = fakeRuntime("prompt-preflight-timeout-session", {
+      prompt: () => new Promise(() => undefined),
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-preflight-timeout-session")]),
+      heartbeatIntervalMs: 60_000,
+      promptPreflightTimeoutMs: 25,
+    });
+
+    await expect(service.prompt(sessionRef("prompt-preflight-timeout-session"), "wait forever")).rejects.toThrow("preflight receipt timed out");
     await service.dispose();
   });
 

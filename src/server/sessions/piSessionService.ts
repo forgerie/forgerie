@@ -114,6 +114,7 @@ export interface PiSessionLogger {
 
 const noopLogger: PiSessionLogger = { info() { /* no-op */ } };
 const DEFAULT_UNREAD_PUBLICATION_RETRY_MS = 1_000;
+const DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS = 30_000;
 /**
  * User-facing names for the two phases of session startup Forgerie can prove it
  * is inside: it awaits exactly one call for each, so the phase is a fact rather
@@ -871,6 +872,8 @@ export interface PiSessionServiceDependencies {
   unreadStore?: SessionUnreadStore;
   /** Initial retry delay for durable unread publication failures. */
   unreadPublicationRetryDelayMs?: number;
+  /** Maximum wait for Pi to accept or reject a prompt before delivery becomes ambiguous. */
+  promptPreflightTimeoutMs?: number;
   /**
    * Lets session startup report that provider model lists are refreshing while
    * a session is being constructed. Omit to report the startup phase alone.
@@ -967,6 +970,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pendingAskStore: PendingAskStore;
   private readonly pendingExtensionDialogStore: PendingExtensionDialogStore;
   private readonly extensionDialogsTimeoutMs: number;
+  private readonly promptPreflightTimeoutMs: number;
   /** The parked extension Promise resolvers behind the store's open dialogs. */
   private readonly dialogWaiters = new ExtensionDialogWaiters();
   private readonly catalogRefreshStatus: CatalogRefreshStatus | undefined;
@@ -993,6 +997,7 @@ export class PiSessionService implements SessionRouteService {
     this.pendingAskStore = deps.pendingAskStore ?? new PendingAskStore();
     this.pendingExtensionDialogStore = deps.pendingExtensionDialogStore ?? new PendingExtensionDialogStore();
     this.extensionDialogsTimeoutMs = deps.extensionDialogsTimeoutMs ?? DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS;
+    this.promptPreflightTimeoutMs = Math.max(1, deps.promptPreflightTimeoutMs ?? DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS);
     this.catalogRefreshStatus = deps.catalogRefreshStatus;
     this.unreadPublicationRetryInitialMs = Math.max(
       0,
@@ -2322,9 +2327,21 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): Promise<boolean> {
-    return await new Promise<boolean>((resolvePreflight) => {
-      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, resolvePreflight);
-      void completion.then(resolvePreflight);
+    return await new Promise<boolean>((resolvePreflight, rejectPreflight) => {
+      let settled = false;
+      const settle = (accepted: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolvePreflight(accepted);
+      };
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        rejectPreflight(new Error("Prompt preflight receipt timed out."));
+      }, this.promptPreflightTimeoutMs);
+      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, settle);
+      void completion.then(settle);
     });
   }
 
