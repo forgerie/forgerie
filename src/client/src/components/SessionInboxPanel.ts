@@ -1131,7 +1131,8 @@ export class SessionInboxPanel extends LitElement {
       interpolate-size: allow-keywords;
       max-height: 60vh;
       overflow: hidden auto;
-      padding: 4px 8px;
+      /* Same inline inset as the header above it, so the two edges agree. */
+      padding: 4px 12px;
       animation: drawer-open 180ms ease-out;
       border-block: 1px solid var(--pi-border-muted);
       background: var(--pi-surface-hover);

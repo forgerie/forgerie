@@ -150,6 +150,16 @@ interface AppContextBarLocation {
   readonly session: SessionInfo | undefined;
 }
 
+/**
+ * The visual viewport, where there is one.
+ *
+ * Browsers report it as null when absent and test environments leave it
+ * undefined, so both have to be one answer before anything reads it.
+ */
+function visualViewportOrUndefined(): VisualViewport | undefined {
+  return window.visualViewport ?? undefined;
+}
+
 @customElement("pi-web-app")
 export class PiWebApp extends LitElement {
   @state() private state: AppState = initialAppState();
@@ -420,12 +430,69 @@ export class PiWebApp extends LitElement {
     this.syncSessionWarningVisibility();
   }
 
+  private observeViewportSpace(): void {
+    const viewport = visualViewportOrUndefined();
+    if (viewport === undefined) return;
+    this.syncViewportSpace();
+    viewport.addEventListener("resize", this.syncViewportSpace);
+    viewport.addEventListener("scroll", this.syncViewportSpace);
+  }
+
+  private unobserveViewportSpace(): void {
+    const viewport = visualViewportOrUndefined();
+    if (viewport === undefined) return;
+    viewport.removeEventListener("resize", this.syncViewportSpace);
+    viewport.removeEventListener("scroll", this.syncViewportSpace);
+  }
+
   protected override updated(): void {
     // Lit has now committed the selected chat and app-shell visibility state.
     // Recheck after every rendered transition; the unread controller
     // deduplicates acknowledgements for the observed completion order.
     this.committedChatIdentity = selectedChatIdentity(this.state);
     this.syncSelectedSessionReadState();
+    this.dismissPeekUnderModal();
+  }
+
+  /**
+   * A dialog puts a peeked panel away.
+   *
+   * A peek is a look at something while staying where you are. A modal is a
+   * move somewhere else, so the look is over -- and leaving a sheet open under
+   * a dialog stacks two dismissable layers whose scrims and Escape keys fight
+   * over which one a press belongs to.
+   */
+  /**
+   * Fit the shell to the space that is actually on screen.
+   *
+   * A soft keyboard does not shrink the layout viewport on Android; it covers
+   * it. A shell sized at 100% therefore keeps its full height and slides its top
+   * out of view, taking the panels' headers -- and their close controls -- with
+   * it. The visual viewport reports what is left, so the shell is measured
+   * against that instead of assuming it owns the window.
+   */
+  private readonly syncViewportSpace = (): void => {
+    const viewport = visualViewportOrUndefined();
+    if (viewport === undefined) return;
+    this.style.setProperty("--pi-viewport-height", `${String(Math.round(viewport.height))}px`);
+    this.style.setProperty("--pi-viewport-offset", `${String(Math.round(viewport.offsetTop))}px`);
+  };
+
+  private dismissPeekUnderModal(): void {
+    if (this.panelPeek.panel === undefined) return;
+    if (!this.modalIsOpen()) return;
+    this.panelPeek.close();
+  }
+
+  private modalIsOpen(): boolean {
+    const state = this.state;
+    return this.settingsSection !== undefined
+      || state.newSessionComposer.kind === "open"
+      || state.workspaceManagementDialog !== undefined
+      || state.commandDialog !== undefined
+      || state.modelDialog !== undefined
+      || state.thinkingDialog !== undefined
+      || state.actionPaletteOpen;
   }
 
   private syncSessionWarningVisibility(): void {
@@ -505,6 +572,7 @@ export class PiWebApp extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.unreadConnected = true;
+    this.observeViewportSpace();
     window.addEventListener("popstate", this.onPopState);
     window.addEventListener("pageshow", this.onPageShow);
     this.browserResume.connect();
@@ -527,6 +595,7 @@ export class PiWebApp extends LitElement {
   private stopInputModeWatch: (() => void) | undefined;
 
   override disconnectedCallback(): void {
+    this.unobserveViewportSpace();
     this.stopInputModeWatch?.();
     this.stopInputModeWatch = undefined;
     this.unreadConnected = false;

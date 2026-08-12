@@ -109,7 +109,12 @@ export const appStyles = css`
    * A peeked sheet is placed against the shell's own box, so the shell is the
    * containing block. Everything else in here is grid placement.
    */
-  .shell { position: relative; --navigation-panel-size: 340px; --workspace-panel-size: minmax(360px, 42vw); --navigation-panel-width: var(--navigation-panel-size); --workspace-panel-width: var(--workspace-panel-size); display: grid; grid-template-columns: var(--navigation-panel-width) 1px minmax(320px, 1fr) 1px var(--workspace-panel-width); height: 100%; min-height: 0; }
+  /*
+   * Height comes from the space on screen, not from the window. A soft keyboard
+   * covers the layout viewport rather than shrinking it, so 100% keeps the top
+   * of every panel above the fold.
+   */
+  .shell { height: var(--pi-viewport-height, 100%); position: relative; --navigation-panel-size: 340px; --workspace-panel-size: minmax(360px, 42vw); --navigation-panel-width: var(--navigation-panel-size); --workspace-panel-width: var(--workspace-panel-size); display: grid; grid-template-columns: var(--navigation-panel-width) 1px minmax(320px, 1fr) 1px var(--workspace-panel-width); min-height: 0; }
   /*
    * One surface, two presentations. Docked it is a grid track; peeked it is
    * lifted out of flow at the same width, so pinning changes what holds the
@@ -122,6 +127,23 @@ export const appStyles = css`
   .panel-surface[data-mode="sheet"] { position: absolute; inset-block: 0; z-index: 41; background: var(--pi-bg); box-shadow: 0 0 24px var(--pi-shadow); transition: transform 180ms ease; }
   /* While a finger is down: no easing, so the sheet cannot lag the hand. */
   .panel-surface[data-mode="sheet"][data-tracking] { transition: none; will-change: transform; }
+  /*
+   * A grip on the edge that faces the session, so the sheet says it can be
+   * pushed. It is drawn rather than added as an element: nothing about it is
+   * interactive on its own, and the whole sheet already answers a drag.
+   */
+  .panel-surface[data-mode="sheet"]::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    width: 18px;
+    background: no-repeat center / 4px 44px linear-gradient(var(--pi-border), var(--pi-border));
+    border-radius: 999px;
+    opacity: .55;
+    pointer-events: none;
+  }
+  .panel-surface[data-mode="sheet"][data-side="navigation"]::after { inset-inline-end: 0; }
+  .panel-surface[data-mode="sheet"][data-side="workspace"]::after { inset-inline-start: 0; }
   /*
    * Only the edge facing the session is rounded. The outer edge is flush with
    * the screen, and rounding it would show the transcript through the corners.
