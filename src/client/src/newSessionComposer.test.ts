@@ -57,27 +57,22 @@ describe("new-session composer state", () => {
     expect(state.kind).toBe("editing");
     expect(canSubmitNewSession(state, { text: "" })).toBe(false);
     expect(canSubmitNewSession(state, { text: "  build the feature  " })).toBe(true);
-    expect(beginNewSessionSubmission(state, { text: "  build the feature  " })).toMatchObject({
+    expect(beginNewSessionSubmission(state, { text: "  build the feature  " })).toEqual({
       kind: "submitting",
-      submission: { text: "  build the feature  " },
+      destination,
     });
 
     const offline = createNewSessionComposerState(completeNewSessionDestination(machine("remote", "offline"), project("forge"), workspace("main", "forge")));
     expect(canSubmitNewSession(offline, { text: "hello" })).toBe(false);
   });
 
-  it("accepts attachment-only input and keeps a copied structured launch submission", () => {
+  it("accepts attachment-only input without copying its payload into view state", () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const attachment = { kind: "file" as const, mimeType: "text/plain", data: "Zm9v", name: "note.txt" };
     const state = beginNewSessionSubmission(createNewSessionComposerState(destination), { text: "", attachments: [attachment], delivery: "folder" });
 
-    expect(state).toMatchObject({
-      kind: "submitting",
-      destination,
-      submission: { text: "", attachments: [attachment], delivery: "folder" },
-    });
-    if (state.kind !== "submitting") throw new Error("Expected submitting state");
-    expect(state.submission.attachments).not.toBe([attachment]);
+    expect(state).toEqual({ kind: "submitting", destination });
+    expect(state).not.toHaveProperty("submission");
   });
 
   it("carries validated prompt-resource identity only with the structured submission", () => {
@@ -86,9 +81,9 @@ describe("new-session composer state", () => {
 
     expect(canSubmitNewSession(createNewSessionComposerState(destination), { text: "/review src" })).toBe(false);
     expect(beginNewSessionSubmission(createNewSessionComposerState(destination), { text: "/review src" })).toMatchObject({ kind: "editing" });
-    expect(beginNewSessionSubmission(createNewSessionComposerState(destination), { text: "/review src", promptResourceCommandIdentity: identity })).toMatchObject({
+    expect(beginNewSessionSubmission(createNewSessionComposerState(destination), { text: "/review src", promptResourceCommandIdentity: identity })).toEqual({
       kind: "submitting",
-      submission: { text: "/review src", promptResourceCommandIdentity: identity },
+      destination,
     });
   });
 

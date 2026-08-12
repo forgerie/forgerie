@@ -233,7 +233,7 @@ describe("PiWebApp New session composer root", () => {
     expect(startSession).toHaveBeenCalledWith(mainWorkspace.path, localMachine.id, pending.id);
     expect(appState(app).sessions.map((candidate) => candidate.id)).toEqual([pending.id, selectedSession.id]);
     expect(appState(app).clientQueuedSessionMessages[pending.id]).toEqual([
-      { kind: "followUp", text: "Build through the real controller" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -257,7 +257,6 @@ describe("PiWebApp New session composer root", () => {
       stage: "creationFailed",
       sessionId: failed.id,
       destination: { machineId: localMachine.id, workspaceId: mainWorkspace.id, cwd: mainWorkspace.path },
-      prompt: "Move this prompt",
       retrying: false,
     });
     const retry = vi.spyOn(controller, "retrySessionLaunch").mockResolvedValue();
@@ -306,7 +305,7 @@ describe("PiWebApp New session composer root", () => {
     const failed = required(appState(app).selectedSession, "failed pending session");
     invoke(app, "openSessionLaunchDestinationComposer", failed.id);
     const container = renderApp(app);
-    let composer = required(container.querySelector<NewSessionComposer>("new-session-composer"), "new-session composer");
+    const composer = required(container.querySelector<NewSessionComposer>("new-session-composer"), "new-session composer");
     await elementUpdateComplete(composer);
     expect(appState(app).clientQueuedSessionMessages[failed.id]).toBeUndefined();
 
@@ -314,18 +313,13 @@ describe("PiWebApp New session composer root", () => {
     required(composer.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='cancel']"), "cancel button").click();
 
     expect(composerRequest(app)).toEqual({ kind: "closed" });
-    expect(appState(app).clientQueuedSessionMessages[failed.id]).toEqual([{ kind: "followUp", text: "Edited through root" }]);
-
-    invoke(app, "openSessionLaunchDestinationComposer", failed.id);
-    const reopenedContainer = renderApp(app);
-    composer = required(reopenedContainer.querySelector<NewSessionComposer>("new-session-composer"), "reopened new-session composer");
-    await elementUpdateComplete(composer);
-    await elementUpdateComplete(composer);
-
-    const draftElement = required(composer.shadowRoot?.querySelector("composer-draft"), "shared composer draft");
-    if (!(draftElement instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
-    await vi.waitFor(() => { expect(draftElement.currentSnapshot()).toEqual({ text: "Edited through root" }); });
-    expect(appState(app).clientQueuedSessionMessages[failed.id]).toBeUndefined();
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toEqual([{ kind: "followUp", text: "[First prompt queued]" }]);
+    container.remove();
+    await Promise.resolve();
+    const returnedSeed = controller.claimSessionLaunchRecoveryDraft(failed.id);
+    expect(returnedSeed?.snapshot).toEqual({ text: "Edited through root", delivery: "inline" });
+    if (returnedSeed !== undefined) controller.returnSessionLaunchRecoveryDraft(failed.id, returnedSeed.snapshot);
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toEqual([{ kind: "followUp", text: "[First prompt queued]" }]);
   });
 
   it("keeps the failed row, recovery, and preview until the real controller selects its replacement pending row", async () => {
@@ -368,7 +362,7 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).sessions).toContain(failed);
     expect(controller.getSessionLaunchRecovery(failedId)?.stage).toBe("creationFailed");
     expect(appState(app).clientQueuedSessionMessages[failedId]).toEqual([
-      { kind: "followUp", text: "Move this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
 
     const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Move this prompt" } } satisfies NewSessionLaunchIntent);
@@ -382,7 +376,7 @@ describe("PiWebApp New session composer root", () => {
     expect(controller.getSessionLaunchRecovery(failedId)).toBeUndefined();
     expect(appState(app).clientQueuedSessionMessages[failedId]).toBeUndefined();
     expect(appState(app).clientQueuedSessionMessages[replacement.id]).toEqual([
-      { kind: "followUp", text: "Move this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -401,7 +395,6 @@ describe("PiWebApp New session composer root", () => {
       stage: "promptDeliveryAmbiguous",
       sessionId: selected.id,
       destination: { machineId: localMachine.id, workspaceId: mainWorkspace.id, cwd: mainWorkspace.path },
-      prompt: "Inspect this prompt",
       retrying: false,
     });
     const refresh = vi.spyOn(controller, "refreshSessionLaunchRecovery").mockResolvedValue();
@@ -476,6 +469,7 @@ describe("PiWebApp New session composer root", () => {
     });
     const sessions = sessionController(app);
     sessions.launchSession = launchSession;
+    vi.spyOn(sessions, "hasQueuedInitialPrompt").mockReturnValue(true);
     const openChat = vi.fn(() => Promise.resolve());
     Reflect.set(app, "openChat", openChat);
 
@@ -603,6 +597,8 @@ function composerRequest(app: PiWebApp): unknown {
 interface SessionLaunchController {
   launchSession: (prompt: FirstPromptSubmission) => Promise<void>;
   getSessionLaunchRecovery: (sessionId: string) => SessionLaunchRecovery | undefined;
+  claimSessionLaunchRecoveryDraft: (sessionId: string) => { id: string; snapshot: FirstPromptSubmission } | undefined;
+  hasQueuedInitialPrompt: (sessionId: string) => boolean;
   retrySessionLaunch: (sessionId: string) => Promise<void>;
   acceptSessionLaunchReplacement: (failedSessionId: string, replacementSessionId: string) => void;
   returnSessionLaunchRecoveryDraft: (sessionId: string, snapshot: FirstPromptSubmission) => void;
@@ -633,6 +629,8 @@ function isSessionLaunchController(value: unknown): value is SessionLaunchContro
   return typeof value === "object" && value !== null
     && "launchSession" in value && typeof value.launchSession === "function"
     && "getSessionLaunchRecovery" in value && typeof value.getSessionLaunchRecovery === "function"
+    && "claimSessionLaunchRecoveryDraft" in value && typeof value.claimSessionLaunchRecoveryDraft === "function"
+    && "hasQueuedInitialPrompt" in value && typeof value.hasQueuedInitialPrompt === "function"
     && "retrySessionLaunch" in value && typeof value.retrySessionLaunch === "function"
     && "acceptSessionLaunchReplacement" in value && typeof value.acceptSessionLaunchReplacement === "function"
     && "returnSessionLaunchRecoveryDraft" in value && typeof value.returnSessionLaunchRecoveryDraft === "function"

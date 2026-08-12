@@ -2,11 +2,13 @@ import { api, workspacesApi, type SlashCommand } from "./api";
 import type { PromptResourceCommandDescriptor } from "../../shared/promptResourceCommand";
 import { fileCompletionInsertText, modelCompletionChoices, type PromptCompletionTrigger } from "./promptCompletions";
 import type { CompletionItem } from "./components/shared";
+import { inputModeForDraft, type InputMode } from "./inputModes";
 
 export type ComposerCompletionKind = PromptCompletionTrigger["kind"];
 
 export interface ComposerRuntime {
   readonly supportedCompletionKinds: ReadonlySet<ComposerCompletionKind>;
+  inputModeForDraft(draft: string): InputMode;
   resolveCompletion(trigger: PromptCompletionTrigger): Promise<readonly CompletionItem[]>;
 }
 
@@ -40,6 +42,7 @@ export class ComposerCompletionProviderError extends Error {
 export function createSessionComposerRuntime(options: SessionComposerRuntimeOptions): ComposerRuntime {
   return {
     supportedCompletionKinds: new Set<ComposerCompletionKind>(["command", "file", "model"]),
+    inputModeForDraft,
     async resolveCompletion(trigger: PromptCompletionTrigger): Promise<readonly CompletionItem[]> {
       if (trigger.kind === "command") return resolveSessionCommands(trigger, options);
       if (trigger.kind === "file") return resolveWorkspaceFiles(trigger, options);
@@ -52,6 +55,7 @@ export function createPreSessionComposerRuntime(options: PreSessionComposerRunti
   const completeDestination = hasDestinationContext(options);
   return {
     supportedCompletionKinds: completeDestination ? new Set<ComposerCompletionKind>(["command", "file"]) : new Set<ComposerCompletionKind>(),
+    inputModeForDraft: preSessionInputModeForDraft,
     async resolveCompletion(trigger: PromptCompletionTrigger): Promise<readonly CompletionItem[]> {
       if (!completeDestination) return [];
       if (trigger.kind === "command") return resolvePreSessionCommands(trigger, options);
@@ -134,6 +138,12 @@ async function resolveSessionModels(trigger: Extract<PromptCompletionTrigger, { 
 
 function hasSessionContext(options: SessionComposerRuntimeOptions): options is SessionComposerRuntimeOptions & { sessionId: string; cwd: string } {
   return options.sessionId !== undefined && options.sessionId !== "" && options.cwd !== undefined && options.cwd !== "";
+}
+
+function preSessionInputModeForDraft(draft: string): InputMode {
+  if (draft.trimStart().startsWith("!")) return { kind: "normal" };
+  const mode = inputModeForDraft(draft);
+  return mode.kind === "model" || mode.kind === "shell" ? { kind: "normal" } : mode;
 }
 
 function hasDestinationContext(options: PreSessionComposerRuntimeOptions): options is PreSessionComposerRuntimeOptions & { projectId: string; workspaceId: string } {

@@ -33,6 +33,9 @@ describe("pre-session composer runtime", () => {
     await expect(runtime.resolveCompletion({ kind: "model", query: "cla", from: 0, to: 4 })).resolves.toEqual([]);
 
     expect(runtime.supportedCompletionKinds).toEqual(new Set(["command", "file"]));
+    expect(runtime.inputModeForDraft("!echo should stay literal")).toEqual({ kind: "normal" });
+    expect(runtime.inputModeForDraft("!!echo should stay literal")).toEqual({ kind: "normal" });
+    expect(runtime.inputModeForDraft("/review")).toEqual({ kind: "command" });
     expect(catalog).toHaveBeenCalledWith("project-1", "workspace-1", "remote-a");
     expect(files).toHaveBeenCalledWith("src", { scope: "tracked", machineId: "remote-a", projectId: "project-1", workspaceId: "workspace-1" });
   });
@@ -69,6 +72,7 @@ describe("session composer runtime", () => {
       { kind: "command", replaceFrom: 0, replaceTo: 3, insertText: "/tree", detail: "builtin", description: "Browse" },
     ]);
     expect(commands).toHaveBeenCalledWith({ id: "session-1", cwd: "/repo" }, "remote-a");
+    expect(runtime.inputModeForDraft("!echo active")).toEqual({ kind: "shell", excludeFromContext: false });
   });
 
   it("requests files for the workspace and maps file completions", async () => {

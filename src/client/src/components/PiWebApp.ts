@@ -221,11 +221,12 @@ export class PiWebApp extends LitElement {
       onSelectedSessionReady: ({ machineId, session }) => {
         void this.commitReadyChatAfterRender(machineId, session);
       },
-      replacePromptEditorText: async ({ machineId, sessionId, text }) => {
+      replacePromptEditorText: async ({ machineId, sessionId, text, snapshot }) => {
         await this.updateComplete;
         const promptEditor = this.promptEditor;
         if (selectedMachineId(this.state) !== machineId || this.state.selectedSession?.id !== sessionId || promptEditor === undefined) return false;
-        promptEditor.replaceText(text);
+        if (snapshot === undefined) promptEditor.replaceText(text);
+        else promptEditor.restoreSnapshot({ ...snapshot, attachments: snapshot.attachments?.map((attachment) => ({ ...attachment })) });
         return true;
       },
     },
@@ -1779,7 +1780,7 @@ export class PiWebApp extends LitElement {
       return;
     }
     const recovery = this.sessions.getSessionLaunchRecovery(sessionId);
-    if (recovery?.stage !== "creationFailed") return;
+    if (recovery === undefined || (recovery.stage !== "creationFailed" && recovery.stage !== "promptConfirmedUnsent")) return;
     const initialDestination = this.sessionLaunchRecoveryDestination(recovery);
     this.setState({
       newSessionComposer: {
@@ -1838,9 +1839,7 @@ export class PiWebApp extends LitElement {
       delivery: intent.firstPrompt.delivery ?? "inline",
     });
     const pending = this.state.selectedSession;
-    const queued = pending === undefined ? undefined : this.state.clientQueuedSessionMessages[pending.id];
-    const queuedFirstPrompt = queued?.some((message) => message.text === intent.firstPrompt.text) === true
-      || ((intent.firstPrompt.attachments?.length ?? 0) > 0 && (queued?.length ?? 0) > 0);
+    const queuedFirstPrompt = pending !== undefined && this.sessions.hasQueuedInitialPrompt(pending.id);
     if (pending === undefined || pending.id === previouslySelectedSessionId || !queuedFirstPrompt) {
       void launch.catch((error: unknown) => { if (isCurrentToken()) this.setState({ error: String(error) }); });
       return { kind: "rejected", reason: "launch-rejected", message: "New session could not be queued." };

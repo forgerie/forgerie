@@ -27,12 +27,13 @@ export interface ComposerDraftDisplayState {
   empty: boolean;
   focused: boolean;
   attachmentCount: number;
+  attachmentCapturePending: boolean;
 }
 
 export interface ComposerDraftSubmitSnapshot {
   text: string;
-  attachments?: PromptAttachment[];
-  delivery?: PromptAttachmentDelivery;
+  attachments?: PromptAttachment[] | undefined;
+  delivery?: PromptAttachmentDelivery | undefined;
 }
 
 export type ComposerDraftSubmitOutcome = "accepted" | "rejected";
@@ -86,12 +87,14 @@ export class ComposerDraft extends LitElement {
   @state() private focused = false;
   private attachmentSeq = 0;
   private attachmentGeneration = 0;
+  private attachmentCaptureCount = 0;
   private requestVersion = 0;
   private editor: EditorView | undefined;
   private promptHistoryState: PromptHistoryState = createPromptHistory();
   private applyingPromptHistory = false;
   private readonly editableCompartment = new Compartment();
   private readonly readOnlyCompartment = new Compartment();
+  private readonly placeholderCompartment = new Compartment();
   private readonly mobilePromptEnterMedia = createMobilePromptEnterMedia();
   private explicitShiftKeyActive = false;
   private mutationVersion = 0;
@@ -108,7 +111,7 @@ export class ComposerDraft extends LitElement {
       if (typeof previousKey === "string" && previousKey !== "") saveDraft(previousKey, this.draft);
       this.draft = this.storageKey !== undefined && this.storageKey !== "" ? loadDraft(this.storageKey) : this.draft;
       this.clearAttachmentOwnership();
-      this.currentInputMode = inputModeForDraft(this.draft);
+      this.currentInputMode = this.resolveInputMode(this.draft);
       this.completions = [];
       this.selectedIndex = 0;
       this.completionError = undefined;
@@ -130,6 +133,7 @@ export class ComposerDraft extends LitElement {
 
   protected override updated(changed: PropertyValues<this>): void {
     if (changed.has("disabled")) this.updateEditorDisabledState();
+    if (changed.has("placeholderText")) this.updateEditorPlaceholder();
     if (changed.has("storageKey")) this.syncEditorDoc();
     this.syncEditorAccessibility();
     this.syncCompletionMenuBoundary();
@@ -218,7 +222,7 @@ export class ComposerDraft extends LitElement {
     }
 
     this.requestVersion += 1;
-    this.currentInputMode = inputModeForDraft(text);
+    this.currentInputMode = this.resolveInputMode(text);
     this.completions = [];
     this.selectedIndex = 0;
     this.completionError = undefined;
@@ -242,7 +246,7 @@ export class ComposerDraft extends LitElement {
   }
 
   submit(streamingBehavior?: "steer" | "followUp"): void {
-    if (this.disabled || this.submissionDisabled) return;
+    if (this.disabled || this.submissionDisabled || this.attachmentCaptureCount > 0) return;
     const snapshot = this.createSubmitSnapshot();
     if (snapshot === undefined) return;
     const submittedMutationVersion = this.mutationVersion;
@@ -279,7 +283,7 @@ export class ComposerDraft extends LitElement {
     this.completionError = undefined;
     if (this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, this.draft);
     this.requestVersion += 1;
-    this.currentInputMode = inputModeForDraft(this.draft);
+    this.currentInputMode = this.resolveInputMode(this.draft);
     this.completions = [];
     this.selectedIndex = 0;
     this.syncEditorDoc();
@@ -448,21 +452,27 @@ export class ComposerDraft extends LitElement {
   private async addAttachmentFiles(files: File[]): Promise<void> {
     if (!this.canMutateAttachments()) return;
     const generation = this.attachmentGeneration;
+    this.attachmentCaptureCount += 1;
     this.attachmentError = undefined;
-    const { attachments, error } = await capturePromptAttachments(files, readFileAsBase64);
-    if (!this.canAcceptAttachmentResult(generation)) return;
-    if (attachments.length > 0) {
-      const previousTotal = this.attachments.length;
-      const added = attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }));
-      this.attachments = [...this.attachments, ...added];
-      this.mutationVersion += 1;
-      this.announcePolite(attachmentAddedAnnouncement(added, previousTotal, this.attachments.length));
-      this.onDraftEdited?.();
+    this.publishDisplayState();
+    try {
+      const { attachments, error } = await capturePromptAttachments(files, readFileAsBase64);
+      if (!this.canAcceptAttachmentResult(generation)) return;
+      if (attachments.length > 0) {
+        const previousTotal = this.attachments.length;
+        const added = attachments.map((attachment) => ({ id: `attachment-${String(++this.attachmentSeq)}`, ...attachment }));
+        this.attachments = [...this.attachments, ...added];
+        this.mutationVersion += 1;
+        this.announcePolite(attachmentAddedAnnouncement(added, previousTotal, this.attachments.length));
+        this.onDraftEdited?.();
+      }
+      if (error !== undefined) {
+        this.attachmentError = error;
+        this.announceAssertive(error);
+      }
+    } finally {
+      this.attachmentCaptureCount = Math.max(0, this.attachmentCaptureCount - 1);
       this.publishDisplayState();
-    }
-    if (error !== undefined) {
-      this.attachmentError = error;
-      this.announceAssertive(error);
     }
   }
 
@@ -506,12 +516,12 @@ export class ComposerDraft extends LitElement {
           indentUnit.of("  "),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           EditorView.lineWrapping,
-          EditorView.contentAttributes.of((view) => inputAssistanceContentAttributes(view.state.sliceDoc(0, view.state.selection.main.head))),
+          EditorView.contentAttributes.of((view) => inputAssistanceContentAttributes(this.resolveInputMode(view.state.sliceDoc(0, view.state.selection.main.head)))),
           EditorView.domEventHandlers({
             keyup: (event) => this.handleEditorKeyUp(event),
             blur: () => this.resetEditorModifierState(),
           }),
-          placeholder(this.placeholderText),
+          this.placeholderCompartment.of(placeholder(this.placeholderText)),
           this.editableCompartment.of(EditorView.editable.of(!this.disabled)),
           this.readOnlyCompartment.of(EditorState.readOnly.of(this.disabled)),
           EditorView.updateListener.of((update) => {
@@ -555,12 +565,20 @@ export class ComposerDraft extends LitElement {
     });
   }
 
+  private updateEditorPlaceholder(): void {
+    this.editor?.dispatch({ effects: this.placeholderCompartment.reconfigure(placeholder(this.placeholderText)) });
+  }
+
+  private resolveInputMode(draft: string): InputMode {
+    return this.runtime?.inputModeForDraft(draft) ?? inputModeForDraft(draft);
+  }
+
   private updateDraft(value: string): void {
     if (!this.applyingPromptHistory) this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
     this.mutationVersion += 1;
     this.draft = value;
     if (this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, this.draft);
-    const nextInputMode = inputModeForDraft(this.draft);
+    const nextInputMode = this.resolveInputMode(this.draft);
     if (!inputModesEqual(nextInputMode, this.currentInputMode)) this.currentInputMode = nextInputMode;
     this.publishDisplayState();
     this.onDraftEdited?.();
@@ -737,6 +755,7 @@ export class ComposerDraft extends LitElement {
       empty: this.draft.trim() === "",
       focused: this.focused,
       attachmentCount: this.attachments.length,
+      attachmentCapturePending: this.attachmentCaptureCount > 0,
     };
     if (displayStatesEqual(state, this.lastDisplayState)) return;
     this.lastDisplayState = state;
@@ -812,6 +831,7 @@ function displayStatesEqual(left: ComposerDraftDisplayState, right: ComposerDraf
   return left.empty === right.empty
     && left.focused === right.focused
     && left.attachmentCount === right.attachmentCount
+    && left.attachmentCapturePending === right.attachmentCapturePending
     && inputModesEqual(left.inputMode, right.inputMode);
 }
 
@@ -907,6 +927,6 @@ const codeLikeInputAssistanceAttributes: Record<string, string> = {
   dir: "auto",
 };
 
-function inputAssistanceContentAttributes(draftBeforeCursor: string): Record<string, string> {
-  return inputModeForDraft(draftBeforeCursor).kind === "normal" ? proseInputAssistanceAttributes : codeLikeInputAssistanceAttributes;
+function inputAssistanceContentAttributes(inputMode: InputMode): Record<string, string> {
+  return inputMode.kind === "normal" ? proseInputAssistanceAttributes : codeLikeInputAssistanceAttributes;
 }

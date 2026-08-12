@@ -20,11 +20,27 @@ describe("chatSessionLaunchRecoveryPresentation", () => {
     });
   });
 
+  it("requires editing instead of retrying a recovered slash command without identity", () => {
+    expect(chatSessionLaunchRecoveryPresentation({ ...recovery("creationFailed"), requiresPromptResourceValidation: true })).toEqual({
+      heading: "Session creation failed",
+      detail: "The edited slash command must be validated again before session creation. Change destination to review and send it.",
+      actions: [{ kind: "changeDestination", label: "Change destination", disabled: false }],
+    });
+  });
+
   it("offers only retry when delivery is confirmed unsent", () => {
     expect(chatSessionLaunchRecoveryPresentation(recovery("promptConfirmedUnsent"))).toEqual({
       heading: "First prompt not sent",
       detail: "The session exists, but the first prompt was confirmed unsent. Any later queued messages wait behind it.",
       actions: [{ kind: "retry", label: "Retry", disabled: false }],
+    });
+  });
+
+  it("requires revalidation after a prompt-resource retry remains unsent", () => {
+    expect(chatSessionLaunchRecoveryPresentation({ ...recovery("promptConfirmedUnsent"), requiresPromptResourceValidation: true })).toEqual({
+      heading: "First prompt not sent",
+      detail: "The prompt resource changed or remained unavailable after retry. Change destination to validate it again.",
+      actions: [{ kind: "changeDestination", label: "Change destination", disabled: false }],
     });
   });
 
@@ -92,7 +108,7 @@ describe("ChatView session launch recovery wiring", () => {
     document.body.append(view);
     await view.updateComplete;
 
-    expect(view.shadowRoot?.querySelector<HTMLElement & { text: string }>(".queued-message formatted-text")?.text).toBe("Recover this exact prompt");
+    expect(view.shadowRoot?.querySelector<HTMLElement & { text: string }>(".queued-message formatted-text")?.text).toBe("[First prompt retained privately]");
     expect(view.shadowRoot?.querySelector(".queued-kind")?.textContent.trim()).toBe("First prompt");
     expect(view.shadowRoot?.querySelector(".session-launch-recovery")).not.toBeNull();
     expect(Array.from(view.shadowRoot?.querySelectorAll<HTMLButtonElement>(".session-launch-recovery button") ?? []).map((button) => button.textContent.trim())).toEqual([
@@ -107,14 +123,13 @@ describe("ChatView session launch recovery wiring", () => {
     view.clientQueuedMessages = [];
     view.sessionLaunchRecovery = {
       ...recovery("promptConfirmedUnsent"),
-      prompt: "Recover with file",
       attachments: [{ name: "notes.txt", mimeType: "text/plain", size: 5 }],
       delivery: "folder",
     };
     document.body.append(view);
     await view.updateComplete;
 
-    expect(view.shadowRoot?.querySelector<HTMLElement & { text: string }>(".queued-message formatted-text")?.text).toBe("Recover with file\n\n[1 attachment queued: notes.txt]");
+    expect(view.shadowRoot?.querySelector<HTMLElement & { text: string }>(".queued-message formatted-text")?.text).toBe("[First prompt retained privately]\n\n[1 attachment queued: notes.txt]");
     expect(JSON.stringify(view.sessionLaunchRecovery)).not.toContain("SGVsbG8=");
   });
 
@@ -137,7 +152,6 @@ function recovery(stage: SessionLaunchRecovery["stage"]): SessionLaunchRecovery 
     stage,
     sessionId: stage === "creationFailed" ? "pending-session-1" : "session-1",
     destination: { machineId: "local", workspaceId: "workspace-1", cwd: "/repo" },
-    prompt: "Recover this exact prompt",
     retrying: false,
   };
 }

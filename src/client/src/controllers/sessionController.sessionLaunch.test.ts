@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { initialAppState } from "../appState";
-import { SessionController } from "./sessionController";
+import { SessionController, type PromptEditorTextReplacement } from "./sessionController";
 import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { defaultApi, deferred, emptyPage, FakeSocket, MemoryStorage, oldSession, sessionLookupId, status, workspace, type AppState, type PromptAttachment, type SessionInfo } from "./sessionController.testSupport";
 
@@ -26,7 +26,7 @@ describe("SessionController session launch", () => {
     expect(temporaryId).toMatch(/^pending-session-/);
     expect(state.sessions.map((session) => session.id)).toEqual([temporaryId]);
     expect(state.clientQueuedSessionMessages[temporaryId ?? ""]).toEqual([
-      { kind: "followUp", text: "Build the feature" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
     expect(state.activity).toMatchObject({
       sessionId: temporaryId,
@@ -68,7 +68,7 @@ describe("SessionController session launch", () => {
 
     expect(state.sessions.map((session) => session.id)).toEqual([temporaryId]);
     expect(state.clientQueuedSessionMessages[temporaryId]).toEqual([
-      { kind: "followUp", text: "Build with image\n\n[1 attachment queued: shot.png]" },
+      { kind: "followUp", text: "[First prompt queued]\n\n[1 attachment queued: shot.png]" },
     ]);
 
     startRequest.resolve(started);
@@ -143,7 +143,6 @@ describe("SessionController session launch", () => {
     const recovery = controller.getSessionLaunchRecovery(failedId);
     expect(recovery).toMatchObject({
       stage: "creationFailed",
-      prompt: "Recover with attachment",
       retrying: false,
       attachments: [{ mimeType: "image/png", name: "shot.png", size: 3 }],
       delivery: "inline",
@@ -263,10 +262,10 @@ describe("SessionController session launch", () => {
     expect(genericCommandCalls).toBe(0);
     expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
       stage: "promptConfirmedUnsent",
-      promptResourceCommandIdentity: identity,
       attachments: [{ mimeType: "image/png", name: "shot.png", size: 3 }],
     });
     expect(JSON.stringify(controller.getSessionLaunchRecovery(started.id))).not.toContain("QUJD");
+    expect(controller.getSessionLaunchRecovery(started.id)).not.toHaveProperty("promptResourceCommandIdentity");
   });
 
   it("clears prompt-resource ambiguous recovery when expanded transcript text matches the delivery receipt", async () => {
@@ -327,7 +326,7 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "/review src" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -358,7 +357,7 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "/review src" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -386,11 +385,10 @@ describe("SessionController session launch", () => {
       stage: "creationFailed",
       sessionId: temporaryId,
       destination: { machineId: "local", workspaceId: workspace.id, cwd: workspace.path },
-      prompt: "Recover this prompt",
       retrying: false,
     });
     expect(state.clientQueuedSessionMessages[temporaryId]).toEqual([
-      { kind: "followUp", text: "Recover this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
     expect(state.activity).toMatchObject({ phase: "error", label: "Session creation failed" });
     const durableValues = Array.from({ length: storage.length }, (_, index) => storage.getItem(storage.key(index) ?? "") ?? "");
@@ -426,22 +424,22 @@ describe("SessionController session launch", () => {
 
     const seed = controller.claimSessionLaunchRecoveryDraft(failedId);
 
-    expect(seed).toEqual({ id: failedId, snapshot: { text: "Recover privately", delivery: "inline" } });
+    expect(seed).toEqual({ id: `${failedId}:claim-1`, snapshot: { text: "Recover privately", delivery: "inline" } });
     expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toBeUndefined();
-    expect(controller.getSessionLaunchRecovery(failedId)).toMatchObject({ prompt: "" });
+    expect(controller.getSessionLaunchRecovery(failedId)).not.toHaveProperty("prompt");
     expect(state.clientQueuedSessionMessages[failedId]).toEqual([{ kind: "followUp", text: "Queued behind it" }]);
     expect(JSON.stringify({ recovery: controller.getSessionLaunchRecovery(failedId), queued: state.clientQueuedSessionMessages[failedId] })).not.toContain("Recover privately");
     expect(queuedRecoveryTexts(controller, failedId)).toEqual(["Queued behind it"]);
 
     controller.returnSessionLaunchRecoveryDraft(failedId, { text: "Edited recovery", delivery: "inline" });
 
-    expect(controller.getSessionLaunchRecovery(failedId)).toMatchObject({ prompt: "Edited recovery" });
+    expect(controller.getSessionLaunchRecovery(failedId)).not.toHaveProperty("prompt");
     expect(state.clientQueuedSessionMessages[failedId]).toEqual([
-      { kind: "followUp", text: "Edited recovery" },
+      { kind: "followUp", text: "[First prompt queued]" },
       { kind: "followUp", text: "Queued behind it" },
     ]);
     expect(queuedRecoveryTexts(controller, failedId)).toEqual(["Edited recovery", "Queued behind it"]);
-    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({ id: failedId, snapshot: { text: "Edited recovery", delivery: "inline" } });
+    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({ id: `${failedId}:claim-2`, snapshot: { text: "Edited recovery", delivery: "inline" } });
     expect(state.clientQueuedSessionMessages[failedId]).toEqual([{ kind: "followUp", text: "Queued behind it" }]);
   });
 
@@ -466,12 +464,12 @@ describe("SessionController session launch", () => {
 
     const seed = controller.claimSessionLaunchRecoveryDraft(failedId);
 
-    expect(seed).toEqual({ id: failedId, snapshot: { text: "", attachments, delivery: "inline" } });
+    expect(seed).toEqual({ id: `${failedId}:claim-1`, snapshot: { text: "", attachments, delivery: "inline" } });
     expect(JSON.stringify({ recovery: controller.getSessionLaunchRecovery(failedId), queued: state.clientQueuedSessionMessages[failedId] })).not.toContain("QUJD");
 
     controller.returnSessionLaunchRecoveryDraft(failedId, { text: "", attachments, delivery: "inline" });
 
-    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({ id: failedId, snapshot: { text: "", attachments, delivery: "inline" } });
+    expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({ id: `${failedId}:claim-2`, snapshot: { text: "", attachments, delivery: "inline" } });
   });
 
   it("preserves prompt-resource identity when a claimed creation recovery rolls back and retries", async () => {
@@ -508,7 +506,7 @@ describe("SessionController session launch", () => {
     if (failedId === undefined) throw new Error("Expected failed pending session");
 
     expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({
-      id: failedId,
+      id: `${failedId}:claim-1`,
       snapshot: { text: "/review src", delivery: "inline" },
     });
 
@@ -517,6 +515,40 @@ describe("SessionController session launch", () => {
 
     expect(resourceCalls).toEqual([{ text: "/review src", identity }]);
     expect(genericPromptCalls).toBe(0);
+  });
+
+  it("requires fresh validation before retrying an edited recovery slash command", async () => {
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    let startCount = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => {
+        startCount += 1;
+        return Promise.reject(new Error("backend unavailable"));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", promptResourceCommandIdentity: identity });
+    const failedId = state.selectedSession?.id;
+    if (failedId === undefined) throw new Error("Expected failed pending session");
+    controller.claimSessionLaunchRecoveryDraft(failedId);
+    controller.returnSessionLaunchRecoveryDraft(failedId, { text: "/tree", delivery: "inline" });
+
+    expect(controller.getSessionLaunchRecovery(failedId)).toMatchObject({
+      stage: "creationFailed",
+      retrying: false,
+      requiresPromptResourceValidation: true,
+    });
+    await controller.retrySessionLaunch(failedId);
+    expect(startCount).toBe(1);
   });
 
   it("clears old claimed recovery bookkeeping when a replacement is accepted", async () => {
@@ -536,7 +568,7 @@ describe("SessionController session launch", () => {
     await controller.launchSession({ text: "Replace this failed launch" });
     const failed = state.selectedSession;
     if (failed === undefined) throw new Error("Expected failed pending session");
-    expect(controller.claimSessionLaunchRecoveryDraft(failed.id)).toEqual({ id: failed.id, snapshot: { text: "Replace this failed launch", delivery: "inline" } });
+    expect(controller.claimSessionLaunchRecoveryDraft(failed.id)).toEqual({ id: `${failed.id}:claim-1`, snapshot: { text: "Replace this failed launch", delivery: "inline" } });
     const replacement = { ...oldSession, id: "pending-replacement", clientPendingStart: true as const, machineId: "local" };
     state = { ...state, selectedSession: replacement, sessions: [replacement, ...state.sessions] };
 
@@ -581,7 +613,6 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(temporaryId)).toMatchObject({
       stage: "creationFailed",
-      prompt: "Recover after returning",
       retrying: false,
     });
     const merged = controller.mergeCreationFailedSessionStarts(`${workspace.path}/`, [oldSession], "local");
@@ -592,7 +623,7 @@ describe("SessionController session launch", () => {
 
     expect(state.selectedSession).toBe(pendingRow);
     expect(state.clientQueuedSessionMessages[temporaryId]).toEqual([
-      { kind: "followUp", text: "Recover after returning" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
     expect(state.activity).toMatchObject({
       sessionId: temporaryId,
@@ -650,11 +681,10 @@ describe("SessionController session launch", () => {
     expect(state.selectedSession?.id).toBe(failedId);
     expect(controller.getSessionLaunchRecovery(failedId)).toMatchObject({
       stage: "creationFailed",
-      prompt: "Recover after refresh",
       retrying: false,
     });
     expect(state.clientQueuedSessionMessages[failedId]).toEqual([
-      { kind: "followUp", text: "Recover after refresh" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
 
     const retry = controller.retrySessionLaunch(failedId);
@@ -662,7 +692,7 @@ describe("SessionController session launch", () => {
     expect(startCalls.at(-1)).toEqual({ cwd: workspace.path, machineId: "local", requestId: failedId });
     expect(controller.getSessionLaunchRecovery(failedId)?.retrying).toBe(true);
     expect(state.clientQueuedSessionMessages[failedId]).toEqual([
-      { kind: "followUp", text: "Recover after refresh" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
 
     retryStart.reject(new Error("stop retry"));
@@ -760,7 +790,7 @@ describe("SessionController session launch", () => {
     expect(startCallCount).toBe(2);
     expect(controller.getSessionLaunchRecovery(temporaryId)?.retrying).toBe(true);
     expect(state.clientQueuedSessionMessages[temporaryId]).toEqual([
-      { kind: "followUp", text: "Recover creation" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
 
     retryStart.resolve(started);
@@ -906,11 +936,10 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
       stage: "promptConfirmedUnsent",
-      prompt: "Retry this prompt",
       retrying: false,
     });
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Retry this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
 
     const firstRetry = controller.retrySessionLaunch(started.id);
@@ -925,6 +954,43 @@ describe("SessionController session launch", () => {
     expect(promptCallCount).toBe(2);
     expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+  });
+
+  it("requires revalidation when a prompt-resource retry remains confirmed unsent", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    let resourceCallCount = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      runPromptResourceCommand: () => {
+        resourceCallCount += 1;
+        return Promise.reject(new Error("resource changed"));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "/review src", promptResourceCommandIdentity: identity });
+    expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({ stage: "promptConfirmedUnsent", retrying: false });
+
+    await controller.retrySessionLaunch(started.id);
+
+    expect(resourceCallCount).toBe(2);
+    expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
+      stage: "promptConfirmedUnsent",
+      retrying: false,
+      requiresPromptResourceValidation: true,
+    });
+    expect(controller.claimSessionLaunchRecoveryDraft(started.id)?.snapshot).toEqual({ text: "/review src", delivery: "inline" });
   });
 
   it("clears only its retry activity after a confirmed-unsent prompt retry succeeds", async () => {
@@ -1012,7 +1078,8 @@ describe("SessionController session launch", () => {
   it("transfers ambiguous delivery to the editor only after replacement succeeds", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     const replacement = deferred<undefined>();
-    const replacements: string[] = [];
+    const attachment: PromptAttachment = { kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" };
+    const replacements: PromptEditorTextReplacement[] = [];
     let promptCallCount = 0;
     let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
     const api: typeof defaultApi = {
@@ -1033,18 +1100,17 @@ describe("SessionController session launch", () => {
       {
         api,
         socket: new FakeSocket(),
-        replacePromptEditorText: ({ text }) => {
-          replacements.push(text);
+        replacePromptEditorText: (request) => {
+          replacements.push(request);
           return replacement.promise;
         },
       },
     );
 
-    await controller.launchSession({ text: "Inspect before resending" });
+    await controller.launchSession({ text: "Inspect before resending", attachments: [attachment], delivery: "inline" });
 
     expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
       stage: "promptDeliveryAmbiguous",
-      prompt: "Inspect before resending",
       retrying: false,
     });
     await controller.retrySessionLaunch(started.id);
@@ -1052,10 +1118,15 @@ describe("SessionController session launch", () => {
 
     const restore = controller.restoreSessionLaunchPrompt(started.id);
 
-    expect(replacements).toEqual(["Inspect before resending"]);
+    expect(replacements).toEqual([{
+      machineId: "local",
+      sessionId: started.id,
+      text: "Inspect before resending",
+      snapshot: { text: "Inspect before resending", attachments: [attachment], delivery: "inline" },
+    }]);
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Inspect before resending" },
+      { kind: "followUp", text: "[First prompt queued]\n\n[1 attachment queued: shot.png]" },
     ]);
 
     replacement.resolve(undefined);
@@ -1117,7 +1188,7 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Ambiguous first prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
       { kind: "followUp", text: "!pwd" },
       { kind: "followUp", text: "Continue after restore" },
     ]);
@@ -1215,7 +1286,7 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Keep this prompt after navigation" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -1247,7 +1318,7 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Keep this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -1436,11 +1507,10 @@ describe("SessionController session launch", () => {
     expect(state.status).toEqual(status(started.id));
     expect(controller.getSessionLaunchRecovery(started.id)).toMatchObject({
       stage: "promptConfirmedUnsent",
-      prompt: "Refresh without resending",
       retrying: false,
     });
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Refresh without resending" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -1477,7 +1547,7 @@ describe("SessionController session launch", () => {
     expect(promptCalls).toEqual(["Do not resend this prompt"]);
     expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Do not resend this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
     expect(state.error).toContain("canonical transcript unavailable");
   });
@@ -1692,7 +1762,7 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)).toBeDefined();
     expect(state.clientQueuedSessionMessages[started.id]).toEqual([
-      { kind: "followUp", text: "Keep local recovery" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
     expect(state.sessionActivities[started.id]).toBe(recoveryActivity);
     expect(state.activity).toBe(recoveryActivity);

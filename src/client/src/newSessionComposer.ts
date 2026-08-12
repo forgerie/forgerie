@@ -58,7 +58,7 @@ export type NewSessionDestinationChoice =
 export type NewSessionComposerState =
   | { kind: "editing"; destination: NewSessionDestination; submissionError?: NewSessionSubmissionOutcome & { kind: "rejected" } }
   | { kind: "choosing"; destination: NewSessionDestination; choice: NewSessionDestinationChoice }
-  | { kind: "submitting"; destination: NewSessionCompleteDestination; submission: NewSessionFirstPromptSubmission };
+  | { kind: "submitting"; destination: NewSessionCompleteDestination };
 
 export function completeNewSessionDestination(machine: Machine, project: Project, workspace: Workspace): NewSessionCompleteDestination {
   return { kind: "complete", machine, project, workspace };
@@ -97,7 +97,7 @@ export function beginNewSessionSubmission(
   snapshot: NewSessionComposerSnapshot,
 ): NewSessionComposerState {
   if (!canSubmitNewSession(state, snapshot)) return state;
-  return { kind: "submitting", destination: state.destination, submission: copyNewSessionSubmission(snapshot) };
+  return { kind: "submitting", destination: state.destination };
 }
 
 export function rejectNewSessionSubmission(
@@ -229,16 +229,6 @@ function newSessionSubmissionIsEmpty(submission: NewSessionComposerSnapshot): bo
 function requiresPromptResourceIdentity(submission: NewSessionComposerSnapshot): boolean {
   const parsed = parseLeadingSlashCommand(submission.text);
   return parsed.kind !== "not-command" && submission.promptResourceCommandIdentity === undefined;
-}
-
-function copyNewSessionSubmission(submission: NewSessionComposerSnapshot): NewSessionFirstPromptSubmission {
-  const attachments = submission.attachments === undefined ? undefined : submission.attachments.map((attachment) => ({ ...attachment }));
-  return {
-    text: submission.text,
-    ...(attachments === undefined ? {} : { attachments }),
-    ...(submission.delivery === undefined ? {} : { delivery: submission.delivery }),
-    ...(submission.promptResourceCommandIdentity === undefined ? {} : { promptResourceCommandIdentity: { ...submission.promptResourceCommandIdentity } }),
-  };
 }
 
 export function createApiNewSessionDestinationCatalog(): NewSessionDestinationCatalog {

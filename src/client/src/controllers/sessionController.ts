@@ -28,6 +28,7 @@ import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
 import { base64ByteLength } from "../../../shared/promptAttachments";
 import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
+import type { NewSessionFirstPromptSubmission } from "../newSessionComposer";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
 import type { SessionInboxBridge } from "./sessionInboxController";
@@ -59,6 +60,7 @@ export interface PromptEditorTextReplacement {
   machineId: string;
   sessionId: string;
   text: string;
+  snapshot?: SessionLaunchRecoveryDraftSnapshot | undefined;
 }
 
 export interface SelectedSessionReady {
@@ -90,18 +92,13 @@ type ClientPendingStartSessionInfo = SessionInfo & { clientPendingStart: true; m
 
 type QueuedPendingSessionSendInput =
   | { type: "prompt"; text: string; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose?: "initialPrompt" }
-  | { type: "promptResource"; text: string; identity: PromptResourceCommandIdentity; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose: "initialPrompt" }
+  | { type: "promptResource"; text: string; identity: PromptResourceCommandIdentity; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose: "initialPrompt"; retryAttempts?: number | undefined }
   | { type: "shell"; text: string }
   | { type: "command"; text: string };
 
 type QueuedPendingSessionSend = QueuedPendingSessionSendInput & { id: string; deliveredText?: string | undefined; deliveryReceipt?: string | undefined };
 
-export interface FirstPromptSubmission {
-  readonly text: string;
-  readonly attachments?: PromptAttachment[] | undefined;
-  readonly delivery?: PromptAttachmentDelivery | undefined;
-  readonly promptResourceCommandIdentity?: PromptResourceCommandIdentity | undefined;
-}
+export type FirstPromptSubmission = NewSessionFirstPromptSubmission;
 
 export type SessionLaunchRecoveryDraftSnapshot = Omit<FirstPromptSubmission, "promptResourceCommandIdentity">;
 
@@ -126,11 +123,10 @@ export interface SessionLaunchRecovery {
   readonly stage: "creationFailed" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous";
   readonly sessionId: string;
   readonly destination: SessionLaunchDestination;
-  readonly prompt: string;
   readonly retrying: boolean;
+  readonly requiresPromptResourceValidation?: boolean | undefined;
   readonly attachments?: readonly SessionLaunchAttachmentMetadata[] | undefined;
   readonly delivery?: PromptAttachmentDelivery | undefined;
-  readonly promptResourceCommandIdentity?: PromptResourceCommandIdentity | undefined;
 }
 
 interface PendingSessionStart {
@@ -204,6 +200,7 @@ export class SessionController {
   private pendingFrame: number | undefined;
   private pendingSessionStartSeq = 0;
   private pendingQueuedSendSeq = 0;
+  private recoveryDraftClaimSeq = 0;
   private readonly pendingSessionStarts = new Map<string, PendingSessionStart>();
   private readonly sessionLaunchRecoveries = new Map<string, SessionLaunchRecoveryRecord>();
   private readonly suppressedCreatedSessions = new Map<string, SuppressedCreatedSession>();
@@ -289,14 +286,15 @@ export class SessionController {
     if (workspace === undefined || firstPromptSubmissionIsEmpty(submission)) return;
     const promptResourceIdentity = submission.promptResourceCommandIdentity;
     if (submission.text.startsWith("/") && promptResourceIdentity === undefined) return;
+    const attachments = submission.attachments?.map((attachment) => ({ ...attachment }));
     const machineId = selectedMachineId(this.getState());
     const pending = this.createPendingSessionStart(workspace, machineId);
     this.pendingSessionStarts.set(pending.tempId, pending);
     this.insertAndSelectPendingSession(pending.session);
     if (promptResourceIdentity === undefined) {
-      this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: submission.text, attachments: submission.attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
+      this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: submission.text, attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
     } else {
-      this.enqueuePendingSessionSend(pending.session, { type: "promptResource", text: submission.text, identity: promptResourceIdentity, attachments: submission.attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
+      this.enqueuePendingSessionSend(pending.session, { type: "promptResource", text: submission.text, identity: promptResourceIdentity, attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
     }
     await this.startPendingSession(pending);
   }
@@ -305,9 +303,13 @@ export class SessionController {
     return this.sessionLaunchRecoveries.get(sessionId)?.recovery;
   }
 
+  hasQueuedInitialPrompt(sessionId: string): boolean {
+    return this.pendingSessionStarts.get(sessionId)?.queuedSends.some(isInitialPromptSend) === true;
+  }
+
   claimSessionLaunchRecoveryDraft(sessionId: string): SessionLaunchRecoveryDraftSeed | undefined {
     const record = this.sessionLaunchRecoveries.get(sessionId);
-    if (record?.recovery.stage !== "creationFailed" || record.claimedDraft !== undefined) return undefined;
+    if (record === undefined || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent") || record.claimedDraft !== undefined) return undefined;
     const index = record.queuedSends.findIndex(isInitialPromptSend);
     const queued = index === -1 ? undefined : record.queuedSends[index];
     if (queued === undefined || !isInitialPromptSend(queued)) return undefined;
@@ -316,10 +318,10 @@ export class SessionController {
       record.pending.queuedSends = record.pending.queuedSends.filter((candidate) => candidate.id !== queued.id);
     }
     record.claimedDraft = { index, queued: claimedRecoveryDraftQueueBookkeeping(queued) };
-    record.recovery = payloadFreeClaimedCreationRecovery(record.recovery, queued);
+    record.recovery = payloadFreeClaimedRecovery(record.recovery, queued);
     this.publishCreationFailedRecoveryQueue(sessionId, record);
     return {
-      id: sessionId,
+      id: `${sessionId}:claim-${String(++this.recoveryDraftClaimSeq)}`,
       snapshot: {
         text: queued.text,
         ...(queued.attachments === undefined ? {} : { attachments: queued.attachments.map((attachment) => ({ ...attachment })) }),
@@ -331,14 +333,14 @@ export class SessionController {
   returnSessionLaunchRecoveryDraft(sessionId: string, snapshot: SessionLaunchRecoveryDraftSnapshot): void {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     const claimed = record?.claimedDraft;
-    if (record?.recovery.stage !== "creationFailed" || claimed === undefined) return;
+    if (record === undefined || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent") || claimed === undefined) return;
     const queued = queuedRecoveryDraftFromSnapshot(claimed.queued, snapshot);
     insertQueuedRecoveryDraft(record.queuedSends, claimed.index, queued);
     if (record.pending !== undefined && record.pending.queuedSends !== record.queuedSends) {
       insertQueuedRecoveryDraft(record.pending.queuedSends, claimed.index, queued);
     }
     delete record.claimedDraft;
-    record.recovery = creationRecoveryWithQueuedSubmission(record.recovery, queued);
+    record.recovery = recoveryWithQueuedSubmission(record.recovery, queued);
     this.publishCreationFailedRecoveryQueue(sessionId, record);
   }
 
@@ -360,20 +362,22 @@ export class SessionController {
   acceptSessionLaunchReplacement(failedSessionId: string, replacementSessionId: string): void {
     const record = this.sessionLaunchRecoveries.get(failedSessionId);
     const state = this.getState();
-    if (record?.recovery.stage !== "creationFailed"
+    if (record === undefined
+      || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent")
       || replacementSessionId === failedSessionId
       || state.selectedSession?.id !== replacementSessionId
       || !state.sessions.some((session) => session.id === replacementSessionId)) return;
     this.sessionLaunchRecoveries.delete(failedSessionId);
     clearDraft(machineSessionKey(record.recovery.destination.machineId, failedSessionId));
+    const removeFailedSession = record.recovery.stage === "creationFailed";
     this.setState({
-      sessions: state.sessions.filter((session) => session.id !== failedSessionId),
+      sessions: removeFailedSession ? state.sessions.filter((session) => session.id !== failedSessionId) : state.sessions,
       sessionStatuses: omitKey(state.sessionStatuses, failedSessionId),
       sessionActivities: omitSessionActivity(state.sessionActivities, failedSessionId),
       sendingPrompts: omitKey(state.sendingPrompts, failedSessionId),
       clientQueuedSessionMessages: omitKey(state.clientQueuedSessionMessages, failedSessionId),
     });
-    this.inbox?.notifyDeleted(record.recovery.destination.machineId, [failedSessionId]);
+    if (removeFailedSession) this.inbox?.notifyDeleted(record.recovery.destination.machineId, [failedSessionId]);
   }
 
   async retrySessionLaunch(sessionId: string): Promise<void> {
@@ -381,6 +385,7 @@ export class SessionController {
     if (record === undefined || record.recovery.retrying) return;
 
     if (record.recovery.stage === "creationFailed" && record.pending !== undefined) {
+      if (record.recovery.requiresPromptResourceValidation === true) return;
       record.recovery = { ...record.recovery, retrying: true };
       record.pending.discarded = false;
       delete record.pending.backendSessionId;
@@ -390,7 +395,9 @@ export class SessionController {
       return;
     }
 
-    if (record.recovery.stage !== "promptConfirmedUnsent" || record.session === undefined) return;
+    if (record.recovery.stage !== "promptConfirmedUnsent" || record.session === undefined || record.recovery.requiresPromptResourceValidation === true) return;
+    const firstPrompt = record.queuedSends[0];
+    if (firstPrompt?.type === "promptResource") firstPrompt.retryAttempts = (firstPrompt.retryAttempts ?? 0) + 1;
     record.recovery = { ...record.recovery, retrying: true };
     this.applySessionLaunchRetryActivity(sessionId, INITIAL_PROMPT_RETRY_ACTIVITY_LABEL);
     await this.flushQueuedPendingSends(record.session, record.recovery.destination.machineId, record.queuedSends, record.recovery.destination);
@@ -404,10 +411,18 @@ export class SessionController {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     if (record?.recovery.stage !== "promptDeliveryAmbiguous" || record.session === undefined || this.replacePromptEditorText === undefined) return;
     if (!this.isSelectedSessionIdentity(sessionId, record.recovery.destination.machineId)) return;
+    const queued = record.queuedSends[0];
+    if (queued === undefined || !isInitialPromptSend(queued)) return;
+    const snapshot: SessionLaunchRecoveryDraftSnapshot = {
+      text: queued.text,
+      ...(queued.attachments === undefined ? {} : { attachments: queued.attachments.map((attachment) => ({ ...attachment })) }),
+      delivery: queued.delivery,
+    };
     const replaced = await this.replacePromptEditorText({
       machineId: record.recovery.destination.machineId,
       sessionId,
-      text: record.recovery.prompt,
+      text: queued.text,
+      snapshot,
     });
     if (replaced === false || this.sessionLaunchRecoveries.get(sessionId) !== record) return;
     const retainedQueuedSends = record.queuedSends.slice(1);
@@ -430,7 +445,7 @@ export class SessionController {
       const history = this.transcripts.mergeHistory(machineSessionKey(machineId, sessionId), page);
       this.setState(history);
       this.applyStatus(status);
-      if (await initialPromptRecoveryAccepted(page, record.recovery, record.queuedSends[0])) {
+      if (await initialPromptRecoveryAccepted(page, record.queuedSends[0])) {
         const retainedQueuedSends = record.queuedSends.slice(1);
         this.sessionLaunchRecoveries.delete(sessionId);
         this.dropNextQueuedSessionMessage(sessionId);
@@ -701,8 +716,8 @@ export class SessionController {
         stage,
         sessionId: session.id,
         destination,
-        prompt: queued.text,
         retrying: false,
+        ...(queuedPromptNeedsValidation(queued) ? { requiresPromptResourceValidation: true } : {}),
         ...recoverySubmissionProjection(queued),
       };
       this.sessionLaunchRecoveries.set(session.id, { recovery, queuedSends: queuedSends.slice(index), session });
@@ -749,7 +764,9 @@ export class SessionController {
       sessionActivities: { ...state.sessionActivities, [recovery.sessionId]: activity },
       activity: state.selectedSession?.id === recovery.sessionId ? activity : state.activity,
       error: recovery.stage === "promptConfirmedUnsent"
-        ? "The first prompt was not sent. You can retry it."
+        ? recovery.requiresPromptResourceValidation === true
+          ? "The first prompt resource needs validation before it can be sent again."
+          : "The first prompt was not sent. You can retry it."
         : "The first prompt may have been accepted. Inspect the transcript before you send it again.",
     });
   }
@@ -1859,7 +1876,6 @@ export class SessionController {
           stage: "creationFailed",
           sessionId: tempId,
           destination: { machineId: pending.machineId, workspaceId: pending.workspaceId, cwd: pending.cwd },
-          prompt: initialPrompt.text,
           retrying: false,
           ...recoverySubmissionProjection(initialPrompt),
         },
@@ -2468,11 +2484,8 @@ function appendSavedAttachmentReferences(text: string, paths: readonly string[])
 ${references}`;
 }
 
-function recoverySubmissionProjection(queued: FirstPromptQueuedSend): Pick<SessionLaunchRecovery, "attachments" | "delivery" | "promptResourceCommandIdentity"> {
-  return {
-    ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
-    ...recoveryAttachmentProjection(queued),
-  };
+function recoverySubmissionProjection(queued: FirstPromptQueuedSend): Pick<SessionLaunchRecovery, "attachments" | "delivery"> {
+  return recoveryAttachmentProjection(queued);
 }
 
 function claimedRecoveryDraftQueueBookkeeping(queued: FirstPromptQueuedSend): ClaimedSessionLaunchRecoveryDraft["queued"] {
@@ -2484,6 +2497,7 @@ function claimedRecoveryDraftQueueBookkeeping(queued: FirstPromptQueuedSend): Cl
       ...(queued.streamingBehavior === undefined ? {} : { streamingBehavior: queued.streamingBehavior }),
       delivery: queued.delivery,
       purpose: queued.purpose,
+      ...(queued.retryAttempts === undefined ? {} : { retryAttempts: queued.retryAttempts }),
       ...(queued.deliveryReceipt === undefined ? {} : { deliveryReceipt: queued.deliveryReceipt }),
     };
   }
@@ -2497,15 +2511,14 @@ function claimedRecoveryDraftQueueBookkeeping(queued: FirstPromptQueuedSend): Cl
   };
 }
 
-function payloadFreeClaimedCreationRecovery(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
+function payloadFreeClaimedRecovery(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
   return {
     stage: recovery.stage,
     sessionId: recovery.sessionId,
     destination: recovery.destination,
-    prompt: "",
     retrying: recovery.retrying,
+    ...(recovery.requiresPromptResourceValidation === undefined ? {} : { requiresPromptResourceValidation: recovery.requiresPromptResourceValidation }),
     delivery: queued.delivery,
-    ...(queued.type === "promptResource" ? { promptResourceCommandIdentity: { ...queued.identity } } : {}),
     ...recoveryAttachmentProjection(queued),
   };
 }
@@ -2533,6 +2546,12 @@ function queuedRecoveryDraftFromSnapshot(bookkeeping: ClaimedSessionLaunchRecove
   };
 }
 
+function queuedPromptNeedsValidation(queued: FirstPromptQueuedSend): boolean {
+  return queued.type === "promptResource"
+    ? (queued.retryAttempts ?? 0) > 0
+    : parseLeadingSlashCommand(queued.text).kind !== "not-command";
+}
+
 function promptResourceIdentityApplies(text: string, identity: PromptResourceCommandIdentity): boolean {
   const parsed = parseLeadingSlashCommand(text);
   return parsed.kind === "command" && parsed.name === identity.name;
@@ -2544,13 +2563,13 @@ function insertQueuedRecoveryDraft(queue: QueuedPendingSessionSend[], index: num
   queue.splice(0, queue.length, ...withoutDuplicate.slice(0, insertionIndex), queued, ...withoutDuplicate.slice(insertionIndex));
 }
 
-function creationRecoveryWithQueuedSubmission(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
+function recoveryWithQueuedSubmission(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
   return {
     stage: recovery.stage,
     sessionId: recovery.sessionId,
     destination: recovery.destination,
-    prompt: queued.text,
     retrying: recovery.retrying,
+    ...(queuedPromptNeedsValidation(queued) ? { requiresPromptResourceValidation: true } : {}),
     ...recoverySubmissionProjection(queued),
   };
 }
@@ -2572,13 +2591,11 @@ function promptAttachmentMetadata(attachment: PromptAttachment): NonNullable<Ses
   };
 }
 
-async function initialPromptRecoveryAccepted(page: MessagePage, recovery: SessionLaunchRecovery, queued: QueuedPendingSessionSend | undefined): Promise<boolean> {
-  if (recovery.promptResourceCommandIdentity !== undefined) {
-    return queued?.type === "promptResource" && queued.deliveryReceipt !== undefined
-      ? await canonicalTranscriptContainsDeliveryReceipt(page, queued.deliveryReceipt)
-      : false;
+async function initialPromptRecoveryAccepted(page: MessagePage, queued: QueuedPendingSessionSend | undefined): Promise<boolean> {
+  if (queued?.type === "promptResource") {
+    return queued.deliveryReceipt !== undefined ? await canonicalTranscriptContainsDeliveryReceipt(page, queued.deliveryReceipt) : false;
   }
-  return canonicalTranscriptContainsPrompt(page, queued?.deliveredText ?? recovery.prompt);
+  return queued?.type === "prompt" ? canonicalTranscriptContainsPrompt(page, queued.deliveredText ?? queued.text) : false;
 }
 
 async function queuedInitialPromptAccepted(page: MessagePage, queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Promise<boolean> {
@@ -2629,9 +2646,15 @@ function isInitialPromptSend(queued: QueuedPendingSessionSend): queued is Extrac
 
 function queuedSessionMessagePreview(queued: QueuedPendingSessionSend): QueuedSessionMessage {
   if (queued.type === "prompt" || queued.type === "promptResource") {
-    return { kind: queued.streamingBehavior === "steer" ? "steer" : "followUp", text: queuedPromptPreviewText(queued.text, queued.attachments) };
+    const text = isInitialPromptSend(queued) ? initialPromptPreviewText(queued.attachments) : queuedPromptPreviewText(queued.text, queued.attachments);
+    return { kind: queued.streamingBehavior === "steer" ? "steer" : "followUp", text };
   }
   return { kind: "followUp", text: queued.text };
+}
+
+function initialPromptPreviewText(attachments: PromptAttachment[] | undefined): string {
+  const attachmentText = queuedAttachmentSummary(attachments);
+  return attachmentText === undefined ? "[First prompt queued]" : `[First prompt queued]\n\n${attachmentText}`;
 }
 
 function queuedPromptPreviewText(text: string, attachments: PromptAttachment[] | undefined): string {

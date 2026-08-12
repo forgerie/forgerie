@@ -55,8 +55,9 @@ export class NewSessionComposer extends LitElement {
   @property({ attribute: false }) promptResourceCatalog: (projectId: string, workspaceId: string, machineId: string) => Promise<PromptResourceCatalogResponse> = (projectId, workspaceId, machineId) => workspacesApi.promptResourceCatalog(projectId, workspaceId, machineId);
 
   @state() private composerState: NewSessionComposerState = createNewSessionComposerState();
-  @state() private draftDisplay: ComposerDraftDisplayState = { inputMode: { kind: "normal" }, empty: true, focused: false, attachmentCount: 0 };
+  @state() private draftDisplay: ComposerDraftDisplayState = { inputMode: { kind: "normal" }, empty: true, focused: false, attachmentCount: 0, attachmentCapturePending: false };
   @state() private slashValidationError: SlashValidationError | undefined;
+  @state() private validationPending = false;
   @query("modal-surface") private modalSurface?: ModalSurface;
   @query("composer-draft") private draft?: ComposerDraft;
 
@@ -67,6 +68,9 @@ export class NewSessionComposer extends LitElement {
   private focusRegion = "";
   private runtime: ComposerRuntime = createPreSessionComposerRuntime({ machineId: "local" });
   private claimedRecoverySeedId: string | undefined;
+  private recoveryClaimRetryScheduled = false;
+  private recoveryClaimRetryAttemptedFor: string | undefined;
+  private connectionGeneration = 0;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
@@ -85,10 +89,20 @@ export class NewSessionComposer extends LitElement {
     this.focusCurrentRegion();
   }
 
+  override connectedCallback(): void {
+    this.connectionGeneration += 1;
+    super.connectedCallback();
+  }
+
   override disconnectedCallback(): void {
     this.requestGeneration += 1;
     this.runtimeGeneration += 1;
     this.submissionGeneration += 1;
+    this.validationPending = false;
+    const generation = ++this.connectionGeneration;
+    queueMicrotask(() => {
+      if (!this.isConnected && generation === this.connectionGeneration) this.returnClaimedRecoveryDraft();
+    });
     super.disconnectedCallback();
   }
 
@@ -100,11 +114,12 @@ export class NewSessionComposer extends LitElement {
   override render(): TemplateResult {
     const state = this.composerState;
     const submitting = state.kind === "submitting";
+    const busy = submitting || this.validationPending;
     return html`
       <modal-surface
         .label=${"New session"}
         .initialFocus=${initialFocusSelector(state)}
-        .busy=${submitting}
+        .busy=${busy}
         .onClose=${() => { this.requestCancel(); }}
       >
         <form class="composer" @submit=${(event: SubmitEvent) => { this.handleFooterSubmit(event); }}>
@@ -123,7 +138,7 @@ export class NewSessionComposer extends LitElement {
                 .placeholderText=${this.placeholderForState(state)}
                 .runtime=${this.runtime}
                 .disabled=${submitting}
-                .submissionDisabled=${this.slashValidationError !== undefined}
+                .submissionDisabled=${this.slashValidationError !== undefined || this.validationPending}
                 .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
                 .onDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
                 .onDraftEdited=${() => { this.invalidatePendingSubmission(); this.clearValidationError(); }}
@@ -143,9 +158,9 @@ export class NewSessionComposer extends LitElement {
           </div>
 
           <footer class="dialog-footer">
-            ${submitting ? html`<span class="busy-label" role="status">Checking destination…</span>` : nothing}
+            ${busy ? html`<span class="busy-label" role="status">${this.validationPending ? "Validating prompt…" : "Checking destination…"}</span>` : nothing}
             <button type="button" data-action="cancel" ?disabled=${submitting} @click=${() => { this.requestCancel(); }}>Cancel</button>
-            <button class="primary" type="submit" data-action="send" ?disabled=${!this.footerSendAvailable(state)}>${submitting ? "Sending…" : "Send"}</button>
+            <button class="primary" type="submit" data-action="send" ?disabled=${!this.footerSendAvailable(state)}>${busy ? "Sending…" : "Send"}</button>
           </footer>
         </form>
       </modal-surface>
@@ -306,6 +321,8 @@ export class NewSessionComposer extends LitElement {
     return state.kind === "editing"
       && state.destination.kind === "complete"
       && this.slashValidationError === undefined
+      && !this.validationPending
+      && !this.draftDisplay.attachmentCapturePending
       && (!this.draftDisplay.empty || this.draftDisplay.attachmentCount > 0);
   }
 
@@ -315,12 +332,15 @@ export class NewSessionComposer extends LitElement {
   }
 
   private async handleDraftSubmit(snapshot: ComposerDraftSubmitSnapshot): Promise<"accepted" | "rejected"> {
+    if (this.validationPending) return "rejected";
     const destination = this.currentDestination();
     if (destination === undefined) return "rejected";
     const runtimeGeneration = this.runtimeGeneration;
     const submissionGeneration = ++this.submissionGeneration;
+    this.validationPending = true;
     const validation = await this.validatePromptResourceCommand(snapshot, destination);
     if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
+    this.validationPending = false;
     if (validation.kind === "invalid") {
       this.slashValidationError = validation.error;
       return "rejected";
@@ -335,9 +355,12 @@ export class NewSessionComposer extends LitElement {
       return "rejected";
     }
     try {
-      const outcome = await callback({ destination: next.destination, firstPrompt: next.submission });
+      const outcome = await callback({ destination: next.destination, firstPrompt: validation.submission });
       if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
-      if (outcome.kind === "accepted") return "accepted";
+      if (outcome.kind === "accepted") {
+        this.claimedRecoverySeedId = undefined;
+        return "accepted";
+      }
       this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
       return "rejected";
     } catch (error) {
@@ -505,20 +528,33 @@ export class NewSessionComposer extends LitElement {
 
   private invalidatePendingSubmission(): void {
     this.submissionGeneration += 1;
+    this.validationPending = false;
   }
 
   private claimRecoveryDraftOnce(): void {
     const seedId = this.recoverySeedId;
     if (seedId === undefined || seedId === this.claimedRecoverySeedId || this.draft === undefined || this.onClaimRecoveryDraft === undefined) return;
-    this.claimedRecoverySeedId = seedId;
     const seed = this.onClaimRecoveryDraft(seedId);
-    if (seed !== undefined) this.draft.restoreSeed(seed);
+    if (seed !== undefined) {
+      this.claimedRecoverySeedId = seedId;
+      this.recoveryClaimRetryAttemptedFor = undefined;
+      this.draft.restoreSeed(seed);
+      return;
+    }
+    if (this.recoveryClaimRetryScheduled || this.recoveryClaimRetryAttemptedFor === seedId) return;
+    this.recoveryClaimRetryScheduled = true;
+    this.recoveryClaimRetryAttemptedFor = seedId;
+    queueMicrotask(() => {
+      this.recoveryClaimRetryScheduled = false;
+      if (this.isConnected) this.claimRecoveryDraftOnce();
+    });
   }
 
   private returnClaimedRecoveryDraft(): void {
     const seedId = this.claimedRecoverySeedId;
     const draft = this.draft;
     if (seedId === undefined || draft === undefined || this.onReturnRecoveryDraft === undefined) return;
+    this.claimedRecoverySeedId = undefined;
     this.onReturnRecoveryDraft(seedId, draft.currentSnapshot());
   }
 

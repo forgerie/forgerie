@@ -43,7 +43,6 @@ describe("chatQueuedMessageSections", () => {
       stage: "promptDeliveryAmbiguous",
       sessionId: "session-1",
       destination: { machineId: "remote", workspaceId: "workspace-1", cwd: "/repo" },
-      prompt: "Recover outside the original workspace",
       retrying: false,
     });
 
@@ -51,7 +50,7 @@ describe("chatQueuedMessageSections", () => {
       source: "client",
       heading: "First prompt needs attention",
       detail: "Resolve it before later queued messages can continue",
-      messages: [{ kind: "followUp", text: "Recover outside the original workspace" }],
+      messages: [{ kind: "followUp", text: "[First prompt retained privately]" }],
     }]);
   });
 });

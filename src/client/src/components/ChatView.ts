@@ -60,9 +60,7 @@ export function chatQueuedMessageSections(
 
 function sessionLaunchRecoveryPreviewText(recovery: SessionLaunchRecovery): string {
   const attachmentText = sessionLaunchRecoveryAttachmentSummary(recovery.attachments);
-  if (attachmentText === undefined) return recovery.prompt;
-  const trimmed = recovery.prompt.trim();
-  return trimmed === "" ? attachmentText : `${recovery.prompt}\n\n${attachmentText}`;
+  return attachmentText === undefined ? "[First prompt retained privately]" : `[First prompt retained privately]\n\n${attachmentText}`;
 }
 
 function sessionLaunchRecoveryAttachmentSummary(attachments: SessionLaunchRecovery["attachments"]): string | undefined {
@@ -87,20 +85,28 @@ export interface ChatSessionLaunchRecoveryPresentation {
 /** Derive truthful, stage-specific recovery copy and controls from the controller contract. */
 export function chatSessionLaunchRecoveryPresentation(recovery: SessionLaunchRecovery): ChatSessionLaunchRecoveryPresentation {
   if (recovery.stage === "creationFailed") {
+    const needsValidation = recovery.requiresPromptResourceValidation === true;
     return {
       heading: "Session creation failed",
-      detail: "The session was not created, so the first prompt was not sent. Any later queued messages wait behind it.",
+      detail: needsValidation
+        ? "The edited slash command must be validated again before session creation. Change destination to review and send it."
+        : "The session was not created, so the first prompt was not sent. Any later queued messages wait behind it.",
       actions: [
-        { kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying },
+        ...(needsValidation ? [] : [{ kind: "retry" as const, label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying }]),
         { kind: "changeDestination", label: "Change destination", disabled: recovery.retrying },
       ],
     };
   }
   if (recovery.stage === "promptConfirmedUnsent") {
+    const needsValidation = recovery.requiresPromptResourceValidation === true;
     return {
       heading: "First prompt not sent",
-      detail: "The session exists, but the first prompt was confirmed unsent. Any later queued messages wait behind it.",
-      actions: [{ kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying }],
+      detail: needsValidation
+        ? "The prompt resource changed or remained unavailable after retry. Change destination to validate it again."
+        : "The session exists, but the first prompt was confirmed unsent. Any later queued messages wait behind it.",
+      actions: needsValidation
+        ? [{ kind: "changeDestination", label: "Change destination", disabled: false }]
+        : [{ kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying }],
     };
   }
   return {

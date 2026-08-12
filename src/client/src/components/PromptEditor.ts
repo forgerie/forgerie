@@ -56,12 +56,13 @@ export class PromptEditor extends LitElement {
   @state() private currentInputMode: InputMode = { kind: "normal" };
   @state() private draftEmpty = true;
   @state() private attachmentCount = 0;
+  @state() private attachmentCapturePending = false;
   @state() private guidanceOpen = false;
   @state() private guidancePending = false;
   @state() private guidanceError: string | undefined = undefined;
   private guidanceRequestVersion = 0;
   private lastEscapeTime = 0;
-  private pendingReplacement: string | undefined;
+  private pendingReplacement: { kind: "text"; text: string } | { kind: "snapshot"; snapshot: ComposerDraftSubmitSnapshot } | undefined;
   private cachedRuntimeKey = "";
   private cachedRuntime: ComposerRuntime = createSessionComposerRuntime({ machineId: "local" });
 
@@ -207,12 +208,22 @@ export class PromptEditor extends LitElement {
 
   replaceText(text: string): void {
     if (this.draftElement === undefined || this.draftElement === null) {
-      this.pendingReplacement = text;
+      this.pendingReplacement = { kind: "text", text };
       this.currentInputMode = inputModeForDraft(text);
       this.draftEmpty = text.trim() === "";
       return;
     }
     this.draftElement.replaceText(text);
+  }
+
+  restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
+    if (this.draftElement === undefined || this.draftElement === null) {
+      this.pendingReplacement = { kind: "snapshot", snapshot };
+      this.currentInputMode = inputModeForDraft(snapshot.text);
+      this.draftEmpty = snapshot.text.trim() === "";
+      return;
+    }
+    this.draftElement.restoreSnapshot(snapshot);
   }
 
   /** Get the underlying CM6 EditorView, or undefined if not yet mounted. */
@@ -229,7 +240,7 @@ export class PromptEditor extends LitElement {
   private rail(): ComposerRail {
     return composerRail({
       disabled: this.disabled || !this.runtimeControlsAvailable,
-      sending: this.sending || this.guidancePending,
+      sending: this.sending || this.guidancePending || this.attachmentCapturePending,
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
       stoppable: this.canStop,
@@ -415,9 +426,10 @@ export class PromptEditor extends LitElement {
 
   private flushPendingReplacement(): void {
     if (this.pendingReplacement === undefined || this.draftElement === undefined || this.draftElement === null) return;
-    const text = this.pendingReplacement;
+    const replacement = this.pendingReplacement;
     this.pendingReplacement = undefined;
-    this.draftElement.replaceText(text);
+    if (replacement.kind === "snapshot") this.draftElement.restoreSnapshot(replacement.snapshot);
+    else this.draftElement.replaceText(replacement.text);
   }
 
   private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): "accepted" {
@@ -452,6 +464,7 @@ export class PromptEditor extends LitElement {
     this.currentInputMode = state.inputMode;
     this.draftEmpty = state.empty;
     this.attachmentCount = state.attachmentCount;
+    this.attachmentCapturePending = state.attachmentCapturePending;
     this.composerFocused = state.focused || this.composerFocused;
   }
 

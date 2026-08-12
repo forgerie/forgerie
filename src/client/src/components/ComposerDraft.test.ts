@@ -3,6 +3,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComposerRuntime } from "../composerRuntime";
+import { inputModeForDraft } from "../inputModes";
 import type { PromptCompletionTrigger } from "../promptCompletions";
 import { loadDraft, saveDraft } from "../promptDraftStorage";
 import { pressKey } from "./modalSurfaceTestSupport";
@@ -227,6 +228,25 @@ describe("ComposerDraft", () => {
     expect(Array.from(disconnectedDraft.querySelectorAll(".attachment-file-name")).map((name) => name.textContent)).toEqual(["owned.txt"]);
   });
 
+  it("blocks submission until an in-flight attachment read settles", async () => {
+    const reads = mockPendingFileReads();
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const draft = await mountDraft({ onSubmit });
+    draft.replaceText("send with attachment");
+    startAttachFile(draft, new File(["pending"], "pending.txt", { type: "text/plain" }));
+    await vi.waitFor(() => { expect(reads).toHaveLength(1); });
+
+    draft.submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    reads[0]?.resolve("pending");
+    await vi.waitFor(() => { expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1); });
+    draft.submit();
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0]?.[0].attachments).toHaveLength(1);
+  });
+
   it("keeps edits after an accepted delayed submit and records the submitted text in history", async () => {
     const acceptance = deferred<"accepted">();
     const onSubmit = vi.fn(() => acceptance.promise);
@@ -388,7 +408,7 @@ describe("ComposerDraft", () => {
 
   it("opens no empty menu for unsupported trigger kinds or zero matches", async () => {
     const resolve = vi.fn(() => Promise.resolve<readonly CompletionItem[]>([]));
-    const draft = await mountDraft({ runtime: { supportedCompletionKinds: new Set(["command"]), resolveCompletion: resolve } });
+    const draft = await mountDraft({ runtime: { supportedCompletionKinds: new Set(["command"]), inputModeForDraft, resolveCompletion: resolve } });
 
     setEditorText(draft, "#cla");
     await Promise.resolve();
@@ -404,7 +424,7 @@ describe("ComposerDraft", () => {
   it("surfaces completion provider failure without clearing the draft", async () => {
     const onCompletionError = vi.fn();
     const draft = await mountDraft({
-      runtime: { supportedCompletionKinds: new Set(["command"]), resolveCompletion: () => Promise.reject(new Error("Catalog failed")) },
+      runtime: { supportedCompletionKinds: new Set(["command"]), inputModeForDraft, resolveCompletion: () => Promise.reject(new Error("Catalog failed")) },
       onCompletionError,
     });
 
@@ -447,6 +467,14 @@ describe("ComposerDraft", () => {
     expect(menu(draft)?.items).toEqual([]);
   });
 
+  it("updates the mounted CodeMirror placeholder when the host changes it", async () => {
+    const draft = await mountDraft();
+    draft.placeholderText = "Destination ready";
+    await draft.updateComplete;
+
+    expect(draft.querySelector(".cm-placeholder")?.textContent).toBe("Destination ready");
+  });
+
   it("survives disconnect and reconnect without losing the draft", async () => {
     const host = document.createElement("div");
     const draft = await mountDraft({ host });
@@ -485,7 +513,7 @@ async function mountDraft(options: {
 }
 
 function runtimeWith(resolve: (trigger: PromptCompletionTrigger) => readonly CompletionItem[] | Promise<readonly CompletionItem[]>): ComposerRuntime {
-  return { supportedCompletionKinds: new Set(["command", "file", "model"]), resolveCompletion: (trigger) => Promise.resolve(resolve(trigger)) };
+  return { supportedCompletionKinds: new Set(["command", "file", "model"]), inputModeForDraft, resolveCompletion: (trigger) => Promise.resolve(resolve(trigger)) };
 }
 
 function press(draft: ComposerDraft, key: string): KeyboardEvent {

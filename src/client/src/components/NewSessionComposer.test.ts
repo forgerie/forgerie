@@ -761,6 +761,22 @@ describe("new-session-composer modal lifetime", () => {
     expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "edited", attachments: [attachment], delivery: "inline" });
   });
 
+  it("returns a claimed recovery snapshot when the modal disconnects without cancel", async () => {
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "still owned" } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    composer.remove();
+    await Promise.resolve();
+
+    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "still owned" });
+  });
+
   it("returns only draft-owned fields when a claimed recovery rolls back", async () => {
     const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
     const composer = new NewSessionComposer();

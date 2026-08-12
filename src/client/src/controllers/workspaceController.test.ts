@@ -112,11 +112,12 @@ describe("WorkspaceController.selectWorkspace", () => {
     expect(state.sessions.map((candidate) => candidate.id)).toEqual([temporaryId]);
     expect(state.selectedSession?.id).toBe(temporaryId);
     expect(state.clientQueuedSessionMessages[temporaryId]).toEqual([
-      { kind: "followUp", text: "Recover through workspace navigation" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
     expect(state.activity).toMatchObject({ phase: "error", label: "Session creation failed" });
     const recovery = sessions.getSessionLaunchRecovery(temporaryId);
-    expect(recovery).toMatchObject({ stage: "creationFailed", prompt: "Recover through workspace navigation", retrying: false });
+    expect(recovery).toMatchObject({ stage: "creationFailed", retrying: false });
+    expect(recovery).not.toHaveProperty("prompt");
     if (recovery === undefined) throw new Error("Expected creation-failed recovery");
     expect(chatSessionLaunchRecoveryPresentation(recovery).actions).toEqual([
       { kind: "retry", label: "Retry", disabled: false },
