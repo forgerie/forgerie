@@ -131,79 +131,48 @@ export class NewSessionComposer extends LitElement {
         .busy=${busy}
         .onClose=${() => { this.requestCancel(); }}
       >
-        <form class="composer" @submit=${(event: SubmitEvent) => { this.handleFooterSubmit(event); }}>
-          <div class="dialog-scroll">
-            <section class="field" aria-labelledby="new-session-destination-label">
+        <div class="composer">
+          ${state.kind !== "choosing" ? nothing : html`
+            <section class="destination-choice" aria-labelledby="new-session-destination-label">
               <h2 class="field-label" id="new-session-destination-label">Destination</h2>
-              ${state.kind === "choosing" ? this.renderDestinationChoice(state) : this.renderDestinationSummary(state)}
+              ${this.renderDestinationChoice(state)}
             </section>
+          `}
+          <!-- The composer stays mounted while a destination is chosen, so the
+               first prompt and its attachments survive the choice. -->
+          <prompt-editor
+              aria-label="First prompt"
+              data-field="prompt"
+              .capabilities=${this.composerCapabilities(state)}
+              .editorLabel=${"First prompt"}
+              .placeholderText=${this.placeholderForState(state)}
+              .composerRuntime=${this.runtime}
+              .disabled=${submitting}
+              .sending=${submitting || this.validationPending}
+              .submissionAvailable=${this.composerDraftAvailable()}
+              .sendAvailable=${this.composerSendAvailable(state)}
+              .onDraftSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
+              .onDraftDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
+              .onDraftEdited=${() => { this.invalidatePendingSubmission(); this.clearValidationError(); }}
+              .onCompletionError=${() => { this.clearValidationError(); }}
+            ></prompt-editor>
 
-            <section class="field">
-              <h2 class="field-label" id="new-session-prompt-label">First prompt</h2>
-              <prompt-editor
-                aria-labelledby="new-session-prompt-label"
-                data-field="prompt"
-                .capabilities=${this.composerCapabilities(state)}
-                .editorLabel=${"First prompt"}
-                .placeholderText=${this.placeholderForState(state)}
-                .composerRuntime=${this.runtime}
-                .disabled=${submitting}
-                .sending=${submitting || this.validationPending}
-                .submissionAvailable=${this.composerDraftAvailable()}
-                .sendAvailable=${this.composerSendAvailable(state)}
-                .onDraftSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
-                .onDraftDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
-                .onDraftEdited=${() => { this.invalidatePendingSubmission(); this.clearValidationError(); }}
-                .onCompletionError=${() => { this.clearValidationError(); }}
-              ></prompt-editor>
-              ${this.slashValidationError === undefined ? nothing : html`
-                <div class="submission-error" role="alert">
-                  <p>${this.slashValidationError.message}</p>
-                  ${this.slashValidationError.retryable ? html`<button type="button" data-action="retry-prompt-resource-validation" @click=${() => { this.retryPromptResourceValidation(); }}>Retry</button>` : nothing}
-                </div>
-              `}
-            </section>
-
-            ${state.kind === "editing" && state.submissionError !== undefined
-              ? html`<p class="submission-error" role="alert">${state.submissionError.message}</p>`
-              : nothing}
-          </div>
-
-          <footer class="dialog-footer">
-            ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : this.validationPending ? "Validating prompt…" : "Starting session…"}</span>` : nothing}
-            <button type="button" data-action="cancel" ?disabled=${submitting || attachmentCapturePending} @click=${() => { this.requestCancel(); }}>Cancel</button>
-          </footer>
-        </form>
+          ${this.slashValidationError === undefined ? nothing : html`
+            <div class="submission-error" role="alert">
+              <p>${this.slashValidationError.message}</p>
+              ${this.slashValidationError.retryable ? html`<button type="button" data-action="retry-prompt-resource-validation" @click=${() => { this.retryPromptResourceValidation(); }}>Retry</button>` : nothing}
+            </div>
+          `}
+          ${state.kind === "editing" && state.submissionError !== undefined
+            ? html`<p class="submission-error" role="alert">${state.submissionError.message}</p>`
+            : nothing}
+          ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : this.validationPending ? "Validating prompt…" : "Starting session…"}</span>` : nothing}
+          <button class="composer-cancel" type="button" data-action="cancel" ?disabled=${submitting || attachmentCapturePending} @click=${() => { this.requestCancel(); }}>Cancel</button>
+        </div>
       </modal-surface>
     `;
   }
 
-  private renderDestinationSummary(state: Exclude<NewSessionComposerState, { kind: "choosing" }>): TemplateResult {
-    const destination = state.destination;
-    return html`
-      <div class="destination-summary" data-destination-summary>
-        ${destination.kind === "complete"
-          ? html`
-              <span class="destination-copy">
-                <strong class="destination-identity">
-                  <span class="destination-part destination-project">${destination.project.name}</span>
-                  <span class="destination-separator">·</span>
-                  <span class="destination-part destination-workspace">${destination.workspace.label}</span>
-                  <span class="destination-separator">·</span>
-                  <span class="destination-part destination-machine">${destination.machine.name}</span>
-                </strong>
-              </span>
-            `
-          : html`<span class="destination-copy destination-required"><strong>Destination required</strong><small>Choose a machine, project, and workspace.</small></span>`}
-        <button
-          type="button"
-          data-action="change-destination"
-          ?disabled=${state.kind === "submitting"}
-          @click=${() => { this.openDestinationChoice(); }}
-        >${destination.kind === "complete" ? "Change" : "Choose"}</button>
-      </div>
-    `;
-  }
 
   private renderDestinationChoice(state: Extract<NewSessionComposerState, { kind: "choosing" }>): TemplateResult {
     const choice = state.choice;
@@ -644,7 +613,6 @@ function stateFocusRegion(state: NewSessionComposerState): string {
 
 function initialFocusSelector(state: NewSessionComposerState): string {
   if (state.kind === "choosing") return "[data-chooser-primary]";
-  if (state.kind === "editing" && state.destination.kind === "required") return "[data-action='change-destination']";
   return "prompt-editor";
 }
 

@@ -70,6 +70,19 @@ function draft(composer: NewSessionComposer): ComposerDraft {
   return element;
 }
 
+/** The destination states itself in the composer row and carries its action. */
+function destinationAction(composer: NewSessionComposer): HTMLButtonElement {
+  const element = promptEditor(composer).shadowRoot?.querySelector("[data-action='change-destination']");
+  if (!(element instanceof HTMLButtonElement)) throw new Error("Expected the destination action");
+  return element;
+}
+
+function destinationChip(composer: NewSessionComposer): HTMLElement {
+  const element = promptEditor(composer).shadowRoot?.querySelector(".composer-context-chip");
+  if (!(element instanceof HTMLElement)) throw new Error("Expected the destination chip");
+  return element;
+}
+
 /** The modal sends through the composer's own send, not a dialog button. */
 function sendButton(composer: NewSessionComposer): HTMLButtonElement {
   const element = promptEditor(composer).shadowRoot?.querySelector(".send-button");
@@ -205,7 +218,7 @@ describe("new-session-composer editing and submission", () => {
 
     expect(promptText(composer)).toBe("keep this");
     expect(root(composer).querySelector("[role='alert']")?.textContent).toContain("no longer available");
-    expect(button(composer, "[data-action='change-destination']").disabled).toBe(false);
+    expect(destinationAction(composer).disabled).toBe(false);
     expect(dialogSurface(composer).busy).toBe(false);
   });
 
@@ -313,7 +326,7 @@ describe("new-session-composer editing and submission", () => {
     const destinationValidationIndex = validations.length;
     sendButton(composer).click();
     await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(destinationValidationIndex); });
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-machine-id='remote']").click();
     await settleCatalog(composer);
@@ -433,10 +446,10 @@ describe("new-session-composer destination choice", () => {
     });
     const composer = await mountComposer({ initialPrompt: "draft survives", catalog, onSubmit });
 
-    expect(deepActiveElement()).toBe(button(composer, "[data-action='change-destination']"));
+    expect(deepActiveElement()).toBe(promptField(composer));
     expect(sendButton(composer).disabled).toBe(true);
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-machine-id='remote']").click();
     await settleCatalog(composer);
@@ -446,8 +459,8 @@ describe("new-session-composer destination choice", () => {
     await composer.updateComplete;
 
     expect(promptText(composer)).toBe("draft survives");
-    expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("Project forge");
-    expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("feature");
+    expect(destinationChip(composer).textContent).toContain("Project forge");
+    expect(destinationChip(composer).textContent).toContain("feature");
     expect(sendButton(composer).disabled).toBe(false);
 
     sendButton(composer).click();
@@ -478,7 +491,7 @@ describe("new-session-composer destination choice", () => {
     };
     const composer = await mountComposer({ initialPrompt: "preserved", catalog });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await composer.updateComplete;
     expect(root(composer).querySelector("[data-state='machine-loading']")).not.toBeNull();
     resolveMachineLoad?.([]);
@@ -512,7 +525,7 @@ describe("new-session-composer destination choice", () => {
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
     const composer = await mountComposer({ initialPrompt: "keep this prompt", catalog, onSubmit });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
 
     expect(root(composer).querySelector("[data-state='machine-unavailable'][role='status']")?.textContent).toContain("No machines are currently available");
@@ -551,7 +564,7 @@ describe("new-session-composer destination choice", () => {
     };
     const composer = await mountComposer({ initialPrompt: "keep me", catalog });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-machine-id='remote']").click();
     await settleCatalog(composer);
@@ -577,7 +590,7 @@ describe("new-session-composer destination choice", () => {
     });
     const composer = await mountComposer({ initialPrompt: "project draft", catalog });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-machine-id='remote']").click();
     await settleCatalog(composer);
@@ -603,7 +616,7 @@ describe("new-session-composer destination choice", () => {
     };
     const composer = await mountComposer({ initialPrompt: "rapid draft", catalog });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-machine-id='remote']").click();
     await composer.updateComplete;
@@ -634,7 +647,7 @@ describe("new-session-composer destination choice", () => {
     };
     const composer = await mountComposer({ initialPrompt: "workspace draft", catalog });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-machine-id='remote']").click();
     await settleCatalog(composer);
@@ -666,7 +679,7 @@ describe("new-session-composer destination choice", () => {
     };
     const composer = await mountComposer({ catalog });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await composer.updateComplete;
     button(composer, "[data-action='refresh-machines-loading']").click();
     await settleCatalog(composer);
@@ -687,15 +700,14 @@ describe("new-session-composer presentation contracts", () => {
     expect(root(composer).querySelector(".dialog-header, h1, [data-action='close']")).toBeNull();
   });
 
-  it("shows one concise destination identity without status or path detail", async () => {
+  it("states one concise destination in the composer row, without status or path detail", async () => {
     const destination = completeNewSessionDestination(machine("remote"), project("forge"), workspace("main", "forge"));
     const composer = await mountComposer({ initialDestination: destination });
-    const summary = root(composer).querySelector("[data-destination-summary] .destination-copy");
-    if (summary === null) throw new Error("Expected a destination summary");
+    const chip = destinationChip(composer);
 
-    expect(summary.textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge · main · Machine remote");
-    expect(summary.textContent).not.toContain("Online");
-    expect(summary.textContent).not.toContain("/repos/forge/main");
+    expect(chip.textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge · main · Machine remote Change");
+    expect(chip.textContent).not.toContain("Online");
+    expect(chip.textContent).not.toContain("/repos/forge/main");
   });
 
   it("uses semantic button lists, keeps the summary to one line, and lets chooser detail wrap", async () => {
@@ -706,7 +718,7 @@ describe("new-session-composer presentation contracts", () => {
     });
     const composer = await mountComposer({ catalog });
 
-    button(composer, "[data-action='change-destination']").click();
+    destinationAction(composer).click();
     await settleCatalog(composer);
     expect(root(composer).querySelectorAll("ul.catalog-list > li > button[data-machine-id]")).toHaveLength(1);
     expect(root(composer).querySelector("[role='listbox'], [role='option']")).toBeNull();
@@ -722,8 +734,6 @@ describe("new-session-composer presentation contracts", () => {
     expect(root(composer).querySelector("[role='listbox'], [role='option']")).toBeNull();
 
     const styles = newSessionComposerStyles.cssText.replaceAll(/\s+/g, " ");
-    expect(styles).toContain(".destination-identity { min-width: 0; display: flex; align-items: baseline; white-space: nowrap;");
-    expect(styles).toContain(".destination-part { min-width: 0; overflow: hidden; text-overflow: ellipsis;");
     expect(styles).toContain(".catalog-item-copy strong, .catalog-item-copy small { min-width: 0; overflow-wrap: anywhere; white-space: normal;");
   });
 
@@ -890,7 +900,7 @@ describe("new-session-composer modal lifetime", () => {
 
     composer.focusExisting();
 
-    expect(deepActiveElement()).toBe(button(composer, "[data-action='change-destination']"));
+    expect(deepActiveElement()).toBe(promptField(composer));
     expect(promptText(composer)).toBe("edited locally");
   });
 
@@ -903,7 +913,7 @@ describe("new-session-composer modal lifetime", () => {
     await composer.updateComplete;
 
     expect(promptText(composer)).toBe("after resize");
-    expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("Project forge");
+    expect(destinationChip(composer).textContent).toContain("Project forge");
   });
 });
 
