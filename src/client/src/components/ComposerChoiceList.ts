@@ -1,0 +1,143 @@
+import { css, html, LitElement, nothing, type TemplateResult } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+
+export interface ComposerChoiceItem {
+  readonly value: string;
+  readonly label: string;
+  /** A second line, for a description the choice cannot be read without. */
+  readonly detail?: string;
+  /** A right-aligned figure: a context window, or why a row is unavailable. */
+  readonly meta?: string;
+  /** Drawn quietly, but still choosable — a capability the row lacks. */
+  readonly muted?: boolean;
+  readonly disabled?: boolean;
+}
+
+export interface ComposerChoiceGroup {
+  /** Omitted when the choices do not divide into named groups. */
+  readonly label?: string;
+  readonly items: readonly ComposerChoiceItem[];
+}
+
+/**
+ * The list inside a composer popover.
+ *
+ * One mechanism for every choice, sized by its content: a heading appears only
+ * for a named group, and a search field only when the host asks for one. A
+ * seven-row scale never grows the chrome that a thirty-row catalogue needs.
+ */
+@customElement("composer-choice-list")
+export class ComposerChoiceList extends LitElement {
+  @property({ attribute: false }) groups: readonly ComposerChoiceGroup[] = [];
+  @property() selectedValue?: string;
+  @property({ type: Boolean }) searchable = false;
+  @property() error?: string;
+  @property() searchLabel = "Search";
+  @property({ attribute: false }) onPick?: (value: string) => void;
+  @property({ attribute: false }) onRetry?: () => void;
+
+  @state() private query = "";
+
+  override render(): TemplateResult {
+    const groups = this.filteredGroups();
+    const empty = groups.every((group) => group.items.length === 0);
+    return html`
+      ${this.error === undefined ? nothing : html`
+        <div class="choice-error" role="alert">
+          <p>${this.error}</p>
+          ${this.onRetry === undefined ? nothing : html`<button type="button" data-action="retry" @click=${() => { this.onRetry?.(); }}>Retry</button>`}
+        </div>
+      `}
+      ${!this.searchable ? nothing : html`
+        <div class="choice-search">
+          <input
+            type="search"
+            aria-label=${this.searchLabel}
+            placeholder=${this.searchLabel}
+            .value=${this.query}
+            @input=${(event: Event) => { this.handleSearch(event); }}
+          />
+        </div>
+      `}
+      <div class="choice-options" role="listbox">
+        ${groups.map((group) => group.items.length === 0 ? nothing : html`
+          ${group.label === undefined ? nothing : html`<p class="choice-group">${group.label}</p>`}
+          ${group.items.map((item) => this.renderItem(item))}
+        `)}
+        ${empty && this.error === undefined ? html`<p class="choice-empty">Nothing matches ${this.query}</p>` : nothing}
+      </div>
+    `;
+  }
+
+  private renderItem(item: ComposerChoiceItem): TemplateResult {
+    const selected = item.value === this.selectedValue;
+    return html`
+      <button
+        type="button"
+        role="option"
+        data-value=${item.value}
+        ?data-muted=${item.muted === true}
+        ?disabled=${item.disabled === true}
+        aria-checked=${selected ? "true" : "false"}
+        aria-selected=${selected ? "true" : "false"}
+        @click=${() => { this.pick(item); }}
+      >
+        <span class="choice-copy">
+          <span class="choice-label">${item.label}</span>
+          ${item.detail === undefined ? nothing : html`<small>${item.detail}</small>`}
+        </span>
+        ${item.meta === undefined ? nothing : html`<span class="choice-meta">${item.meta}</span>`}
+      </button>
+    `;
+  }
+
+  private pick(item: ComposerChoiceItem): void {
+    if (item.disabled === true) return;
+    this.onPick?.(item.value);
+  }
+
+  private handleSearch(event: Event): void {
+    if (!(event.target instanceof HTMLInputElement)) return;
+    this.query = event.target.value;
+  }
+
+  private filteredGroups(): readonly ComposerChoiceGroup[] {
+    const query = this.query.trim().toLowerCase();
+    if (query === "") return this.groups;
+    return this.groups.map((group) => ({
+      ...(group.label === undefined ? {} : { label: group.label }),
+      items: group.items.filter((item) => `${item.label} ${item.detail ?? ""} ${item.value} ${group.label ?? ""}`.toLowerCase().includes(query)),
+    }));
+  }
+
+  static override styles = css`
+    :host { display: block; color: var(--pi-text); font: 13px system-ui, sans-serif; }
+    .choice-search { padding: 8px 10px 4px; }
+    .choice-search input { box-sizing: border-box; width: 100%; padding: 6px 8px; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); font: inherit; }
+    .choice-group { margin: 0; padding: 6px 11px 4px; color: var(--pi-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .choice-options button {
+      box-sizing: border-box; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center;
+      padding: 8px 11px; border: 0; border-radius: 0; background: transparent; color: var(--pi-text); font: inherit; text-align: left; cursor: pointer;
+    }
+    .choice-options button + button { border-top: 1px solid var(--pi-border-muted); }
+    .choice-options button:hover:not(:disabled), .choice-options button:focus-visible { background: var(--pi-selection-bg); }
+    .choice-options button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+    .choice-options button[aria-checked="true"] { background: var(--pi-selection-bg); }
+    .choice-options button[data-muted] .choice-label { color: var(--pi-muted); }
+    .choice-options button:disabled { cursor: default; }
+    .choice-options button:disabled .choice-label { color: var(--pi-muted); }
+    .choice-copy { min-width: 0; display: grid; gap: 2px; }
+    .choice-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .choice-copy small { color: var(--pi-muted); line-height: 1.35; white-space: normal; }
+    .choice-meta { color: var(--pi-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .choice-empty, .choice-error { margin: 0; padding: 10px 11px; color: var(--pi-muted); font-size: 12px; }
+    .choice-error { display: grid; gap: 8px; color: var(--pi-danger); }
+    .choice-error button { justify-self: start; padding: 4px 10px; border: 1px solid var(--pi-border); border-radius: 6px; background: transparent; color: var(--pi-text); font: inherit; cursor: pointer; }
+  `;
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "composer-choice-list": ComposerChoiceList;
+  }
+}
