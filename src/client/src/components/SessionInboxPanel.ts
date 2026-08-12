@@ -1101,19 +1101,41 @@ export class SessionInboxPanel extends LitElement {
      * Nothing is positioned against the screen, so nothing can be clipped by a
      * sheet that is transformed.
      */
-    @keyframes drawer-open { from { grid-template-rows: 0fr; opacity: 0; } to { grid-template-rows: 1fr; opacity: 1; } }
+    /*
+     * The opening is the whole point. A drawer is a compartment that was always
+     * there and is now pulled out, so its height grows from nothing and its
+     * contents arrive with it. Without this it is a menu that appears at full
+     * size in a fixed spot, which is what it was.
+     */
+    @keyframes drawer-open {
+      from { height: 0; opacity: 0; transform: translateY(-6px); }
+      to { height: auto; opacity: 1; transform: translateY(0); }
+    }
+    /*
+     * Cut into the surface rather than laid on top of it. A border, a radius and
+     * a drop shadow all say the same thing -- that this floats above the list --
+     * and it does not. It is recessed instead: a darker face, and a rule at each
+     * end where the list was parted to make room.
+     */
     .menu-panel {
       box-sizing: border-box;
       /* Takes a whole row of the header rather than a place beside its title. */
       flex: 1 0 100%;
       width: 100%;
-      overflow: hidden;
-      padding: 4px;
-      animation: drawer-open 160ms ease-out;
-      border: 1px solid var(--pi-border);
-      border-radius: 8px;
-      background: var(--pi-surface);
-      box-shadow: 0 8px 24px var(--pi-shadow);
+      /*
+       * Growth has to stop at the content, not at some ceiling far above it. A
+       * max-height large enough for a long menu is passed within a frame or two
+       * by a short one, so the drawer appeared to open instantly. This lets the
+       * keyframe interpolate to the height the content actually wants.
+       */
+      interpolate-size: allow-keywords;
+      max-height: 60vh;
+      overflow: hidden auto;
+      padding: 4px 8px;
+      animation: drawer-open 180ms ease-out;
+      border-block: 1px solid var(--pi-border-muted);
+      background: var(--pi-surface-hover);
+      box-shadow: inset 0 6px 8px -8px var(--pi-shadow), inset 0 -6px 8px -8px var(--pi-shadow);
     }
 
     .menu-panel button {
