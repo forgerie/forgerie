@@ -79,8 +79,16 @@
            36rem is about 71 characters at the transcript's 15px prose, which
            stays inside the range where the eye reliably finds the next line.
            Raising the cap without raising the type would have pushed past it,
-           which is the usual way a reading column is spoiled. */
-        --calm-measure: clamp(20rem, 92cqi, 36rem);
+           which is the usual way a reading column is spoiled.
+
+           Stated as the cap or what is left of the container after the gutters,
+           whichever is smaller -- not as a percentage that approximates the
+           same thing. Every surface that lays itself out on this column has to
+           arrive at one number: when the composer used the cap while the
+           transcript track used what actually fit, the two disagreed by 26px on
+           a folded phone and the alignment came apart exactly where the screen
+           is tightest. */
+        --calm-measure: min(36rem, 100cqi - 2 * var(--calm-gutter));
         /* The gutter either side of the content column. It is wide enough to
            hold the composer's chrome -- island border and padding, draft border
            and padding -- outside the column, because the composer aligns the
@@ -88,20 +96,20 @@
            drawn in hang into the gutter. A gutter narrower than that chrome
            would make the alignment impossible to satisfy. */
         --calm-gutter: 32px;
-        /* How far past the reading measure content that is not prose may reach,
-           per side. A table or a code block is not prose and was being clipped
-           while empty space sat beside it; this is that space, capped so a wide
-           monitor does not stretch a table to the horizon. */
-        --calm-wide-extra: 10rem;
-        /* The content column: one left edge for everything the eye tracks down
-           the page, transcript and composer alike.
+        /* Bleed is space, not width.
 
-           Prose is still capped at the measure and sits at the column's start;
-           wide blocks take the whole column. Resolves against whichever
-           inline-size container the reader sits in -- the transcript scroller
-           and the composer island are both exactly the width of the main
-           region, so both arrive at the same number without sharing a box. */
-        --calm-column: min(100cqi - 2 * var(--calm-gutter), var(--calm-measure) + 2 * var(--calm-wide-extra));
+           A table or a code block is not prose: it keeps the column's start
+           edge and may run past its end into the free space beside the column,
+           and never further. Derived from what is actually free rather than
+           chosen, and capped so a wide monitor does not stretch a table to the
+           horizon.
+
+           What it is not is part of the column. The column is what the eye
+           reads and what the hand writes into; making it as wide as the widest
+           table would leave that much empty space on every screen that has no
+           table on it. A feature takes what it needs (fit-content) up to this
+           bound, so the space appears only when something wide is on screen. */
+        --calm-bleed: min(max(0px, (100cqi - 2 * var(--calm-gutter) - var(--calm-measure)) / 2), 10rem);
         /* Wide on purpose. This is the only break in the transcript that has to
            be seen without being read, and it has to hold apart two things that
            look alike: the step count closing one turn and the question opening

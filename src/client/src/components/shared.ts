@@ -557,24 +557,17 @@ export const chatStyles = css`
      shorthands later in this sheet, which would silently reset margin-inline
      and left-align the column. The track owns the width, so child rules cannot
      fight it. */
-  /* The track is the content column, not the reading measure. Prose is capped
-     at the measure and sits at the column's start edge; content that is not
-     prose takes the whole column. One left edge for everything, and the
-     composer aligns its text to the same edge.
+  /* One column. The track is the reading measure, and everything the reader
+     reads or writes lives in it: prose, cards, the activity fold, and the
+     composer below. Nothing computes a width of its own; it inherits the track,
+     so a new kind of message cannot arrive at some other width by forgetting a
+     rule.
 
-     The measure is applied to the children rather than to the track, because a
-     track sized to prose leaves a table nowhere to grow into: the previous
-     arrangement had to pull wide blocks out with negative margins, which every
-     later margin shorthand quietly undid. */
-  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-column)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
-  /* Everything in the transcript reads at the measure unless it says otherwise.
-     Stated once on the track's items instead of per component, so a new kind of
-     message cannot arrive full-column by forgetting a rule. */
-  .chat > *, .turn-body > * { max-inline-size: min(100%, var(--calm-measure)); }
-  /* The run is stated as a distance past the reading measure rather than as an
-     absolute width, so a block nested inside a padded parent still stops on the
-     column's end edge instead of pushing the scroller sideways. */
-  .chat { --calm-wide-run: max(0px, var(--calm-column) - var(--calm-measure)); }
+     Content that is not prose keeps the track's start edge and runs past its
+     end into the bleed -- see the feature rule in the prose sheet. The bleed is
+     free space beside the column, not part of it: a column as wide as the
+     widest table would leave that much emptiness on every screen without one. */
+  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
   /* One human message and its reply share a box. The box is what the reading
      position holds at the top of the viewport when a turn opens, and what
      reserves the space a streaming reply arrives into. It adds no spacing of
@@ -632,7 +625,7 @@ export const chatStyles = css`
   .msg.user, .msg.assistant { font-size: 15px; }
   .msg.user {
     /* A bubble is a container, not a page: content inside it stays inside it. */
-    --calm-wide-run: 0px;
+    --calm-bleed: 0px;
     width: fit-content;
     max-width: min(100%, 30rem);
     margin-inline-start: auto;
@@ -807,11 +800,15 @@ export const formattedTextStyles = css`
      owns. No negative margins: a later margin shorthand used to reset them and
      silently undo the widening.
 
+     A feature takes what it needs, not what it may have: fit-content bounded by
+     the bleed, so a narrow table stays inside the column and produces no ragged
+     edge at all, and a wide one sticks out exactly as far as its content asks.
+
      Only a top-level pre widens: one nested inside a list item belongs to the
-     prose around it. Where the run is unknown (outside the transcript) or
+     prose around it. Where the bleed is unknown (outside the transcript) or
      deliberately withheld (inside a message bubble), the fallback keeps these
      inside their parent. */
-  .table-scroll, .formatted > pre { inline-size: calc(100% + var(--calm-wide-run, 0px)); max-inline-size: calc(100% + var(--calm-wide-run, 0px)); }
+  .table-scroll, .formatted > pre { inline-size: fit-content; max-inline-size: calc(100% + var(--calm-bleed, 0px)); }
   blockquote { border-left: 3px solid var(--pi-border); padding-left: 10px; color: var(--pi-muted); }
   a { color: var(--pi-accent); }
   /* A heading belongs to what follows it, so it sits far from the paragraph
@@ -876,7 +873,7 @@ export const promptEditorStyles = css`
     --composer-text-inset: calc(var(--composer-island-edge) + var(--composer-island-pad) + var(--composer-draft-edge) + var(--composer-draft-pad));
     position: relative;
     box-sizing: border-box;
-    inline-size: min(100%, var(--calm-column) + 2 * var(--composer-text-inset));
+    inline-size: min(100%, var(--calm-measure) + 2 * var(--composer-text-inset));
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px;
     margin: 0 auto max(8px, env(safe-area-inset-bottom));
     padding: var(--composer-island-pad);

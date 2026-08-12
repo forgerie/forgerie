@@ -18,8 +18,8 @@ describe("composer island styles", () => {
     expect(islandCss).not.toContain("--pi-composer-rule");
   });
 
-  it("puts the first character of the draft on the transcript's content column", () => {
-    expect(islandCss).toContain("inline-size: min(100%, var(--calm-column) + 2 * var(--composer-text-inset))");
+  it("writes into the same column the transcript is read in", () => {
+    expect(islandCss).toContain("inline-size: min(100%, var(--calm-measure) + 2 * var(--composer-text-inset))");
     expect(islandCss).toContain("margin: 0 auto max(8px, env(safe-area-inset-bottom))");
   });
 
