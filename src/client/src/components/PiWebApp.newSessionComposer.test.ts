@@ -310,7 +310,7 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).clientQueuedSessionMessages[failed.id]).toBeUndefined();
 
     setComposerText(composer, "Edited through root");
-    required(composer.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='cancel']"), "cancel button").click();
+    required(required(composer.shadowRoot?.querySelector("prompt-editor"), "composer").shadowRoot?.querySelector<HTMLButtonElement>(".composer-dismiss"), "cancel button").click();
 
     expect(composerRequest(app)).toEqual({ kind: "closed" });
     expect(appState(app).clientQueuedSessionMessages[failed.id]).toEqual([{ kind: "followUp", text: "[First prompt queued]" }]);

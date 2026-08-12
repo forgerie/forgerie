@@ -11,9 +11,11 @@ afterEach(() => {
 });
 
 describe("PromptEditor session guidance", () => {
-  it("keeps the one-line summary visible for empty and active guidance", async () => {
+  it("carries the summary in its name and the count on its face", async () => {
     const editor = await mountEditor(status([]));
-    expect(guidanceTrigger(editor).textContent.trim()).toBe("Guidance");
+    expect(guidanceTrigger(editor).getAttribute("aria-label")).toBe("Guidance");
+    // Nothing active means nothing to count, so no badge is drawn.
+    expect(editor.shadowRoot?.querySelector(".guidance-count")).toBeNull();
 
     // The host states which guidance is active; the composer does not read it
     // back out of a session status.
@@ -21,7 +23,8 @@ describe("PromptEditor session guidance", () => {
     editor.capabilities = sessionCapabilities({ status: status(["technical-english"]) });
     await editor.updateComplete;
 
-    expect(guidanceTrigger(editor).textContent.trim()).toBe("Technical English");
+    expect(guidanceTrigger(editor).getAttribute("aria-label")).toBe("Technical English");
+    expect(editor.shadowRoot?.querySelector(".guidance-count")?.textContent).toBe("1");
   });
 
   it("opens above the composer, clears completions, and keeps CodeMirror mounted", async () => {

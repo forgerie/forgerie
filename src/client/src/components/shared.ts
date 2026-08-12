@@ -890,31 +890,31 @@ export const promptEditorStyles = css`
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }
   .compact-status > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .compact-status > .guidance-trigger { flex: 0 0 auto; min-width: 0; max-width: min(38cqi, 190px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-text-secondary); font-size: inherit; }
+  .compact-status > .guidance-trigger { position: relative; flex: 0 0 auto; overflow: visible; border-color: var(--pi-border-muted); color: var(--pi-text-secondary); }
+  .guidance-count { position: absolute; top: -4px; inset-inline-end: -4px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 999px; background: var(--pi-accent); color: var(--pi-bg); font: 600 10px/15px system-ui, sans-serif; text-align: center; }
   .guidance-trigger[aria-expanded="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-text); }
   .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; overflow: hidden; }
-  .model-capsule .select-model { max-width: min(42cqi, 320px); border-start-end-radius: 0; border-end-end-radius: 0; }
+  .model-capsule .select-model { max-width: min(64cqi, 460px); border-start-end-radius: 0; border-end-end-radius: 0; }
   .model-capsule .select-thinking { width: auto; min-width: 34px; margin-inline-start: -1px; padding-inline: 6px; border-start-start-radius: 0; border-end-start-radius: 0; }
   /* The gauge carries the level; the word joins it only where the rail has room. */
-  .thinking-level { display: none; margin-inline-start: 4px; font-size: 11.5px; }
   @container (min-width: 560px) {
-    .thinking-level { display: inline; }
   }
   /*
    * The rail has one row and a fixed order of importance: direct actions,
    * runtime status, the primary action, and stop always fit. Session identity
    * appears only when the island's own width can carry it.
    */
+  .composer-context-chip { display: none; align-items: center; gap: 4px; }
+  .context-chip-name { min-width: 0; max-width: min(26cqi, 168px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prompt-branch-icon { flex: 0 0 auto; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
   @container (min-width: 560px) {
     .session-identity { display: inline; }
+    .composer-context-chip { display: inline-flex; }
   }
   .icon-button { flex: 0 0 auto; display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; }
   .composer-archive { border-color: var(--pi-border-muted); color: var(--pi-muted); }
-  .composer-archive-label { display: none; }
   @container (min-width: 700px) {
-    .icon-button.composer-archive { display: inline-flex; width: auto; gap: 6px; padding: 5px 9px; }
-    .composer-archive-label { display: inline; }
   }
   .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
   /* Queue and steer read as one control with two targets: steering is a way of
@@ -936,12 +936,12 @@ export const promptEditorStyles = css`
     footer { gap: 8px; --composer-island-pad: 8px; }
     .actions { gap: 6px; }
     .compact-status { flex: 1 1 220px; gap: 4px; }
-    .select-model { max-width: min(58cqi, 260px); }
+    .select-model { max-width: min(62cqi, 320px); }
     button { padding: 6px 8px; }
   }
   @container (max-width: 430px) {
     .compact-status { flex-basis: 170px; font-size: 11px; }
-    .select-model { max-width: 48cqi; }
+    .select-model { max-width: 56cqi; }
     button { padding: 5px 7px; }
   }
 `;

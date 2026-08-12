@@ -83,6 +83,13 @@ function destinationChip(composer: NewSessionComposer): HTMLElement {
   return element;
 }
 
+/** The way out lives beside the way in, inside the composer. */
+function cancelButton(composer: NewSessionComposer): HTMLButtonElement {
+  const element = promptEditor(composer).shadowRoot?.querySelector(".composer-dismiss");
+  if (!(element instanceof HTMLButtonElement)) throw new Error("Expected the composer cancel button");
+  return element;
+}
+
 /** The modal sends through the composer's own send, not a dialog button. */
 function sendButton(composer: NewSessionComposer): HTMLButtonElement {
   const element = promptEditor(composer).shadowRoot?.querySelector(".send-button");
@@ -190,7 +197,7 @@ describe("new-session-composer editing and submission", () => {
 
     expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "  exact prompt  " } });
     expect(dialogSurface(composer).busy).toBe(true);
-    expect(button(composer, "[data-action='cancel']").disabled).toBe(true);
+    expect(cancelButton(composer).disabled).toBe(true);
     surfaceBackdrop(composer).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
     expect(onCancel).not.toHaveBeenCalled();
 
@@ -200,7 +207,7 @@ describe("new-session-composer editing and submission", () => {
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(dialogSurface(composer).busy).toBe(true);
     expect(draft(composer).disabled).toBe(true);
-    expect(button(composer, "[data-action='cancel']").disabled).toBe(true);
+    expect(cancelButton(composer).disabled).toBe(true);
     expect(sendButton(composer).disabled).toBe(true);
     expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Starting session");
   });
@@ -343,7 +350,7 @@ describe("new-session-composer editing and submission", () => {
     const cancelValidationIndex = validations.length;
     sendButton(composer).click();
     await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(cancelValidationIndex); });
-    button(composer, "[data-action='cancel']").click();
+    cancelButton(composer).click();
     validations[cancelValidationIndex]?.resolve({
       available: true,
       diagnostics: [],
@@ -751,7 +758,7 @@ describe("new-session-composer modal lifetime", () => {
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
     const composer = await mountComposer({ onCancel, onSubmit });
 
-    button(composer, "[data-action='cancel']").click();
+    cancelButton(composer).click();
     dialogSurface(composer).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, composed: true }));
     surfaceBackdrop(composer).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
 
@@ -791,7 +798,7 @@ describe("new-session-composer modal lifetime", () => {
     if (snapshot.attachments === undefined) throw new Error("Expected restored attachment");
     snapshot.attachments[0] = { ...attachment, data: "changed" };
     expect(draft(composer).currentSnapshot().attachments?.[0]?.data).toBe("QUJD");
-    button(composer, "[data-action='cancel']").click();
+    cancelButton(composer).click();
 
     expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "edited", attachments: [attachment], delivery: "inline" });
   });
@@ -834,7 +841,7 @@ describe("new-session-composer modal lifetime", () => {
     if (input === null) throw new Error("Expected attachment input");
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["image"], "shot.png", { type: "image/png" })] });
     input.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => { expect(button(composer, "[data-action='cancel']").disabled).toBe(true); });
+    await vi.waitFor(() => { expect(cancelButton(composer).disabled).toBe(true); });
     composer.remove();
     await Promise.resolve();
     expect(returned).not.toHaveBeenCalled();
@@ -886,7 +893,7 @@ describe("new-session-composer modal lifetime", () => {
     await settleRenderedDialog(composer);
     await composer.updateComplete;
 
-    button(composer, "[data-action='cancel']").click();
+    cancelButton(composer).click();
 
     expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "/review src" });
   });

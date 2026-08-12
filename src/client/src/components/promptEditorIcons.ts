@@ -56,6 +56,36 @@ export function renderStopIcon(): TemplateResult {
   `;
 }
 
+/** Marks a place that is not the project's main worktree. */
+export function renderBranchIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-branch-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="7" cy="6" r="2.2"></circle>
+      <circle cx="7" cy="18" r="2.2"></circle>
+      <circle cx="17" cy="9" r="2.2"></circle>
+      <path d="M7 8.2v7.6M9.2 18h1.8a6 6 0 0 0 6-6v-.8"></path>
+    </svg>
+  `;
+}
+
+/** Guidance the session is answering under; the count rides on top. */
+export function renderGuidanceIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 4l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 9.3l5-.7z"></path>
+    </svg>
+  `;
+}
+
+/** The way out of a composer that has one — drawn beside the way in. */
+export function renderDismissIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M7 7l10 10M17 7L7 17"></path>
+    </svg>
+  `;
+}
+
 /**
  * A gauge whose bar count comes from the available thinking levels (the non-"off"
  * levels) and whose fill reflects the current level's rank. Bars are laid out to

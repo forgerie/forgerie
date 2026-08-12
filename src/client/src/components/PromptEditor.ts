@@ -9,7 +9,7 @@ import { composerRail, type ComposerRail } from "../composerRail";
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderQueueIcon, renderSendIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderGuidanceIcon, renderQueueIcon, renderSendIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
@@ -187,6 +187,7 @@ export class PromptEditor extends LitElement {
               @click=${() => { this.closeGuidance(false, true); this.capabilities.newSession?.onNewSession(); }}
             >${renderNewSessionIcon()}</button>
           `}
+          ${this.renderDismissAction()}
           ${this.renderPrimaryAction(rail)}
           ${this.capabilities.stop === undefined ? nothing : html`<button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>`}
         </div>
@@ -323,6 +324,24 @@ export class PromptEditor extends LitElement {
    * its second half while the agent is speaking, so the rail gains a target
    * rather than a row.
    */
+  /** The way out sits beside the way in, at the same size. */
+  private renderDismissAction() {
+    const dismiss = this.capabilities.dismiss;
+    if (dismiss === undefined) return nothing;
+    const label = dismiss.label ?? "Cancel";
+    return html`
+      <button
+        class="icon-button composer-dismiss"
+        type="button"
+        data-action="cancel"
+        ?disabled=${this.disabled || dismiss.disabled === true}
+        title=${label}
+        aria-label=${label}
+        @click=${() => { this.closeGuidance(false, true); this.closeChoice(false); dismiss.onDismiss(); }}
+      >${renderDismissIcon()}</button>
+    `;
+  }
+
   private renderPrimaryAction(rail: ComposerRail) {
     const queues = rail.primaryAction === "queue";
     return html`
@@ -357,12 +376,13 @@ export class PromptEditor extends LitElement {
         ${guidance === undefined ? nothing : html`
           <button
             id="guidance-trigger"
-            class="guidance-trigger"
+            class="icon-button guidance-trigger"
             aria-controls="session-guidance-picker"
             aria-expanded=${this.guidanceOpen ? "true" : "false"}
-            title="Session guidance"
+            title=${sessionGuidanceSummary(guidance.activeIds)}
+            aria-label=${sessionGuidanceSummary(guidance.activeIds)}
             @click=${() => { this.toggleGuidance(); }}
-          >${sessionGuidanceSummary(guidance.activeIds)}</button>
+          >${renderGuidanceIcon()}${guidance.activeIds.length === 0 ? nothing : html`<span class="guidance-count" aria-hidden="true">${guidance.activeIds.length}</span>`}</button>
         `}
       </div>
     `;
@@ -417,7 +437,7 @@ export class PromptEditor extends LitElement {
       <div class="model-capsule">
         <button class="select-model" ?disabled=${this.disabled || !changeable} title="Select model" @click=${() => { this.selectModel(); }}>${provider}${name}</button>
         <button class="select-thinking icon-button" ?disabled=${this.disabled || !changeable} title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => { this.selectThinking(); }}>
-          ${renderThinkingGauge(thinkingGauge(capability.thinkingLevel, capability.availableThinkingLevels ?? []))}<span class="thinking-level">${thinking}</span>
+          ${renderThinkingGauge(thinkingGauge(capability.thinkingLevel, capability.availableThinkingLevels ?? []))}
         </button>
       </div>
     `;
@@ -427,7 +447,7 @@ export class PromptEditor extends LitElement {
     const action = chip.action;
     return html`
       <span class="composer-context-chip session-identity summoned-secondary" title=${chip.title ?? chip.label}>
-        ${chip.label}
+        ${chip.kind === "branch" ? renderBranchIcon() : nothing}<span class="context-chip-name">${chip.label}</span>
         ${action === undefined ? nothing : html`<button
           class="composer-context-chip-action"
           data-action="change-destination"
@@ -592,7 +612,7 @@ export class PromptEditor extends LitElement {
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
         @click=${() => { this.closeGuidance(false, true); this.capabilities.archive?.onArchiveAndNext(); }}
-      >${renderArchiveIcon()}<span class="composer-archive-label">Archive &amp; next</span></button>
+      >${renderArchiveIcon()}</button>
     `;
   }
 

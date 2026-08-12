@@ -178,7 +178,6 @@ export class NewSessionComposer extends LitElement {
             ? html`<p class="submission-error" role="alert">${state.submissionError.message}</p>`
             : nothing}
           ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : this.validationPending ? "Validating prompt…" : "Starting session…"}</span>` : nothing}
-          <button class="composer-cancel" type="button" data-action="cancel" ?disabled=${submitting || attachmentCapturePending} @click=${() => { this.requestCancel(); }}>Cancel</button>
         </div>
       </modal-surface>
     `;
@@ -321,6 +320,11 @@ export class NewSessionComposer extends LitElement {
       ? "Destination required"
       : `${chosen.project.name} · ${chosen.workspace.label} · ${chosen.machine.name}`;
     return {
+      dismiss: {
+        label: "Cancel",
+        disabled: state.kind === "submitting" || this.draftDisplay.attachmentCapturePending,
+        onDismiss: () => { this.requestCancel(); },
+      },
       context: [{
         id: "destination",
         label,

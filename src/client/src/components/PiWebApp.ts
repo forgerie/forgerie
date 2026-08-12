@@ -18,6 +18,7 @@ import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
 import type { ComposerCapabilities } from "../composerCapabilities";
+import { composerBranchIdentity } from "../composerIdentity";
 import { KNOWN_THINKING_LEVELS } from "../../../shared/thinkingLevels";
 import { SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot, type SessionTranscriptPreview } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
@@ -2946,9 +2947,9 @@ export class PiWebApp extends LitElement {
    * declaration shape serves the new-session modal.
    */
   private sessionComposerCapabilities(state: AppState, runtimeAvailable: boolean): ComposerCapabilities {
-    const label = this.composerSessionLabel(state);
+    const branch = composerBranchIdentity(state.selectedWorkspace);
     return {
-      ...(label === undefined || label === "" ? {} : { context: [{ id: "session", label, title: label }] }),
+      ...(branch === undefined ? {} : { context: [{ id: "branch", kind: "branch" as const, label: branch.name, title: branch.title }] }),
       model: {
         ...(state.status?.model === undefined ? {} : { model: state.status.model }),
         ...(state.status?.thinkingLevel === undefined ? {} : { thinkingLevel: state.status.thinkingLevel }),
@@ -2964,7 +2965,6 @@ export class PiWebApp extends LitElement {
         onSet: this.handleSetGuidance,
       },
       stop: { stoppable: runtimeAvailable, onStop: this.handleStopActiveWork },
-      newSession: { onNewSession: this.handleNewSessionFromComposer },
       ...(this.canArchiveSelectedSession(state) ? { archive: { onArchiveAndNext: this.handleArchiveAndNext } } : {}),
       ...(state.status?.contextUsage === undefined ? {} : { contextUsage: state.status.contextUsage }),
     };
@@ -2972,18 +2972,8 @@ export class PiWebApp extends LitElement {
 
   /** A chat still opening has a place but no runtime to ask about it yet. */
   private openingComposerCapabilities(workspace: Workspace | undefined): ComposerCapabilities {
-    const label = this.composerWorkspaceLabel(workspace);
-    return {
-      ...(label === undefined || label === "" ? {} : { context: [{ id: "session", label, title: label }] }),
-      newSession: { onNewSession: this.handleNewSessionFromComposer },
-    };
-  }
-
-  private composerSessionLabel(state: AppState): string | undefined {
-    const workspace = state.selectedWorkspace;
-    if (workspace === undefined) return undefined;
-    const branch = workspace.branch;
-    return branch === undefined || branch === "" ? workspace.label : `${workspace.label} · ${branch}`;
+    const branch = composerBranchIdentity(workspace);
+    return branch === undefined ? {} : { context: [{ id: "branch", kind: "branch", label: branch.name, title: branch.title }] };
   }
 
   private selectedPromptHistory(state: AppState): readonly string[] {
@@ -3134,11 +3124,6 @@ export class PiWebApp extends LitElement {
     ></prompt-editor>`;
   }
 
-  private composerWorkspaceLabel(workspace: Workspace | undefined): string | undefined {
-    if (workspace === undefined) return undefined;
-    const branch = workspace.branch;
-    return branch === undefined || branch === "" ? workspace.label : `${workspace.label} · ${branch}`;
-  }
 
   private initialReadingTargetFor(machineId: string, session: Pick<SessionInfo, "id" | "cwd">): ChatInitialReadingTarget | undefined {
     const pending = this.pendingChatReadingTarget;

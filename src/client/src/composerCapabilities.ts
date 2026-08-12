@@ -15,6 +15,7 @@ export interface ComposerCapabilities {
   readonly stop?: ComposerStopCapability;
   readonly archive?: ComposerArchiveCapability;
   readonly newSession?: ComposerNewSessionCapability;
+  readonly dismiss?: ComposerDismissCapability;
   /** Drawn as the island's own top edge; absent below the reporting threshold. */
   readonly contextUsage?: SessionStatus["contextUsage"];
   /** Where the composer stands: a session's identity, or a chosen destination. */
@@ -70,6 +71,19 @@ export interface ComposerNewSessionCapability {
 }
 
 /**
+ * A way out of the composer, for a host that has one.
+ *
+ * The chat has none: leaving a session is a shell action. A new-session
+ * composer does, and it belongs beside the control that commits, so leaving
+ * costs no more searching than sending.
+ */
+export interface ComposerDismissCapability {
+  readonly label?: string;
+  readonly disabled?: boolean;
+  readonly onDismiss: () => void;
+}
+
+/**
  * A short, quiet statement of where the composer is pointed.
  *
  * A chat session states its identity and cannot be repointed. A new-session
@@ -78,6 +92,8 @@ export interface ComposerNewSessionCapability {
  */
 export interface ComposerContextChip {
   readonly id: string;
+  /** `branch` earns a mark, because being off the main worktree is unusual. */
+  readonly kind?: "plain" | "branch";
   readonly label: string;
   readonly title?: string;
   readonly action?: ComposerContextChipAction;

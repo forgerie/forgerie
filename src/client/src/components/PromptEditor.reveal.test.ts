@@ -13,15 +13,17 @@ describe("PromptEditor rail reveals", () => {
     expect(templateText(renderCompactStatus(composer))).toContain("forgerie · main");
   });
 
-  it("keeps direct archive present and expands its label only when space allows", () => {
+  it("keeps every action an icon, and spends the width on the model name", () => {
     const css = promptEditorStyles.cssText;
 
     expect(css).toMatch(/\.session-identity\s*{\s*display:\s*none/);
     expect(css).not.toMatch(/\.composer-archive\s*{\s*display:\s*none/);
-    expect(css).toMatch(/\.composer-archive-label\s*{\s*display:\s*none/);
+    // An action never states itself in words, so no label or level survives.
+    expect(css).not.toContain(".composer-archive-label");
+    expect(css).not.toContain(".thinking-level");
     expect(css).toMatch(/\.compact-status\s*>\s*\.guidance-trigger\s*{[^}]*flex:\s*0 0 auto/);
     expect(css).toMatch(/@container \(min-width: 560px\)\s*{\s*\.session-identity/);
-    expect(css).toMatch(/@container \(min-width: 700px\)[^}]*\.icon-button\.composer-archive/);
+    expect(css).toMatch(/\.select-model\s*{\s*max-width:\s*min\(64cqi, 460px\)/);
   });
 });
 
