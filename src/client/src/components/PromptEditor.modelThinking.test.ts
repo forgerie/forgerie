@@ -1,5 +1,7 @@
+// @vitest-environment happy-dom
+
 import type { TemplateResult } from "lit";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { SessionStatus } from "../api";
 import { isTemplateResult, templateClickHandlerForText, templateEventHandlerAfterValue, templateText } from "../templateInspection.testSupport";
 import { PromptEditor } from "./PromptEditor";
@@ -14,22 +16,20 @@ describe("PromptEditor model capsule", () => {
     expect(rendered).toContain("model-capsule");
   });
 
-  it("routes the model half to the model picker", () => {
-    const onSelectModel = vi.fn();
-    const composer = editor({ onSelectModel });
+  it("opens each half as its own anchored choice", async () => {
+    const composer = editor();
+    document.body.append(composer);
+    await composer.updateComplete;
 
     templateClickHandlerForText(renderCompactStatus(composer), "gpt-5.6-sol")(new Event("click"));
-
-    expect(onSelectModel).toHaveBeenCalledOnce();
-  });
-
-  it("routes the thinking half to the thinking picker", () => {
-    const onSelectThinking = vi.fn();
-    const composer = editor({ onSelectThinking });
+    await composer.updateComplete;
+    expect(composer.shadowRoot?.querySelector("composer-popover")?.getAttribute("label")).toBe("Model");
 
     templateEventHandlerAfterValue(renderCompactStatus(composer), "Thinking level: high", "@click")(new Event("click"));
+    await composer.updateComplete;
+    expect(composer.shadowRoot?.querySelector("composer-popover")?.getAttribute("label")).toBe("Thinking level");
 
-    expect(onSelectThinking).toHaveBeenCalledOnce();
+    composer.remove();
   });
 
   it("still names a session that has no model yet", () => {
@@ -42,7 +42,7 @@ describe("PromptEditor model capsule", () => {
   });
 });
 
-function editor(options: { onSelectModel?: () => void; onSelectThinking?: () => void } = {}): PromptEditor {
+function editor(options: { listModels?: () => Promise<never[]> } = {}): PromptEditor {
   const composer = new PromptEditor();
   composer.status = status();
   composer.capabilities = sessionCapabilities({

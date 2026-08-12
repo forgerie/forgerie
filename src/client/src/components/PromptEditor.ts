@@ -11,7 +11,9 @@ import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
 import { renderArchiveIcon, renderAttachIcon, renderQueueIcon, renderSendIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
-import type { ComposerCapabilities, ComposerContextChip, ComposerModelCapability } from "../composerCapabilities";
+import type { ComposerCapabilities, ComposerContextChip, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
+import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
+import "./ComposerChoiceList";
 import type { ComposerDraft, ComposerDraftCompletionError, ComposerDraftDisplayState, ComposerDraftEscapeContext, ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./ComposerDraft";
 import "./ContextUsageMeter";
@@ -71,6 +73,8 @@ export class PromptEditor extends LitElement {
 
   @query("composer-draft") private draftElement?: ComposerDraft | null;
   @query(".guidance-trigger") private guidanceTrigger?: HTMLButtonElement;
+  @query(".select-model") private modelTrigger?: HTMLButtonElement;
+  @query(".select-thinking") private thinkingTrigger?: HTMLButtonElement;
 
   @state() private composerFocused = false;
   @state() private currentInputMode: InputMode = { kind: "normal" };
@@ -78,9 +82,14 @@ export class PromptEditor extends LitElement {
   @state() private attachmentCount = 0;
   @state() private attachmentCapturePending = false;
   @state() private guidanceOpen = false;
+  /** Which choice is open; only ever one, because there is one layer. */
+  @state() private openChoice: "model" | "thinking" | undefined = undefined;
+  @state() private choiceModels: readonly ComposerSelectableModel[] = [];
+  @state() private choiceError: string | undefined = undefined;
   @state() private guidancePending = false;
   @state() private guidanceError: string | undefined = undefined;
   private guidanceRequestVersion = 0;
+  private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
   private pendingReplacement: { kind: "text"; text: string } | { kind: "snapshot"; snapshot: ComposerDraftSubmitSnapshot } | undefined;
   private cachedRuntimeKey = "";
@@ -122,6 +131,7 @@ export class PromptEditor extends LitElement {
     const busy = this.sending || this.guidancePending;
     const resting = this.isResting();
     return html`
+      ${this.openChoice === undefined || this.capabilities.model === undefined ? nothing : this.renderChoicePopover(this.capabilities.model)}
       ${this.guidanceOpen ? html`
         <composer-popover
           label="Session guidance"
@@ -362,6 +372,42 @@ export class PromptEditor extends LitElement {
    * Model and thinking level are read together and set together, so they share
    * one capsule instead of spending two slots on the rail.
    */
+  /** One layer: the open choice, anchored to the control that raised it. */
+  private renderChoicePopover(model: ComposerModelCapability) {
+    const isModel = this.openChoice === "model";
+    const groups = isModel ? this.modelChoiceGroups() : this.thinkingChoiceGroups(model);
+    const selected = isModel
+      ? (model.model === undefined ? undefined : `${model.model.provider ?? ""}/${model.model.id ?? ""}`)
+      : model.thinkingLevel;
+    return html`
+      <composer-popover
+        label=${isModel ? "Model" : "Thinking level"}
+        .anchor=${isModel ? this.modelTrigger : this.thinkingTrigger}
+        .onClose=${(restoreFocus: boolean) => { this.closeChoice(restoreFocus); }}
+      >
+        <composer-choice-list
+          .groups=${groups}
+          .selectedValue=${selected}
+          .searchable=${isModel}
+          .searchLabel=${"Search models"}
+          .error=${isModel ? this.choiceError : undefined}
+          .onRetry=${isModel ? () => { void this.loadChoiceModels(model); } : undefined}
+          .onPick=${(value: string) => { this.pickChoice(model, value); }}
+        ></composer-choice-list>
+      </composer-popover>
+    `;
+  }
+
+  private pickChoice(model: ComposerModelCapability, value: string): void {
+    if (this.openChoice === "thinking") {
+      model.onChooseThinkingLevel(value);
+    } else {
+      const picked = this.choiceModels.find((candidate) => modelChoiceValue(candidate) === value);
+      if (picked !== undefined) model.onChooseModel(picked);
+    }
+    this.closeChoice(true);
+  }
+
   private renderModelCapsule(capability: ComposerModelCapability) {
     const changeable = capability.changeable !== false;
     const name = capability.model?.id ?? "no model";
@@ -410,14 +456,83 @@ export class PromptEditor extends LitElement {
     const model = this.capabilities.model;
     if (this.disabled || model === undefined || model.changeable === false) return;
     this.closeGuidance(false, true);
-    model.onSelectModel();
+    if (this.openChoice === "model") {
+      this.closeChoice(true);
+      return;
+    }
+    this.openChoice = "model";
+    void this.loadChoiceModels(model);
   }
 
   private selectThinking(): void {
     const model = this.capabilities.model;
     if (this.disabled || model === undefined || model.changeable === false) return;
     this.closeGuidance(false, true);
-    model.onSelectThinking();
+    this.openChoice = this.openChoice === "thinking" ? undefined : "thinking";
+  }
+
+  private async loadChoiceModels(model: ComposerModelCapability): Promise<void> {
+    const version = ++this.choiceRequestVersion;
+    this.choiceError = undefined;
+    try {
+      const models = await model.listModels();
+      if (version !== this.choiceRequestVersion) return;
+      this.choiceModels = models;
+    } catch {
+      if (version !== this.choiceRequestVersion) return;
+      this.choiceModels = [];
+      this.choiceError = "Models are unavailable.";
+    }
+  }
+
+  private closeChoice(restoreFocus: boolean): void {
+    if (this.openChoice === undefined) return;
+    const anchor = this.openChoice === "model" ? this.modelTrigger : this.thinkingTrigger;
+    this.openChoice = undefined;
+    if (restoreFocus) anchor?.focus();
+  }
+
+  /** The catalogue is grouped by provider, because more than one is configured. */
+  private modelChoiceGroups(): ComposerChoiceGroup[] {
+    const byProvider = new Map<string, ComposerChoiceItem[]>();
+    for (const model of this.choiceModels) {
+      const provider = model.provider ?? "";
+      const items = byProvider.get(provider) ?? [];
+      items.push({
+        value: modelChoiceValue(model),
+        label: model.id ?? "",
+        ...(model.contextWindow === undefined ? {} : { meta: model.contextWindow.toLocaleString("en-GB").replaceAll(",", " ") }),
+        ...(model.reasoning === false ? { muted: true } : {}),
+      });
+      byProvider.set(provider, items);
+    }
+    return [...byProvider].map(([label, items]) => (label === "" ? { items } : { label, items }));
+  }
+
+  /**
+   * A model that cannot reason clamps the scale, so the rows say so in place
+   * rather than letting a level be chosen that the session would discard.
+   */
+  private thinkingChoiceGroups(model: ComposerModelCapability): ComposerChoiceGroup[] {
+    const clamped = this.selectedChoiceModel()?.reasoning === false;
+    const levels = model.availableThinkingLevels ?? [];
+    return [{
+      items: levels.map((level): ComposerChoiceItem => {
+        const detail = thinkingLevelDetail(level);
+        return {
+          value: level,
+          label: level,
+          ...(detail === undefined ? {} : { detail }),
+          ...(clamped && level !== "off" ? { disabled: true, meta: "unavailable" } : {}),
+        };
+      }),
+    }];
+  }
+
+  private selectedChoiceModel(): ComposerSelectableModel | undefined {
+    const current = this.capabilities.model?.model;
+    if (current === undefined) return undefined;
+    return this.choiceModels.find((candidate) => candidate.provider === current.provider && candidate.id === current.id);
   }
 
   private toggleGuidance(): void {
@@ -602,4 +717,21 @@ export function promptComposerIsResting(input: PromptComposerRestingInput): bool
   if (input.focused) return false;
   if (input.attachmentCount > 0) return false;
   return input.draft.trim() === "";
+}
+
+function modelChoiceValue(model: ComposerSelectableModel): string {
+  return `${model.provider ?? ""}/${model.id ?? ""}`;
+}
+
+/** Pi owns the levels; these describe only the ones it documents. */
+function thinkingLevelDetail(level: string): string | undefined {
+  switch (level) {
+    case "off": return "No reasoning";
+    case "minimal": return "Very brief reasoning (~1k tokens)";
+    case "low": return "Light reasoning (~2k tokens)";
+    case "medium": return "Moderate reasoning (~8k tokens)";
+    case "high": return "Deep reasoning (~16k tokens)";
+    case "xhigh": return "Maximum reasoning (~32k tokens)";
+    default: return undefined;
+  }
 }

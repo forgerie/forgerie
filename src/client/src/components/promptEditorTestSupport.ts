@@ -1,5 +1,5 @@
 import type { SessionStatus } from "../api";
-import type { ComposerCapabilities } from "../composerCapabilities";
+import type { ComposerCapabilities, ComposerSelectableModel } from "../composerCapabilities";
 
 export interface SessionCapabilityOptions {
   status?: SessionStatus;
@@ -7,8 +7,9 @@ export interface SessionCapabilityOptions {
   stoppable?: boolean;
   sessionLabel?: string;
   availableThinkingLevels?: readonly string[];
-  onSelectModel?: () => void;
-  onSelectThinking?: () => void;
+  listModels?: () => Promise<readonly ComposerSelectableModel[]>;
+  onChooseModel?: (model: ComposerSelectableModel) => void;
+  onChooseThinkingLevel?: (level: string) => void;
   onSetGuidance?: (entryId: string, enabled: boolean) => Promise<boolean>;
   onStop?: () => void;
   onArchiveAndNext?: () => void;
@@ -32,8 +33,9 @@ export function sessionCapabilities(options: SessionCapabilityOptions = {}): Com
       ...(status?.thinkingLevel === undefined ? {} : { thinkingLevel: status.thinkingLevel }),
       availableThinkingLevels: options.availableThinkingLevels ?? [],
       changeable: runtimeAvailable,
-      onSelectModel: options.onSelectModel ?? (() => undefined),
-      onSelectThinking: options.onSelectThinking ?? (() => undefined),
+      listModels: options.listModels ?? (() => Promise.resolve([])),
+      onChooseModel: options.onChooseModel ?? (() => undefined),
+      onChooseThinkingLevel: options.onChooseThinkingLevel ?? (() => undefined),
     },
     guidance: {
       activeIds: status?.activeGuidanceIds ?? [],

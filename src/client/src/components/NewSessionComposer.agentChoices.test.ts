@@ -71,18 +71,12 @@ function editor(composer: NewSessionComposer): PromptEditor {
 }
 
 async function pickModel(composer: NewSessionComposer, model: SessionModel): Promise<void> {
-  composer.onPickModel = (_current, machineId) => {
-    // The catalog must be asked of the destination machine.
-    expect(machineId).toBe("local");
-    return Promise.resolve(model);
-  };
-  editor(composer).capabilities.model?.onSelectModel();
+  editor(composer).capabilities.model?.onChooseModel(model);
   await settleRenderedDialog(composer);
 }
 
 async function pickThinking(composer: NewSessionComposer, level: string): Promise<void> {
-  composer.onPickThinkingLevel = () => Promise.resolve(level);
-  editor(composer).capabilities.model?.onSelectThinking();
+  editor(composer).capabilities.model?.onChooseThinkingLevel(level);
   await settleRenderedDialog(composer);
 }
 

@@ -14,9 +14,7 @@ afterEach(() => {
 describe("PromptEditor read-only control availability", () => {
   it("disables model, thinking, and stop controls when the editor is disabled", async () => {
     const onStop = vi.fn();
-    const onSelectModel = vi.fn();
-    const onSelectThinking = vi.fn();
-    const editor = await renderPromptEditor({ disabled: true, stoppable: true, onStop, onSelectModel, onSelectThinking });
+    const editor = await renderPromptEditor({ disabled: true, stoppable: true, onStop });
 
     const model = button(editor, ".select-model");
     const thinking = button(editor, ".select-thinking");
@@ -28,9 +26,10 @@ describe("PromptEditor read-only control availability", () => {
     model.click();
     thinking.click();
     stop.click();
+    await editor.updateComplete;
 
-    expect(onSelectModel).not.toHaveBeenCalled();
-    expect(onSelectThinking).not.toHaveBeenCalled();
+    // A disabled control raises no choice, so no layer opens over the draft.
+    expect(editor.shadowRoot?.querySelector("composer-popover")).toBeNull();
     expect(onStop).not.toHaveBeenCalled();
   });
 

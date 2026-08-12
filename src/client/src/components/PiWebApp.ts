@@ -2915,6 +2915,12 @@ export class PiWebApp extends LitElement {
     return new Promise<string | undefined>((resolve) => { this.pendingThinkingPick = resolve; });
   };
 
+  /** The composer picked a model; the session applies it. */
+  private async applySelectedModel(model: { provider?: string; id?: string }): Promise<void> {
+    if (model.provider === undefined || model.id === undefined) return;
+    await this.sessions.setModel(model.provider, model.id);
+  }
+
   private readonly handleSelectModel = (): void => {
     void this.openModelDialog();
   };
@@ -2948,8 +2954,9 @@ export class PiWebApp extends LitElement {
         ...(state.status?.thinkingLevel === undefined ? {} : { thinkingLevel: state.status.thinkingLevel }),
         availableThinkingLevels: state.availableThinkingLevels,
         changeable: runtimeAvailable,
-        onSelectModel: this.handleSelectModel,
-        onSelectThinking: this.handleSelectThinking,
+        listModels: () => this.sessions.listModels(),
+        onChooseModel: (model) => { void this.applySelectedModel(model); },
+        onChooseThinkingLevel: (level) => { void this.sessions.setThinkingLevel(level); },
       },
       guidance: {
         activeIds: state.status?.activeGuidanceIds ?? [],

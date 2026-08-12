@@ -2,7 +2,7 @@ import { LitElement, html, nothing, type PropertyValues, type TemplateResult } f
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { PromptResourceCatalogResponse } from "../../../shared/promptResourceCommand";
 import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
-import { workspacesApi, type Machine, type Project, type Workspace } from "../api";
+import { sessionsApi, workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import { createPreSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import type { ComposerCapabilities } from "../composerCapabilities";
 import type { NewSessionAgentChoices, SessionModel as ClientSessionModel } from "../../../shared/apiTypes";
@@ -336,8 +336,9 @@ export class NewSessionComposer extends LitElement {
         ...(this.chosenThinkingLevel === undefined ? {} : { thinkingLevel: this.chosenThinkingLevel }),
         availableThinkingLevels: KNOWN_THINKING_LEVELS,
         changeable: state.kind !== "submitting",
-        onSelectModel: () => { void this.chooseModel(); },
-        onSelectThinking: () => { this.chooseThinkingLevel(); },
+        listModels: () => this.listDestinationModels(),
+        onChooseModel: (model) => { this.chosenModel = model; },
+        onChooseThinkingLevel: (level) => { this.chosenThinkingLevel = level; },
       },
       guidance: {
         activeIds: this.chosenGuidanceIds,
@@ -362,6 +363,13 @@ export class NewSessionComposer extends LitElement {
     return state.kind === "editing"
       && state.destination.kind === "complete"
       && !this.draftDisplay.attachmentCapturePending;
+  }
+
+  /** The catalogue belongs to the destination machine, not the selected one. */
+  private async listDestinationModels(): Promise<readonly ClientSessionModel[]> {
+    const machineId = this.destinationMachineId();
+    if (machineId === undefined) return [];
+    return (await sessionsApi.newSessionModels(machineId)).models;
   }
 
   private async chooseModel(): Promise<void> {

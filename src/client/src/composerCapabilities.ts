@@ -27,8 +27,27 @@ export interface ComposerModelCapability {
   readonly availableThinkingLevels?: readonly string[];
   /** False while the choice is known but cannot be changed yet. */
   readonly changeable?: boolean;
-  readonly onSelectModel: () => void;
-  readonly onSelectThinking: () => void;
+  /**
+   * The catalogue, read when the choice is opened.
+   *
+   * The host owns where models come from; the composer owns how they are
+   * shown, so both surfaces present the same list without restating it.
+   */
+  readonly listModels: () => Promise<readonly ComposerSelectableModel[]>;
+  readonly onChooseModel: (model: ComposerSelectableModel) => void;
+  readonly onChooseThinkingLevel: (level: string) => void;
+}
+
+export interface ComposerSelectableModel {
+  readonly provider?: string;
+  readonly id?: string;
+  readonly name?: string;
+  readonly contextWindow?: number;
+  /**
+   * Pi reports this loosely, so it is read as a flag only when it is a boolean.
+   * False clamps the thinking level to `off`.
+   */
+  readonly reasoning?: unknown;
 }
 
 export interface ComposerGuidanceCapability {

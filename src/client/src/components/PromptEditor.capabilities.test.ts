@@ -34,25 +34,36 @@ describe("PromptEditor capabilities", () => {
   });
 
   it("offers model and thinking to any host that can choose them", async () => {
-    const onSelectModel = vi.fn();
-    const onSelectThinking = vi.fn();
+    const onChooseModel = vi.fn();
+    const onChooseThinkingLevel = vi.fn();
     const editor = await mount({
       model: {
         model: { id: "sonnet", provider: "anthropic" },
         thinkingLevel: "medium",
         availableThinkingLevels: ["off", "medium"],
-        onSelectModel,
-        onSelectThinking,
+        listModels: () => Promise.resolve([{ provider: "anthropic", id: "claude-opus-4-8", contextWindow: 1000000 }]),
+        onChooseModel,
+        onChooseThinkingLevel,
       },
     });
 
-    const model = button(editor, ".select-model");
-    expect(model.textContent).toContain("sonnet");
-    model.click();
-    button(editor, ".select-thinking").click();
+    expect(button(editor, ".select-model").textContent).toContain("sonnet");
 
-    expect(onSelectModel).toHaveBeenCalledTimes(1);
-    expect(onSelectThinking).toHaveBeenCalledTimes(1);
+    // The choice opens against its own control, in the composer's one layer.
+    button(editor, ".select-thinking").click();
+    await editor.updateComplete;
+    pick(editor, "off");
+    await editor.updateComplete;
+
+    expect(onChooseThinkingLevel).toHaveBeenCalledWith("off");
+    expect(editor.shadowRoot?.querySelector("composer-popover")).toBeNull();
+
+    button(editor, ".select-model").click();
+    await editor.updateComplete;
+    await editor.updateComplete;
+    pick(editor, "anthropic/claude-opus-4-8");
+
+    expect(onChooseModel).toHaveBeenCalledWith({ provider: "anthropic", id: "claude-opus-4-8", contextWindow: 1000000 });
   });
 
   it("offers guidance, stop, archive, and new session only when declared", async () => {
@@ -101,6 +112,13 @@ async function mount(capabilities: ComposerCapabilities): Promise<PromptEditor> 
 
 function query(editor: PromptEditor, selector: string): Element | null {
   return editor.shadowRoot?.querySelector(selector) ?? null;
+}
+
+function pick(editor: PromptEditor, value: string): void {
+  const list = editor.shadowRoot?.querySelector("composer-choice-list");
+  const option = list?.shadowRoot?.querySelector(`[data-value="${value}"]`);
+  if (!(option instanceof HTMLButtonElement)) throw new Error(`Expected choice ${value}`);
+  option.click();
 }
 
 function button(editor: PromptEditor, selector: string): HTMLButtonElement {
