@@ -1121,7 +1121,6 @@ export class SessionInboxPanel extends LitElement {
       box-sizing: border-box;
       /* Takes a whole row of the header rather than a place beside its title. */
       flex: 1 0 100%;
-      width: 100%;
       /*
        * Growth has to stop at the content, not at some ceiling far above it. A
        * max-height large enough for a long menu is passed within a frame or two
@@ -1131,12 +1130,25 @@ export class SessionInboxPanel extends LitElement {
       interpolate-size: allow-keywords;
       max-height: 60vh;
       overflow: hidden auto;
-      /* Same inline inset as the header above it, so the two edges agree. */
+      /*
+       * Flush with the panel, not inset within the header.
+       *
+       * The header pads its contents by 6 and 12, and the drawer was one of
+       * those contents -- so it sat in the middle of that padding with air on
+       * three sides and read as a box inside a box. It steps back out of that
+       * padding so its own edges are the panel's edges, and its bottom edge is
+       * the seam the list begins at: a drawer pulled from the header's border
+       * rather than a card floating inside it.
+       */
+      margin-inline: -12px;
+      margin-block-end: -6px;
+      width: calc(100% + 24px);
       padding: 4px 12px;
       animation: drawer-open 180ms ease-out;
-      border-block: 1px solid var(--pi-border-muted);
+      /* Its top edge is the header's own border; only the far edge is new. */
+      border-block-end: 1px solid var(--pi-border);
       background: var(--pi-surface-hover);
-      box-shadow: inset 0 6px 8px -8px var(--pi-shadow), inset 0 -6px 8px -8px var(--pi-shadow);
+      box-shadow: inset 0 6px 8px -8px var(--pi-shadow);
     }
 
     .menu-panel button {
