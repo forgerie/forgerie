@@ -116,20 +116,7 @@ export const appStyles = css`
   .panel-surface { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
   .panel-surface[data-side="navigation"] { grid-column: 1; }
   .panel-surface[data-side="workspace"] { grid-column: 5; }
-  .panel-surface > *:not(.panel-controls) { flex: 1 1 auto; min-height: 0; }
-  /*
-   * The panel's own controls, laid over its header row rather than above it.
-   * A band would be a second piece of chrome on top of a header the panel
-   * already has. They sit at the edge that faces the session, which is the edge
-   * the reader reaches from.
-   */
-  .panel-controls { position: absolute; top: 0; z-index: 3; display: flex; align-items: center; gap: 2px; padding: 6px; }
-  .panel-controls[data-side="navigation"] { inset-inline-end: 0; }
-  .panel-controls[data-side="workspace"] { inset-inline-start: 0; }
-  .panel-control { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pi-muted); opacity: .7; cursor: pointer; }
-  .panel-control:hover, .panel-control:focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); opacity: 1; }
-  .panel-control[data-pressed="true"] { color: var(--pi-accent); opacity: 1; }
-  .panel-control-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .panel-surface > * { flex: 1 1 auto; min-height: 0; }
   .panel-surface[data-mode="sheet"] { position: absolute; inset-block: 0; z-index: 41; background: var(--pi-bg); box-shadow: 0 0 24px var(--pi-shadow); transition: transform 180ms ease; }
   /* While a finger is down: no easing, so the sheet cannot lag the hand. */
   .panel-surface[data-mode="sheet"][data-tracking] { transition: none; will-change: transform; }
@@ -409,6 +396,8 @@ export const workspacePanelStyles = css`
     .tabs button.icon-tab .tab-label, .workspace-header-action-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
   }
   .panel-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+  /* An empty panel keeps a header for its own controls, and nothing else. */
+  header.empty-state-header { justify-content: flex-end; align-items: center; padding: 6px; border-bottom: 0; }
   .empty-state { box-sizing: border-box; width: min(100%, 380px); margin: auto; padding: 24px; display: grid; gap: 8px; color: var(--pi-muted); text-align: center; }
   .empty-state h2 { margin: 0; color: var(--pi-text); font-size: 15px; line-height: 1.3; }
   .empty-state p { margin: 0; line-height: 1.45; }

@@ -19,6 +19,8 @@ export class WorkspacePanel extends LitElement {
   @property() tool: QualifiedContributionId = "core:workspace.files";
   @property({ attribute: false }) panels: QualifiedWorkspacePanelContribution[] = [];
   @property({ type: Boolean }) hideToolTabs = false;
+  /** The panel's own pin and close, rendered in this header beside its actions. */
+  @property({ attribute: false }) panelControls?: unknown;
   @property({ attribute: false }) onSelectTool: (tool: QualifiedContributionId) => void = () => undefined;
   @property({ attribute: false }) onNewSession?: () => void;
   @query(".workspace-header-strip") private workspaceHeaderStrip?: HTMLElement | null;
@@ -90,6 +92,7 @@ export class WorkspacePanel extends LitElement {
             @click=${this.onNewSession}
           >${renderNewSessionIcon()}<span class="workspace-header-action-label">${NEW_SESSION_LABEL}</span></button>
         `}
+        ${this.panelControls}
       </header>
       ${selectedPanel === undefined ? this.renderEmptyState({
         title: "No workspace tools available",
@@ -127,8 +130,16 @@ export class WorkspacePanel extends LitElement {
     return badge === undefined || badge === "";
   }
 
+  /**
+   * An empty panel is still a panel, and still has to be closable.
+   *
+   * This path renders no tool strip, so without its own header row the panel's
+   * pin and close would disappear exactly when there is nothing else to act on
+   * -- a docked panel with no workspace selected and no way out of it.
+   */
   private renderEmptyState(state: WorkspacePanelEmptyState): TemplateResult {
     return html`
+      ${this.panelControls === undefined ? null : html`<header class="empty-state-header">${this.panelControls}</header>`}
       <section class="empty-state" role="status">
         <h2>${state.title}</h2>
         ${state.body === undefined ? null : html`<p>${state.body}</p>`}

@@ -1,11 +1,5 @@
-import { LitElement, html, svg } from "lit";
+import { LitElement, html } from "lit";
 
-/*
- * Drawn here rather than imported: the app has no icon set, and two 12-line
- * paths do not justify inventing one for this change.
- */
-const PANEL_PIN_ICON = svg`<svg class="panel-control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/></svg>`;
-const PANEL_CLOSE_ICON = svg`<svg class="panel-control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>`;
 import { customElement, query, state } from "lit/decorators.js";
 import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
@@ -102,6 +96,7 @@ import "./SessionInboxPanel";
 import "./WorkspaceManagementDialog";
 import { navigateToInboxSession, type InboxNavigationResult } from "../controllers/inboxNavigation";
 import { deriveSessionInboxBoard } from "../sessionBoard";
+import "./appShell/AppPanelControls";
 import "./appShell/AppPanelOpener";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
@@ -1273,7 +1268,7 @@ export class PiWebApp extends LitElement {
    * One panel, one place. A peeked panel moves into the sheet rather than being
    * mounted twice, which would run its subscriptions twice with it.
    */
-  private renderWorkspacePanel() {
+  private renderWorkspacePanel(panelControls?: unknown) {
     // The panel shows its own tool strip unless something else already shows
     // one. Stacked under the session on a summoned shell, the control sheet
     // carries the tools. Standing on its own -- docked beside the session or
@@ -1287,6 +1282,7 @@ export class PiWebApp extends LitElement {
     return html`
       <workspace-panel
         id="workspace-panel"
+        .panelControls=${panelControls}
         .workspace=${workspace}
         .panelContext=${panelContext}
         .emptyState=${emptyState}
@@ -1440,9 +1436,10 @@ export class PiWebApp extends LitElement {
     }
   }
 
-  private renderNavigationPanel() {
+  private renderNavigationPanel(panelControls?: unknown) {
     return html`
       <app-navigation-panel
+        .panelControls=${panelControls}
         .machines=${this.state.machines}
         .selectedMachine=${this.state.selectedMachine}
         .machineStatuses=${this.state.machineStatuses}
@@ -3030,8 +3027,9 @@ export class PiWebApp extends LitElement {
         aria-label=${label}
         style=${peeked ? `width: ${String(width)}px; --peek-progress: ${String(this.panelPeek.progress(side))}` : ""}
       >
-        ${this.renderPanelControls(side)}
-        ${side === "navigation" ? this.renderNavigationPanel() : this.renderWorkspacePanel()}
+        ${side === "navigation"
+          ? this.renderNavigationPanel(this.renderPanelControls(side))
+          : this.renderWorkspacePanel(this.renderPanelControls(side))}
       </aside>
     `;
   }
@@ -3046,29 +3044,15 @@ export class PiWebApp extends LitElement {
    */
   private renderPanelControls(side: ShellPanel) {
     const docked = this.panelIntent.isDocked(side);
-    const noun = side === "navigation" ? "sessions" : "workspace";
-    const canPin = docked || canDockAt(this.clientWidth, side);
     return html`
-      <div class="panel-controls" data-side=${side}>
-        ${canPin ? html`
-          <button
-            type="button"
-            class="panel-control"
-            data-pressed=${String(docked)}
-            title=${docked ? `Unpin ${noun}` : `Pin ${noun} open`}
-            aria-label=${docked ? `Unpin ${noun}` : `Pin ${noun} open`}
-            aria-pressed=${String(docked)}
-            @click=${() => { this.togglePanelPin(side); }}
-          >${PANEL_PIN_ICON}</button>
-        ` : null}
-        <button
-          type="button"
-          class="panel-control"
-          title=${`Close ${noun}`}
-          aria-label=${`Close ${noun}`}
-          @click=${() => { this.closePanelSurface(side); }}
-        >${PANEL_CLOSE_ICON}</button>
-      </div>
+      <app-panel-controls
+        noun=${side === "navigation" ? "sessions" : "workspace"}
+        controls=${`${side}-panel`}
+        .pinned=${docked}
+        .pinnable=${docked || canDockAt(this.clientWidth, side)}
+        .onPin=${() => { this.togglePanelPin(side); }}
+        .onClose=${() => { this.closePanelSurface(side); }}
+      ></app-panel-controls>
     `;
   }
 

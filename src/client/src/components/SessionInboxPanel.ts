@@ -168,6 +168,8 @@ export class SessionInboxPanel extends LitElement {
    * by the shell.
    */
   @property({ attribute: false }) refreshControl?: unknown;
+  /** The panel's own pin and close, rendered beside these commands, not over them. */
+  @property({ attribute: false }) panelControls?: unknown;
   /**
    * Active undo toast state. Set by the controller after a successful archive.
    * Cleared by the controller's 5-second timer, by explicit dismissal, or on
@@ -512,6 +514,7 @@ export class SessionInboxPanel extends LitElement {
           aria-label="More inbox commands"
           @click=${(event: MouseEvent) => { this.toggleMenu("board", event.currentTarget); }}
         >⋯</button>
+        ${this.panelControls}
       </div>
       ${this.renderGroupByMenu()}
       ${this.renderBoardMenu()}

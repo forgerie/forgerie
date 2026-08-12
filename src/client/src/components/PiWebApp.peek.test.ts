@@ -5,6 +5,7 @@ import type { SessionInfo } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { PANEL_PEEK, PEEK_EXIT_MS, peekSheetWidth } from "../appShell/panelPeek";
 import { PiWebApp } from "./PiWebApp";
+import { AppPanelControls } from "./appShell/AppPanelControls";
 import { AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
 
@@ -92,7 +93,7 @@ describe("PiWebApp panel peek", () => {
     const app = await mountApp(1000);
     await dragAcross(app, peekSheetWidth(1000) * 0.9, { release: true });
 
-    pin(app)?.click();
+    (await pin(app))?.click();
     await settle(app);
 
     expect(storedIntents().navigation).toBe("pinned");
@@ -107,7 +108,7 @@ describe("PiWebApp panel peek", () => {
     await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
 
     expect(peekSheet(app)).not.toBeNull();
-    expect(pin(app)).toBeNull();
+    expect(await pin(app)).toBeNull();
   });
 
   it("arms over a transcript turn, whose content spills but cannot scroll", async () => {
@@ -154,8 +155,7 @@ describe("PiWebApp panel peek", () => {
     localStorage.setItem("pi-web-panel-intents", JSON.stringify({ navigation: "auto", workspace: "pinned" }));
     const app = await mountApp(979);
 
-    const controls = shadowRoot(app).querySelectorAll(".panel-surface[data-side='workspace'] .panel-control");
-    const labels = [...controls].map((control) => control.getAttribute("aria-label"));
+    const labels = await panelControlLabels(app, "workspace");
 
     expect(labels).toContain("Unpin workspace");
     expect(labels).toContain("Close workspace");
@@ -166,8 +166,7 @@ describe("PiWebApp panel peek", () => {
 
     for (const side of ["navigation", "workspace"] as const) {
       const noun = side === "navigation" ? "sessions" : "workspace";
-      const labels = [...shadowRoot(app).querySelectorAll(`.panel-surface[data-side='${side}'] .panel-control`)]
-        .map((control) => control.getAttribute("aria-label"));
+      const labels = await panelControlLabels(app, side);
       expect(labels).toContain(`Unpin ${noun}`);
       expect(labels).toContain(`Close ${noun}`);
     }
@@ -196,6 +195,39 @@ describe("PiWebApp panel peek", () => {
     expect(peekSheet(app)).toBeNull();
   });
 });
+
+/**
+ * The panel's controls live inside the panel, beside its own header buttons, so
+ * reaching them crosses the panel's shadow boundary. That is the point: an
+ * earlier version floated them over the header and covered the commands there.
+ */
+async function findPanelControls(app: PiWebApp, side: "navigation" | "workspace"): Promise<AppPanelControls | undefined> {
+  const surface = shadowRoot(app).querySelector(`.panel-surface[data-side='${side}']`);
+  if (surface === null) return undefined;
+  const queue: (Element | ShadowRoot)[] = [surface];
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (node === undefined) break;
+    if (node instanceof AppPanelControls) {
+      await node.updateComplete;
+      return node;
+    }
+    for (const child of node.children) {
+      queue.push(child);
+      // Wait before reading: an element that has not rendered yet has no shadow
+      // root, and skipping it here loses everything inside the panel.
+      if ("updateComplete" in child) await Reflect.get(child, "updateComplete");
+      if (child.shadowRoot !== null) queue.push(child.shadowRoot);
+    }
+  }
+  return undefined;
+}
+
+async function panelControlLabels(app: PiWebApp, side: "navigation" | "workspace"): Promise<(string | null)[]> {
+  const controls = await findPanelControls(app, side);
+  if (controls === undefined) return [];
+  return [...(controls.shadowRoot?.querySelectorAll("button") ?? [])].map((button) => button.getAttribute("aria-label"));
+}
 
 async function mountApp(shellWidth: number): Promise<PiWebApp> {
   const app = new PiWebApp();
@@ -264,8 +296,9 @@ function peekSheet(app: PiWebApp): HTMLElement | null {
   return sheet instanceof HTMLElement ? sheet : null;
 }
 
-function pin(app: PiWebApp): HTMLElement | null {
-  const button = shadowRoot(app).querySelector(".panel-surface[data-mode=\"sheet\"] .panel-control[data-pressed]");
+async function pin(app: PiWebApp, side: "navigation" | "workspace" = "navigation"): Promise<HTMLElement | null> {
+  const controls = await findPanelControls(app, side);
+  const button = controls?.shadowRoot?.querySelector("button[data-action='pin']");
   return button instanceof HTMLElement ? button : null;
 }
 

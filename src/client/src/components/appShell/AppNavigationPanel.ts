@@ -61,6 +61,7 @@ export class AppNavigationPanel extends LitElement {
   /** Dismiss the navigation overlay. Only meaningful while `compact` is set. */
   @property({ attribute: false }) onCloseOverlay?: () => void;
   @property({ attribute: false }) refreshControl?: unknown;
+  @property({ attribute: false }) panelControls?: unknown;
 
   @query("machine-list") private machineList?: KeyboardNavigableSection;
   @query("machine-switcher") private machineSwitcher?: KeyboardNavigableSection;
@@ -124,6 +125,7 @@ export class AppNavigationPanel extends LitElement {
         .onManageWorkspaces=${this.onManageWorkspaces}
         .onShowActions=${this.onShowActions}
         .refreshControl=${this.refreshControl}
+        .panelControls=${this.panelControls}
         .undoToast=${this.undoToast}
         .onUndoArchive=${this.onUndoArchive}
         .onDismissUndoToast=${this.onDismissUndoToast}
