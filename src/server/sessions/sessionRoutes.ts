@@ -5,6 +5,8 @@ import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { normalizeSessionCleanupRequest } from "./sessionCleanup.js";
+import { normalizeSessionGuidanceIds } from "../../shared/sessionGuidance.js";
+import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 
 interface SessionQuery {
   cwd?: string;
@@ -48,14 +50,34 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
-  app.post<{ Body: { cwd?: unknown; startupToken?: unknown } | undefined }>(`${prefix}/sessions`, async (request, reply) => {
+  // Models a composer may choose from before any session exists. The runtime is
+  // a service dependency, so this needs no session to answer.
+  app.get(`${prefix}/models`, async (_request, reply) => {
+    try {
+      return { models: await sessions.availableModelsForNewSession() };
+    } catch (error) {
+      return reply.code(500).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.post<{ Body: { cwd?: unknown; startupToken?: unknown; modelSpec?: unknown; thinkingLevel?: unknown; guidanceIds?: unknown } | undefined }>(`${prefix}/sessions`, async (request, reply) => {
     try {
       const body = requireRecord(request.body);
       // An opaque label the caller uses to recognise its own construction's
       // startup reports. Optional: only a browser row waiting for a session id
       // has anything to correlate.
       const startupToken = body["startupToken"] === undefined ? undefined : requireNonEmptyString(body, "startupToken");
-      return await sessions.start(normalizeRequestCwd(requireString(body, "cwd")), optionalField("startupToken", startupToken));
+      // Agent choices made before the session existed. Each is optional; an
+      // omitted one leaves the server's own default in place.
+      const modelSpec = body["modelSpec"] === undefined ? undefined : requireNonEmptyString(body, "modelSpec");
+      const thinkingLevel = body["thinkingLevel"] === undefined ? undefined : requireKnownThinkingLevel(body);
+      const guidanceIds = body["guidanceIds"] === undefined ? undefined : normalizeSessionGuidanceIds(body["guidanceIds"]);
+      return await sessions.start(normalizeRequestCwd(requireString(body, "cwd")), {
+        ...optionalField("startupToken", startupToken),
+        ...optionalField("initialModelSpec", modelSpec),
+        ...optionalField("initialThinkingLevel", thinkingLevel),
+        ...optionalField("initialGuidanceIds", guidanceIds),
+      });
     } catch (error) {
       return reply.code(400).send({ error: errorMessage(error) });
     }
@@ -774,4 +796,10 @@ function isSessionNotFoundError(error: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireKnownThinkingLevel(body: Record<string, unknown>): ThinkingLevel {
+  const value = requireNonEmptyString(body, "thinkingLevel");
+  if (!isKnownThinkingLevel(value)) throw new Error(`Unknown thinking level "${value}"`);
+  return value;
 }

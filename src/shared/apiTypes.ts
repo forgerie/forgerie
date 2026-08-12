@@ -1434,3 +1434,15 @@ export type GlobalSessionEvent =
   | SessionUnreadEvent
   | SessionStartupProgressEvent;
 export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | WorkspaceActivityUiEvent;
+
+/**
+ * Agent choices a composer makes before its session exists.
+ *
+ * Each is optional: an omitted choice leaves the server's own default in
+ * place, so a caller states only what the author actually picked.
+ */
+export interface NewSessionAgentChoices {
+  readonly modelSpec?: string;
+  readonly thinkingLevel?: string;
+  readonly guidanceIds?: readonly string[];
+}

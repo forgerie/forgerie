@@ -28,6 +28,7 @@ import type {
   SessionUnreadAcknowledgeRequest,
   SessionUnreadCatalogSnapshot,
   SessionTreeNavigateResult,
+  ThinkingLevel,
 } from "../../shared/apiTypes.js";
 import { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { PiSessionService, type PiSessionManagerGateway } from "./piSessionService.js";
@@ -1156,6 +1157,44 @@ describe("session routes", () => {
     }
   });
 
+  it("carries the agent choices made before the session existed, and refuses unknown ones", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const requestCwd = resolve("/repo");
+      const chosen = await routeApp.inject({
+        method: "POST",
+        url: "/sessions",
+        payload: { cwd: requestCwd, modelSpec: "anthropic/claude-opus-5", thinkingLevel: "high", guidanceIds: ["technical-english"] },
+      });
+      // An unknown level must not reach the service as a level it would apply.
+      const unknownLevel = await routeApp.inject({ method: "POST", url: "/sessions", payload: { cwd: requestCwd, thinkingLevel: "ludicrous" } });
+      // Unknown guidance is dropped rather than refused: the set is advisory.
+      const unknownGuidance = await routeApp.inject({ method: "POST", url: "/sessions", payload: { cwd: requestCwd, guidanceIds: ["not-a-guidance"] } });
+
+      expect(chosen.statusCode).toBe(200);
+      expect(unknownLevel.statusCode).toBe(400);
+      expect(unknownGuidance.statusCode).toBe(200);
+      expect(routeService.startCalls).toEqual([
+        {
+          cwd: requestCwd,
+          startupToken: undefined,
+          initialModelSpec: "anthropic/claude-opus-5",
+          initialThinkingLevel: "high",
+          initialGuidanceIds: ["technical-english"],
+        },
+        { cwd: requestCwd, startupToken: undefined, initialGuidanceIds: [] },
+      ]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("rejects malformed bulk mutation bodies before calling the service", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1213,7 +1252,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly cancelAskCalls: { lookup: SessionRouteRef; askId: string }[] = [];
   readonly answerDialogCalls: { lookup: SessionRouteRef; dialogId: string; value: ExtensionDialogAnswer }[] = [];
   readonly cancelDialogCalls: { lookup: SessionRouteRef; dialogId: string }[] = [];
-  readonly startCalls: { cwd: string; startupToken: string | undefined }[] = [];
+  readonly startCalls: { cwd: string; startupToken: string | undefined; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel; initialGuidanceIds?: readonly string[] }[] = [];
   readonly promptResourceCommandCalls: { lookup: SessionRouteRef; text: string; identity: unknown; streamingBehavior?: unknown; attachments?: unknown }[] = [];
   askError: Error | undefined;
   dialogError: Error | undefined;
@@ -1319,8 +1358,14 @@ class CapturingRouteSessionService implements SessionRouteService {
 
   list(): never { throw unusedRouteMethod("list"); }
 
-  start(cwd: string, options?: { startupToken?: string }): Promise<ClientSession> {
-    this.startCalls.push({ cwd, startupToken: options?.startupToken });
+  start(cwd: string, options?: { startupToken?: string; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel; initialGuidanceIds?: readonly string[] }): Promise<ClientSession> {
+    this.startCalls.push({
+      cwd,
+      startupToken: options?.startupToken,
+      ...(options?.initialModelSpec === undefined ? {} : { initialModelSpec: options.initialModelSpec }),
+      ...(options?.initialThinkingLevel === undefined ? {} : { initialThinkingLevel: options.initialThinkingLevel }),
+      ...(options?.initialGuidanceIds === undefined ? {} : { initialGuidanceIds: options.initialGuidanceIds }),
+    });
     return Promise.resolve({ id: "session-1", path: "/tmp/session-1.jsonl", cwd, created: "2026-06-25T00:00:00.000Z", modified: "2026-06-25T00:00:00.000Z", messageCount: 0, firstMessage: "" });
   }
 
@@ -1384,6 +1429,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   }
 
   availableModels(): Promise<[]> { return Promise.resolve([]); }
+  availableModelsForNewSession(): Promise<[]> { return Promise.resolve([]); }
   setModel(): never { throw unusedRouteMethod("setModel"); }
   cycleModel(): never { throw unusedRouteMethod("cycleModel"); }
   availableThinkingLevels(): Promise<[]> { return Promise.resolve([]); }

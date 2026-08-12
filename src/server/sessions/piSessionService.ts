@@ -257,11 +257,18 @@ type SessionCreationProvenance = "tracked-subsession";
 interface StartSessionOptions {
   parentSession?: string;
   initialModel?: AgentModel;
+  /** Strict `provider/model-id` chosen before the session existed. */
+  initialModelSpec?: string;
   /**
    * Thinking level for the brand new session; omit to resolve from settings
    * and pi defaults. Pi clamps it to the initial model's capabilities.
    */
   initialThinkingLevel?: ClientThinkingLevel;
+  /**
+   * Guidance chosen before the session existed. Applied once the runtime is up,
+   * so the first prompt is answered under the guidance the author picked.
+   */
+  initialGuidanceIds?: readonly string[];
   /**
    * Opaque label, echoed on this construction's startup progress so a browser
    * row with no session id yet can recognise its own.
@@ -1392,7 +1399,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async start(cwd: string, options: StartSessionOptions = {}): Promise<ClientSession> {
-    return this.startSession(cwd, options);
+    const modelSpec = options.initialModelSpec;
+    if (modelSpec === undefined) return this.startSession(cwd, options);
+    const initialModel = await this.resolveNewSessionModel(modelSpec);
+    return this.startSession(cwd, { ...options, initialModel });
   }
 
   private async startSession(cwd: string, options: InternalStartSessionOptions): Promise<ClientSession> {
@@ -1408,6 +1418,9 @@ export class PiSessionService implements SessionRouteService {
       },
     );
     const { session } = active.runtime;
+    if (options.initialGuidanceIds !== undefined && options.initialGuidanceIds.length > 0) {
+      await this.inheritSessionGuidance(session, options.initialGuidanceIds);
+    }
     const created: ClientSession = {
       id: session.sessionId,
       path: session.sessionFile ?? "",
@@ -1522,6 +1535,18 @@ export class PiSessionService implements SessionRouteService {
    * or malformed specs throw; the agent loop turns that into an error tool
    * result the spawning agent can retry from.
    */
+  /** Resolve `provider/model-id` against the shared runtime, with no session. */
+  private async resolveNewSessionModel(modelSpec: string): Promise<AgentModel> {
+    await this.modelRuntime.refresh();
+    const parsed = parseModelSpec(modelSpec);
+    const model = parsed === undefined
+      ? undefined
+      : this.modelRuntime.getAvailableSnapshot().find((candidate) => candidate.provider === parsed.provider && candidate.id === parsed.modelId)
+        ?? this.modelRuntime.getModel(parsed.provider, parsed.modelId);
+    if (model === undefined) throw unknownSpawnModelError(modelSpec);
+    return model;
+  }
+
   private async resolveSpawnModel(spawningRef: PiSessionRef, modelSpec: string): Promise<AgentModel> {
     const session = await this.getOrOpen(spawningRef);
     const parsed = parseModelSpec(modelSpec);
@@ -2176,6 +2201,18 @@ export class PiSessionService implements SessionRouteService {
       ? null
       : annotateAssistantThinkingLevel(projectBrowserMessage(streamingMessage), session.thinkingLevel);
     return { seq, partial };
+  }
+
+  /**
+   * Models available before any session exists.
+   *
+   * The runtime is a service dependency, not a property of a session, so a
+   * composer with no session yet can still offer a choice. A session narrows
+   * this only when its workspace scopes the agent profile.
+   */
+  async availableModelsForNewSession(): Promise<ClientSessionModel[]> {
+    await this.modelRuntime.refresh();
+    return this.modelRuntime.getAvailableSnapshot().map(modelToClientModel);
   }
 
   async availableModels(ref: PiSessionRef): Promise<ClientSessionModel[]> {

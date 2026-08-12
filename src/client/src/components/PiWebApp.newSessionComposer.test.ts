@@ -230,7 +230,7 @@ describe("PiWebApp New session composer root", () => {
       expect(isClientPendingSession(appState(app).selectedSession)).toBe(true);
     });
     const pending = required(appState(app).selectedSession, "pending session");
-    expect(startSession).toHaveBeenCalledWith(mainWorkspace.path, localMachine.id, pending.id);
+    expect(startSession).toHaveBeenCalledWith(mainWorkspace.path, localMachine.id, pending.id, undefined);
     expect(appState(app).sessions.map((candidate) => candidate.id)).toEqual([pending.id, selectedSession.id]);
     expect(appState(app).clientQueuedSessionMessages[pending.id]).toEqual([
       { kind: "followUp", text: "[First prompt queued]" },
@@ -476,7 +476,7 @@ describe("PiWebApp New session composer root", () => {
     const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Build it" } } satisfies NewSessionLaunchIntent);
 
     expect(navigate).toHaveBeenCalledWith(destination, expect.any(Function));
-    expect(launchSession).toHaveBeenCalledWith({ text: "Build it", delivery: "inline" });
+    expect(launchSession).toHaveBeenCalledWith({ text: "Build it", attachments: undefined, delivery: "inline" }, undefined);
     expect(composerRequest(app)).toMatchObject({ kind: "closed" });
     expect(openChat).toHaveBeenCalledOnce();
     expect(outcome).toEqual({ kind: "accepted" });

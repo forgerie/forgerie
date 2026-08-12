@@ -1,6 +1,6 @@
 import type { Machine, Project, Workspace } from "./api";
 import { machinesApi, projectsApi, workspacesApi } from "./api";
-import type { PromptAttachment, PromptAttachmentDelivery } from "../../shared/apiTypes";
+import type { NewSessionAgentChoices, PromptAttachment, PromptAttachmentDelivery } from "../../shared/apiTypes";
 import { parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand";
 
 export interface NewSessionCompleteDestination {
@@ -28,6 +28,8 @@ export type NewSessionComposerSnapshot = NewSessionFirstPromptSubmission;
 export interface NewSessionLaunchIntent {
   destination: NewSessionCompleteDestination;
   firstPrompt: NewSessionFirstPromptSubmission;
+  /** Model, thinking level, and guidance chosen before the session existed. */
+  agentChoices?: NewSessionAgentChoices;
 }
 
 export type NewSessionSubmissionOutcome =

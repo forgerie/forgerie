@@ -1,4 +1,5 @@
 import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type MessagePage, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
+import type { NewSessionAgentChoices } from "../../../shared/apiTypes";
 import type { AppState, ClosedExtensionDialog } from "../appState";
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
 import { normalizeMessages, textMessage } from "../chatMessages";
@@ -151,6 +152,8 @@ interface PendingSessionStart {
   cwd: string;
   machineId: string;
   session: ClientPendingStartSessionInfo;
+  /** Model, thinking, and guidance chosen before this session existed. */
+  agentChoices?: NewSessionAgentChoices;
   queuedSends: QueuedPendingSessionSend[];
   discarded: boolean;
   /**
@@ -302,7 +305,7 @@ export class SessionController {
     await this.startPendingSession(pending);
   }
 
-  async launchSession(submission: FirstPromptSubmission): Promise<void> {
+  async launchSession(submission: FirstPromptSubmission, agentChoices?: NewSessionAgentChoices): Promise<void> {
     const workspace = this.getState().selectedWorkspace;
     if (workspace === undefined || firstPromptSubmissionIsEmpty(submission)) return;
     const promptResourceIdentity = submission.promptResourceCommandIdentity;
@@ -310,6 +313,7 @@ export class SessionController {
     const attachments = submission.attachments?.map((attachment) => ({ ...attachment }));
     const machineId = selectedMachineId(this.getState());
     const pending = this.createPendingSessionStart(workspace, machineId);
+    if (agentChoices !== undefined) pending.agentChoices = agentChoices;
     this.pendingSessionStarts.set(pending.tempId, pending);
     this.insertAndSelectPendingSession(pending.session);
     if (promptResourceIdentity === undefined) {
@@ -534,7 +538,7 @@ export class SessionController {
 
   private async startPendingSession(pending: PendingSessionStart): Promise<void> {
     try {
-      const session = await this.api.startSession(pending.cwd, pending.machineId, pending.tempId);
+      const session = await this.api.startSession(pending.cwd, pending.machineId, pending.tempId, pending.agentChoices);
       await this.resolvePendingSessionStart(pending.tempId, session);
     } catch (error) {
       await this.failPendingSessionStart(pending.tempId, error);

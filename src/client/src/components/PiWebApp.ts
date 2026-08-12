@@ -1,7 +1,7 @@
 import { LitElement, html } from "lit";
 
 import { customElement, query, state } from "lit/decorators.js";
-import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
+import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionModel, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
 import { createInboxLocationResolver } from "../inboxLocation";
@@ -18,6 +18,7 @@ import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
 import type { ComposerCapabilities } from "../composerCapabilities";
+import { KNOWN_THINKING_LEVELS } from "../../../shared/thinkingLevels";
 import { SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot, type SessionTranscriptPreview } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
@@ -1948,7 +1949,7 @@ export class PiWebApp extends LitElement {
       ...intent.firstPrompt,
       attachments: intent.firstPrompt.attachments === undefined ? undefined : [...intent.firstPrompt.attachments],
       delivery: intent.firstPrompt.delivery ?? "inline",
-    });
+    }, intent.agentChoices);
     const pending = this.state.selectedSession;
     const queuedFirstPrompt = pending !== undefined && this.sessions.hasQueuedInitialPrompt(pending.id);
     if (pending === undefined || pending.id === previouslySelectedSessionId || !queuedFirstPrompt) {
@@ -2682,6 +2683,13 @@ export class PiWebApp extends LitElement {
 
   private async pickModel(value: string) {
     this.setState({ modelDialog: undefined });
+    const pending = this.pendingModelPick;
+    if (pending !== undefined) {
+      this.pendingModelPick = undefined;
+      const slash = value.indexOf("/");
+      pending(slash <= 0 ? undefined : { provider: value.slice(0, slash), id: value.slice(slash + 1) });
+      return;
+    }
     if (!this.selectedChatRuntimeAvailable()) return;
     const slash = value.indexOf("/");
     if (slash <= 0) return;
@@ -2792,6 +2800,12 @@ export class PiWebApp extends LitElement {
 
   private async pickThinking(value: string) {
     this.setState({ thinkingDialog: undefined });
+    const pending = this.pendingThinkingPick;
+    if (pending !== undefined) {
+      this.pendingThinkingPick = undefined;
+      pending(value === "" ? undefined : value);
+      return;
+    }
     if (!this.selectedChatRuntimeAvailable()) return;
     if (value !== "") await this.sessions.setThinkingLevel(value);
   }
@@ -2866,6 +2880,39 @@ export class PiWebApp extends LitElement {
     if (next === this.sessionWarningVisibility) return;
     this.sessionWarningVisibility = next;
     this.requestUpdate();
+  };
+
+  private pendingModelPick: ((model: SessionModel | undefined) => void) | undefined;
+  private pendingThinkingPick: ((level: string | undefined) => void) | undefined;
+
+  /**
+   * Offer the chat's own model picker to a composer with no session yet.
+   *
+   * The dialog is the same one the chat opens; only the outcome differs. A
+   * session applies the choice, a new-session composer keeps it for creation.
+   */
+  private readonly handlePickNewSessionModel = async (current: SessionModel | undefined): Promise<SessionModel | undefined> => {
+    const models = (await sessionsApi.newSessionModels(selectedMachineId(this.state))).models;
+    const currentValue = current?.provider !== undefined && current.id !== undefined ? `${current.provider}/${current.id}` : undefined;
+    this.setState({
+      modelDialog: {
+        title: "Select Model",
+        ...(currentValue === undefined ? {} : { selectedValue: currentValue }),
+        options: models.map((model) => ({ value: `${model.provider ?? ""}/${model.id ?? ""}`, label: model.id ?? "", description: model.provider ?? "" })),
+      },
+    });
+    return new Promise<SessionModel | undefined>((resolve) => { this.pendingModelPick = resolve; });
+  };
+
+  private readonly handlePickNewSessionThinkingLevel = (current: string | undefined): Promise<string | undefined> => {
+    this.setState({
+      thinkingDialog: {
+        title: "Select Thinking Level",
+        selectedValue: current ?? "off",
+        options: KNOWN_THINKING_LEVELS.map((level) => { const description = thinkingDescription(level); return { value: level, label: level, ...(description === undefined ? {} : { description }) }; }),
+      },
+    });
+    return new Promise<string | undefined>((resolve) => { this.pendingThinkingPick = resolve; });
   };
 
   private readonly handleSelectModel = (): void => {
@@ -3415,8 +3462,8 @@ export class PiWebApp extends LitElement {
             ${this.renderChatView(state, state.selectedSession)}
             ${this.renderSelectedComposer(state, state.selectedSession, runtimeAvailable)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
-            ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}
-            ${state.thinkingDialog !== undefined ? html`<command-picker title=${state.thinkingDialog.title} .options=${state.thinkingDialog.options} .selectedValue=${state.thinkingDialog.selectedValue} .onPick=${(value: string) => { void this.pickThinking(value); }} .onCancel=${() => { this.setState({ thinkingDialog: undefined }); }}></command-picker>` : null}
+            ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); this.pendingModelPick?.(undefined); this.pendingModelPick = undefined; }}></command-picker>` : null}
+            ${state.thinkingDialog !== undefined ? html`<command-picker title=${state.thinkingDialog.title} .options=${state.thinkingDialog.options} .selectedValue=${state.thinkingDialog.selectedValue} .onPick=${(value: string) => { void this.pickThinking(value); }} .onCancel=${() => { this.setState({ thinkingDialog: undefined }); this.pendingThinkingPick?.(undefined); this.pendingThinkingPick = undefined; }}></command-picker>` : null}
           ` : this.renderSessionEmptyState()}
         </main>
         ${this.renderWorkspacePanelEdgeControl()}
@@ -3426,6 +3473,8 @@ export class PiWebApp extends LitElement {
           .recoverySeedId=${state.newSessionComposer.recoverySeedId}
           .catalog=${this.newSessionDestinationCatalog}
           .onCancel=${() => { this.closeNewSessionComposer(); }}
+          .onPickModel=${this.handlePickNewSessionModel}
+          .onPickThinkingLevel=${this.handlePickNewSessionThinkingLevel}
           .onSubmit=${(intent: NewSessionLaunchIntent) => this.submitNewSession(intent)}
           .onClaimRecoveryDraft=${(recoverySeedId: string) => this.sessions.claimSessionLaunchRecoveryDraft(recoverySeedId)}
           .onReturnRecoveryDraft=${(recoverySeedId: string, snapshot: SessionLaunchRecoveryDraftSnapshot) => { this.sessions.returnSessionLaunchRecoveryDraft(recoverySeedId, snapshot); }}

@@ -68,6 +68,8 @@ import {
 } from "./parsers";
 import { machineGitDiffPath, messagePath } from "./urls";
 
+import type { NewSessionAgentChoices } from "../../../shared/apiTypes";
+
 const machinePrefix = (machineId = "local") => `api/machines/${encodeURIComponent(machineId)}`;
 
 function sessionBasePath(session: SessionRef, machineId = "local"): string {
@@ -213,7 +215,18 @@ export const sessionsApi = {
   notificationInbox: (session: SessionRef, machineId = "local") => request(sessionQueryPath(session, "notifications", machineId), parseSessionNotificationInboxSnapshot),
   dismissNotification: (session: SessionRef, daemonInstanceId: string, notificationId: string, machineId = "local") => request(sessionPath(session, "notifications/dismiss", machineId), parseSessionNotificationInboxSnapshot, { method: "POST", body: sessionBody(session, { daemonInstanceId, notificationId }) }),
   dismissAllNotifications: (session: SessionRef, daemonInstanceId: string, through: SessionNotificationDismissThrough, machineId = "local") => request(sessionPath(session, "notifications/dismiss-all", machineId), parseSessionNotificationInboxSnapshot, { method: "POST", body: sessionBody(session, { daemonInstanceId, throughOrder: through.order, throughOverflowWatermark: through.overflowWatermark }) }),
-  startSession: (cwd: string, machineId = "local", startupToken?: string) => request(`${machinePrefix(machineId)}/sessions`, parseSessionInfo, { method: "POST", body: JSON.stringify(startupToken === undefined ? { cwd } : { cwd, startupToken }) }),
+  startSession: (cwd: string, machineId = "local", startupToken?: string, agentChoices?: NewSessionAgentChoices) => request(`${machinePrefix(machineId)}/sessions`, parseSessionInfo, {
+    method: "POST",
+    body: JSON.stringify({
+      cwd,
+      ...(startupToken === undefined ? {} : { startupToken }),
+      ...(agentChoices?.modelSpec === undefined ? {} : { modelSpec: agentChoices.modelSpec }),
+      ...(agentChoices?.thinkingLevel === undefined ? {} : { thinkingLevel: agentChoices.thinkingLevel }),
+      ...(agentChoices?.guidanceIds === undefined ? {} : { guidanceIds: agentChoices.guidanceIds }),
+    }),
+  }),
+  /** Models a composer may choose from before any session exists. */
+  newSessionModels: (machineId = "local") => request(`${machinePrefix(machineId)}/models`, parseModelSelectionResponse),
   cleanupPreview: (input: SessionCleanupRequest, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/cleanup/preview`, parseSessionCleanupPreviewResponse, { method: "POST", body: JSON.stringify(input) }),
   cleanup: (input: SessionCleanupRequest, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/cleanup`, parseSessionCleanupExecuteResponse, { method: "POST", body: JSON.stringify(input) }),
   archiveMany: (sessions: readonly SessionRef[], machineId = "local") => request(`${machinePrefix(machineId)}/sessions/bulk/archive`, parseSessionBulkArchiveResponse, { method: "POST", body: sessionBulkMutationBody(sessions) }),

@@ -56,7 +56,13 @@ export interface SessionRouteService {
    * it can recognise this construction's startup progress reports; the service
    * echoes it and never interprets it.
    */
-  start(cwd: string, options?: { startupToken?: string }): Promise<ClientSession>;
+  start(cwd: string, options?: {
+    startupToken?: string;
+    /** Strict `provider/model-id` chosen before the session existed. */
+    initialModelSpec?: string;
+    initialThinkingLevel?: ClientThinkingLevel;
+    initialGuidanceIds?: readonly string[];
+  }): Promise<ClientSession>;
   messages(ref: SessionRouteRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage>;
   status(ref: SessionRouteRef): Promise<ClientSessionStatus>;
   streamSnapshot(ref: SessionRouteRef): Promise<SessionStreamSnapshot>;
@@ -73,6 +79,8 @@ export interface SessionRouteService {
   cancelDialog(ref: SessionRouteRef, dialogId: string): Promise<ExtensionDialogCloseResponse>;
   dismissWarning(ref: SessionRouteRef, dismissId: string): Promise<ClientSessionStatus>;
   availableModels(ref: SessionRouteRef): Promise<ClientSessionModel[]>;
+  /** Models a composer may choose from before any session exists. */
+  availableModelsForNewSession(): Promise<ClientSessionModel[]>;
   setModel(ref: SessionRouteRef, provider: string, modelId: string): Promise<ClientSessionStatus>;
   setGuidance(ref: SessionRouteRef, entryId: string, enabled: unknown): Promise<ClientSessionStatus>;
   cycleModel(ref: SessionRouteRef, direction: "forward" | "backward"): Promise<ClientSessionStatus>;

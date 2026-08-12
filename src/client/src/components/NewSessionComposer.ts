@@ -5,6 +5,9 @@ import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand"
 import { workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import { createPreSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import type { ComposerCapabilities } from "../composerCapabilities";
+import type { NewSessionAgentChoices, SessionModel as ClientSessionModel } from "../../../shared/apiTypes";
+import { KNOWN_THINKING_LEVELS } from "../../../shared/thinkingLevels";
+import { setSessionGuidance } from "../../../shared/sessionGuidance";
 import {
   backToMachineChoice,
   backToProjectChoice,
@@ -64,6 +67,14 @@ export class NewSessionComposer extends LitElement {
   @query("modal-surface") private modalSurface?: ModalSurface;
   @query("prompt-editor") private editor?: PromptEditor;
   private draftWaitScheduled = false;
+  /** Opened by the host, which owns the pickers the chat already uses. */
+  @property({ attribute: false }) onPickModel?: (current: ClientSessionModel | undefined) => Promise<ClientSessionModel | undefined>;
+  @property({ attribute: false }) onPickThinkingLevel?: (current: string | undefined) => Promise<string | undefined>;
+  /** Model, thinking, and guidance picked before the session exists. */
+  @state() private chosenModel?: ClientSessionModel;
+  @state() private chosenThinkingLevel?: string;
+  @state() private chosenGuidanceIds: readonly string[] = [];
+  @state() private availableModels: readonly ClientSessionModel[] = [];
 
   /** The modal drives the same shared draft the chat composer drives. */
   private get draft(): ComposerDraft | undefined {
@@ -320,6 +331,22 @@ export class NewSessionComposer extends LitElement {
           onActivate: () => { this.openDestinationChoice(); },
         },
       }],
+      model: {
+        ...(this.chosenModel === undefined ? {} : { model: this.chosenModel }),
+        ...(this.chosenThinkingLevel === undefined ? {} : { thinkingLevel: this.chosenThinkingLevel }),
+        availableThinkingLevels: KNOWN_THINKING_LEVELS,
+        changeable: state.kind !== "submitting",
+        onSelectModel: () => { void this.chooseModel(); },
+        onSelectThinking: () => { this.chooseThinkingLevel(); },
+      },
+      guidance: {
+        activeIds: this.chosenGuidanceIds,
+        changeable: state.kind !== "submitting",
+        onSet: (entryId: string, enabled: boolean) => {
+          this.chosenGuidanceIds = setSessionGuidance(this.chosenGuidanceIds, entryId, enabled).activeIds;
+          return Promise.resolve(true);
+        },
+      },
     };
   }
 
@@ -335,6 +362,30 @@ export class NewSessionComposer extends LitElement {
     return state.kind === "editing"
       && state.destination.kind === "complete"
       && !this.draftDisplay.attachmentCapturePending;
+  }
+
+  private async chooseModel(): Promise<void> {
+    const picked = await this.onPickModel?.(this.chosenModel);
+    if (picked !== undefined) this.chosenModel = picked;
+  }
+
+  private chooseThinkingLevel(): void {
+    void this.onPickThinkingLevel?.(this.chosenThinkingLevel).then((picked) => {
+      if (picked !== undefined) this.chosenThinkingLevel = picked;
+    });
+  }
+
+  /** What the author picked before the session existed, stated for creation. */
+  private agentChoices(): NewSessionAgentChoices | undefined {
+    const modelSpec = this.chosenModel?.provider !== undefined && this.chosenModel.id !== undefined
+      ? `${this.chosenModel.provider}/${this.chosenModel.id}`
+      : undefined;
+    const choices: NewSessionAgentChoices = {
+      ...(modelSpec === undefined ? {} : { modelSpec }),
+      ...(this.chosenThinkingLevel === undefined ? {} : { thinkingLevel: this.chosenThinkingLevel }),
+      ...(this.chosenGuidanceIds.length === 0 ? {} : { guidanceIds: this.chosenGuidanceIds }),
+    };
+    return Object.keys(choices).length === 0 ? undefined : choices;
   }
 
   /** Blocks the draft itself, so it stays clear of destination questions. */
@@ -371,7 +422,12 @@ export class NewSessionComposer extends LitElement {
       return "rejected";
     }
     try {
-      const outcome = await callback({ destination: next.destination, firstPrompt: validation.submission });
+      const agentChoices = this.agentChoices();
+      const outcome = await callback({
+        destination: next.destination,
+        firstPrompt: validation.submission,
+        ...(agentChoices === undefined ? {} : { agentChoices }),
+      });
       if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
       if (outcome.kind === "accepted") {
         this.completedRecoverySeedId = this.claimedRecoverySeedId;
