@@ -13,24 +13,17 @@ afterEach(() => {
 });
 
 describe("PiWebApp session-warning visibility wiring", () => {
-  it("keeps the warning control present and toggles the warning area from the island menu's sheet", () => {
+  it("toggles warning visibility from the warning area itself", () => {
     const app = createApp();
     const state = stateWithWarnings();
     setAppState(app, state);
     syncWarningVisibility(app);
 
-    const visibleSheet = renderControlSheet(app, state);
-    expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(true);
-    expect(templateValueAfterMarker(visibleSheet, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(visibleSheet, ".warningsExpanded=")).toBe(true);
+    const visibleChat = renderChatView(app, state);
+    expect(templateValueAfterMarker(visibleChat, ".warningsVisible=")).toBe(true);
 
-    const toggle = templateCallbackAfterMarker(visibleSheet, ".onToggleWarnings=");
-    toggle();
-
-    const collapsedSheet = renderControlSheet(app, state);
+    templateCallbackAfterMarker(visibleChat, ".onToggleWarnings=")();
     expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(false);
-    expect(templateValueAfterMarker(collapsedSheet, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(collapsedSheet, ".warningsExpanded=")).toBe(false);
 
     const otherState = stateWithWarnings("session-2");
     setAppState(app, otherState);
@@ -41,26 +34,18 @@ describe("PiWebApp session-warning visibility wiring", () => {
     setAppState(app, returningState);
     syncWarningVisibility(app);
     expect(templateValueAfterMarker(renderChatView(app, returningState), ".warningsVisible=")).toBe(true);
-    expect(templateValueAfterMarker(renderControlSheet(app, returningState), ".warningCount=")).toBe(0);
 
     setAppState(app, state);
     syncWarningVisibility(app);
-    const returnedSheet = renderControlSheet(app, state);
-    expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(false);
-    expect(templateValueAfterMarker(returnedSheet, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(returnedSheet, ".warningsExpanded=")).toBe(false);
+    const returnedChat = renderChatView(app, state);
+    expect(templateValueAfterMarker(returnedChat, ".warningsVisible=")).toBe(false);
 
-    templateCallbackAfterMarker(returnedSheet, ".onToggleWarnings=")();
-
-    const restoredSheet = renderControlSheet(app, state);
+    templateCallbackAfterMarker(returnedChat, ".onToggleWarnings=")();
     expect(templateValueAfterMarker(renderChatView(app, state), ".warningsVisible=")).toBe(true);
-    expect(templateValueAfterMarker(restoredSheet, ".warningCount=")).toBe(2);
-    expect(templateValueAfterMarker(restoredSheet, ".warningsExpanded=")).toBe(true);
   });
 });
 
 type RenderChatView = (this: PiWebApp, state: AppState, session: SessionInfo) => TemplateResult;
-type RenderControlSheet = (this: PiWebApp, state: AppState) => TemplateResult;
 type SyncWarningVisibility = (this: PiWebApp) => void;
 type WarningVisibilityCallback = () => void;
 
@@ -126,12 +111,6 @@ function renderChatView(app: PiWebApp, state: AppState): TemplateResult {
   return method.call(app, state, session);
 }
 
-function renderControlSheet(app: PiWebApp, state: AppState): TemplateResult {
-  const method: unknown = Reflect.get(app, "renderControlSheet");
-  if (!isRenderControlSheet(method)) throw new Error("PiWebApp.renderControlSheet is not callable");
-  return method.call(app, state);
-}
-
 function templateCallbackAfterMarker(template: TemplateResult, marker: string): WarningVisibilityCallback {
   const value = templateValueAfterMarker(template, marker);
   if (!isWarningVisibilityCallback(value)) throw new Error(`Expected callback after ${marker}`);
@@ -139,10 +118,6 @@ function templateCallbackAfterMarker(template: TemplateResult, marker: string): 
 }
 
 function isRenderChatView(value: unknown): value is RenderChatView {
-  return typeof value === "function";
-}
-
-function isRenderControlSheet(value: unknown): value is RenderControlSheet {
   return typeof value === "function";
 }
 

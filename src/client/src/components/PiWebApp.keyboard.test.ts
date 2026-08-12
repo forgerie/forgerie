@@ -226,7 +226,7 @@ describe("PiWebApp on-screen keyboard layout", () => {
 
     expect(container.querySelector("prompt-editor")).not.toBeNull();
     expect(container.querySelector("status-bar")).toBeNull();
-    expect(container.querySelector("app-control-sheet")).not.toBeNull();
+    expect(container.querySelector("app-control-sheet")).toBeNull();
   });
 
   it("gives the composer the selected session's user prompt history", () => {

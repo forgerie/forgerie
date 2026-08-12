@@ -3,7 +3,7 @@
 import type { TemplateResult } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "../api";
-import { isTemplateResult, templateClickHandlerForText, templateText } from "../templateInspection.testSupport";
+import { isTemplateResult, templateText } from "../templateInspection.testSupport";
 import { NEW_SESSION_LABEL } from "./shared";
 import { PromptEditor } from "./PromptEditor";
 
@@ -19,36 +19,15 @@ describe("PromptEditor summoned chrome", () => {
     expect(templateText(renderCompactStatus(editor))).toContain("forgerie · main");
   });
 
-  it("keeps archive one tap away so the triage loop survives the header's removal", () => {
-    const editor = summonedEditor();
-    const onArchiveAndNext = vi.fn();
-    editor.canArchive = true;
-    editor.onArchiveAndNext = onArchiveAndNext;
-
-    templateClickHandlerForText(renderCompactStatus(editor), "Archive")(new Event("click"));
-
-    expect(onArchiveAndNext).toHaveBeenCalledOnce();
-  });
-
-  it("drops archive when the session cannot be archived", () => {
-    const editor = summonedEditor();
-    editor.canArchive = false;
-
-    expect(templateText(renderCompactStatus(editor))).not.toContain("Archive");
-  });
-
-  it("keeps identity and archive on the rail even where the shell still has bands", () => {
+  it("keeps identity on the rail even where the shell still has bands", () => {
     const editor = summonedEditor();
     editor.chromeSummoned = false;
     editor.sessionLabel = "forgerie · main";
-    editor.canArchive = true;
 
-    // Which of them the rail actually shows is the island's own width to
-    // decide (see PromptEditor.reveal.test.ts); the composer no longer keys
-    // them off whether the shell kept its chrome bands.
-    const rendered = templateText(renderCompactStatus(editor));
-    expect(rendered).toContain("forgerie · main");
-    expect(rendered).toContain("Archive");
+    // Whether identity appears is the island's own width to decide (see
+    // PromptEditor.reveal.test.ts); the composer does not key it off whether
+    // the shell kept its chrome bands.
+    expect(templateText(renderCompactStatus(editor))).toContain("forgerie · main");
   });
 
   it("keeps the icon-only New session action adjacent before the message action", async () => {

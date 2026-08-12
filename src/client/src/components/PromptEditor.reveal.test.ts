@@ -1,44 +1,26 @@
 import type { TemplateResult } from "lit";
-import { describe, expect, it, vi } from "vitest";
-import { isTemplateResult, templateClickHandlerForText, templateText } from "../templateInspection.testSupport";
+import { describe, expect, it } from "vitest";
+import { isTemplateResult, templateText } from "../templateInspection.testSupport";
 import { PromptEditor } from "./PromptEditor";
 import { promptEditorStyles } from "./shared";
 
 describe("PromptEditor rail reveals", () => {
-  it("carries identity and archive whatever the shell is doing with its bands", () => {
+  it("carries identity whatever the shell is doing with its bands", () => {
     const composer = editor();
     composer.chromeSummoned = false;
 
-    const rendered = templateText(renderCompactStatus(composer));
-    expect(rendered).toContain("forgerie · main");
-    expect(rendered).toContain("Archive");
+    expect(templateText(renderCompactStatus(composer))).toContain("forgerie · main");
   });
 
-  it("keeps archive off the rail on a session that cannot be archived", () => {
-    const composer = editor();
-    composer.canArchive = false;
-
-    expect(templateText(renderCompactStatus(composer))).not.toContain("Archive");
-  });
-
-  it("still ends the turn from the rail when the island has room for it", () => {
-    const composer = editor();
-    const onArchiveAndNext = vi.fn();
-    composer.onArchiveAndNext = onArchiveAndNext;
-
-    templateClickHandlerForText(renderCompactStatus(composer), "Archive")(new Event("click"));
-
-    expect(onArchiveAndNext).toHaveBeenCalledOnce();
-  });
-
-  it("keeps guidance resident and reveals identity and archive only after it", () => {
+  it("keeps direct archive present and expands its label only when space allows", () => {
     const css = promptEditorStyles.cssText;
 
     expect(css).toMatch(/\.session-identity\s*{\s*display:\s*none/);
-    expect(css).toMatch(/\.composer-archive\s*{\s*display:\s*none/);
+    expect(css).not.toMatch(/\.composer-archive\s*{\s*display:\s*none/);
+    expect(css).toMatch(/\.composer-archive-label\s*{\s*display:\s*none/);
     expect(css).toMatch(/\.compact-status\s*>\s*\.guidance-trigger\s*{[^}]*flex:\s*0 0 auto/);
     expect(css).toMatch(/@container \(min-width: 560px\)\s*{\s*\.session-identity/);
-    expect(css).toMatch(/@container \(min-width: 700px\)\s*{\s*\.composer-archive/);
+    expect(css).toMatch(/@container \(min-width: 700px\)[^}]*\.icon-button\.composer-archive/);
   });
 });
 

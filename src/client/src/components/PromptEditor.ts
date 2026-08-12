@@ -18,7 +18,7 @@ import { loadAttachmentDelivery, saveAttachmentDelivery } from "../attachmentPre
 import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon, type CompletionItem } from "./shared";
-import { renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderSendIcon, renderQueueIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import "./AutocompleteMenu";
 import "./ContextUsageMeter";
@@ -50,14 +50,11 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) onSelectModel?: () => void;
   @property({ attribute: false }) onSelectThinking?: () => void;
   @property({ attribute: false }) onSetGuidance?: (entryId: string, enabled: boolean) => Promise<boolean>;
-  /** Set when the chat surface has handed its chrome to an on-request sheet. */
+  /** Set when the shell keeps its navigation chrome on request instead of resident. */
   @property({ type: Boolean }) chromeSummoned = false;
   @property() sessionLabel?: string;
   @property({ type: Boolean }) canArchive = false;
   @property({ attribute: false }) onArchiveAndNext?: () => void;
-  @property({ attribute: false }) onOpenControlSheet?: () => void;
-  /** Warnings plus notifications waiting behind the island menu. */
-  @property({ type: Number }) attentionCount = 0;
   @property({ attribute: false }) onNewSession?: () => void;
   @property({ attribute: false }) availableThinkingLevels: readonly string[] = [];
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
@@ -177,7 +174,8 @@ export class PromptEditor extends LitElement {
           <autocomplete-menu .items=${this.completions} .selectedIndex=${this.selectedIndex} .onPick=${(item: CompletionItem) => { this.pick(item); }}></autocomplete-menu>
         </div>
         <div class="actions">
-          ${this.renderIslandMenuAction(busy)}
+          ${this.renderAttachmentAction(busy)}
+          ${this.renderArchiveAction()}
           ${this.renderCompactStatus()}
           <button
             class="icon-button new-session-button"
@@ -214,15 +212,8 @@ export class PromptEditor extends LitElement {
     this.editor?.focus();
   }
 
-  /**
-   * Open the file picker from outside the composer.
-   *
-   * The island menu lives in the sheet, so the sheet needs a way in that still
-   * honours the composer's own guard: an archived session, or one already
-   * sending, must not be able to start an attachment.
-   */
-  openAttachmentPicker(): void {
-    if (this.disabled || this.sending) return;
+  private openAttachmentPicker(): void {
+    if (this.disabled || this.sending || this.guidancePending) return;
     this.attachmentInput?.click();
   }
 
@@ -323,18 +314,15 @@ export class PromptEditor extends LitElement {
           title="Session guidance"
           @click=${() => { this.toggleGuidance(); }}
         >${sessionGuidanceSummary(status.activeGuidanceIds ?? [])}</button>
-        ${this.renderArchiveAction()}
       </div>
     `;
   }
 
   /**
-   * Where you are, and the action that ends a turn.
+   * Where you are, inherited from the retired chrome bands.
    *
-   * The chrome bands used to carry these; the composer inherits them rather
-   * than reviving a band. Both are rendered whenever they mean something and
-   * revealed by the island's own width, so a narrow composer spends its row on
-   * the controls that must always work and leaves these to the sheet.
+   * A narrow composer spends its row on controls that must always work. The
+   * session identity appears only when the island's own width can carry it.
    */
   private renderSessionIdentity() {
     const label = this.sessionLabel;
@@ -414,34 +402,23 @@ export class PromptEditor extends LitElement {
     if (!this.canArchive) return null;
     return html`
       <button
-        class="composer-archive summoned-secondary"
+        class="composer-archive icon-button"
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
         @click=${() => { this.closeGuidance(false, true); this.onArchiveAndNext?.(); }}
-      >Archive &amp; next</button>
+      >${renderArchiveIcon()}<span class="composer-archive-label">Archive &amp; next</span></button>
     `;
   }
 
-  /**
-   * One way to everything the rail does not hold.
-   *
-   * Attachments and the session controls used to be two separate buttons in two
-   * places; the island has room for one. It also carries the count of what is
-   * waiting behind it, because a sheet nobody opens cannot report a warning.
-   */
-  private renderIslandMenuAction(busy: boolean) {
-    const waiting = this.attentionCount > 0;
-    const label = waiting
-      ? `Attachments and session controls, ${String(this.attentionCount)} waiting`
-      : "Attachments and session controls";
+  private renderAttachmentAction(busy: boolean) {
     return html`
       <button
-        class=${waiting ? "island-menu composer-summon icon-button attention" : "island-menu composer-summon icon-button"}
-        ?disabled=${busy}
-        title=${label}
-        aria-label=${label}
-        @click=${() => { this.closeGuidance(false, true); this.onOpenControlSheet?.(); }}
-      >${renderAttachIcon()}${waiting ? html`<span class="island-menu-count" aria-hidden="true">${String(this.attentionCount)}</span>` : null}</button>
+        class="composer-attach icon-button"
+        ?disabled=${this.disabled || busy}
+        title="Attach files"
+        aria-label="Attach files"
+        @click=${() => { this.closeGuidance(false, true); this.openAttachmentPicker(); }}
+      >${renderAttachIcon()}</button>
     `;
   }
 

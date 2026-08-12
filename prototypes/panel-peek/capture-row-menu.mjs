@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
 const URL_ARG = process.argv[2] ?? "http://127.0.0.1:8504/";
-// A session must be open before the composer, and so the summon control, exists.
+// A session route keeps the capture anchored to a known workspace.
 const SESSION_ARG = process.env["FORGERIE_SESSION"] ?? "";
 const OUT = process.argv[3] ?? "/tmp/fg-row-menu";
 const PORT = 9333;
@@ -68,14 +68,10 @@ async function capture(wsTargetUrl, posture) {
 function holdFirstRowScript() {
   return `(async () => {
     const app = document.querySelector("pi-web-app");
-    // On a shell that shows one surface, the inbox has to be summoned first.
+    // On a shell that shows one surface, open the navigation sheet first.
     if (app.shadowRoot.querySelector(".shell.overlay-navigation") !== null) {
-      deepQuery(app, ".composer-summon")?.click();
-      await new Promise((r) => setTimeout(r, 400));
-      const tabs = deepQuery(app, "app-mobile-main-tabs");
-      for (const button of tabs?.shadowRoot.querySelectorAll("button") ?? []) {
-        if (/session|inbox/i.test(button.textContent ?? "")) { button.click(); break; }
-      }
+      const burger = deepQuery(app, "app-panel-burger[side='navigation']");
+      burger?.shadowRoot?.querySelector(".burger")?.click();
       await new Promise((r) => setTimeout(r, 600));
     }
     const panel = deepQuery(app, "session-inbox-panel");

@@ -882,22 +882,22 @@ export const promptEditorStyles = css`
     .thinking-level { display: inline; }
   }
   /*
-   * The rail has one row and a fixed order of importance: the menu, the model,
-   * the primary action, and stop always fit. Identity and archive are revealed
-   * by the island's own width, and stay reachable from the sheet when they are
-   * not on the rail.
+   * The rail has one row and a fixed order of importance: direct actions,
+   * runtime status, the primary action, and stop always fit. Session identity
+   * appears only when the island's own width can carry it.
    */
   .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
-  .composer-archive { display: none; flex: 0 0 auto; white-space: nowrap; border-color: var(--pi-border-muted); color: var(--pi-muted); padding: 5px 9px; font-size: inherit; }
   @container (min-width: 560px) {
     .session-identity { display: inline; }
   }
+  .icon-button { flex: 0 0 auto; display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; }
+  .composer-archive { border-color: var(--pi-border-muted); color: var(--pi-muted); }
+  .composer-archive-label { display: none; }
   @container (min-width: 700px) {
-    .composer-archive { display: inline-flex; }
+    .icon-button.composer-archive { display: inline-flex; width: auto; gap: 6px; padding: 5px 9px; }
+    .composer-archive-label { display: inline; }
   }
   .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
-  .composer-summon { flex: 0 0 auto; }
-  .icon-button { flex: 0 0 auto; display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; }
   /* Queue and steer read as one control with two targets: steering is a way of
      answering the running turn, not a separate errand. */
   .primary-action { flex: 0 0 auto; display: inline-flex; align-items: center; }
@@ -909,15 +909,6 @@ export const promptEditorStyles = css`
   .stop-button:not(:disabled) { color: var(--pi-danger); }
   .select-thinking .prompt-thinking-gauge .gauge-bar { fill: currentColor; stroke: none; opacity: .28; }
   .select-thinking .prompt-thinking-gauge .gauge-bar-active { opacity: 1; }
-  /* One way in to everything the rail does not hold, and the only place a
-     waiting warning or notification can announce itself now the bar is gone. */
-  .island-menu { position: relative; }
-  .island-menu.attention { border-color: var(--pi-accent); color: var(--pi-accent); }
-  .island-menu-count {
-    position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px; padding: 0 3px;
-    border-radius: 999px; background: var(--pi-accent); color: var(--pi-bg);
-    font: 600 10px/15px system-ui, sans-serif; text-align: center;
-  }
   textarea, .markdown-editor .cm-editor { box-sizing: border-box; width: 100%; min-height: 54px; max-height: 220px; resize: none; overflow: hidden; border-radius: 8px; border: 1px solid var(--pi-border); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); }
   textarea { overflow-y: auto; padding: 8px; }
   .markdown-editor .cm-scroller { max-height: 220px; overflow-y: auto; font-family: var(--pi-control-font-family, system-ui, sans-serif); line-height: 1.4; }
@@ -960,45 +951,4 @@ export const promptEditorStyles = css`
     .select-model { max-width: 48cqi; }
     button { padding: 5px 7px; }
   }
-`;
-
-/**
- * The control sheet the composer summons once the chat surface stops keeping
- * its chrome resident. It rises from the bottom because that is where it was
- * asked for, and it overlays rather than displaces so dismissing it returns the
- * conversation untouched.
- */
-export const controlSheetStyles = css`
-  /*
-   * Closed, the host takes no box at all. Open, it claims the whole pane and its
-   * own stacking context: display:contents would drop the box and take the
-   * z-index with it, letting the composer paint over the sheet.
-   */
-  :host { display: none; }
-  :host([open]) { position: absolute; inset: 0; z-index: 40; display: block; }
-  .control-sheet-scrim { position: absolute; inset: 0; z-index: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: var(--pi-shadow); cursor: pointer; }
-  .control-sheet {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
-    display: flex; flex-direction: column; gap: 2px;
-    max-height: 80%; overflow-y: auto;
-    padding: 7px 0 max(9px, env(safe-area-inset-bottom));
-    border-top: 1px solid var(--pi-border);
-    border-radius: 12px 12px 0 0;
-    background: var(--pi-bg);
-    box-shadow: 0 -10px 24px var(--pi-shadow-strong);
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .control-sheet { animation: control-sheet-in 160ms ease-out; }
-  }
-  @keyframes control-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
-  .control-sheet-grab { align-self: center; width: 34px; height: 4px; margin-bottom: 5px; border-radius: 2px; background: var(--pi-border); }
-  .control-sheet-notifications { margin: 0; padding: 9px 12px 2px; color: var(--pi-muted); font-size: 12px; }
-  /* Three named groups — do this, know this, go there — so the sheet does not
-     read as one list once it carries the retired status readings. */
-  .control-sheet-section { margin: 0; padding: 9px 12px 2px; color: var(--pi-dim); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-  .control-sheet-action { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; border-radius: 0; background: transparent; color: var(--pi-text); padding: 9px 12px; font: inherit; text-align: start; cursor: pointer; }
-  .control-sheet-action:hover, .control-sheet-action:focus-visible { background: var(--pi-selection-bg); }
-  .control-sheet-warning-icon { flex: 0 0 auto; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .control-sheet-readings { display: flex; flex-wrap: wrap; gap: 12px; padding: 2px 12px 4px; color: var(--pi-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .control-sheet-note { margin: 0; padding: 6px 12px; color: var(--pi-dim); font-size: 12px; }
 `;

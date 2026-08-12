@@ -58,27 +58,23 @@ describe("PromptEditor read-only control availability", () => {
     expect(onSend).toHaveBeenCalledWith("queue this immediately", undefined, undefined, undefined);
   });
 
-  it("keeps archive and control-sheet summon available while the editor is read-only", async () => {
+  it("keeps archive available but disables attachments while the editor is read-only", async () => {
     const onArchiveAndNext = vi.fn();
-    const onOpenControlSheet = vi.fn();
     const editor = await renderPromptEditor({
       disabled: true,
       chromeSummoned: true,
       canArchive: true,
       onArchiveAndNext,
-      onOpenControlSheet,
     });
 
     const archive = button(editor, ".composer-archive");
-    const summon = button(editor, ".composer-summon");
+    const attach = button(editor, ".composer-attach");
 
     expect(archive.disabled).toBe(false);
-    expect(summon.disabled).toBe(false);
+    expect(attach.disabled).toBe(true);
     archive.click();
-    summon.click();
 
     expect(onArchiveAndNext).toHaveBeenCalledOnce();
-    expect(onOpenControlSheet).toHaveBeenCalledOnce();
   });
 });
 
@@ -88,7 +84,6 @@ async function renderPromptEditor(options: {
   chromeSummoned?: boolean;
   canArchive?: boolean;
   onArchiveAndNext?: () => void;
-  onOpenControlSheet?: () => void;
   runtimeControlsAvailable?: boolean;
 }): Promise<PromptEditor> {
   const editor = new PromptEditor();
@@ -101,7 +96,6 @@ async function renderPromptEditor(options: {
   editor.chromeSummoned = options.chromeSummoned ?? false;
   editor.canArchive = options.canArchive ?? false;
   if (options.onArchiveAndNext !== undefined) editor.onArchiveAndNext = options.onArchiveAndNext;
-  if (options.onOpenControlSheet !== undefined) editor.onOpenControlSheet = options.onOpenControlSheet;
   document.body.append(editor);
   await editor.updateComplete;
   return editor;

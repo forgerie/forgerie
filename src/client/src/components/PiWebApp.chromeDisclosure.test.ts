@@ -56,10 +56,14 @@ describe("PiWebApp chrome disclosure", () => {
     }
   });
 
-  it("keeps the summoned controls reachable from the composer", async () => {
+  it("keeps direct attachment access in the composer without a control sheet", async () => {
     const app = await mountApp(499);
+    const root = shadowRoot(app);
+    const composer = root.querySelector<PromptEditor>("prompt-editor");
 
-    expect(shadowRoot(app).querySelector("app-control-sheet")).not.toBeNull();
+    expect(root.querySelector("app-control-sheet")).toBeNull();
+    await composer?.updateComplete;
+    expect(composer?.shadowRoot?.querySelector(".composer-attach")).not.toBeNull();
   });
 
   it("draws session context progress on the composer island itself, not over the transcript", async () => {

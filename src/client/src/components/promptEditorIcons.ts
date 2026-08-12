@@ -13,6 +13,16 @@ export function renderAttachIcon(): TemplateResult {
   `;
 }
 
+export function renderArchiveIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 7.5h16v12H4z"></path>
+      <path d="M3 4.5h18v3H3z"></path>
+      <path d="M9 12h6"></path>
+    </svg>
+  `;
+}
+
 export function renderSendIcon(): TemplateResult {
   return svg`
     <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">

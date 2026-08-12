@@ -41,7 +41,7 @@ import type { ManagedProcessesBrowserEvent, ManagedProcessesRuntime } from "../.
 import { resolveParentSessionLocation, type ParentSessionLocation } from "../parentSessionLocation";
 import { promptHistoryEntries } from "../promptHistory";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
-import { notificationInboxTotalCount, selectedNotificationView } from "../sessionNotifications";
+import { selectedNotificationView } from "../sessionNotifications";
 import { createChatOpenTiming } from "../chatOpenTiming";
 import { selectedChatCanUseRuntime, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget, selectedChatTargetsEqual, type SelectedChatLoad } from "../selectedChatLoad";
 import { SessionUnreadController } from "../sessionUnread";
@@ -95,7 +95,6 @@ import "./SettingsDialog";
 import "./WorkspacePanel";
 import type { WorkspacePanelEmptyState } from "./WorkspacePanel";
 import "./appShell/AppContextBar";
-import "./appShell/AppControlSheet";
 import "./appShell/AppMobileMainTabs";
 import type { AppMobileMainTab, AppMobileMainTabIcon } from "./appShell/AppMobileMainTabs";
 import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/AppNavigationPanel";
@@ -2852,10 +2851,6 @@ export class PiWebApp extends LitElement {
     void this.archiveAndNext();
   };
 
-  private readonly handleOpenControlSheet = (): void => {
-    this.setState({ controlSheetOpen: true });
-  };
-
   private readonly handleRetrySelectedChat = (): void => {
     const session = this.state.selectedSession;
     if (session === undefined) return;
@@ -2931,11 +2926,11 @@ export class PiWebApp extends LitElement {
 
   private renderOpeningComposer(intent: Extract<ChatNavigationIntent, { kind: "opening" }>) {
     const workspace = workspaceForSessionCwd(this.state, intent.session.cwd);
-    return html`<prompt-editor .sessionId=${intent.session.id} .cwd=${intent.session.cwd} .machineId=${intent.machineId} .projectId=${workspace?.projectId} .workspaceId=${workspace?.id} .promptHistory=${[]} .disabled=${intent.session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${false} .canSteer=${false} .isCompacting=${false} .canStop=${false} .status=${undefined} .contextUsage=${undefined} .availableThinkingLevels=${[]} .sending=${this.state.sendingPrompts[intent.session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerWorkspaceLabel(workspace)} .canArchive=${false} .attentionCount=${0} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
+    return html`<prompt-editor .sessionId=${intent.session.id} .cwd=${intent.session.cwd} .machineId=${intent.machineId} .projectId=${workspace?.projectId} .workspaceId=${workspace?.id} .promptHistory=${[]} .disabled=${intent.session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${false} .canSteer=${false} .isCompacting=${false} .canStop=${false} .status=${undefined} .contextUsage=${undefined} .availableThinkingLevels=${[]} .sending=${this.state.sendingPrompts[intent.session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerWorkspaceLabel(workspace)} .canArchive=${false} .onArchiveAndNext=${this.handleArchiveAndNext} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
   }
 
   private renderSelectedComposer(state: AppState, session: SessionInfo, runtimeAvailable: boolean) {
-    return html`<prompt-editor .sessionId=${session.id} .cwd=${state.selectedWorkspace?.path ?? session.cwd} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${runtimeAvailable} .canSteer=${runtimeAvailable && state.status?.isStreaming === true} .isCompacting=${runtimeAvailable && state.status?.isCompacting === true} .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .attentionCount=${this.selectedAttentionCount(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onOpenControlSheet=${this.handleOpenControlSheet} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
+    return html`<prompt-editor .sessionId=${session.id} .cwd=${state.selectedWorkspace?.path ?? session.cwd} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${runtimeAvailable} .canSteer=${runtimeAvailable && state.status?.isStreaming === true} .isCompacting=${runtimeAvailable && state.status?.isCompacting === true} .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
   }
 
   private composerWorkspaceLabel(workspace: Workspace | undefined): string | undefined {
@@ -3156,48 +3151,6 @@ export class PiWebApp extends LitElement {
     return html`<button type="button" class="navigation-scrim" aria-label="Close navigation" @click=${() => { this.selectMainView("chat"); }}></button>`;
   }
 
-  /** Zero when no session is selected or its inbox has not loaded, so the sheet stays quiet. */
-  private selectedNotificationCount(state: AppState): number {
-    const inbox = selectedNotificationView(state.selectedNotificationInbox);
-    return inbox === undefined ? 0 : notificationInboxTotalCount(inbox);
-  }
-
-  /** Warnings plus notifications: what the island menu has to announce now the bar is gone. */
-  private selectedAttentionCount(state: AppState): number {
-    return this.sessionWarningVisibility.warningCount + this.selectedNotificationCount(state);
-  }
-
-  private readonly handleAttachFiles = (): void => {
-    this.promptEditor?.openAttachmentPicker();
-  };
-
-  private renderControlSheet(state: AppState) {
-    const warningCount = this.sessionWarningVisibility.warningCount;
-    return html`
-      <app-control-sheet
-        .open=${state.controlSheetOpen}
-        .status=${state.status}
-        .warningCount=${warningCount}
-        .warningsExpanded=${warningCount > 0 && !this.sessionWarningVisibility.collapsed}
-        .onToggleWarnings=${this.handleToggleWarnings}
-        .onAttachFiles=${this.handleAttachFiles}
-        .canArchive=${this.canArchiveSelectedSession(state)}
-        .onArchiveAndNext=${this.handleArchiveAndNext}
-        .machines=${state.machines}
-        .machine=${state.selectedMachine}
-        .project=${state.selectedProject}
-        .workspace=${state.selectedWorkspace}
-        .session=${state.selectedSession}
-        .tabs=${this.mobileMainTabs()}
-        .selectedView=${state.mainView}
-        .notificationCount=${this.selectedNotificationCount(state)}
-        .onSelectView=${(view: AppState["mainView"]) => { this.selectMainView(view); }}
-        .onOpenSection=${(section: NavigationSection) => { this.openNavigationSection(section); }}
-        .onClose=${() => { this.setState({ controlSheetOpen: false }); }}
-      ></app-control-sheet>
-    `;
-  }
-
   private renderContextBar() {
     if (this.appShell.isChromeSummoned) return null;
     if (!this.appShell.isMobileNavigationLayout) return null;
@@ -3305,7 +3258,6 @@ export class PiWebApp extends LitElement {
           ` : state.selectedSession ? html`
             ${this.renderChatView(state, state.selectedSession)}
             ${this.renderSelectedComposer(state, state.selectedSession, runtimeAvailable)}
-            ${this.renderControlSheet(state)}
             ${state.commandDialog !== undefined ? html`<command-picker .title=${state.commandDialog.title} .options=${state.commandDialog.options} .onPick=${(value: string) => this.sessions.respondToCommand(state.commandDialog?.requestId ?? "", value)} .onCancel=${() => { this.sessions.cancelCommand(); }}></command-picker>` : null}
             ${state.modelDialog !== undefined ? html`<command-picker title=${state.modelDialog.title} .searchable=${true} .options=${state.modelDialog.options} .selectedValue=${state.modelDialog.selectedValue} .onPick=${(value: string) => { void this.pickModel(value); }} .onCancel=${() => { this.setState({ modelDialog: undefined }); }}></command-picker>` : null}
             ${state.thinkingDialog !== undefined ? html`<command-picker title=${state.thinkingDialog.title} .options=${state.thinkingDialog.options} .selectedValue=${state.thinkingDialog.selectedValue} .onPick=${(value: string) => { void this.pickThinking(value); }} .onCancel=${() => { this.setState({ thinkingDialog: undefined }); }}></command-picker>` : null}
