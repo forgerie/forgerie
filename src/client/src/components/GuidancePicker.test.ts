@@ -38,22 +38,6 @@ describe("GuidancePicker", () => {
     expect(onClose).toHaveBeenCalledWith(true);
   });
 
-  it("does not swallow an outside pointer activation", async () => {
-    const outside = document.createElement("button");
-    const outsideClick = vi.fn();
-    outside.addEventListener("click", outsideClick);
-    const picker = new GuidancePicker();
-    const onClose = vi.fn();
-    picker.onClose = onClose;
-    document.body.append(picker, outside);
-    await picker.updateComplete;
-
-    outside.dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }));
-    outside.click();
-
-    expect(onClose).toHaveBeenCalledWith(false);
-    expect(outsideClick).toHaveBeenCalledOnce();
-  });
 });
 
 function required<T>(value: T | null | undefined): T {

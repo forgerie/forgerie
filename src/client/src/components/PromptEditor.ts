@@ -16,6 +16,7 @@ import type { ComposerDraft, ComposerDraftCompletionError, ComposerDraftDisplayS
 import "./ComposerDraft";
 import "./ContextUsageMeter";
 import "./GuidancePicker";
+import "./ComposerPopover";
 
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
@@ -122,17 +123,23 @@ export class PromptEditor extends LitElement {
     const resting = this.isResting();
     return html`
       ${this.guidanceOpen ? html`
-        <guidance-picker
-          id="session-guidance-picker"
-          .activeIds=${this.status?.activeGuidanceIds ?? []}
-          .pending=${this.guidancePending}
-          .working=${this.canSteer || this.isCompacting}
-          .readOnly=${this.disabled || !this.runtimeControlsAvailable}
-          .error=${this.guidanceError}
-          .trigger=${this.guidanceTrigger}
-          .onToggle=${(entryId: string, enabled: boolean) => { void this.setGuidance(entryId, enabled); }}
+        <composer-popover
+          label="Session guidance"
+          .anchor=${this.guidanceTrigger}
           .onClose=${(restoreFocus: boolean) => { this.closeGuidance(restoreFocus); }}
-        ></guidance-picker>
+        >
+          <guidance-picker
+            id="session-guidance-picker"
+            .activeIds=${this.status?.activeGuidanceIds ?? []}
+            .pending=${this.guidancePending}
+            .working=${this.canSteer || this.isCompacting}
+            .readOnly=${this.disabled || !this.runtimeControlsAvailable}
+            .error=${this.guidanceError}
+            .trigger=${this.guidanceTrigger}
+            .onToggle=${(entryId: string, enabled: boolean) => { void this.setGuidance(entryId, enabled); }}
+            .onClose=${(restoreFocus: boolean) => { this.closeGuidance(restoreFocus); }}
+          ></guidance-picker>
+        </composer-popover>
       ` : null}
       <footer
         class=${this.footerClass(shellMode, resting)}

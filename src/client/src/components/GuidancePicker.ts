@@ -13,22 +13,6 @@ export class GuidancePicker extends LitElement {
   @property({ attribute: false }) onToggle?: (entryId: string, enabled: boolean) => void;
   @property({ attribute: false }) onClose?: (restoreFocus: boolean) => void;
 
-  private readonly handleDocumentPointerDown = (event: PointerEvent): void => {
-    const path = event.composedPath();
-    if (path.includes(this) || (this.trigger !== undefined && path.includes(this.trigger))) return;
-    this.onClose?.(false);
-  };
-
-  override connectedCallback(): void {
-    super.connectedCallback();
-    document.addEventListener("pointerdown", this.handleDocumentPointerDown, true);
-  }
-
-  override disconnectedCallback(): void {
-    document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
-    super.disconnectedCallback();
-  }
-
   override firstUpdated(): void {
     const firstEnabled = this.optionButtons().find((button) => !button.disabled);
     if (firstEnabled !== undefined) firstEnabled.focus();
@@ -93,8 +77,8 @@ export class GuidancePicker extends LitElement {
   }
 
   static override styles = css`
-    :host { position: absolute; right: clamp(6px, 2cqi, 12px); bottom: calc(100% + 8px); left: clamp(6px, 2cqi, 12px); z-index: 20; display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; }
-    .guidance-panel { max-height: 260px; overflow-y: auto; border: 1px solid var(--pi-border); border-radius: 12px; background: var(--pi-surface); box-shadow: 0 10px 30px var(--pi-shadow-strong); }
+    :host { display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+    .guidance-panel { display: block; }
     header { padding: 9px 11px; border-bottom: 1px solid var(--pi-border-muted); }
     .guidance-options button { box-sizing: border-box; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; border: 0; border-bottom: 1px solid var(--pi-border-muted); border-radius: 0; background: transparent; color: var(--pi-text); font: inherit; text-align: left; cursor: pointer; }
     .guidance-options button:hover:not(:disabled), .guidance-options button:focus-visible { background: var(--pi-selection-bg); }
