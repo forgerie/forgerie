@@ -59,7 +59,6 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) onFocusNavigationTarget?: (target: NavigationFocusTarget) => void | Promise<void>;
   @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
   /** Dismiss the navigation overlay. Only meaningful while `compact` is set. */
-  @property({ attribute: false }) onCloseOverlay?: () => void;
   @property({ attribute: false }) refreshControl?: unknown;
   @property({ attribute: false }) panelControls?: unknown;
 
@@ -131,7 +130,6 @@ export class AppNavigationPanel extends LitElement {
         .onDismissUndoToast=${this.onDismissUndoToast}
         .unavailableCwds=${this.unavailableCwds}
         .compact=${this.compact}
-        .onCloseOverlay=${this.onCloseOverlay}
         data-machine=${machineId ?? ""}
       ></session-inbox-panel>
     `;

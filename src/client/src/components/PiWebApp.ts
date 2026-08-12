@@ -1467,7 +1467,6 @@ export class PiWebApp extends LitElement {
         .onNewSession=${() => { this.openNewSessionComposer(); }}
         .onManageWorkspaces=${() => { this.setState({ workspaceManagementDialog: { step: "project" } }); }}
         .onCancelKeyboardNavigation=${() => { void this.openChat(); }}
-        .onCloseOverlay=${() => { this.selectMainView("chat"); }}
         .unavailableCwds=${this.unavailableCwds}
       ></app-navigation-panel>
     `;
@@ -3044,6 +3043,24 @@ export class PiWebApp extends LitElement {
    * the edge that faces the session, in the panel's own header row rather than
    * in a band above it.
    */
+  /**
+   * The close for the sessions list when it is a main view rather than a panel.
+   *
+   * It cannot pin -- a main view is not docked -- and closing it means going
+   * back to the conversation. This replaces the back arrow that used to sit in
+   * the inbox header, so the list is closed the same way wherever it appears.
+   */
+  private renderMainViewControls() {
+    return html`
+      <app-panel-controls
+        noun="sessions"
+        controls="navigation-panel"
+        .pinnable=${false}
+        .onClose=${() => { this.selectMainView("chat"); }}
+      ></app-panel-controls>
+    `;
+  }
+
   private renderPanelControls(side: ShellPanel) {
     const docked = this.panelIntent.isDocked(side);
     return html`
@@ -3237,7 +3254,9 @@ export class PiWebApp extends LitElement {
           ${this.renderMobileMainTabs()}
           ${this.renderGlobalError(state)}
           ${this.renderNavigationScrim(state)}
-          <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout ? this.renderNavigationPanel() : null}</div>
+          <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout
+            ? this.renderNavigationPanel(this.renderMainViewControls())
+            : null}</div>
           ${intent.kind === "opening" ? html`
             ${this.renderOpeningChatIntent(intent)}
             ${this.renderOpeningComposer(intent)}

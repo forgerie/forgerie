@@ -198,7 +198,6 @@ export class SessionInboxPanel extends LitElement {
    */
   @property({ type: Boolean, reflect: true }) compact = false;
   /** Dismiss the navigation overlay and return to the session underneath. */
-  @property({ attribute: false }) onCloseOverlay?: () => void;
   /**
    * Cwds confirmed to have no matching workspace after lazy loading all
    * known projects. Rows whose session.cwd is in this set render as disabled
@@ -471,15 +470,6 @@ export class SessionInboxPanel extends LitElement {
   private renderHeader(): TemplateResult {
     return html`
       <div class="board-identity">
-        ${this.compact && this.onCloseOverlay !== undefined ? html`
-          <button
-            class="overlay-back-btn"
-            data-action="close-overlay"
-            title="Back to session"
-            aria-label="Back to session"
-            @click=${() => { this.onCloseOverlay?.(); }}
-          >←</button>
-        ` : nothing}
         <h2 class="board-title-row">
           <button
             class="board-title-btn"
@@ -1146,20 +1136,6 @@ export class SessionInboxPanel extends LitElement {
       text-overflow: ellipsis;
     }
 
-    .overlay-back-btn {
-      display: inline-grid;
-      place-items: center;
-      min-width: 44px;
-      min-height: 44px;
-      margin-inline-start: -8px;
-      font: inherit;
-      color: var(--pi-muted, #aaa4bd);
-      background: none;
-      border: none;
-      cursor: pointer;
-    }
-
-    .overlay-back-btn:hover { color: var(--pi-text, #f7f4ff); }
 
     .icon-btn {
       display: inline-grid;

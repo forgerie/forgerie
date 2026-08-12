@@ -1192,23 +1192,16 @@ describe("board shortcuts", () => {
 // ---------------------------------------------------------------------------
 
 describe("overlay dismissal", () => {
-  it("offers a way back only while the board is overlaid", async () => {
-    const docked = await mountPanel({
-      globalSessions: mkGlobalSessions([mkSession("open-one")]),
-      onCloseOverlay: () => { /* unused while docked */ },
-    });
-    expect(shadowRoot(docked).querySelector("[data-action='close-overlay']")).toBeNull();
-
-    let closed = 0;
+  it("leaves dismissal to the panel's own close, not a second control", async () => {
+    // The board used to carry a back arrow of its own while overlaid. The panel
+    // now brings a close with it wherever it appears, so a second control here
+    // would be two ways to put the same thing away.
     const overlaid = await mountPanel({
       globalSessions: mkGlobalSessions([mkSession("open-one")]),
       compact: true,
-      onCloseOverlay: () => { closed += 1; },
     });
-    clickSelector(shadowRoot(overlaid), "[data-action='close-overlay']");
-    await overlaid.updateComplete;
 
-    expect(closed).toBe(1);
+    expect(shadowRoot(overlaid).querySelector("[data-action='close-overlay']")).toBeNull();
   });
 });
 
