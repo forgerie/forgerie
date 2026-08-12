@@ -142,8 +142,17 @@ describe("PromptResourceCatalogService", () => {
     expect(enforcePromptResourceCatalogLimits(responseWithSerializedBytes(PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes + 1))).toEqual(promptResourceCatalogUnavailable("over-limit", "Prompt-resource catalog exceeded the response size limit."));
   });
 
-  it("rejects oversized and non-regular skill resource content before fingerprinting", async () => {
+  it("rejects oversized and non-regular resource content before fingerprinting", async () => {
     const root = await tempRoot();
+    const oversizedPrompt = new PromptResourceCatalogService({
+      agentDir: join(root, "agent"),
+      loader: resourcesFrom({
+        prompts: [{ name: "oversized", description: "Too large", content: "x".repeat(PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes + 1), filePath: "oversized.md", sourceInfo: sourceInfo("oversized.md") }],
+        skills: [],
+        diagnostics: [],
+      }),
+    });
+    await expect(oversizedPrompt.catalog(join(root, "workspace"))).resolves.toEqual(promptResourceCatalogUnavailable("over-limit", "Prompt-resource catalog contained over-limit resource content."));
     const oversizedPath = join(root, "oversized", "SKILL.md");
     await mkdir(join(root, "oversized"), { recursive: true });
     await writeFile(oversizedPath, "x".repeat(PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes + 1), "utf8");

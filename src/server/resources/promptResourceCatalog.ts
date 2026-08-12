@@ -1,9 +1,10 @@
-import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { DefaultResourceLoader, type PromptTemplate, type ResourceDiagnostic, type Skill } from "@earendil-works/pi-coding-agent";
 import { buildPromptResourceCatalogFromResources, type CanonicalSkillResourceInput } from "../sessions/commandCatalog.js";
 import { canonicalPromptResourceOrigin } from "../sessions/promptResourceOrigin.js";
+import { BUILTIN_COMMANDS } from "../sessions/builtinCommands.js";
 import type { PromptResourceCatalogAvailable, PromptResourceCatalogResponse } from "../../shared/promptResourceCommand.js";
+import { assertBoundedPromptResourceContent, PromptResourceContentLimitError, readBoundedPromptResourceFile } from "./promptResourceContent.js";
 
 export interface PromptResourceCatalogLimits {
   maxCommands: number;
@@ -53,8 +54,6 @@ interface QueuedLoad {
   resolve: (response: PromptResourceCatalogResponse) => void;
 }
 
-class PromptResourceContentLimitError extends Error {}
-
 export class PromptResourceCatalogService {
   private readonly agentDir: string;
   private readonly loader: PromptResourceLoader;
@@ -77,13 +76,16 @@ export class PromptResourceCatalogService {
     if (this.activeLoads < this.limits.activeLoads) return this.start(key, canonicalCwd);
     if (this.queue.length >= this.limits.queuedLoads) return Promise.resolve(promptResourceCatalogUnavailable("busy", "Prompt-resource catalog loading is busy."));
 
-    let queuedLoad!: QueuedLoad;
     const queued = new Promise<PromptResourceCatalogResponse>((resolveQueued) => {
-      queuedLoad = {
+      const expire = () => {
+        const queuedLoad = this.queue.find((candidate) => candidate.key === key);
+        if (queuedLoad !== undefined) this.expireQueued(queuedLoad);
+      };
+      const queuedLoad: QueuedLoad = {
         key,
         cwd: canonicalCwd,
         deadlineAt: Date.now() + this.limits.deadlineMs,
-        timeout: setTimeout(() => { this.expireQueued(queuedLoad); }, this.limits.deadlineMs),
+        timeout: setTimeout(expire, this.limits.deadlineMs),
         resolve: resolveQueued,
       };
       this.queue.push(queuedLoad);
@@ -158,7 +160,7 @@ export class PromptResourceCatalogService {
       const resources = await this.loader.loadResources({ cwd, agentDir: this.agentDir, signal });
       throwIfAborted(signal);
       const prompts = resources.prompts.map((prompt) => {
-        assertBoundedResourceContent(prompt.content, this.limits.maxSerializedBytes);
+        assertBoundedPromptResourceContent(prompt.content, this.limits.maxSerializedBytes);
         return {
           name: prompt.name,
           description: prompt.description,
@@ -171,13 +173,14 @@ export class PromptResourceCatalogService {
         skills.push({
           name: skill.name,
           description: skill.description,
-          content: await readBoundedResourceFile(skill.filePath, this.limits.maxSerializedBytes, signal),
+          content: await readBoundedPromptResourceFile(skill.filePath, this.limits.maxSerializedBytes, signal),
           origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
           baseDir: skill.baseDir,
           filePath: skill.filePath,
         });
       }
       const catalog = await buildPromptResourceCatalogFromResources({
+        builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, source: "builtin" as const, ...(command.description === undefined ? {} : { description: command.description }) })),
         prompts,
         skills,
         diagnostics: resources.diagnostics.map(safeDiagnostic),
@@ -235,32 +238,6 @@ export function promptResourceCatalogUnavailable(reason: PromptResourceCatalogUn
 
 function promptResourceCatalogTimeout(): PromptResourceCatalogResponse {
   return promptResourceCatalogUnavailable("timeout", "Prompt-resource catalog loading timed out after 10 seconds; the loader will finish in the background.");
-}
-
-async function readBoundedResourceFile(filePath: string, maxBytes: number, signal: AbortSignal): Promise<string> {
-  throwIfAborted(signal);
-  const handle = await open(filePath, "r");
-  try {
-    const file = await handle.stat();
-    if (!file.isFile() || file.size > maxBytes) throw new PromptResourceContentLimitError();
-    const capacity = Math.min(maxBytes + 1, file.size + 1);
-    const content = Buffer.alloc(Math.max(1, capacity));
-    let offset = 0;
-    while (offset < content.length) {
-      throwIfAborted(signal);
-      const { bytesRead } = await handle.read(content, offset, content.length - offset, offset);
-      if (bytesRead === 0) break;
-      offset += bytesRead;
-    }
-    if (offset > maxBytes || offset > file.size) throw new PromptResourceContentLimitError();
-    return content.subarray(0, offset).toString("utf8");
-  } finally {
-    await handle.close();
-  }
-}
-
-function assertBoundedResourceContent(content: string, maxBytes: number): void {
-  if (Buffer.byteLength(content, "utf8") > maxBytes) throw new PromptResourceContentLimitError();
 }
 
 function throwIfAborted(signal: AbortSignal): void {

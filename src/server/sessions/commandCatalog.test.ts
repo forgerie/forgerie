@@ -31,6 +31,19 @@ describe("canonical command catalog", () => {
     expect(catalog.firstPromptCommands[0]?.identity.fingerprint).toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it("does not advertise prompt resources shadowed by known builtins", async () => {
+    const catalog = await buildPromptResourceCatalogFromResources({
+      builtins: [{ name: "tree", source: "builtin" }],
+      prompts: [
+        { name: "tree", content: "shadowed", origin: "prompt:tree" },
+        { name: "review", content: "available", origin: "prompt:review" },
+      ],
+      skills: [],
+    });
+
+    expect(catalog.commands.map((command) => command.name)).toEqual(["review"]);
+  });
+
   it("projects active command descriptors without requiring prompt-resource bodies or identities", () => {
     const commands = buildActiveCommandList({
       builtins: [{ name: "tree", source: "builtin" }],

@@ -97,8 +97,9 @@ export async function buildActiveCommandCatalog(input: ActiveCommandCatalogInput
   };
 }
 
-export async function buildPromptResourceCatalogFromResources(input: { prompts: readonly CanonicalPromptResourceInput[]; skills: readonly CanonicalSkillResourceInput[]; diagnostics?: readonly string[] }): Promise<PromptResourceCatalogAvailable> {
+export async function buildPromptResourceCatalogFromResources(input: { builtins?: readonly CanonicalBuiltinCommandInput[]; prompts: readonly CanonicalPromptResourceInput[]; skills: readonly CanonicalSkillResourceInput[]; diagnostics?: readonly string[] }): Promise<PromptResourceCatalogAvailable> {
   const candidates = [
+    ...(input.builtins ?? []).map((command) => clientCommand(command.name, "builtin", command.description)),
     ...await promptResourceRecordsFromSkills(input.skills),
     ...await promptResourceRecordsFromPrompts(input.prompts),
   ];

@@ -38,6 +38,8 @@ import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
 import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
+import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
+import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
 import { SESSION_GUIDANCE_ENTRIES, setSessionGuidance } from "../../shared/sessionGuidance.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
 import type {
@@ -2258,13 +2260,13 @@ export class PiSessionService implements SessionRouteService {
       prompts: session.promptTemplates.map((template) => ({
         name: template.name,
         ...(template.description === undefined ? {} : { description: template.description }),
-        content: template.content ?? "",
+        content: boundedActivePromptContent(template.content ?? ""),
         origin: canonicalPromptResourceOrigin("prompt", template.filePath, template.sourceInfo),
       })),
       skills: await Promise.all(session.resourceLoader.getSkills().skills.map(async (skill) => ({
         name: skill.name,
         ...(skill.description === undefined ? {} : { description: skill.description }),
-        content: skill.filePath === undefined ? "" : await readResourceContent(skill.filePath),
+        content: await readActiveSkillContent(skill.filePath),
         origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
         baseDir: skill.baseDir ?? "",
         ...(skill.filePath === undefined ? {} : { filePath: skill.filePath }),
@@ -2320,11 +2322,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): Promise<boolean> {
-    let resolvePreflight!: (accepted: boolean) => void;
-    const preflight = new Promise<boolean>((resolve) => { resolvePreflight = resolve; });
-    const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, resolvePreflight);
-    void completion.then(resolvePreflight);
-    return await preflight;
+    return await new Promise<boolean>((resolvePreflight) => {
+      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, resolvePreflight);
+      void completion.then(resolvePreflight);
+    });
   }
 
   private enqueuePromptDuringCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): void {
@@ -4814,11 +4815,21 @@ function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: Imag
   return Object.keys(options).length > 0 ? options : undefined;
 }
 
-async function readResourceContent(path: string): Promise<string> {
+function boundedActivePromptContent(content: string): string {
   try {
-    return await readFile(path, "utf8");
+    assertBoundedPromptResourceContent(content, PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes);
+    return content;
   } catch {
-    return "";
+    throw new Error("Prompt-resource template content is unavailable.");
+  }
+}
+
+async function readActiveSkillContent(filePath: string | undefined): Promise<string> {
+  if (filePath === undefined) throw new Error("Prompt-resource skill content is unavailable.");
+  try {
+    return await readBoundedPromptResourceFile(filePath, PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes);
+  } catch {
+    throw new Error("Prompt-resource skill content is unavailable.");
   }
 }
 

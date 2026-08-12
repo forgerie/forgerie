@@ -4,11 +4,25 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type AssistantMessage } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText } from "../../shared/promptResourceCommand.js";
 import { PiSessionService } from "./piSessionService.js";
 import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources } from "./commandCatalog.js";
 import { CapturingSessionEventHub, createTestModelRuntime, fakeRuntime, runtimeCreator, seedCredential, sessionGateway, sessionRecord, sessionRef, TEST_MODEL_ID, TEST_MODEL_PROVIDER, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
+
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof PiCodingAgent>()),
+  resizeImage: vi.fn((bytes: Buffer, mimeType: string) => Promise.resolve({
+    data: bytes.toString("base64"),
+    mimeType,
+    originalWidth: 1,
+    originalHeight: 1,
+    width: 1,
+    height: 1,
+    wasResized: false,
+  })),
+}));
 
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
 
@@ -103,6 +117,61 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await service.dispose();
   });
 
+  it("delivers inline attachments through the identity-bound expansion-disabled path", async () => {
+    const fake = fakeRuntime("prompt-resource-inline-session");
+    fake.session.promptTemplates = [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }];
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-inline-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({ source: "prompt", name: "review", origin: "prompt:unknown:unknown:unknown:unknown", content: "Review $ARGUMENTS" }),
+    };
+    const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
+    await expect(service.runPromptResourceCommand(
+      sessionRef("prompt-resource-inline-session"),
+      "/review src",
+      identity,
+      undefined,
+      [{ kind: "image", mimeType: "image/png", data: tinyPng, name: "shot.png" }],
+    )).resolves.toMatchObject({ accepted: true });
+
+    expect(fake.calls.prompt).toHaveLength(1);
+    expect(fake.calls.prompt[0]).toMatchObject({
+      text: "Review src",
+      options: { expandPromptTemplates: false, images: [{ type: "image", mimeType: "image/png" }] },
+    });
+    await service.dispose();
+  });
+
+  it("rejects a stale prompt-resource identity after its content changes", async () => {
+    const fake = fakeRuntime("prompt-resource-stale-session", {
+      promptTemplates: [{ name: "review", description: "Review", content: "Changed $ARGUMENTS" }],
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-stale-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const staleIdentity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({ source: "prompt", name: "review", origin: "prompt:unknown:unknown:unknown:unknown", content: "Original $ARGUMENTS" }),
+    };
+
+    await expect(service.runPromptResourceCommand(sessionRef("prompt-resource-stale-session"), "/review src", staleIdentity)).rejects.toThrow("no longer available");
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
   it("does not return a delivery receipt when Pi rejects prompt preflight", async () => {
     const fake = fakeRuntime("prompt-resource-rejected-session", {
       promptTemplates: [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }],
@@ -194,6 +263,27 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
       [{ kind: "image", mimeType: "image/png", data: tinyPng, name: "shot.png" }],
     )).rejects.toThrow("Prompt-resource command is no longer available");
 
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("fails closed without exposing a missing active skill path", async () => {
+    const missingPath = join(tmpdir(), "forgerie-missing-skill", "SKILL.md");
+    const fake = fakeRuntime("prompt-resource-missing-skill-session", {
+      resourceLoader: { getSkills: () => ({ skills: [{ name: "missing", description: "Missing", filePath: missingPath, baseDir: join(tmpdir(), "forgerie-missing-skill") }] }) },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-missing-skill-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = { source: "skill" as const, name: "skill:missing", fingerprint: "a".repeat(64) };
+
+    const error = await service.runPromptResourceCommand(sessionRef("prompt-resource-missing-skill-session"), "/skill:missing", identity).catch((caught: unknown) => caught);
+    expect(error).toEqual(new Error("Prompt-resource skill content is unavailable."));
+    expect(String(error)).not.toContain(missingPath);
     expect(fake.calls.prompt).toEqual([]);
     await service.dispose();
   });
