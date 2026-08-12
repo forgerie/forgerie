@@ -68,6 +68,7 @@ export class NewSessionComposer extends LitElement {
   private focusRegion = "";
   private runtime: ComposerRuntime = createPreSessionComposerRuntime({ machineId: "local" });
   private claimedRecoverySeedId: string | undefined;
+  private completedRecoverySeedId: string | undefined;
   private recoveryClaimRetryScheduled = false;
   private recoveryClaimRetryAttemptedFor: string | undefined;
   private connectionGeneration = 0;
@@ -100,9 +101,7 @@ export class NewSessionComposer extends LitElement {
     this.submissionGeneration += 1;
     this.validationPending = false;
     const generation = ++this.connectionGeneration;
-    queueMicrotask(() => {
-      if (!this.isConnected && generation === this.connectionGeneration) this.returnClaimedRecoveryDraft();
-    });
+    queueMicrotask(() => { void this.returnDisconnectedRecoveryDraftWhenSettled(generation); });
     super.disconnectedCallback();
   }
 
@@ -114,7 +113,8 @@ export class NewSessionComposer extends LitElement {
   override render(): TemplateResult {
     const state = this.composerState;
     const submitting = state.kind === "submitting";
-    const busy = submitting || this.validationPending;
+    const attachmentCapturePending = this.draftDisplay.attachmentCapturePending;
+    const busy = submitting || this.validationPending || attachmentCapturePending;
     return html`
       <modal-surface
         .label=${"New session"}
@@ -158,8 +158,8 @@ export class NewSessionComposer extends LitElement {
           </div>
 
           <footer class="dialog-footer">
-            ${busy ? html`<span class="busy-label" role="status">${this.validationPending ? "Validating prompt…" : "Checking destination…"}</span>` : nothing}
-            <button type="button" data-action="cancel" ?disabled=${submitting} @click=${() => { this.requestCancel(); }}>Cancel</button>
+            ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : this.validationPending ? "Validating prompt…" : "Starting session…"}</span>` : nothing}
+            <button type="button" data-action="cancel" ?disabled=${submitting || attachmentCapturePending} @click=${() => { this.requestCancel(); }}>Cancel</button>
             <button class="primary" type="submit" data-action="send" ?disabled=${!this.footerSendAvailable(state)}>${busy ? "Sending…" : "Send"}</button>
           </footer>
         </form>
@@ -358,6 +358,7 @@ export class NewSessionComposer extends LitElement {
       const outcome = await callback({ destination: next.destination, firstPrompt: validation.submission });
       if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
       if (outcome.kind === "accepted") {
+        this.completedRecoverySeedId = this.claimedRecoverySeedId;
         this.claimedRecoverySeedId = undefined;
         return "accepted";
       }
@@ -512,7 +513,7 @@ export class NewSessionComposer extends LitElement {
   }
 
   private requestCancel(): void {
-    if (this.composerState.kind === "submitting") return;
+    if (this.composerState.kind === "submitting" || this.draftDisplay.attachmentCapturePending) return;
     this.requestGeneration += 1;
     this.invalidatePendingSubmission();
     this.returnClaimedRecoveryDraft();
@@ -533,7 +534,7 @@ export class NewSessionComposer extends LitElement {
 
   private claimRecoveryDraftOnce(): void {
     const seedId = this.recoverySeedId;
-    if (seedId === undefined || seedId === this.claimedRecoverySeedId || this.draft === undefined || this.onClaimRecoveryDraft === undefined) return;
+    if (seedId === undefined || seedId === this.claimedRecoverySeedId || seedId === this.completedRecoverySeedId || this.draft === undefined || this.onClaimRecoveryDraft === undefined) return;
     const seed = this.onClaimRecoveryDraft(seedId);
     if (seed !== undefined) {
       this.claimedRecoverySeedId = seedId;
@@ -548,6 +549,11 @@ export class NewSessionComposer extends LitElement {
       this.recoveryClaimRetryScheduled = false;
       if (this.isConnected) this.claimRecoveryDraftOnce();
     });
+  }
+
+  private async returnDisconnectedRecoveryDraftWhenSettled(generation: number): Promise<void> {
+    if (this.draftDisplay.attachmentCapturePending) await this.draft?.whenAttachmentCaptureSettled();
+    if (!this.isConnected && generation === this.connectionGeneration) this.returnClaimedRecoveryDraft();
   }
 
   private returnClaimedRecoveryDraft(): void {

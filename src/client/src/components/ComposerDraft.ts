@@ -88,10 +88,12 @@ export class ComposerDraft extends LitElement {
   private attachmentSeq = 0;
   private attachmentGeneration = 0;
   private attachmentCaptureCount = 0;
+  private attachmentCaptureWaiters: (() => void)[] = [];
   private requestVersion = 0;
   private editor: EditorView | undefined;
   private promptHistoryState: PromptHistoryState = createPromptHistory();
   private applyingPromptHistory = false;
+  private applyingSnapshot = false;
   private readonly editableCompartment = new Compartment();
   private readonly readOnlyCompartment = new Compartment();
   private readonly placeholderCompartment = new Compartment();
@@ -145,7 +147,6 @@ export class ComposerDraft extends LitElement {
     this.completions = [];
     this.selectedIndex = 0;
     this.completionError = undefined;
-    this.attachmentGeneration += 1;
     this.editor?.destroy();
     this.editor = undefined;
     super.disconnectedCallback();
@@ -241,6 +242,11 @@ export class ComposerDraft extends LitElement {
     };
   }
 
+  whenAttachmentCaptureSettled(): Promise<void> {
+    if (this.attachmentCaptureCount === 0) return Promise.resolve();
+    return new Promise((resolve) => { this.attachmentCaptureWaiters.push(resolve); });
+  }
+
   closeCompletionMenu(): boolean {
     return this.closeCompletions();
   }
@@ -268,26 +274,16 @@ export class ComposerDraft extends LitElement {
   restoreSeed(seed: ComposerDraftSeed): boolean {
     if (this.restoredSeedIds.has(seed.id)) return false;
     this.restoredSeedIds.add(seed.id);
-    this.restoreSnapshot(seed.snapshot);
+    this.applySnapshot(seed.snapshot, false);
     return true;
   }
 
   restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
-    this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
-    this.mutationVersion += 1;
-    this.draft = snapshot.text;
-    this.attachmentGeneration += 1;
-    this.attachments = (snapshot.attachments ?? []).map((attachment) => restoredPendingAttachment(attachment, `attachment-${String(++this.attachmentSeq)}`));
-    if (snapshot.delivery !== undefined) this.attachmentDelivery = snapshot.delivery;
-    this.attachmentError = undefined;
-    this.completionError = undefined;
-    if (this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, this.draft);
-    this.requestVersion += 1;
-    this.currentInputMode = this.resolveInputMode(this.draft);
-    this.completions = [];
-    this.selectedIndex = 0;
-    this.syncEditorDoc();
-    this.publishDisplayState();
+    this.applySnapshot(snapshot, true);
+  }
+
+  restoreTransientSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
+    this.applySnapshot(snapshot, false);
   }
 
   clearAfterAcceptance(): void {
@@ -472,6 +468,10 @@ export class ComposerDraft extends LitElement {
       }
     } finally {
       this.attachmentCaptureCount = Math.max(0, this.attachmentCaptureCount - 1);
+      if (this.attachmentCaptureCount === 0) {
+        const waiters = this.attachmentCaptureWaiters.splice(0);
+        for (const resolve of waiters) resolve();
+      }
       this.publishDisplayState();
     }
   }
@@ -481,7 +481,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private canAcceptAttachmentResult(generation: number): boolean {
-    return generation === this.attachmentGeneration && this.canMutateAttachments();
+    return generation === this.attachmentGeneration && !this.disabled && !this.submissionDisabled;
   }
 
   private clearAttachmentOwnership(): void {
@@ -525,7 +525,8 @@ export class ComposerDraft extends LitElement {
           this.editableCompartment.of(EditorView.editable.of(!this.disabled)),
           this.readOnlyCompartment.of(EditorState.readOnly.of(this.disabled)),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) this.updateDraft(update.state.doc.toString());
+            if (update.docChanged && !this.applyingSnapshot) this.updateDraft(update.state.doc.toString());
+            else if (update.selectionSet && !this.applyingSnapshot) void this.refreshCompletions();
           }),
           keymap.of([
             { any: (view, event) => this.handleEditorKeyDown(event, view) },
@@ -571,6 +572,29 @@ export class ComposerDraft extends LitElement {
 
   private resolveInputMode(draft: string): InputMode {
     return this.runtime?.inputModeForDraft(draft) ?? inputModeForDraft(draft);
+  }
+
+  private applySnapshot(snapshot: ComposerDraftSubmitSnapshot, persist: boolean): void {
+    this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
+    this.mutationVersion += 1;
+    this.draft = snapshot.text;
+    this.attachmentGeneration += 1;
+    this.attachments = (snapshot.attachments ?? []).map((attachment) => restoredPendingAttachment(attachment, `attachment-${String(++this.attachmentSeq)}`));
+    if (snapshot.delivery !== undefined) this.attachmentDelivery = snapshot.delivery;
+    this.attachmentError = undefined;
+    this.completionError = undefined;
+    if (persist && this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, this.draft);
+    this.requestVersion += 1;
+    this.currentInputMode = this.resolveInputMode(this.draft);
+    this.completions = [];
+    this.selectedIndex = 0;
+    this.applyingSnapshot = true;
+    try {
+      this.syncEditorDoc();
+    } finally {
+      this.applyingSnapshot = false;
+    }
+    this.publishDisplayState();
   }
 
   private updateDraft(value: string): void {

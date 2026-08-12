@@ -7,6 +7,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText } from "../../shared/promptResourceCommand.js";
+import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { PiSessionService } from "./piSessionService.js";
 import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources } from "./commandCatalog.js";
 import { CapturingSessionEventHub, createTestModelRuntime, fakeRuntime, runtimeCreator, seedCredential, sessionGateway, sessionRecord, sessionRef, TEST_MODEL_ID, TEST_MODEL_PROVIDER, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
@@ -263,6 +264,28 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
       [{ kind: "image", mimeType: "image/png", data: tinyPng, name: "shot.png" }],
     )).rejects.toThrow("Prompt-resource command is no longer available");
 
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("fails closed without dispatching oversized active prompt-template content", async () => {
+    const oversizedContent = "x".repeat(PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes + 1);
+    const fake = fakeRuntime("prompt-resource-oversized-template-session", {
+      promptTemplates: [{ name: "oversized", description: "Oversized", content: oversizedContent }],
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-oversized-template-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = { source: "prompt" as const, name: "oversized", fingerprint: "a".repeat(64) };
+
+    const error = await service.runPromptResourceCommand(sessionRef("prompt-resource-oversized-template-session"), "/oversized", identity).catch((caught: unknown) => caught);
+
+    expect(error).toEqual(new Error("Prompt-resource template content is unavailable."));
+    expect(String(error)).not.toContain(oversizedContent.slice(0, 100));
     expect(fake.calls.prompt).toEqual([]);
     await service.dispose();
   });

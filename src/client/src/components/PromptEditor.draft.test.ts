@@ -51,6 +51,17 @@ describe("PromptEditor draft replacement", () => {
     expect(loadDraft(machineSessionKey("local", "session-early"))).toBe("seed before mount");
   });
 
+  it("restores first-prompt recovery text without writing it to durable chat drafts", async () => {
+    const key = machineSessionKey("local", "session-recovery");
+    saveDraft(key, "durable chat draft");
+    const editor = await mountEditor("local", "session-recovery");
+
+    editor.restoreSnapshot({ text: "memory-only first prompt" });
+
+    expect(editor.view?.state.doc.toString()).toBe("memory-only first prompt");
+    expect(loadDraft(key)).toBe("durable chat draft");
+  });
+
   it("clears an existing durable draft and CodeMirror document", async () => {
     const key = machineSessionKey("local", "session-2");
     saveDraft(key, "stale text");

@@ -334,6 +334,17 @@ export class SessionController {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     const claimed = record?.claimedDraft;
     if (record === undefined || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent") || claimed === undefined) return;
+    if (firstPromptSubmissionIsEmpty(snapshot)) {
+      delete record.claimedDraft;
+      record.recovery = {
+        stage: record.recovery.stage,
+        sessionId: record.recovery.sessionId,
+        destination: record.recovery.destination,
+        retrying: record.recovery.retrying,
+      };
+      this.publishCreationFailedRecoveryQueue(sessionId, record);
+      return;
+    }
     const queued = queuedRecoveryDraftFromSnapshot(claimed.queued, snapshot);
     insertQueuedRecoveryDraft(record.queuedSends, claimed.index, queued);
     if (record.pending !== undefined && record.pending.queuedSends !== record.queuedSends) {

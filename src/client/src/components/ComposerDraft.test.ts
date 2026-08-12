@@ -312,12 +312,14 @@ describe("ComposerDraft", () => {
     await vi.waitFor(() => { expect(draft.view?.state.doc.toString()).toBe(""); });
   });
 
-  it("restores one-shot seed snapshots and exposes explicit clear/discard operations", async () => {
-    const draft = await mountDraft();
+  it("restores one-shot seed snapshots without persisting recovered first-prompt text", async () => {
+    saveDraft("remote-a:session-1", "durable chat draft");
+    const draft = await mountDraft({ storageKey: "remote-a:session-1" });
     const seed = { id: "recovery-1", snapshot: { text: "restore me" } };
 
     expect(draft.restoreSeed(seed)).toBe(true);
     expect(draft.view?.state.doc.toString()).toBe("restore me");
+    expect(loadDraft("remote-a:session-1")).toBe("durable chat draft");
     draft.replaceText("changed");
     expect(draft.restoreSeed(seed)).toBe(false);
     expect(draft.view?.state.doc.toString()).toBe("changed");
@@ -327,6 +329,22 @@ describe("ComposerDraft", () => {
     draft.replaceText("discard me");
     draft.discardDraft();
     expect(draft.view?.state.doc.toString()).toBe("");
+  });
+
+  it("discards completion results after a cursor-only move leaves the trigger", async () => {
+    const completion = deferred<CompletionItem[]>();
+    const resolveCompletion = vi.fn(() => completion.promise);
+    const draft = await mountDraft({ runtime: runtimeWith(resolveCompletion) });
+
+    setEditorText(draft, "/");
+    await vi.waitFor(() => { expect(resolveCompletion).toHaveBeenCalledOnce(); });
+    draft.view?.dispatch({ selection: EditorSelection.cursor(0) });
+    completion.resolve([{ kind: "command", replaceFrom: 0, replaceTo: 1, insertText: "/review", detail: "prompt" }]);
+    await Promise.resolve();
+    await draft.updateComplete;
+
+    expect(menu(draft)?.items).toEqual([]);
+    expect(draft.view?.state.doc.toString()).toBe("/");
   });
 
   it("keeps completion navigation ahead of prompt history and updates combobox state", async () => {

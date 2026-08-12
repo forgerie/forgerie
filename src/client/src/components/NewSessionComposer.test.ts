@@ -164,7 +164,7 @@ describe("new-session-composer editing and submission", () => {
     expect(draft(composer).disabled).toBe(true);
     expect(button(composer, "[data-action='cancel']").disabled).toBe(true);
     expect(button(composer, "[data-action='send']").disabled).toBe(true);
-    expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Checking destination");
+    expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Starting session");
   });
 
   it("returns a root rejection to the same mounted draft and permits destination recovery", async () => {
@@ -772,9 +772,73 @@ describe("new-session-composer modal lifetime", () => {
     await composer.updateComplete;
 
     composer.remove();
+
+    await vi.waitFor(() => {
+      expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "still owned" });
+    });
+  });
+
+  it("waits for pending attachment capture before returning a disconnected recovery draft", async () => {
+    let resolveRead: (() => void) | undefined;
+    vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (this: FileReader) {
+      resolveRead = () => {
+        Object.defineProperty(this, "result", { configurable: true, value: "data:image/png;base64,aW1hZ2U=" });
+        this.dispatchEvent(new ProgressEvent("load"));
+      };
+    });
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "still owned" } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    const input = draft(composer).querySelector<HTMLInputElement>(".attachment-input");
+    if (input === null) throw new Error("Expected attachment input");
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["image"], "shot.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => { expect(button(composer, "[data-action='cancel']").disabled).toBe(true); });
+    composer.remove();
+    await Promise.resolve();
+    expect(returned).not.toHaveBeenCalled();
+
+    if (resolveRead === undefined) throw new Error("Expected pending FileReader");
+    resolveRead();
+
+    await vi.waitFor(() => {
+      expect(returned).toHaveBeenCalledWith("recovery-1", {
+        text: "still owned",
+        attachments: [{ kind: "image", mimeType: "image/png", data: "aW1hZ2U=", name: "shot.png" }],
+        delivery: "inline",
+      });
+    });
+  });
+
+  it("does not return a claimed recovery draft after its replacement launch is accepted", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const submitted = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = new NewSessionComposer();
+    composer.initialDestination = destination;
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "replace me" } });
+    composer.onReturnRecoveryDraft = returned;
+    composer.onSubmit = submitted;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => {
+      expect(submitted).toHaveBeenCalledOnce();
+      expect(draft(composer).currentSnapshot().text).toBe("");
+    });
+    composer.remove();
     await Promise.resolve();
 
-    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "still owned" });
+    expect(returned).not.toHaveBeenCalled();
   });
 
   it("returns only draft-owned fields when a claimed recovery rolls back", async () => {

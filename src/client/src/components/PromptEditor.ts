@@ -223,7 +223,7 @@ export class PromptEditor extends LitElement {
       this.draftEmpty = snapshot.text.trim() === "";
       return;
     }
-    this.draftElement.restoreSnapshot(snapshot);
+    this.draftElement.restoreTransientSnapshot(snapshot);
   }
 
   /** Get the underlying CM6 EditorView, or undefined if not yet mounted. */
@@ -428,7 +428,7 @@ export class PromptEditor extends LitElement {
     if (this.pendingReplacement === undefined || this.draftElement === undefined || this.draftElement === null) return;
     const replacement = this.pendingReplacement;
     this.pendingReplacement = undefined;
-    if (replacement.kind === "snapshot") this.draftElement.restoreSnapshot(replacement.snapshot);
+    if (replacement.kind === "snapshot") this.draftElement.restoreTransientSnapshot(replacement.snapshot);
     else this.draftElement.replaceText(replacement.text);
   }
 

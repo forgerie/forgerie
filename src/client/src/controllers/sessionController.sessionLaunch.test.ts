@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../appState";
 import { SessionController, type PromptEditorTextReplacement } from "./sessionController";
 import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
@@ -441,6 +441,40 @@ describe("SessionController session launch", () => {
     expect(queuedRecoveryTexts(controller, failedId)).toEqual(["Edited recovery", "Queued behind it"]);
     expect(controller.claimSessionLaunchRecoveryDraft(failedId)).toEqual({ id: `${failedId}:claim-2`, snapshot: { text: "Edited recovery", delivery: "inline" } });
     expect(state.clientQueuedSessionMessages[failedId]).toEqual([{ kind: "followUp", text: "Queued behind it" }]);
+  });
+
+  it("does not requeue an empty first prompt when a recovered draft is cleared", async () => {
+    let startCount = 0;
+    const prompt = vi.fn(() => Promise.resolve({ accepted: true as const }));
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => {
+        startCount += 1;
+        return startCount === 1 ? Promise.reject(new Error("backend unavailable")) : Promise.resolve({ ...oldSession, id: "blank-replacement" });
+      },
+      prompt,
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.launchSession({ text: "remove this prompt" });
+    const failedId = state.selectedSession?.id;
+    if (failedId === undefined) throw new Error("Expected failed pending session");
+    controller.claimSessionLaunchRecoveryDraft(failedId);
+
+    controller.returnSessionLaunchRecoveryDraft(failedId, { text: "", delivery: "inline" });
+
+    expect(queuedRecoveryTexts(controller, failedId)).toEqual([]);
+    expect(state.clientQueuedSessionMessages[failedId]).toBeUndefined();
+    await controller.retrySessionLaunch(failedId);
+    expect(startCount).toBe(2);
+    expect(prompt).not.toHaveBeenCalled();
   });
 
   it("restores claimed attachment-only recovery drafts without retaining base64 in app state", async () => {
