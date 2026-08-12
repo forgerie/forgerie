@@ -124,6 +124,19 @@ export class PanelPeekController implements ReactiveController {
     this.entryFrame = requestAnimationFrame(() => { this.setPeek({ kind: "open", panel }); });
   }
 
+  /**
+   * Stop peeking without playing the exit.
+   *
+   * Pinning is not a dismissal. Closing the peek made the sheet slide out and
+   * the docked panel appear behind it, so a panel that was supposed to stay
+   * exactly where it was left and came back instead.
+   */
+  settle(): void {
+    this.disarm();
+    this.clearEntryFrame();
+    this.setPeek(PEEK_CLOSED);
+  }
+
   close(): void {
     this.disarm();
     this.clearEntryFrame();

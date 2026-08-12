@@ -3006,8 +3006,10 @@ export class PiWebApp extends LitElement {
    * therefore moves nothing.
    */
   private renderPanelSurface(side: ShellPanel) {
-    const peeked = this.panelPeek.panel === side;
     const docked = this.panelIntent.isDocked(side);
+    // Docked wins. While a peek was still finishing, a panel that had just been
+    // pinned kept rendering as a sheet and played the exit slide first.
+    const peeked = !docked && this.panelPeek.panel === side;
     // A third presentation, and the reason this cannot just test peek and pin:
     // on a narrow shell the workspace panel is also a main view of its own,
     // chosen from the tab strip rather than pinned.
@@ -3063,7 +3065,7 @@ export class PiWebApp extends LitElement {
       return;
     }
     this.panelIntent.keep(side);
-    this.panelPeek.close();
+    this.panelPeek.settle();
   }
 
   private closePanelSurface(side: ShellPanel) {
