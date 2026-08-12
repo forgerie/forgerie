@@ -51,6 +51,102 @@ describe("ChatView unread reading position", () => {
     expect(view.shadowRoot?.querySelectorAll(".turn-body.reserved")).toHaveLength(1);
   });
 
+  it("keeps an unread answer fixed while an older image settles", async () => {
+    const frames = installFrames();
+    const onApplied = vi.fn();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [
+      textMessage("user", "older question"),
+      { role: "tool", parts: [{ type: "image", mimeType: "image/png", data: "QUJD" }] },
+      textMessage("assistant", "older answer"),
+      textMessage("user", "new question"),
+      textMessage("assistant", "new answer"),
+    ];
+    view.messageEnd = 5;
+    view.messageTotal = 5;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    view.initialReadingTarget = { kind: "latest-response", id: "unread-with-image" };
+    view.onInitialReadingTargetApplied = onApplied;
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    const image = requiredElement(view.shadowRoot?.querySelector<HTMLImageElement>("img.chat-image"), "older image");
+    const answer = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:4"]'), "unread answer");
+    defineScrollGeometry(chat, { scrollTop: 500, scrollHeight: 2_000, clientHeight: 400, top: 100, bottom: 500 });
+    let answerContentTop = 800;
+    answer.getBoundingClientRect = () => rect(100 + answerContentTop - chat.scrollTop, 180 + answerContentTop - chat.scrollTop);
+
+    frames.releaseAll();
+    await view.updateComplete;
+    await Promise.resolve();
+    expect(onApplied).toHaveBeenCalledOnce();
+    expect(answer.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(0);
+    const alignedScrollTop = chat.scrollTop;
+
+    view.messages = [...view.messages, textMessage("user", "later question from elsewhere")];
+    view.messageEnd = 6;
+    view.messageTotal = 6;
+    await view.updateComplete;
+
+    answerContentTop += 304;
+    image.dispatchEvent(new Event("load"));
+
+    expect(chat.scrollTop).toBe(alignedScrollTop + 304);
+    expect(answer.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(0);
+  });
+
+  it("keeps a clamped unread-answer offset when an image below it settles", async () => {
+    const frames = installFrames();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [
+      textMessage("user", "older question"),
+      textMessage("assistant", "older answer"),
+      textMessage("user", "new question"),
+      textMessage("assistant", "new answer"),
+      { role: "tool", parts: [{ type: "image", mimeType: "image/png", data: "QUJD" }] },
+    ];
+    view.messageEnd = 5;
+    view.messageTotal = 5;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    view.initialReadingTarget = { kind: "latest-response", id: "unread-clamped" };
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    const image = requiredElement(view.shadowRoot?.querySelector<HTMLImageElement>("img.chat-image"), "later image");
+    const answer = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:3"]'), "unread answer");
+    let scrollTop = 500;
+    let scrollHeight = 1_160;
+    let maxScrollTop = 760;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = Math.min(value, maxScrollTop); } },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    chat.getBoundingClientRect = () => rect(100, 500);
+    const answerContentTop = 800;
+    answer.getBoundingClientRect = () => rect(100 + answerContentTop - chat.scrollTop, 180 + answerContentTop - chat.scrollTop);
+
+    frames.releaseAll();
+    await view.updateComplete;
+    await Promise.resolve();
+    expect(answer.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(40);
+
+    scrollHeight += 304;
+    maxScrollTop += 304;
+    image.dispatchEvent(new Event("load"));
+
+    expect(chat.scrollTop).toBe(760);
+    expect(answer.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(40);
+  });
+
   it("waits for fresh history before applying a target from the opening shell", async () => {
     const frames = installFrames();
     const view = await mountView();
@@ -180,6 +276,51 @@ describe("ChatView unread reading position", () => {
 
     expect(savedAnchorRect).toHaveBeenCalled();
     expect(chat.scrollTop).not.toBe(chat.scrollHeight);
+  });
+
+  it("keeps a restored passage fixed while earlier images settle until the reader scrolls", async () => {
+    const frames = installFrames();
+    localStorage.setItem(chatScrollStorageKey(session.id), JSON.stringify({ mode: "anchor", anchorId: "m:1", offset: 24 }));
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [
+      { role: "tool", parts: [{ type: "image", mimeType: "image/png", data: "QUJD" }] },
+      textMessage("assistant", "saved passage"),
+    ];
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    const image = requiredElement(view.shadowRoot?.querySelector<HTMLImageElement>("img.chat-image"), "history image");
+    const savedPassage = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:1"]'), "saved passage");
+    defineScrollGeometry(chat, { scrollTop: 500, scrollHeight: 1_100, clientHeight: 400, top: 100, bottom: 500 });
+    let scrollHeight = 1_100;
+    Object.defineProperty(chat, "scrollHeight", { configurable: true, get: () => scrollHeight });
+    let passageContentTop = 700;
+    savedPassage.getBoundingClientRect = () => rect(100 + passageContentTop - chat.scrollTop, 180 + passageContentTop - chat.scrollTop);
+
+    frames.releaseAll();
+    expect(chat.scrollTop).toBe(676);
+
+    passageContentTop += 304;
+    scrollHeight += 304;
+    image.dispatchEvent(new Event("load"));
+    frames.releaseAll();
+
+    expect(chat.scrollTop).toBe(980);
+    expect(savedPassage.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(24);
+
+    chat.scrollTop = 900;
+    chat.dispatchEvent(new Event("scroll"));
+    passageContentTop += 304;
+    image.dispatchEvent(new Event("load"));
+
+    expect(chat.scrollTop).toBe(900);
   });
 
   it("falls back to ordinary restoration when the unread turn has no answer", async () => {
