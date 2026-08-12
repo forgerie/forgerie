@@ -89,6 +89,7 @@ export class ComposerDraft extends LitElement {
   private attachmentGeneration = 0;
   private attachmentCaptureCount = 0;
   private attachmentCaptureWaiters: (() => void)[] = [];
+  private settleAttachmentCaptureAfterDisconnect = false;
   private requestVersion = 0;
   private editor: EditorView | undefined;
   private promptHistoryState: PromptHistoryState = createPromptHistory();
@@ -147,6 +148,12 @@ export class ComposerDraft extends LitElement {
     this.completions = [];
     this.selectedIndex = 0;
     this.completionError = undefined;
+    const disconnectedGeneration = this.attachmentGeneration;
+    queueMicrotask(() => {
+      if (!this.isConnected && !this.settleAttachmentCaptureAfterDisconnect && this.attachmentGeneration === disconnectedGeneration) {
+        this.attachmentGeneration += 1;
+      }
+    });
     this.editor?.destroy();
     this.editor = undefined;
     super.disconnectedCallback();
@@ -245,6 +252,12 @@ export class ComposerDraft extends LitElement {
   whenAttachmentCaptureSettled(): Promise<void> {
     if (this.attachmentCaptureCount === 0) return Promise.resolve();
     return new Promise((resolve) => { this.attachmentCaptureWaiters.push(resolve); });
+  }
+
+  retainPendingAttachmentCaptureAfterDisconnect(): Promise<void> {
+    if (this.attachmentCaptureCount === 0) return Promise.resolve();
+    this.settleAttachmentCaptureAfterDisconnect = true;
+    return this.whenAttachmentCaptureSettled().finally(() => { this.settleAttachmentCaptureAfterDisconnect = false; });
   }
 
   closeCompletionMenu(): boolean {
@@ -481,7 +494,11 @@ export class ComposerDraft extends LitElement {
   }
 
   private canAcceptAttachmentResult(generation: number): boolean {
-    return generation === this.attachmentGeneration && !this.disabled && !this.submissionDisabled;
+    const ownsDisconnectedSettlement = !this.isConnected && this.settleAttachmentCaptureAfterDisconnect;
+    return generation === this.attachmentGeneration
+      && (this.isConnected || ownsDisconnectedSettlement)
+      && !this.disabled
+      && !this.submissionDisabled;
   }
 
   private clearAttachmentOwnership(): void {

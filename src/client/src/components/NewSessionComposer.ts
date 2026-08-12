@@ -552,7 +552,7 @@ export class NewSessionComposer extends LitElement {
   }
 
   private async returnDisconnectedRecoveryDraftWhenSettled(generation: number): Promise<void> {
-    if (this.draftDisplay.attachmentCapturePending) await this.draft?.whenAttachmentCaptureSettled();
+    if (this.draftDisplay.attachmentCapturePending) await this.draft?.retainPendingAttachmentCaptureAfterDisconnect();
     if (!this.isConnected && generation === this.connectionGeneration) this.returnClaimedRecoveryDraft();
   }
 

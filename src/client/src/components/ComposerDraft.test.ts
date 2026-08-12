@@ -222,7 +222,8 @@ describe("ComposerDraft", () => {
     await vi.waitFor(() => { expect(disconnectedReads).toHaveLength(1); });
     host.remove();
     disconnectedReads[0]?.resolve("late");
-    await Promise.resolve();
+    await disconnectedDraft.whenAttachmentCaptureSettled();
+    expect(disconnectedDraft.currentSnapshot().attachments?.map((attachment) => attachment.name)).toEqual(["owned.txt"]);
     document.body.append(host);
     await disconnectedDraft.updateComplete;
     expect(Array.from(disconnectedDraft.querySelectorAll(".attachment-file-name")).map((name) => name.textContent)).toEqual(["owned.txt"]);
