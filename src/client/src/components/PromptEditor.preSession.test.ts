@@ -64,7 +64,6 @@ describe("PromptEditor pre-session surface", () => {
 
 async function renderPreSessionEditor(options: { runtime?: ReturnType<typeof createPreSessionComposerRuntime> } = {}): Promise<PromptEditor> {
   const editor = new PromptEditor();
-  editor.surface = "pre-session";
   editor.machineId = "local";
   editor.composerRuntime = options.runtime ?? createPreSessionComposerRuntime({
     machineId: "local",

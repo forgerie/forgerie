@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities } from "./promptEditorTestSupport";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -22,7 +23,7 @@ describe("PromptEditor composer actions", () => {
 
   it("keeps archive directly available wherever the composer fits", async () => {
     const onArchiveAndNext = vi.fn();
-    const editor = await renderPromptEditor({ canArchive: true, onArchiveAndNext });
+    const editor = await renderPromptEditor({ onArchiveAndNext });
 
     button(editor, ".composer-archive").click();
 
@@ -37,14 +38,12 @@ describe("PromptEditor composer actions", () => {
 });
 
 async function renderPromptEditor(options: {
-  canArchive?: boolean;
   onArchiveAndNext?: () => void;
 } = {}): Promise<PromptEditor> {
   const editor = new PromptEditor();
   editor.sessionId = "session-1";
   editor.machineId = "local";
-  editor.canArchive = options.canArchive ?? false;
-  if (options.onArchiveAndNext !== undefined) editor.onArchiveAndNext = options.onArchiveAndNext;
+  editor.capabilities = sessionCapabilities(options);
   document.body.append(editor);
   await editor.updateComplete;
   return editor;

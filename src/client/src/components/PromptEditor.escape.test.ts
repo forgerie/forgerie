@@ -5,6 +5,7 @@ import { api, type SessionStatus } from "../api";
 import type { AutocompleteMenu } from "./AutocompleteMenu";
 import { pressKey } from "./modalSurfaceTestSupport";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities } from "./promptEditorTestSupport";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -118,8 +119,11 @@ async function mountEditor(options: {
   editor.sessionId = "session-1";
   editor.cwd = "/repo";
   editor.status = options.status;
-  editor.canStop = options.canStop ?? false;
-  if (options.onStop !== undefined) editor.onStop = options.onStop;
+  editor.capabilities = sessionCapabilities({
+    status: options.status,
+    stoppable: options.canStop ?? false,
+    ...(options.onStop === undefined ? {} : { onStop: options.onStop }),
+  });
   if (options.onDoubleEscapeAction !== undefined) editor.onDoubleEscapeAction = options.onDoubleEscapeAction;
   document.body.append(editor);
   await editor.updateComplete;

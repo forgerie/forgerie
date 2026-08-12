@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, type SessionStatus } from "../api";
 import type { AutocompleteMenu } from "./AutocompleteMenu";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities } from "./promptEditorTestSupport";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -14,7 +15,10 @@ describe("PromptEditor session guidance", () => {
     const editor = await mountEditor(status([]));
     expect(guidanceTrigger(editor).textContent.trim()).toBe("Guidance");
 
+    // The host states which guidance is active; the composer does not read it
+    // back out of a session status.
     editor.status = status(["technical-english"]);
+    editor.capabilities = sessionCapabilities({ status: status(["technical-english"]) });
     await editor.updateComplete;
 
     expect(guidanceTrigger(editor).textContent.trim()).toBe("Technical English");
@@ -44,12 +48,12 @@ describe("PromptEditor session guidance", () => {
     const calls: { entryId: string; enabled: boolean }[] = [];
     const onSend = vi.fn();
     const editor = await mountEditor(status([]));
-    editor.canStop = true;
+    editor.capabilities = { ...editor.capabilities, stop: { stoppable: true, onStop: () => undefined } };
     editor.onSend = onSend;
-    editor.onSetGuidance = (entryId, enabled) => {
+    setGuidanceHandler(editor, (entryId: string, enabled: boolean) => {
       calls.push({ entryId, enabled });
       return request.promise;
-    };
+    });
     await editor.updateComplete;
 
     guidanceTrigger(editor).click();
@@ -77,7 +81,7 @@ describe("PromptEditor session guidance", () => {
 
   it("keeps the picker open with a retry message after failure", async () => {
     const editor = await mountEditor(status([]));
-    editor.onSetGuidance = () => Promise.resolve(false);
+    setGuidanceHandler(editor, () => Promise.resolve(false));
 
     guidanceTrigger(editor).click();
     await editor.updateComplete;
@@ -148,7 +152,10 @@ describe("PromptEditor session guidance", () => {
     guidanceTrigger(editor).click();
     await editor.updateComplete;
 
+    // The host states which guidance is active; the composer does not read it
+    // back out of a session status.
     editor.status = status(["technical-english"]);
+    editor.capabilities = sessionCapabilities({ status: status(["technical-english"]) });
     await editor.updateComplete;
 
     expect(guidanceOption(editor).getAttribute("aria-pressed")).toBe("true");
@@ -156,10 +163,15 @@ describe("PromptEditor session guidance", () => {
   });
 });
 
+function setGuidanceHandler(editor: PromptEditor, onSet: (entryId: string, enabled: boolean) => Promise<boolean>): void {
+  editor.capabilities = { ...editor.capabilities, guidance: { activeIds: editor.status?.activeGuidanceIds ?? [], onSet } };
+}
+
 async function mountEditor(currentStatus: SessionStatus): Promise<PromptEditor> {
   const editor = new PromptEditor();
   editor.sessionId = currentStatus.sessionId;
   editor.status = currentStatus;
+  editor.capabilities = sessionCapabilities({ status: currentStatus });
   document.body.append(editor);
   await editor.updateComplete;
   return editor;

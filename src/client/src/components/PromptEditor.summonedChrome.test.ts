@@ -6,6 +6,7 @@ import type { SessionStatus } from "../api";
 import { isTemplateResult, templateText } from "../templateInspection.testSupport";
 import { NEW_SESSION_LABEL } from "./shared";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities } from "./promptEditorTestSupport";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -14,7 +15,7 @@ afterEach(() => {
 describe("PromptEditor summoned chrome", () => {
   it("carries the session's identity when no chrome band is left to show it", () => {
     const editor = summonedEditor();
-    editor.sessionLabel = "forgerie · main";
+    editor.capabilities = sessionCapabilities({ status: modelStatus(), sessionLabel: "forgerie · main" });
 
     expect(templateText(renderCompactStatus(editor))).toContain("forgerie · main");
   });
@@ -22,7 +23,7 @@ describe("PromptEditor summoned chrome", () => {
   it("keeps identity on the rail even where the shell still has bands", () => {
     const editor = summonedEditor();
     editor.chromeSummoned = false;
-    editor.sessionLabel = "forgerie · main";
+    editor.capabilities = sessionCapabilities({ status: modelStatus(), sessionLabel: "forgerie · main" });
 
     // Whether identity appears is the island's own width to decide (see
     // PromptEditor.reveal.test.ts); the composer does not key it off whether
@@ -33,7 +34,7 @@ describe("PromptEditor summoned chrome", () => {
   it("keeps the icon-only New session action adjacent before the message action", async () => {
     const editor = summonedEditor();
     const onNewSession = vi.fn();
-    editor.onNewSession = onNewSession;
+    editor.capabilities = { ...editor.capabilities, newSession: { onNewSession: onNewSession } };
     document.body.append(editor);
     await editor.updateComplete;
 
@@ -57,6 +58,7 @@ describe("PromptEditor summoned chrome", () => {
 function summonedEditor(): PromptEditor {
   const editor = new PromptEditor();
   editor.status = modelStatus();
+  editor.capabilities = sessionCapabilities({ status: modelStatus() });
   editor.chromeSummoned = true;
   return editor;
 }

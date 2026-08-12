@@ -31,9 +31,10 @@ describe("PiWebApp session guidance", () => {
     await app.updateComplete;
 
     const editor = app.shadowRoot?.querySelector<PromptEditor>("prompt-editor");
-    if (editor?.onSetGuidance === undefined) throw new Error("Expected wired prompt editor");
+    const onSet = editor?.capabilities.guidance?.onSet;
+    if (onSet === undefined) throw new Error("Expected wired prompt editor");
 
-    await expect(editor.onSetGuidance("technical-english", true)).resolves.toBe(true);
+    await expect(onSet("technical-english", true)).resolves.toBe(true);
     expect(setGuidance).toHaveBeenCalledWith("technical-english", true);
   });
 });

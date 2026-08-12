@@ -11,6 +11,7 @@ import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
 import { renderArchiveIcon, renderAttachIcon, renderQueueIcon, renderSendIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
+import type { ComposerCapabilities, ComposerContextChip, ComposerModelCapability } from "../composerCapabilities";
 import type { ComposerDraft, ComposerDraftCompletionError, ComposerDraftDisplayState, ComposerDraftEscapeContext, ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./ComposerDraft";
 import "./ContextUsageMeter";
@@ -19,14 +20,13 @@ import "./GuidancePicker";
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
   /**
-   * Which surface the composer stands on.
+   * What this host can do.
    *
-   * `pre-session` is the new-session modal: the same composer, with the
-   * controls that need a running session stood down. Session-only chrome
-   * already hides itself when its own inputs are absent, so this only has to
-   * retire the controls that would otherwise render unconditionally.
+   * A control renders because a host declared it, never because a field
+   * happened to be set, so the chat and the new-session modal offer the same
+   * control as soon as each can supply the state behind it.
    */
-  @property() surface: "session" | "pre-session" = "session";
+  @property({ attribute: false }) capabilities: ComposerCapabilities = {};
   /** Supplied by a pre-session host; the session surface builds its own. */
   @property({ attribute: false }) composerRuntime?: ComposerRuntime;
   @property() placeholderText?: string;
@@ -60,25 +60,13 @@ export class PromptEditor extends LitElement {
   @property() workspaceId?: string;
   @property({ type: Boolean }) canSteer = false;
   @property({ type: Boolean }) isCompacting = false;
-  @property({ type: Boolean }) canStop = false;
   @property({ attribute: false }) status?: SessionStatus;
-  /** Drawn as the island's own top edge; absent below the reporting threshold. */
-  @property({ attribute: false }) contextUsage?: SessionStatus["contextUsage"];
   @property({ type: Boolean }) sending = false;
   @property({ attribute: false, hasChanged: promptHistoryChanged }) promptHistory: readonly string[] = [];
   @property({ attribute: false }) onSend?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => void | Promise<void>;
-  @property({ attribute: false }) onStop?: () => void;
   @property({ attribute: false }) onDoubleEscapeAction?: (action: Exclude<DoubleEscapeAction, "none">) => void;
-  @property({ attribute: false }) onSelectModel?: () => void;
-  @property({ attribute: false }) onSelectThinking?: () => void;
-  @property({ attribute: false }) onSetGuidance?: (entryId: string, enabled: boolean) => Promise<boolean>;
   /** Set when the shell keeps its navigation chrome on request instead of resident. */
   @property({ type: Boolean }) chromeSummoned = false;
-  @property() sessionLabel?: string;
-  @property({ type: Boolean }) canArchive = false;
-  @property({ attribute: false }) onArchiveAndNext?: () => void;
-  @property({ attribute: false }) onNewSession?: () => void;
-  @property({ attribute: false }) availableThinkingLevels: readonly string[] = [];
 
   @query("composer-draft") private draftElement?: ComposerDraft | null;
   @query(".guidance-trigger") private guidanceTrigger?: HTMLButtonElement;
@@ -132,7 +120,6 @@ export class PromptEditor extends LitElement {
     const rail = this.rail();
     const busy = this.sending || this.guidancePending;
     const resting = this.isResting();
-    const preSession = this.surface === "pre-session";
     return html`
       ${this.guidanceOpen ? html`
         <guidance-picker
@@ -152,7 +139,7 @@ export class PromptEditor extends LitElement {
         @focusin=${() => { this.composerFocused = true; }}
         @focusout=${(event: FocusEvent) => { this.releaseComposerFocus(event); }}
       >
-        ${preSession ? nothing : html`<context-usage-meter .contextUsage=${this.contextUsage}></context-usage-meter>`}
+        ${this.capabilities.contextUsage === undefined ? nothing : html`<context-usage-meter .contextUsage=${this.capabilities.contextUsage}></context-usage-meter>`}
         <composer-draft
           .disabled=${this.disabled}
           .submissionDisabled=${busy || !this.submissionAvailable}
@@ -174,17 +161,17 @@ export class PromptEditor extends LitElement {
           ${this.renderAttachmentAction(busy)}
           ${this.renderArchiveAction()}
           ${this.renderCompactStatus()}
-          ${preSession ? nothing : html`
+          ${this.capabilities.newSession === undefined ? nothing : html`
             <button
               class="icon-button new-session-button"
               data-action="new-session"
               title=${NEW_SESSION_LABEL}
               aria-label=${NEW_SESSION_LABEL}
-              @click=${() => { this.closeGuidance(false, true); this.onNewSession?.(); }}
+              @click=${() => { this.closeGuidance(false, true); this.capabilities.newSession?.onNewSession(); }}
             >${renderNewSessionIcon()}</button>
           `}
           ${this.renderPrimaryAction(rail)}
-          ${preSession ? nothing : html`<button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>`}
+          ${this.capabilities.stop === undefined ? nothing : html`<button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>`}
         </div>
       </footer>
     `;
@@ -209,9 +196,9 @@ export class PromptEditor extends LitElement {
   }
 
   private draftStorageKey(): string | undefined {
-    // A first prompt belongs to the modal's recovery record, not to a durable
+    // A first prompt belongs to its host's recovery record, not to a durable
     // per-session draft that no session owns yet.
-    if (this.surface === "pre-session") return undefined;
+    if (this.sessionId === undefined) return undefined;
     return draftStorageKey(this.machineId, this.sessionId);
   }
 
@@ -309,7 +296,7 @@ export class PromptEditor extends LitElement {
       sending: this.sending || this.guidancePending || this.attachmentCapturePending,
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
-      stoppable: this.canStop,
+      stoppable: this.capabilities.stop?.stoppable === true,
     });
   }
 
@@ -342,31 +329,61 @@ export class PromptEditor extends LitElement {
   }
 
   private renderCompactStatus() {
-    const status = this.status;
-    if (status === undefined) return null;
-    const model = status.model?.id ?? "no model";
-    const provider = status.model?.provider !== undefined && status.model.provider !== "" ? `${status.model.provider}/` : "";
-    const thinking = thinkingLevelLabel(status.thinkingLevel);
+    const context = this.capabilities.context ?? [];
+    const model = this.capabilities.model;
+    const guidance = this.capabilities.guidance;
+    if (context.length === 0 && model === undefined && guidance === undefined) return null;
     return html`
-      <div class=${`compact-status${this.chromeSummoned ? " summoned" : ""}`} aria-label="Session status">
-        ${this.renderSessionIdentity()}
-        <!-- Model and thinking level are read together and set together, so they
-             share one capsule instead of spending two slots on the rail. -->
-        <div class="model-capsule">
-          <button class="select-model" ?disabled=${this.disabled || !this.runtimeControlsAvailable} title="Select model" @click=${() => { this.selectModel(); }}>${provider}${model}</button>
-          <button class="select-thinking icon-button" ?disabled=${this.disabled || !this.runtimeControlsAvailable} title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => { this.selectThinking(); }}>
-            ${renderThinkingGauge(thinkingGauge(status.thinkingLevel, this.availableThinkingLevels))}<span class="thinking-level">${thinking}</span>
-          </button>
-        </div>
-        <button
-          id="guidance-trigger"
-          class="guidance-trigger"
-          aria-controls="session-guidance-picker"
-          aria-expanded=${this.guidanceOpen ? "true" : "false"}
-          title="Session guidance"
-          @click=${() => { this.toggleGuidance(); }}
-        >${sessionGuidanceSummary(status.activeGuidanceIds ?? [])}</button>
+      <div class=${`compact-status${this.chromeSummoned ? " summoned" : ""}`} aria-label="Composer status">
+        ${context.map((chip) => this.renderContextChip(chip))}
+        ${model === undefined ? nothing : this.renderModelCapsule(model)}
+        ${guidance === undefined ? nothing : html`
+          <button
+            id="guidance-trigger"
+            class="guidance-trigger"
+            aria-controls="session-guidance-picker"
+            aria-expanded=${this.guidanceOpen ? "true" : "false"}
+            title="Session guidance"
+            @click=${() => { this.toggleGuidance(); }}
+          >${sessionGuidanceSummary(guidance.activeIds)}</button>
+        `}
       </div>
+    `;
+  }
+
+  /**
+   * Model and thinking level are read together and set together, so they share
+   * one capsule instead of spending two slots on the rail.
+   */
+  private renderModelCapsule(capability: ComposerModelCapability) {
+    const changeable = capability.changeable !== false;
+    const name = capability.model?.id ?? "no model";
+    const provider = capability.model?.provider !== undefined && capability.model.provider !== "" ? `${capability.model.provider}/` : "";
+    const thinking = thinkingLevelLabel(capability.thinkingLevel);
+    return html`
+      <div class="model-capsule">
+        <button class="select-model" ?disabled=${this.disabled || !changeable} title="Select model" @click=${() => { this.selectModel(); }}>${provider}${name}</button>
+        <button class="select-thinking icon-button" ?disabled=${this.disabled || !changeable} title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => { this.selectThinking(); }}>
+          ${renderThinkingGauge(thinkingGauge(capability.thinkingLevel, capability.availableThinkingLevels ?? []))}<span class="thinking-level">${thinking}</span>
+        </button>
+      </div>
+    `;
+  }
+
+  private renderContextChip(chip: ComposerContextChip) {
+    const action = chip.action;
+    return html`
+      <span class="composer-context-chip session-identity summoned-secondary" title=${chip.title ?? chip.label}>
+        ${chip.label}
+        ${action === undefined ? nothing : html`<button
+          class="composer-context-chip-action"
+          data-action="change-destination"
+          ?disabled=${this.disabled || action.disabled === true}
+          title=${action.label}
+          aria-label=${action.label}
+          @click=${() => { action.onActivate(); }}
+        >${action.label}</button>`}
+      </span>
     `;
   }
 
@@ -376,27 +393,24 @@ export class PromptEditor extends LitElement {
    * A narrow composer spends its row on controls that must always work. The
    * session identity appears only when the island's own width can carry it.
    */
-  private renderSessionIdentity() {
-    const label = this.sessionLabel;
-    if (label === undefined || label === "") return null;
-    return html`<span class="session-identity summoned-secondary" title=${label}>${label}</span>`;
-  }
-
   private stop(): void {
-    if (this.disabled || !this.runtimeControlsAvailable || !this.canStop) return;
-    this.onStop?.();
+    const stop = this.capabilities.stop;
+    if (this.disabled || stop?.stoppable !== true) return;
+    stop.onStop();
   }
 
   private selectModel(): void {
-    if (this.disabled || !this.runtimeControlsAvailable) return;
+    const model = this.capabilities.model;
+    if (this.disabled || model === undefined || model.changeable === false) return;
     this.closeGuidance(false, true);
-    this.onSelectModel?.();
+    model.onSelectModel();
   }
 
   private selectThinking(): void {
-    if (this.disabled || !this.runtimeControlsAvailable) return;
+    const model = this.capabilities.model;
+    if (this.disabled || model === undefined || model.changeable === false) return;
     this.closeGuidance(false, true);
-    this.onSelectThinking?.();
+    model.onSelectThinking();
   }
 
   private toggleGuidance(): void {
@@ -435,7 +449,7 @@ export class PromptEditor extends LitElement {
     this.guidanceError = undefined;
     let success: boolean;
     try {
-      success = await this.onSetGuidance?.(entryId, enabled) ?? false;
+      success = await this.capabilities.guidance?.onSet(entryId, enabled) ?? false;
     } catch {
       success = false;
     }
@@ -449,13 +463,13 @@ export class PromptEditor extends LitElement {
   }
 
   private renderArchiveAction() {
-    if (!this.canArchive) return null;
+    if (this.capabilities.archive === undefined) return null;
     return html`
       <button
         class="composer-archive icon-button"
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
-        @click=${() => { this.closeGuidance(false, true); this.onArchiveAndNext?.(); }}
+        @click=${() => { this.closeGuidance(false, true); this.capabilities.archive?.onArchiveAndNext(); }}
       >${renderArchiveIcon()}<span class="composer-archive-label">Archive &amp; next</span></button>
     `;
   }

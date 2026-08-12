@@ -4,6 +4,7 @@ import type { PromptResourceCatalogResponse } from "../../../shared/promptResour
 import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
 import { workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import { createPreSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
+import type { ComposerCapabilities } from "../composerCapabilities";
 import {
   backToMachineChoice,
   backToProjectChoice,
@@ -142,7 +143,7 @@ export class NewSessionComposer extends LitElement {
               <prompt-editor
                 aria-labelledby="new-session-prompt-label"
                 data-field="prompt"
-                surface="pre-session"
+                .capabilities=${this.composerCapabilities(state)}
                 .editorLabel=${"First prompt"}
                 .placeholderText=${this.placeholderForState(state)}
                 .composerRuntime=${this.runtime}
@@ -325,6 +326,32 @@ export class NewSessionComposer extends LitElement {
     return state.destination.kind === "complete"
       ? "Describe the first task… Use / for prompt resources, @ for tracked files, @ space for all files"
       : "Describe the first task… Choose a destination to enable / and @ completions";
+  }
+
+  /**
+   * What the new-session composer can do.
+   *
+   * The destination is stated in the composer's own row and carries the action
+   * that changes it, so the modal does not need a field of its own for it.
+   */
+  private composerCapabilities(state: NewSessionComposerState): ComposerCapabilities {
+    const destination = state.kind === "choosing" ? undefined : state.destination;
+    const chosen = destination?.kind === "complete" ? destination : undefined;
+    const label = chosen === undefined
+      ? "Destination required"
+      : `${chosen.project.name} · ${chosen.workspace.label} · ${chosen.machine.name}`;
+    return {
+      context: [{
+        id: "destination",
+        label,
+        title: label,
+        action: {
+          label: chosen === undefined ? "Choose" : "Change",
+          disabled: state.kind === "submitting",
+          onActivate: () => { this.openDestinationChoice(); },
+        },
+      }],
+    };
   }
 
   /**

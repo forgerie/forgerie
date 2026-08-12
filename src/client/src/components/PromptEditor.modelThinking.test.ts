@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "../api";
 import { isTemplateResult, templateClickHandlerForText, templateEventHandlerAfterValue, templateText } from "../templateInspection.testSupport";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities } from "./promptEditorTestSupport";
 
 describe("PromptEditor model capsule", () => {
   it("reports the model and the thinking level as one control", () => {
@@ -15,8 +16,7 @@ describe("PromptEditor model capsule", () => {
 
   it("routes the model half to the model picker", () => {
     const onSelectModel = vi.fn();
-    const composer = editor();
-    composer.onSelectModel = onSelectModel;
+    const composer = editor({ onSelectModel });
 
     templateClickHandlerForText(renderCompactStatus(composer), "gpt-5.6-sol")(new Event("click"));
 
@@ -25,8 +25,7 @@ describe("PromptEditor model capsule", () => {
 
   it("routes the thinking half to the thinking picker", () => {
     const onSelectThinking = vi.fn();
-    const composer = editor();
-    composer.onSelectThinking = onSelectThinking;
+    const composer = editor({ onSelectThinking });
 
     templateEventHandlerAfterValue(renderCompactStatus(composer), "Thinking level: high", "@click")(new Event("click"));
 
@@ -34,19 +33,23 @@ describe("PromptEditor model capsule", () => {
   });
 
   it("still names a session that has no model yet", () => {
-    const composer = editor();
     const withoutModel = status();
     delete withoutModel.model;
-    composer.status = withoutModel;
+    const composer = editor();
+    composer.capabilities = sessionCapabilities({ status: withoutModel, availableThinkingLevels: ["off", "low", "medium", "high"] });
 
     expect(templateText(renderCompactStatus(composer))).toContain("no model");
   });
 });
 
-function editor(): PromptEditor {
+function editor(options: { onSelectModel?: () => void; onSelectThinking?: () => void } = {}): PromptEditor {
   const composer = new PromptEditor();
   composer.status = status();
-  composer.availableThinkingLevels = ["off", "low", "medium", "high"];
+  composer.capabilities = sessionCapabilities({
+    ...options,
+    status: status(),
+    availableThinkingLevels: ["off", "low", "medium", "high"],
+  });
   return composer;
 }
 

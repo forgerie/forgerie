@@ -230,12 +230,12 @@ describe("PiWebApp chat opening", () => {
     setAppState(app, { ...state, mainView: "chat", selectedChatLoad: selectedChatLiveReady(selectedChatTarget("local", selected)) });
     const container = renderApp(app);
     const editor = requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "prompt editor");
-    const firstHandler = editor.onNewSession;
+    const firstHandler = editor.capabilities.newSession?.onNewSession;
 
     appSetState(app, { messages: [textMessage("assistant", "streamed update")] });
     renderApp(app, container);
 
-    expect(requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "updated prompt editor").onNewSession).toBe(firstHandler);
+    expect(requiredElement(container.querySelector<PromptEditor>("prompt-editor"), "updated prompt editor").capabilities.newSession?.onNewSession).toBe(firstHandler);
   });
 
   it("gates runtime-dependent app handlers until the selected chat is live-ready", async () => {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "../api";
 import { isTemplateResult, templateText } from "../templateInspection.testSupport";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities } from "./promptEditorTestSupport";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -19,7 +20,7 @@ describe("PromptEditor control rail", () => {
   });
 
   it("turns send into a queue and offers steering beside it while the agent streams", () => {
-    const rendered = templateText(render(editor({ canSteer: true, canStop: true })));
+    const rendered = templateText(render(editor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }) })));
 
     expect(rendered).toContain("Queue message");
     expect(rendered).toContain("Steer current response");
@@ -27,7 +28,7 @@ describe("PromptEditor control rail", () => {
   });
 
   it("queues without steering while history is compacting", () => {
-    const rendered = templateText(render(editor({ isCompacting: true, canStop: true })));
+    const rendered = templateText(render(editor({ isCompacting: true, capabilities: sessionCapabilities({ stoppable: true }) })));
 
     expect(rendered).toContain("Queue message");
     expect(rendered).not.toContain("Steer current response");
@@ -35,7 +36,7 @@ describe("PromptEditor control rail", () => {
 
   it("steers the running reply rather than queueing behind it", async () => {
     const onSend = vi.fn();
-    const composer = await mountEditor({ canSteer: true, canStop: true, onSend });
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
     composer.replaceText("use the second approach");
 
     button(composer, ".steer-button").click();
@@ -45,7 +46,7 @@ describe("PromptEditor control rail", () => {
 
   it("queues the message when the primary control is used mid-stream", async () => {
     const onSend = vi.fn();
-    const composer = await mountEditor({ canSteer: true, canStop: true, onSend });
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
     composer.replaceText("and then run the tests");
 
     button(composer, ".send-button").click();
@@ -65,7 +66,7 @@ describe("PromptEditor control rail", () => {
 
   it("accepts nothing from a session that cannot be used", async () => {
     const onSend = vi.fn();
-    const composer = await mountEditor({ disabled: true, canSteer: true, canStop: true, onSend });
+    const composer = await mountEditor({ disabled: true, canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
     composer.replaceText("too late");
 
     button(composer, ".send-button").click();

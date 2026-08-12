@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "../api";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities, type SessionCapabilityOptions } from "./promptEditorTestSupport";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -12,14 +13,10 @@ afterEach(() => {
 
 describe("PromptEditor read-only control availability", () => {
   it("disables model, thinking, and stop controls when the editor is disabled", async () => {
-    const editor = await renderPromptEditor({ disabled: true, canStop: true });
     const onStop = vi.fn();
     const onSelectModel = vi.fn();
     const onSelectThinking = vi.fn();
-    editor.onStop = onStop;
-    editor.onSelectModel = onSelectModel;
-    editor.onSelectThinking = onSelectThinking;
-    await editor.updateComplete;
+    const editor = await renderPromptEditor({ disabled: true, stoppable: true, onStop, onSelectModel, onSelectThinking });
 
     const model = button(editor, ".select-model");
     const thinking = button(editor, ".select-thinking");
@@ -63,7 +60,6 @@ describe("PromptEditor read-only control availability", () => {
     const editor = await renderPromptEditor({
       disabled: true,
       chromeSummoned: true,
-      canArchive: true,
       onArchiveAndNext,
     });
 
@@ -78,24 +74,20 @@ describe("PromptEditor read-only control availability", () => {
   });
 });
 
-async function renderPromptEditor(options: {
+async function renderPromptEditor(options: SessionCapabilityOptions & {
   disabled?: boolean;
-  canStop?: boolean;
   chromeSummoned?: boolean;
-  canArchive?: boolean;
-  onArchiveAndNext?: () => void;
   runtimeControlsAvailable?: boolean;
 }): Promise<PromptEditor> {
   const editor = new PromptEditor();
+  const runtimeAvailable = options.runtimeControlsAvailable ?? true;
   editor.sessionId = "session-1";
   editor.machineId = "local";
   editor.status = status();
   editor.disabled = options.disabled ?? false;
-  editor.runtimeControlsAvailable = options.runtimeControlsAvailable ?? true;
-  editor.canStop = options.canStop ?? false;
+  editor.runtimeControlsAvailable = runtimeAvailable;
   editor.chromeSummoned = options.chromeSummoned ?? false;
-  editor.canArchive = options.canArchive ?? false;
-  if (options.onArchiveAndNext !== undefined) editor.onArchiveAndNext = options.onArchiveAndNext;
+  editor.capabilities = sessionCapabilities({ ...options, status: status(), runtimeAvailable });
   document.body.append(editor);
   await editor.updateComplete;
   return editor;

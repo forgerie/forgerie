@@ -2,6 +2,7 @@ import type { TemplateResult } from "lit";
 import { describe, expect, it } from "vitest";
 import { isTemplateResult, templateText } from "../templateInspection.testSupport";
 import { PromptEditor } from "./PromptEditor";
+import { sessionCapabilities } from "./promptEditorTestSupport";
 import { promptEditorStyles } from "./shared";
 
 describe("PromptEditor rail reveals", () => {
@@ -27,8 +28,7 @@ describe("PromptEditor rail reveals", () => {
 function editor(): PromptEditor {
   const composer = new PromptEditor();
   composer.chromeSummoned = true;
-  composer.sessionLabel = "forgerie · main";
-  composer.canArchive = true;
+  composer.capabilities = sessionCapabilities({ sessionLabel: "forgerie · main", onArchiveAndNext: () => undefined });
   composer.status = {
     sessionId: "session-1",
     isStreaming: false,

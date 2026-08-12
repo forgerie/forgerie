@@ -17,6 +17,7 @@ import { MachineController } from "../controllers/machineController";
 import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
+import type { ComposerCapabilities } from "../composerCapabilities";
 import { SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot, type SessionTranscriptPreview } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
@@ -2885,6 +2886,45 @@ export class PiWebApp extends LitElement {
    * The context bar carried this until the chrome bands were retired; the
    * composer inherits a shortened form rather than reviving a band for it.
    */
+  /**
+   * What the chat composer can do for the selected session.
+   *
+   * Built here rather than inferred inside the composer, so the same
+   * declaration shape serves the new-session modal.
+   */
+  private sessionComposerCapabilities(state: AppState, runtimeAvailable: boolean): ComposerCapabilities {
+    const label = this.composerSessionLabel(state);
+    return {
+      ...(label === undefined || label === "" ? {} : { context: [{ id: "session", label, title: label }] }),
+      model: {
+        ...(state.status?.model === undefined ? {} : { model: state.status.model }),
+        ...(state.status?.thinkingLevel === undefined ? {} : { thinkingLevel: state.status.thinkingLevel }),
+        availableThinkingLevels: state.availableThinkingLevels,
+        changeable: runtimeAvailable,
+        onSelectModel: this.handleSelectModel,
+        onSelectThinking: this.handleSelectThinking,
+      },
+      guidance: {
+        activeIds: state.status?.activeGuidanceIds ?? [],
+        changeable: runtimeAvailable,
+        onSet: this.handleSetGuidance,
+      },
+      stop: { stoppable: runtimeAvailable, onStop: this.handleStopActiveWork },
+      newSession: { onNewSession: this.handleNewSessionFromComposer },
+      ...(this.canArchiveSelectedSession(state) ? { archive: { onArchiveAndNext: this.handleArchiveAndNext } } : {}),
+      ...(state.status?.contextUsage === undefined ? {} : { contextUsage: state.status.contextUsage }),
+    };
+  }
+
+  /** A chat still opening has a place but no runtime to ask about it yet. */
+  private openingComposerCapabilities(workspace: Workspace | undefined): ComposerCapabilities {
+    const label = this.composerWorkspaceLabel(workspace);
+    return {
+      ...(label === undefined || label === "" ? {} : { context: [{ id: "session", label, title: label }] }),
+      newSession: { onNewSession: this.handleNewSessionFromComposer },
+    };
+  }
+
   private composerSessionLabel(state: AppState): string | undefined {
     const workspace = state.selectedWorkspace;
     if (workspace === undefined) return undefined;
@@ -2995,11 +3035,49 @@ export class PiWebApp extends LitElement {
 
   private renderOpeningComposer(intent: Extract<ChatNavigationIntent, { kind: "opening" }>) {
     const workspace = workspaceForSessionCwd(this.state, intent.session.cwd);
-    return html`<prompt-editor .sessionId=${intent.session.id} .cwd=${intent.session.cwd} .machineId=${intent.machineId} .projectId=${workspace?.projectId} .workspaceId=${workspace?.id} .promptHistory=${[]} .disabled=${intent.session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${false} .canSteer=${false} .isCompacting=${false} .canStop=${false} .status=${undefined} .contextUsage=${undefined} .availableThinkingLevels=${[]} .sending=${this.state.sendingPrompts[intent.session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerWorkspaceLabel(workspace)} .canArchive=${false} .onArchiveAndNext=${this.handleArchiveAndNext} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
+    return html`<prompt-editor
+      .sessionId=${intent.session.id}
+      .cwd=${intent.session.cwd}
+      .machineId=${intent.machineId}
+      .projectId=${workspace?.projectId}
+      .workspaceId=${workspace?.id}
+      .promptHistory=${[]}
+      .disabled=${intent.session.archived === true}
+      .submissionAvailable=${true}
+      .runtimeControlsAvailable=${false}
+      .canSteer=${false}
+      .isCompacting=${false}
+      .canStop=${false}
+      .status=${undefined}
+      .sending=${this.state.sendingPrompts[intent.session.id] === true}
+      .chromeSummoned=${this.appShell.isChromeSummoned}
+      .capabilities=${this.openingComposerCapabilities(workspace)}
+      .onSend=${this.handleSendPrompt}
+      .onDoubleEscapeAction=${this.handleDoubleEscapeAction}
+    ></prompt-editor>`;
   }
 
   private renderSelectedComposer(state: AppState, session: SessionInfo, runtimeAvailable: boolean) {
-    return html`<prompt-editor .sessionId=${session.id} .cwd=${state.selectedWorkspace?.path ?? session.cwd} .machineId=${selectedMachineId(state)} .projectId=${state.selectedWorkspace?.projectId} .workspaceId=${state.selectedWorkspace?.id} .promptHistory=${this.selectedPromptHistory(state)} .disabled=${session.archived === true} .submissionAvailable=${true} .runtimeControlsAvailable=${runtimeAvailable} .canSteer=${runtimeAvailable && state.status?.isStreaming === true} .isCompacting=${runtimeAvailable && state.status?.isCompacting === true} .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)} .status=${state.status} .contextUsage=${state.status?.contextUsage} .availableThinkingLevels=${state.availableThinkingLevels} .sending=${state.sendingPrompts[session.id] === true} .chromeSummoned=${this.appShell.isChromeSummoned} .sessionLabel=${this.composerSessionLabel(state)} .canArchive=${this.canArchiveSelectedSession(state)} .onArchiveAndNext=${this.handleArchiveAndNext} .onNewSession=${this.handleNewSessionFromComposer} .onSend=${this.handleSendPrompt} .onStop=${this.handleStopActiveWork} .onDoubleEscapeAction=${this.handleDoubleEscapeAction} .onSelectModel=${this.handleSelectModel} .onSelectThinking=${this.handleSelectThinking} .onSetGuidance=${this.handleSetGuidance}></prompt-editor>`;
+    return html`<prompt-editor
+      .sessionId=${session.id}
+      .cwd=${state.selectedWorkspace?.path ?? session.cwd}
+      .machineId=${selectedMachineId(state)}
+      .projectId=${state.selectedWorkspace?.projectId}
+      .workspaceId=${state.selectedWorkspace?.id}
+      .promptHistory=${this.selectedPromptHistory(state)}
+      .disabled=${session.archived === true}
+      .submissionAvailable=${true}
+      .runtimeControlsAvailable=${runtimeAvailable}
+      .canSteer=${runtimeAvailable && state.status?.isStreaming === true}
+      .isCompacting=${runtimeAvailable && state.status?.isCompacting === true}
+      .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)}
+      .status=${state.status}
+      .sending=${state.sendingPrompts[session.id] === true}
+      .chromeSummoned=${this.appShell.isChromeSummoned}
+      .capabilities=${this.sessionComposerCapabilities(state, runtimeAvailable)}
+      .onSend=${this.handleSendPrompt}
+      .onDoubleEscapeAction=${this.handleDoubleEscapeAction}
+    ></prompt-editor>`;
   }
 
   private composerWorkspaceLabel(workspace: Workspace | undefined): string | undefined {
