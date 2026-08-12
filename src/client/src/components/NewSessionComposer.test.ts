@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import type { NewSessionDestinationCatalog, NewSessionLaunchIntent, NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination } from "../newSessionComposer";
+import { PromptEditor } from "./PromptEditor";
 import { ComposerDraft } from "./ComposerDraft";
 import type { AutocompleteMenu } from "./AutocompleteMenu";
 import { NewSessionComposer } from "./NewSessionComposer";
@@ -57,9 +58,22 @@ function button(composer: NewSessionComposer, selector: string): HTMLButtonEleme
   return element;
 }
 
+function promptEditor(composer: NewSessionComposer): PromptEditor {
+  const element = root(composer).querySelector("prompt-editor");
+  if (!(element instanceof PromptEditor)) throw new Error("Expected the shared composer");
+  return element;
+}
+
 function draft(composer: NewSessionComposer): ComposerDraft {
-  const element = root(composer).querySelector("composer-draft");
+  const element = promptEditor(composer).draft;
   if (!(element instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
+  return element;
+}
+
+/** The modal sends through the composer's own send, not a dialog button. */
+function sendButton(composer: NewSessionComposer): HTMLButtonElement {
+  const element = promptEditor(composer).shadowRoot?.querySelector(".send-button");
+  if (!(element instanceof HTMLButtonElement)) throw new Error("Expected the composer send button");
   return element;
 }
 
@@ -125,19 +139,30 @@ function deferredPromptResourceCatalog(): {
 }
 
 describe("new-session-composer editing and submission", () => {
-  it("focuses a complete default's prompt and enables Send only for non-empty text", async () => {
+  it("focuses a complete default's prompt and refuses to launch an empty draft", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
-    const composer = await mountComposer({ initialDestination: destination });
-    const send = button(composer, "[data-action='send']");
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = await mountComposer({ initialDestination: destination, onSubmit });
+    const send = sendButton(composer);
 
     expect(dialogSection(composer).getAttribute("aria-label")).toBe("New session");
-    expect(deepActiveElement()).toBe(draft(composer));
-    expect(send.disabled).toBe(true);
+    expect(deepActiveElement()).toBe(promptField(composer));
+
+    // The modal shows the chat composer itself, so send stays available and an
+    // empty or blank draft simply does not launch a session.
+    send.click();
+    await settleCatalog(composer);
+    expect(onSubmit).not.toHaveBeenCalled();
 
     await enterPrompt(composer, "   ");
-    expect(send.disabled).toBe(true);
+    send.click();
+    await settleCatalog(composer);
+    expect(onSubmit).not.toHaveBeenCalled();
+
     await enterPrompt(composer, "Start the review");
-    expect(send.disabled).toBe(false);
+    send.click();
+    await settleCatalog(composer);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   it("submits the exact prompt and destination, then remains busy until the root accepts and unmounts it", async () => {
@@ -147,7 +172,7 @@ describe("new-session-composer editing and submission", () => {
     const onCancel = vi.fn<() => void>();
     const composer = await mountComposer({ initialDestination: destination, initialPrompt: "  exact prompt  ", onSubmit, onCancel });
 
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await settleCatalog(composer);
 
     expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "  exact prompt  " } });
@@ -163,7 +188,7 @@ describe("new-session-composer editing and submission", () => {
     expect(dialogSurface(composer).busy).toBe(true);
     expect(draft(composer).disabled).toBe(true);
     expect(button(composer, "[data-action='cancel']").disabled).toBe(true);
-    expect(button(composer, "[data-action='send']").disabled).toBe(true);
+    expect(sendButton(composer).disabled).toBe(true);
     expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Starting session");
   });
 
@@ -175,7 +200,7 @@ describe("new-session-composer editing and submission", () => {
       onSubmit: () => Promise.resolve({ kind: "rejected", reason: "destination-unavailable", message: "The selected workspace is no longer available." }),
     });
 
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await settleCatalog(composer);
 
     expect(promptText(composer)).toBe("keep this");
@@ -192,7 +217,7 @@ describe("new-session-composer editing and submission", () => {
       onSubmit: () => { throw new Error("Navigation failed"); },
     });
 
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await settleCatalog(composer);
 
     expect(promptText(composer)).toBe("still here");
@@ -225,7 +250,7 @@ describe("new-session-composer editing and submission", () => {
     expect(menu(composer)?.items[0]).toMatchObject({ insertText: "@src/app.ts" });
 
     setEditorText(composer, "/review now");
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await settleCatalog(composer);
     expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
   });
@@ -236,12 +261,12 @@ describe("new-session-composer editing and submission", () => {
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
     const composer = await mountComposer({ initialDestination: destination, initialPrompt: "/tree", onSubmit });
 
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await settleCatalog(composer);
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(root(composer).querySelector("[role='alert']")?.textContent).toContain("/tree is not available");
-    expect(button(composer, "[data-action='send']").disabled).toBe(true);
+    expect(sendButton(composer).disabled).toBe(true);
 
     pressPrompt(composer, "Enter");
     await settleCatalog(composer);
@@ -274,7 +299,7 @@ describe("new-session-composer editing and submission", () => {
     });
     await settleCatalog(composer);
     const editedValidationIndex = validations.length;
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(editedValidationIndex); });
     await enterPrompt(composer, "plain replacement");
     validations[editedValidationIndex]?.resolve({ available: false, reason: "error", message: "Old destination unavailable" });
@@ -286,7 +311,7 @@ describe("new-session-composer editing and submission", () => {
 
     await enterPrompt(composer, "/review");
     const destinationValidationIndex = validations.length;
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(destinationValidationIndex); });
     button(composer, "[data-action='change-destination']").click();
     await settleCatalog(composer);
@@ -303,7 +328,7 @@ describe("new-session-composer editing and submission", () => {
     expect(root(composer).querySelector("[role='alert']")).toBeNull();
 
     const cancelValidationIndex = validations.length;
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(cancelValidationIndex); });
     button(composer, "[data-action='cancel']").click();
     validations[cancelValidationIndex]?.resolve({
@@ -333,14 +358,14 @@ describe("new-session-composer editing and submission", () => {
       },
     });
 
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-action='retry-prompt-resource-validation']").click();
     await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review", promptResourceCommandIdentity: identity } }); });
 
     document.body.replaceChildren();
     const missingName = await mountComposer({ initialDestination: destination, initialPrompt: "/", onSubmit });
-    button(missingName, "[data-action='send']").click();
+    sendButton(missingName).click();
     await settleCatalog(missingName);
     expect(root(missingName).querySelector("[role='alert']")?.textContent).toContain("name after /");
 
@@ -358,7 +383,7 @@ describe("new-session-composer editing and submission", () => {
         ],
       }),
     });
-    button(ambiguous, "[data-action='send']").click();
+    sendButton(ambiguous).click();
     await settleCatalog(ambiguous);
     expect(root(ambiguous).querySelector("[role='alert']")?.textContent).toContain("ambiguous");
   });
@@ -369,7 +394,7 @@ describe("new-session-composer editing and submission", () => {
 
     const textSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
     const textComposer = await mountComposer({ initialDestination: destination, initialPrompt: "plain text", onSubmit: textSubmit });
-    button(textComposer, "[data-action='send']").click();
+    sendButton(textComposer).click();
     await settleCatalog(textComposer);
     expect(textSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "plain text" } });
 
@@ -380,14 +405,14 @@ describe("new-session-composer editing and submission", () => {
     });
     const attachmentComposer = await mountComposer({ initialDestination: destination, onSubmit: attachmentSubmit });
     await attachFile(attachmentComposer, new File(["hello"], "note.txt", { type: "text/plain" }));
-    button(attachmentComposer, "[data-action='send']").click();
+    sendButton(attachmentComposer).click();
     await settleCatalog(attachmentComposer);
     expect(attachmentSubmit.mock.calls[0]?.[0].firstPrompt).toMatchObject({ text: "", attachments: [{ name: "note.txt", mimeType: "text/plain" }], delivery: "folder" });
 
     document.body.replaceChildren();
     const slashSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
     const slashComposer = await mountComposer({ initialDestination: destination, initialPrompt: "/review", onSubmit: slashSubmit });
-    button(slashComposer, "[data-action='send']").click();
+    sendButton(slashComposer).click();
     await settleCatalog(slashComposer);
     expect(slashSubmit).not.toHaveBeenCalled();
     expect(root(slashComposer).querySelector("[data-action='retry-prompt-resource-validation']")?.textContent).toBe("Retry");
@@ -409,7 +434,7 @@ describe("new-session-composer destination choice", () => {
     const composer = await mountComposer({ initialPrompt: "draft survives", catalog, onSubmit });
 
     expect(deepActiveElement()).toBe(button(composer, "[data-action='change-destination']"));
-    expect(button(composer, "[data-action='send']").disabled).toBe(true);
+    expect(sendButton(composer).disabled).toBe(true);
 
     button(composer, "[data-action='change-destination']").click();
     await settleCatalog(composer);
@@ -423,9 +448,9 @@ describe("new-session-composer destination choice", () => {
     expect(promptText(composer)).toBe("draft survives");
     expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("Project forge");
     expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("feature");
-    expect(button(composer, "[data-action='send']").disabled).toBe(false);
+    expect(sendButton(composer).disabled).toBe(false);
 
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await composer.updateComplete;
     expect(onSubmit).toHaveBeenCalledOnce();
     if (submittedIntent === undefined) throw new Error("Expected a submitted launch intent");
@@ -494,7 +519,7 @@ describe("new-session-composer destination choice", () => {
     expect(button(composer, "[data-machine-id='offline']").disabled).toBe(true);
     expect(button(composer, "[data-machine-id='failed']").disabled).toBe(true);
     expect(promptText(composer)).toBe("keep this prompt");
-    expect(button(composer, "[data-action='send']").disabled).toBe(true);
+    expect(sendButton(composer).disabled).toBe(true);
 
     button(composer, "[data-action='refresh-machines']").click();
     await settleCatalog(composer);
@@ -508,8 +533,8 @@ describe("new-session-composer destination choice", () => {
     await composer.updateComplete;
 
     expect(promptText(composer)).toBe("keep this prompt");
-    expect(button(composer, "[data-action='send']").disabled).toBe(false);
-    button(composer, "[data-action='send']").click();
+    expect(sendButton(composer).disabled).toBe(false);
+    sendButton(composer).click();
     await composer.updateComplete;
     expect(onSubmit).toHaveBeenCalledOnce();
   });
@@ -542,7 +567,7 @@ describe("new-session-composer destination choice", () => {
     await settleCatalog(composer);
     expect(root(composer).querySelector("[data-project-id='forge']")).not.toBeNull();
     expect(promptText(composer)).toBe("keep me");
-    expect(button(composer, "[data-action='send']").disabled).toBe(true);
+    expect(sendButton(composer).disabled).toBe(true);
   });
 
   it("runs Back from a project catalog and preserves the prompt", async () => {
@@ -830,7 +855,7 @@ describe("new-session-composer modal lifetime", () => {
     await settleRenderedDialog(composer);
     await composer.updateComplete;
 
-    button(composer, "[data-action='send']").click();
+    sendButton(composer).click();
     await vi.waitFor(() => {
       expect(submitted).toHaveBeenCalledOnce();
       expect(draft(composer).currentSnapshot().text).toBe("");

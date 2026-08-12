@@ -224,7 +224,7 @@ describe("PiWebApp New session composer root", () => {
     setComposerText(composer, "Build through the real controller");
     await elementUpdateComplete(composer);
 
-    required(composer.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='send']"), "Send button").click();
+    required(required(composer.shadowRoot?.querySelector("prompt-editor"), "composer").shadowRoot?.querySelector<HTMLButtonElement>(".send-button"), "Send button").click();
 
     await vi.waitFor(() => {
       expect(isClientPendingSession(appState(app).selectedSession)).toBe(true);
@@ -701,7 +701,7 @@ async function elementUpdateComplete(element: HTMLElement): Promise<void> {
 }
 
 function setComposerText(composer: NewSessionComposer, text: string): void {
-  const element = required(composer.shadowRoot?.querySelector("composer-draft"), "shared composer draft");
+  const element = required(required(composer.shadowRoot?.querySelector("prompt-editor"), "composer").shadowRoot?.querySelector("composer-draft"), "shared composer draft");
   if (!(element instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
   const view = required(element.view, "CodeMirror view");
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: EditorSelection.cursor(text.length) });

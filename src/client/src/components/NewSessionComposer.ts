@@ -29,6 +29,8 @@ import {
 } from "../newSessionComposer";
 import type { ModalSurface } from "./ModalSurface";
 import "./ComposerDraft";
+import "./PromptEditor";
+import type { PromptEditor } from "./PromptEditor";
 import type { ComposerDraft, ComposerDraftDisplayState, ComposerDraftSeed, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./ModalSurface";
 import { newSessionComposerStyles } from "./shared";
@@ -59,7 +61,13 @@ export class NewSessionComposer extends LitElement {
   @state() private slashValidationError: SlashValidationError | undefined;
   @state() private validationPending = false;
   @query("modal-surface") private modalSurface?: ModalSurface;
-  @query("composer-draft") private draft?: ComposerDraft;
+  @query("prompt-editor") private editor?: PromptEditor;
+  private draftWaitScheduled = false;
+
+  /** The modal drives the same shared draft the chat composer drives. */
+  private get draft(): ComposerDraft | undefined {
+    return this.editor?.draft;
+  }
 
   private initialized = false;
   private requestGeneration = 0;
@@ -131,19 +139,22 @@ export class NewSessionComposer extends LitElement {
 
             <section class="field">
               <h2 class="field-label" id="new-session-prompt-label">First prompt</h2>
-              <composer-draft
+              <prompt-editor
                 aria-labelledby="new-session-prompt-label"
                 data-field="prompt"
+                surface="pre-session"
                 .editorLabel=${"First prompt"}
                 .placeholderText=${this.placeholderForState(state)}
-                .runtime=${this.runtime}
+                .composerRuntime=${this.runtime}
                 .disabled=${submitting}
-                .submissionDisabled=${this.slashValidationError !== undefined || this.validationPending}
-                .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
-                .onDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
+                .sending=${submitting || this.validationPending}
+                .submissionAvailable=${this.composerDraftAvailable()}
+                .sendAvailable=${this.composerSendAvailable(state)}
+                .onDraftSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
+                .onDraftDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
                 .onDraftEdited=${() => { this.invalidatePendingSubmission(); this.clearValidationError(); }}
                 .onCompletionError=${() => { this.clearValidationError(); }}
-              ></composer-draft>
+              ></prompt-editor>
               ${this.slashValidationError === undefined ? nothing : html`
                 <div class="submission-error" role="alert">
                   <p>${this.slashValidationError.message}</p>
@@ -160,7 +171,6 @@ export class NewSessionComposer extends LitElement {
           <footer class="dialog-footer">
             ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : this.validationPending ? "Validating prompt…" : "Starting session…"}</span>` : nothing}
             <button type="button" data-action="cancel" ?disabled=${submitting || attachmentCapturePending} @click=${() => { this.requestCancel(); }}>Cancel</button>
-            <button class="primary" type="submit" data-action="send" ?disabled=${!this.footerSendAvailable(state)}>${busy ? "Sending…" : "Send"}</button>
           </footer>
         </form>
       </modal-surface>
@@ -317,13 +327,23 @@ export class NewSessionComposer extends LitElement {
       : "Describe the first task… Choose a destination to enable / and @ completions";
   }
 
-  private footerSendAvailable(state: NewSessionComposerState): boolean {
+  /**
+   * Whether the composer may submit.
+   *
+   * This gate also stops the draft mutating, so it must not include a missing
+   * destination: you may attach files and write a first prompt before you have
+   * chosen where to run it. An incomplete destination is refused by the submit
+   * handler instead, which keeps the draft intact.
+   */
+  private composerSendAvailable(state: NewSessionComposerState): boolean {
     return state.kind === "editing"
       && state.destination.kind === "complete"
-      && this.slashValidationError === undefined
-      && !this.validationPending
-      && !this.draftDisplay.attachmentCapturePending
-      && (!this.draftDisplay.empty || this.draftDisplay.attachmentCount > 0);
+      && !this.draftDisplay.attachmentCapturePending;
+  }
+
+  /** Blocks the draft itself, so it stays clear of destination questions. */
+  private composerDraftAvailable(): boolean {
+    return this.slashValidationError === undefined && !this.validationPending;
   }
 
   private handleFooterSubmit(event: SubmitEvent): void {
@@ -534,7 +554,13 @@ export class NewSessionComposer extends LitElement {
 
   private claimRecoveryDraftOnce(): void {
     const seedId = this.recoverySeedId;
-    if (seedId === undefined || seedId === this.claimedRecoverySeedId || seedId === this.completedRecoverySeedId || this.draft === undefined || this.onClaimRecoveryDraft === undefined) return;
+    if (seedId === undefined || seedId === this.claimedRecoverySeedId || seedId === this.completedRecoverySeedId || this.onClaimRecoveryDraft === undefined) return;
+    if (this.draft === undefined) {
+      // The composer renders its own draft, so the draft appears one update
+      // after this element does. Wait for it rather than dropping the claim.
+      this.awaitDraftForRecoveryClaim();
+      return;
+    }
     const seed = this.onClaimRecoveryDraft(seedId);
     if (seed !== undefined) {
       this.claimedRecoverySeedId = seedId;
@@ -547,6 +573,16 @@ export class NewSessionComposer extends LitElement {
     this.recoveryClaimRetryAttemptedFor = seedId;
     queueMicrotask(() => {
       this.recoveryClaimRetryScheduled = false;
+      if (this.isConnected) this.claimRecoveryDraftOnce();
+    });
+  }
+
+  private awaitDraftForRecoveryClaim(): void {
+    const editor = this.editor;
+    if (editor === undefined || this.draftWaitScheduled) return;
+    this.draftWaitScheduled = true;
+    void editor.updateComplete.then(() => {
+      this.draftWaitScheduled = false;
       if (this.isConnected) this.claimRecoveryDraftOnce();
     });
   }
@@ -582,7 +618,7 @@ function stateFocusRegion(state: NewSessionComposerState): string {
 function initialFocusSelector(state: NewSessionComposerState): string {
   if (state.kind === "choosing") return "[data-chooser-primary]";
   if (state.kind === "editing" && state.destination.kind === "required") return "[data-action='change-destination']";
-  return "composer-draft";
+  return "prompt-editor";
 }
 
 function machineAvailabilityLabel(machine: Machine): string {

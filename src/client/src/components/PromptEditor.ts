@@ -10,7 +10,8 @@ import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
 import { renderArchiveIcon, renderAttachIcon, renderQueueIcon, renderSendIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
-import type { ComposerDraft, ComposerDraftDisplayState, ComposerDraftEscapeContext, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
+import type { ComposerDraft, ComposerDraftCompletionError, ComposerDraftDisplayState, ComposerDraftEscapeContext, ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./ComposerDraft";
 import "./ContextUsageMeter";
 import "./GuidancePicker";
@@ -28,8 +29,29 @@ export class PromptEditor extends LitElement {
   @property() surface: "session" | "pre-session" = "session";
   /** Supplied by a pre-session host; the session surface builds its own. */
   @property({ attribute: false }) composerRuntime?: ComposerRuntime;
+  @property() placeholderText?: string;
+  @property() editorLabel?: string;
+  /**
+   * Snapshot-level submission for hosts that must accept or reject a draft.
+   *
+   * The chat sends and forgets. A pre-session host has to validate first and
+   * keep the text when it rejects, so it needs the draft's own outcome
+   * protocol rather than the fire-and-forget `onSend`.
+   */
+  @property({ attribute: false }) onDraftSubmit?: (snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
+  @property({ attribute: false }) onDraftDisplayStateChange?: (state: ComposerDraftDisplayState) => void;
+  @property({ attribute: false }) onDraftEdited?: () => void;
+  @property({ attribute: false }) onCompletionError?: (error: ComposerDraftCompletionError) => void;
   @property({ type: Boolean }) disabled = false;
   @property({ type: Boolean }) submissionAvailable = true;
+  /**
+   * Whether the send control may fire, when the draft itself is still free.
+   *
+   * `submissionAvailable` also freezes the draft, so it cannot express "you may
+   * keep writing and attaching, but there is nowhere to send this yet". A
+   * pre-session host needs exactly that while a destination is unchosen.
+   */
+  @property({ type: Boolean }) sendAvailable = true;
   @property({ type: Boolean }) runtimeControlsAvailable = true;
   @property() sessionId?: string;
   @property() cwd?: string;
@@ -140,9 +162,13 @@ export class PromptEditor extends LitElement {
           .runtime=${this.runtime()}
           .promptHistory=${this.promptHistory}
           .storageKey=${this.draftStorageKey()}
+          .placeholderText=${this.placeholderText ?? DEFAULT_COMPOSER_PLACEHOLDER}
+          .editorLabel=${this.editorLabel ?? DEFAULT_COMPOSER_EDITOR_LABEL}
           .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => this.sendSnapshot(snapshot, streamingBehavior)}
           .onEscape=${(context: ComposerDraftEscapeContext) => this.handleDraftEscape(context)}
           .onDisplayStateChange=${(state: ComposerDraftDisplayState) => { this.updateDraftDisplayState(state); }}
+          .onDraftEdited=${this.onDraftEdited}
+          .onCompletionError=${this.onCompletionError}
         ></composer-draft>
         <div class="actions">
           ${this.renderAttachmentAction(busy)}
@@ -209,6 +235,27 @@ export class PromptEditor extends LitElement {
     this.composerFocused = false;
   }
 
+  /**
+   * Hosts focus the composer; the caret belongs in the draft, not the shell.
+   *
+   * Falls back to the host element when the editor has not mounted yet, so a
+   * dialog moving focus on open still lands inside the composer.
+   */
+  override focus(options?: FocusOptions): void {
+    if (this.view !== undefined) {
+      this.focusInput();
+      return;
+    }
+    // A dialog can move focus here before the editor mounts. Hold focus on the
+    // host, then hand it to the caret as soon as the draft exists. Only an
+    // explicit focus() on this element starts this, so it cannot steal focus.
+    super.focus(options);
+    void this.updateComplete.then(async () => {
+      await this.draftElement?.updateComplete;
+      this.focusInput();
+    });
+  }
+
   focusInput(): void {
     this.draftElement?.focusInput();
   }
@@ -258,7 +305,7 @@ export class PromptEditor extends LitElement {
    */
   private rail(): ComposerRail {
     return composerRail({
-      disabled: this.disabled || !this.submissionAvailable,
+      disabled: this.disabled || !this.submissionAvailable || !this.sendAvailable,
       sending: this.sending || this.guidancePending || this.attachmentCapturePending,
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
@@ -437,7 +484,8 @@ export class PromptEditor extends LitElement {
     else this.draftElement.replaceText(replacement.text);
   }
 
-  private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): "accepted" {
+  private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome> {
+    if (this.onDraftSubmit !== undefined) return this.onDraftSubmit(snapshot);
     void this.onSend?.(snapshot.text, streamingBehavior, snapshot.attachments, snapshot.delivery);
     return "accepted";
   }
@@ -465,7 +513,13 @@ export class PromptEditor extends LitElement {
     return true;
   }
 
+  /** The shared draft, for hosts that must drive it imperatively. */
+  get draft(): ComposerDraft | undefined {
+    return this.draftElement ?? undefined;
+  }
+
   private updateDraftDisplayState(state: ComposerDraftDisplayState): void {
+    this.onDraftDisplayStateChange?.(state);
     this.currentInputMode = state.inputMode;
     this.draftEmpty = state.empty;
     this.attachmentCount = state.attachmentCount;

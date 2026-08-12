@@ -55,11 +55,25 @@ export function pressNativeButtonEnter(button: HTMLButtonElement): KeyboardEvent
   return event;
 }
 
+/** Reading a shadow root's active element throws when nothing holds focus. */
+function shadowActiveElement(host: HTMLElement): Element | null {
+  const root = host.shadowRoot;
+  if (root === null) return null;
+  try {
+    return root.activeElement;
+  } catch {
+    return null;
+  }
+}
+
 /** Deepest element holding focus, resolving through nested shadow roots. */
 export function deepActiveElement(): Element | null {
   let active: Element | null = document.activeElement;
-  while (active instanceof HTMLElement && active.shadowRoot?.activeElement instanceof Element) {
-    active = active.shadowRoot.activeElement;
+  for (;;) {
+    if (!(active instanceof HTMLElement)) break;
+    const deeper = shadowActiveElement(active);
+    if (!(deeper instanceof Element)) break;
+    active = deeper;
   }
   // happy-dom reports activeElement as undefined when nothing is focused;
   // the runtime value is normalized even though the type says Element | null.

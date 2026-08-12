@@ -184,13 +184,30 @@ export function focusElement(target: HTMLElement): boolean {
 export function deepActiveElement(ownerDocument: Document): Element | null {
   let active: Element | null = ownerDocument.activeElement;
   while (active instanceof HTMLElement) {
-    const deeper: Element | null = active.shadowRoot?.activeElement ?? null;
+    const deeper = shadowActiveElement(active);
     if (deeper === null) return active;
     active = deeper;
   }
   // happy-dom reports activeElement as undefined when nothing is focused;
   // normalize that runtime value even though the DOM type says Element | null.
   return active ?? null;
+}
+
+/**
+ * A shadow root's own active element, or null when it cannot be read.
+ *
+ * Reading this throws in environments that leave the document without an
+ * active element, so a focused host with an empty shadow root must not take
+ * the whole focus walk down with it.
+ */
+function shadowActiveElement(host: HTMLElement): Element | null {
+  const root = host.shadowRoot;
+  if (root === null) return null;
+  try {
+    return root.activeElement;
+  } catch {
+    return null;
+  }
 }
 
 /** Hidden/inert content is unavailable as a viable focus target. */

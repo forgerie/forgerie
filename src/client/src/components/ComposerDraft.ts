@@ -53,6 +53,10 @@ export interface ComposerDraftEscapeContext {
   inputMode: InputMode;
 }
 
+/** Shared so a host can fall back to them without restating the copy. */
+export const DEFAULT_COMPOSER_PLACEHOLDER = "Message pi... Use / for commands, @ for tracked files, @ space for all files, # for models";
+export const DEFAULT_COMPOSER_EDITOR_LABEL = "Message pi";
+
 @customElement("composer-draft")
 export class ComposerDraft extends LitElement {
   @property({ type: Boolean }) disabled = false;
@@ -60,8 +64,8 @@ export class ComposerDraft extends LitElement {
   @property({ type: Boolean }) working = false;
   @property({ type: Boolean }) compacting = false;
   @property({ type: Boolean }) resting = false;
-  @property() placeholderText = "Message pi... Use / for commands, @ for tracked files, @ space for all files, # for models";
-  @property() editorLabel = "Message pi";
+  @property() placeholderText = DEFAULT_COMPOSER_PLACEHOLDER;
+  @property() editorLabel = DEFAULT_COMPOSER_EDITOR_LABEL;
   @property({ attribute: false }) runtime?: ComposerRuntime;
   @property({ attribute: false }) promptHistory: readonly string[] = [];
   @property() storageKey?: string;

@@ -54,7 +54,7 @@ describe("PromptEditor pre-session surface", () => {
       machineId: "local",
       projectId: "project-1",
       workspaceId: "workspace-1",
-      promptResourceCatalog: async () => ({ resources: [] }),
+      promptResourceCatalog: () => Promise.resolve({ available: true as const, commands: [], diagnostics: [] }),
     });
     const editor = await renderPreSessionEditor({ runtime });
 
@@ -70,7 +70,7 @@ async function renderPreSessionEditor(options: { runtime?: ReturnType<typeof cre
     machineId: "local",
     projectId: "project-1",
     workspaceId: "workspace-1",
-    promptResourceCatalog: async () => ({ resources: [] }),
+    promptResourceCatalog: () => Promise.resolve({ available: true as const, commands: [], diagnostics: [] }),
   });
   document.body.append(editor);
   await editor.updateComplete;
