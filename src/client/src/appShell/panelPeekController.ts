@@ -162,13 +162,17 @@ export class PanelPeekController implements ReactiveController {
   }
 
   onPointerDown(event: PointerEvent): void {
-    if (event.pointerType !== "touch") return;
     this.disarm();
+    // Any new press is a new gesture, whatever it is made with. This used to sit
+    // below the touch test, so a mouse never cleared the flag: after one drag
+    // opened a sheet, every later click was read as the end of that drag and a
+    // click beside the sheet stopped dismissing it.
+    this.travelled = false;
+    if (event.pointerType !== "touch") return;
     // A drag that starts inside something that scrolls sideways belongs to it.
     if (ownsHorizontalScroll(composedElements(event))) return;
     if (this.hasLiveSelection()) return;
 
-    this.travelled = false;
     this.origin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     this.stillTimer = setTimeout(() => { this.disarm(); }, PEEK_STILL_MS);
   }

@@ -237,52 +237,6 @@ export const appStyles = css`
   }
   .navigation-scrim { display: none; }
   @keyframes navigation-overlay-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-  /*
-   * The sheet follows the finger. Travel is a share of the sheet's own width,
-   * written by the renderer, so the arithmetic that decided to open it and the
-   * transform that shows it read the same number.
-   *
-   * While a finger is down the sheet has no transition: easing would make the
-   * sheet lag the hand and the peek would stop feeling direct. The transition
-   * returns for the release, which is the part that should glide.
-   */
-    position: absolute;
-    inset-block: 0;
-    z-index: 41;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    max-width: 100%;
-    overflow: hidden;
-    background: var(--pi-bg);
-    box-shadow: 0 0 24px var(--pi-shadow);
-    transition: transform 180ms ease;
-  }
-  /*
-   * While a finger is down the sheet has no transition and is promoted to its
-   * own layer: easing makes it lag the hand, and a layer keeps the travel on
-   * the compositor instead of asking for paint on every frame.
-   */
-  /*
-   * Only the edge that faces the session is rounded. The other edge is flush
-   * with the screen, and rounding it would show the transcript through the
-   * corners of a sheet that is supposed to be covering it.
-   *
-   * The radius is written out because this codebase has no radius token: the
-   * theme contract carries colour only, and every corner in the app is a
-   * literal. A sheet is a larger surface than the 8px controls around it, so it
-   * takes a larger corner.
-   */
-    inset-inline-start: 0;
-    transform: translateX(calc((var(--peek-progress, 0) - 1) * 100%));
-    border-start-end-radius: 16px;
-    border-end-end-radius: 16px;
-  }
-    inset-inline-end: 0;
-    transform: translateX(calc((1 - var(--peek-progress, 0)) * 100%));
-    border-start-start-radius: 16px;
-    border-end-start-radius: 16px;
-  }
 
   /*
    * Dims what the sheet covers, by exactly as much of the sheet as shows. It

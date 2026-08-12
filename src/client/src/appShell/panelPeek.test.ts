@@ -67,7 +67,15 @@ describe("trackPeek", () => {
     for (const travelled of [-45, -60, -75]) peek = track(peek, travelled, 0);
 
     expect(peek).toEqual({ kind: "tracking", panel: "navigation", progress: 0.75, gesture: "closing" });
-    expect(releasePeek(peek, PANEL_PEEK)).toEqual({ kind: "open", panel: "navigation" });
+    // A quarter of the sheet pushed back is a dismissal. Closing is a
+    // correction and costs less than opening, which is a request.
+    expect(releasePeek(peek, PANEL_PEEK)).toEqual({ kind: "closing", panel: "navigation" });
+  });
+
+  it("holds a sheet that was barely nudged", () => {
+    const nudged = track({ kind: "open", panel: "navigation" }, -SHEET * 0.1, 0);
+
+    expect(releasePeek(nudged, PANEL_PEEK)).toEqual({ kind: "open", panel: "navigation" });
   });
 
   it("pulls the sheet open again when a retreat reverses under the finger", () => {

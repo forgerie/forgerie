@@ -51,6 +51,16 @@ export interface PeekConfig {
   readonly maxAngleDegrees: number;
   /** Share of the sheet that has to show before letting go opens it. */
   readonly commitFraction: number;
+  /**
+   * How far back a sheet must be pushed before letting go dismisses it.
+   *
+   * Opening and closing are not the same act and do not deserve the same
+   * number. Opening is a request and should be deliberate. Closing is a
+   * correction, usually made with the sheet already in the way, so it asks for
+   * less. Sharing one threshold meant a sheet had to be shoved more than half
+   * its width to leave.
+   */
+  readonly dismissFraction: number;
 }
 
 /**
@@ -63,7 +73,7 @@ export interface PeekConfig {
  * kept, so they are chosen values now. Change them from a hand on glass, not
  * from reasoning here.
  */
-export const PANEL_PEEK: PeekConfig = { capturePx: 10, maxAngleDegrees: 30, commitFraction: 0.4 };
+export const PANEL_PEEK: PeekConfig = { capturePx: 10, maxAngleDegrees: 30, commitFraction: 0.4, dismissFraction: 0.2 };
 
 /**
  * How wide a peeked sheet is.
@@ -111,10 +121,19 @@ export function trackPeek(input: PeekTrackInput): PanelPeek {
   return { kind: "tracking", panel, progress: clampFraction(travel / sheetWidthPx), gesture: "opening" };
 }
 
-/** What letting go leaves on screen. A look that fell short leaves by sliding. */
+/**
+ * What letting go leaves on screen. A look that fell short leaves by sliding.
+ *
+ * A sheet being pushed back is judged by how far it has been pushed, not by how
+ * much of it is left. Reusing the opening threshold made dismissal cost more
+ * than three times what it should: a fifth of the sheet is enough to mean it.
+ */
 export function releasePeek(current: PanelPeek, config: PeekConfig): PanelPeek {
   if (current.kind !== "tracking") return current;
-  return current.progress >= config.commitFraction
+  const held = current.gesture === "closing"
+    ? current.progress > 1 - config.dismissFraction
+    : current.progress >= config.commitFraction;
+  return held
     ? { kind: "open", panel: current.panel }
     : { kind: "closing", panel: current.panel };
 }
