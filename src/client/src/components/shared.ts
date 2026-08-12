@@ -108,8 +108,38 @@ export const appStyles = css`
    * containing block. Everything else in here is grid placement.
    */
   .shell { position: relative; --navigation-panel-size: 340px; --workspace-panel-size: minmax(360px, 42vw); --navigation-panel-width: var(--navigation-panel-size); --workspace-panel-width: var(--workspace-panel-size); display: grid; grid-template-columns: var(--navigation-panel-width) 1px minmax(320px, 1fr) 1px var(--workspace-panel-width); height: 100%; min-height: 0; }
-  aside { grid-column: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-  aside app-navigation-panel { flex: 1 1 auto; min-height: 0; }
+  /*
+   * One surface, two presentations. Docked it is a grid track; peeked it is
+   * lifted out of flow at the same width, so pinning changes what holds the
+   * panel up without moving the panel.
+   */
+  .panel-surface { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+  .panel-surface[data-side="navigation"] { grid-column: 1; }
+  .panel-surface[data-side="workspace"] { grid-column: 5; }
+  .panel-surface > *:not(.panel-controls) { flex: 1 1 auto; min-height: 0; }
+  /*
+   * The panel's own controls, laid over its header row rather than above it.
+   * A band would be a second piece of chrome on top of a header the panel
+   * already has. They sit at the edge that faces the session, which is the edge
+   * the reader reaches from.
+   */
+  .panel-controls { position: absolute; top: 0; z-index: 3; display: flex; align-items: center; gap: 2px; padding: 6px; }
+  .panel-controls[data-side="navigation"] { inset-inline-end: 0; }
+  .panel-controls[data-side="workspace"] { inset-inline-start: 0; }
+  .panel-control { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pi-muted); opacity: .7; cursor: pointer; }
+  .panel-control:hover, .panel-control:focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); opacity: 1; }
+  .panel-control[data-pressed="true"] { color: var(--pi-accent); opacity: 1; }
+  .panel-control-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .panel-surface[data-mode="sheet"] { position: absolute; inset-block: 0; z-index: 41; background: var(--pi-bg); box-shadow: 0 0 24px var(--pi-shadow); transition: transform 180ms ease; }
+  /* While a finger is down: no easing, so the sheet cannot lag the hand. */
+  .panel-surface[data-mode="sheet"][data-tracking] { transition: none; will-change: transform; }
+  /*
+   * Only the edge facing the session is rounded. The outer edge is flush with
+   * the screen, and rounding it would show the transcript through the corners.
+   * The radius is a literal because the theme contract carries colour only.
+   */
+  .panel-surface[data-mode="sheet"][data-side="navigation"] { inset-inline-start: 0; transform: translateX(calc((var(--peek-progress, 0) - 1) * 100%)); border-start-end-radius: 16px; border-end-end-radius: 16px; }
+  .panel-surface[data-mode="sheet"][data-side="workspace"] { inset-inline-end: 0; transform: translateX(calc((1 - var(--peek-progress, 0)) * 100%)); border-start-start-radius: 16px; border-end-start-radius: 16px; }
   header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
   .header-actions { display: flex; align-items: center; gap: 8px; }
   /* Positioned in every layout so the summoned control sheet has a pane to fill. */
@@ -150,7 +180,7 @@ export const appStyles = css`
   .shell.navigation-panel-collapsed .navigation-panel-edge-button { transform: translateX(calc(50% - .5px)); }
   .shell.workspace-panel-collapsed .workspace-panel-edge-button { transform: translateX(calc(-50% + .5px)); }
   .navigation-panel-edge-icon, .workspace-panel-edge-icon { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-  workspace-panel { grid-column: 5; min-width: 0; min-height: 0; overflow: hidden; }
+  workspace-panel { min-width: 0; min-height: 0; overflow: hidden; }
   /*
    * Disclosure is measured from the shell's own box by AppShellController, not
    * from the viewport. The bar is the sum of the three panes' content minimums
@@ -163,9 +193,7 @@ export const appStyles = css`
    * folds and unfolds gains and loses a column on the same terms.
    */
   .shell.navigation-panel-collapsed { --navigation-panel-width: 0px; }
-  .shell.navigation-panel-collapsed > aside { display: none; }
   .shell.workspace-panel-collapsed { --workspace-panel-width: 0px; }
-  .shell.workspace-panel-collapsed > workspace-panel { display: none; }
 
   /*
    * A summoned shell with no docked workspace panel is a single-column shell:
@@ -174,12 +202,18 @@ export const appStyles = css`
    * the same arrangement a wider shell uses, minus the panes that do not fit.
    */
   .shell.chrome-summoned.workspace-panel-collapsed { grid-template-columns: var(--navigation-panel-width) 1px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .shell.chrome-summoned.workspace-panel-collapsed aside { grid-row: 1 / 3; }
+  .shell.chrome-summoned.workspace-panel-collapsed .panel-surface[data-side="navigation"] { grid-row: 1 / 3; }
+  /*
+   * The seam spans both rows only where there are two. It used to span them
+   * whenever the shell was narrow, which created a second row the layout did
+   * not want and squashed every column to content height.
+   */
+  .shell.chrome-summoned.workspace-panel-collapsed .navigation-panel-edge { grid-row: 1 / 3; }
   .shell.chrome-summoned.workspace-panel-collapsed .navigation-panel-edge { grid-row: 1 / 3; }
   .shell.chrome-summoned.workspace-panel-collapsed main { grid-column: 3; grid-row: 1 / 3; }
   .shell.chrome-summoned.workspace-panel-collapsed .workspace-panel-edge { display: none; }
   .shell.chrome-summoned.workspace-panel-collapsed.workspace-view main { grid-row: 1; min-height: auto; }
-  .shell.chrome-summoned.workspace-panel-collapsed.workspace-view > workspace-panel { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
+  .shell.chrome-summoned.workspace-panel-collapsed.workspace-view .panel-surface[data-side="workspace"] { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
   .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view chat-view,
   .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view prompt-editor,
   .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view .empty { display: none; }
@@ -187,8 +221,8 @@ export const appStyles = css`
   .shell.chrome-summoned app-mobile-main-tabs { display: block; flex: 0 0 auto; min-width: 0; }
   .shell.chrome-summoned .mobile-tabs-frame { display: flex; }
   .shell.overlay-navigation { grid-template-columns: minmax(0, 1fr); }
-  .shell.overlay-navigation > aside, .shell.overlay-navigation .navigation-panel-edge { display: none; }
-  .shell.overlay-navigation main, .shell.overlay-navigation.workspace-view > workspace-panel { grid-column: 1; }
+  .shell.overlay-navigation .panel-surface[data-side="navigation"][data-mode="docked"], .shell.overlay-navigation .navigation-panel-edge { display: none; }
+  .shell.overlay-navigation main, .shell.overlay-navigation.workspace-view .panel-surface[data-side="workspace"] { grid-column: 1; }
   .shell.overlay-navigation .context-bar { display: flex; }
   .shell.overlay-navigation .mobile-navigation-tab { display: block; }
   .shell.overlay-navigation main { position: relative; }
@@ -225,7 +259,6 @@ export const appStyles = css`
    * sheet lag the hand and the peek would stop feeling direct. The transition
    * returns for the release, which is the part that should glide.
    */
-  .peek-sheet {
     position: absolute;
     inset-block: 0;
     z-index: 41;
@@ -243,7 +276,6 @@ export const appStyles = css`
    * own layer: easing makes it lag the hand, and a layer keeps the travel on
    * the compositor instead of asking for paint on every frame.
    */
-  .peek-sheet[data-tracking] { transition: none; will-change: transform; }
   /*
    * Only the edge that faces the session is rounded. The other edge is flush
    * with the screen, and rounding it would show the transcript through the
@@ -254,29 +286,16 @@ export const appStyles = css`
    * literal. A sheet is a larger surface than the 8px controls around it, so it
    * takes a larger corner.
    */
-  .peek-sheet[data-side="navigation"] {
     inset-inline-start: 0;
     transform: translateX(calc((var(--peek-progress, 0) - 1) * 100%));
     border-start-end-radius: 16px;
     border-end-end-radius: 16px;
   }
-  .peek-sheet[data-side="workspace"] {
     inset-inline-end: 0;
     transform: translateX(calc((1 - var(--peek-progress, 0)) * 100%));
     border-start-start-radius: 16px;
     border-end-start-radius: 16px;
   }
-  /*
-   * One control, no title. The panel underneath already names itself, and a
-   * second name for the same thing is two vocabularies for one concept. The
-   * band carries the pin only, so the sheet spends almost no height on chrome.
-   */
-  /* Inline padding clears the sheet's corner, so the pin is not inside the curve. */
-  .peek-sheet-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; padding: 6px 12px; }
-  .peek-pin { flex: 0 0 auto; min-height: 28px; padding: 2px 10px; font-size: 12px; color: var(--pi-muted); }
-  .peek-pin:hover, .peek-pin:focus-visible { color: var(--pi-text); }
-  .peek-sheet-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-  .peek-sheet-body > * { flex: 1 1 auto; min-height: 0; }
 
   /*
    * Dims what the sheet covers, by exactly as much of the sheet as shows. It
@@ -300,7 +319,7 @@ export const appStyles = css`
   .peek-scrim[data-tracking] { transition: none; }
 
   @media (prefers-reduced-motion: reduce) {
-    .peek-sheet, .peek-scrim { transition: none; }
+    .panel-surface, .peek-scrim { transition: none; }
   }
 
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }

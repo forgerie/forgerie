@@ -339,6 +339,9 @@ async function openUploadReview(app: PiWebApp): Promise<HTMLElement> {
     workspaces: [selectedWorkspace],
     workspaceTool: "core:workspace.files",
   });
+  // The workspace panel is rendered where it can be seen, so this needs a shell
+  // wide enough to seat it rather than a stylesheet that hid it.
+  Object.defineProperty(app, "clientWidth", { configurable: true, value: 1440 });
   const container = renderApp(app);
   const panelHost = requiredElement(container.querySelector<WorkspacePanel>("workspace-panel"), "workspace panel");
   await panelHost.updateComplete;

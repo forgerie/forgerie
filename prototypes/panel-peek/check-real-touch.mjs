@@ -45,7 +45,7 @@ for (let x = 50; x <= 300; x += 25) {
   await delay(16);
 }
 console.log("seen:", await ev(socket, "String((globalThis.seen ?? []).join(' '))"));
-console.log("sheet:", await ev(socket, `String(document.querySelector("pi-web-app").shadowRoot.querySelector(".peek-sheet")?.dataset.side ?? "none")`));
+console.log("sheet:", await ev(socket, `String(document.querySelector("pi-web-app").shadowRoot.querySelector(".panel-surface[data-mode='sheet']")?.dataset.side ?? "none")`));
 await send(socket, "Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 chrome.kill();
 

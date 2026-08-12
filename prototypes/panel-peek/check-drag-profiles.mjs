@@ -73,7 +73,7 @@ async function run(wsUrl, profile) {
     const cancelled = seen.includes("pointercancel");
     return moves + " moves" + (cancelled ? " + CANCEL" : "");
   })()`);
-  const sheet = await ev(socket, `String(document.querySelector("pi-web-app")?.shadowRoot?.querySelector(".peek-sheet")?.dataset.side ?? "none")`);
+  const sheet = await ev(socket, `String(document.querySelector("pi-web-app")?.shadowRoot?.querySelector(".panel-surface[data-mode='sheet']")?.dataset.side ?? "none")`);
   const where = await ev(socket, "String(location.pathname + location.search).slice(0, 40)");
   if (where.indexOf("session=") === -1) console.log("  !! navigated away:", where);
   socket.close();

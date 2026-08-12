@@ -84,7 +84,7 @@ function dragScript(fraction, release, direction) {
     fire("pointermove", start + direction * distance);
     ${release ? 'fire("pointerup", start + direction * distance);' : ""}
     await new Promise((r) => setTimeout(r, 400));
-    const sheet = app.shadowRoot.querySelector(".peek-sheet");
+    const sheet = app.shadowRoot.querySelector(".panel-surface[data-mode='sheet']");
     if (sheet === null) return "no-sheet";
     return `+"`"+`side=${"$"}{sheet.dataset.side} progress=${"$"}{sheet.style.getPropertyValue("--peek-progress")}`+"`"+`;
   })()`;

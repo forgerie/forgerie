@@ -85,7 +85,7 @@ async function dragOnce(y) {
     if (globalThis.watch !== undefined) shell.removeEventListener("pointermove", globalThis.watch, true);
     globalThis.watch = () => {
       globalThis.moves += 1;
-      const sheet = app.shadowRoot.querySelector(".peek-sheet");
+      const sheet = app.shadowRoot.querySelector(".panel-surface[data-mode='sheet']");
       const now = sheet === null ? "" : sheet.style.getPropertyValue("--peek-progress");
       if (now !== "" && now !== globalThis.lastSeen) { globalThis.frames += 1; globalThis.lastSeen = now; }
     };
@@ -102,7 +102,7 @@ async function dragOnce(y) {
   await send(socket, "Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await delay(350);
 
-  const stats = await ev(socket, `String(globalThis.moves) + "," + String(globalThis.frames) + "," + String(document.querySelector("pi-web-app").shadowRoot.querySelector(".peek-sheet") !== null)`);
+  const stats = await ev(socket, `String(globalThis.moves) + "," + String(globalThis.frames) + "," + String(document.querySelector("pi-web-app").shadowRoot.querySelector(".panel-surface[data-mode='sheet']") !== null)`);
   const [moves, frames, opened] = stats.split(",");
   const after = await metrics();
   return {

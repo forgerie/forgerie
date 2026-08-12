@@ -132,7 +132,7 @@ async function closeSheet() {
 }
 
 async function sheetState() {
-  return ev(`(() => { const el = document.querySelector("pi-web-app").shadowRoot.querySelector(".peek-sheet");
+  return ev(`(() => { const el = document.querySelector("pi-web-app").shadowRoot.querySelector(".panel-surface[data-mode='sheet']");
     return el === null ? "closed" : "open@" + (el.style.getPropertyValue("--peek-progress") || "?"); })()`);
 }
 

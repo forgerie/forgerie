@@ -129,7 +129,7 @@ describe("PiWebApp New session composer root", () => {
   it("does not provide the workspace header action while desktop chat owns the visible New session action", () => {
     const app = new PiWebApp();
     setAppState(app, { mainView: "chat", selectedSession: session("selected", mainWorkspace.path) });
-    const workspace = required(renderApp(app).querySelector<WorkspacePanel>("workspace-panel"), "workspace panel");
+    const workspace = required(renderWideApp(app).querySelector<WorkspacePanel>("workspace-panel"), "workspace panel");
 
     expect(workspace.onNewSession).toBeUndefined();
   });
@@ -528,6 +528,18 @@ function renderApp(app: PiWebApp): HTMLDivElement {
   document.body.append(container);
   render(app.render(), container);
   return container;
+}
+
+/**
+ * A shell wide enough to seat the workspace panel.
+ *
+ * The panel is no longer rendered where it cannot be seen -- it used to be
+ * present and hidden by a stylesheet. Tests that want the panel now have to
+ * give it room, which is the same rule the interface follows.
+ */
+function renderWideApp(app: PiWebApp): HTMLDivElement {
+  Object.defineProperty(app, "clientWidth", { configurable: true, value: 1440 });
+  return renderApp(app);
 }
 
 function setAppState(app: PiWebApp, patch: Partial<AppState>): void {

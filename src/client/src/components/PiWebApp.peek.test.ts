@@ -129,7 +129,7 @@ describe("PiWebApp panel peek", () => {
     await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
     expect(peekSheet(app)).not.toBeNull();
 
-    const panel = shadowRoot(app).querySelector(".peek-sheet app-navigation-panel");
+    const panel = shadowRoot(app).querySelector(".panel-surface[data-mode=\"sheet\"] app-navigation-panel");
     if (!(panel instanceof AppNavigationPanel)) throw new Error("The sheet did not carry the session list");
     void panel.onSelectSession?.(session());
     await settle(app);
@@ -142,7 +142,7 @@ describe("PiWebApp panel peek", () => {
 
     await dragAcross(app, -peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
 
-    const panel = shadowRoot(app).querySelector(".peek-sheet workspace-panel");
+    const panel = shadowRoot(app).querySelector(".panel-surface[data-mode=\"sheet\"] workspace-panel");
     if (!(panel instanceof WorkspacePanel)) throw new Error("The sheet did not carry the workspace panel");
 
     expect(panel.hideToolTabs).toBe(false);
@@ -154,23 +154,22 @@ describe("PiWebApp panel peek", () => {
     localStorage.setItem("pi-web-panel-intents", JSON.stringify({ navigation: "auto", workspace: "pinned" }));
     const app = await mountApp(979);
 
-    const burger = shadowRoot(app).querySelector("app-panel-burger[side='workspace']");
-    if (!(burger instanceof HTMLElement)) throw new Error("The shell rendered no workspace burger");
+    const controls = shadowRoot(app).querySelectorAll(".panel-surface[data-side='workspace'] .panel-control");
+    const labels = [...controls].map((control) => control.getAttribute("aria-label"));
 
-    expect(getComputedStyle(burger).display).not.toBe("none");
-    const button = burger.shadowRoot?.querySelector("button");
-    if (!(button instanceof HTMLButtonElement)) throw new Error("The burger rendered no button");
-    expect(button.getAttribute("aria-label")).toBe("Hide workspace");
+    expect(labels).toContain("Unpin workspace");
+    expect(labels).toContain("Close workspace");
   });
 
   it("leaves a way out of every panel a three-pane shell docks", async () => {
     const app = await mountApp(DESKTOP);
 
     for (const side of ["navigation", "workspace"] as const) {
-      const burger = shadowRoot(app).querySelector(`app-panel-burger[side='${side}']`);
-      if (!(burger instanceof HTMLElement)) throw new Error(`The shell rendered no ${side} burger`);
-      expect(getComputedStyle(burger).display).not.toBe("none");
-      expect(burger.shadowRoot?.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
+      const noun = side === "navigation" ? "sessions" : "workspace";
+      const labels = [...shadowRoot(app).querySelectorAll(`.panel-surface[data-side='${side}'] .panel-control`)]
+        .map((control) => control.getAttribute("aria-label"));
+      expect(labels).toContain(`Unpin ${noun}`);
+      expect(labels).toContain(`Close ${noun}`);
     }
   });
 
@@ -261,12 +260,12 @@ function scrim(app: PiWebApp): HTMLElement | null {
 }
 
 function peekSheet(app: PiWebApp): HTMLElement | null {
-  const sheet = shadowRoot(app).querySelector(".peek-sheet");
+  const sheet = shadowRoot(app).querySelector(".panel-surface[data-mode=\"sheet\"]");
   return sheet instanceof HTMLElement ? sheet : null;
 }
 
 function pin(app: PiWebApp): HTMLElement | null {
-  const button = shadowRoot(app).querySelector(".peek-pin");
+  const button = shadowRoot(app).querySelector(".panel-surface[data-mode=\"sheet\"] .panel-control[data-pressed]");
   return button instanceof HTMLElement ? button : null;
 }
 

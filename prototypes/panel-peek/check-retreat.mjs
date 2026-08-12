@@ -36,7 +36,7 @@ for (const start of [150, 600]) {
     const before = await sheetState();
     // Watch the sheet through the whole gesture.
     await ev(s, `(() => { globalThis.trace = []; const app = document.querySelector("pi-web-app");
-      globalThis.tick = setInterval(() => { const el = app.shadowRoot.querySelector(".peek-sheet");
+      globalThis.tick = setInterval(() => { const el = app.shadowRoot.querySelector(".panel-surface[data-mode='sheet']");
         globalThis.trace.push(el === null ? "gone" : (el.hasAttribute("data-tracking") ? "T" : "s") + (el.style.getPropertyValue("--peek-progress") || "?"));
       }, 25); return "watching"; })()`);
     await dragFrom(start, 480, -retreat);
@@ -62,8 +62,8 @@ async function dragFrom(x,y,dx){
   for(let i=1;i<=steps;i+=1){await send(s,"Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:x+Math.round(dx*i/steps),y}]});await delay(14);}
   await send(s,"Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
 }
-async function sheetState(){return ev(s,`(() => {const el=document.querySelector("pi-web-app").shadowRoot.querySelector(".peek-sheet");
-  return el===null?"CLOSED":"open@"+(el.style.getPropertyValue("--peek-progress")||"?");})()`);}
+async function sheetState(){return ev(s,`(() => {const el=document.querySelector("pi-web-app").shadowRoot.querySelector(".panel-surface[data-mode='sheet']");
+  return el===null?"CLOSED":el.dataset.side+"@"+(el.style.getPropertyValue("--peek-progress")||"?");})()`);}
 async function ev(k,e){const r=await send(k,"Runtime.evaluate",{expression:e,awaitPromise:true,returnByValue:true});
   if(r.exceptionDetails)return "threw"; return String(r.result?.value);}
 async function waitForTarget(){for(let i=0;i<50;i+=1){try{const res=await fetch(`http://127.0.0.1:${String(PORT)}/json/list`);

@@ -1,4 +1,11 @@
-import { LitElement, html } from "lit";
+import { LitElement, html, svg } from "lit";
+
+/*
+ * Drawn here rather than imported: the app has no icon set, and two 12-line
+ * paths do not justify inventing one for this change.
+ */
+const PANEL_PIN_ICON = svg`<svg class="panel-control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/></svg>`;
+const PANEL_CLOSE_ICON = svg`<svg class="panel-control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>`;
 import { customElement, query, state } from "lit/decorators.js";
 import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
@@ -96,7 +103,7 @@ import "./SessionInboxPanel";
 import "./WorkspaceManagementDialog";
 import { navigateToInboxSession, type InboxNavigationResult } from "../controllers/inboxNavigation";
 import { deriveSessionInboxBoard } from "../sessionBoard";
-import "./appShell/AppPanelBurger";
+import "./appShell/AppPanelOpener";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRefreshControl";
 import { appStyles, NEW_SESSION_LABEL, renderNewSessionIcon, type ChatLine } from "./shared";
@@ -319,7 +326,7 @@ export class PiWebApp extends LitElement {
   private writePeekProgress(progress: number): void {
     const root = this.shadowRoot;
     if (root === null) return;
-    const sheet = root.querySelector(".peek-sheet");
+    const sheet = root.querySelector(".panel-surface[data-mode=\"sheet\"]");
     if (sheet instanceof HTMLElement) sheet.style.setProperty("--peek-progress", String(progress));
     const scrim = root.querySelector(".peek-scrim");
     if (scrim instanceof HTMLElement) scrim.style.opacity = String(progress);
@@ -1267,15 +1274,14 @@ export class PiWebApp extends LitElement {
    * One panel, one place. A peeked panel moves into the sheet rather than being
    * mounted twice, which would run its subscriptions twice with it.
    */
-  private renderWorkspacePanel(placement: "docked" | "peeked" = "docked") {
-    if (placement === "docked" && this.panelPeek.panel === "workspace") return null;
+  private renderWorkspacePanel() {
     // The panel shows its own tool strip unless something else already shows
     // one. Stacked under the session on a summoned shell, the control sheet
-    // carries the tools. Docked beside the session, or inside a peeked sheet,
-    // nothing else does, so the panel must carry them itself.
-    const hideToolTabs = placement === "docked"
-      && this.appShell.isChromeSummoned
-      && !this.panelIntent.isDocked("workspace");
+    // carries the tools. Standing on its own -- docked beside the session or
+    // overlaid as a sheet -- nothing else does, so it carries them itself.
+    const hideToolTabs = this.appShell.isChromeSummoned
+      && !this.panelIntent.isDocked("workspace")
+      && this.panelPeek.panel !== "workspace";
     const workspace = this.state.selectedWorkspace;
     const panelContext = workspace === undefined ? undefined : this.createWorkspacePanelContext(workspace);
     const emptyState = workspace === undefined ? this.workspacePanelEmptyState() : undefined;
@@ -2984,59 +2990,148 @@ export class PiWebApp extends LitElement {
    * this were hidden there the panel could be pinned and never unpinned -- the
    * trap the seam arrow used to spring.
    */
-  private renderPanelBurger(side: ShellPanel) {
-    if (this.panelPeek.panel === side) return null;
+  private renderPanelOpener(side: ShellPanel) {
+    if (this.renderPanelSurface(side) !== null) return null;
     if (side === "navigation" && this.appShell.isMobileNavigationLayout) return null;
-    const docked = this.panelIntent.isDocked(side);
     const noun = side === "navigation" ? "sessions" : "workspace";
     return html`
-      <app-panel-burger
+      <app-panel-opener
         side=${side}
         controls=${`${side}-panel`}
-        label=${docked ? `Hide ${noun}` : `Show ${noun}`}
-        .open=${docked}
-        .onPress=${() => { if (docked) this.panelIntent.toggle(side); else this.panelPeek.open(side); }}
-      ></app-panel-burger>
+        label=${`Show ${noun}`}
+        .onPress=${() => { this.panelPeek.open(side); }}
+      ></app-panel-opener>
     `;
   }
 
-  private renderPeekSheet() {
+  /**
+   * The one place a side panel is rendered.
+   *
+   * A sheet and a docked column used to be two elements with two lifetimes, so
+   * pinning closed one and opened the other and the panel visibly changed
+   * hands. This is a single element whose presentation changes: overlaid while
+   * peeked, in the layout once pinned, at the same width either way. Pinning
+   * therefore moves nothing.
+   */
+  private renderPanelSurface(side: ShellPanel) {
+    const peeked = this.panelPeek.panel === side;
+    const docked = this.panelIntent.isDocked(side);
+    // A third presentation, and the reason this cannot just test peek and pin:
+    // on a narrow shell the workspace panel is also a main view of its own,
+    // chosen from the tab strip rather than pinned.
+    const isMainView = side === "workspace" && mainViewClass(this.state.mainView) === "workspace-view";
+    if (!peeked && !docked && !isMainView) return null;
+    if (side === "navigation" && this.appShell.isMobileNavigationLayout && !peeked) return null;
+    const label = side === "navigation" ? "Sessions" : "Workspace";
+    const width = this.panelSurfaceWidth(side);
+    return html`
+      <aside
+        id=${`${side}-panel`}
+        class="panel-surface"
+        data-side=${side}
+        data-mode=${peeked ? "sheet" : "docked"}
+        ?data-tracking=${this.panelPeek.isTracking}
+        role=${peeked ? "dialog" : "complementary"}
+        aria-label=${label}
+        style=${peeked ? `width: ${String(width)}px; --peek-progress: ${String(this.panelPeek.progress(side))}` : ""}
+      >
+        ${this.renderPanelControls(side)}
+        ${side === "navigation" ? this.renderNavigationPanel() : this.renderWorkspacePanel()}
+      </aside>
+    `;
+  }
+
+  /**
+   * The panel's own pin and close.
+   *
+   * They belong to the panel, not to the thing presenting it: a docked panel
+   * used to have neither, so it could be pinned and never unpinned. They sit at
+   * the edge that faces the session, in the panel's own header row rather than
+   * in a band above it.
+   */
+  private renderPanelControls(side: ShellPanel) {
+    const docked = this.panelIntent.isDocked(side);
+    const noun = side === "navigation" ? "sessions" : "workspace";
+    const canPin = docked || canDockAt(this.clientWidth, side);
+    return html`
+      <div class="panel-controls" data-side=${side}>
+        ${canPin ? html`
+          <button
+            type="button"
+            class="panel-control"
+            data-pressed=${String(docked)}
+            title=${docked ? `Unpin ${noun}` : `Pin ${noun} open`}
+            aria-label=${docked ? `Unpin ${noun}` : `Pin ${noun} open`}
+            aria-pressed=${String(docked)}
+            @click=${() => { this.togglePanelPin(side); }}
+          >${PANEL_PIN_ICON}</button>
+        ` : null}
+        <button
+          type="button"
+          class="panel-control"
+          title=${`Close ${noun}`}
+          aria-label=${`Close ${noun}`}
+          @click=${() => { this.closePanelSurface(side); }}
+        >${PANEL_CLOSE_ICON}</button>
+      </div>
+    `;
+  }
+
+  /** Pinning keeps the sheet exactly where it is; the layout opens around it. */
+  private togglePanelPin(side: ShellPanel) {
+    if (this.panelIntent.isDocked(side)) {
+      this.panelIntent.toggle(side);
+      return;
+    }
+    this.panelIntent.keep(side);
+    this.panelPeek.close();
+  }
+
+  private closePanelSurface(side: ShellPanel) {
+    if (this.panelIntent.isDocked(side)) this.panelIntent.toggle(side);
+    else this.panelPeek.close();
+  }
+
+  /**
+   * One width, whichever presentation the panel is in.
+   *
+   * Two numbers here is what made pinning jump: the sheet was a fixed 360 and
+   * the column was a share of the window. The panel keeps whatever width it was
+   * given, narrowed only where the shell is too small to hold it.
+   */
+  private panelSurfaceWidth(side: ShellPanel): number {
+    return Math.min(this.panelResize.panelWidth(side), Math.round(this.clientWidth * 0.85));
+  }
+
+  /**
+   * The docked track takes the width the panel already has.
+   *
+   * Without this the column is sized by its own rule -- a share of the window --
+   * and the panel jumps at the moment of pinning, which is exactly the hand-off
+   * this work removed. Set only where a panel is docked, so the collapsed rule
+   * still wins when it is not.
+   */
+  private dockedWidthStyle(): string {
+    const sides: ShellPanel[] = ["navigation", "workspace"];
+    return sides
+      .filter((side) => this.panelIntent.isDocked(side))
+      .map((side) => `--${side}-panel-width: ${String(this.panelSurfaceWidth(side))}px;`)
+      .join(" ");
+  }
+
+  private renderPeekScrim() {
     const panel = this.panelPeek.panel;
     if (panel === undefined) return null;
-    const progress = this.panelPeek.progress(panel);
-    const label = panel === "navigation" ? "Sessions" : "Workspace";
+    const label = panel === "navigation" ? "sessions" : "workspace";
     return html`
       <button
         type="button"
         class="peek-scrim"
-        aria-label=${`Close ${label.toLowerCase()}`}
+        aria-label=${`Close ${label}`}
         ?data-tracking=${this.panelPeek.isTracking}
-        style=${`opacity: ${String(progress)}`}
+        style=${`opacity: ${String(this.panelPeek.progress(panel))}`}
         @click=${() => { this.dismissPeekOnTap(); }}
       ></button>
-      <div
-        class="peek-sheet"
-        data-side=${panel}
-        ?data-tracking=${this.panelPeek.isTracking}
-        role="dialog"
-        aria-label=${label}
-        style=${`width: ${String(peekSheetWidth(this.clientWidth))}px; --peek-progress: ${String(progress)}`}
-      >
-        <div class="peek-sheet-head">
-          ${canDockAt(this.clientWidth, panel) ? html`
-            <button
-              type="button"
-              class="peek-pin"
-              title=${`Keep ${label.toLowerCase()} open`}
-              aria-label=${`Keep ${label.toLowerCase()} open`}
-              @click=${() => { this.pinPeekedPanel(panel); }}
-            >Pin</button>
-          ` : null}
-        </div>
-        <div class="peek-sheet-body">
-          ${panel === "navigation" ? this.renderNavigationPanel() : this.renderWorkspacePanel("peeked")}
-        </div>
-      </div>
     `;
   }
 
@@ -3185,7 +3280,7 @@ export class PiWebApp extends LitElement {
     return html`
       <div
         class=${`${this.panelIntent.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`}
-        style=${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })}
+        style=${`${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })} ${this.dockedWidthStyle()}`}
         @pointerdown=${(event: PointerEvent) => { this.panelPeek.onPointerDown(event); }}
         @pointermove=${(event: PointerEvent) => { this.panelPeek.onPointerMove(event); }}
         @pointerup=${(event: PointerEvent) => { this.panelPeek.onPointerUp(event); }}
@@ -3193,12 +3288,12 @@ export class PiWebApp extends LitElement {
         @touchmove=${(event: TouchEvent) => { this.panelPeek.onTouchMove(event); }}
         @wheel=${(event: WheelEvent) => { this.panelPeek.onWheel(event); }}
       >
-        ${this.renderPeekSheet()}
-        <aside id="navigation-panel">${this.appShell.isMobileNavigationLayout || this.panelPeek.panel === "navigation" ? null : this.renderNavigationPanel()}</aside>
+        ${this.renderPeekScrim()}
+        ${this.renderPanelSurface("navigation")}
         ${this.renderNavigationPanelEdgeControl()}
         <main class=${mainViewClass(state.mainView)}>
-          ${this.renderPanelBurger("navigation")}
-          ${this.renderPanelBurger("workspace")}
+          ${this.renderPanelOpener("navigation")}
+          ${this.renderPanelOpener("workspace")}
           ${this.renderContextBar()}
           ${this.renderMobileMainTabs()}
           ${this.renderGlobalError(state)}
@@ -3217,7 +3312,7 @@ export class PiWebApp extends LitElement {
           ` : this.renderSessionEmptyState()}
         </main>
         ${this.renderWorkspacePanelEdgeControl()}
-        ${this.renderWorkspacePanel()}
+        ${this.renderPanelSurface("workspace")}
         ${state.newSessionComposer.kind === "open" ? html`<new-session-composer
           .initialDestination=${state.newSessionComposer.initialDestination}
           .initialPrompt=${state.newSessionComposer.initialPrompt}

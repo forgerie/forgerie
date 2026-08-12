@@ -201,7 +201,6 @@ export class AppPanelEdgeControl extends LitElement {
     .resize-handle { position: absolute; inset: 0 -6px; z-index: 0; cursor: col-resize; touch-action: none; outline: none; }
     .resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); background: transparent; transition: width .12s ease, background .12s ease, opacity .12s ease; }
     .resize-handle:hover::after, .resize-handle:focus-visible::after, :host([resizing]) .resize-handle::after { width: 3px; background: var(--pi-accent); opacity: .72; }
-    :host([disclosure="summoned"][side="navigation"]) { grid-row: 1 / 3; }
     /*
      * Hidden only while the panel is away. A docked panel has no sheet, so this
      * control is the only way back out of it; hiding it whenever the shell is
