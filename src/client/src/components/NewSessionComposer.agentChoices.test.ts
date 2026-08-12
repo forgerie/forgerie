@@ -71,7 +71,11 @@ function editor(composer: NewSessionComposer): PromptEditor {
 }
 
 async function pickModel(composer: NewSessionComposer, model: SessionModel): Promise<void> {
-  composer.onPickModel = () => Promise.resolve(model);
+  composer.onPickModel = (_current, machineId) => {
+    // The catalog must be asked of the destination machine.
+    expect(machineId).toBe("local");
+    return Promise.resolve(model);
+  };
   editor(composer).capabilities.model?.onSelectModel();
   await settleRenderedDialog(composer);
 }

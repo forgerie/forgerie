@@ -109,6 +109,13 @@ describe("machine-scoped session proxy routes", () => {
     expect(daemon.requests).toEqual([{ method: "DELETE", path: "/sessions/session-1", body: undefined }]);
   });
 
+  it("forwards the pre-session model catalog, which belongs to no session", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/machines/local/models" });
+
+    expect(response.statusCode).toBe(200);
+    expect(daemon.requests).toEqual([{ method: "GET", path: "/models", body: undefined }]);
+  });
+
   it("returns a 502 response when the daemon request fails", async () => {
     daemon.failWith(new Error("connection refused"));
 

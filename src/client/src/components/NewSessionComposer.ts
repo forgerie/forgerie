@@ -68,7 +68,7 @@ export class NewSessionComposer extends LitElement {
   @query("prompt-editor") private editor?: PromptEditor;
   private draftWaitScheduled = false;
   /** Opened by the host, which owns the pickers the chat already uses. */
-  @property({ attribute: false }) onPickModel?: (current: ClientSessionModel | undefined) => Promise<ClientSessionModel | undefined>;
+  @property({ attribute: false }) onPickModel?: (current: ClientSessionModel | undefined, machineId: string) => Promise<ClientSessionModel | undefined>;
   @property({ attribute: false }) onPickThinkingLevel?: (current: string | undefined) => Promise<string | undefined>;
   /** Model, thinking, and guidance picked before the session exists. */
   @state() private chosenModel?: ClientSessionModel;
@@ -365,8 +365,18 @@ export class NewSessionComposer extends LitElement {
   }
 
   private async chooseModel(): Promise<void> {
-    const picked = await this.onPickModel?.(this.chosenModel);
+    // The catalog belongs to the destination machine, not to whichever machine
+    // the surrounding app happens to have selected.
+    const machineId = this.destinationMachineId();
+    if (machineId === undefined) return;
+    const picked = await this.onPickModel?.(this.chosenModel, machineId);
     if (picked !== undefined) this.chosenModel = picked;
+  }
+
+  private destinationMachineId(): string | undefined {
+    const state = this.composerState;
+    if (state.kind === "choosing") return undefined;
+    return state.destination.kind === "complete" ? state.destination.machine.id : undefined;
   }
 
   private chooseThinkingLevel(): void {

@@ -2891,8 +2891,8 @@ export class PiWebApp extends LitElement {
    * The dialog is the same one the chat opens; only the outcome differs. A
    * session applies the choice, a new-session composer keeps it for creation.
    */
-  private readonly handlePickNewSessionModel = async (current: SessionModel | undefined): Promise<SessionModel | undefined> => {
-    const models = (await sessionsApi.newSessionModels(selectedMachineId(this.state))).models;
+  private readonly handlePickNewSessionModel = async (current: SessionModel | undefined, machineId: string): Promise<SessionModel | undefined> => {
+    const models = (await sessionsApi.newSessionModels(machineId)).models;
     const currentValue = current?.provider !== undefined && current.id !== undefined ? `${current.provider}/${current.id}` : undefined;
     this.setState({
       modelDialog: {
