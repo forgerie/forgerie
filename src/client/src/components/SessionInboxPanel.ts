@@ -1145,8 +1145,13 @@ export class SessionInboxPanel extends LitElement {
       width: calc(100% + 24px);
       padding: 4px 12px;
       animation: drawer-open 180ms ease-out;
-      /* Its top edge is the header's own border; only the far edge is new. */
-      border-block-end: 1px solid var(--pi-border);
+      /*
+       * A rule at each end. The header's own border is below the drawer, not
+       * above it, so it separates the drawer from the list and leaves the title
+       * row touching it. The near edge is the one the drawer is drawn out of and
+       * needs a line of its own.
+       */
+      border-block: 1px solid var(--pi-border);
       background: var(--pi-surface-hover);
       box-shadow: inset 0 6px 8px -8px var(--pi-shadow);
     }
