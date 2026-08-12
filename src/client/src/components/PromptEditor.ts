@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { html, LitElement, type PropertyValues } from "lit";
+import { html, LitElement, nothing, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery, SessionStatus } from "../../../shared/apiTypes";
 import { sessionGuidanceSummary } from "../../../shared/sessionGuidance";
@@ -17,6 +17,17 @@ import "./GuidancePicker";
 
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
+  /**
+   * Which surface the composer stands on.
+   *
+   * `pre-session` is the new-session modal: the same composer, with the
+   * controls that need a running session stood down. Session-only chrome
+   * already hides itself when its own inputs are absent, so this only has to
+   * retire the controls that would otherwise render unconditionally.
+   */
+  @property() surface: "session" | "pre-session" = "session";
+  /** Supplied by a pre-session host; the session surface builds its own. */
+  @property({ attribute: false }) composerRuntime?: ComposerRuntime;
   @property({ type: Boolean }) disabled = false;
   @property({ type: Boolean }) submissionAvailable = true;
   @property({ type: Boolean }) runtimeControlsAvailable = true;
@@ -99,6 +110,7 @@ export class PromptEditor extends LitElement {
     const rail = this.rail();
     const busy = this.sending || this.guidancePending;
     const resting = this.isResting();
+    const preSession = this.surface === "pre-session";
     return html`
       ${this.guidanceOpen ? html`
         <guidance-picker
@@ -118,7 +130,7 @@ export class PromptEditor extends LitElement {
         @focusin=${() => { this.composerFocused = true; }}
         @focusout=${(event: FocusEvent) => { this.releaseComposerFocus(event); }}
       >
-        <context-usage-meter .contextUsage=${this.contextUsage}></context-usage-meter>
+        ${preSession ? nothing : html`<context-usage-meter .contextUsage=${this.contextUsage}></context-usage-meter>`}
         <composer-draft
           .disabled=${this.disabled}
           .submissionDisabled=${busy || !this.submissionAvailable}
@@ -136,21 +148,26 @@ export class PromptEditor extends LitElement {
           ${this.renderAttachmentAction(busy)}
           ${this.renderArchiveAction()}
           ${this.renderCompactStatus()}
-          <button
-            class="icon-button new-session-button"
-            data-action="new-session"
-            title=${NEW_SESSION_LABEL}
-            aria-label=${NEW_SESSION_LABEL}
-            @click=${() => { this.closeGuidance(false, true); this.onNewSession?.(); }}
-          >${renderNewSessionIcon()}</button>
+          ${preSession ? nothing : html`
+            <button
+              class="icon-button new-session-button"
+              data-action="new-session"
+              title=${NEW_SESSION_LABEL}
+              aria-label=${NEW_SESSION_LABEL}
+              @click=${() => { this.closeGuidance(false, true); this.onNewSession?.(); }}
+            >${renderNewSessionIcon()}</button>
+          `}
           ${this.renderPrimaryAction(rail)}
-          <button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>
+          ${preSession ? nothing : html`<button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>`}
         </div>
       </footer>
     `;
   }
 
   private runtime(): ComposerRuntime {
+    // A pre-session host owns its own capabilities, so it supplies the runtime
+    // rather than letting the composer build a session-shaped one.
+    if (this.composerRuntime !== undefined) return this.composerRuntime;
     const key = JSON.stringify({ sessionId: this.sessionId, cwd: this.cwd, machineId: this.machineId, projectId: this.projectId, workspaceId: this.workspaceId });
     if (key !== this.cachedRuntimeKey) {
       this.cachedRuntimeKey = key;
@@ -166,6 +183,9 @@ export class PromptEditor extends LitElement {
   }
 
   private draftStorageKey(): string | undefined {
+    // A first prompt belongs to the modal's recovery record, not to a durable
+    // per-session draft that no session owns yet.
+    if (this.surface === "pre-session") return undefined;
     return draftStorageKey(this.machineId, this.sessionId);
   }
 
