@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import type { SessionUiEvent } from "../../shared/apiTypes.js";
+import { parseLeadingSlashCommand } from "../../shared/promptResourceCommand.js";
 import type { ClientCommandResult, ClientSession, ClientSessionTreeSnapshot } from "../types.js";
-import { isBuiltinCommand } from "./builtinCommands.js";
+import { BUILTIN_COMMANDS, isBuiltinCommand } from "./builtinCommands.js";
+import { resolveCanonicalCommandSource } from "./commandCatalog.js";
 
 export interface CommandSession {
   sessionId: string;
@@ -92,8 +94,14 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
   async run(sessionId: string, text: string): Promise<ClientCommandResult> {
     const active = await this.getActive(sessionId);
     const session = active.runtime.session;
-    const [name = "", ...args] = text.trim().replace(/^\//, "").split(/\s+/);
-    const rest = args.join(" ").trim();
+    const parsed = parseLeadingSlashCommand(text);
+    if (parsed.kind !== "command") {
+      return parsed.kind === "not-command"
+        ? { type: "unsupported", message: "Command must start with / at offset zero" }
+        : { type: "unsupported", message: "Command name is required" };
+    }
+    const { name } = parsed;
+    const rest = parsed.args.trim();
 
     if (this.lifecycle.isTreeNavigationActive?.(session) === true) return treeNavigationActiveUnsupported();
 
@@ -290,9 +298,13 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
   }
 
   private isRuntimeCommand(session: TSession, name: string): boolean {
-    return session.extensionRunner.getRegisteredCommands().some((command) => command.invocationName === name)
-      || session.promptTemplates.some((template) => template.name === name)
-      || session.resourceLoader.getSkills().skills.some((skill) => `skill:${skill.name}` === name);
+    const source = resolveCanonicalCommandSource({
+      builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, description: command.description, source: "builtin" as const })),
+      extensions: session.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, source: "extension" as const })),
+      prompts: session.promptTemplates.map((template) => ({ name: template.name })),
+      skills: session.resourceLoader.getSkills().skills.map((skill) => ({ name: skill.name })),
+    }, name);
+    return source === "extension" || source === "skill" || source === "prompt";
   }
 }
 

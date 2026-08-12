@@ -1,6 +1,7 @@
 export type FederatedHttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 export const PI_PACKAGE_MUTATION_PROXY_TIMEOUT_MS = 5 * 60_000;
+export const PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS = 15_000;
 export const SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS = 5 * 60_000;
 export const SESSION_TREE_FORK_PROXY_TIMEOUT_MS = 5 * 60_000;
 
@@ -32,6 +33,7 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "POST", path: "/projects/:projectId/workspaces/:workspaceId/file/move" },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/file/preview" },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/files" },
+  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/prompt-resource-catalog", timeoutMs: PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/git/status" },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/git/diff" },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/terminals" },
@@ -73,6 +75,7 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "POST", path: "/sessions/:sessionId/thinking-level/cycle" },
   { method: "GET", path: "/sessions/:sessionId/commands" },
   { method: "POST", path: "/sessions/:sessionId/prompt" },
+  { method: "POST", path: "/sessions/:sessionId/prompt-resource-command" },
   { method: "POST", path: "/sessions/:sessionId/queue/clear" },
   { method: "POST", path: "/sessions/:sessionId/guidance" },
   { method: "POST", path: "/sessions/:sessionId/ask/submit" },

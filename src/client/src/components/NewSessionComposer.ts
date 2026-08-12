@@ -1,11 +1,13 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
-import type { Machine, Project, Workspace } from "../api";
+import type { PromptResourceCatalogResponse } from "../../../shared/promptResourceCommand";
+import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
+import { workspacesApi, type Machine, type Project, type Workspace } from "../api";
+import { createPreSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import {
   backToMachineChoice,
   backToProjectChoice,
   beginNewSessionSubmission,
-  canSubmitNewSession,
   chooseNewSessionMachine,
   chooseNewSessionProject,
   chooseNewSessionWorkspace,
@@ -13,72 +15,114 @@ import {
   createNewSessionComposerState,
   refreshNewSessionCatalog,
   rejectNewSessionSubmission,
+  isNewSessionMachineAvailable,
   resolveNewSessionMachines,
   resolveNewSessionProjects,
   resolveNewSessionWorkspaces,
   startNewSessionDestinationChoice,
-  updateNewSessionPrompt,
   type NewSessionCompleteDestination,
   type NewSessionComposerState,
   type NewSessionDestinationCatalog,
+  type NewSessionFirstPromptSubmission,
   type NewSessionLaunchIntent,
   type NewSessionSubmissionOutcome,
 } from "../newSessionComposer";
 import type { ModalSurface } from "./ModalSurface";
+import "./ComposerDraft";
+import type { ComposerDraft, ComposerDraftDisplayState, ComposerDraftSeed, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./ModalSurface";
 import { newSessionComposerStyles } from "./shared";
+
+interface SlashValidationError {
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
+type SlashValidationResult =
+  | { readonly kind: "valid"; readonly submission: NewSessionFirstPromptSubmission }
+  | { readonly kind: "invalid"; readonly error: SlashValidationError };
 
 @customElement("new-session-composer")
 export class NewSessionComposer extends LitElement {
   /** Initial values are read once. Later property updates never replace the mounted local draft. */
   @property({ attribute: false }) initialDestination?: NewSessionCompleteDestination;
-  @property({ attribute: false }) initialPrompt = "";
+  @property({ attribute: false }) recoverySeedId?: string;
   @property({ attribute: false }) catalog: NewSessionDestinationCatalog = createApiNewSessionDestinationCatalog();
   @property({ attribute: false }) onCancel?: () => void;
   @property({ attribute: false }) onSubmit?: (intent: NewSessionLaunchIntent) => Promise<NewSessionSubmissionOutcome> | NewSessionSubmissionOutcome;
+  @property({ attribute: false }) onClaimRecoveryDraft?: (recoverySeedId: string) => ComposerDraftSeed | undefined;
+  @property({ attribute: false }) onReturnRecoveryDraft?: (recoverySeedId: string, snapshot: ComposerDraftSubmitSnapshot) => void;
+  @property({ attribute: false }) promptResourceCatalog: (projectId: string, workspaceId: string, machineId: string) => Promise<PromptResourceCatalogResponse> = (projectId, workspaceId, machineId) => workspacesApi.promptResourceCatalog(projectId, workspaceId, machineId);
 
   @state() private composerState: NewSessionComposerState = createNewSessionComposerState();
+  @state() private draftDisplay: ComposerDraftDisplayState = { inputMode: { kind: "normal" }, empty: true, focused: false, attachmentCount: 0, attachmentCapturePending: false };
+  @state() private slashValidationError: SlashValidationError | undefined;
+  @state() private validationPending = false;
   @query("modal-surface") private modalSurface?: ModalSurface;
+  @query("composer-draft") private draft?: ComposerDraft;
 
   private initialized = false;
   private requestGeneration = 0;
+  private runtimeGeneration = 0;
+  private submissionGeneration = 0;
   private focusRegion = "";
+  private runtime: ComposerRuntime = createPreSessionComposerRuntime({ machineId: "local" });
+  private claimedRecoverySeedId: string | undefined;
+  private completedRecoverySeedId: string | undefined;
+  private recoveryClaimRetryScheduled = false;
+  private recoveryClaimRetryAttemptedFor: string | undefined;
+  private connectionGeneration = 0;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
-    if (this.initialized) return;
-    this.initialized = true;
-    this.composerState = createNewSessionComposerState(this.initialDestination, this.initialPrompt);
+    if (!this.initialized) {
+      this.initialized = true;
+      this.composerState = createNewSessionComposerState(this.initialDestination);
+      this.replaceRuntimeForDestination(this.composerState.destination);
+    }
   }
 
   protected override updated(): void {
+    this.claimRecoveryDraftOnce();
     const focusRegion = stateFocusRegion(this.composerState);
     if (focusRegion === this.focusRegion) return;
     this.focusRegion = focusRegion;
-    this.modalSurface?.focusDialog();
+    this.focusCurrentRegion();
+  }
+
+  override connectedCallback(): void {
+    this.connectionGeneration += 1;
+    super.connectedCallback();
   }
 
   override disconnectedCallback(): void {
     this.requestGeneration += 1;
+    this.runtimeGeneration += 1;
+    this.submissionGeneration += 1;
+    this.validationPending = false;
+    const generation = ++this.connectionGeneration;
+    queueMicrotask(() => { void this.returnDisconnectedRecoveryDraftWhenSettled(generation); });
     super.disconnectedCallback();
   }
 
   /** Refocuses this mounted composer without replacing its destination or draft. */
   focusExisting(): void {
-    this.modalSurface?.focusDialog();
+    this.focusCurrentRegion();
   }
 
   override render(): TemplateResult {
     const state = this.composerState;
     const submitting = state.kind === "submitting";
+    const attachmentCapturePending = this.draftDisplay.attachmentCapturePending;
+    const busy = submitting || this.validationPending || attachmentCapturePending;
     return html`
       <modal-surface
         .label=${"New session"}
         .initialFocus=${initialFocusSelector(state)}
-        .busy=${submitting}
+        .busy=${busy}
         .onClose=${() => { this.requestCancel(); }}
       >
-        <form class="composer" @submit=${(event: SubmitEvent) => { this.handleSubmit(event); }}>
+        <form class="composer" @submit=${(event: SubmitEvent) => { this.handleFooterSubmit(event); }}>
           <div class="dialog-scroll">
             <section class="field" aria-labelledby="new-session-destination-label">
               <h2 class="field-label" id="new-session-destination-label">Destination</h2>
@@ -86,16 +130,26 @@ export class NewSessionComposer extends LitElement {
             </section>
 
             <section class="field">
-              <label class="field-label" for="new-session-prompt">First prompt</label>
-              <textarea
-                id="new-session-prompt"
+              <h2 class="field-label" id="new-session-prompt-label">First prompt</h2>
+              <composer-draft
+                aria-labelledby="new-session-prompt-label"
                 data-field="prompt"
-                aria-label="First prompt"
-                rows="3"
-                .value=${state.prompt}
-                ?disabled=${submitting}
-                @input=${(event: InputEvent) => { this.updatePrompt(event); }}
-              ></textarea>
+                .editorLabel=${"First prompt"}
+                .placeholderText=${this.placeholderForState(state)}
+                .runtime=${this.runtime}
+                .disabled=${submitting}
+                .submissionDisabled=${this.slashValidationError !== undefined || this.validationPending}
+                .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
+                .onDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
+                .onDraftEdited=${() => { this.invalidatePendingSubmission(); this.clearValidationError(); }}
+                .onCompletionError=${() => { this.clearValidationError(); }}
+              ></composer-draft>
+              ${this.slashValidationError === undefined ? nothing : html`
+                <div class="submission-error" role="alert">
+                  <p>${this.slashValidationError.message}</p>
+                  ${this.slashValidationError.retryable ? html`<button type="button" data-action="retry-prompt-resource-validation" @click=${() => { this.retryPromptResourceValidation(); }}>Retry</button>` : nothing}
+                </div>
+              `}
             </section>
 
             ${state.kind === "editing" && state.submissionError !== undefined
@@ -104,9 +158,9 @@ export class NewSessionComposer extends LitElement {
           </div>
 
           <footer class="dialog-footer">
-            ${submitting ? html`<span class="busy-label" role="status">Checking destination…</span>` : nothing}
-            <button type="button" data-action="cancel" ?disabled=${submitting} @click=${() => { this.requestCancel(); }}>Cancel</button>
-            <button class="primary" type="submit" data-action="send" ?disabled=${!canSubmitNewSession(state)}>${submitting ? "Sending…" : "Send"}</button>
+            ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : this.validationPending ? "Validating prompt…" : "Starting session…"}</span>` : nothing}
+            <button type="button" data-action="cancel" ?disabled=${submitting || attachmentCapturePending} @click=${() => { this.requestCancel(); }}>Cancel</button>
+            <button class="primary" type="submit" data-action="send" ?disabled=${!this.footerSendAvailable(state)}>${busy ? "Sending…" : "Send"}</button>
           </footer>
         </form>
       </modal-surface>
@@ -168,27 +222,15 @@ export class NewSessionComposer extends LitElement {
         </div>
       `;
     }
-    if (catalog.kind === "error") {
-      return this.renderCatalogProblem("machine-error", catalog.message, "refresh-machines", "Refresh machines");
-    }
-    if (catalog.kind === "empty") {
-      return this.renderCatalogProblem("machine-empty", "No machines are available.", "refresh-machines", "Refresh machines");
-    }
-    const hasAvailableMachine = catalog.items.some(isMachineAvailable);
+    if (catalog.kind === "error") return this.renderCatalogProblem("machine-error", catalog.message, "refresh-machines", "Refresh machines");
+    if (catalog.kind === "empty") return this.renderCatalogProblem("machine-empty", "No machines are available.", "refresh-machines", "Refresh machines");
+    const hasAvailableMachine = catalog.items.some(isNewSessionMachineAvailable);
     return html`
-      ${hasAvailableMachine
-        ? nothing
-        : this.renderCatalogProblem("machine-unavailable", "No machines are currently available.", "refresh-machines", "Refresh")}
+      ${hasAvailableMachine ? nothing : this.renderCatalogProblem("machine-unavailable", "No machines are currently available.", "refresh-machines", "Refresh")}
       <ul class="catalog-list" aria-label="Machines">
         ${catalog.items.map((machine) => html`
           <li>
-            <button
-              class="catalog-item"
-              type="button"
-              data-machine-id=${machine.id}
-              ?disabled=${!isMachineAvailable(machine)}
-              @click=${() => { this.selectMachine(machine); }}
-            >
+            <button class="catalog-item" type="button" data-machine-id=${machine.id} ?disabled=${!isNewSessionMachineAvailable(machine)} @click=${() => { this.selectMachine(machine); }}>
               <span class="catalog-item-copy"><strong>${machine.name}</strong><small>${machine.statusMessage ?? machine.id}</small></span>
               <span class="catalog-meta">${machineAvailabilityLabel(machine)}</span>
             </button>
@@ -198,18 +240,12 @@ export class NewSessionComposer extends LitElement {
     `;
   }
 
-  private renderProjects(
-    machine: Machine,
-    catalog: Extract<Extract<NewSessionComposerState, { kind: "choosing" }>["choice"], { step: "project" }>["catalog"],
-  ): TemplateResult {
+  private renderProjects(machine: Machine, catalog: Extract<Extract<NewSessionComposerState, { kind: "choosing" }>["choice"], { step: "project" }>["catalog"]): TemplateResult {
     let body: TemplateResult;
-    if (catalog.kind === "loading") {
-      body = html`<div class="catalog-state" data-state="project-loading" role="status"><p>Loading projects…</p><button type="button" data-action="refresh-projects-loading" @click=${() => { this.refreshCatalog(); }}>Refresh</button></div>`;
-    } else if (catalog.kind === "error") {
-      body = this.renderCatalogProblem("project-error", catalog.message, "refresh-projects", "Refresh projects");
-    } else if (catalog.kind === "empty") {
-      body = this.renderCatalogProblem("project-empty", `No projects are available on ${machine.name}.`, "refresh-projects", "Refresh projects");
-    } else {
+    if (catalog.kind === "loading") body = html`<div class="catalog-state" data-state="project-loading" role="status"><p>Loading projects…</p><button type="button" data-action="refresh-projects-loading" @click=${() => { this.refreshCatalog(); }}>Refresh</button></div>`;
+    else if (catalog.kind === "error") body = this.renderCatalogProblem("project-error", catalog.message, "refresh-projects", "Refresh projects");
+    else if (catalog.kind === "empty") body = this.renderCatalogProblem("project-empty", `No projects are available on ${machine.name}.`, "refresh-projects", "Refresh projects");
+    else {
       body = html`
         <ul class="catalog-list" aria-label="Projects">
           ${catalog.items.map((project) => html`
@@ -225,19 +261,12 @@ export class NewSessionComposer extends LitElement {
     return html`${body}<div class="catalog-back"><button type="button" data-action="back-machine" @click=${() => { this.backToMachines(); }}>← Change machine</button></div>`;
   }
 
-  private renderWorkspaces(
-    machine: Machine,
-    project: Project,
-    catalog: Extract<Extract<NewSessionComposerState, { kind: "choosing" }>["choice"], { step: "workspace" }>["catalog"],
-  ): TemplateResult {
+  private renderWorkspaces(machine: Machine, project: Project, catalog: Extract<Extract<NewSessionComposerState, { kind: "choosing" }>["choice"], { step: "workspace" }>["catalog"]): TemplateResult {
     let body: TemplateResult;
-    if (catalog.kind === "loading") {
-      body = html`<div class="catalog-state" data-state="workspace-loading" role="status"><p>Loading workspaces…</p><button type="button" data-action="refresh-workspaces-loading" @click=${() => { this.refreshCatalog(); }}>Refresh</button></div>`;
-    } else if (catalog.kind === "error") {
-      body = this.renderCatalogProblem("workspace-error", catalog.message, "refresh-workspaces", "Refresh workspaces");
-    } else if (catalog.kind === "empty") {
-      body = this.renderCatalogProblem("workspace-empty", `No workspaces are available in ${project.name} on ${machine.name}.`, "refresh-workspaces", "Refresh workspaces");
-    } else {
+    if (catalog.kind === "loading") body = html`<div class="catalog-state" data-state="workspace-loading" role="status"><p>Loading workspaces…</p><button type="button" data-action="refresh-workspaces-loading" @click=${() => { this.refreshCatalog(); }}>Refresh</button></div>`;
+    else if (catalog.kind === "error") body = this.renderCatalogProblem("workspace-error", catalog.message, "refresh-workspaces", "Refresh workspaces");
+    else if (catalog.kind === "empty") body = this.renderCatalogProblem("workspace-empty", `No workspaces are available in ${project.name} on ${machine.name}.`, "refresh-workspaces", "Refresh workspaces");
+    else {
       body = html`
         <ul class="catalog-list" aria-label="Workspaces">
           ${catalog.items.map((workspace) => html`
@@ -263,13 +292,130 @@ export class NewSessionComposer extends LitElement {
     `;
   }
 
-  private updatePrompt(event: InputEvent): void {
-    const target = event.currentTarget;
-    if (!(target instanceof HTMLTextAreaElement)) return;
-    this.composerState = updateNewSessionPrompt(this.composerState, target.value);
+  private currentDestination(): NewSessionCompleteDestination | undefined {
+    const state = this.composerState;
+    return state.destination.kind === "complete" ? state.destination : undefined;
+  }
+
+  private replaceRuntimeForDestination(destination = this.composerState.destination): void {
+    this.runtimeGeneration += 1;
+    if (destination.kind !== "complete") {
+      this.runtime = createPreSessionComposerRuntime({ machineId: "local" });
+      return;
+    }
+    this.runtime = createPreSessionComposerRuntime({
+      machineId: destination.machine.id,
+      projectId: destination.project.id,
+      workspaceId: destination.workspace.id,
+      promptResourceCatalog: this.promptResourceCatalog,
+    });
+  }
+
+  private placeholderForState(state: NewSessionComposerState): string {
+    return state.destination.kind === "complete"
+      ? "Describe the first task… Use / for prompt resources, @ for tracked files, @ space for all files"
+      : "Describe the first task… Choose a destination to enable / and @ completions";
+  }
+
+  private footerSendAvailable(state: NewSessionComposerState): boolean {
+    return state.kind === "editing"
+      && state.destination.kind === "complete"
+      && this.slashValidationError === undefined
+      && !this.validationPending
+      && !this.draftDisplay.attachmentCapturePending
+      && (!this.draftDisplay.empty || this.draftDisplay.attachmentCount > 0);
+  }
+
+  private handleFooterSubmit(event: SubmitEvent): void {
+    event.preventDefault();
+    this.draft?.submit();
+  }
+
+  private async handleDraftSubmit(snapshot: ComposerDraftSubmitSnapshot): Promise<"accepted" | "rejected"> {
+    if (this.validationPending) return "rejected";
+    const destination = this.currentDestination();
+    if (destination === undefined) return "rejected";
+    const runtimeGeneration = this.runtimeGeneration;
+    const submissionGeneration = ++this.submissionGeneration;
+    this.validationPending = true;
+    const validation = await this.validatePromptResourceCommand(snapshot, destination);
+    if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
+    this.validationPending = false;
+    if (validation.kind === "invalid") {
+      this.slashValidationError = validation.error;
+      return "rejected";
+    }
+    const next = beginNewSessionSubmission(this.composerState, validation.submission);
+    if (next.kind !== "submitting" || next === this.composerState) return "rejected";
+    this.requestGeneration += 1;
+    this.composerState = next;
+    const callback = this.onSubmit;
+    if (callback === undefined) {
+      this.composerState = rejectNewSessionSubmission(next, { kind: "rejected", reason: "launch-rejected", message: "New session could not be started." });
+      return "rejected";
+    }
+    try {
+      const outcome = await callback({ destination: next.destination, firstPrompt: validation.submission });
+      if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
+      if (outcome.kind === "accepted") {
+        this.completedRecoverySeedId = this.claimedRecoverySeedId;
+        this.claimedRecoverySeedId = undefined;
+        return "accepted";
+      }
+      this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
+      return "rejected";
+    } catch (error) {
+      if (this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) {
+        this.composerState = rejectNewSessionSubmission(this.composerState, {
+          kind: "rejected",
+          reason: "launch-rejected",
+          message: errorMessage(error),
+        });
+      }
+      return "rejected";
+    }
+  }
+
+  private async validatePromptResourceCommand(snapshot: ComposerDraftSubmitSnapshot, destination: NewSessionCompleteDestination): Promise<SlashValidationResult> {
+    const parsed = parseLeadingSlashCommand(snapshot.text);
+    if (parsed.kind === "not-command") return { kind: "valid", submission: snapshot };
+    if (parsed.kind !== "command") {
+      return { kind: "invalid", error: { message: "Enter a prompt resource command name after / before starting a session.", retryable: false } };
+    }
+    let catalog: PromptResourceCatalogResponse;
+    try {
+      catalog = await this.promptResourceCatalog(destination.project.id, destination.workspace.id, destination.machine.id);
+    } catch (error) {
+      return { kind: "invalid", error: { message: errorMessage(error, "Prompt-resource catalog unavailable. Retry before sending a slash command."), retryable: true } };
+    }
+    if (!catalog.available) return { kind: "invalid", error: { message: catalog.message, retryable: true } };
+    const matches = catalog.commands.filter((command) => command.name === parsed.name);
+    const match = matches[0];
+    if (matches.length !== 1 || match === undefined) {
+      return {
+        kind: "invalid",
+        error: {
+          message: matches.length === 0
+            ? `/${parsed.name} is not available as a first-prompt command in this destination.`
+            : `/${parsed.name} is ambiguous in this destination. Refresh resources and choose the command again.`,
+          retryable: false,
+        },
+      };
+    }
+    return { kind: "valid", submission: { ...snapshot, promptResourceCommandIdentity: { ...match.identity } } };
+  }
+
+  private clearValidationError(): void {
+    if (this.slashValidationError !== undefined) this.slashValidationError = undefined;
+  }
+
+  private retryPromptResourceValidation(): void {
+    this.clearValidationError();
+    void this.updateComplete.then(() => { this.draft?.submit(); });
   }
 
   private openDestinationChoice(): void {
+    this.invalidatePendingSubmission();
     const requestId = this.nextRequest();
     const next = startNewSessionDestinationChoice(this.composerState, requestId);
     if (next === this.composerState) return;
@@ -310,6 +456,8 @@ export class NewSessionComposer extends LitElement {
     if (next === this.composerState) return;
     this.requestGeneration += 1;
     this.composerState = next;
+    this.clearValidationError();
+    this.replaceRuntimeForDestination(next.destination);
   }
 
   private backToMachines(): void {
@@ -332,7 +480,7 @@ export class NewSessionComposer extends LitElement {
       const items = await this.catalog.loadMachines();
       this.resolveIfCurrent(requestId, () => resolveNewSessionMachines(this.composerState, requestId, { kind: "ready", items }));
     } catch (error) {
-      this.resolveIfCurrent(requestId, () => resolveNewSessionMachines(this.composerState, requestId, { kind: "error", message: errorMessage(error) }));
+      this.resolveIfCurrent(requestId, () => resolveNewSessionMachines(this.composerState, requestId, { kind: "error", message: errorMessage(error, "The destination catalog could not be loaded.") }));
     }
   }
 
@@ -341,7 +489,7 @@ export class NewSessionComposer extends LitElement {
       const items = await this.catalog.loadProjects(machineId);
       this.resolveIfCurrent(requestId, () => resolveNewSessionProjects(this.composerState, requestId, { kind: "ready", items }));
     } catch (error) {
-      this.resolveIfCurrent(requestId, () => resolveNewSessionProjects(this.composerState, requestId, { kind: "error", message: errorMessage(error) }));
+      this.resolveIfCurrent(requestId, () => resolveNewSessionProjects(this.composerState, requestId, { kind: "error", message: errorMessage(error, "The destination catalog could not be loaded.") }));
     }
   }
 
@@ -350,7 +498,7 @@ export class NewSessionComposer extends LitElement {
       const items = await this.catalog.loadWorkspaces(machineId, projectId);
       this.resolveIfCurrent(requestId, () => resolveNewSessionWorkspaces(this.composerState, requestId, { kind: "ready", items }));
     } catch (error) {
-      this.resolveIfCurrent(requestId, () => resolveNewSessionWorkspaces(this.composerState, requestId, { kind: "error", message: errorMessage(error) }));
+      this.resolveIfCurrent(requestId, () => resolveNewSessionWorkspaces(this.composerState, requestId, { kind: "error", message: errorMessage(error, "The destination catalog could not be loaded.") }));
     }
   }
 
@@ -365,41 +513,63 @@ export class NewSessionComposer extends LitElement {
   }
 
   private requestCancel(): void {
-    if (this.composerState.kind === "submitting") return;
+    if (this.composerState.kind === "submitting" || this.draftDisplay.attachmentCapturePending) return;
     this.requestGeneration += 1;
+    this.invalidatePendingSubmission();
+    this.returnClaimedRecoveryDraft();
+    this.draft?.discardDraft();
     this.onCancel?.();
   }
 
-  private handleSubmit(event: SubmitEvent): void {
-    event.preventDefault();
-    const next = beginNewSessionSubmission(this.composerState);
-    if (next.kind !== "submitting" || next === this.composerState) return;
-    this.requestGeneration += 1;
-    this.composerState = next;
-    const callback = this.onSubmit;
-    if (callback === undefined) {
-      this.composerState = rejectNewSessionSubmission(next, { kind: "rejected", reason: "launch-rejected", message: "New session could not be started." });
-      return;
-    }
-    void this.submitToRoot(callback, next);
+  private submissionIsCurrent(submissionGeneration: number, runtimeGeneration: number): boolean {
+    return this.isConnected
+      && submissionGeneration === this.submissionGeneration
+      && runtimeGeneration === this.runtimeGeneration;
   }
 
-  private async submitToRoot(
-    callback: NonNullable<NewSessionComposer["onSubmit"]>,
-    state: Extract<NewSessionComposerState, { kind: "submitting" }>,
-  ): Promise<void> {
-    try {
-      const outcome = await callback({ destination: state.destination, prompt: state.prompt });
-      if (!this.isConnected || outcome.kind === "accepted") return;
-      this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
-    } catch (error) {
-      if (!this.isConnected) return;
-      this.composerState = rejectNewSessionSubmission(this.composerState, {
-        kind: "rejected",
-        reason: "launch-rejected",
-        message: errorMessage(error),
-      });
+  private invalidatePendingSubmission(): void {
+    this.submissionGeneration += 1;
+    this.validationPending = false;
+  }
+
+  private claimRecoveryDraftOnce(): void {
+    const seedId = this.recoverySeedId;
+    if (seedId === undefined || seedId === this.claimedRecoverySeedId || seedId === this.completedRecoverySeedId || this.draft === undefined || this.onClaimRecoveryDraft === undefined) return;
+    const seed = this.onClaimRecoveryDraft(seedId);
+    if (seed !== undefined) {
+      this.claimedRecoverySeedId = seedId;
+      this.recoveryClaimRetryAttemptedFor = undefined;
+      this.draft.restoreSeed(seed);
+      return;
     }
+    if (this.recoveryClaimRetryScheduled || this.recoveryClaimRetryAttemptedFor === seedId) return;
+    this.recoveryClaimRetryScheduled = true;
+    this.recoveryClaimRetryAttemptedFor = seedId;
+    queueMicrotask(() => {
+      this.recoveryClaimRetryScheduled = false;
+      if (this.isConnected) this.claimRecoveryDraftOnce();
+    });
+  }
+
+  private async returnDisconnectedRecoveryDraftWhenSettled(generation: number): Promise<void> {
+    if (this.draftDisplay.attachmentCapturePending) await this.draft?.retainPendingAttachmentCaptureAfterDisconnect();
+    if (!this.isConnected && generation === this.connectionGeneration) this.returnClaimedRecoveryDraft();
+  }
+
+  private returnClaimedRecoveryDraft(): void {
+    const seedId = this.claimedRecoverySeedId;
+    const draft = this.draft;
+    if (seedId === undefined || draft === undefined || this.onReturnRecoveryDraft === undefined) return;
+    this.claimedRecoverySeedId = undefined;
+    this.onReturnRecoveryDraft(seedId, draft.currentSnapshot());
+  }
+
+  private focusCurrentRegion(): void {
+    if (this.composerState.kind === "editing" && this.composerState.destination.kind === "complete") {
+      this.draft?.focusInput();
+      return;
+    }
+    this.modalSurface?.focusDialog();
   }
 
   static override styles = newSessionComposerStyles;
@@ -412,11 +582,7 @@ function stateFocusRegion(state: NewSessionComposerState): string {
 function initialFocusSelector(state: NewSessionComposerState): string {
   if (state.kind === "choosing") return "[data-chooser-primary]";
   if (state.kind === "editing" && state.destination.kind === "required") return "[data-action='change-destination']";
-  return "[data-field='prompt']";
-}
-
-function isMachineAvailable(machine: Machine): boolean {
-  return machine.status !== "offline" && machine.status !== "error";
+  return "composer-draft";
 }
 
 function machineAvailabilityLabel(machine: Machine): string {
@@ -426,6 +592,6 @@ function machineAvailabilityLabel(machine: Machine): string {
   return "Status unknown";
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim().length > 0 ? error.message : "The destination catalog could not be loaded.";
+function errorMessage(error: unknown, fallback = "New session could not be started."): string {
+  return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }

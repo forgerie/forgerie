@@ -28,6 +28,9 @@ import {
 } from "../selectedChatLoad";
 import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent, SessionUiEvent as SharedSessionUiEvent } from "../../../shared/apiTypes";
+import { base64ByteLength } from "../../../shared/promptAttachments";
+import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
+import type { NewSessionFirstPromptSubmission } from "../newSessionComposer";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
 import type { SessionInboxBridge } from "./sessionInboxController";
@@ -59,6 +62,7 @@ export interface PromptEditorTextReplacement {
   machineId: string;
   sessionId: string;
   text: string;
+  snapshot?: SessionLaunchRecoveryDraftSnapshot | undefined;
 }
 
 export interface SelectedSessionReady {
@@ -98,10 +102,20 @@ type ClientPendingStartSessionInfo = SessionInfo & { clientPendingStart: true; m
 
 type QueuedPendingSessionSendInput =
   | { type: "prompt"; text: string; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose?: "initialPrompt" }
+  | { type: "promptResource"; text: string; identity: PromptResourceCommandIdentity; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose: "initialPrompt"; retryAttempts?: number | undefined }
   | { type: "shell"; text: string }
   | { type: "command"; text: string };
 
-type QueuedPendingSessionSend = QueuedPendingSessionSendInput & { id: string };
+type QueuedPendingSessionSend = QueuedPendingSessionSendInput & { id: string; deliveredText?: string | undefined; deliveryReceipt?: string | undefined };
+
+export type FirstPromptSubmission = NewSessionFirstPromptSubmission;
+
+export type SessionLaunchRecoveryDraftSnapshot = Omit<FirstPromptSubmission, "promptResourceCommandIdentity">;
+
+export interface SessionLaunchRecoveryDraftSeed {
+  readonly id: string;
+  readonly snapshot: SessionLaunchRecoveryDraftSnapshot;
+}
 
 interface ReadinessQueuedSends {
   readonly session: SessionInfo;
@@ -115,12 +129,20 @@ export interface SessionLaunchDestination {
   readonly cwd: string;
 }
 
+export interface SessionLaunchAttachmentMetadata {
+  readonly name?: string | undefined;
+  readonly mimeType: string;
+  readonly size: number;
+}
+
 export interface SessionLaunchRecovery {
   readonly stage: "creationFailed" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous";
   readonly sessionId: string;
   readonly destination: SessionLaunchDestination;
-  readonly prompt: string;
   readonly retrying: boolean;
+  readonly requiresPromptResourceValidation?: boolean | undefined;
+  readonly attachments?: readonly SessionLaunchAttachmentMetadata[] | undefined;
+  readonly delivery?: PromptAttachmentDelivery | undefined;
 }
 
 interface PendingSessionStart {
@@ -140,12 +162,23 @@ interface PendingSessionStart {
   backendSessionId?: string;
 }
 
+type FirstPromptQueuedSend = Extract<QueuedPendingSessionSend, { type: "prompt" }> | Extract<QueuedPendingSessionSend, { type: "promptResource" }>;
+
+type ClaimedSessionLaunchRecoveryDraftQueue = Omit<Extract<QueuedPendingSessionSend, { type: "prompt" }>, "text" | "attachments" | "deliveredText">
+  | Omit<Extract<QueuedPendingSessionSend, { type: "promptResource" }>, "text" | "attachments" | "deliveredText">;
+
+interface ClaimedSessionLaunchRecoveryDraft {
+  readonly index: number;
+  readonly queued: ClaimedSessionLaunchRecoveryDraftQueue;
+}
+
 interface SessionLaunchRecoveryRecord {
   recovery: SessionLaunchRecovery;
   queuedSends: QueuedPendingSessionSend[];
   pending?: PendingSessionStart;
   session?: SessionInfo;
   creationFailureMessage?: string;
+  claimedDraft?: ClaimedSessionLaunchRecoveryDraft;
 }
 
 interface SuppressedCreatedSession {
@@ -183,6 +216,7 @@ export class SessionController {
   private pendingFrame: number | undefined;
   private pendingSessionStartSeq = 0;
   private pendingQueuedSendSeq = 0;
+  private recoveryDraftClaimSeq = 0;
   private readonly pendingSessionStarts = new Map<string, PendingSessionStart>();
   private readonly readinessQueuedSends = new Map<string, ReadinessQueuedSends>();
   private readonly transcriptPreviewRequests = new Map<string, Promise<MessagePage>>();
@@ -268,19 +302,78 @@ export class SessionController {
     await this.startPendingSession(pending);
   }
 
-  async launchSession(firstPrompt: string): Promise<void> {
+  async launchSession(submission: FirstPromptSubmission): Promise<void> {
     const workspace = this.getState().selectedWorkspace;
-    if (workspace === undefined || firstPrompt.trim() === "") return;
+    if (workspace === undefined || firstPromptSubmissionIsEmpty(submission)) return;
+    const promptResourceIdentity = submission.promptResourceCommandIdentity;
+    if (submission.text.startsWith("/") && promptResourceIdentity === undefined) return;
+    const attachments = submission.attachments?.map((attachment) => ({ ...attachment }));
     const machineId = selectedMachineId(this.getState());
     const pending = this.createPendingSessionStart(workspace, machineId);
     this.pendingSessionStarts.set(pending.tempId, pending);
     this.insertAndSelectPendingSession(pending.session);
-    this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: firstPrompt, delivery: "inline", purpose: "initialPrompt" });
+    if (promptResourceIdentity === undefined) {
+      this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: submission.text, attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
+    } else {
+      this.enqueuePendingSessionSend(pending.session, { type: "promptResource", text: submission.text, identity: promptResourceIdentity, attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
+    }
     await this.startPendingSession(pending);
   }
 
   getSessionLaunchRecovery(sessionId: string): SessionLaunchRecovery | undefined {
     return this.sessionLaunchRecoveries.get(sessionId)?.recovery;
+  }
+
+  hasQueuedInitialPrompt(sessionId: string): boolean {
+    return this.pendingSessionStarts.get(sessionId)?.queuedSends.some(isInitialPromptSend) === true;
+  }
+
+  claimSessionLaunchRecoveryDraft(sessionId: string): SessionLaunchRecoveryDraftSeed | undefined {
+    const record = this.sessionLaunchRecoveries.get(sessionId);
+    if (record === undefined || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent") || record.claimedDraft !== undefined) return undefined;
+    const index = record.queuedSends.findIndex(isInitialPromptSend);
+    const queued = index === -1 ? undefined : record.queuedSends[index];
+    if (queued === undefined || !isInitialPromptSend(queued)) return undefined;
+    record.queuedSends.splice(index, 1);
+    if (record.pending !== undefined && record.pending.queuedSends !== record.queuedSends) {
+      record.pending.queuedSends = record.pending.queuedSends.filter((candidate) => candidate.id !== queued.id);
+    }
+    record.claimedDraft = { index, queued: claimedRecoveryDraftQueueBookkeeping(queued) };
+    record.recovery = payloadFreeClaimedRecovery(record.recovery, queued);
+    this.publishCreationFailedRecoveryQueue(sessionId, record);
+    return {
+      id: `${sessionId}:claim-${String(++this.recoveryDraftClaimSeq)}`,
+      snapshot: {
+        text: queued.text,
+        ...(queued.attachments === undefined ? {} : { attachments: queued.attachments.map((attachment) => ({ ...attachment })) }),
+        delivery: queued.delivery,
+      },
+    };
+  }
+
+  returnSessionLaunchRecoveryDraft(sessionId: string, snapshot: SessionLaunchRecoveryDraftSnapshot): void {
+    const record = this.sessionLaunchRecoveries.get(sessionId);
+    const claimed = record?.claimedDraft;
+    if (record === undefined || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent") || claimed === undefined) return;
+    if (firstPromptSubmissionIsEmpty(snapshot)) {
+      delete record.claimedDraft;
+      record.recovery = {
+        stage: record.recovery.stage,
+        sessionId: record.recovery.sessionId,
+        destination: record.recovery.destination,
+        retrying: record.recovery.retrying,
+      };
+      this.publishCreationFailedRecoveryQueue(sessionId, record);
+      return;
+    }
+    const queued = queuedRecoveryDraftFromSnapshot(claimed.queued, snapshot);
+    insertQueuedRecoveryDraft(record.queuedSends, claimed.index, queued);
+    if (record.pending !== undefined && record.pending.queuedSends !== record.queuedSends) {
+      insertQueuedRecoveryDraft(record.pending.queuedSends, claimed.index, queued);
+    }
+    delete record.claimedDraft;
+    record.recovery = recoveryWithQueuedSubmission(record.recovery, queued);
+    this.publishCreationFailedRecoveryQueue(sessionId, record);
   }
 
   mergeCreationFailedSessionStarts(cwd: string, listedSessions: SessionInfo[], machineId: string): SessionInfo[] {
@@ -301,20 +394,22 @@ export class SessionController {
   acceptSessionLaunchReplacement(failedSessionId: string, replacementSessionId: string): void {
     const record = this.sessionLaunchRecoveries.get(failedSessionId);
     const state = this.getState();
-    if (record?.recovery.stage !== "creationFailed"
+    if (record === undefined
+      || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent")
       || replacementSessionId === failedSessionId
       || state.selectedSession?.id !== replacementSessionId
       || !state.sessions.some((session) => session.id === replacementSessionId)) return;
     this.sessionLaunchRecoveries.delete(failedSessionId);
     clearDraft(machineSessionKey(record.recovery.destination.machineId, failedSessionId));
+    const removeFailedSession = record.recovery.stage === "creationFailed";
     this.setState({
-      sessions: state.sessions.filter((session) => session.id !== failedSessionId),
+      sessions: removeFailedSession ? state.sessions.filter((session) => session.id !== failedSessionId) : state.sessions,
       sessionStatuses: omitKey(state.sessionStatuses, failedSessionId),
       sessionActivities: omitSessionActivity(state.sessionActivities, failedSessionId),
       sendingPrompts: omitKey(state.sendingPrompts, failedSessionId),
       clientQueuedSessionMessages: omitKey(state.clientQueuedSessionMessages, failedSessionId),
     });
-    this.inbox?.notifyDeleted(record.recovery.destination.machineId, [failedSessionId]);
+    if (removeFailedSession) this.inbox?.notifyDeleted(record.recovery.destination.machineId, [failedSessionId]);
   }
 
   async retrySessionLaunch(sessionId: string): Promise<void> {
@@ -322,6 +417,7 @@ export class SessionController {
     if (record === undefined || record.recovery.retrying) return;
 
     if (record.recovery.stage === "creationFailed" && record.pending !== undefined) {
+      if (record.recovery.requiresPromptResourceValidation === true) return;
       record.recovery = { ...record.recovery, retrying: true };
       record.pending.discarded = false;
       delete record.pending.backendSessionId;
@@ -331,7 +427,9 @@ export class SessionController {
       return;
     }
 
-    if (record.recovery.stage !== "promptConfirmedUnsent" || record.session === undefined) return;
+    if (record.recovery.stage !== "promptConfirmedUnsent" || record.session === undefined || record.recovery.requiresPromptResourceValidation === true) return;
+    const firstPrompt = record.queuedSends[0];
+    if (firstPrompt?.type === "promptResource") firstPrompt.retryAttempts = (firstPrompt.retryAttempts ?? 0) + 1;
     record.recovery = { ...record.recovery, retrying: true };
     this.applySessionLaunchRetryActivity(sessionId, INITIAL_PROMPT_RETRY_ACTIVITY_LABEL);
     await this.flushQueuedPendingSends(record.session, record.recovery.destination.machineId, record.queuedSends, record.recovery.destination);
@@ -345,10 +443,18 @@ export class SessionController {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     if (record?.recovery.stage !== "promptDeliveryAmbiguous" || record.session === undefined || this.replacePromptEditorText === undefined) return;
     if (!this.isSelectedSessionIdentity(sessionId, record.recovery.destination.machineId)) return;
+    const queued = record.queuedSends[0];
+    if (queued === undefined || !isInitialPromptSend(queued)) return;
+    const snapshot: SessionLaunchRecoveryDraftSnapshot = {
+      text: queued.text,
+      ...(queued.attachments === undefined ? {} : { attachments: queued.attachments.map((attachment) => ({ ...attachment })) }),
+      delivery: queued.delivery,
+    };
     const replaced = await this.replacePromptEditorText({
       machineId: record.recovery.destination.machineId,
       sessionId,
-      text: record.recovery.prompt,
+      text: queued.text,
+      snapshot,
     });
     if (replaced === false || this.sessionLaunchRecoveries.get(sessionId) !== record) return;
     const retainedQueuedSends = record.queuedSends.slice(1);
@@ -371,7 +477,7 @@ export class SessionController {
       const history = this.transcripts.mergeHistory(machineSessionKey(machineId, sessionId), page);
       this.setState(history);
       this.applyStatus(status);
-      if (canonicalTranscriptContainsPrompt(page, record.recovery.prompt)) {
+      if (await initialPromptRecoveryAccepted(page, record.queuedSends[0])) {
         const retainedQueuedSends = record.queuedSends.slice(1);
         this.sessionLaunchRecoveries.delete(sessionId);
         this.dropNextQueuedSessionMessage(sessionId);
@@ -431,7 +537,7 @@ export class SessionController {
       const session = await this.api.startSession(pending.cwd, pending.machineId, pending.tempId);
       await this.resolvePendingSessionStart(pending.tempId, session);
     } catch (error) {
-      this.failPendingSessionStart(pending.tempId, error);
+      await this.failPendingSessionStart(pending.tempId, error);
     }
   }
 
@@ -780,7 +886,7 @@ export class SessionController {
         return;
       }
       if (destination === undefined) return;
-      const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued.text);
+      const stage = await this.reconcileInitialPromptDelivery(session, machineId, queued);
       if (stage === "accepted") {
         this.markCachedNewSessionPersisted(session);
         this.dropNextQueuedSessionMessage(session.id);
@@ -791,8 +897,9 @@ export class SessionController {
         stage,
         sessionId: session.id,
         destination,
-        prompt: queued.text,
         retrying: false,
+        ...(queuedPromptNeedsValidation(queued) ? { requiresPromptResourceValidation: true } : {}),
+        ...recoverySubmissionProjection(queued),
       };
       this.sessionLaunchRecoveries.set(session.id, { recovery, queuedSends: queuedSends.slice(index), session });
       this.applyInitialPromptRecoveryActivity(recovery);
@@ -800,17 +907,35 @@ export class SessionController {
     }
   }
 
-  private async reconcileInitialPromptDelivery(session: SessionInfo, machineId: string, prompt: string): Promise<"accepted" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous"> {
+  private async reconcileInitialPromptDelivery(session: SessionInfo, machineId: string, queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Promise<"accepted" | "promptConfirmedUnsent" | "promptDeliveryAmbiguous"> {
     try {
       const [page, status] = await Promise.all([
         this.api.messages(session, { limit: MESSAGE_PAGE_SIZE }, machineId),
         this.api.status(session, machineId),
       ]);
-      if (canonicalTranscriptContainsPrompt(page, prompt)) return "accepted";
+      if (await queuedInitialPromptAccepted(page, queued)) return "accepted";
       return canonicalSessionIsBlankAndIdle(page, status) ? "promptConfirmedUnsent" : "promptDeliveryAmbiguous";
     } catch {
       return "promptDeliveryAmbiguous";
     }
+  }
+
+  private publishCreationFailedRecoveryQueue(sessionId: string, record: SessionLaunchRecoveryRecord): void {
+    if (record.recovery.stage !== "creationFailed") return;
+    const state = this.getState();
+    const queuedMessages = record.queuedSends.map(queuedSessionMessagePreview);
+    const activity = record.creationFailureMessage === undefined
+      ? state.sessionActivities[sessionId]
+      : failedPendingSessionActivity(sessionId, record.creationFailureMessage, record.queuedSends.length);
+    this.setState({
+      clientQueuedSessionMessages: queuedMessages.length === 0
+        ? omitKey(state.clientQueuedSessionMessages, sessionId)
+        : { ...state.clientQueuedSessionMessages, [sessionId]: queuedMessages },
+      ...(activity === undefined ? {} : {
+        sessionActivities: { ...state.sessionActivities, [sessionId]: activity },
+        ...(state.selectedSession?.id === sessionId ? { activity } : {}),
+      }),
+    });
   }
 
   private applyInitialPromptRecoveryActivity(recovery: SessionLaunchRecovery): void {
@@ -820,28 +945,55 @@ export class SessionController {
       sessionActivities: { ...state.sessionActivities, [recovery.sessionId]: activity },
       activity: state.selectedSession?.id === recovery.sessionId ? activity : state.activity,
       error: recovery.stage === "promptConfirmedUnsent"
-        ? "The first prompt was not sent. You can retry it."
+        ? recovery.requiresPromptResourceValidation === true
+          ? "The first prompt resource needs validation before it can be sent again."
+          : "The first prompt was not sent. You can retry it."
         : "The first prompt may have been accepted. Inspect the transcript before you send it again.",
     });
   }
 
   private async deliverQueuedPendingSend(session: SessionInfo, machineId: string, queued: QueuedPendingSessionSend): Promise<boolean> {
-    if (queued.type === "prompt") return this.deliverPromptToSession(session, queued.text, queued.streamingBehavior, queued.attachments, queued.delivery, machineId, { markSending: true });
+    if (queued.type === "prompt") return this.deliverPromptToSession(session, queued.text, queued.streamingBehavior, queued.attachments, queued.delivery, machineId, { markSending: true, recordDelivery: (delivery) => { queued.deliveredText = delivery.text; } });
+    if (queued.type === "promptResource") return this.deliverPromptResourceToSession(session, queued.text, queued.identity, queued.streamingBehavior, queued.attachments, queued.delivery, machineId, { markSending: true, recordDelivery: (delivery) => { queued.deliveredText = delivery.text; queued.deliveryReceipt = delivery.receipt; } });
     if (queued.type === "shell") return this.deliverShellToSession(session, queued.text, machineId, { optimisticLine: true });
     return this.deliverCommandToSession(session, queued.text, machineId, { applyResult: true });
   }
 
-  private async deliverPromptToSession(session: SessionInfo, text: string, streamingBehavior: "steer" | "followUp" | undefined, attachments: PromptAttachment[] | undefined, delivery: PromptAttachmentDelivery, machineId: string, options: { markSending: boolean }): Promise<boolean> {
+  private async deliverPromptToSession(session: SessionInfo, text: string, streamingBehavior: "steer" | "followUp" | undefined, attachments: PromptAttachment[] | undefined, delivery: PromptAttachmentDelivery, machineId: string, options: { markSending: boolean; recordDelivery?: ((delivery: { text: string }) => void) | undefined }): Promise<boolean> {
     const hasAttachments = attachments !== undefined && attachments.length > 0;
     if (options.markSending) this.markSendingPrompt(session.id, true);
     try {
       if (hasAttachments && delivery === "folder") {
         const saved = await this.api.saveAttachments(session, attachments, machineId);
-        const references = saved.map((file) => fileCompletionInsertText(file.path, false)).join(" ");
-        const body = text === "" ? references : `${text}\n\n${references}`;
+        const body = appendSavedAttachmentReferences(text, saved.map((file) => file.path));
+        options.recordDelivery?.({ text: body });
         await this.api.prompt(session, body, streamingBehavior, machineId);
       } else {
+        options.recordDelivery?.({ text });
         await this.api.prompt(session, text, streamingBehavior, machineId, attachments);
+      }
+      this.markCachedNewSessionPersisted(session);
+      return true;
+    } catch (error) {
+      this.setState({ error: String(error) });
+      return false;
+    } finally {
+      if (options.markSending) this.markSendingPrompt(session.id, false);
+    }
+  }
+
+  private async deliverPromptResourceToSession(session: SessionInfo, text: string, identity: PromptResourceCommandIdentity, streamingBehavior: "steer" | "followUp" | undefined, attachments: PromptAttachment[] | undefined, delivery: PromptAttachmentDelivery, machineId: string, options: { markSending: boolean; recordDelivery?: ((delivery: { text: string; receipt: string }) => void) | undefined }): Promise<boolean> {
+    const hasAttachments = attachments !== undefined && attachments.length > 0;
+    if (options.markSending) this.markSendingPrompt(session.id, true);
+    try {
+      if (hasAttachments && delivery === "folder") {
+        const saved = await this.api.saveAttachments(session, attachments, machineId);
+        const body = appendSavedAttachmentReferences(text, saved.map((file) => file.path));
+        const response = await this.api.runPromptResourceCommand(session, body, identity, streamingBehavior, machineId);
+        options.recordDelivery?.({ text: body, receipt: response.deliveryFingerprint });
+      } else {
+        const response = await this.api.runPromptResourceCommand(session, text, identity, streamingBehavior, machineId, attachments);
+        options.recordDelivery?.({ text, receipt: response.deliveryFingerprint });
       }
       this.markCachedNewSessionPersisted(session);
       return true;
@@ -1887,9 +2039,17 @@ export class SessionController {
     await this.flushQueuedPendingSends(cachedSession, pending.machineId, queuedSends, sessionLaunchDestination(pending));
   }
 
-  private failPendingSessionStart(tempId: string, error: unknown): void {
+  private async failPendingSessionStart(tempId: string, error: unknown): Promise<void> {
     const pending = this.pendingSessionStarts.get(tempId);
     if (pending === undefined) return;
+    const identifiedCreatedSession = pending.backendSessionId === undefined
+      ? undefined
+      : this.suppressedCreatedSessions.get(pending.backendSessionId);
+    if (identifiedCreatedSession?.machineId === pending.machineId
+      && sessionPathsEqual(identifiedCreatedSession.session.cwd, pending.cwd)) {
+      await this.resolvePendingSessionStart(tempId, identifiedCreatedSession.session);
+      return;
+    }
     this.pendingSessionStarts.delete(tempId);
     const wasDiscarded = pending.discarded;
     // The pending start is dead: stop routing its dialog frames (a card on the
@@ -1908,8 +2068,8 @@ export class SessionController {
           stage: "creationFailed",
           sessionId: tempId,
           destination: { machineId: pending.machineId, workspaceId: pending.workspaceId, cwd: pending.cwd },
-          prompt: initialPrompt.text,
           retrying: false,
+          ...recoverySubmissionProjection(initialPrompt),
         },
         queuedSends: pending.queuedSends,
         pending,
@@ -2505,12 +2665,159 @@ function isInitialPromptRetryActivity(activity: SessionActivity | undefined): bo
     && activity.detail === "Retry in progress";
 }
 
+function firstPromptSubmissionIsEmpty(submission: FirstPromptSubmission): boolean {
+  return submission.text.trim() === "" && (submission.attachments === undefined || submission.attachments.length === 0);
+}
+
+function appendSavedAttachmentReferences(text: string, paths: readonly string[]): string {
+  const references = paths.map((path) => fileCompletionInsertText(path, false)).join(" ");
+  return text === "" ? references : `${text}
+
+${references}`;
+}
+
+function recoverySubmissionProjection(queued: FirstPromptQueuedSend): Pick<SessionLaunchRecovery, "attachments" | "delivery"> {
+  return recoveryAttachmentProjection(queued);
+}
+
+function claimedRecoveryDraftQueueBookkeeping(queued: FirstPromptQueuedSend): ClaimedSessionLaunchRecoveryDraft["queued"] {
+  if (queued.type === "promptResource") {
+    return {
+      type: queued.type,
+      id: queued.id,
+      identity: { ...queued.identity },
+      ...(queued.streamingBehavior === undefined ? {} : { streamingBehavior: queued.streamingBehavior }),
+      delivery: queued.delivery,
+      purpose: queued.purpose,
+      ...(queued.retryAttempts === undefined ? {} : { retryAttempts: queued.retryAttempts }),
+      ...(queued.deliveryReceipt === undefined ? {} : { deliveryReceipt: queued.deliveryReceipt }),
+    };
+  }
+  return {
+    type: queued.type,
+    id: queued.id,
+    ...(queued.streamingBehavior === undefined ? {} : { streamingBehavior: queued.streamingBehavior }),
+    delivery: queued.delivery,
+    ...(queued.purpose === undefined ? {} : { purpose: queued.purpose }),
+    ...(queued.deliveryReceipt === undefined ? {} : { deliveryReceipt: queued.deliveryReceipt }),
+  };
+}
+
+function payloadFreeClaimedRecovery(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
+  return {
+    stage: recovery.stage,
+    sessionId: recovery.sessionId,
+    destination: recovery.destination,
+    retrying: recovery.retrying,
+    ...(recovery.requiresPromptResourceValidation === undefined ? {} : { requiresPromptResourceValidation: recovery.requiresPromptResourceValidation }),
+    delivery: queued.delivery,
+    ...recoveryAttachmentProjection(queued),
+  };
+}
+
+function queuedRecoveryDraftFromSnapshot(bookkeeping: ClaimedSessionLaunchRecoveryDraft["queued"], snapshot: SessionLaunchRecoveryDraftSnapshot): FirstPromptQueuedSend {
+  const attachments = snapshot.attachments === undefined ? undefined : snapshot.attachments.map((attachment) => ({ ...attachment }));
+  if (bookkeeping.type === "promptResource" && promptResourceIdentityApplies(snapshot.text, bookkeeping.identity)) {
+    return {
+      ...bookkeeping,
+      identity: { ...bookkeeping.identity },
+      text: snapshot.text,
+      attachments,
+      delivery: snapshot.delivery ?? bookkeeping.delivery,
+      purpose: "initialPrompt",
+    };
+  }
+  return {
+    type: "prompt",
+    id: bookkeeping.id,
+    ...(bookkeeping.streamingBehavior === undefined ? {} : { streamingBehavior: bookkeeping.streamingBehavior }),
+    text: snapshot.text,
+    attachments,
+    delivery: snapshot.delivery ?? bookkeeping.delivery,
+    purpose: "initialPrompt",
+  };
+}
+
+function queuedPromptNeedsValidation(queued: FirstPromptQueuedSend): boolean {
+  return queued.type === "promptResource"
+    ? (queued.retryAttempts ?? 0) > 0
+    : parseLeadingSlashCommand(queued.text).kind !== "not-command";
+}
+
+function promptResourceIdentityApplies(text: string, identity: PromptResourceCommandIdentity): boolean {
+  const parsed = parseLeadingSlashCommand(text);
+  return parsed.kind === "command" && parsed.name === identity.name;
+}
+
+function insertQueuedRecoveryDraft(queue: QueuedPendingSessionSend[], index: number, queued: FirstPromptQueuedSend): void {
+  const withoutDuplicate = queue.filter((candidate) => candidate.id !== queued.id);
+  const insertionIndex = Math.max(0, Math.min(index, withoutDuplicate.length));
+  queue.splice(0, queue.length, ...withoutDuplicate.slice(0, insertionIndex), queued, ...withoutDuplicate.slice(insertionIndex));
+}
+
+function recoveryWithQueuedSubmission(recovery: SessionLaunchRecovery, queued: FirstPromptQueuedSend): SessionLaunchRecovery {
+  return {
+    stage: recovery.stage,
+    sessionId: recovery.sessionId,
+    destination: recovery.destination,
+    retrying: recovery.retrying,
+    ...(queuedPromptNeedsValidation(queued) ? { requiresPromptResourceValidation: true } : {}),
+    ...recoverySubmissionProjection(queued),
+  };
+}
+
+function recoveryAttachmentProjection(queued: FirstPromptQueuedSend): Pick<SessionLaunchRecovery, "attachments" | "delivery"> {
+  return queued.attachments === undefined || queued.attachments.length === 0
+    ? {}
+    : {
+        delivery: queued.delivery,
+        attachments: queued.attachments.map(promptAttachmentMetadata),
+      };
+}
+
+function promptAttachmentMetadata(attachment: PromptAttachment): NonNullable<SessionLaunchRecovery["attachments"]>[number] {
+  return {
+    ...(attachment.name === undefined ? {} : { name: attachment.name }),
+    mimeType: attachment.mimeType,
+    size: base64ByteLength(attachment.data),
+  };
+}
+
+async function initialPromptRecoveryAccepted(page: MessagePage, queued: QueuedPendingSessionSend | undefined): Promise<boolean> {
+  if (queued?.type === "promptResource") {
+    return queued.deliveryReceipt !== undefined ? await canonicalTranscriptContainsDeliveryReceipt(page, queued.deliveryReceipt) : false;
+  }
+  return queued?.type === "prompt" ? canonicalTranscriptContainsPrompt(page, queued.deliveredText ?? queued.text) : false;
+}
+
+async function queuedInitialPromptAccepted(page: MessagePage, queued: Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }>): Promise<boolean> {
+  if (queued.type === "promptResource") {
+    return queued.deliveryReceipt !== undefined ? await canonicalTranscriptContainsDeliveryReceipt(page, queued.deliveryReceipt) : false;
+  }
+  return canonicalTranscriptContainsPrompt(page, queued.deliveredText ?? queued.text);
+}
+
 function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): boolean {
   return normalizeMessages(page.messages).some((message) => {
     if (message.role !== "user") return false;
     if (message.promptText === prompt) return true;
-    return message.parts.map((part) => part.type === "text" ? part.text : "").join("") === prompt;
+    return canonicalUserMessageText(message) === prompt;
   });
+}
+
+async function canonicalTranscriptContainsDeliveryReceipt(page: MessagePage, receipt: string): Promise<boolean> {
+  for (const message of normalizeMessages(page.messages)) {
+    if (message.role !== "user") continue;
+    const texts = message.promptText === undefined ? [canonicalUserMessageText(message)] : [message.promptText, canonicalUserMessageText(message)];
+    for (const text of texts) {
+      if (await fingerprintPromptResourceDeliveryText(text) === receipt) return true;
+    }
+  }
+  return false;
+}
+
+function canonicalUserMessageText(message: { parts: readonly { type: string; text?: string | undefined }[] }): string {
+  return message.parts.map((part) => part.type === "text" ? part.text ?? "" : "").join("");
 }
 
 function canonicalSessionIsBlankAndIdle(page: MessagePage, status: SessionStatus): boolean {
@@ -2525,15 +2832,21 @@ function canonicalStatusIsIdle(status: SessionStatus): boolean {
     && status.queuedMessages.length === 0;
 }
 
-function isInitialPromptSend(queued: QueuedPendingSessionSend): queued is Extract<QueuedPendingSessionSend, { type: "prompt" }> & { purpose: "initialPrompt" } {
-  return queued.type === "prompt" && queued.purpose === "initialPrompt";
+function isInitialPromptSend(queued: QueuedPendingSessionSend): queued is Extract<QueuedPendingSessionSend, { type: "prompt" | "promptResource" }> & { purpose: "initialPrompt" } {
+  return (queued.type === "prompt" || queued.type === "promptResource") && queued.purpose === "initialPrompt";
 }
 
 function queuedSessionMessagePreview(queued: QueuedPendingSessionSend): QueuedSessionMessage {
-  if (queued.type === "prompt") {
-    return { kind: queued.streamingBehavior === "steer" ? "steer" : "followUp", text: queuedPromptPreviewText(queued.text, queued.attachments) };
+  if (queued.type === "prompt" || queued.type === "promptResource") {
+    const text = isInitialPromptSend(queued) ? initialPromptPreviewText(queued.attachments) : queuedPromptPreviewText(queued.text, queued.attachments);
+    return { kind: queued.streamingBehavior === "steer" ? "steer" : "followUp", text };
   }
   return { kind: "followUp", text: queued.text };
+}
+
+function initialPromptPreviewText(attachments: PromptAttachment[] | undefined): string {
+  const attachmentText = queuedAttachmentSummary(attachments);
+  return attachmentText === undefined ? "[First prompt queued]" : `[First prompt queued]\n\n${attachmentText}`;
 }
 
 function queuedPromptPreviewText(text: string, attachments: PromptAttachment[] | undefined): string {

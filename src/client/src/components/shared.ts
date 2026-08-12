@@ -1,5 +1,6 @@
 import { css, svg, type TemplateResult } from "lit";
 import type { AskUserOutcome, ProcessNotificationDetails } from "../../../shared/apiTypes";
+import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import type { SessionWarningSeverity } from "../api";
 
 export const NEW_SESSION_LABEL = "New session";
@@ -94,6 +95,7 @@ export interface CompletionItem {
   detail: string;
   description?: string;
   cursorOffset?: number;
+  promptResourceCommandIdentity?: PromptResourceCommandIdentity;
 }
 
 export const appStyles = css`
@@ -273,7 +275,39 @@ export const appStyles = css`
 
 `;
 
+export const composerDraftStyles = css`
+  .editor-wrap { position: relative; min-width: 0; }
+  .composer-live-region { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+  .markdown-editor .cm-editor { box-sizing: border-box; width: 100%; min-height: 54px; max-height: 220px; overflow: hidden; border-radius: 8px; border: 1px solid var(--pi-border); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); }
+  .markdown-editor .cm-scroller { max-height: 220px; overflow-y: auto; font-family: var(--pi-control-font-family, system-ui, sans-serif); line-height: 1.4; }
+  .markdown-editor .cm-content { min-height: 38px; padding: 8px; caret-color: var(--pi-text); text-align: start; unicode-bidi: plaintext; }
+  .markdown-editor .cm-line { padding: 0; unicode-bidi: plaintext; }
+  .markdown-editor .cm-placeholder { color: var(--pi-dim); }
+  .markdown-editor .cm-focused { outline: none; }
+  .shell-mode .markdown-editor .cm-editor { border-color: var(--pi-success); box-shadow: 0 0 0 1px var(--pi-success-ring); }
+  .resting { gap: 6px; padding-block: 7px; }
+  .resting .markdown-editor .cm-editor { min-height: 38px; }
+  .resting .markdown-editor .cm-content { min-height: 22px; padding-block: 6px; }
+  .mode-hint { position: absolute; right: 8px; bottom: 8px; max-width: calc(100% - 54px); border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 2px 8px; font-size: 12px; pointer-events: none; }
+  .attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  .attachment-chip { position: relative; width: 56px; height: 56px; border: 1px solid var(--pi-border); border-radius: 8px; overflow: hidden; background: var(--pi-bg); }
+  .attachment-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .attachment-chip-file { display: grid; place-items: center; }
+  .attachment-file-preview { display: grid; place-items: center; width: 34px; height: 26px; border: 1px solid var(--pi-border-muted); border-radius: 4px; background: var(--pi-surface); color: var(--pi-muted); font: 700 10px/1 system-ui, sans-serif; letter-spacing: .03em; }
+  .attachment-file-name { position: absolute; right: 4px; bottom: 3px; left: 4px; overflow: hidden; color: var(--pi-muted); font-size: 10px; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+  .attachment-remove { position: absolute; top: 1px; right: 1px; width: 18px; min-height: 18px; height: 18px; padding: 0; line-height: 16px; border-radius: 50%; border: 1px solid var(--pi-border); background: var(--pi-surface); color: var(--pi-text); font-size: 13px; cursor: pointer; }
+  .attachment-chip:focus-visible, .attachment-remove:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .attachment-delivery { min-width: min(100%, 18rem); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 7px 9px; border: 1px solid var(--pi-border-muted); border-radius: 8px; }
+  .attachment-delivery legend { padding: 0 4px; color: var(--pi-muted); font-size: 12px; }
+  .attachment-delivery label { display: inline-flex; align-items: center; gap: 5px; color: var(--pi-text); font-size: 12px; }
+  .attachment-delivery input { margin: 0; accent-color: var(--pi-accent); }
+  .attachment-delivery input:disabled + span { color: var(--pi-dim); }
+  .attachment-error { flex-basis: 100%; color: var(--pi-danger); font-size: 12px; }
+  .markdown-editor-disabled .cm-editor { opacity: .5; cursor: not-allowed; }
+`;
+
 export const newSessionComposerStyles = css`
+  ${composerDraftStyles}
   :host { position: fixed; inset: 0; z-index: 40; display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; container-type: size; }
   modal-surface {
     --modal-surface-width: min(42rem, calc(100% - clamp(1rem, 4cqi, 2rem)));
@@ -311,9 +345,9 @@ export const newSessionComposerStyles = css`
   .catalog-item-copy strong, .catalog-item-copy small { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
   .catalog-item-copy small, .catalog-meta { color: var(--pi-muted); }
   .catalog-back { display: flex; justify-content: flex-start; padding: 0.5rem 0.75rem; border-top: 1px solid var(--pi-border-muted); }
-  textarea { box-sizing: border-box; width: 100%; min-height: clamp(5rem, 12cqb, 7rem); resize: vertical; padding: 0.75rem; border: 1px solid var(--pi-border); border-radius: 0.5rem; background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.45 var(--pi-control-font-family, system-ui, sans-serif); }
-  textarea:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
-  textarea:disabled { color: var(--pi-muted); cursor: wait; }
+  composer-draft { display: block; min-width: 0; }
+  composer-draft .markdown-editor .cm-editor { min-height: clamp(5rem, 12cqb, 7rem); max-height: min(18rem, 42cqb); }
+  composer-draft .markdown-editor .cm-scroller { max-height: min(18rem, 42cqb); }
   .submission-error { margin: 0.75rem 0 0; padding: 0.75rem; border: 1px solid var(--pi-danger); border-radius: 0.5rem; background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-surface)); color: var(--pi-text); overflow-wrap: anywhere; }
   .dialog-footer { flex: 0 0 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; padding: clamp(0.625rem, 2cqi, 0.875rem) clamp(0.875rem, 2.5cqi, 1.25rem); border-top: 1px solid var(--pi-border); background: var(--pi-bg); }
   button { min-height: 2.75rem; border: 1px solid var(--pi-border); border-radius: 0.5rem; background: var(--pi-surface); color: var(--pi-text); padding: 0 1rem; font: inherit; cursor: pointer; }
@@ -778,15 +812,23 @@ export const formattedTextStyles = css`
 
 export const autocompleteStyles = css`
   :host { display: block; }
-  .menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10; max-height: 260px; overflow: auto; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); box-shadow: 0 10px 30px var(--pi-shadow); }
+  .menu {
+    position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
+    max-height: min(260px, var(--composer-completion-menu-max-block-size, 260px));
+    max-block-size: min(260px, var(--composer-completion-menu-max-block-size, 260px));
+    overflow: auto; overscroll-behavior: contain;
+    border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); box-shadow: 0 10px 30px var(--pi-shadow);
+  }
   button { display: grid; grid-template-columns: minmax(120px, 1fr) auto; gap: 4px 10px; width: 100%; border: 0; border-bottom: 1px solid var(--pi-border); border-radius: 0; background: transparent; color: var(--pi-text); padding: 8px 10px; text-align: left; cursor: pointer; }
   button:last-child { border-bottom: 0; }
   button.selected, button:hover { background: var(--pi-selection-bg); }
+  button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
   span { color: var(--pi-muted); font-size: 12px; }
   small { grid-column: 1 / -1; color: var(--pi-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `;
 
 export const promptEditorStyles = css`
+  ${composerDraftStyles}
   /*
    * The composer is one island: an inset surface the transcript runs up to,
    * rather than a stack of full-width bands. Everything it needs — the context
@@ -810,7 +852,6 @@ export const promptEditorStyles = css`
      already crosses, instead of a band of its own. */
   context-usage-meter { position: absolute; top: 0; right: 0; left: 0; }
   footer.shell-mode { border-color: var(--pi-success); background: var(--pi-success-bg); }
-  .editor-wrap { position: relative; min-width: 0; }
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }
   .compact-status > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -852,36 +893,10 @@ export const promptEditorStyles = css`
   .stop-button:not(:disabled) { color: var(--pi-danger); }
   .select-thinking .prompt-thinking-gauge .gauge-bar { fill: currentColor; stroke: none; opacity: .28; }
   .select-thinking .prompt-thinking-gauge .gauge-bar-active { opacity: 1; }
-  textarea, .markdown-editor .cm-editor { box-sizing: border-box; width: 100%; min-height: 54px; max-height: 220px; resize: none; overflow: hidden; border-radius: 8px; border: 1px solid var(--pi-border); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); }
-  textarea { overflow-y: auto; padding: 8px; }
-  .markdown-editor .cm-scroller { max-height: 220px; overflow-y: auto; font-family: var(--pi-control-font-family, system-ui, sans-serif); line-height: 1.4; }
-  .markdown-editor .cm-content { min-height: 38px; padding: 8px; caret-color: var(--pi-text); text-align: start; unicode-bidi: plaintext; }
-  .markdown-editor .cm-line { padding: 0; unicode-bidi: plaintext; }
-  .markdown-editor .cm-placeholder { color: var(--pi-dim); }
-  .markdown-editor .cm-focused { outline: none; }
-  .shell-mode textarea, .shell-mode .markdown-editor .cm-editor { border-color: var(--pi-success); box-shadow: 0 0 0 1px var(--pi-success-ring); }
-  /*
-   * At rest the composer stands down to a single line so the transcript keeps
-   * the space. Focus, typed text, or an attachment restores it; the model and
-   * thinking controls come back with it rather than being lost.
-   */
-  .resting { gap: 6px; padding-block: 7px; }
-  .resting .markdown-editor .cm-editor { min-height: 38px; }
-  .resting .markdown-editor .cm-content { min-height: 22px; padding-block: 6px; }
-
+  /* At rest the draft stands down so the transcript keeps the space. */
   .resting .model-capsule { display: none; }
-  .mode-hint { position: absolute; right: 8px; bottom: 8px; max-width: calc(100% - 54px); border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 2px 8px; font-size: 12px; pointer-events: none; }
-  .attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
-  .attachment-chip { position: relative; width: 56px; height: 56px; border: 1px solid var(--pi-border); border-radius: 8px; overflow: hidden; background: var(--pi-bg); }
-  .attachment-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .attachment-chip-file { display: grid; place-items: center; }
-  .attachment-file-preview { display: grid; place-items: center; width: 34px; height: 26px; border: 1px solid var(--pi-border-muted); border-radius: 4px; background: var(--pi-surface); color: var(--pi-muted); font: 700 10px/1 system-ui, sans-serif; letter-spacing: .03em; }
-  .attachment-file-name { position: absolute; right: 4px; bottom: 3px; left: 4px; overflow: hidden; color: var(--pi-muted); font-size: 10px; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-  .attachment-remove { position: absolute; top: 1px; right: 1px; width: 18px; height: 18px; padding: 0; line-height: 16px; border-radius: 50%; border: 1px solid var(--pi-border); background: var(--pi-surface); color: var(--pi-text); font-size: 13px; cursor: pointer; }
-  .attachment-delivery select { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 5px 7px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
-  .attachment-error { flex-basis: 100%; color: var(--pi-danger); font-size: 12px; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
-  button:disabled, textarea:disabled, .markdown-editor-disabled .cm-editor { opacity: .5; cursor: not-allowed; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
   @container (max-width: 640px) {
     footer { gap: 8px; padding: 8px; }
     .actions { gap: 6px; }

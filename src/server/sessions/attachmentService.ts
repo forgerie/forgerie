@@ -1,4 +1,4 @@
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { formatDimensionNote, resizeImage } from "@earendil-works/pi-coding-agent";
@@ -41,11 +41,17 @@ export async function attachmentsToInlineImages(attachments: PromptImageAttachme
   return results;
 }
 
+type AttachmentFileWriter = (path: string, bytes: Uint8Array, options: { flag: "wx" }) => Promise<void>;
+type AttachmentFileRemover = (path: string) => Promise<void>;
+
 export interface SaveAttachmentsOptions {
   /** Workspace-relative folder to write into. Defaults to `.forgerie/attachments`. */
   folder?: string;
   /** Clock injection for deterministic tests. */
   now?: () => Date;
+  /** File-system seams used to verify transactional cleanup. */
+  fileWriter?: AttachmentFileWriter;
+  fileRemover?: AttachmentFileRemover;
 }
 
 /**
@@ -59,6 +65,8 @@ export async function saveAttachmentsToWorkspace(
 ): Promise<SavedPromptAttachment[]> {
   const folder = options.folder ?? DEFAULT_ATTACHMENT_FOLDER;
   const now = options.now ?? (() => new Date());
+  const fileWriter = options.fileWriter ?? ((path, bytes, writeOptions) => writeFile(path, bytes, writeOptions));
+  const fileRemover = options.fileRemover ?? ((path) => rm(path, { force: true }));
   const { root, target: requestedFolderTarget, relativePath: normalizedFolder } = await resolveParentInsideWorkspace(cwd, folder);
   await mkdir(requestedFolderTarget, { recursive: true });
   const folderTarget = await realpath(requestedFolderTarget);
@@ -66,20 +74,27 @@ export async function saveAttachmentsToWorkspace(
 
   const stamp = timestamp(now());
   const saved: SavedPromptAttachment[] = [];
-  for (const [index, attachment] of attachments.entries()) {
-    const bytes = Buffer.from(attachment.data, "base64");
-    const filename = await writeUniqueAttachmentFile(folderTarget, attachmentFilename(attachment, stamp, index), bytes);
-    const relativePath = normalizedFolder === "" ? filename : `${normalizedFolder}/${filename}`;
-    saved.push({ path: relativePath, mimeType: attachment.mimeType, size: bytes.byteLength });
+  const writtenPaths: string[] = [];
+  try {
+    for (const [index, attachment] of attachments.entries()) {
+      const bytes = Buffer.from(attachment.data, "base64");
+      const filename = await writeUniqueAttachmentFile(folderTarget, attachmentFilename(attachment, stamp, index), bytes, fileWriter);
+      writtenPaths.push(join(folderTarget, filename));
+      const relativePath = normalizedFolder === "" ? filename : `${normalizedFolder}/${filename}`;
+      saved.push({ path: relativePath, mimeType: attachment.mimeType, size: bytes.byteLength });
+    }
+    return saved;
+  } catch (error) {
+    await Promise.allSettled(writtenPaths.map(async (path) => { await fileRemover(path); }));
+    throw error;
   }
-  return saved;
 }
 
-async function writeUniqueAttachmentFile(folderTarget: string, filename: string, bytes: Buffer): Promise<string> {
+async function writeUniqueAttachmentFile(folderTarget: string, filename: string, bytes: Buffer, fileWriter: AttachmentFileWriter): Promise<string> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const candidate = attempt === 0 ? filename : addCollisionSuffix(filename, attempt + 1);
     try {
-      await writeFile(join(folderTarget, candidate), bytes, { flag: "wx" });
+      await fileWriter(join(folderTarget, candidate), bytes, { flag: "wx" });
       return candidate;
     } catch (error: unknown) {
       if (!isNodeErrorWithCode(error, "EEXIST")) throw error;

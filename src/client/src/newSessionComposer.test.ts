@@ -16,7 +16,6 @@ import {
   resolveNewSessionProjects,
   resolveNewSessionWorkspaces,
   startNewSessionDestinationChoice,
-  updateNewSessionPrompt,
 } from "./newSessionComposer";
 
 const machine = (id: string, status: Machine["status"] = "online"): Machine => ({
@@ -51,24 +50,46 @@ describe("new-session composer state", () => {
     expect(isNewSessionMachineAvailable(machine("remote", machineStatus))).toBe(available);
   });
 
-  it("requires a structurally complete, available destination and a non-empty prompt", () => {
+  it("requires a structurally complete, available destination and a non-empty first-prompt snapshot", () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
-    let state = createNewSessionComposerState(destination);
+    const state = createNewSessionComposerState(destination);
 
     expect(state.kind).toBe("editing");
-    expect(canSubmitNewSession(state)).toBe(false);
+    expect(canSubmitNewSession(state, { text: "" })).toBe(false);
+    expect(canSubmitNewSession(state, { text: "  build the feature  " })).toBe(true);
+    expect(beginNewSessionSubmission(state, { text: "  build the feature  " })).toEqual({
+      kind: "submitting",
+      destination,
+    });
 
-    state = updateNewSessionPrompt(state, "  build the feature  ");
-    expect(canSubmitNewSession(state)).toBe(true);
-    expect(beginNewSessionSubmission(state)).toMatchObject({ kind: "submitting", prompt: "  build the feature  " });
-
-    const offline = createNewSessionComposerState(completeNewSessionDestination(machine("remote", "offline"), project("forge"), workspace("main", "forge")), "hello");
-    expect(canSubmitNewSession(offline)).toBe(false);
+    const offline = createNewSessionComposerState(completeNewSessionDestination(machine("remote", "offline"), project("forge"), workspace("main", "forge")));
+    expect(canSubmitNewSession(offline, { text: "hello" })).toBe(false);
   });
 
-  it("keeps one prompt while choosing another machine, project, and workspace", () => {
+  it("accepts attachment-only input without copying its payload into view state", () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const attachment = { kind: "file" as const, mimeType: "text/plain", data: "Zm9v", name: "note.txt" };
+    const state = beginNewSessionSubmission(createNewSessionComposerState(destination), { text: "", attachments: [attachment], delivery: "folder" });
+
+    expect(state).toEqual({ kind: "submitting", destination });
+    expect(state).not.toHaveProperty("submission");
+  });
+
+  it("carries validated prompt-resource identity only with the structured submission", () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "a".repeat(64) };
+
+    expect(canSubmitNewSession(createNewSessionComposerState(destination), { text: "/review src" })).toBe(false);
+    expect(beginNewSessionSubmission(createNewSessionComposerState(destination), { text: "/review src" })).toMatchObject({ kind: "editing" });
+    expect(beginNewSessionSubmission(createNewSessionComposerState(destination), { text: "/review src", promptResourceCommandIdentity: identity })).toEqual({
+      kind: "submitting",
+      destination,
+    });
+  });
+
+  it("chooses another machine, project, and workspace without owning prompt text", () => {
     const original = completeNewSessionDestination(machine("local"), project("one"), workspace("main", "one"));
-    let state = createNewSessionComposerState(original, "keep this prompt");
+    let state = createNewSessionComposerState(original);
 
     state = startNewSessionDestinationChoice(state, 1);
     state = resolveNewSessionMachines(state, 1, { kind: "ready", items: [machine("remote")] });
@@ -80,7 +101,6 @@ describe("new-session composer state", () => {
 
     expect(state).toMatchObject({
       kind: "editing",
-      prompt: "keep this prompt",
       destination: {
         kind: "complete",
         machine: { id: "remote" },
@@ -91,20 +111,20 @@ describe("new-session composer state", () => {
   });
 
   it("models loading, empty, and error catalog outcomes without inventing a selection", () => {
-    let state = startNewSessionDestinationChoice(createNewSessionComposerState(undefined, "draft"), 4);
+    let state = startNewSessionDestinationChoice(createNewSessionComposerState(), 4);
     expect(state).toMatchObject({ kind: "choosing", choice: { step: "machine", catalog: { kind: "loading" } } });
 
     state = resolveNewSessionMachines(state, 4, { kind: "ready", items: [] });
-    expect(state).toMatchObject({ choice: { catalog: { kind: "empty" } }, prompt: "draft", destination: { kind: "required" } });
+    expect(state).toMatchObject({ choice: { catalog: { kind: "empty" } }, destination: { kind: "required" } });
 
     state = refreshNewSessionCatalog(state, 5);
     state = resolveNewSessionMachines(state, 5, { kind: "error", message: "Machines unavailable" });
-    expect(state).toMatchObject({ choice: { catalog: { kind: "error", message: "Machines unavailable" } }, prompt: "draft" });
+    expect(state).toMatchObject({ choice: { catalog: { kind: "error", message: "Machines unavailable" } } });
   });
 
   it("accepts destination choices only from the active ready catalog", () => {
     const remote = machine("remote");
-    let state = startNewSessionDestinationChoice(createNewSessionComposerState(undefined, "draft"), 1);
+    let state = startNewSessionDestinationChoice(createNewSessionComposerState(), 1);
 
     expect(chooseNewSessionMachine(state, remote, 2)).toBe(state);
     state = resolveNewSessionMachines(state, 1, { kind: "ready", items: [remote] });
@@ -118,7 +138,7 @@ describe("new-session composer state", () => {
   });
 
   it("ignores stale project and workspace results after the active choice changes", () => {
-    let state = startNewSessionDestinationChoice(createNewSessionComposerState(undefined, "draft"), 1);
+    let state = startNewSessionDestinationChoice(createNewSessionComposerState(), 1);
     state = resolveNewSessionMachines(state, 1, { kind: "ready", items: [machine("a"), machine("b")] });
     state = chooseNewSessionMachine(state, machine("a"), 2);
     state = refreshNewSessionCatalog(state, 3);

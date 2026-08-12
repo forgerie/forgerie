@@ -4,6 +4,7 @@ import type {
   ExtensionDialogAnswer,
   ExtensionDialogCloseResponse,
   MachineSessionListingSnapshot,
+  PromptResourceCommandIdentity,
   SavedPromptAttachment,
   SessionAskCatalogSnapshot,
   SessionBulkArchiveResponse,
@@ -80,6 +81,7 @@ export interface SessionRouteService {
   cycleThinkingLevel(ref: SessionRouteRef): Promise<ClientSessionStatus>;
   commands(ref: SessionRouteRef): Promise<ClientCommand[]>;
   prompt(ref: SessionRouteRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown): Promise<void>;
+  runPromptResourceCommand(ref: SessionRouteRef, text: string, identity: PromptResourceCommandIdentity, streamingBehavior?: unknown, attachments?: unknown): Promise<{ accepted: true; deliveryFingerprint: string }>;
   saveAttachments(ref: SessionRouteRef, attachments: unknown, folder?: string): Promise<SavedPromptAttachment[]>;
   cleanupPreview(request: NormalizedSessionCleanupRequest): Promise<ClientSessionCleanupPreviewResponse>;
   cleanup(request: NormalizedSessionCleanupRequest): Promise<ClientSessionCleanupExecuteResponse>;

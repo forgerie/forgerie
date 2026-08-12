@@ -26,6 +26,8 @@ import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
+import { buildActiveCommandCatalog, buildActiveCommandList, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
+import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
 import { SessionCommandService } from "./sessionCommandService.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
 import { SessionArchiveStore, type ArchivedSessionRecord, type ArchiveSessionInput } from "./sessionArchiveStore.js";
@@ -35,6 +37,9 @@ import { deterministicSessionName, fallbackSessionName, generateShortSessionName
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
+import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
+import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
+import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
 import { SESSION_GUIDANCE_ENTRIES, setSessionGuidance } from "../../shared/sessionGuidance.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
 import type {
@@ -109,6 +114,7 @@ export interface PiSessionLogger {
 
 const noopLogger: PiSessionLogger = { info() { /* no-op */ } };
 const DEFAULT_UNREAD_PUBLICATION_RETRY_MS = 1_000;
+const DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS = 30_000;
 /**
  * User-facing names for the two phases of session startup Forgerie can prove it
  * is inside: it awaits exactly one call for each, so the phase is a fact rather
@@ -178,6 +184,7 @@ interface QueuedPrompt {
   text: string;
   images?: ImageContent[];
   echoUserMessage?: boolean;
+  expandPromptTemplates?: boolean;
 }
 
 interface DeferredSubsessionNotification {
@@ -441,8 +448,8 @@ export interface PiAgentSession {
     getUIContext(): ExtensionUIContext;
     setUIContext(uiContext?: ExtensionUIContext, mode?: "rpc"): void;
   };
-  promptTemplates: readonly { name: string; description?: string }[];
-  resourceLoader: { getSkills(): { skills: readonly { name: string; description?: string }[] } };
+  promptTemplates: readonly { name: string; description?: string; content?: string; filePath?: string; sourceInfo?: { source: string; scope: string; origin: string } }[];
+  resourceLoader: { getSkills(): { skills: readonly { name: string; description?: string; filePath?: string; baseDir?: string; sourceInfo?: { source: string; scope: string; origin: string } }[] } };
   subscribe(listener: (event: unknown) => void): () => void;
   bindExtensions(bindings: PiExtensionBindings): Promise<void>;
   compact(instructions?: string): Promise<{ summary: string; tokensBefore: number }>;
@@ -450,7 +457,7 @@ export interface PiAgentSession {
   getSessionStats(): { sessionId: string; totalMessages: number; userMessages: number; assistantMessages: number; toolCalls: number; tokens: ClientSessionStatus["tokens"]; cost: number };
   reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void>;
   getContextUsage(): ClientSessionStatus["contextUsage"] | undefined;
-  prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[] }): Promise<void>;
+  prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: (accepted: boolean) => void }): Promise<void>;
   sendCustomMessage(message: { customType: string; content: string; display: boolean; details?: unknown }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void>;
   executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }): Promise<{ output: string; exitCode: number | undefined; cancelled: boolean; truncated: boolean; fullOutputPath?: string }>;
   navigateTree?(targetId: string, options?: { summarize?: boolean; customInstructions?: string }): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: unknown }>;
@@ -865,6 +872,8 @@ export interface PiSessionServiceDependencies {
   unreadStore?: SessionUnreadStore;
   /** Initial retry delay for durable unread publication failures. */
   unreadPublicationRetryDelayMs?: number;
+  /** Maximum wait for Pi to accept or reject a prompt before delivery becomes ambiguous. */
+  promptPreflightTimeoutMs?: number;
   /**
    * Lets session startup report that provider model lists are refreshing while
    * a session is being constructed. Omit to report the startup phase alone.
@@ -961,6 +970,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pendingAskStore: PendingAskStore;
   private readonly pendingExtensionDialogStore: PendingExtensionDialogStore;
   private readonly extensionDialogsTimeoutMs: number;
+  private readonly promptPreflightTimeoutMs: number;
   /** The parked extension Promise resolvers behind the store's open dialogs. */
   private readonly dialogWaiters = new ExtensionDialogWaiters();
   private readonly catalogRefreshStatus: CatalogRefreshStatus | undefined;
@@ -987,6 +997,7 @@ export class PiSessionService implements SessionRouteService {
     this.pendingAskStore = deps.pendingAskStore ?? new PendingAskStore();
     this.pendingExtensionDialogStore = deps.pendingExtensionDialogStore ?? new PendingExtensionDialogStore();
     this.extensionDialogsTimeoutMs = deps.extensionDialogsTimeoutMs ?? DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS;
+    this.promptPreflightTimeoutMs = Math.max(1, deps.promptPreflightTimeoutMs ?? DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS);
     this.catalogRefreshStatus = deps.catalogRefreshStatus;
     this.unreadPublicationRetryInitialMs = Math.max(
       0,
@@ -2231,17 +2242,41 @@ export class PiSessionService implements SessionRouteService {
 
   async commands(ref: PiSessionRef): Promise<ClientCommand[]> {
     const session = await this.getOrOpen(ref);
-    const commands: ClientCommand[] = [...BUILTIN_COMMANDS];
-    for (const command of session.extensionRunner.getRegisteredCommands()) {
-      commands.push({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" });
-    }
-    for (const template of session.promptTemplates) {
-      commands.push({ name: template.name, ...(template.description === undefined ? {} : { description: template.description }), source: "prompt" });
-    }
-    for (const skill of session.resourceLoader.getSkills().skills) {
-      commands.push({ name: `skill:${skill.name}`, ...(skill.description === undefined ? {} : { description: skill.description }), source: "skill" });
-    }
-    return commands.sort((a, b) => a.name.localeCompare(b.name));
+    return buildActiveCommandList({
+      builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, ...(command.description === undefined ? {} : { description: command.description }), source: "builtin" as const })),
+      extensions: session.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" as const })),
+      prompts: session.promptTemplates.map((template) => ({
+        name: template.name,
+        ...(template.description === undefined ? {} : { description: template.description }),
+        origin: canonicalPromptResourceOrigin("prompt", template.filePath, template.sourceInfo),
+      })),
+      skills: session.resourceLoader.getSkills().skills.map((skill) => ({
+        name: skill.name,
+        ...(skill.description === undefined ? {} : { description: skill.description }),
+        origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
+      })),
+    });
+  }
+
+  private async activeCommandCatalog(session: PiAgentSession): Promise<ActiveCommandCatalog> {
+    return await buildActiveCommandCatalog({
+      builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, ...(command.description === undefined ? {} : { description: command.description }), source: "builtin" as const })),
+      extensions: session.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" as const })),
+      prompts: session.promptTemplates.map((template) => ({
+        name: template.name,
+        ...(template.description === undefined ? {} : { description: template.description }),
+        content: boundedActivePromptContent(template.content ?? ""),
+        origin: canonicalPromptResourceOrigin("prompt", template.filePath, template.sourceInfo),
+      })),
+      skills: await Promise.all(session.resourceLoader.getSkills().skills.map(async (skill) => ({
+        name: skill.name,
+        ...(skill.description === undefined ? {} : { description: skill.description }),
+        content: await readActiveSkillContent(skill.filePath),
+        origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
+        baseDir: skill.baseDir ?? "",
+        ...(skill.filePath === undefined ? {} : { filePath: skill.filePath }),
+      }))),
+    });
   }
 
   async prompt(ref: PiSessionRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown, options?: { echoUserMessage?: boolean }): Promise<void> {
@@ -2273,28 +2308,76 @@ export class PiSessionService implements SessionRouteService {
       this.enqueuePromptDuringCompaction(session, promptText, behavior ?? "followUp", images, echoUserMessage);
       return;
     }
-    void this.submitPrompt(session, promptText, behavior, images, echoUserMessage);
+    const accepted = await this.submitPromptUntilPreflight(session, promptText, behavior, images, echoUserMessage);
+    if (!accepted) throw new Error("Prompt delivery was rejected before agent start.");
   }
 
-  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true): Promise<void> {
+  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void): Promise<boolean> {
     this.publishActivity(session, behavior === "steer" ? "steering queued" : behavior === "followUp" ? "message queued" : "prompt accepted", "active");
     if (behavior === undefined && echoUserMessage) this.events.publish(session.sessionId, { type: "message.append", message: userMessage(text, images) });
-    const promptOptions = buildPromptOptions(behavior, images);
-    const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).catch((error: unknown) => {
+    const promptOptions = buildPromptOptions(behavior, images, expandPromptTemplates, preflightResult);
+    const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).then(() => true).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       this.publishActivity(session, "error", "error", message);
       this.events.publish(session.sessionId, { type: "session.error", message });
+      return false;
     });
     void promptPromise;
     return promptPromise;
   }
 
-  private enqueuePromptDuringCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true): void {
+  private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): Promise<boolean> {
+    return await new Promise<boolean>((resolvePreflight, rejectPreflight) => {
+      let settled = false;
+      const settle = (accepted: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolvePreflight(accepted);
+      };
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        rejectPreflight(new Error("Prompt preflight receipt timed out."));
+      }, this.promptPreflightTimeoutMs);
+      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, settle);
+      void completion.then(settle);
+    });
+  }
+
+  private enqueuePromptDuringCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): void {
     const queue = this.compactionPromptQueues.get(session.sessionId) ?? [];
-    queue.push({ kind, text, ...(images.length > 0 ? { images } : {}), ...(echoUserMessage ? {} : { echoUserMessage: false }) });
+    queue.push({ kind, text, ...(images.length > 0 ? { images } : {}), ...(echoUserMessage ? {} : { echoUserMessage: false }), ...(expandPromptTemplates ? {} : { expandPromptTemplates: false }) });
     this.compactionPromptQueues.set(session.sessionId, queue);
     this.publishActivity(session, "message queued during compaction", "active");
     this.publishStatus(session);
+  }
+
+  async runPromptResourceCommand(ref: PiSessionRef, text: string, identity: PromptResourceCommandIdentity, streamingBehavior?: unknown, attachments?: unknown): Promise<{ accepted: true; deliveryFingerprint: string }> {
+    const requestedBehavior = parsePromptStreamingBehavior(streamingBehavior);
+    const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
+    const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
+    this.assertTreeNavigationInactive(session, "send a prompt-resource command");
+    const catalog = await this.activeCommandCatalog(session);
+    const resolved = resolvePromptResourceIdentity(catalog, text, identity);
+    if (resolved.kind !== "matched") throw new Error("Prompt-resource command is no longer available for this session.");
+    const expanded = expandPromptResourceCommand(resolved.command, resolved.args);
+    const isQueued = session.isStreaming || session.isCompacting;
+    const behavior = isQueued ? requestedBehavior ?? "followUp" : undefined;
+    if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, expanded)) {
+      this.publishActivity(session, "duplicate queued message ignored", "active");
+      this.publishStatus(session);
+      return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
+    }
+    await this.voidOpenAskForUserMessage(session);
+    if (session.isCompacting) this.enqueuePromptDuringCompaction(session, expanded, behavior ?? "followUp", images, true, false);
+    else {
+      const accepted = await this.submitPromptUntilPreflight(session, expanded, behavior, images, true, false);
+      if (!accepted) throw new Error("Prompt-resource command delivery was rejected before agent start.");
+    }
+    return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
   }
 
   async saveAttachments(ref: PiSessionRef, attachments: unknown, folder?: string): Promise<SavedPromptAttachment[]> {
@@ -3746,14 +3829,14 @@ export class PiSessionService implements SessionRouteService {
       const queued = this.takeCompactionPromptQueue(sessionId);
       if (queued.length === 0) return;
       this.publishStatus(session);
-      for (const prompt of queued) void this.submitPrompt(session, prompt.text, prompt.kind, prompt.images, prompt.echoUserMessage ?? true);
+      for (const prompt of queued) void this.submitPrompt(session, prompt.text, prompt.kind, prompt.images, prompt.echoUserMessage ?? true, prompt.expandPromptTemplates ?? true);
       return;
     }
 
     const prompt = this.shiftCompactionPrompt(sessionId);
     if (prompt === undefined) return;
     this.publishStatus(session);
-    const submitted = this.submitPrompt(session, prompt.text, undefined, prompt.images, prompt.echoUserMessage ?? true);
+    const submitted = this.submitPrompt(session, prompt.text, undefined, prompt.images, prompt.echoUserMessage ?? true, prompt.expandPromptTemplates ?? true);
     void submitted.finally(() => { this.scheduleCompactionQueueDrain(sessionId); });
   }
 
@@ -4740,11 +4823,35 @@ function userMessage(text: string, images: ImageContent[]): { role: "user"; cont
   return { role: "user", content };
 }
 
-function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: ImageContent[]): { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[] } | undefined {
-  const options: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[] } = {};
+function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: ImageContent[], expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void): { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: (accepted: boolean) => void } | undefined {
+  const options: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: (accepted: boolean) => void } = {};
   if (behavior !== undefined) options.streamingBehavior = behavior;
   if (images.length > 0) options.images = images;
+  if (!expandPromptTemplates) options.expandPromptTemplates = false;
+  if (preflightResult !== undefined) options.preflightResult = preflightResult;
   return Object.keys(options).length > 0 ? options : undefined;
+}
+
+function boundedActivePromptContent(content: string): string {
+  try {
+    assertBoundedPromptResourceContent(content, PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes);
+    return content;
+  } catch {
+    throw new Error("Prompt-resource template content is unavailable.");
+  }
+}
+
+async function readActiveSkillContent(filePath: string | undefined): Promise<string> {
+  if (filePath === undefined) throw new Error("Prompt-resource skill content is unavailable.");
+  try {
+    return await readBoundedPromptResourceFile(filePath, PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes);
+  } catch {
+    throw new Error("Prompt-resource skill content is unavailable.");
+  }
+}
+
+async function deliveryFingerprint(expanded: string): Promise<string> {
+  return await fingerprintPromptResourceDeliveryText(expanded);
 }
 
 function stringValue(value: unknown): string {

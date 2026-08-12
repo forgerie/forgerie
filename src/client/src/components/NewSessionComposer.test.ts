@@ -1,11 +1,14 @@
 // @vitest-environment happy-dom
 
+import { EditorSelection } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Machine, Project, Workspace } from "../api";
+import { api, workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import type { NewSessionDestinationCatalog, NewSessionLaunchIntent, NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination } from "../newSessionComposer";
+import { ComposerDraft } from "./ComposerDraft";
+import type { AutocompleteMenu } from "./AutocompleteMenu";
 import { NewSessionComposer } from "./NewSessionComposer";
-import { deepActiveElement, dialogSection, dialogSurface, settleRenderedDialog, surfaceBackdrop } from "./modalSurfaceTestSupport";
+import { deepActiveElement, dialogSection, dialogSurface, pressKey, settleRenderedDialog, surfaceBackdrop } from "./modalSurfaceTestSupport";
 import { newSessionComposerStyles } from "./shared";
 
 const machine = (id: string, status: Machine["status"] = "online"): Machine => ({
@@ -25,15 +28,21 @@ async function mountComposer(options: {
   catalog?: NewSessionDestinationCatalog;
   onCancel?: () => void;
   onSubmit?: NewSessionComposer["onSubmit"];
+  onReturnRecoveryDraft?: NewSessionComposer["onReturnRecoveryDraft"];
+  promptResourceCatalog?: NewSessionComposer["promptResourceCatalog"];
 } = {}): Promise<NewSessionComposer> {
   const composer = new NewSessionComposer();
   if (options.initialDestination !== undefined) composer.initialDestination = options.initialDestination;
-  if (options.initialPrompt !== undefined) composer.initialPrompt = options.initialPrompt;
   if (options.catalog !== undefined) composer.catalog = options.catalog;
   if (options.onCancel !== undefined) composer.onCancel = options.onCancel;
   if (options.onSubmit !== undefined) composer.onSubmit = options.onSubmit;
+  if (options.onReturnRecoveryDraft !== undefined) composer.onReturnRecoveryDraft = options.onReturnRecoveryDraft;
+  if (options.promptResourceCatalog !== undefined) composer.promptResourceCatalog = options.promptResourceCatalog;
   document.body.append(composer);
   await settleRenderedDialog(composer);
+  if (options.initialPrompt !== undefined) {
+    await enterPrompt(composer, options.initialPrompt);
+  }
   return composer;
 }
 
@@ -48,16 +57,54 @@ function button(composer: NewSessionComposer, selector: string): HTMLButtonEleme
   return element;
 }
 
-function promptField(composer: NewSessionComposer): HTMLTextAreaElement {
-  const element = root(composer).querySelector("textarea[data-field='prompt']");
-  if (!(element instanceof HTMLTextAreaElement)) throw new Error("Expected first-prompt textarea");
+function draft(composer: NewSessionComposer): ComposerDraft {
+  const element = root(composer).querySelector("composer-draft");
+  if (!(element instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
   return element;
 }
 
+function promptField(composer: NewSessionComposer): HTMLElement {
+  const content = draft(composer).view?.contentDOM;
+  if (content === undefined) throw new Error("Expected CodeMirror prompt field");
+  return content;
+}
+
+function promptText(composer: NewSessionComposer): string {
+  return draft(composer).view?.state.doc.toString() ?? "";
+}
+
 async function enterPrompt(composer: NewSessionComposer, value: string): Promise<void> {
-  const field = promptField(composer);
-  field.value = value;
-  field.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+  draft(composer).replaceText(value);
+  await composer.updateComplete;
+}
+
+function setEditorText(composer: NewSessionComposer, text: string): void {
+  const view = draft(composer).view;
+  if (view === undefined) throw new Error("Expected CodeMirror to mount");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: EditorSelection.cursor(text.length) });
+}
+
+function menu(composer: NewSessionComposer): AutocompleteMenu | null | undefined {
+  return draft(composer).querySelector<AutocompleteMenu>("autocomplete-menu");
+}
+
+async function waitForMenuItems(composer: NewSessionComposer, count: number): Promise<void> {
+  const found = menu(composer);
+  if (found === null || found === undefined) throw new Error("Expected autocomplete menu");
+  await vi.waitFor(() => { expect(found.items).toHaveLength(count); });
+  await found.updateComplete;
+}
+
+function pressPrompt(composer: NewSessionComposer, key: string): void {
+  pressKey(promptField(composer), key);
+}
+
+async function attachFile(composer: NewSessionComposer, file: File): Promise<void> {
+  const input = draft(composer).querySelector<HTMLInputElement>(".attachment-input");
+  if (input === null) throw new Error("Expected attachment input");
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new Event("change"));
+  await vi.waitFor(() => { expect(draft(composer).querySelector(".attachment-chip")).not.toBeNull(); });
   await composer.updateComplete;
 }
 
@@ -68,6 +115,15 @@ async function settleCatalog(composer: NewSessionComposer): Promise<void> {
   await composer.updateComplete;
 }
 
+function deferredPromptResourceCatalog(): {
+  promise: Promise<Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>>;
+  resolve: (value: Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>) => void;
+} {
+  let resolve!: (value: Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>) => void;
+  const promise = new Promise<Awaited<ReturnType<NewSessionComposer["promptResourceCatalog"]>>>((resolver) => { resolve = resolver; });
+  return { promise, resolve };
+}
+
 describe("new-session-composer editing and submission", () => {
   it("focuses a complete default's prompt and enables Send only for non-empty text", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
@@ -75,7 +131,7 @@ describe("new-session-composer editing and submission", () => {
     const send = button(composer, "[data-action='send']");
 
     expect(dialogSection(composer).getAttribute("aria-label")).toBe("New session");
-    expect(deepActiveElement()).toBe(promptField(composer));
+    expect(deepActiveElement()).toBe(draft(composer));
     expect(send.disabled).toBe(true);
 
     await enterPrompt(composer, "   ");
@@ -92,9 +148,9 @@ describe("new-session-composer editing and submission", () => {
     const composer = await mountComposer({ initialDestination: destination, initialPrompt: "  exact prompt  ", onSubmit, onCancel });
 
     button(composer, "[data-action='send']").click();
-    await composer.updateComplete;
+    await settleCatalog(composer);
 
-    expect(onSubmit).toHaveBeenCalledWith({ destination, prompt: "  exact prompt  " });
+    expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "  exact prompt  " } });
     expect(dialogSurface(composer).busy).toBe(true);
     expect(button(composer, "[data-action='cancel']").disabled).toBe(true);
     surfaceBackdrop(composer).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
@@ -105,10 +161,10 @@ describe("new-session-composer editing and submission", () => {
 
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(dialogSurface(composer).busy).toBe(true);
-    expect(promptField(composer).disabled).toBe(true);
+    expect(draft(composer).disabled).toBe(true);
     expect(button(composer, "[data-action='cancel']").disabled).toBe(true);
     expect(button(composer, "[data-action='send']").disabled).toBe(true);
-    expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Checking destination");
+    expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Starting session");
   });
 
   it("returns a root rejection to the same mounted draft and permits destination recovery", async () => {
@@ -122,7 +178,7 @@ describe("new-session-composer editing and submission", () => {
     button(composer, "[data-action='send']").click();
     await settleCatalog(composer);
 
-    expect(promptField(composer).value).toBe("keep this");
+    expect(promptText(composer)).toBe("keep this");
     expect(root(composer).querySelector("[role='alert']")?.textContent).toContain("no longer available");
     expect(button(composer, "[data-action='change-destination']").disabled).toBe(false);
     expect(dialogSurface(composer).busy).toBe(false);
@@ -139,9 +195,202 @@ describe("new-session-composer editing and submission", () => {
     button(composer, "[data-action='send']").click();
     await settleCatalog(composer);
 
-    expect(promptField(composer).value).toBe("still here");
+    expect(promptText(composer)).toBe("still here");
     expect(root(composer).querySelector("[role='alert']")?.textContent).toContain("Navigation failed");
     expect(dialogSurface(composer).busy).toBe(false);
+  });
+
+  it("uses the shared draft runtime for prompt-resource and file completions, then sends the validated command identity", async () => {
+    const destination = completeNewSessionDestination(machine("remote"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "a".repeat(64) };
+    vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValue({
+      available: true,
+      diagnostics: [],
+      commands: [{ name: "review", source: "prompt", description: "Review <script>", identity }],
+    });
+    vi.spyOn(api, "files").mockResolvedValue([{ path: "src/app.ts", kind: "tracked" }]);
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = await mountComposer({ initialDestination: destination, onSubmit });
+
+    setEditorText(composer, "/re");
+    await waitForMenuItems(composer, 1);
+    expect(menu(composer)?.items[0]).toMatchObject({ insertText: "/review", description: "Review <script>" });
+    expect(draft(composer).querySelector("script")).toBeNull();
+    pressPrompt(composer, "Enter");
+    await composer.updateComplete;
+    expect(promptText(composer)).toBe("/review ");
+
+    setEditorText(composer, "Read @src");
+    await waitForMenuItems(composer, 1);
+    expect(menu(composer)?.items[0]).toMatchObject({ insertText: "@src/app.ts" });
+
+    setEditorText(composer, "/review now");
+    button(composer, "[data-action='send']").click();
+    await settleCatalog(composer);
+    expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
+  });
+
+  it("blocks unknown slash commands after validation without creating a session through footer or Enter", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    vi.spyOn(workspacesApi, "promptResourceCatalog").mockResolvedValue({ available: true, diagnostics: [], commands: [] });
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = await mountComposer({ initialDestination: destination, initialPrompt: "/tree", onSubmit });
+
+    button(composer, "[data-action='send']").click();
+    await settleCatalog(composer);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(root(composer).querySelector("[role='alert']")?.textContent).toContain("/tree is not available");
+    expect(button(composer, "[data-action='send']").disabled).toBe(true);
+
+    pressPrompt(composer, "Enter");
+    await settleCatalog(composer);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("ignores stale slash validation after editing, destination change, or cancel", async () => {
+    const firstDestination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const replacementDestination = completeNewSessionDestination(machine("remote"), project("other"), workspace("feature", "other"));
+    const validations: ReturnType<typeof deferredPromptResourceCatalog>[] = [];
+    const promptResourceCatalog = vi.fn(() => {
+      const validation = deferredPromptResourceCatalog();
+      validations.push(validation);
+      return validation.promise;
+    });
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const onCancel = vi.fn<() => void>();
+    const catalog = new InMemoryNewSessionDestinationCatalog({
+      machines: [replacementDestination.machine],
+      projectsByMachine: { remote: [replacementDestination.project] },
+      workspacesByMachineAndProject: { "remote:other": [replacementDestination.workspace] },
+    });
+    const composer = await mountComposer({ initialDestination: firstDestination, initialPrompt: "/review", catalog, onSubmit, onCancel, promptResourceCatalog });
+
+    await vi.waitFor(() => { expect(validations).toHaveLength(1); });
+    validations[0]?.resolve({
+      available: true,
+      diagnostics: [],
+      commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "b".repeat(64) } }],
+    });
+    await settleCatalog(composer);
+    const editedValidationIndex = validations.length;
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(editedValidationIndex); });
+    await enterPrompt(composer, "plain replacement");
+    validations[editedValidationIndex]?.resolve({ available: false, reason: "error", message: "Old destination unavailable" });
+    await settleCatalog(composer);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(root(composer).querySelector("[role='alert']")).toBeNull();
+    expect(promptText(composer)).toBe("plain replacement");
+
+    await enterPrompt(composer, "/review");
+    const destinationValidationIndex = validations.length;
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(destinationValidationIndex); });
+    button(composer, "[data-action='change-destination']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-machine-id='remote']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-project-id='other']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-workspace-id='feature']").click();
+    await composer.updateComplete;
+    validations[destinationValidationIndex]?.resolve({ available: false, reason: "error", message: "Stale validation error" });
+    await settleCatalog(composer);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(root(composer).querySelector("[role='alert']")).toBeNull();
+
+    const cancelValidationIndex = validations.length;
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(cancelValidationIndex); });
+    button(composer, "[data-action='cancel']").click();
+    validations[cancelValidationIndex]?.resolve({
+      available: true,
+      diagnostics: [],
+      commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "c".repeat(64) } }],
+    });
+    await settleCatalog(composer);
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("retries transient slash validation and blocks missing or ambiguous command names", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "d".repeat(64) };
+    let loads = 0;
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = await mountComposer({
+      initialDestination: destination,
+      initialPrompt: "/review",
+      onSubmit,
+      promptResourceCatalog: () => {
+        loads += 1;
+        if (loads === 2) return Promise.reject(new Error("Catalog offline"));
+        return Promise.resolve({ available: true, diagnostics: [], commands: [{ name: "review", source: "prompt", identity }] });
+      },
+    });
+
+    button(composer, "[data-action='send']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-action='retry-prompt-resource-validation']").click();
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review", promptResourceCommandIdentity: identity } }); });
+
+    document.body.replaceChildren();
+    const missingName = await mountComposer({ initialDestination: destination, initialPrompt: "/", onSubmit });
+    button(missingName, "[data-action='send']").click();
+    await settleCatalog(missingName);
+    expect(root(missingName).querySelector("[role='alert']")?.textContent).toContain("name after /");
+
+    document.body.replaceChildren();
+    const ambiguous = await mountComposer({
+      initialDestination: destination,
+      initialPrompt: "/review",
+      onSubmit,
+      promptResourceCatalog: () => Promise.resolve({
+        available: true,
+        diagnostics: [],
+        commands: [
+          { name: "review", source: "prompt", identity },
+          { name: "review", source: "skill", identity: { source: "skill", name: "review", fingerprint: "e".repeat(64) } },
+        ],
+      }),
+    });
+    button(ambiguous, "[data-action='send']").click();
+    await settleCatalog(ambiguous);
+    expect(root(ambiguous).querySelector("[role='alert']")?.textContent).toContain("ambiguous");
+  });
+
+  it("lets plain text and attachment-only launches proceed when the prompt-resource catalog fails", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    vi.spyOn(workspacesApi, "promptResourceCatalog").mockRejectedValue(new Error("Catalog offline"));
+
+    const textSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const textComposer = await mountComposer({ initialDestination: destination, initialPrompt: "plain text", onSubmit: textSubmit });
+    button(textComposer, "[data-action='send']").click();
+    await settleCatalog(textComposer);
+    expect(textSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "plain text" } });
+
+    document.body.replaceChildren();
+    const attachmentSubmit = vi.fn((intent: NewSessionLaunchIntent): Promise<NewSessionSubmissionOutcome> => {
+      expect(intent.destination).toEqual(destination);
+      return Promise.resolve({ kind: "accepted" });
+    });
+    const attachmentComposer = await mountComposer({ initialDestination: destination, onSubmit: attachmentSubmit });
+    await attachFile(attachmentComposer, new File(["hello"], "note.txt", { type: "text/plain" }));
+    button(attachmentComposer, "[data-action='send']").click();
+    await settleCatalog(attachmentComposer);
+    expect(attachmentSubmit.mock.calls[0]?.[0].firstPrompt).toMatchObject({ text: "", attachments: [{ name: "note.txt", mimeType: "text/plain" }], delivery: "folder" });
+
+    document.body.replaceChildren();
+    const slashSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const slashComposer = await mountComposer({ initialDestination: destination, initialPrompt: "/review", onSubmit: slashSubmit });
+    button(slashComposer, "[data-action='send']").click();
+    await settleCatalog(slashComposer);
+    expect(slashSubmit).not.toHaveBeenCalled();
+    expect(root(slashComposer).querySelector("[data-action='retry-prompt-resource-validation']")?.textContent).toBe("Retry");
   });
 });
 
@@ -171,7 +420,7 @@ describe("new-session-composer destination choice", () => {
     button(composer, "[data-workspace-id='feature']").click();
     await composer.updateComplete;
 
-    expect(promptField(composer).value).toBe("draft survives");
+    expect(promptText(composer)).toBe("draft survives");
     expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("Project forge");
     expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("feature");
     expect(button(composer, "[data-action='send']").disabled).toBe(false);
@@ -183,7 +432,7 @@ describe("new-session-composer destination choice", () => {
     expect(submittedIntent.destination.machine.id).toBe("remote");
     expect(submittedIntent.destination.project.id).toBe("forge");
     expect(submittedIntent.destination.workspace.id).toBe("feature");
-    expect(submittedIntent.prompt).toBe("draft survives");
+    expect(submittedIntent.firstPrompt.text).toBe("draft survives");
   });
 
   it("renders stage-specific loading, empty, error, refresh, and Back actions", async () => {
@@ -220,7 +469,7 @@ describe("new-session-composer destination choice", () => {
     button(composer, "[data-action='refresh-projects']").click();
     await settleCatalog(composer);
     expect(root(composer).querySelector("[data-state='project-empty']")?.textContent).toContain("No projects");
-    expect(promptField(composer).value).toBe("preserved");
+    expect(promptText(composer)).toBe("preserved");
   });
 
   it("keeps unavailable machines visible and Refresh permits selection when one returns online", async () => {
@@ -244,7 +493,7 @@ describe("new-session-composer destination choice", () => {
     expect(root(composer).querySelector("[data-state='machine-unavailable'][role='status']")?.textContent).toContain("No machines are currently available");
     expect(button(composer, "[data-machine-id='offline']").disabled).toBe(true);
     expect(button(composer, "[data-machine-id='failed']").disabled).toBe(true);
-    expect(promptField(composer).value).toBe("keep this prompt");
+    expect(promptText(composer)).toBe("keep this prompt");
     expect(button(composer, "[data-action='send']").disabled).toBe(true);
 
     button(composer, "[data-action='refresh-machines']").click();
@@ -258,7 +507,7 @@ describe("new-session-composer destination choice", () => {
     button(composer, "[data-workspace-id='main']").click();
     await composer.updateComplete;
 
-    expect(promptField(composer).value).toBe("keep this prompt");
+    expect(promptText(composer)).toBe("keep this prompt");
     expect(button(composer, "[data-action='send']").disabled).toBe(false);
     button(composer, "[data-action='send']").click();
     await composer.updateComplete;
@@ -292,7 +541,7 @@ describe("new-session-composer destination choice", () => {
     button(composer, "[data-action='back-project']").click();
     await settleCatalog(composer);
     expect(root(composer).querySelector("[data-project-id='forge']")).not.toBeNull();
-    expect(promptField(composer).value).toBe("keep me");
+    expect(promptText(composer)).toBe("keep me");
     expect(button(composer, "[data-action='send']").disabled).toBe(true);
   });
 
@@ -311,7 +560,7 @@ describe("new-session-composer destination choice", () => {
     await settleCatalog(composer);
 
     expect(root(composer).querySelector("[data-machine-id='remote']")).not.toBeNull();
-    expect(promptField(composer).value).toBe("project draft");
+    expect(promptText(composer)).toBe("project draft");
   });
 
   it("settles the active machine request after rapid repeated Change machine", async () => {
@@ -342,7 +591,7 @@ describe("new-session-composer destination choice", () => {
     expect(machineLoads).toBe(2);
     expect(root(composer).querySelector("[data-machine-id='current']")).not.toBeNull();
     expect(root(composer).querySelector("[data-state='machine-loading']")).toBeNull();
-    expect(promptField(composer).value).toBe("rapid draft");
+    expect(promptText(composer)).toBe("rapid draft");
   });
 
   it("settles the active project request after rapid repeated Change project", async () => {
@@ -375,7 +624,7 @@ describe("new-session-composer destination choice", () => {
     expect(projectLoads).toBe(2);
     expect(root(composer).querySelector("[data-project-id='current']")).not.toBeNull();
     expect(root(composer).querySelector("[data-state='project-loading']")).toBeNull();
-    expect(promptField(composer).value).toBe("workspace draft");
+    expect(promptText(composer)).toBe("workspace draft");
   });
 
   it("ignores a stale machine result after Refresh starts a newer request", async () => {
@@ -453,10 +702,11 @@ describe("new-session-composer presentation contracts", () => {
     expect(styles).toContain(".catalog-item-copy strong, .catalog-item-copy small { min-width: 0; overflow-wrap: anywhere; white-space: normal;");
   });
 
-  it("uses the existing control font tokens for the first prompt", () => {
+  it("hosts the shared draft rather than retaining textarea-specific prompt styling", () => {
     const styles = newSessionComposerStyles.cssText.replaceAll(/\s+/g, " ");
 
-    expect(styles).toContain("font: var(--pi-control-font-size, 16px)/1.45 var(--pi-control-font-family, system-ui, sans-serif)");
+    expect(styles).toContain("composer-draft { display: block; min-width: 0;");
+    expect(styles).not.toContain("textarea { box-sizing: border-box; width: 100%; min-height");
   });
 });
 
@@ -474,6 +724,138 @@ describe("new-session-composer modal lifetime", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("claims an opaque recovery seed exactly once into the shared draft", async () => {
+    const claim = vi.fn((id: string) => ({ id, snapshot: { text: "restored privately" } }));
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = claim;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    expect(claim).toHaveBeenCalledExactlyOnceWith("recovery-1");
+    expect(promptText(composer)).toBe("restored privately");
+    composer.requestUpdate();
+    await composer.updateComplete;
+    expect(claim).toHaveBeenCalledOnce();
+  });
+
+  it("returns the current claimed recovery snapshot on cancel before discarding the draft", async () => {
+    const attachment = { kind: "image" as const, mimeType: "image/png", data: "QUJD", name: "shot.png" };
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "original", attachments: [attachment], delivery: "inline" } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    await enterPrompt(composer, "edited");
+    const snapshot = draft(composer).currentSnapshot();
+    if (snapshot.attachments === undefined) throw new Error("Expected restored attachment");
+    snapshot.attachments[0] = { ...attachment, data: "changed" };
+    expect(draft(composer).currentSnapshot().attachments?.[0]?.data).toBe("QUJD");
+    button(composer, "[data-action='cancel']").click();
+
+    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "edited", attachments: [attachment], delivery: "inline" });
+  });
+
+  it("returns a claimed recovery snapshot when the modal disconnects without cancel", async () => {
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "still owned" } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    composer.remove();
+
+    await vi.waitFor(() => {
+      expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "still owned" });
+    });
+  });
+
+  it("waits for pending attachment capture before returning a disconnected recovery draft", async () => {
+    let resolveRead: (() => void) | undefined;
+    vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (this: FileReader) {
+      resolveRead = () => {
+        Object.defineProperty(this, "result", { configurable: true, value: "data:image/png;base64,aW1hZ2U=" });
+        this.dispatchEvent(new ProgressEvent("load"));
+      };
+    });
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "still owned" } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    const input = draft(composer).querySelector<HTMLInputElement>(".attachment-input");
+    if (input === null) throw new Error("Expected attachment input");
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["image"], "shot.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => { expect(button(composer, "[data-action='cancel']").disabled).toBe(true); });
+    composer.remove();
+    await Promise.resolve();
+    expect(returned).not.toHaveBeenCalled();
+
+    if (resolveRead === undefined) throw new Error("Expected pending FileReader");
+    resolveRead();
+
+    await vi.waitFor(() => {
+      expect(returned).toHaveBeenCalledWith("recovery-1", {
+        text: "still owned",
+        attachments: [{ kind: "image", mimeType: "image/png", data: "aW1hZ2U=", name: "shot.png" }],
+        delivery: "inline",
+      });
+    });
+  });
+
+  it("does not return a claimed recovery draft after its replacement launch is accepted", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const submitted = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = new NewSessionComposer();
+    composer.initialDestination = destination;
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "replace me" } });
+    composer.onReturnRecoveryDraft = returned;
+    composer.onSubmit = submitted;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    button(composer, "[data-action='send']").click();
+    await vi.waitFor(() => {
+      expect(submitted).toHaveBeenCalledOnce();
+      expect(draft(composer).currentSnapshot().text).toBe("");
+    });
+    composer.remove();
+    await Promise.resolve();
+
+    expect(returned).not.toHaveBeenCalled();
+  });
+
+  it("returns only draft-owned fields when a claimed recovery rolls back", async () => {
+    const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
+    const composer = new NewSessionComposer();
+    composer.recoverySeedId = "recovery-1";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "/review src", delivery: "inline" } });
+    composer.onReturnRecoveryDraft = returned;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await composer.updateComplete;
+
+    button(composer, "[data-action='cancel']").click();
+
+    expect(returned).toHaveBeenCalledExactlyOnceWith("recovery-1", { text: "/review src" });
+  });
+
   it("focusExisting returns focus to the same draft without reinitializing it", async () => {
     const composer = await mountComposer({ initialPrompt: "original" });
     await enterPrompt(composer, "edited locally");
@@ -484,7 +866,7 @@ describe("new-session-composer modal lifetime", () => {
     composer.focusExisting();
 
     expect(deepActiveElement()).toBe(button(composer, "[data-action='change-destination']"));
-    expect(promptField(composer).value).toBe("edited locally");
+    expect(promptText(composer)).toBe("edited locally");
   });
 
   it("preserves the local prompt and destination across ordinary responsive rerenders", async () => {
@@ -492,11 +874,10 @@ describe("new-session-composer modal lifetime", () => {
     const composer = await mountComposer({ initialDestination: destination, initialPrompt: "before" });
     await enterPrompt(composer, "after resize");
 
-    composer.initialPrompt = "replacement must not win";
-    composer.requestUpdate();
+        composer.requestUpdate();
     await composer.updateComplete;
 
-    expect(promptField(composer).value).toBe("after resize");
+    expect(promptText(composer)).toBe("after resize");
     expect(root(composer).querySelector("[data-destination-summary]")?.textContent).toContain("Project forge");
   });
 });
@@ -504,4 +885,5 @@ describe("new-session-composer modal lifetime", () => {
 afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
+  vi.restoreAllMocks();
 });

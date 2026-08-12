@@ -53,7 +53,7 @@ export function chatQueuedMessageSections(
   sessionLaunchRecovery?: SessionLaunchRecovery,
 ): QueuedMessageSection[] {
   const recoveryClientQueued = sessionLaunchRecovery !== undefined && clientQueued.length === 0
-    ? [{ kind: "followUp" as const, text: sessionLaunchRecovery.prompt }]
+    ? [{ kind: "followUp" as const, text: sessionLaunchRecoveryPreviewText(sessionLaunchRecovery) }]
     : clientQueued;
   const clientSection = sessionLaunchRecovery === undefined
     ? { source: "client" as const, heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: recoveryClientQueued }
@@ -62,6 +62,22 @@ export function chatQueuedMessageSections(
     recoveryClientQueued.length === 0 ? undefined : clientSection,
     serverQueued.length === 0 ? undefined : { source: "server", heading: "Queued messages", detail: `${String(serverQueued.length)} pending`, messages: serverQueued },
   ].filter((section): section is QueuedMessageSection => section !== undefined);
+}
+
+function sessionLaunchRecoveryPreviewText(recovery: SessionLaunchRecovery): string {
+  const attachmentText = sessionLaunchRecoveryAttachmentSummary(recovery.attachments);
+  return attachmentText === undefined ? "[First prompt retained privately]" : `[First prompt retained privately]\n\n${attachmentText}`;
+}
+
+function sessionLaunchRecoveryAttachmentSummary(attachments: SessionLaunchRecovery["attachments"]): string | undefined {
+  if (attachments === undefined || attachments.length === 0) return undefined;
+  const names = attachments.map((attachment) => attachment.name?.trim()).filter((name): name is string => name !== undefined && name !== "");
+  const count = attachments.length;
+  const label = `${String(count)} ${count === 1 ? "attachment" : "attachments"}`;
+  if (names.length === 0) return `[${label} queued]`;
+  const shownNames = names.slice(0, 3).join(", ");
+  const suffix = names.length > 3 ? `, +${String(names.length - 3)} more` : "";
+  return `[${label} queued: ${shownNames}${suffix}]`;
 }
 
 export type ChatSessionLaunchRecoveryActionKind = "retry" | "changeDestination" | "refresh" | "restore";
@@ -75,20 +91,28 @@ export interface ChatSessionLaunchRecoveryPresentation {
 /** Derive truthful, stage-specific recovery copy and controls from the controller contract. */
 export function chatSessionLaunchRecoveryPresentation(recovery: SessionLaunchRecovery): ChatSessionLaunchRecoveryPresentation {
   if (recovery.stage === "creationFailed") {
+    const needsValidation = recovery.requiresPromptResourceValidation === true;
     return {
       heading: "Session creation failed",
-      detail: "The session was not created, so the first prompt was not sent. Any later queued messages wait behind it.",
+      detail: needsValidation
+        ? "The edited slash command must be validated again before session creation. Change destination to review and send it."
+        : "The session was not created, so the first prompt was not sent. Any later queued messages wait behind it.",
       actions: [
-        { kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying },
+        ...(needsValidation ? [] : [{ kind: "retry" as const, label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying }]),
         { kind: "changeDestination", label: "Change destination", disabled: recovery.retrying },
       ],
     };
   }
   if (recovery.stage === "promptConfirmedUnsent") {
+    const needsValidation = recovery.requiresPromptResourceValidation === true;
     return {
       heading: "First prompt not sent",
-      detail: "The session exists, but the first prompt was confirmed unsent. Any later queued messages wait behind it.",
-      actions: [{ kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying }],
+      detail: needsValidation
+        ? "The prompt resource changed or remained unavailable after retry. Change destination to validate it again."
+        : "The session exists, but the first prompt was confirmed unsent. Any later queued messages wait behind it.",
+      actions: needsValidation
+        ? [{ kind: "changeDestination", label: "Change destination", disabled: false }]
+        : [{ kind: "retry", label: recovery.retrying ? "Retrying…" : "Retry", disabled: recovery.retrying }],
     };
   }
   return {

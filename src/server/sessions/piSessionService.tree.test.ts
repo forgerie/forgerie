@@ -195,13 +195,14 @@ describe("PiSessionService session-tree behavior", () => {
     const navigateTree = vi.fn<NavigateTree>(() => Promise.resolve({ cancelled: false }));
     const { service } = treeHarness({}, { prompt, navigateTree });
 
-    await service.prompt(sessionRef(SESSION_ID), "preflight is still running");
+    const sending = service.prompt(sessionRef(SESSION_ID), "preflight is still running");
     await vi.waitFor(() => { expect(prompt).toHaveBeenCalledOnce(); });
     await expect(service.navigateTree(sessionRef(SESSION_ID), navigationRequest())).rejects.toThrow(
       "Stop current session activity before navigating the session tree",
     );
 
     promptOperation.resolve(undefined);
+    await sending;
     await expect(service.navigateTree(sessionRef(SESSION_ID), navigationRequest())).resolves.toEqual({ cancelled: false });
     await service.dispose();
   });

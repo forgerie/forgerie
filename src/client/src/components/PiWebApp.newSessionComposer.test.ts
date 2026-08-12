@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { EditorSelection } from "@codemirror/state";
 import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Machine, Project, SessionInfo, Workspace } from "../api";
@@ -7,11 +8,12 @@ import { initialAppState, type AppState } from "../appState";
 import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination, type NewSessionLaunchIntent } from "../newSessionComposer";
 import { PiWebApp } from "./PiWebApp";
 import type { AppNavigationPanel } from "./appShell/AppNavigationPanel";
+import { ComposerDraft } from "./ComposerDraft";
 import type { NewSessionComposer } from "./NewSessionComposer";
 import type { ChatView } from "./ChatView";
 import type { WorkspacePanel } from "./WorkspacePanel";
 import { NEW_SESSION_LABEL } from "./shared";
-import type { SessionLaunchRecovery } from "../controllers/sessionController";
+import type { FirstPromptSubmission, SessionLaunchRecovery } from "../controllers/sessionController";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -65,7 +67,7 @@ describe("PiWebApp New session composer root", () => {
 
     invoke(app, "openNewSessionComposer");
 
-    expect(composerRequest(app)).toEqual({ kind: "open", initialPrompt: "" });
+    expect(composerRequest(app)).toEqual({ kind: "open" });
   });
 
   it("focuses the mounted composer and preserves the existing request on repeated activation", () => {
@@ -219,9 +221,7 @@ describe("PiWebApp New session composer root", () => {
     const composer = required(container.querySelector<NewSessionComposer>("new-session-composer"), "new-session composer");
     expect(composer.initialDestination).toEqual(destination);
     await elementUpdateComplete(composer);
-    const prompt = required(composer.shadowRoot?.querySelector<HTMLTextAreaElement>("textarea[data-field='prompt']"), "first prompt");
-    prompt.value = "Build through the real controller";
-    prompt.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+    setComposerText(composer, "Build through the real controller");
     await elementUpdateComplete(composer);
 
     required(composer.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='send']"), "Send button").click();
@@ -233,7 +233,7 @@ describe("PiWebApp New session composer root", () => {
     expect(startSession).toHaveBeenCalledWith(mainWorkspace.path, localMachine.id, pending.id);
     expect(appState(app).sessions.map((candidate) => candidate.id)).toEqual([pending.id, selectedSession.id]);
     expect(appState(app).clientQueuedSessionMessages[pending.id]).toEqual([
-      { kind: "followUp", text: "Build through the real controller" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -257,7 +257,6 @@ describe("PiWebApp New session composer root", () => {
       stage: "creationFailed",
       sessionId: failed.id,
       destination: { machineId: localMachine.id, workspaceId: mainWorkspace.id, cwd: mainWorkspace.path },
-      prompt: "Move this prompt",
       retrying: false,
     });
     const retry = vi.spyOn(controller, "retrySessionLaunch").mockResolvedValue();
@@ -275,7 +274,7 @@ describe("PiWebApp New session composer root", () => {
     expect(composerRequest(app)).toEqual({
       kind: "open",
       initialDestination: completeNewSessionDestination(localMachine, project, mainWorkspace),
-      initialPrompt: "Move this prompt",
+      recoverySeedId: failed.id,
       replacesFailedSessionId: failed.id,
     });
     expect(appState(app).sessions).toEqual([other, failed]);
@@ -283,6 +282,44 @@ describe("PiWebApp New session composer root", () => {
     invoke(app, "closeNewSessionComposer");
 
     expect(appState(app).sessions).toEqual([other, failed]);
+  });
+
+  it("returns a claimed recovery draft through the root callback before cancel closes the composer", async () => {
+    const app = new PiWebApp();
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedWorkspace: mainWorkspace,
+      sessions: [],
+    });
+    const controller = sessionController(app);
+    const api: unknown = Reflect.get(controller, "api");
+    if (!isSessionTransport(api)) throw new Error("Expected SessionController transport");
+    Reflect.set(controller, "api", { ...api, startSession: () => Promise.reject(new Error("backend unavailable")) });
+
+    await controller.launchSession({ text: "Recover through root" });
+    const failed = required(appState(app).selectedSession, "failed pending session");
+    invoke(app, "openSessionLaunchDestinationComposer", failed.id);
+    const container = renderApp(app);
+    const composer = required(container.querySelector<NewSessionComposer>("new-session-composer"), "new-session composer");
+    await elementUpdateComplete(composer);
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toBeUndefined();
+
+    setComposerText(composer, "Edited through root");
+    required(composer.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='cancel']"), "cancel button").click();
+
+    expect(composerRequest(app)).toEqual({ kind: "closed" });
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toEqual([{ kind: "followUp", text: "[First prompt queued]" }]);
+    container.remove();
+    await Promise.resolve();
+    const returnedSeed = controller.claimSessionLaunchRecoveryDraft(failed.id);
+    expect(returnedSeed?.snapshot).toEqual({ text: "Edited through root", delivery: "inline" });
+    if (returnedSeed !== undefined) controller.returnSessionLaunchRecoveryDraft(failed.id, returnedSeed.snapshot);
+    expect(appState(app).clientQueuedSessionMessages[failed.id]).toEqual([{ kind: "followUp", text: "[First prompt queued]" }]);
   });
 
   it("keeps the failed row, recovery, and preview until the real controller selects its replacement pending row", async () => {
@@ -317,7 +354,7 @@ describe("PiWebApp New session composer root", () => {
     });
     Reflect.set(controller, "api", { ...api, startSession });
 
-    await controller.launchSession("Move this prompt");
+    await controller.launchSession({ text: "Move this prompt" });
     const failed = required(appState(app).selectedSession, "failed pending session");
     const failedId = failed.id;
     invoke(app, "openSessionLaunchDestinationComposer", failedId);
@@ -325,10 +362,10 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).sessions).toContain(failed);
     expect(controller.getSessionLaunchRecovery(failedId)?.stage).toBe("creationFailed");
     expect(appState(app).clientQueuedSessionMessages[failedId]).toEqual([
-      { kind: "followUp", text: "Move this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Move this prompt" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Move this prompt" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toEqual({ kind: "accepted" });
     const replacement = required(appState(app).selectedSession, "replacement pending session");
@@ -339,7 +376,7 @@ describe("PiWebApp New session composer root", () => {
     expect(controller.getSessionLaunchRecovery(failedId)).toBeUndefined();
     expect(appState(app).clientQueuedSessionMessages[failedId]).toBeUndefined();
     expect(appState(app).clientQueuedSessionMessages[replacement.id]).toEqual([
-      { kind: "followUp", text: "Move this prompt" },
+      { kind: "followUp", text: "[First prompt queued]" },
     ]);
   });
 
@@ -358,7 +395,6 @@ describe("PiWebApp New session composer root", () => {
       stage: "promptDeliveryAmbiguous",
       sessionId: selected.id,
       destination: { machineId: localMachine.id, workspaceId: mainWorkspace.id, cwd: mainWorkspace.path },
-      prompt: "Inspect this prompt",
       retrying: false,
     });
     const refresh = vi.spyOn(controller, "refreshSessionLaunchRecovery").mockResolvedValue();
@@ -421,24 +457,26 @@ describe("PiWebApp New session composer root", () => {
       return Promise.resolve(true);
     });
     Reflect.set(app, "navigateToNewSessionDestination", navigate);
-    const launchSession = vi.fn((prompt: string) => {
+    const launchSession = vi.fn((prompt: FirstPromptSubmission) => {
+      const text = prompt.text;
       const pending = { ...session("pending", remoteWorkspace.path), clientPendingStart: true, machineId: remoteMachine.id };
       patchAppState(app, {
         selectedSession: pending,
         sessions: [pending],
-        clientQueuedSessionMessages: { [pending.id]: [{ kind: "followUp", text: prompt }] },
+        clientQueuedSessionMessages: { [pending.id]: [{ kind: "followUp", text }] },
       });
       return new Promise<void>(() => undefined);
     });
     const sessions = sessionController(app);
     sessions.launchSession = launchSession;
+    vi.spyOn(sessions, "hasQueuedInitialPrompt").mockReturnValue(true);
     const openChat = vi.fn(() => Promise.resolve());
     Reflect.set(app, "openChat", openChat);
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Build it" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Build it" } } satisfies NewSessionLaunchIntent);
 
     expect(navigate).toHaveBeenCalledWith(destination, expect.any(Function));
-    expect(launchSession).toHaveBeenCalledWith("Build it");
+    expect(launchSession).toHaveBeenCalledWith({ text: "Build it", delivery: "inline" });
     expect(composerRequest(app)).toMatchObject({ kind: "closed" });
     expect(openChat).toHaveBeenCalledOnce();
     expect(outcome).toEqual({ kind: "accepted" });
@@ -486,7 +524,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(app, "navigateToNewSessionDestination", vi.fn(navigate));
     const launch = vi.spyOn(sessionController(app), "launchSession");
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Keep me" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toMatchObject({ kind: "rejected", reason: "destination-unavailable" });
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
@@ -502,7 +540,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(app, "navigateToNewSessionDestination", navigate);
     const launch = vi.spyOn(sessionController(app), "launchSession");
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, prompt: "Keep me" } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toMatchObject({ kind: "rejected", reason: "destination-unavailable" });
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
@@ -569,10 +607,13 @@ function composerRequest(app: PiWebApp): unknown {
 }
 
 interface SessionLaunchController {
-  launchSession: (prompt: string) => Promise<void>;
+  launchSession: (prompt: FirstPromptSubmission) => Promise<void>;
   getSessionLaunchRecovery: (sessionId: string) => SessionLaunchRecovery | undefined;
+  claimSessionLaunchRecoveryDraft: (sessionId: string) => { id: string; snapshot: FirstPromptSubmission } | undefined;
+  hasQueuedInitialPrompt: (sessionId: string) => boolean;
   retrySessionLaunch: (sessionId: string) => Promise<void>;
   acceptSessionLaunchReplacement: (failedSessionId: string, replacementSessionId: string) => void;
+  returnSessionLaunchRecoveryDraft: (sessionId: string, snapshot: FirstPromptSubmission) => void;
   refreshSessionLaunchRecovery: (sessionId: string) => Promise<void>;
   restoreSessionLaunchPrompt: (sessionId: string) => Promise<void>;
 }
@@ -600,8 +641,11 @@ function isSessionLaunchController(value: unknown): value is SessionLaunchContro
   return typeof value === "object" && value !== null
     && "launchSession" in value && typeof value.launchSession === "function"
     && "getSessionLaunchRecovery" in value && typeof value.getSessionLaunchRecovery === "function"
+    && "claimSessionLaunchRecoveryDraft" in value && typeof value.claimSessionLaunchRecoveryDraft === "function"
+    && "hasQueuedInitialPrompt" in value && typeof value.hasQueuedInitialPrompt === "function"
     && "retrySessionLaunch" in value && typeof value.retrySessionLaunch === "function"
     && "acceptSessionLaunchReplacement" in value && typeof value.acceptSessionLaunchReplacement === "function"
+    && "returnSessionLaunchRecoveryDraft" in value && typeof value.returnSessionLaunchRecoveryDraft === "function"
     && "refreshSessionLaunchRecovery" in value && typeof value.refreshSessionLaunchRecovery === "function"
     && "restoreSessionLaunchPrompt" in value && typeof value.restoreSessionLaunchPrompt === "function";
 }
@@ -654,6 +698,13 @@ async function elementUpdateComplete(element: HTMLElement): Promise<void> {
   const updateComplete: unknown = Reflect.get(element, "updateComplete");
   if (!(updateComplete instanceof Promise)) throw new Error("Expected Lit updateComplete");
   await updateComplete;
+}
+
+function setComposerText(composer: NewSessionComposer, text: string): void {
+  const element = required(composer.shadowRoot?.querySelector("composer-draft"), "shared composer draft");
+  if (!(element instanceof ComposerDraft)) throw new Error("Expected shared composer draft");
+  const view = required(element.view, "CodeMirror view");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: EditorSelection.cursor(text.length) });
 }
 
 function required<T>(value: T | null | undefined, label: string): T {

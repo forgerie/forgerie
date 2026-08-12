@@ -4,11 +4,35 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type AssistantMessage } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText } from "../../shared/promptResourceCommand.js";
+import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { PiSessionService } from "./piSessionService.js";
+import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources } from "./commandCatalog.js";
 import { CapturingSessionEventHub, createTestModelRuntime, fakeRuntime, runtimeCreator, seedCredential, sessionGateway, sessionRecord, sessionRef, TEST_MODEL_ID, TEST_MODEL_PROVIDER, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
 
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof PiCodingAgent>()),
+  resizeImage: vi.fn((bytes: Buffer, mimeType: string) => Promise.resolve({
+    data: bytes.toString("base64"),
+    mimeType,
+    originalWidth: 1,
+    originalHeight: 1,
+    width: 1,
+    height: 1,
+    wasResized: false,
+  })),
+}));
+
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
+
+function promptPreflightResult(options: unknown): ((accepted: boolean) => void) | undefined {
+  if (typeof options !== "object" || options === null || !("preflightResult" in options)) return undefined;
+  const preflightResult = options.preflightResult;
+  if (typeof preflightResult !== "function") return undefined;
+  return (accepted) => { Reflect.apply(preflightResult, undefined, [accepted]); };
+}
 
 beforeEach(() => {
   // Pi 0.82 uses PI_OFFLINE for refreshes after runtime creation. These tests
@@ -17,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
 });
 
@@ -63,6 +88,300 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     ]);
 
     await service.dispose();
+  });
+
+  it("expands an identity-matched prompt resource with generic prompt expansion disabled", async () => {
+    const fake = fakeRuntime("prompt-resource-session");
+    fake.session.promptTemplates = [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }];
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({
+        source: "prompt",
+        name: "review",
+        origin: "prompt:unknown:unknown:unknown:unknown",
+        content: "Review $ARGUMENTS",
+      }),
+    };
+
+    const response = await service.runPromptResourceCommand(sessionRef("prompt-resource-session"), "/review src", identity);
+
+    expect(response).toEqual({ accepted: true, deliveryFingerprint: await fingerprintPromptResourceDeliveryText("Review src") });
+    expect(JSON.stringify(response)).not.toContain("Review src");
+    expect(fake.calls.prompt).toEqual([{ text: "Review src", options: { expandPromptTemplates: false } }]);
+    await service.dispose();
+  });
+
+  it("delivers inline attachments through the identity-bound expansion-disabled path", async () => {
+    const fake = fakeRuntime("prompt-resource-inline-session");
+    fake.session.promptTemplates = [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }];
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-inline-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({ source: "prompt", name: "review", origin: "prompt:unknown:unknown:unknown:unknown", content: "Review $ARGUMENTS" }),
+    };
+    const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
+    await expect(service.runPromptResourceCommand(
+      sessionRef("prompt-resource-inline-session"),
+      "/review src",
+      identity,
+      undefined,
+      [{ kind: "image", mimeType: "image/png", data: tinyPng, name: "shot.png" }],
+    )).resolves.toMatchObject({ accepted: true });
+
+    expect(fake.calls.prompt).toHaveLength(1);
+    expect(fake.calls.prompt[0]).toMatchObject({
+      text: "Review src",
+      options: { expandPromptTemplates: false, images: [{ type: "image", mimeType: "image/png" }] },
+    });
+    await service.dispose();
+  });
+
+  it("rejects a stale prompt-resource identity after its content changes", async () => {
+    const fake = fakeRuntime("prompt-resource-stale-session", {
+      promptTemplates: [{ name: "review", description: "Review", content: "Changed $ARGUMENTS" }],
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-stale-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const staleIdentity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({ source: "prompt", name: "review", origin: "prompt:unknown:unknown:unknown:unknown", content: "Original $ARGUMENTS" }),
+    };
+
+    await expect(service.runPromptResourceCommand(sessionRef("prompt-resource-stale-session"), "/review src", staleIdentity)).rejects.toThrow("no longer available");
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("bounds a prompt receipt when Pi never reports preflight or completion", async () => {
+    const fake = fakeRuntime("prompt-preflight-timeout-session", {
+      prompt: () => new Promise(() => undefined),
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-preflight-timeout-session")]),
+      heartbeatIntervalMs: 60_000,
+      promptPreflightTimeoutMs: 25,
+    });
+
+    await expect(service.prompt(sessionRef("prompt-preflight-timeout-session"), "wait forever")).rejects.toThrow("preflight receipt timed out");
+    await service.dispose();
+  });
+
+  it("does not return a delivery receipt when Pi rejects prompt preflight", async () => {
+    const fake = fakeRuntime("prompt-resource-rejected-session", {
+      promptTemplates: [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }],
+      prompt: (_text, options) => {
+        promptPreflightResult(options)?.(false);
+        return Promise.reject(new Error("model unavailable"));
+      },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-rejected-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({
+        source: "prompt",
+        name: "review",
+        origin: "prompt:unknown:unknown:unknown:unknown",
+        content: "Review $ARGUMENTS",
+      }),
+    };
+
+    await expect(service.runPromptResourceCommand(sessionRef("prompt-resource-rejected-session"), "/review src", identity)).rejects.toThrow("rejected before agent start");
+    await service.dispose();
+  });
+
+  it("does not run a colliding extension for an identity-bound prompt resource", async () => {
+    const destination = await buildPromptResourceCatalogFromResources({
+      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", origin: "prompt:unknown:unknown:unknown:unknown" }],
+      skills: [],
+    });
+    const identity = destination.commands[0]?.identity;
+    if (identity === undefined) throw new Error("Expected prompt identity");
+    const fake = fakeRuntime("prompt-resource-collision-session", {
+      promptTemplates: [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }],
+    });
+    const extensionRunner = fake.session.extensionRunner;
+    fake.session.extensionRunner = {
+      ...extensionRunner,
+      getRegisteredCommands: () => [{ invocationName: "review", description: "extension wins" }],
+    };
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-collision-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await expect(service.runPromptResourceCommand(sessionRef("prompt-resource-collision-session"), "/review src", identity)).rejects.toThrow("Prompt-resource command is no longer available");
+
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("does not run a colliding extension for an identity-bound prompt resource with inline attachments", async () => {
+    const destination = await buildPromptResourceCatalogFromResources({
+      prompts: [{ name: "review", description: "Review", content: "Review $ARGUMENTS", origin: "prompt:unknown:unknown:unknown:unknown" }],
+      skills: [],
+    });
+    const identity = destination.commands[0]?.identity;
+    if (identity === undefined) throw new Error("Expected prompt identity");
+    const fake = fakeRuntime("prompt-resource-attachment-collision-session", {
+      promptTemplates: [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }],
+    });
+    const extensionRunner = fake.session.extensionRunner;
+    fake.session.extensionRunner = {
+      ...extensionRunner,
+      getRegisteredCommands: () => [{ invocationName: "review", description: "extension wins" }],
+    };
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-attachment-collision-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
+    await expect(service.runPromptResourceCommand(
+      sessionRef("prompt-resource-attachment-collision-session"),
+      "/review src",
+      identity,
+      undefined,
+      [{ kind: "image", mimeType: "image/png", data: tinyPng, name: "shot.png" }],
+    )).rejects.toThrow("Prompt-resource command is no longer available");
+
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("fails closed without dispatching oversized active prompt-template content", async () => {
+    const oversizedContent = "x".repeat(PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes + 1);
+    const fake = fakeRuntime("prompt-resource-oversized-template-session", {
+      promptTemplates: [{ name: "oversized", description: "Oversized", content: oversizedContent }],
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-oversized-template-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = { source: "prompt" as const, name: "oversized", fingerprint: "a".repeat(64) };
+
+    const error = await service.runPromptResourceCommand(sessionRef("prompt-resource-oversized-template-session"), "/oversized", identity).catch((caught: unknown) => caught);
+
+    expect(error).toEqual(new Error("Prompt-resource template content is unavailable."));
+    expect(String(error)).not.toContain(oversizedContent.slice(0, 100));
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("fails closed without exposing a missing active skill path", async () => {
+    const missingPath = join(tmpdir(), "forgerie-missing-skill", "SKILL.md");
+    const fake = fakeRuntime("prompt-resource-missing-skill-session", {
+      resourceLoader: { getSkills: () => ({ skills: [{ name: "missing", description: "Missing", filePath: missingPath, baseDir: join(tmpdir(), "forgerie-missing-skill") }] }) },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-missing-skill-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = { source: "skill" as const, name: "skill:missing", fingerprint: "a".repeat(64) };
+
+    const error = await service.runPromptResourceCommand(sessionRef("prompt-resource-missing-skill-session"), "/skill:missing", identity).catch((caught: unknown) => caught);
+    expect(error).toEqual(new Error("Prompt-resource skill content is unavailable."));
+    expect(String(error)).not.toContain(missingPath);
+    expect(fake.calls.prompt).toEqual([]);
+    await service.dispose();
+  });
+
+  it("expands identity-bound prompt and skill resources before dispatching with Pi expansion disabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-web-prompt-resource-"));
+    const skillPath = join(root, "SKILL.md");
+    await writeFile(skillPath, "---\ndescription: Audit\n---\nUse the audit skill\n", "utf8");
+    const activeCatalog = await buildActiveCommandCatalog({
+      builtins: [],
+      extensions: [],
+      prompts: [{ name: "review", description: "Review", content: "Review $1 and ${2:-fallback} for $ARGUMENTS", origin: "prompt:unknown:unknown:unknown:unknown" }],
+      skills: [{ name: "audit", description: "Audit", content: "---\ndescription: Audit\n---\nUse the audit skill\n", origin: `skill:unknown:unknown:unknown:${skillPath}`, baseDir: root, filePath: skillPath }],
+    });
+    const review = activeCatalog.resourceCommands.find((command) => command.name === "review");
+    const audit = activeCatalog.resourceCommands.find((command) => command.name === "skill:audit");
+    if (review === undefined || audit === undefined) throw new Error("Expected prompt and skill identities");
+    const fake = fakeRuntime("prompt-resource-expansion-session", {
+      promptTemplates: [{ name: "review", description: "Review", content: "Review $1 and ${2:-fallback} for $ARGUMENTS" }],
+      resourceLoader: { getSkills: () => ({ skills: [{ name: "audit", description: "Audit", filePath: skillPath, baseDir: root }] }) },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("prompt-resource-expansion-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    try {
+      const reviewResponse = await service.runPromptResourceCommand(sessionRef("prompt-resource-expansion-session"), "/review src 'quoted value'", review.identity);
+      const skillResponse = await service.runPromptResourceCommand(sessionRef("prompt-resource-expansion-session"), "/skill:audit target", audit.identity);
+
+      expect(reviewResponse.deliveryFingerprint).toBe(await fingerprintPromptResourceDeliveryText("Review src and quoted value for src quoted value"));
+      expect(skillResponse.deliveryFingerprint).toBe(await fingerprintPromptResourceDeliveryText(`<skill name="audit" location="${skillPath}">
+References are relative to ${root}.
+
+Use the audit skill
+</skill>
+
+target`));
+      expect(JSON.stringify(reviewResponse)).not.toContain("Review src and quoted value");
+      expect(JSON.stringify(skillResponse)).not.toContain("Use the audit skill");
+      expect(fake.calls.prompt).toEqual([
+        { text: "Review src and quoted value for src quoted value", options: { expandPromptTemplates: false } },
+        { text: `<skill name="audit" location="${skillPath}">
+References are relative to ${root}.
+
+Use the audit skill
+</skill>
+
+target`, options: { expandPromptTemplates: false } },
+      ]);
+    } finally {
+      await service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("rejects malformed prompt text before opening the runtime", async () => {

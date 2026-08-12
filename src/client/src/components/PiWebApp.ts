@@ -17,7 +17,7 @@ import { MachineController } from "../controllers/machineController";
 import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
-import { SessionController, type SessionLaunchRecovery, type SessionTranscriptPreview } from "../controllers/sessionController";
+import { SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot, type SessionTranscriptPreview } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
 import { WorkspaceController, canDeleteWorkspace } from "../controllers/workspaceController";
@@ -224,11 +224,12 @@ export class PiWebApp extends LitElement {
       onSelectedSessionReady: ({ machineId, session }) => {
         void this.commitReadyChatAfterRender(machineId, session);
       },
-      replacePromptEditorText: async ({ machineId, sessionId, text }) => {
+      replacePromptEditorText: async ({ machineId, sessionId, text, snapshot }) => {
         await this.updateComplete;
         const promptEditor = this.promptEditor;
         if (selectedMachineId(this.state) !== machineId || this.state.selectedSession?.id !== sessionId || promptEditor === undefined) return false;
-        promptEditor.replaceText(text);
+        if (snapshot === undefined) promptEditor.replaceText(text);
+        else promptEditor.restoreSnapshot({ ...snapshot, attachments: snapshot.attachments?.map((attachment) => ({ ...attachment })) });
         return true;
       },
     },
@@ -1775,7 +1776,7 @@ export class PiWebApp extends LitElement {
   // New-session composer and workspace management
   // -------------------------------------------------------------------------
 
-  private openNewSessionComposer(initialPrompt = ""): void {
+  private openNewSessionComposer(): void {
     if (this.state.newSessionComposer.kind === "open") {
       this.newSessionComposer?.focusExisting();
       return;
@@ -1785,7 +1786,6 @@ export class PiWebApp extends LitElement {
       newSessionComposer: {
         kind: "open",
         ...(initialDestination === undefined ? {} : { initialDestination }),
-        initialPrompt,
       },
     });
   }
@@ -1821,13 +1821,13 @@ export class PiWebApp extends LitElement {
       return;
     }
     const recovery = this.sessions.getSessionLaunchRecovery(sessionId);
-    if (recovery?.stage !== "creationFailed") return;
+    if (recovery === undefined || (recovery.stage !== "creationFailed" && recovery.stage !== "promptConfirmedUnsent")) return;
     const initialDestination = this.sessionLaunchRecoveryDestination(recovery);
     this.setState({
       newSessionComposer: {
         kind: "open",
         ...(initialDestination === undefined ? {} : { initialDestination }),
-        initialPrompt: recovery.prompt,
+        recoverySeedId: sessionId,
         replacesFailedSessionId: sessionId,
       },
     });
@@ -1874,10 +1874,14 @@ export class PiWebApp extends LitElement {
     }
 
     const previouslySelectedSessionId = this.state.selectedSession?.id;
-    const launch = this.sessions.launchSession(intent.prompt);
+    const launch = this.sessions.launchSession({
+      ...intent.firstPrompt,
+      attachments: intent.firstPrompt.attachments === undefined ? undefined : [...intent.firstPrompt.attachments],
+      delivery: intent.firstPrompt.delivery ?? "inline",
+    });
     const pending = this.state.selectedSession;
-    const queued = pending === undefined ? undefined : this.state.clientQueuedSessionMessages[pending.id];
-    if (pending === undefined || pending.id === previouslySelectedSessionId || queued?.some((message) => message.text === intent.prompt) !== true) {
+    const queuedFirstPrompt = pending !== undefined && this.sessions.hasQueuedInitialPrompt(pending.id);
+    if (pending === undefined || pending.id === previouslySelectedSessionId || !queuedFirstPrompt) {
       void launch.catch((error: unknown) => { if (isCurrentToken()) this.setState({ error: String(error) }); });
       return { kind: "rejected", reason: "launch-rejected", message: "New session could not be queued." };
     }
@@ -3272,10 +3276,12 @@ export class PiWebApp extends LitElement {
         ${this.renderPanelSurface("workspace")}
         ${state.newSessionComposer.kind === "open" ? html`<new-session-composer
           .initialDestination=${state.newSessionComposer.initialDestination}
-          .initialPrompt=${state.newSessionComposer.initialPrompt}
+          .recoverySeedId=${state.newSessionComposer.recoverySeedId}
           .catalog=${this.newSessionDestinationCatalog}
           .onCancel=${() => { this.closeNewSessionComposer(); }}
           .onSubmit=${(intent: NewSessionLaunchIntent) => this.submitNewSession(intent)}
+          .onClaimRecoveryDraft=${(recoverySeedId: string) => this.sessions.claimSessionLaunchRecoveryDraft(recoverySeedId)}
+          .onReturnRecoveryDraft=${(recoverySeedId: string, snapshot: SessionLaunchRecoveryDraftSnapshot) => { this.sessions.returnSessionLaunchRecoveryDraft(recoverySeedId, snapshot); }}
         ></new-session-composer>` : null}
         ${state.workspaceManagementDialog !== undefined ? html`<workspace-management-dialog
           .dialogState=${state.workspaceManagementDialog}

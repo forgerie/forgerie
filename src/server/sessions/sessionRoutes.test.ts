@@ -788,6 +788,44 @@ describe("session routes", () => {
     }
   });
 
+  it("forwards identity-bound prompt-resource invocations through the dedicated route", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    const identity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const attachments = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    try {
+      const response = await routeApp.inject({ method: "POST", url: "/sessions/session-1/prompt-resource-command", payload: { cwd: "/repo", text: "/review src", identity, streamingBehavior: "followUp", attachments } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ accepted: true, deliveryFingerprint: "b".repeat(64) });
+      expect(routeService.promptResourceCommandCalls).toEqual([{ lookup: { id: "session-1", cwd: resolve("/repo") }, text: "/review src", identity, streamingBehavior: "followUp", attachments }]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
+  it("rejects malformed prompt-resource identities before service dispatch", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const response = await routeApp.inject({ method: "POST", url: "/sessions/session-1/prompt-resource-command", payload: { cwd: "/repo", text: "/review src", identity: { source: "prompt", name: "review", fingerprint: "not-a-digest" } } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: "identity fingerprint must be a SHA-256 hex digest" });
+      expect(routeService.promptResourceCommandCalls).toEqual([]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("passes cwd when per-session routes include workspace context", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1176,6 +1214,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly answerDialogCalls: { lookup: SessionRouteRef; dialogId: string; value: ExtensionDialogAnswer }[] = [];
   readonly cancelDialogCalls: { lookup: SessionRouteRef; dialogId: string }[] = [];
   readonly startCalls: { cwd: string; startupToken: string | undefined }[] = [];
+  readonly promptResourceCommandCalls: { lookup: SessionRouteRef; text: string; identity: unknown; streamingBehavior?: unknown; attachments?: unknown }[] = [];
   askError: Error | undefined;
   dialogError: Error | undefined;
   reloadError: Error | undefined;
@@ -1368,6 +1407,10 @@ class CapturingRouteSessionService implements SessionRouteService {
 
   shell(): never { throw unusedRouteMethod("shell"); }
   runCommand(): never { throw unusedRouteMethod("runCommand"); }
+  runPromptResourceCommand(lookup: SessionRouteRef, text: string, identity: unknown, streamingBehavior?: unknown, attachments?: unknown): Promise<{ accepted: true; deliveryFingerprint: string }> {
+    this.promptResourceCommandCalls.push({ lookup, text, identity, ...(streamingBehavior === undefined ? {} : { streamingBehavior }), ...(attachments === undefined ? {} : { attachments }) });
+    return Promise.resolve({ accepted: true, deliveryFingerprint: "b".repeat(64) });
+  }
   respondToCommand(): never { throw unusedRouteMethod("respondToCommand"); }
   navigateTree(lookup: SessionRouteRef, request: SessionTreeNavigateRequest): Promise<SessionTreeNavigateResult> {
     this.navigateTreeCalls.push({ lookup, request });

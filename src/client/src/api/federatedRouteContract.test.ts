@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "../../../shared/apiTypes";
-import { FEDERATED_HTTP_ROUTES, FEDERATED_WEBSOCKET_ROUTES, SESSION_TREE_FORK_PROXY_TIMEOUT_MS, SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS, type FederatedHttpRouteSpec } from "../../../shared/federatedRoutes";
+import { FEDERATED_HTTP_ROUTES, FEDERATED_WEBSOCKET_ROUTES, PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS, SESSION_TREE_FORK_PROXY_TIMEOUT_MS, SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS, type FederatedHttpRouteSpec } from "../../../shared/federatedRoutes";
 import { activityApi, configApi, filesApi, gitApi, piPackagesApi, piWebApi, pluginsApi, projectsApi, sessionsApi, terminalsApi, workspacesApi } from "./clients";
 import { globalSessionEvents, realtimeEvents, sessionEvents, terminalSocket } from "./sockets";
 import { workspaceImagePreviewUrl } from "./urls";
@@ -78,6 +78,15 @@ describe("federated route contract", () => {
     ]);
   });
 
+  it("allowlists prompt-resource catalogs with a bounded proxy timeout", () => {
+    expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === "/projects/:projectId/workspaces/:workspaceId/prompt-resource-catalog")).toEqual({
+      method: "GET",
+      path: "/projects/:projectId/workspaces/:workspaceId/prompt-resource-catalog",
+      timeoutMs: PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS,
+    });
+    expect(PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS).toBe(15_000);
+  });
+
   it("allowlists session tree mutations with long model-operation timeouts and no new WebSocket", () => {
     expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === "/sessions/:sessionId/tree/navigate")).toEqual({
       method: "POST",
@@ -120,6 +129,7 @@ describe("federated route contract", () => {
       ignoreParseFailure(workspacesApi.writeWorkspaceFile("p 1", "w 1", "README.md", "hello", { overwrite: false }, machineId)),
       ignoreParseFailure(workspacesApi.deleteWorkspaceFile("p 1", "w 1", "README.md", machineId)),
       ignoreParseFailure(workspacesApi.moveWorkspaceFile("p 1", "w 1", "README.md", "docs/README.md", { overwrite: false }, machineId)),
+      ignoreParseFailure(workspacesApi.promptResourceCatalog("p 1", "w 1", machineId)),
       ignoreParseFailure(filesApi.files("README", { kind: "tracked", mode: "file", projectId: "p 1", workspaceId: "w 1", machineId })),
       ignoreParseFailure(gitApi.gitStatus("p 1", "w 1", machineId)),
       ignoreParseFailure(gitApi.gitDiff("p 1", "w 1", { path: "README.md", staged: true }, machineId)),
@@ -151,6 +161,7 @@ describe("federated route contract", () => {
       ignoreParseFailure(sessionsApi.cycleThinkingLevel(session, machineId)),
       ignoreParseFailure(sessionsApi.commands(session, machineId)),
       ignoreParseFailure(sessionsApi.prompt(session, "hello", "followUp", machineId)),
+      ignoreParseFailure(sessionsApi.runPromptResourceCommand(session, "/review src", { source: "prompt", name: "review", fingerprint: "a".repeat(64) }, "followUp", machineId, [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }])),
       ignoreParseFailure(sessionsApi.saveAttachments(session, [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }], machineId, "uploads")),
       ignoreParseFailure(sessionsApi.shell(session, "ls", machineId)),
       ignoreParseFailure(sessionsApi.runCommand(session, "/help", machineId)),
