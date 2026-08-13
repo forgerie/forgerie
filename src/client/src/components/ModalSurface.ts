@@ -170,10 +170,12 @@ export class ModalSurface extends LitElement {
          --modal-surface-height / --modal-surface-max-height / --modal-surface-min-height
          --modal-surface-border / --modal-surface-radius / --modal-surface-shadow
          --modal-surface-background     dialog fill; set to transparent when the
-                                        slotted content is itself the surface */
+                                        slotted content is itself the surface
+         --modal-surface-overflow       clipping; set to visible when the content
+                                        anchors a layer that must leave the box */
     :host { display: block; width: 100%; height: 100%; }
-    .backdrop { box-sizing: border-box; width: 100%; height: 100%; display: grid; place-items: var(--modal-surface-place-items, center); padding: var(--modal-surface-backdrop-padding, 0); background: var(--pi-overlay); overflow: hidden; }
-    section[role="dialog"] { box-sizing: border-box; width: var(--modal-surface-width, min(720px, 100%)); max-width: var(--modal-surface-max-width, 100%); height: var(--modal-surface-height, auto); max-height: var(--modal-surface-max-height, 100%); min-height: var(--modal-surface-min-height, auto); display: flex; flex-direction: column; border: var(--modal-surface-border, 1px solid var(--pi-border)); border-radius: var(--modal-surface-radius, 12px); background: var(--modal-surface-background, var(--pi-bg)); box-shadow: var(--modal-surface-shadow, 0 20px 60px var(--pi-shadow-strong)); overflow: hidden; }
+    .backdrop { box-sizing: border-box; width: 100%; height: 100%; display: grid; place-items: var(--modal-surface-place-items, center); padding: var(--modal-surface-backdrop-padding, 0); background: var(--pi-overlay); overflow: var(--modal-surface-overflow, hidden); }
+    section[role="dialog"] { box-sizing: border-box; width: var(--modal-surface-width, min(720px, 100%)); max-width: var(--modal-surface-max-width, 100%); height: var(--modal-surface-height, auto); max-height: var(--modal-surface-max-height, 100%); min-height: var(--modal-surface-min-height, auto); display: flex; flex-direction: column; border: var(--modal-surface-border, 1px solid var(--pi-border)); border-radius: var(--modal-surface-radius, 12px); background: var(--modal-surface-background, var(--pi-bg)); box-shadow: var(--modal-surface-shadow, 0 20px 60px var(--pi-shadow-strong)); overflow: var(--modal-surface-overflow, hidden); }
   `;
 }
 

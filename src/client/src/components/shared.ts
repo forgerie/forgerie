@@ -341,6 +341,9 @@ export const newSessionComposerStyles = css`
      that already has all three. */
   modal-surface {
     --modal-surface-background: transparent;
+    /* The composer anchors its choices to its own controls, and they open
+       above the island. A clipping dialog paints them away entirely. */
+    --modal-surface-overflow: visible;
     --modal-surface-border: none;
     --modal-surface-shadow: none;
     --modal-surface-radius: 0;

@@ -5,6 +5,8 @@ import { completeNewSessionDestination } from "../newSessionComposer";
 import { NewSessionComposer } from "./NewSessionComposer";
 import { PromptEditor } from "./PromptEditor";
 import { settleRenderedDialog } from "./modalSurfaceTestSupport";
+import { ModalSurface } from "./ModalSurface";
+import { newSessionComposerStyles } from "./shared";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -29,6 +31,18 @@ describe("new-session composer guidance", () => {
     expect(popover).not.toBeNull();
     expect(popover?.querySelector("guidance-picker")).not.toBeNull();
     expect(popover?.shadowRoot?.querySelector(".popover-panel")).not.toBeNull();
+  });
+
+  it("lets a choice leave the dialog instead of being clipped away", () => {
+    // The panel opens above the composer, outside the dialog's box. A dialog
+    // that clips paints it away, which reads as the menu never opening.
+    const styles = newSessionComposerStyles.cssText.replaceAll(/\s+/g, " ");
+    const modalStyles = ModalSurface.styles.cssText.replaceAll(/\s+/g, " ");
+
+    expect(styles).toContain("--modal-surface-overflow: visible");
+    expect(modalStyles).not.toMatch(/section\[role="dialog"\][^}]*overflow: hidden/);
+    expect(modalStyles).toMatch(/section\[role="dialog"\][^}]*overflow: var\(--modal-surface-overflow, hidden\)/);
+    expect(modalStyles).toMatch(/\.backdrop[^}]*overflow: var\(--modal-surface-overflow, hidden\)/);
   });
 
   it("keeps the modal open when the panel is dismissed", async () => {
