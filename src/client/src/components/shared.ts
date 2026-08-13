@@ -336,7 +336,14 @@ export const composerDraftStyles = css`
 export const newSessionComposerStyles = css`
   ${composerDraftStyles}
   :host { position: fixed; inset: 0; z-index: 40; display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; container-type: size; }
+  /* The composer island is the surface. A dialog box around it would draw a
+     second border, a second background, and a second shadow around something
+     that already has all three. */
   modal-surface {
+    --modal-surface-background: transparent;
+    --modal-surface-border: none;
+    --modal-surface-shadow: none;
+    --modal-surface-radius: 0;
     --modal-surface-width: min(42rem, calc(100% - clamp(1rem, 4cqi, 2rem)));
     --modal-surface-height: auto;
     --modal-surface-max-width: 100%;
@@ -908,6 +915,11 @@ export const promptEditorStyles = css`
    * appears only when the island's own width can carry it.
    */
   .composer-context-chip { display: none; align-items: center; gap: 4px; }
+  /* A chip states where the composer points; its action is a quiet aside, not
+     a second button competing with the row's real controls. */
+  .composer-context-chip-action { min-height: 0; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--pi-accent); font: inherit; font-size: inherit; cursor: pointer; }
+  .composer-context-chip-action:hover:not(:disabled), .composer-context-chip-action:focus-visible { text-decoration: underline; }
+  .composer-context-chip-action:disabled { color: var(--pi-muted); cursor: default; }
   .context-chip-name { min-width: 0; max-width: min(26cqi, 168px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prompt-branch-icon { flex: 0 0 auto; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }

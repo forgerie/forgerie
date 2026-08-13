@@ -699,6 +699,16 @@ describe("new-session-composer destination choice", () => {
 });
 
 describe("new-session-composer presentation contracts", () => {
+  it("lets the island be the only surface, with no dialog box around it", () => {
+    const styles = newSessionComposerStyles.cssText.replaceAll(/\s+/g, " ");
+
+    // A dialog box here would draw a second border, background, and shadow
+    // around a composer that already carries all three.
+    expect(styles).toContain("--modal-surface-background: transparent");
+    expect(styles).toContain("--modal-surface-border: none");
+    expect(styles).toContain("--modal-surface-shadow: none");
+  });
+
   it("keeps the accessible modal name without a visible duplicate titlebar or close action", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const composer = await mountComposer({ initialDestination: destination });
