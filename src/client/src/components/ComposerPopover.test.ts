@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerPopover } from "./ComposerPopover";
+import "./ComposerChoiceList";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -85,6 +86,22 @@ describe("composer-popover", () => {
 
     expect(onClose).toHaveBeenCalledWith(false);
     expect(outsideClick).toHaveBeenCalledOnce();
+  });
+
+  it("stays open for a press on a row inside the content it holds", async () => {
+    const onClose = vi.fn();
+    const popover = await mount({ onClose });
+    const list = document.createElement("composer-choice-list");
+    list.groups = [{ items: [{ value: "anthropic/claude-opus-4-8", label: "claude-opus-4-8" }] }];
+    popover.append(list);
+    await list.updateComplete;
+
+    // The row lives in the list's shadow root, one tree below the popover's.
+    // A containment check inside a single tree cannot see it.
+    const row = list.shadowRoot?.querySelector("[data-value]");
+    row?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, composed: true }));
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("names itself for a screen reader", async () => {

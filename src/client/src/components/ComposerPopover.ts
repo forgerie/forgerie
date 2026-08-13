@@ -98,9 +98,12 @@ export class ComposerPopover extends LitElement {
   };
 
   private readonly handleDocumentPointerDown = (event: Event): void => {
-    const target = event.composedPath()[0];
-    if (target instanceof Node && (this.contains(target) || this.shadowRoot?.contains(target) === true)) return;
-    if (this.anchor !== undefined && target instanceof Node && this.anchor.contains(target)) return;
+    // The composed path crosses shadow boundaries; a containment check does
+    // not. Rows live in the content's own shadow root, one tree below this
+    // one, so testing containment dismissed the panel on every press.
+    const path = event.composedPath();
+    if (path.includes(this)) return;
+    if (this.anchor !== undefined && path.includes(this.anchor)) return;
     this.onClose?.(false);
   };
 
