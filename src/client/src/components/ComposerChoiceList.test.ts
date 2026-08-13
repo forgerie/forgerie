@@ -68,6 +68,21 @@ describe("composer-choice-list", () => {
     expect(list.shadowRoot?.querySelector(".choice-search")).toBeNull();
   });
 
+  it("says it is still reading, rather than that nothing matched", async () => {
+    const list = await mount({ groups: [], searchable: true });
+    list.loading = true;
+    await list.updateComplete;
+
+    expect(required(list, ".choice-empty").textContent).toContain("Reading the catalogue");
+
+    list.loading = false;
+    list.emptyMessage = "No models are configured";
+    await list.updateComplete;
+
+    // An empty list with no query never claims a search found nothing.
+    expect(required(list, ".choice-empty").textContent).toBe("No models are configured");
+  });
+
   it("states an unavailable catalogue and offers to retry", async () => {
     const onRetry = vi.fn();
     const list = await mount({ groups: [], error: "Session daemon unavailable", onRetry });
@@ -107,6 +122,7 @@ async function mount(options: {
   selectedValue?: string;
   searchable?: boolean;
   error?: string;
+  loading?: boolean;
   onPick?: (value: string) => void;
   onRetry?: () => void;
 }): Promise<ComposerChoiceList> {
@@ -115,6 +131,7 @@ async function mount(options: {
   if (options.selectedValue !== undefined) list.selectedValue = options.selectedValue;
   list.searchable = options.searchable ?? false;
   if (options.error !== undefined) list.error = options.error;
+  list.loading = options.loading ?? false;
   if (options.onPick !== undefined) list.onPick = options.onPick;
   if (options.onRetry !== undefined) list.onRetry = options.onRetry;
   document.body.append(list);

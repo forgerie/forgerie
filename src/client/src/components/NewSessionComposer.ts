@@ -372,7 +372,9 @@ export class NewSessionComposer extends LitElement {
   /** The catalogue belongs to the destination machine, not the selected one. */
   private async listDestinationModels(): Promise<readonly ClientSessionModel[]> {
     const machineId = this.destinationMachineId();
-    if (machineId === undefined) return [];
+    // Models belong to a machine, so there is nothing to read until one is
+    // chosen. Saying so beats an empty list that reads as "none exist".
+    if (machineId === undefined) throw new Error("Choose a destination to see its models.");
     return (await sessionsApi.newSessionModels(machineId)).models;
   }
 

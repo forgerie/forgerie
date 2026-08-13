@@ -32,6 +32,10 @@ export class ComposerChoiceList extends LitElement {
   @property() selectedValue?: string;
   @property({ type: Boolean }) searchable = false;
   @property() error?: string;
+  /** True while the choices are being read; an empty list means nothing yet. */
+  @property({ type: Boolean }) loading = false;
+  /** Said when there is nothing to choose and nothing was searched for. */
+  @property() emptyMessage = "Nothing to choose from";
   @property() searchLabel = "Search";
   @property({ attribute: false }) onPick?: (value: string) => void;
   @property({ attribute: false }) onRetry?: () => void;
@@ -64,9 +68,24 @@ export class ComposerChoiceList extends LitElement {
           ${group.label === undefined ? nothing : html`<p class="choice-group">${group.label}</p>`}
           ${group.items.map((item) => this.renderItem(item))}
         `)}
-        ${empty && this.error === undefined ? html`<p class="choice-empty">Nothing matches ${this.query}</p>` : nothing}
+        ${this.renderEmptyState(empty)}
       </div>
     `;
+  }
+
+  /**
+   * An empty list has three quite different meanings, and saying the wrong one
+   * reads as a broken panel: still reading, searched for something absent, or
+   * genuinely nothing to offer.
+   */
+  private renderEmptyState(empty: boolean) {
+    if (this.error !== undefined) return nothing;
+    if (this.loading) return html`<p class="choice-empty" role="status">Reading the catalogue…</p>`;
+    if (!empty) return nothing;
+    const query = this.query.trim();
+    return query === ""
+      ? html`<p class="choice-empty">${this.emptyMessage}</p>`
+      : html`<p class="choice-empty">Nothing matches ${query}</p>`;
   }
 
   private renderItem(item: ComposerChoiceItem): TemplateResult {

@@ -86,6 +86,7 @@ export class PromptEditor extends LitElement {
   @state() private openChoice: "model" | "thinking" | undefined = undefined;
   @state() private choiceModels: readonly ComposerSelectableModel[] = [];
   @state() private choiceError: string | undefined = undefined;
+  @state() private choiceLoading = false;
   @state() private guidancePending = false;
   @state() private guidanceError: string | undefined = undefined;
   private guidanceRequestVersion = 0;
@@ -410,6 +411,8 @@ export class PromptEditor extends LitElement {
           .selectedValue=${selected}
           .searchable=${isModel}
           .searchLabel=${"Search models"}
+          .loading=${isModel && this.choiceLoading}
+          .emptyMessage=${isModel ? "No models are configured" : "No levels are available"}
           .error=${isModel ? this.choiceError : undefined}
           .onRetry=${isModel ? () => { void this.loadChoiceModels(model); } : undefined}
           .onPick=${(value: string) => { this.pickChoice(model, value); }}
@@ -494,14 +497,17 @@ export class PromptEditor extends LitElement {
   private async loadChoiceModels(model: ComposerModelCapability): Promise<void> {
     const version = ++this.choiceRequestVersion;
     this.choiceError = undefined;
+    this.choiceLoading = true;
     try {
       const models = await model.listModels();
       if (version !== this.choiceRequestVersion) return;
       this.choiceModels = models;
-    } catch {
+    } catch (error: unknown) {
       if (version !== this.choiceRequestVersion) return;
       this.choiceModels = [];
-      this.choiceError = "Models are unavailable.";
+      this.choiceError = error instanceof Error && error.message !== "" ? error.message : "Models are unavailable.";
+    } finally {
+      if (version === this.choiceRequestVersion) this.choiceLoading = false;
     }
   }
 
