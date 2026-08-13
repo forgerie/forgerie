@@ -433,12 +433,13 @@ export class PromptEditor extends LitElement {
 
   private renderModelCapsule(capability: ComposerModelCapability) {
     const changeable = capability.changeable !== false;
-    const name = capability.model?.id ?? "no model";
-    const provider = capability.model?.provider !== undefined && capability.model.provider !== "" ? `${capability.model.provider}/` : "";
+    const model = capability.model;
+    const name = model === undefined ? "no model" : modelDisplayName(model);
+    const identity = model === undefined ? "no model" : modelChoiceValue(model);
     const thinking = thinkingLevelLabel(capability.thinkingLevel);
     return html`
       <div class="model-capsule">
-        <button class="select-model" ?disabled=${this.disabled || !changeable} title="Select model" @click=${() => { this.selectModel(); }}>${provider}${name}</button>
+        <button class="select-model" ?disabled=${this.disabled || !changeable} title=${`Select model: ${identity}`} @click=${() => { this.selectModel(); }}>${name}</button>
         <button class="select-thinking icon-button" ?disabled=${this.disabled || !changeable} title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => { this.selectThinking(); }}>
           ${renderThinkingGauge(thinkingGauge(capability.thinkingLevel, capability.availableThinkingLevels ?? []))}
         </button>
@@ -526,7 +527,7 @@ export class PromptEditor extends LitElement {
       const items = byProvider.get(provider) ?? [];
       items.push({
         value: modelChoiceValue(model),
-        label: model.id ?? "",
+        label: modelDisplayName(model),
         ...(model.contextWindow === undefined ? {} : { meta: model.contextWindow.toLocaleString("en-GB").replaceAll(",", " ") }),
         ...(model.reasoning === false ? { muted: true } : {}),
       });
@@ -747,6 +748,10 @@ export function promptComposerIsResting(input: PromptComposerRestingInput): bool
 
 function modelChoiceValue(model: ComposerSelectableModel): string {
   return `${model.provider ?? ""}/${model.id ?? ""}`;
+}
+
+function modelDisplayName(model: ComposerSelectableModel): string {
+  return model.name === undefined || model.name === "" ? (model.id ?? "no model") : model.name;
 }
 
 /** Pi owns the levels; these describe only the ones it documents. */

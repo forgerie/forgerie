@@ -907,7 +907,7 @@ export const promptEditorStyles = css`
   .guidance-count { position: absolute; top: -4px; inset-inline-end: -4px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 999px; background: var(--pi-accent); color: var(--pi-bg); font: 600 10px/15px system-ui, sans-serif; text-align: center; }
   .guidance-trigger[aria-expanded="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-text); }
   .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; overflow: hidden; }
-  .model-capsule .select-model { max-width: min(64cqi, 460px); border-start-end-radius: 0; border-end-end-radius: 0; }
+  .model-capsule .select-model { box-sizing: border-box; height: 36px; max-width: min(64cqi, 460px); border-start-end-radius: 0; border-end-end-radius: 0; }
   .model-capsule .select-thinking { width: auto; min-width: 34px; margin-inline-start: -1px; padding-inline: 6px; border-start-start-radius: 0; border-end-start-radius: 0; }
   /* The gauge carries the level; the word joins it only where the rail has room. */
   @container (min-width: 560px) {

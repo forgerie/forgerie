@@ -23,7 +23,8 @@ describe("PromptEditor rail reveals", () => {
     expect(css).not.toContain(".thinking-level");
     expect(css).toMatch(/\.compact-status\s*>\s*\.guidance-trigger\s*{[^}]*flex:\s*0 0 auto/);
     expect(css).toMatch(/@container \(min-width: 560px\)\s*{\s*\.session-identity/);
-    expect(css).toMatch(/\.select-model\s*{\s*max-width:\s*min\(64cqi, 460px\)/);
+    expect(css).toMatch(/\.select-model\s*{[^}]*box-sizing:\s*border-box;[^}]*height:\s*36px;/);
+    expect(css).toMatch(/\.select-model\s*{[^}]*max-width:\s*min\(64cqi, 460px\)/);
   });
 });
 
