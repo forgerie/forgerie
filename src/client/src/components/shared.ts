@@ -932,7 +932,6 @@ export const promptEditorStyles = css`
   .select-thinking .prompt-thinking-gauge .gauge-bar { fill: currentColor; stroke: none; opacity: .28; }
   .select-thinking .prompt-thinking-gauge .gauge-bar-active { opacity: 1; }
   /* At rest the draft stands down so the transcript keeps the space. */
-  .resting .model-capsule { display: none; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   @container (max-width: 640px) {

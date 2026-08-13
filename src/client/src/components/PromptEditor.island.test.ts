@@ -19,6 +19,12 @@ describe("composer island styles", () => {
     expect(islandCss).not.toContain("--pi-composer-rule");
   });
 
+  it("keeps the model named while the composer rests", () => {
+    // Resting stands the composer down to one line; it does not take away the
+    // one value in the row that cannot be guessed from anywhere else.
+    expect(islandCss).not.toMatch(/\.resting \.model-capsule\s*{\s*display:\s*none/);
+  });
+
   it("keeps the context meter off the island's curved corners", () => {
     // A square-ended bar drawn across a rounded top edge overhangs the curve,
     // so the meter is held to the straight run between the corners.
