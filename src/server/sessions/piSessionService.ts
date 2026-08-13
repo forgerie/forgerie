@@ -10,6 +10,7 @@ import {
   createEditToolDefinition,
   defineTool,
   readStoredCredential,
+  resolveModelScopeWithDiagnostics,
   SessionManager,
   SettingsManager,
   type AgentSessionRuntimeDiagnostic,
@@ -688,12 +689,14 @@ interface CreateAgentRuntimeOptions {
   agentDir: string;
   sessionManager: PiSessionManager;
   delegationToolsEnabled: boolean;
+  scopedModels: readonly ScopedAgentModel[];
   initialModel?: AgentModel;
   initialThinkingLevel?: ClientThinkingLevel;
 }
 
 type PiWebRuntimeFactoryOptions = Parameters<CreateAgentSessionRuntimeFactory>[0] & {
   delegationToolsEnabled?: boolean;
+  scopedModels?: readonly ScopedAgentModel[];
   initialModel?: AgentModel;
   initialThinkingLevel?: ClientThinkingLevel;
 };
@@ -706,7 +709,7 @@ type CreateAgentRuntime = (createRuntime: PiWebCreateAgentSessionRuntimeFactory,
 
 function defaultCreateAgentRuntime(createRuntime: PiWebCreateAgentSessionRuntimeFactory, options: CreateAgentRuntimeOptions): Promise<PiSessionRuntime> {
   if (!(options.sessionManager instanceof SessionManager)) throw new Error("Default runtime creation requires an SDK SessionManager");
-  const runtimeFactory = createRuntimeWithOneShotSessionOptions(createRuntime, options.initialModel, options.initialThinkingLevel, options.delegationToolsEnabled);
+  const runtimeFactory = createRuntimeWithOneShotSessionOptions(createRuntime, options.initialModel, options.initialThinkingLevel, options.delegationToolsEnabled, options.scopedModels);
   return createAgentSessionRuntime(runtimeFactory, {
     cwd: options.cwd,
     agentDir: options.agentDir,
@@ -719,6 +722,7 @@ function createRuntimeWithOneShotSessionOptions(
   initialModel: AgentModel | undefined,
   initialThinkingLevel: ClientThinkingLevel | undefined,
   delegationToolsEnabled: boolean,
+  scopedModels: readonly ScopedAgentModel[],
 ): CreateAgentSessionRuntimeFactory {
   // These inputs belong only to the session being opened. A later runtime
   // replacement resolves its own model and delegation capability, and restores
@@ -738,6 +742,7 @@ function createRuntimeWithOneShotSessionOptions(
       ...(model === undefined ? {} : { initialModel: model }),
       ...(thinkingLevel === undefined ? {} : { initialThinkingLevel: thinkingLevel }),
       ...(toolsEnabled === undefined ? {} : { delegationToolsEnabled: toolsEnabled }),
+      scopedModels,
     });
   };
 }
@@ -768,7 +773,7 @@ function createDefaultRuntimeFactory(
   subsessions?: SubsessionToolDeps,
   askUser?: AskUserToolDeps,
 ): PiWebCreateAgentSessionRuntimeFactory {
-  return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled }) => {
+  return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
     const sessionGuidanceSlot = createSessionGuidanceSlot();
@@ -796,6 +801,7 @@ function createDefaultRuntimeFactory(
       ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
       ...(initialModel === undefined ? {} : { model: initialModel }),
       ...(initialThinkingLevel === undefined ? {} : { thinkingLevel: initialThinkingLevel }),
+      ...(scopedModels === undefined || scopedModels.length === 0 ? {} : { scopedModels: [...scopedModels] }),
     });
     return { ...result, services, diagnostics: services.diagnostics };
   };
@@ -1518,15 +1524,12 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /**
-   * The models a session may pick from: its scoped set when model-scoped,
-   * otherwise the runtime's available snapshot. Refreshes the runtime catalog
-   * first so callers see newly configured providers and models.
+   * The models a session may pick from: scoped models first, then the remaining
+   * runtime catalogue. Refreshes first so callers see newly configured models.
    */
   private async sessionModelCandidates(session: PiAgentSession): Promise<readonly AgentModel[]> {
     await session.modelRuntime.refresh();
-    return session.scopedModels.length > 0
-      ? session.scopedModels.map((scoped) => scoped.model)
-      : session.modelRuntime.getAvailableSnapshot();
+    return modelsWithScopeFirst(session.modelRuntime.getAvailableSnapshot(), session.scopedModels);
   }
 
   /**
@@ -2215,15 +2218,19 @@ export class PiSessionService implements SessionRouteService {
     await this.modelRuntime.refresh();
     const candidates = this.modelRuntime.getAvailableSnapshot();
     const settings = SettingsManager.create(cwd, this.agentDir);
-    const model = resolveNewSessionDefaultModel(
-      candidates,
+    const scopedModels = await resolveEnabledModels(settings, this.modelRuntime);
+    const orderedModels = modelsWithScopeFirst(candidates, scopedModels);
+    const selected = resolveNewSessionDefaultModel(
+      orderedModels,
+      scopedModels,
       settings.getDefaultProvider(),
       settings.getDefaultModel(),
     );
-    const requestedThinkingLevel = settings.getDefaultThinkingLevel() ?? "medium";
+    const requestedThinkingLevel = selected?.thinkingLevel ?? settings.getDefaultThinkingLevel() ?? "medium";
+    const model = selected?.model;
     const thinkingLevel = model === undefined ? "off" : clampThinkingLevel(model, requestedThinkingLevel);
     return {
-      models: candidates.map(modelToClientModel),
+      models: orderedModels.map(modelToClientModel),
       ...(model === undefined ? {} : { model: modelToClientModel(model) }),
       thinkingLevel,
     };
@@ -3463,11 +3470,14 @@ export class PiSessionService implements SessionRouteService {
     startup.report(STARTUP_PHASE_RUNTIME);
     const delegationToolsEnabled = options.creationProvenance !== "tracked-subsession"
       && await sessionAllowsDelegationTools(sessionManager, this.sessionManager);
+    const settings = SettingsManager.create(cwd, this.agentDir);
+    const scopedModels = await resolveEnabledModels(settings, this.modelRuntime);
     const runtime = await this.createAgentRuntime(this.createRuntime, {
       cwd,
       agentDir: this.agentDir,
       sessionManager,
       delegationToolsEnabled,
+      scopedModels,
       ...(options.initialModel === undefined ? {} : { initialModel: options.initialModel }),
       ...(options.initialThinkingLevel === undefined ? {} : { initialThinkingLevel: options.initialThinkingLevel }),
     });
@@ -4398,16 +4408,40 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface ScopedAgentModel {
+  readonly model: AgentModel;
+  readonly thinkingLevel?: ClientThinkingLevel;
+}
+
+async function resolveEnabledModels(settings: SettingsManager, modelRuntime: ModelRuntime): Promise<readonly ScopedAgentModel[]> {
+  const patterns = settings.getEnabledModels();
+  if (patterns === undefined || patterns.length === 0) return [];
+  return (await resolveModelScopeWithDiagnostics(patterns, modelRuntime)).scopedModels;
+}
+
+function modelsWithScopeFirst(candidates: readonly AgentModel[], scopedModels: readonly ScopedAgentModel[]): AgentModel[] {
+  const ordered = scopedModels.map((scoped) => scoped.model);
+  const scopedIds = new Set(ordered.map(modelIdentity));
+  return [...ordered, ...candidates.filter((candidate) => !scopedIds.has(modelIdentity(candidate)))];
+}
+
 function resolveNewSessionDefaultModel(
   candidates: readonly AgentModel[],
+  scopedModels: readonly ScopedAgentModel[],
   defaultProvider: string | undefined,
   defaultModelId: string | undefined,
-): AgentModel | undefined {
+): ScopedAgentModel | undefined {
   if (defaultProvider !== undefined && defaultModelId !== undefined) {
     const configured = candidates.find((candidate) => candidate.provider === defaultProvider && candidate.id === defaultModelId);
-    if (configured !== undefined) return configured;
+    const configuredScope = configured === undefined ? undefined : scopedModels.find((scoped) => modelIdentity(scoped.model) === modelIdentity(configured));
+    if (configured !== undefined && (scopedModels.length === 0 || configuredScope !== undefined)) return configuredScope ?? { model: configured };
   }
-  return candidates[0];
+  const scoped = scopedModels[0];
+  return scoped ?? (candidates[0] === undefined ? undefined : { model: candidates[0] });
+}
+
+function modelIdentity(model: AgentModel): string {
+  return `${model.provider}\u0000${model.id}`;
 }
 
 function modelToClientModel(model: PiAgentSession["model"]): ClientSessionModel {

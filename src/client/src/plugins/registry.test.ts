@@ -38,6 +38,7 @@ function createContext(statePatch: Partial<AppState> = {}) {
     logoutAuth: vi.fn(() => { calls.push("logoutAuth"); }),
     openThemePicker: vi.fn(() => { calls.push("openThemePicker"); }),
     openModelPicker: vi.fn(() => { calls.push("openModelPicker"); }),
+    cycleModel: vi.fn(() => { calls.push("cycleModel"); }),
     openThinkingLevelPicker: vi.fn(() => { calls.push("openThinkingLevelPicker"); }),
     selectMainView: vi.fn((view: AppState["mainView"]) => { calls.push(`selectMainView:${view}`); }),
     selectWorkspaceTool: vi.fn((tool: AppState["workspaceTool"]) => { calls.push(`selectWorkspaceTool:${tool}`); }),
@@ -308,16 +309,19 @@ describe("PluginRegistry", () => {
     const { context, calls } = createContext({ selectedSession: testSession() });
     const actions = registry.getActions(context);
     const modelAction = actions.find((action) => action.id === "core:model.select");
+    const cycleModelAction = actions.find((action) => action.id === "core:model.cycle");
     const thinkingAction = actions.find((action) => action.id === "core:thinking.select");
     expect(modelAction).toMatchObject({ title: "Select Model", enabled: true });
     expect(modelAction?.shortcut).toBeUndefined();
+    expect(cycleModelAction).toMatchObject({ title: "Cycle Model", shortcut: "mod+p", enabled: true });
     expect(thinkingAction).toMatchObject({ title: "Select Thinking Level", enabled: true });
     expect(thinkingAction?.shortcut).toBeUndefined();
 
     if (modelAction !== undefined) void modelAction.run();
+    if (cycleModelAction !== undefined) void cycleModelAction.run();
     if (thinkingAction !== undefined) void thinkingAction.run();
 
-    expect(calls).toEqual(["openModelPicker", "openThinkingLevelPicker"]);
+    expect(calls).toEqual(["openModelPicker", "cycleModel", "openThinkingLevelPicker"]);
   });
 
   it("routes refresh current to the active core workspace panel", () => {
@@ -378,6 +382,7 @@ describe("PluginRegistry", () => {
       ["core:workspace.refresh-git", "mod+shift+g"],
       ["core:workspace.refresh-current", "mod+shift+r"],
       ["core:session.start", "mod+enter"],
+      ["core:model.cycle", "mod+p"],
       ["core:session.stop", "mod+."],
     ]);
     expect(new Set(shortcuts.map(([, shortcut]) => shortcut)).size).toBe(shortcuts.length);

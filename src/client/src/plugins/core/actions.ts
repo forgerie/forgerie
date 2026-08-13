@@ -176,6 +176,15 @@ export function createCoreActions(): PluginAction[] {
       run: (context) => context.openModelPicker(),
     },
     {
+      id: "model.cycle",
+      title: "Cycle Model",
+      description: "Use the next Pi scoped model for the selected session",
+      shortcut: "mod+p",
+      group: "Session",
+      enabled: hasSelectableSession,
+      run: (context) => context.cycleModel(),
+    },
+    {
       id: "thinking.select",
       title: "Select Thinking Level",
       description: "Choose the thinking level for the selected session",

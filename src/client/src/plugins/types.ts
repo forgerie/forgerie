@@ -110,6 +110,7 @@ export interface PluginRuntimeContext {
   logoutAuth: () => void | Promise<void>;
   openThemePicker: () => void;
   openModelPicker: () => void | Promise<void>;
+  cycleModel: () => void | Promise<void>;
   openThinkingLevelPicker: () => void | Promise<void>;
   selectMainView: (view: AppState["mainView"]) => void;
   selectWorkspaceTool: (tool: QualifiedContributionId) => void;
