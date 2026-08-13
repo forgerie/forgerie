@@ -1,0 +1,242 @@
+/* PROTOTYPE — throwaway styling. Container-driven, no width breakpoints. */
+
+:root {
+  --pi-bg: #070912;
+  --pi-surface: #101527;
+  --pi-border: #26304f;
+  --pi-text: #f7f4ff;
+  --pi-muted: #aaa4bd;
+  --pi-dim: #817a99;
+  --pi-accent: #b7a2ff;
+  --pi-success: #4fd8a4;
+  --pi-warning: #ffcc66;
+  --pi-danger: #ff4f7b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font: clamp(14px, 1.6cqi + 12px, 17px)/1.55 system-ui, sans-serif;
+  overscroll-behavior: none;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100dvh;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem clamp(0.75rem, 2cqi, 1.25rem);
+  border-bottom: 1px solid var(--pi-border);
+}
+.top h1 { font-size: 1rem; font-weight: 600; margin: 0; letter-spacing: 0.01em; }
+
+.lamp {
+  font-size: 0.78rem;
+  color: var(--pi-dim);
+  border: 1px solid var(--pi-border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+.lamp.on { color: var(--pi-bg); background: var(--pi-accent); border-color: transparent; font-weight: 600; }
+.lamp.listening { background: var(--pi-danger); color: #fff; }
+
+.voice-line { margin: 0 0 0.6rem; padding: 0.4rem 0.6rem; border-left: 2px solid var(--pi-danger); color: var(--pi-muted); font-size: 0.85rem; min-height: 1.6em; }
+.voice-line.partial { font-style: italic; }
+.warn { color: var(--pi-warning); font-size: 0.8rem; margin: 0 0 0.6rem; }
+
+.hint {
+  margin: 0;
+  padding: 0.45rem clamp(0.75rem, 2cqi, 1.25rem);
+  color: var(--pi-muted);
+  font-size: 0.85rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--pi-border) 60%, transparent);
+}
+
+#stage { min-height: 0; }
+
+/* The split becomes one column when the stage itself is narrow. */
+.split {
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30ch), 1fr));
+  height: 100%;
+  min-height: 0;
+}
+.split > .scroller { grid-column: span 1; }
+
+.scroller {
+  overflow: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.content {
+  position: relative;
+  padding: clamp(0.75rem, 2cqi, 1.5rem);
+  min-height: 100%;
+}
+
+.ink-canvas {
+  position: absolute;
+  inset: 0 auto auto 0;
+  pointer-events: none; /* the host owns input; the canvas only shows ink */
+  z-index: 5;
+}
+
+/* "always" mode: the host never pans by itself, so a pen stroke can never be
+   eaten by a scroll gesture. Finger scrolling is done by hand in ink.js. */
+.ink-live { touch-action: none; user-select: none; -webkit-user-select: none; }
+
+/* --- transcript ------------------------------------------------------- */
+
+.msg { margin: 0 0 1.4rem; }
+.role { margin: 0 0 0.3rem; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pi-dim); }
+.role-human .prose { color: var(--pi-text); font-weight: 500; }
+.prose { margin: 0 0 0.5rem; padding: 0.1rem 0.25rem; border-radius: 4px; }
+
+pre.code, pre.output {
+  margin: 0.4rem 0 0.6rem;
+  padding: 0.5rem 0.35rem;
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: 8px;
+  overflow-x: auto;
+  font: 0.82rem/1.6 ui-monospace, monospace;
+}
+pre.output { color: var(--pi-warning); }
+.line { display: block; padding: 0 0.35rem; border-radius: 3px; white-space: pre; }
+
+.hovered { outline: 1px dashed color-mix(in srgb, var(--pi-accent) 70%, transparent); outline-offset: 2px; }
+.marked-include { background: color-mix(in srgb, var(--pi-accent) 22%, transparent); }
+.marked-investigate { background: color-mix(in srgb, var(--pi-warning) 20%, transparent); }
+.marked-exclude { text-decoration: line-through; color: var(--pi-dim); }
+
+/* --- diff ------------------------------------------------------------- */
+
+.file-head { margin: 0 0 0.5rem; font: 0.85rem ui-monospace, monospace; color: var(--pi-muted); }
+.hunk { margin: 0.5rem 0 0.25rem; font: 0.78rem ui-monospace, monospace; color: var(--pi-dim); }
+.diff { border: 1px solid var(--pi-border); border-radius: 8px; overflow: hidden; }
+.row { display: grid; grid-template-columns: clamp(3rem, 14cqi, 6rem) 3ch 1fr; align-items: start; font: 0.8rem/1.7 ui-monospace, monospace; }
+.gutter { border-right: 1px dashed color-mix(in srgb, var(--pi-border) 80%, transparent); min-height: 1.7em; }
+.num { color: var(--pi-dim); text-align: right; padding-right: 0.5rem; }
+.code-cell { white-space: pre-wrap; padding-right: 0.4rem; }
+.row-add .code-cell { background: color-mix(in srgb, var(--pi-success) 12%, transparent); }
+.row-del .code-cell { background: color-mix(in srgb, var(--pi-danger) 12%, transparent); }
+.row-note .gutter { background: color-mix(in srgb, var(--pi-accent) 24%, transparent); }
+.row-reject .gutter { background: color-mix(in srgb, var(--pi-danger) 26%, transparent); }
+
+/* --- sketch ----------------------------------------------------------- */
+
+.sheet { position: relative; min-height: 70vh; border: 1px dashed color-mix(in srgb, var(--pi-border) 80%, transparent); border-radius: 10px; display: grid; place-items: center; }
+.sheet img { max-width: 100%; display: block; }
+.sheet-empty { color: var(--pi-dim); text-align: center; font-size: 0.9rem; }
+.sheet-empty p { margin: 0.2rem 0; }
+.sketch-tools { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.file-button { border: 1px solid var(--pi-border); background: var(--pi-surface); border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+.file-button input { display: none; }
+
+/* --- probe ------------------------------------------------------------ */
+
+.probe-pad { position: relative; height: clamp(160px, 30cqi, 260px); border: 1px dashed var(--pi-border); border-radius: 10px; display: grid; place-items: center; color: var(--pi-dim); touch-action: none; }
+.probe-pad > span { position: absolute; font-size: 0.8rem; }
+.probe-pad.used > span { display: none; }
+.probe-canvas { position: absolute; inset: 0; }
+.probe-table { width: 100%; margin-top: 0.8rem; border-collapse: collapse; font-size: 0.82rem; }
+.probe-table th, .probe-table td { text-align: left; padding: 0.25rem 0.4rem; border-bottom: 1px solid color-mix(in srgb, var(--pi-border) 60%, transparent); }
+.probe-table th { color: var(--pi-muted); font-weight: 500; }
+.probe-table td { font-family: ui-monospace, monospace; }
+.caps { list-style: none; margin: 0 0 1rem; padding: 0; font-size: 0.84rem; }
+.cap { padding: 0.15rem 0; color: var(--pi-dim); }
+.cap.yes { color: var(--pi-success); }
+.log { margin: 0; max-height: 30vh; overflow: auto; font: 0.75rem/1.5 ui-monospace, monospace; color: var(--pi-muted); }
+
+/* --- panel ------------------------------------------------------------ */
+
+.panel {
+  border-left: 1px solid var(--pi-border);
+  background: color-mix(in srgb, var(--pi-surface) 70%, transparent);
+  padding: clamp(0.75rem, 2cqi, 1.25rem);
+  overflow: auto;
+  min-height: 0;
+}
+.panel h2 { margin: 0 0 0.5rem; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pi-dim); }
+.muted { color: var(--pi-dim); font-size: 0.85rem; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.6rem; }
+.chip { border: 1px solid var(--pi-border); background: var(--pi-surface); color: var(--pi-text); border-radius: 999px; padding: 0.2rem 0.6rem; font: inherit; font-size: 0.78rem; }
+.chip.intent-include { border-color: var(--pi-accent); }
+.chip.intent-investigate { border-color: var(--pi-warning); }
+.chip.intent-exclude { border-color: var(--pi-danger); text-decoration: line-through; }
+.chip.intent-relate { border-color: var(--pi-success); }
+
+.draft-prompt { margin: 0 0 0.6rem; padding: 0.6rem; background: var(--pi-bg); border: 1px solid var(--pi-border); border-radius: 8px; font: 0.8rem/1.6 ui-monospace, monospace; white-space: pre-wrap; }
+.draft-image { width: 100%; border: 1px solid var(--pi-border); border-radius: 8px; margin-bottom: 0.6rem; background: var(--pi-bg); }
+.draft-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.note-field { flex: 1 1 100%; } /* the handwriting target gets its own row, however narrow the panel is */
+
+.note { display: grid; grid-template-columns: 1fr auto; gap: 0.3rem; align-items: center; margin-bottom: 0.5rem; padding: 0.4rem; border: 1px solid var(--pi-border); border-radius: 8px; }
+.note-line { grid-column: 1 / -1; font: 0.75rem ui-monospace, monospace; color: var(--pi-muted); }
+.note-reject { border-color: color-mix(in srgb, var(--pi-danger) 60%, var(--pi-border)); }
+
+input {
+  font: inherit;
+  font-size: max(16px, 0.9rem); /* 16px keeps mobile browsers from zooming on focus */
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  border: 1px solid var(--pi-border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  min-width: 0;
+  flex: 1 1 12ch;
+}
+input:focus-visible, button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--pi-text);
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  min-height: 2.4rem;
+}
+button.primary { background: var(--pi-accent); color: #16102b; border-color: transparent; font-weight: 600; }
+
+/* --- bottom bar ------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.5rem clamp(0.75rem, 2cqi, 1.25rem) calc(0.5rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--pi-border);
+  background: color-mix(in srgb, var(--pi-surface) 85%, transparent);
+}
+.bar button[aria-pressed="true"] { border-color: var(--pi-accent); color: var(--pi-accent); }
+.bar .toggle { margin-left: auto; }
+.bar .mode { margin-left: 0; }
+.voice-toggle[aria-pressed="true"] { border-color: var(--pi-danger); color: var(--pi-danger); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-accent);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  z-index: 20;
+}
