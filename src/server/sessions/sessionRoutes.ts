@@ -52,9 +52,10 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
 
   // Models a composer may choose from before any session exists. The runtime is
   // a service dependency, so this needs no session to answer.
-  app.get(`${prefix}/models`, async (_request, reply) => {
+  app.get<{ Querystring: SessionQuery }>(`${prefix}/models`, async (request, reply) => {
+    if (request.query.cwd === undefined || request.query.cwd === "") return reply.code(400).send({ error: "cwd query parameter is required" });
     try {
-      return { models: await sessions.availableModelsForNewSession() };
+      return await sessions.availableModelsForNewSession(normalizeRequestCwd(request.query.cwd));
     } catch (error) {
       return reply.code(500).send({ error: errorMessage(error) });
     }

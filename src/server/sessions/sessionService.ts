@@ -27,6 +27,7 @@ import type {
   ClientSessionCleanupExecuteResponse,
   ClientSessionCleanupPreviewResponse,
   ClientSessionModel,
+  ClientNewSessionModelSelection,
   ClientSessionRef,
   ClientSessionStatus,
   ClientSessionTreeForkRequest,
@@ -79,8 +80,8 @@ export interface SessionRouteService {
   cancelDialog(ref: SessionRouteRef, dialogId: string): Promise<ExtensionDialogCloseResponse>;
   dismissWarning(ref: SessionRouteRef, dismissId: string): Promise<ClientSessionStatus>;
   availableModels(ref: SessionRouteRef): Promise<ClientSessionModel[]>;
-  /** Models a composer may choose from before any session exists. */
-  availableModelsForNewSession(): Promise<ClientSessionModel[]>;
+  /** Models and effective Pi defaults for a destination before a session exists. */
+  availableModelsForNewSession(cwd: string): Promise<ClientNewSessionModelSelection>;
   setModel(ref: SessionRouteRef, provider: string, modelId: string): Promise<ClientSessionStatus>;
   setGuidance(ref: SessionRouteRef, entryId: string, enabled: unknown): Promise<ClientSessionStatus>;
   cycleModel(ref: SessionRouteRef, direction: "forward" | "backward"): Promise<ClientSessionStatus>;

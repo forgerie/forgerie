@@ -2,10 +2,10 @@ import { LitElement, html, nothing, type PropertyValues, type TemplateResult } f
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { PromptResourceCatalogResponse } from "../../../shared/promptResourceCommand";
 import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
-import { sessionsApi, workspacesApi, type Machine, type Project, type Workspace } from "../api";
+import { workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import { createPreSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import type { ComposerCapabilities } from "../composerCapabilities";
-import type { NewSessionAgentChoices, SessionModel as ClientSessionModel } from "../../../shared/apiTypes";
+import type { NewSessionAgentChoices, NewSessionModelSelectionResponse, SessionModel as ClientSessionModel } from "../../../shared/apiTypes";
 import { KNOWN_THINKING_LEVELS } from "../../../shared/thinkingLevels";
 import { setSessionGuidance } from "../../../shared/sessionGuidance";
 import {
@@ -59,6 +59,8 @@ export class NewSessionComposer extends LitElement {
   @property({ attribute: false }) onClaimRecoveryDraft?: (recoverySeedId: string) => ComposerDraftSeed | undefined;
   @property({ attribute: false }) onReturnRecoveryDraft?: (recoverySeedId: string, snapshot: ComposerDraftSubmitSnapshot) => void;
   @property({ attribute: false }) promptResourceCatalog: (projectId: string, workspaceId: string, machineId: string) => Promise<PromptResourceCatalogResponse> = (projectId, workspaceId, machineId) => workspacesApi.promptResourceCatalog(projectId, workspaceId, machineId);
+  /** The host supplies destination-scoped Pi defaults. Previews may omit it. */
+  @property({ attribute: false }) loadAgentDefaults?: (cwd: string, machineId: string) => Promise<NewSessionModelSelectionResponse>;
 
   @state() private composerState: NewSessionComposerState = createNewSessionComposerState();
   @state() private draftDisplay: ComposerDraftDisplayState = { inputMode: { kind: "normal" }, empty: true, focused: false, attachmentCount: 0, attachmentCapturePending: false };
@@ -67,14 +69,13 @@ export class NewSessionComposer extends LitElement {
   @query("modal-surface") private modalSurface?: ModalSurface;
   @query("prompt-editor") private editor?: PromptEditor;
   private draftWaitScheduled = false;
-  /** Opened by the host, which owns the pickers the chat already uses. */
-  @property({ attribute: false }) onPickModel?: (current: ClientSessionModel | undefined, machineId: string) => Promise<ClientSessionModel | undefined>;
-  @property({ attribute: false }) onPickThinkingLevel?: (current: string | undefined) => Promise<string | undefined>;
-  /** Model, thinking, and guidance picked before the session exists. */
-  @state() private chosenModel?: ClientSessionModel;
-  @state() private chosenThinkingLevel?: string;
+  /** Effective Pi defaults, then any author overrides, before the session exists. */
+  @state() private chosenModel: ClientSessionModel | undefined;
+  @state() private chosenThinkingLevel: string | undefined;
   @state() private chosenGuidanceIds: readonly string[] = [];
-  @state() private availableModels: readonly ClientSessionModel[] = [];
+  private modelChosenByAuthor = false;
+  private thinkingChosenByAuthor = false;
+  private defaultsRequestGeneration = 0;
 
   /** The modal drives the same shared draft the chat composer drives. */
   private get draft(): ComposerDraft | undefined {
@@ -99,6 +100,7 @@ export class NewSessionComposer extends LitElement {
       this.initialized = true;
       this.composerState = createNewSessionComposerState(this.initialDestination);
       this.replaceRuntimeForDestination(this.composerState.destination);
+      this.refreshDestinationDefaults(this.composerState.destination);
     }
   }
 
@@ -119,6 +121,7 @@ export class NewSessionComposer extends LitElement {
     this.requestGeneration += 1;
     this.runtimeGeneration += 1;
     this.submissionGeneration += 1;
+    this.defaultsRequestGeneration += 1;
     this.validationPending = false;
     const generation = ++this.connectionGeneration;
     queueMicrotask(() => { void this.returnDisconnectedRecoveryDraftWhenSettled(generation); });
@@ -341,8 +344,14 @@ export class NewSessionComposer extends LitElement {
         availableThinkingLevels: KNOWN_THINKING_LEVELS,
         changeable: state.kind !== "submitting",
         listModels: () => this.listDestinationModels(),
-        onChooseModel: (model) => { this.chosenModel = model; },
-        onChooseThinkingLevel: (level) => { this.chosenThinkingLevel = level; },
+        onChooseModel: (model) => {
+          this.modelChosenByAuthor = true;
+          this.chosenModel = model;
+        },
+        onChooseThinkingLevel: (level) => {
+          this.thinkingChosenByAuthor = true;
+          this.chosenThinkingLevel = level;
+        },
       },
       guidance: {
         activeIds: this.chosenGuidanceIds,
@@ -369,33 +378,28 @@ export class NewSessionComposer extends LitElement {
       && !this.draftDisplay.attachmentCapturePending;
   }
 
-  /** The catalogue belongs to the destination machine, not the selected one. */
+  /** The catalogue and defaults belong to the destination cwd and machine. */
   private async listDestinationModels(): Promise<readonly ClientSessionModel[]> {
-    const machineId = this.destinationMachineId();
-    // Models belong to a machine, so there is nothing to read until one is
-    // chosen. Saying so beats an empty list that reads as "none exist".
-    if (machineId === undefined) throw new Error("Choose a destination to see its models.");
-    return (await sessionsApi.newSessionModels(machineId)).models;
+    const destination = this.currentDestination();
+    if (destination === undefined) throw new Error("Choose a destination to see its models.");
+    const load = this.loadAgentDefaults;
+    if (load === undefined) throw new Error("Models are unavailable.");
+    return (await load(destination.workspace.path, destination.machine.id)).models;
   }
 
-  private async chooseModel(): Promise<void> {
-    // The catalog belongs to the destination machine, not to whichever machine
-    // the surrounding app happens to have selected.
-    const machineId = this.destinationMachineId();
-    if (machineId === undefined) return;
-    const picked = await this.onPickModel?.(this.chosenModel, machineId);
-    if (picked !== undefined) this.chosenModel = picked;
-  }
-
-  private destinationMachineId(): string | undefined {
-    const state = this.composerState;
-    if (state.kind === "choosing") return undefined;
-    return state.destination.kind === "complete" ? state.destination.machine.id : undefined;
-  }
-
-  private chooseThinkingLevel(): void {
-    void this.onPickThinkingLevel?.(this.chosenThinkingLevel).then((picked) => {
-      if (picked !== undefined) this.chosenThinkingLevel = picked;
+  private refreshDestinationDefaults(destination: NewSessionComposerState["destination"]): void {
+    const requestGeneration = ++this.defaultsRequestGeneration;
+    const load = this.loadAgentDefaults;
+    if (destination.kind !== "complete" || load === undefined) return;
+    if (!this.modelChosenByAuthor) this.chosenModel = undefined;
+    if (!this.thinkingChosenByAuthor) this.chosenThinkingLevel = undefined;
+    void load(destination.workspace.path, destination.machine.id).then((selection) => {
+      if (!this.isConnected || requestGeneration !== this.defaultsRequestGeneration) return;
+      if (!this.modelChosenByAuthor) this.chosenModel = selection.model;
+      if (!this.thinkingChosenByAuthor) this.chosenThinkingLevel = selection.thinkingLevel;
+    }).catch(() => {
+      // The picker still reports catalogue failures when opened. A defaults
+      // read failure must not block writing or submitting the first prompt.
     });
   }
 
@@ -554,6 +558,7 @@ export class NewSessionComposer extends LitElement {
     this.composerState = next;
     this.clearValidationError();
     this.replaceRuntimeForDestination(next.destination);
+    this.refreshDestinationDefaults(next.destination);
   }
 
   private backToMachines(): void {

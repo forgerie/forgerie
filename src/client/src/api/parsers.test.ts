@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH } from "../../../shared/apiTypes";
-import { parseAborted, parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parsePromptResourceCatalogResponse, parsePromptResourceCommandRunResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
+import { parseAborted, parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseNewSessionModelSelectionResponse, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parsePromptResourceCatalogResponse, parsePromptResourceCommandRunResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
 import { parseMachineSessionListingSnapshot, parseSessionAskCatalogSnapshot } from "./parsers";
 
 describe("API parsers", () => {
+  it("parses destination-aware new-session model defaults", () => {
+    expect(parseNewSessionModelSelectionResponse({
+      models: [{ provider: "anthropic", id: "claude-opus-5", reasoning: true }],
+      model: { provider: "anthropic", id: "claude-opus-5", reasoning: true },
+      thinkingLevel: "high",
+    })).toEqual({
+      models: [{ provider: "anthropic", id: "claude-opus-5", reasoning: true }],
+      model: { provider: "anthropic", id: "claude-opus-5", reasoning: true },
+      thinkingLevel: "high",
+    });
+    expect(() => parseNewSessionModelSelectionResponse({ models: [], thinkingLevel: 3 })).toThrow("Invalid thinking level");
+  });
+
   it("validates managed process route results", () => {
     expect(parseManagedProcessesSnapshot({ available: true, writeSupported: true, processes: [] })).toEqual({ available: true, writeSupported: true, processes: [] });
     expect(parseManagedProcessOutputResult({ ok: true, lines: [{ type: "stdout", text: "ready\n" }] })).toEqual({ ok: true, lines: [{ type: "stdout", text: "ready\n" }] });

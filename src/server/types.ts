@@ -15,6 +15,7 @@ export type {
   SessionStreamSnapshot,
   SessionStatus as ClientSessionStatus,
   SessionModel as ClientSessionModel,
+  NewSessionModelSelectionResponse as ClientNewSessionModelSelection,
   ThinkingLevel as ClientThinkingLevel,
   SlashCommand as ClientCommand,
   FileSuggestion as ClientFileSuggestion,

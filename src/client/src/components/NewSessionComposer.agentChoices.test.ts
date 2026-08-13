@@ -39,20 +39,57 @@ describe("new-session composer agent choices", () => {
     });
   });
 
-  it("states no choice at all when the author picked none", async () => {
+  it("shows and carries Pi's effective defaults before the author picks anything", async () => {
+    const defaultModel = { provider: "anthropic", id: "claude-opus-5", reasoning: true };
+    const defaults = vi.fn(() => Promise.resolve({
+      models: [defaultModel],
+      model: defaultModel,
+      thinkingLevel: "high",
+    }));
     const submitted: NewSessionLaunchIntent[] = [];
-    const composer = await mount((intent) => { submitted.push(intent); return Promise.resolve({ kind: "accepted" as const }); });
+    const composer = await mount(
+      (intent) => { submitted.push(intent); return Promise.resolve({ kind: "accepted" as const }); },
+      defaults,
+    );
+
+    expect(defaults).toHaveBeenCalledWith("/repos/forge/main", "local");
+    expect(editor(composer).capabilities.model).toMatchObject({ model: defaultModel, thinkingLevel: "high" });
 
     setText(composer, "start the review");
     sendButton(composer).click();
     await settleRenderedDialog(composer);
 
-    expect(submitted[0]?.agentChoices).toBeUndefined();
+    expect(submitted[0]?.agentChoices).toEqual({
+      modelSpec: "anthropic/claude-opus-5",
+      thinkingLevel: "high",
+    });
+  });
+
+  it("does not replace an author choice when an earlier defaults request finishes", async () => {
+    let resolveDefaults!: (value: Awaited<ReturnType<NonNullable<NewSessionComposer["loadAgentDefaults"]>>>) => void;
+    const defaults = () => new Promise<Awaited<ReturnType<NonNullable<NewSessionComposer["loadAgentDefaults"]>>>>((resolve) => { resolveDefaults = resolve; });
+    const composer = await mount(() => Promise.resolve({ kind: "accepted" as const }), defaults);
+
+    const authorModel = { provider: "openai-codex", id: "gpt-5.6-sol", reasoning: true };
+    await pickModel(composer, authorModel);
+    await pickThinking(composer, "max");
+    resolveDefaults({
+      models: [authorModel, { provider: "anthropic", id: "claude-opus-5", reasoning: true }],
+      model: { provider: "anthropic", id: "claude-opus-5", reasoning: true },
+      thinkingLevel: "high",
+    });
+    await settleRenderedDialog(composer);
+
+    expect(editor(composer).capabilities.model).toMatchObject({ model: authorModel, thinkingLevel: "max" });
   });
 });
 
-async function mount(onSubmit: (intent: NewSessionLaunchIntent) => Promise<NewSessionSubmissionOutcome>): Promise<NewSessionComposer> {
+async function mount(
+  onSubmit: (intent: NewSessionLaunchIntent) => Promise<NewSessionSubmissionOutcome>,
+  loadAgentDefaults?: NonNullable<NewSessionComposer["loadAgentDefaults"]>,
+): Promise<NewSessionComposer> {
   const composer = new NewSessionComposer();
+  if (loadAgentDefaults !== undefined) composer.loadAgentDefaults = loadAgentDefaults;
   composer.initialDestination = completeNewSessionDestination(
     { id: "local", name: "Machine local", kind: "local", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", status: "online" },
     { id: "forge", name: "Project forge", path: "/repos/forge", createdAt: "2026-01-01T00:00:00.000Z" },

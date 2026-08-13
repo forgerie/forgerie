@@ -139,6 +139,7 @@ describe("federated route contract", () => {
       ignoreParseFailure(sessionsApi.unreadCatalog(machineId)),
       ignoreParseFailure(sessionsApi.acknowledgeUnread(session, "catalog-a", 7, machineId)),
       ignoreParseFailure(sessionsApi.startSession("/repo", machineId)),
+      ignoreParseFailure(sessionsApi.newSessionModels("/repo", machineId)),
       ignoreParseFailure(sessionsApi.cleanupPreview({ archiveIdleDays: 14 }, machineId)),
       ignoreParseFailure(sessionsApi.cleanup({ archiveIdleDays: 14, deleteArchivedDays: 30, projectCwds: ["/repo"] }, machineId)),
       ignoreParseFailure(sessionsApi.archiveMany([session], machineId)),

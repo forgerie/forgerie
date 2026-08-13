@@ -1,7 +1,7 @@
 import { statSync, type Stats } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, type ImageContent } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import {
   createAgentSessionFromServices,
@@ -11,6 +11,7 @@ import {
   defineTool,
   readStoredCredential,
   SessionManager,
+  SettingsManager,
   type AgentSessionRuntimeDiagnostic,
   type AgentSessionServices,
   type CreateAgentSessionRuntimeFactory,
@@ -20,7 +21,7 @@ import {
   type ModelRuntime,
   type ResourceDiagnostic,
 } from "@earendil-works/pi-coding-agent";
-import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
+import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
 import { projectBrowserMessage } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
@@ -2210,9 +2211,22 @@ export class PiSessionService implements SessionRouteService {
    * composer with no session yet can still offer a choice. A session narrows
    * this only when its workspace scopes the agent profile.
    */
-  async availableModelsForNewSession(): Promise<ClientSessionModel[]> {
+  async availableModelsForNewSession(cwd: string): Promise<ClientNewSessionModelSelection> {
     await this.modelRuntime.refresh();
-    return this.modelRuntime.getAvailableSnapshot().map(modelToClientModel);
+    const candidates = this.modelRuntime.getAvailableSnapshot();
+    const settings = SettingsManager.create(cwd, this.agentDir);
+    const model = resolveNewSessionDefaultModel(
+      candidates,
+      settings.getDefaultProvider(),
+      settings.getDefaultModel(),
+    );
+    const requestedThinkingLevel = settings.getDefaultThinkingLevel() ?? "medium";
+    const thinkingLevel = model === undefined ? "off" : clampThinkingLevel(model, requestedThinkingLevel);
+    return {
+      models: candidates.map(modelToClientModel),
+      ...(model === undefined ? {} : { model: modelToClientModel(model) }),
+      thinkingLevel,
+    };
   }
 
   async availableModels(ref: PiSessionRef): Promise<ClientSessionModel[]> {
@@ -4382,6 +4396,18 @@ function arraysEqual(left: readonly string[], right: readonly string[]): boolean
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function resolveNewSessionDefaultModel(
+  candidates: readonly AgentModel[],
+  defaultProvider: string | undefined,
+  defaultModelId: string | undefined,
+): AgentModel | undefined {
+  if (defaultProvider !== undefined && defaultModelId !== undefined) {
+    const configured = candidates.find((candidate) => candidate.provider === defaultProvider && candidate.id === defaultModelId);
+    if (configured !== undefined) return configured;
+  }
+  return candidates[0];
 }
 
 function modelToClientModel(model: PiAgentSession["model"]): ClientSessionModel {

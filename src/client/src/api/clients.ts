@@ -31,6 +31,7 @@ import {
   parseManagedProcessWriteResult,
   parseMessagePage,
   parseModelSelectionResponse,
+  parseNewSessionModelSelectionResponse,
   parseMoveWorkspaceFileResponse,
   parseOAuthFlowState,
   parsePiPackageMutationResponse,
@@ -226,7 +227,7 @@ export const sessionsApi = {
     }),
   }),
   /** Models a composer may choose from before any session exists. */
-  newSessionModels: (machineId = "local") => request(`${machinePrefix(machineId)}/models`, parseModelSelectionResponse),
+  newSessionModels: (cwd: string, machineId = "local") => request(`${machinePrefix(machineId)}/models?cwd=${encodeURIComponent(cwd)}`, parseNewSessionModelSelectionResponse),
   cleanupPreview: (input: SessionCleanupRequest, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/cleanup/preview`, parseSessionCleanupPreviewResponse, { method: "POST", body: JSON.stringify(input) }),
   cleanup: (input: SessionCleanupRequest, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/cleanup`, parseSessionCleanupExecuteResponse, { method: "POST", body: JSON.stringify(input) }),
   archiveMany: (sessions: readonly SessionRef[], machineId = "local") => request(`${machinePrefix(machineId)}/sessions/bulk/archive`, parseSessionBulkArchiveResponse, { method: "POST", body: sessionBulkMutationBody(sessions) }),

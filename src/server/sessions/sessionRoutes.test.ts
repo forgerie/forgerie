@@ -1128,6 +1128,32 @@ describe("session routes", () => {
     }
   });
 
+  it("returns destination-aware Pi defaults with the pre-session model catalog", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const requestCwd = resolve("/repo");
+      const response = await routeApp.inject({ method: "GET", url: `/models?cwd=${encodeURIComponent(requestCwd)}` });
+      const missingCwd = await routeApp.inject({ method: "GET", url: "/models" });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        models: [{ provider: "anthropic", id: "claude-opus-5", reasoning: true }],
+        model: { provider: "anthropic", id: "claude-opus-5", reasoning: true },
+        thinkingLevel: "high",
+      });
+      expect(routeService.newSessionModelCwds).toEqual([requestCwd]);
+      expect(missingCwd.statusCode).toBe(400);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("forwards a create's optional correlation token alongside the normalized cwd", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1253,6 +1279,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly answerDialogCalls: { lookup: SessionRouteRef; dialogId: string; value: ExtensionDialogAnswer }[] = [];
   readonly cancelDialogCalls: { lookup: SessionRouteRef; dialogId: string }[] = [];
   readonly startCalls: { cwd: string; startupToken: string | undefined; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel; initialGuidanceIds?: readonly string[] }[] = [];
+  readonly newSessionModelCwds: string[] = [];
   readonly promptResourceCommandCalls: { lookup: SessionRouteRef; text: string; identity: unknown; streamingBehavior?: unknown; attachments?: unknown }[] = [];
   askError: Error | undefined;
   dialogError: Error | undefined;
@@ -1429,7 +1456,11 @@ class CapturingRouteSessionService implements SessionRouteService {
   }
 
   availableModels(): Promise<[]> { return Promise.resolve([]); }
-  availableModelsForNewSession(): Promise<[]> { return Promise.resolve([]); }
+  availableModelsForNewSession(cwd: string) {
+    this.newSessionModelCwds.push(cwd);
+    const model = { provider: "anthropic", id: "claude-opus-5", reasoning: true };
+    return Promise.resolve({ models: [model], model, thinkingLevel: "high" as const });
+  }
   setModel(): never { throw unusedRouteMethod("setModel"); }
   cycleModel(): never { throw unusedRouteMethod("cycleModel"); }
   availableThinkingLevels(): Promise<[]> { return Promise.resolve([]); }

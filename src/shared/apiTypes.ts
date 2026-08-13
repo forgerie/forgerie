@@ -882,6 +882,12 @@ export interface ModelSelectionResponse {
   models: SessionModel[];
 }
 
+/** Pi's effective choices for a session that will start in one destination. */
+export interface NewSessionModelSelectionResponse extends ModelSelectionResponse {
+  model?: SessionModel;
+  thinkingLevel: string;
+}
+
 export interface ThinkingLevelsResponse {
   levels: string[];
 }
