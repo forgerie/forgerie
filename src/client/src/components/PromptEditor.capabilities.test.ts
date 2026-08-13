@@ -78,6 +78,40 @@ describe("PromptEditor capabilities", () => {
     });
   });
 
+  it("preserves scoped-first model order across provider groups", async () => {
+    const editor = await mount({
+      model: {
+        model: { provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+        listModels: () => Promise.resolve([
+          { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5" },
+          { provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+          { provider: "anthropic", id: "claude-opus-5", name: "Claude Opus 5" },
+          { provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
+        ]),
+        onChooseModel: vi.fn(),
+        onChooseThinkingLevel: vi.fn(),
+      },
+    });
+
+    button(editor, ".select-model").click();
+    await editor.updateComplete;
+    await editor.updateComplete;
+
+    const list = editor.shadowRoot?.querySelector("composer-choice-list");
+    const headings = [...list?.shadowRoot?.querySelectorAll(".choice-group") ?? []]
+      .map((heading) => heading.textContent);
+    expect(headings).toEqual(["anthropic", "openai-codex", "anthropic"]);
+
+    const values = [...list?.shadowRoot?.querySelectorAll<HTMLButtonElement>("[data-value]") ?? []]
+      .map((option) => option.dataset["value"]);
+    expect(values).toEqual([
+      "anthropic/claude-fable-5",
+      "openai-codex/gpt-5.6-sol",
+      "anthropic/claude-opus-5",
+      "anthropic/claude-haiku-4-5",
+    ]);
+  });
+
   it("offers guidance, stop, archive, and new session only when declared", async () => {
     const onStop = vi.fn();
     const onArchiveAndNext = vi.fn();

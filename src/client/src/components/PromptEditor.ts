@@ -519,21 +519,27 @@ export class PromptEditor extends LitElement {
     if (restoreFocus) anchor?.focus();
   }
 
-  /** The catalogue is grouped by provider, because more than one is configured. */
+  /** Group adjacent providers without changing the server's scoped-first order. */
   private modelChoiceGroups(): ComposerChoiceGroup[] {
-    const byProvider = new Map<string, ComposerChoiceItem[]>();
+    const groups: ComposerChoiceGroup[] = [];
     for (const model of this.choiceModels) {
-      const provider = model.provider ?? "";
-      const items = byProvider.get(provider) ?? [];
-      items.push({
+      const label = model.provider ?? "";
+      const item: ComposerChoiceItem = {
         value: modelChoiceValue(model),
         label: modelDisplayName(model),
         ...(model.contextWindow === undefined ? {} : { meta: model.contextWindow.toLocaleString("en-GB").replaceAll(",", " ") }),
         ...(model.reasoning === false ? { muted: true } : {}),
-      });
-      byProvider.set(provider, items);
+      };
+      const previous = groups.at(-1);
+      if (previous !== undefined && (previous.label ?? "") === label) {
+        groups[groups.length - 1] = label === ""
+          ? { items: [...previous.items, item] }
+          : { label, items: [...previous.items, item] };
+      } else {
+        groups.push(label === "" ? { items: [item] } : { label, items: [item] });
+      }
     }
-    return [...byProvider].map(([label, items]) => (label === "" ? { items } : { label, items }));
+    return groups;
   }
 
   /**
