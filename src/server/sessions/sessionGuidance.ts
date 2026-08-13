@@ -4,7 +4,16 @@ export const SESSION_GUIDANCE_CUSTOM_TYPE = "forgerie.session-guidance";
 const SESSION_GUIDANCE_VERSION = 1;
 
 const instructions = {
-  "technical-english": "Use ASD-STE100 Simplified Technical English. Use short sentences. Put one idea in each sentence. Use plain words and one term for each concept.",
+  "technical-english": [
+    "Use ASD-STE100 Simplified Technical English in all responses.",
+    "This rule also applies to required templates and technical reports.",
+    "Use sentences of 20 words or fewer when practical.",
+    "Put one idea in each sentence.",
+    "Use plain words.",
+    "Use one term for each concept.",
+    "Explain necessary technical terms when you first use them.",
+    "Before sending, split sentences that contain more than one action, cause, result, or qualification.",
+  ].join(" "),
 } satisfies Readonly<Record<SessionGuidanceId, string>>;
 
 export interface PersistedSessionGuidance {

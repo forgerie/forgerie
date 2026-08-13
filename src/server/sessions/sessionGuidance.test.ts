@@ -40,11 +40,14 @@ describe("session guidance prompt block", () => {
     expect(sessionGuidancePromptBlock([])).toBeUndefined();
   });
 
-  it("uses only compact server instruction text for active entries", () => {
+  it("uses strict server instruction text for active entries", () => {
     const block = sessionGuidancePromptBlock(["technical-english"]);
 
-    expect(block).toContain("ASD-STE100 Simplified Technical English");
-    expect(block).toContain("Use short sentences.");
+    expect(block).toContain("Use ASD-STE100 Simplified Technical English in all responses.");
+    expect(block).toContain("This rule also applies to required templates and technical reports.");
+    expect(block).toContain("Use sentences of 20 words or fewer when practical.");
+    expect(block).toContain("Explain necessary technical terms when you first use them.");
+    expect(block).toContain("Before sending, split sentences that contain more than one action, cause, result, or qualification.");
     expect(block).not.toContain("Use short, direct sentences and consistent terms.");
     expect(block).not.toContain("technical-english");
   });
