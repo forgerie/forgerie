@@ -50,12 +50,12 @@ export class ContextUsageMeter extends LitElement {
   }
 
   /*
-   * One rule, not two: the meter is the composer's top rule while it is present
-   * (the shell blanks the composer's own border via --pi-composer-rule), so the
-   * used fraction tints a line the layout already had.
+   * One rule, not two: the meter tints the line the island's top edge already
+   * draws, so the used fraction is read on a line the eye crosses anyway. Its
+   * ends are rounded because it sits between two curved corners.
    */
   static override styles = css`
-    :host { display: block; height: 2px; }
+    :host { display: block; height: 2px; overflow: hidden; border-radius: 999px; }
     .meter { height: 2px; background: var(--pi-border); }
     .fill {
       width: var(--context-usage);

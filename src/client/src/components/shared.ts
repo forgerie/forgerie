@@ -869,6 +869,7 @@ export const promptEditorStyles = css`
    */
   footer {
     --composer-island-edge: 1px;
+    --composer-island-radius: 16px;
     --composer-island-pad: 10px;
     --composer-text-inset: calc(var(--composer-island-edge) + var(--composer-island-pad) + var(--composer-draft-edge) + var(--composer-draft-pad));
     position: relative;
@@ -879,13 +880,15 @@ export const promptEditorStyles = css`
     padding: var(--composer-island-pad);
     overflow: visible;
     border: var(--composer-island-edge) solid var(--pi-border);
-    border-radius: 16px;
+    border-radius: var(--composer-island-radius);
     background: var(--pi-bg);
     box-shadow: 0 6px 18px var(--pi-shadow);
   }
   /* Context use is the island's own top edge — one reading on a line the eye
-     already crosses, instead of a band of its own. */
-  context-usage-meter { position: absolute; top: 0; right: 0; left: 0; }
+     already crosses, instead of a band of its own. It is held to the straight
+     run between the corners: a square-ended bar cannot follow the curve, and
+     clipping the island to make it fit would trap the choice popovers. */
+  context-usage-meter { position: absolute; top: 0; inset-inline: var(--composer-island-radius); }
   footer.shell-mode { border-color: var(--pi-success); background: var(--pi-success-bg); }
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }

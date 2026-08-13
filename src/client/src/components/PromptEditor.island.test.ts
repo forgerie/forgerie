@@ -14,8 +14,17 @@ describe("composer island styles", () => {
   });
 
   it("draws one inset surface rather than a full-width band", () => {
-    expect(islandCss).toMatch(/border-radius:\s*16px/);
+    expect(islandCss).toContain("--composer-island-radius: 16px");
+    expect(islandCss).toMatch(/border-radius:\s*var\(--composer-island-radius\)/);
     expect(islandCss).not.toContain("--pi-composer-rule");
+  });
+
+  it("keeps the context meter off the island's curved corners", () => {
+    // A square-ended bar drawn across a rounded top edge overhangs the curve,
+    // so the meter is held to the straight run between the corners.
+    expect(islandCss).toMatch(/context-usage-meter \{[^}]*inset-inline: var\(--composer-island-radius\)/);
+    // Clipping the island instead would trap the anchored choice popovers.
+    expect(islandCss).toMatch(/footer \{[^}]*overflow: visible/);
   });
 
   it("writes into the same column the transcript is read in", () => {
