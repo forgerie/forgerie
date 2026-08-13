@@ -29,7 +29,7 @@ describe("AuthService", () => {
     await expect(auth.logoutProvider("anthropic")).resolves.toEqual({ accepted: true });
 
     await expect(credentials.read("anthropic")).resolves.toBeUndefined();
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
     expect(changes).toEqual([{ removedProviderId: "anthropic" }]);
     auth.dispose();
   });
@@ -50,7 +50,9 @@ describe("AuthService", () => {
       attempts.push("healthy");
     });
 
-    const state = await auth.startApiKeyLogin("anthropic");
+    const started = await auth.startApiKeyLogin("anthropic");
+    await vi.waitFor(() => { expect(auth.oauthFlow(started.flowId).prompt).toBeDefined(); });
+    const state = auth.oauthFlow(started.flowId);
     if (state.prompt === undefined) throw new Error("Expected Anthropic key prompt");
     auth.respondToOAuthFlow(state.flowId, state.prompt.requestId, "sk-test");
     await vi.waitFor(() => { expect(auth.oauthFlow(state.flowId).status).toBe("complete"); });
@@ -89,7 +91,9 @@ describe("AuthService", () => {
   it("executes Cloudflare multi-field API-key setup through the interactive flow", async () => {
     const { auth, credentials, changes } = await createAuthService();
 
-    const state = await auth.startApiKeyLogin("cloudflare-ai-gateway");
+    const started = await auth.startApiKeyLogin("cloudflare-ai-gateway");
+    await vi.waitFor(() => { expect(auth.oauthFlow(started.flowId).prompt).toBeDefined(); });
+    const state = auth.oauthFlow(started.flowId);
     expect(state.prompt).toMatchObject({ message: "Enter Cloudflare API key", promptType: "secret" });
     if (state.prompt === undefined) throw new Error("Expected Cloudflare key prompt");
     auth.respondToOAuthFlow(state.flowId, state.prompt.requestId, "cf-secret");
@@ -124,7 +128,9 @@ describe("AuthService", () => {
   ])("executes $providerId select-first API-key setup through the interactive flow", async ({ providerId, selection, secretPrompt }) => {
     const { auth, credentials, changes } = await createAuthService();
 
-    const state = await auth.startApiKeyLogin(providerId);
+    const started = await auth.startApiKeyLogin(providerId);
+    await vi.waitFor(() => { expect(auth.oauthFlow(started.flowId).select).toBeDefined(); });
+    const state = auth.oauthFlow(started.flowId);
     expect(state.select).toBeDefined();
     if (state.select === undefined) throw new Error("Expected auth method selection");
     auth.respondToOAuthFlow(state.flowId, state.select.requestId, selection);
@@ -256,7 +262,9 @@ describe("AuthService", () => {
     const runtime = await createModelRuntimeForAgentDir(agentDir);
     const auth = await AuthService.create({ runtime });
 
-    const state = await auth.startApiKeyLogin("anthropic");
+    const started = await auth.startApiKeyLogin("anthropic");
+    await vi.waitFor(() => { expect(auth.oauthFlow(started.flowId).prompt).toBeDefined(); });
+    const state = auth.oauthFlow(started.flowId);
     if (state.prompt === undefined) throw new Error("Expected Anthropic key prompt");
     auth.respondToOAuthFlow(state.flowId, state.prompt.requestId, "sk-test");
     await vi.waitFor(() => { expect(auth.oauthFlow(state.flowId).status).toBe("complete"); });
@@ -265,7 +273,7 @@ describe("AuthService", () => {
     auth.dispose();
   });
 
-  it("reconciles cancellation after ModelRuntime persists OAuth but before its refresh completes", async () => {
+  it("reconciles cancellation after ModelRuntime persists OAuth but before its synchronization completes", async () => {
     const { auth, runtime, credentials, changes } = await createAuthService();
     const provider = runtime.getProviders().find((option) => option.id === "anthropic" && option.auth.oauth !== undefined);
     if (provider?.auth.oauth === undefined) throw new Error("Expected built-in OAuth provider");
@@ -275,37 +283,29 @@ describe("AuthService", () => {
       access: "access-token",
       expires: Date.now() + 60_000,
     };
-    vi.spyOn(provider.auth.oauth, "login").mockResolvedValue(credential);
-    const refreshStarted = deferred<undefined>();
-    const finishRefresh = deferred<undefined>();
-    // Pi 0.82 merged reloadConfig() into refresh(), so the provider lookup now
-    // shares this seam with the post-login refresh. Only the post-login call
-    // (the second) is held open; deferring the lookup would stall the flow
-    // before it starts.
-    let refreshCalls = 0;
-    const refresh = vi.spyOn(runtime, "refresh").mockImplementation(async () => {
-      refreshCalls += 1;
-      if (refreshCalls < 2) return { aborted: false, errors: new Map() };
-      refreshStarted.resolve(undefined);
-      await finishRefresh.promise;
-      return { aborted: false, errors: new Map() };
+    const loginStarted = deferred<undefined>();
+    const finishLogin = deferred<undefined>();
+    vi.spyOn(runtime, "login").mockImplementation(async () => {
+      await credentials.modify(provider.id, () => Promise.resolve(credential));
+      loginStarted.resolve(undefined);
+      await finishLogin.promise;
+      return credential;
     });
 
     const state = await auth.startOAuthLogin(provider.id);
-    await refreshStarted.promise;
+    await loginStarted.promise;
 
     await expect(credentials.read(provider.id)).resolves.toEqual(credential);
     expect(auth.cancelOAuthFlow(state.flowId)).toMatchObject({ status: "cancelled", error: "Login cancelled" });
     expect(changes).toEqual([]);
 
-    finishRefresh.resolve(undefined);
+    finishLogin.resolve(undefined);
     await vi.waitFor(() => { expect(auth.oauthFlow(state.flowId).status).toBe("complete"); });
 
     expect(auth.oauthFlow(state.flowId)).toMatchObject({ status: "complete", progress: ["Login complete"] });
     expect(auth.oauthFlow(state.flowId)).not.toHaveProperty("error");
     await expect(credentials.read(provider.id)).resolves.toEqual(credential);
     expect(changes).toEqual([{}]);
-    expect(refresh).toHaveBeenCalledTimes(2);
     auth.dispose();
   });
 
@@ -372,20 +372,17 @@ describe("AuthService", () => {
 
 describe("createModelRuntimeForAgentDir", () => {
   it("keeps runtime-owned refreshes local so request paths cannot stall", async () => {
-    // Runtime-owned mutations refresh with allowNetwork = the construction-time
-    // network flag and no abort signal; that is what regressed. Pi 0.82 removed
-    // reloadConfig(), so removeRuntimeApiKey() is the surviving public seam that
-    // still forwards that flag explicitly and can be observed on refresh().
-    // The ambient PI_OFFLINE=1 stub has to go, or the runtime would be offline
-    // whether or not the helper forces it and this would assert nothing.
+    // Pi 0.84 synchronizes only the changed provider and fixes allowNetwork to
+    // false. A throwing global refresh proves credential mutation no longer
+    // reaches that unbounded path.
     vi.stubEnv("PI_OFFLINE", undefined);
     const agentDir = await tempAgentDir();
     const runtime = await createModelRuntimeForAgentDir(agentDir);
-    const refresh = vi.spyOn(runtime, "refresh");
+    const refresh = vi.spyOn(runtime, "refresh").mockRejectedValue(new Error("global refresh must not run"));
 
-    await runtime.removeRuntimeApiKey("anthropic");
+    await expect(runtime.removeRuntimeApiKey("anthropic")).resolves.toBeUndefined();
 
-    expect(refresh).toHaveBeenCalledWith({ allowNetwork: false });
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("restores a previously set PI_OFFLINE after runtime creation", async () => {
@@ -402,11 +399,11 @@ describe("createModelRuntimeForAgentDir", () => {
     try {
       const agentDir = await tempAgentDir();
       const runtime = await createModelRuntimeForAgentDir(agentDir);
-      const refresh = vi.spyOn(runtime, "refresh");
+      const refresh = vi.spyOn(runtime, "refresh").mockRejectedValue(new Error("global refresh must not run"));
 
-      await runtime.removeRuntimeApiKey("anthropic");
+      await expect(runtime.removeRuntimeApiKey("anthropic")).resolves.toBeUndefined();
 
-      expect(refresh).toHaveBeenCalledWith({ allowNetwork: false });
+      expect(refresh).not.toHaveBeenCalled();
       expect(process.env["PI_OFFLINE"]).toBeUndefined();
     } finally {
       if (previous !== undefined) process.env["PI_OFFLINE"] = previous;
@@ -424,9 +421,9 @@ describe("createModelRuntimeForAgentDir", () => {
       // Interleaved save/restore pairs would leave PI_OFFLINE set process-wide.
       expect(process.env["PI_OFFLINE"]).toBeUndefined();
       for (const runtime of runtimes) {
-        const refresh = vi.spyOn(runtime, "refresh");
-        await runtime.removeRuntimeApiKey("anthropic");
-        expect(refresh).toHaveBeenCalledWith({ allowNetwork: false });
+        const refresh = vi.spyOn(runtime, "refresh").mockRejectedValue(new Error("global refresh must not run"));
+        await expect(runtime.removeRuntimeApiKey("anthropic")).resolves.toBeUndefined();
+        expect(refresh).not.toHaveBeenCalled();
       }
     } finally {
       if (previous !== undefined) process.env["PI_OFFLINE"] = previous;
