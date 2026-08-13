@@ -44,6 +44,8 @@ export interface ComposerSelectableModel {
   readonly id?: string;
   readonly name?: string;
   readonly contextWindow?: number;
+  /** True when Pi's `enabledModels` scope holds this model, so Ctrl+P reaches it. */
+  readonly scoped?: boolean;
   /**
    * Pi reports this loosely, so it is read as a flag only when it is a boolean.
    * False clamps the thinking level to `off`.

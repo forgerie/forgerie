@@ -100,7 +100,7 @@ describe("PromptEditor capabilities", () => {
     const list = editor.shadowRoot?.querySelector("composer-choice-list");
     const headings = [...list?.shadowRoot?.querySelectorAll(".choice-group") ?? []]
       .map((heading) => heading.textContent);
-    expect(headings).toEqual(["anthropic", "openai-codex", "anthropic"]);
+    expect(headings).toEqual(["Anthropic", "Openai Codex", "Anthropic"]);
 
     const values = [...list?.shadowRoot?.querySelectorAll<HTMLButtonElement>("[data-value]") ?? []]
       .map((option) => option.dataset["value"]);

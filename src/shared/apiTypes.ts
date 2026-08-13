@@ -826,6 +826,12 @@ export interface SessionModel {
   name?: string;
   contextWindow?: number;
   reasoning?: unknown;
+  /**
+   * Set only on the models Pi's `enabledModels` scope holds. Model cycling
+   * moves through exactly this set, so the picker can name it rather than
+   * leaving it to look like the first few rows of the catalogue.
+   */
+  scoped?: boolean;
 }
 
 // Domain type is owned by pi and re-exported from the shared thinking-levels

@@ -13,6 +13,7 @@ import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIco
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
+import { modelChoiceGroups } from "./modelChoiceGroups";
 import "./ComposerChoiceList";
 import type { ComposerDraft, ComposerDraftCompletionError, ComposerDraftDisplayState, ComposerDraftEscapeContext, ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./ComposerDraft";
@@ -519,27 +520,9 @@ export class PromptEditor extends LitElement {
     if (restoreFocus) anchor?.focus();
   }
 
-  /** Group adjacent providers without changing the server's scoped-first order. */
+  /** Names Pi's cycling scope, then the rest of the catalogue by provider. */
   private modelChoiceGroups(): ComposerChoiceGroup[] {
-    const groups: ComposerChoiceGroup[] = [];
-    for (const model of this.choiceModels) {
-      const label = model.provider ?? "";
-      const item: ComposerChoiceItem = {
-        value: modelChoiceValue(model),
-        label: modelDisplayName(model),
-        ...(model.contextWindow === undefined ? {} : { meta: model.contextWindow.toLocaleString("en-GB").replaceAll(",", " ") }),
-        ...(model.reasoning === false ? { muted: true } : {}),
-      };
-      const previous = groups.at(-1);
-      if (previous !== undefined && (previous.label ?? "") === label) {
-        groups[groups.length - 1] = label === ""
-          ? { items: [...previous.items, item] }
-          : { label, items: [...previous.items, item] };
-      } else {
-        groups.push(label === "" ? { items: [item] } : { label, items: [item] });
-      }
-    }
-    return groups;
+    return modelChoiceGroups(this.choiceModels);
   }
 
   /**

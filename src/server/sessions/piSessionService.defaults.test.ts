@@ -100,8 +100,11 @@ describe("PiSessionService new-session defaults", () => {
 
     try {
       const models = await service.availableModels(sessionRef("scoped-list"));
-      expect(models[0]).toMatchObject({ provider: "anthropic", id: "claude-opus-4-5" });
+      expect(models[0]).toMatchObject({ provider: "anthropic", id: "claude-opus-4-5", scoped: true });
       expect(models.length).toBeGreaterThan(1);
+      // Only the scope is marked, so the picker can name it without counting rows.
+      expect(models.filter((model) => model.scoped === true)).toHaveLength(1);
+      expect(models.slice(1).every((model) => model.scoped === undefined)).toBe(true);
     } finally {
       await service.dispose();
     }

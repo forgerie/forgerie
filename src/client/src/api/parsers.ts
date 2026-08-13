@@ -1192,7 +1192,7 @@ function parseTokens(value: unknown): SessionStatus["tokens"] {
 
 function parseSessionModel(value: unknown): SessionModel {
   const record = requireRecord(value);
-  return { ...optionalField("provider", optionalString(record, "provider")), ...optionalField("id", optionalString(record, "id")), ...optionalField("name", optionalString(record, "name")), ...optionalField("contextWindow", optionalNumber(record, "contextWindow")), ...optionalField("reasoning", record["reasoning"]) };
+  return { ...optionalField("provider", optionalString(record, "provider")), ...optionalField("id", optionalString(record, "id")), ...optionalField("name", optionalString(record, "name")), ...optionalField("contextWindow", optionalNumber(record, "contextWindow")), ...optionalField("reasoning", record["reasoning"]), ...optionalField("scoped", record["scoped"] === true ? true : undefined) };
 }
 
 function optionalModel(value: unknown): Pick<SessionStatus, "model"> | object {

@@ -2230,7 +2230,7 @@ export class PiSessionService implements SessionRouteService {
     const model = selected?.model;
     const thinkingLevel = model === undefined ? "off" : clampThinkingLevel(model, requestedThinkingLevel);
     return {
-      models: orderedModels.map(modelToClientModel),
+      models: clientModelsWithScope(orderedModels, scopedModels),
       ...(model === undefined ? {} : { model: modelToClientModel(model) }),
       thinkingLevel,
     };
@@ -2239,7 +2239,7 @@ export class PiSessionService implements SessionRouteService {
   async availableModels(ref: PiSessionRef): Promise<ClientSessionModel[]> {
     const session = await this.getOrOpen(ref);
     const models = await this.sessionModelCandidates(session);
-    return models.map(modelToClientModel);
+    return clientModelsWithScope(models, session.scopedModels);
   }
 
   async setModel(ref: PiSessionRef, provider: string, modelId: string): Promise<ClientSessionStatus> {
@@ -4442,6 +4442,19 @@ function resolveNewSessionDefaultModel(
 
 function modelIdentity(model: AgentModel): string {
   return `${model.provider}\u0000${model.id}`;
+}
+
+/**
+ * The catalogue, with Pi's cycling scope marked on the models that belong to
+ * it. Order already puts them first; the flag says *why* they are first, which
+ * position alone cannot tell a reader.
+ */
+function clientModelsWithScope(models: readonly AgentModel[], scopedModels: readonly ScopedAgentModel[]): ClientSessionModel[] {
+  const scopedIds = new Set(scopedModels.map((scoped) => modelIdentity(scoped.model)));
+  return models.map((model) => {
+    const client = modelToClientModel(model);
+    return scopedIds.has(modelIdentity(model)) ? { ...client, scoped: true } : client;
+  });
 }
 
 function modelToClientModel(model: PiAgentSession["model"]): ClientSessionModel {

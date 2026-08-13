@@ -104,6 +104,59 @@ describe("composer-choice-list", () => {
     expect(onPick).toHaveBeenCalledWith("aka-llama/qwen2.5-coder-32b-q4-k-s");
   });
 
+  it("ranks a section above the providers under it, and counts what it holds", async () => {
+    const list = await mount({
+      groups: [
+        { label: "Ctrl+P cycle", level: "section", count: 2, items: [{ value: "a/1", label: "Claude Fable 5", meta: "Anthropic · 1m" }, { value: "b/1", label: "GPT-5.6 Sol", meta: "Openai Codex · 272k" }] },
+        { label: "Other models", level: "section", count: 25, divider: true, items: [] },
+        { label: "anthropic", level: "provider", items: [{ value: "a/2", label: "Claude Opus 4.6", meta: "1m" }] },
+      ],
+      searchable: true,
+    });
+
+    const sections = list.shadowRoot?.querySelectorAll(".choice-group.section") ?? [];
+    // The count is its own element, spaced by the heading's gap, not by text.
+    expect(Array.from(sections).map((node) => node.querySelector(".choice-group-label")?.textContent)).toEqual(["Ctrl+P cycle", "Other models"]);
+    expect(Array.from(sections).map((node) => node.querySelector(".choice-count")?.textContent)).toEqual(["2", "25"]);
+    // A heading with no rows of its own still names the set beneath it.
+    expect(required(list, "[data-divider]").textContent).toContain("Other models");
+    expect(required(list, ".choice-group.provider").textContent.trim()).toBe("anthropic");
+  });
+
+  it("drops a count while a search is narrowing what the section holds", async () => {
+    const list = await mount({
+      groups: [{ label: "Ctrl+P cycle", level: "section", count: 2, items: [{ value: "a/1", label: "Claude Fable 5" }, { value: "b/1", label: "GPT-5.6 Sol" }] }],
+      searchable: true,
+    });
+
+    expect(required(list, ".choice-count").textContent).toBe("2");
+
+    await search(list, "fable");
+
+    // Saying "2" over a single result would describe a set the reader cannot see.
+    expect(list.shadowRoot?.querySelector(".choice-count")).toBeNull();
+  });
+
+  it("sets a variant beside a label that would otherwise repeat", async () => {
+    const list = await mount({
+      groups: [{ items: [{ value: "a/1", label: "Claude Haiku 4.5", variant: "2025-10-01" }] }],
+    });
+
+    expect(required(list, ".choice-variant").textContent).toContain("2025-10-01");
+    expect(required(list, "[data-value='a/1']").textContent.replace(/\s+/g, " ")).toContain("Claude Haiku 4.5 · 2025-10-01");
+  });
+
+  it("searches the variant, so a pinned date finds its row", async () => {
+    const list = await mount({
+      groups: [{ items: [{ value: "a/1", label: "Claude Haiku 4.5", variant: "2025-10-01" }, { value: "a/2", label: "Claude Haiku 4.5", variant: "latest" }] }],
+      searchable: true,
+    });
+
+    await search(list, "2025-10");
+
+    expect(rows(list).map((row) => row.dataset["value"])).toEqual(["a/1"]);
+  });
+
   it("does not pick a row that is disabled", async () => {
     const onPick = vi.fn();
     const list = await mount({
