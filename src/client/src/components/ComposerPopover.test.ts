@@ -20,7 +20,21 @@ describe("composer-popover", () => {
 
     expect(popover.dataset["side"]).toBe("above");
     expect(panel.style.left).toBe("216px");
-    expect(panel.style.width).toBe("300px");
+    expect(panel.style.maxWidth).toBe("348px");
+  });
+
+  it("caps its width without setting one, and holds that across updates", async () => {
+    const popover = await mount({ space: { above: 400, below: 120 } });
+    const panel = required(popover, ".popover-panel");
+
+    // Setting a measured width would shrink the panel a little on every pass.
+    expect(panel.style.width).toBe("");
+    popover.reposition();
+    popover.reposition();
+    await popover.updateComplete;
+
+    expect(panel.style.width).toBe("");
+    expect(panel.style.maxWidth).toBe("348px");
   });
 
   it("flips below when there is no room above, without changing its width", async () => {
@@ -28,7 +42,7 @@ describe("composer-popover", () => {
     const panel = required(popover, ".popover-panel");
 
     expect(popover.dataset["side"]).toBe("below");
-    expect(panel.style.width).toBe("300px");
+    expect(panel.style.maxWidth).toBe("348px");
   });
 
   it("raises no scrim and holds no focus trap", async () => {
@@ -93,7 +107,7 @@ async function mount(options: {
     anchor: { left: 216, width: 120 },
     space: options.space ?? { above: 400, below: 120 },
     host: { width: 680 },
-    panel: { width: 300, height: 180 },
+    panel: { height: 180 },
   });
   if (options.onClose !== undefined) popover.onClose = options.onClose;
   document.body.append(popover);

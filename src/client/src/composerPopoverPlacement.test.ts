@@ -13,10 +13,22 @@ describe("composerPopoverPlacement", () => {
       anchor: { left: 216, width: 120 },
       space: { above: 400, below: 120 },
       host: island,
-      panel: { width: 300, height: 180 },
+      panel: { height: 180 },
     });
 
-    expect(placement).toEqual({ side: "above", left: 216, width: 300 });
+    expect(placement).toEqual({ side: "above", left: 216, maxWidth: 348 });
+  });
+
+  it("caps the panel without ever sizing it, so it cannot collapse", () => {
+    const placement = composerPopoverPlacement({
+      anchor: { left: 216, width: 120 },
+      space: { above: 400, below: 120 },
+      host: island,
+      panel: { height: 180 },
+    });
+
+    expect(placement).not.toHaveProperty("width");
+    expect(placement.maxWidth).toBe(348);
   });
 
   it("flips below when there is not enough room above", () => {
@@ -24,7 +36,7 @@ describe("composerPopoverPlacement", () => {
       anchor: { left: 216, width: 120 },
       space: { above: 80, below: 400 },
       host: island,
-      panel: { width: 300, height: 180 },
+      panel: { height: 180 },
     });
 
     expect(placement.side).toBe("below");
@@ -35,7 +47,7 @@ describe("composerPopoverPlacement", () => {
       anchor: { left: 216, width: 120 },
       space: { above: 120, below: 60 },
       host: island,
-      panel: { width: 300, height: 400 },
+      panel: { height: 400 },
     });
 
     expect(placement.side).toBe("above");
@@ -46,17 +58,17 @@ describe("composerPopoverPlacement", () => {
       anchor: { left: 216, width: 120 },
       space: { above: 400, below: 120 },
       host: island,
-      panel: { width: 900, height: 180 },
+      panel: { height: 180 },
     });
     const phone = composerPopoverPlacement({
       anchor: { left: 120, width: 120 },
       space: { above: 400, below: 120 },
       host: { width: 300 },
-      panel: { width: 348, height: 180 },
+      panel: { height: 180 },
     });
 
-    expect(wide.width).toBe(348);
-    expect(phone.width).toBe(284);
+    expect(wide.maxWidth).toBe(348);
+    expect(phone.maxWidth).toBe(284);
     expect(phone.left).toBe(8);
   });
 
@@ -65,11 +77,11 @@ describe("composerPopoverPlacement", () => {
       anchor: { left: 600, width: 60 },
       space: { above: 400, below: 120 },
       host: island,
-      panel: { width: 300, height: 180 },
+      panel: { height: 180 },
     });
 
-    expect(placement.left).toBe(372);
-    expect(placement.left + placement.width).toBe(672);
+    expect(placement.left).toBe(324);
+    expect(placement.left + placement.maxWidth).toBe(672);
   });
 
   it("keeps a control's own left edge when there is room for it", () => {
@@ -77,7 +89,7 @@ describe("composerPopoverPlacement", () => {
       anchor: { left: 8, width: 60 },
       space: { above: 400, below: 120 },
       host: island,
-      panel: { width: 200, height: 180 },
+      panel: { height: 180 },
     });
 
     expect(placement.left).toBe(8);

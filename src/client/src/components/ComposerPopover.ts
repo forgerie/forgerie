@@ -64,7 +64,9 @@ export class ComposerPopover extends LitElement {
     const placement = composerPopoverPlacement(measurement);
     this.dataset["side"] = placement.side;
     panel.style.left = `${String(placement.left)}px`;
-    panel.style.width = `${String(placement.width)}px`;
+    // A ceiling only. The panel takes its width from its content, so it is
+    // never measured into a smaller and smaller box on each update.
+    panel.style.maxWidth = `${String(placement.maxWidth)}px`;
   }
 
   private measurement(panel: HTMLElement): ComposerPopoverMeasurement | undefined {
@@ -80,7 +82,7 @@ export class ComposerPopover extends LitElement {
       anchor: { left: anchorRect.left - hostRect.left, width: anchorRect.width },
       space: { above: anchorRect.top, below: window.innerHeight - anchorRect.bottom },
       host: { width: hostRect.width },
-      panel: { width: panelRect.width, height: panelRect.height },
+      panel: { height: panelRect.height },
     };
   }
 
@@ -107,7 +109,9 @@ export class ComposerPopover extends LitElement {
     :host([data-side="above"]) { bottom: calc(100% + 8px); }
     :host([data-side="below"]) { top: calc(100% + 8px); }
     .popover-panel {
-      position: absolute; max-height: 320px; overflow-y: auto; pointer-events: auto;
+      /* Sized by content, capped by placement. A minimum keeps a short list
+         from collapsing to the width of its longest word. */
+      position: absolute; width: max-content; min-width: 220px; max-height: 320px; overflow-y: auto; pointer-events: auto;
       border: 1px solid var(--pi-border); border-radius: 12px; background: var(--pi-surface);
       box-shadow: 0 10px 30px var(--pi-shadow-strong);
     }

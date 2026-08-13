@@ -11,8 +11,14 @@ export interface ComposerPopoverPlacementInput {
   readonly space: { readonly above: number; readonly below: number };
   /** The island the panel is anchored to. */
   readonly host: { readonly width: number };
-  /** The panel's own content size, before any clamping. */
-  readonly panel: { readonly width: number; readonly height: number };
+  /**
+   * The panel's own height, used only to decide which side it opens on.
+   *
+   * Its width is deliberately not an input: a panel that is measured and then
+   * set to its own measurement collapses, because the measurement is taken
+   * after the constraint has already been applied.
+   */
+  readonly panel: { readonly height: number };
   /** Space between the panel and its control. */
   readonly gap?: number;
   /** Smallest distance kept between the panel and the island's edges. */
@@ -24,7 +30,8 @@ export interface ComposerPopoverPlacementInput {
 export interface ComposerPopoverPlacement {
   readonly side: "above" | "below";
   readonly left: number;
-  readonly width: number;
+  /** A ceiling, not a size. The panel is sized by its own content. */
+  readonly maxWidth: number;
 }
 
 const DEFAULT_GAP = 8;
@@ -45,13 +52,14 @@ export function composerPopoverPlacement(input: ComposerPopoverPlacementInput): 
   const maxWidth = input.maxWidth ?? DEFAULT_MAX_WIDTH;
 
   const available = Math.max(0, input.host.width - inset * 2);
-  const width = Math.min(input.panel.width, maxWidth, available);
+  const ceiling = Math.min(maxWidth, available);
 
-  // Prefer the control's own left edge; pull back only to stay inside.
-  const rightMost = Math.max(inset, input.host.width - inset - width);
+  // Prefer the control's own left edge, and leave room for a panel that uses
+  // the whole ceiling, so a wide panel never overhangs the island.
+  const rightMost = Math.max(inset, input.host.width - inset - ceiling);
   const left = Math.min(Math.max(input.anchor.left, inset), rightMost);
 
   const needed = input.panel.height + gap;
   const side = input.space.above >= needed || input.space.above >= input.space.below ? "above" : "below";
-  return { side, left, width };
+  return { side, left, maxWidth: ceiling };
 }
