@@ -1,7 +1,7 @@
 ---
 title: "fix: Align composer working controls"
 type: fix
-status: active
+status: completed
 date: 2026-08-13
 origin: work/items/active/01KZQD4T7N8B2K5M9V1XW3PH6C-floating-composer-island/requirements.md
 verify_command: "npm run verify"
