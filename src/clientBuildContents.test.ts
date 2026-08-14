@@ -33,6 +33,7 @@ describe("production client build contents", () => {
         short_name: "Forgerie",
         start_url: "./",
         scope: "./",
+        display: "fullscreen",
         icons: [
           { src: "./pwa-icon-192.png" },
           { src: "./pwa-icon-512.png" },
