@@ -120,6 +120,14 @@ describe("WhisperProcess", () => {
     expect(wrapper).not.toContain("''${1");
   });
 
+  it("randomizes multipart boundaries and rejects boolean WAV byte counts in the Python worker", async () => {
+    const worker = await readFile("speech/whisper_worker.py", "utf8");
+
+    expect(worker).toContain("type(wav_bytes) is not int");
+    expect(worker).toContain("secrets.token_hex(16)");
+    expect(worker).toContain('boundary = f"forgerie-speech-boundary-{secrets.token_hex(16)}"');
+  });
+
   it("requires strict worker readiness", async () => {
     const nonJson = await helperScript(`
       console.log('not-json');

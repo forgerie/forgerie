@@ -35,7 +35,8 @@ describe("PiWebApp plugin prompt editor during dictation", () => {
     await editor.updateComplete;
 
     const context = pluginRuntimeContext(app);
-    expect(context.prompt.insertText(" plugin")).toBe(false);
+    context.prompt.insertText(" plugin");
+    expect(context.prompt.getText()).toBe("locked");
     context.focusPrompt();
     await app.updateComplete;
     await new Promise<void>((resolve) => {

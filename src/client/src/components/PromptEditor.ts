@@ -134,6 +134,7 @@ export class PromptEditor extends LitElement {
   private pendingDictationStatus: PendingDictationStatus | undefined;
   private dictationGesture = this.createDictationGesture();
   private dictationGestureSource: DictationGestureSource | undefined;
+  private suppressNextDictationClick = false;
   private guidanceRequestVersion = 0;
   private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
@@ -180,6 +181,8 @@ export class PromptEditor extends LitElement {
     if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) {
       this.resetGuidanceDisclosure();
       this.resetSteerDisclosure();
+      this.resetDictationGesture();
+      this.dictationController?.surfaceDisabled();
     }
     if (changed.has("canSteer") || changed.has("isCompacting") || changed.has("disabled") || changed.has("submissionAvailable") || changed.has("sendAvailable") || changed.has("sending")) {
       const rail = this.rail();
@@ -462,7 +465,7 @@ export class PromptEditor extends LitElement {
         @pointercancel=${(event: PointerEvent) => { this.handleDictationPointerCancel(event); }}
         @lostpointercapture=${(event: PointerEvent) => { this.handleDictationLostPointerCapture(event); }}
         @contextmenu=${(event: Event) => { event.preventDefault(); }}
-        @click=${(event: Event) => { event.preventDefault(); event.stopPropagation(); }}
+        @click=${(event: Event) => { this.handleDictationClick(event); }}
         @keydown=${(event: KeyboardEvent) => { this.handleDictationKeyDown(event); }}
         @keyup=${(event: KeyboardEvent) => { this.handleDictationKeyUp(event); }}
       >${renderMicrophoneIcon()}</button>
@@ -1234,6 +1237,7 @@ export class PromptEditor extends LitElement {
     event.stopPropagation();
     this.releaseDictationPointerCapture();
     this.dictationGestureSource = undefined;
+    this.suppressNextDictationSyntheticClick();
     this.dictationGesture.release();
   }
 
@@ -1264,6 +1268,17 @@ export class PromptEditor extends LitElement {
     } catch { /* ignored */ }
   }
 
+  private handleDictationClick(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.suppressNextDictationClick) {
+      this.suppressNextDictationClick = false;
+      return;
+    }
+    if (this.dictationGestureSource !== undefined) return;
+    this.activateDictationShortTap();
+  }
+
   private handleDictationKeyDown(event: KeyboardEvent): void {
     if (event.repeat) return;
     if (event.key === "Escape") {
@@ -1273,9 +1288,14 @@ export class PromptEditor extends LitElement {
       if (!this.dictationGesture.cancel()) this.dictationController?.cancel();
       return;
     }
-    if (event.key === "Enter" && this.dictationCanCompleteFromKey()) {
+    if (event.key === "Enter") {
       event.preventDefault();
-      this.dictationController?.press();
+      this.suppressNextDictationSyntheticClick();
+      if (this.dictationCanCompleteFromKey()) {
+        this.dictationController?.press();
+      } else {
+        this.activateDictationShortTap();
+      }
       return;
     }
     if (event.key !== " ") return;
@@ -1293,7 +1313,18 @@ export class PromptEditor extends LitElement {
     if (event.key !== " " || this.dictationGestureSource?.tag !== "space") return;
     event.preventDefault();
     this.dictationGestureSource = undefined;
+    this.suppressNextDictationSyntheticClick();
     this.dictationGesture.release();
+  }
+
+  private activateDictationShortTap(): void {
+    if (!this.dictationGesture.press()) return;
+    this.dictationGesture.release();
+  }
+
+  private suppressNextDictationSyntheticClick(): void {
+    this.suppressNextDictationClick = true;
+    window.setTimeout(() => { this.suppressNextDictationClick = false; }, 0);
   }
 
   private createDictationGesture(): PromptDictationGesture {
@@ -1309,6 +1340,7 @@ export class PromptEditor extends LitElement {
   private resetDictationGesture(): void {
     this.releaseDictationPointerCapture();
     this.dictationGestureSource = undefined;
+    this.suppressNextDictationClick = false;
     this.dictationGesture.dispose();
     this.dictationGesture = this.createDictationGesture();
   }

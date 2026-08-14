@@ -183,6 +183,35 @@ describe("speech service", () => {
     expect(budgets[1]).toBeLessThan(budgets[0] ?? 0);
   });
 
+  it("caps Smart Turn backend timeout at the endpoint deadline while preserving queue expiry", async () => {
+    const activeGate = deferred<{ complete: boolean; probability: number; samples: number }>();
+    const budgets: number[] = [];
+    const policy = { ...SPEECH_POLICY, timing: { ...SPEECH_POLICY.timing, operationDeadlineMs: 1_000, endpointDeadlineMs: 25 } };
+    const service = createSpeechService({
+      policy,
+      smartTurn: {
+        status: () => "ready",
+        start: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+        checkTurn: (_pcm, options) => {
+          budgets.push(options?.timeoutMs ?? 0);
+          return budgets.length === 1 ? activeGate.promise : Promise.resolve({ complete: true, probability: 1, samples: SPEECH_POLICY.audio.minRequestSamples });
+        },
+      },
+      whisper: speechServiceUnavailable("missing_runtime"),
+    });
+
+    const active = service.checkTurn(pcm(SPEECH_POLICY.audio.minRequestSamples));
+    const queued = service.checkTurn(pcm(SPEECH_POLICY.audio.minRequestSamples));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    activeGate.resolve({ complete: false, probability: 0.1, samples: SPEECH_POLICY.audio.minRequestSamples });
+    await expect(active).resolves.toMatchObject({ complete: false });
+    await expect(queued).resolves.toMatchObject({ complete: true });
+
+    expect(budgets).toHaveLength(2);
+    expect(budgets).toEqual([policy.timing.endpointDeadlineMs, policy.timing.endpointDeadlineMs]);
+  });
+
   it("closes both components and rejects new work", async () => {
     let closed = 0;
     const component = {

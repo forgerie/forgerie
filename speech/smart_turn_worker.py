@@ -159,7 +159,7 @@ def main() -> None:
             return
         request_id = header.get("requestId")
         pcm_bytes = header.get("pcmBytes")
-        if not isinstance(pcm_bytes, int) or pcm_bytes < 0 or pcm_bytes > max_pcm_bytes:
+        if type(pcm_bytes) is not int or pcm_bytes < 0 or pcm_bytes > max_pcm_bytes:
             response({"requestId": request_id, "status": "error", "error": "invalid pcmBytes"})
             return
         raw = read_exact(stream, pcm_bytes)

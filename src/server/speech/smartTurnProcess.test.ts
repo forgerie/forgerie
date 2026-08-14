@@ -201,6 +201,27 @@ describe("SmartTurnProcess", () => {
     await processClient.close();
   });
 
+  it("rejects worker response sample counts beyond the submitted endpoint PCM", async () => {
+    const script = await helperScript(`
+      console.log(${readyRecord});
+      ${framedReader}
+      readSmartFrames((request, body) => {
+        console.log(JSON.stringify({ requestId: request.requestId, status: 'ready', complete: true, probability: 1, samples: (body.byteLength / 4) + 1 }));
+      });
+    `);
+    const processClient = new SmartTurnProcess({ commandPath: process.execPath, args: [script], sandbox: { enabled: false }, startupTimeoutMs: 1_000, operationTimeoutMs: 1_000 });
+
+    await expect(processClient.checkTurn(pcm(SPEECH_POLICY.audio.minRequestSamples))).rejects.toMatchObject({ kind: "protocol" });
+    expect(processClient.status()).toBe("unavailable");
+    await processClient.close();
+  });
+
+  it("keeps the packaged Python worker frame length guard on exact integers", async () => {
+    const worker = await readFile("speech/smart_turn_worker.py", "utf8");
+
+    expect(worker).toContain("type(pcm_bytes) is not int");
+  });
+
   it("rejects relative executable paths and builds a bwrap-style sandbox without home or Pi data mounts", () => {
     expect(() => new SmartTurnProcess({ commandPath: "node", args: [], sandbox: { enabled: false } })).toThrow(/absolute/iu);
 

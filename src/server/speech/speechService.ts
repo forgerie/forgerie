@@ -53,7 +53,7 @@ export function createSpeechService(options: SpeechServiceOptions): SpeechServic
       } catch (error) {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
-      return smartQueue.enqueue(pcm.bytes.byteLength, operationOptions.signal, (timeoutMs) => options.smartTurn.checkTurn?.(pcm, { timeoutMs }) ?? Promise.reject(new SpeechProcessError("unavailable", "Smart Turn is unavailable.")));
+      return smartQueue.enqueue(pcm.bytes.byteLength, operationOptions.signal, (timeoutMs) => options.smartTurn.checkTurn?.(pcm, { timeoutMs: Math.min(timeoutMs, policy.timing.endpointDeadlineMs) }) ?? Promise.reject(new SpeechProcessError("unavailable", "Smart Turn is unavailable.")));
     },
     transcribe: (pcmBytes, operationOptions = {}) => {
       if (closed) return Promise.reject(new SpeechProcessError("closed", "Speech service is closed."));

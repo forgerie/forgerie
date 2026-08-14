@@ -340,7 +340,7 @@ function workletBatch(startSample: number, values: number[] | Iterable<number>, 
   return { kind: "batch", startSample, endSample: startSample + samples.length, samples, rms, voiced: rms >= 0.012 };
 }
 
-class FakeTrack implements SpeechMediaTrackLike {
+class RecordingMediaTrack implements SpeechMediaTrackLike {
   private endedListener: (() => void) | undefined;
   public stopped = false;
 
@@ -361,15 +361,15 @@ class FakeTrack implements SpeechMediaTrackLike {
   }
 }
 
-class FakeStream implements SpeechMediaStreamLike {
-  public constructor(private readonly track: FakeTrack) {}
+class RecordingMediaStream implements SpeechMediaStreamLike {
+  public constructor(private readonly track: RecordingMediaTrack) {}
 
   public getAudioTracks(): SpeechMediaTrackLike[] {
     return [this.track];
   }
 }
 
-class FakeNode implements SpeechAudioNodeLike {
+class RecordingAudioNode implements SpeechAudioNodeLike {
   public readonly connections: string[] = [];
 
   public constructor(public readonly kind: string) {}
@@ -383,7 +383,7 @@ class FakeNode implements SpeechAudioNodeLike {
   }
 }
 
-class FakeFilter extends FakeNode implements SpeechBiquadFilterLike {
+class RecordingBiquadFilter extends RecordingAudioNode implements SpeechBiquadFilterLike {
   public type: BiquadFilterType = "lowpass";
   public readonly frequency = { value: 0 };
 
@@ -392,7 +392,7 @@ class FakeFilter extends FakeNode implements SpeechBiquadFilterLike {
   }
 }
 
-class FakeGain extends FakeNode implements SpeechGainNodeLike {
+class RecordingGainNode extends RecordingAudioNode implements SpeechGainNodeLike {
   public readonly gain = { value: 1 };
 
   public constructor() {
@@ -400,7 +400,7 @@ class FakeGain extends FakeNode implements SpeechGainNodeLike {
   }
 }
 
-class FakeWorkletNode extends FakeNode implements SpeechAudioWorkletNodeLike {
+class RecordingWorkletNode extends RecordingAudioNode implements SpeechAudioWorkletNodeLike {
   private listener: ((event: MessageEvent<SpeechCaptureMessage>) => void) | undefined;
   public acks = 0;
   public readonly flushes: string[] = [];
@@ -427,13 +427,13 @@ class FakeWorkletNode extends FakeNode implements SpeechAudioWorkletNodeLike {
   }
 }
 
-class FakeAudioContext implements SpeechAudioContextLike {
+class RecordingAudioContext implements SpeechAudioContextLike {
   public sampleRateValue = 48_000;
   public stateValue: AudioContextState = "running";
-  public readonly destination = new FakeNode("destination");
-  public readonly source = new FakeNode("source");
-  public readonly filter = new FakeFilter();
-  public readonly gain = new FakeGain();
+  public readonly destination = new RecordingAudioNode("destination");
+  public readonly source = new RecordingAudioNode("source");
+  public readonly filter = new RecordingBiquadFilter();
+  public readonly gain = new RecordingGainNode();
   public closed = false;
   public moduleAdded = false;
   public resumeCalls = 0;
@@ -442,7 +442,7 @@ class FakeAudioContext implements SpeechAudioContextLike {
   private workletModuleResolve: (() => void) | undefined;
   private contextCloseResolve: (() => void) | undefined;
 
-  public constructor(private readonly owner: FakeSpeechHost) {}
+  public constructor(private readonly owner: RecordingSpeechHost) {}
 
   public get sampleRate(): number {
     return this.sampleRateValue;
@@ -502,11 +502,11 @@ class FakeAudioContext implements SpeechAudioContextLike {
   }
 }
 
-class FakeSpeechHost implements SpeechCaptureBrowserHost {
+class RecordingSpeechHost implements SpeechCaptureBrowserHost {
   public readonly getUserMediaCalls: MediaStreamConstraints[] = [];
-  public readonly track = new FakeTrack();
-  public readonly context = new FakeAudioContext(this);
-  public readonly worklet = new FakeWorkletNode();
+  public readonly track = new RecordingMediaTrack();
+  public readonly context = new RecordingAudioContext(this);
+  public readonly worklet = new RecordingWorkletNode();
   public readonly workletUrl = "worklet.js";
   public audioContextCreatedBeforeWorklet = false;
   public failWorklet = false;
@@ -519,7 +519,7 @@ class FakeSpeechHost implements SpeechCaptureBrowserHost {
   public readonly mediaDevices = {
     getUserMedia: (constraints: MediaStreamConstraints): Promise<SpeechMediaStreamLike> => {
       this.getUserMediaCalls.push(constraints);
-      if (!this.deferUserMedia) return Promise.resolve(new FakeStream(this.track));
+      if (!this.deferUserMedia) return Promise.resolve(new RecordingMediaStream(this.track));
       return new Promise((resolve) => { this.userMediaResolve = resolve; });
     },
   };
@@ -535,7 +535,7 @@ class FakeSpeechHost implements SpeechCaptureBrowserHost {
   }
 
   public resolveUserMedia(): void {
-    this.userMediaResolve?.(new FakeStream(this.track));
+    this.userMediaResolve?.(new RecordingMediaStream(this.track));
   }
 
   public waitForWorkletModuleAttempt(): Promise<void> {
@@ -607,8 +607,8 @@ class FakeSpeechHost implements SpeechCaptureBrowserHost {
   }
 }
 
-function fakeHost(): FakeSpeechHost {
-  return new FakeSpeechHost();
+function fakeHost(): RecordingSpeechHost {
+  return new RecordingSpeechHost();
 }
 
 function unsupportedHost(): SpeechCaptureBrowserHost {
@@ -621,7 +621,7 @@ function unsupportedHost(): SpeechCaptureBrowserHost {
 }
 
 function nodeKind(value: unknown): string {
-  return value instanceof FakeNode ? value.kind : "unknown";
+  return value instanceof RecordingAudioNode ? value.kind : "unknown";
 }
 
 expect(new SpeechCaptureError("unsupported", "test")).toBeInstanceOf(Error);

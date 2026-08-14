@@ -179,6 +179,62 @@ describe("PromptEditor local dictation", () => {
     expect(editor.getText()).toBe("held turn");
   });
 
+  it("starts idle dictation from Enter and programmatic button activation as short taps", async () => {
+    const dictation = fakeDictation();
+    const editor = await mount({ dictation: dictation.capability });
+    const button = requiredMic(editor);
+
+    key(button, "keydown", "Enter");
+    button.click();
+    dictation.captureReady();
+    await settle(editor);
+    expect(dictation.captureCalls).toBe(1);
+    expect(statusText(editor)).toContain("Listening");
+
+    key(button, "keydown", "Enter");
+    button.click();
+    await settle(editor);
+    dictation.resolveStop(new Float32Array([0.4]));
+    await settle(editor);
+    dictation.resolveTranscribe({ text: "enter turn" });
+    await settle(editor);
+    expect(editor.getText()).toBe("enter turn");
+
+    button.click();
+    dictation.captureReady();
+    await settle(editor);
+    expect(dictation.captureCalls).toBe(2);
+    expect(statusText(editor)).toContain("Listening");
+  });
+
+  it("suppresses duplicate synthetic clicks after pointer and Space gestures", async () => {
+    const dictation = fakeDictation();
+    const editor = await mount({ dictation: dictation.capability });
+    const button = requiredMic(editor);
+
+    pointer(button, "pointerdown", 21);
+    pointer(button, "pointerup", 21);
+    button.click();
+    dictation.captureReady();
+    await settle(editor);
+    expect(dictation.captureCalls).toBe(1);
+    expect(statusText(editor)).toContain("Listening");
+
+    key(button, "keydown", "Enter");
+    dictation.resolveStop(new Float32Array([0.7]));
+    await settle(editor);
+    dictation.resolveTranscribe({ text: "first turn" });
+    await settle(editor);
+
+    key(button, "keydown", " ");
+    key(button, "keyup", " ");
+    button.click();
+    dictation.captureReady();
+    await settle(editor);
+    expect(dictation.captureCalls).toBe(2);
+    expect(statusText(editor)).toContain("Listening");
+  });
+
   it("supports keyboard parity, repeat suppression, manual-only readiness, Escape abort, and pointercancel", async () => {
     const dictation = fakeDictation({ capability: "manual-only", smartTurn: "unavailable", whisper: "ready" });
     const editor = await mount({ dictation: dictation.capability });
@@ -363,6 +419,32 @@ describe("PromptEditor local dictation", () => {
 
     expect(editor.getText()).toBe("new draft");
     expect(statusText(editor)).toContain("ready");
+  });
+
+  it("aborts active capture when runtime controls disconnect and ignores late speech results", async () => {
+    const dictation = fakeDictation();
+    const editor = await mount({ dictation: dictation.capability });
+    editor.replaceText("kept draft");
+    pointer(requiredMic(editor), "pointerdown");
+    dictation.captureReady();
+    pointer(requiredMic(editor), "pointerup");
+    await settle(editor);
+    expect(statusText(editor)).toContain("Listening");
+
+    editor.runtimeControlsAvailable = false;
+    await settle(editor);
+    expect(dictation.abortCalls).toBe(1);
+    expect(editor.replaceText("new editable draft")).toBe(true);
+    await settle(editor);
+
+    dictation.emitSpeech();
+    dictation.emitPause(new Float32Array([0.1]));
+    dictation.resolveCheck({ complete: true, probability: 0.9, samples: 1 });
+    dictation.resolveStop(new Float32Array([0.8]));
+    dictation.resolveTranscribe({ text: "late disconnected text" });
+    await settle(editor);
+
+    expect(editor.getText()).toBe("new editable draft");
   });
 
   it("keeps one action rail and one microphone across the Fold viewport set", async () => {

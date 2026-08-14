@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
-import { SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
+import { SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
 import {
   SpeechErrorResponseSchema,
   SpeechServiceStatusResponseSchema,
@@ -27,7 +27,8 @@ describe("speech HTTP contracts", () => {
       },
     })).toBe(true);
 
-    expect(Check(SpeechTurnDecisionResponseSchema, { complete: true, probability: 0.75, samples: 32_000 })).toBe(true);
+    expect(Check(SpeechTurnDecisionResponseSchema, { complete: true, probability: 0.75, samples: SPEECH_POLICY.audio.endpointWindowSamples })).toBe(true);
+    expect(Check(SpeechTurnDecisionResponseSchema, { complete: true, probability: 0.75, samples: SPEECH_POLICY.audio.endpointWindowSamples + 1 })).toBe(false);
     expect(Check(SpeechTranscriptionResponseSchema, { text: "spoken words" })).toBe(true);
     expect(Check(SpeechErrorResponseSchema, { error: { kind: "speech_unavailable", message: "Speech is unavailable.", retryable: true } })).toBe(true);
   });

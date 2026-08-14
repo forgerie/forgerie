@@ -1,6 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
+import { SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
 
 export const SpeechComponentStatusSchema = Type.Union([
   Type.Literal("warming"),
@@ -33,7 +33,7 @@ export const SpeechServiceStatusResponseSchema = Type.Object({
 export const SpeechTurnDecisionResponseSchema = Type.Object({
   complete: Type.Boolean(),
   probability: Type.Number({ minimum: 0, maximum: 1 }),
-  samples: Type.Integer({ minimum: 0 }),
+  samples: Type.Integer({ minimum: 0, maximum: SPEECH_POLICY.audio.endpointWindowSamples }),
 }, { additionalProperties: false });
 
 export const SpeechTranscriptionResponseSchema = Type.Object({

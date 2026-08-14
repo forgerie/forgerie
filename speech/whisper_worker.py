@@ -13,6 +13,7 @@ bounded stdin/stdout protocol to Node:
 
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -106,7 +107,7 @@ def wav_silence() -> bytes:
 
 
 def multipart_wav_body(wav: bytes) -> tuple[bytes, str]:
-    boundary = "forgerie-speech-boundary"
+    boundary = f"forgerie-speech-boundary-{secrets.token_hex(16)}"
     body = b"".join(
         [
             f"--{boundary}\r\ncontent-disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\ncontent-type: audio/wav\r\n\r\n".encode(),
@@ -249,7 +250,7 @@ def main() -> None:
                 return
             request_id = header.get("requestId")
             wav_bytes = header.get("wavBytes")
-            if not isinstance(wav_bytes, int) or wav_bytes < 0 or wav_bytes > max_wav_bytes:
+            if type(wav_bytes) is not int or wav_bytes < 0 or wav_bytes > max_wav_bytes:
                 response({"requestId": request_id, "status": "error", "error": "invalid wavBytes"})
                 return
             wav = read_exact(stream, wav_bytes)

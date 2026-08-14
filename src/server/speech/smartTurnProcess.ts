@@ -155,7 +155,7 @@ export class SmartTurnProcess {
         throw new SpeechProcessError("protocol", "Smart Turn response shape is invalid.");
       }
       const samples = response["samples"];
-      if (samples !== undefined && (typeof samples !== "number" || !Number.isInteger(samples) || samples < 0 || samples > this.policy.audio.maxTurnSamples)) {
+      if (samples !== undefined && (typeof samples !== "number" || !Number.isInteger(samples) || samples < 0 || samples > pcm.samples.length)) {
         throw new SpeechProcessError("protocol", "Smart Turn response sample count is invalid.");
       }
       return { complete: response["complete"], probability: response["probability"], samples: samples ?? pcm.samples.length };

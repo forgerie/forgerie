@@ -67,6 +67,25 @@ describe("speech capture worklet protocol", () => {
 
     expect(processor.port.posted.map(messageKind)).toEqual(["batch", "limit"]);
   });
+
+  it("downsamples 48 kHz input to averaged 16 kHz output samples", () => {
+    const processor = createProcessor({ sourceSampleRateHz: 48_000, targetSampleRateHz: 16_000, batchSamples: 2, maxSamples: 2, rmsThreshold: 0.1 });
+
+    expect(processor.process([[new Float32Array([0, 0.3, 0.6, 0.9, -0.3, -0.6])]])).toBe(true);
+    expect(processor.process([[new Float32Array([0.5, 0.5, 0.5])]])).toBe(false);
+
+    const batch = processor.port.posted[0];
+    expect(processor.port.posted.map(messageKind)).toEqual(["batch", "limit"]);
+    expect(messageProperty(batch, "startSample")).toBe(0);
+    expect(messageProperty(batch, "endSample")).toBe(2);
+    const samples = messageProperty(batch, "samples");
+    if (!(samples instanceof Float32Array)) throw new Error("Expected downsampled Float32Array");
+    expect(samples[0]).toBeCloseTo(0.3);
+    expect(samples[1]).toBeCloseTo(0);
+    expect(messageProperty(batch, "rms")).toBeCloseTo(Math.sqrt((0.3 * 0.3) / 2));
+    expect(messageProperty(batch, "voiced")).toBe(true);
+    expect(messageProperty(processor.port.posted[1], "totalSamples")).toBe(2);
+  });
 });
 
 function createProcessor(processorOptions: Record<string, number>): ProcessorInstance {
