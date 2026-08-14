@@ -100,6 +100,24 @@ describe("PromptEditor control rail", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("keeps held pointer activation suppression until the release click", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("do not queue after held pointer");
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 42, pointerType: "touch", button: 0, clientX: 10, clientY: 10 }));
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    vi.runOnlyPendingTimers();
+    queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 42, pointerType: "touch", button: 0, clientX: 10, clientY: 10 }));
+    queue.click();
+
+    expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("confirms the disclosed Steer action exactly once and returns focus to the draft", async () => {
     vi.useFakeTimers();
     const onSend = vi.fn();
@@ -268,6 +286,24 @@ describe("PromptEditor control rail", () => {
 
     expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps held keyboard activation suppression until the release click", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("do not queue after held keyboard");
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(keyEvent("keydown", "Enter"));
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    vi.runOnlyPendingTimers();
+    queue.dispatchEvent(keyEvent("keyup", "Enter"));
+    queue.click();
+
+    expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("expires keyboard click suppression when no native click follows the activation", async () => {
@@ -488,6 +524,7 @@ function pressEnter(composer: PromptEditor): void {
 async function openSteerByPointerHold(composer: PromptEditor, queue: HTMLButtonElement): Promise<void> {
   queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 7, pointerType: "touch", button: 0, clientX: 10, clientY: 10 }));
   vi.advanceTimersByTime(500);
+  queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 7, pointerType: "touch", button: 0, clientX: 10, clientY: 10 }));
   await composer.updateComplete;
   const opened = composer.shadowRoot?.querySelector("composer-popover");
   expect(opened).not.toBeNull();

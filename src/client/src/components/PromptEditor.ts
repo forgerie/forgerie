@@ -22,6 +22,21 @@ import "./ContextUsageMeter";
 import "./GuidancePicker";
 import "./ComposerPopover";
 
+type QueuePressOutcome = "pending" | "consumed";
+
+interface QueuePointerPress {
+  readonly outcome: QueuePressOutcome;
+  readonly x: number;
+  readonly y: number;
+  readonly pointerId: number;
+  readonly button: HTMLButtonElement;
+}
+
+interface QueueKeyboardPress {
+  readonly outcome: QueuePressOutcome;
+  readonly key: " " | "Enter";
+}
+
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
   /**
@@ -100,10 +115,10 @@ export class PromptEditor extends LitElement {
   private pendingReplacement: { kind: "text"; text: string } | { kind: "snapshot"; snapshot: ComposerDraftSubmitSnapshot } | undefined;
   private cachedRuntimeKey = "";
   private cachedRuntime: ComposerRuntime = createSessionComposerRuntime({ machineId: "local" });
-  private queuePointerPress: { readonly x: number; readonly y: number; readonly pointerId: number; readonly button: HTMLButtonElement } | undefined;
+  private queuePointerPress: QueuePointerPress | undefined;
   private queuePressTimer: ReturnType<typeof setTimeout> | undefined;
   private queueSuppressClickTimer: ReturnType<typeof setTimeout> | undefined;
-  private queueKeyboardPress: { readonly key: " " | "Enter" } | undefined;
+  private queueKeyboardPress: QueueKeyboardPress | undefined;
   private queueSuppressClick = false;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
@@ -710,8 +725,9 @@ export class PromptEditor extends LitElement {
     if (!rail.canSteer || !rail.canInvokeQueue || !isPrimaryQueuePointerPress(event)) return;
     const button = event.currentTarget;
     if (!(button instanceof HTMLButtonElement)) return;
+    if (this.queuePointerPress !== undefined) return;
     this.cancelQueuePress({ clearSuppression: true });
-    this.queuePointerPress = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, button };
+    this.queuePointerPress = { outcome: "pending", x: event.clientX, y: event.clientY, pointerId: event.pointerId, button };
     button.setPointerCapture(event.pointerId);
     this.queuePressTimer = setTimeout(() => { this.openSteerFromQueueHold(); }, COMPOSER_QUEUE_HOLD_MS);
   }
@@ -719,17 +735,18 @@ export class PromptEditor extends LitElement {
   private onQueuePointerMove(event: PointerEvent): void {
     const origin = this.queuePointerPress;
     if (origin === undefined) return;
-    if (event.pointerId !== origin.pointerId) return;
+    if (event.pointerId !== origin.pointerId || origin.outcome !== "pending") return;
     const travel = composerQueuePressTravel(event.clientX - origin.x, event.clientY - origin.y);
-    if (readComposerQueuePress(travel, 0) === "abandoned") {
-      this.cancelQueuePress({ clearSuppression: false });
-      this.suppressQueueClickForActivation();
-    }
+    if (readComposerQueuePress(travel, 0) === "abandoned") this.consumeQueuePointerPress();
   }
 
   private onQueuePointerUp(event: PointerEvent): void {
-    if (event.pointerId !== this.queuePointerPress?.pointerId) return;
-    this.cancelQueuePress({ clearSuppression: false });
+    const press = this.queuePointerPress;
+    if (event.pointerId !== press?.pointerId) return;
+    this.clearQueuePressTimer();
+    this.releaseQueuePointerCapture(press);
+    this.queuePointerPress = undefined;
+    if (press.outcome === "consumed") this.armQueueClickSuppression();
   }
 
   private onQueuePointerCancel(event: PointerEvent): void {
@@ -744,31 +761,32 @@ export class PromptEditor extends LitElement {
     if (event.repeat || this.queueKeyboardPress !== undefined) return;
     const key = event.key === "Enter" ? "Enter" : " ";
     this.cancelQueuePress({ clearSuppression: true });
-    this.queueKeyboardPress = { key };
+    this.queueKeyboardPress = { outcome: "pending", key };
     this.queuePressTimer = setTimeout(() => { this.openSteerFromQueueHold(); }, COMPOSER_QUEUE_HOLD_MS);
   }
 
   private onQueueKeyUp(event: KeyboardEvent, rail: ComposerRail): void {
-    if (event.key !== this.queueKeyboardPress?.key) return;
+    const press = this.queueKeyboardPress;
+    if (event.key !== press?.key) return;
     event.preventDefault();
     event.stopPropagation();
-    const hadTimer = this.queuePressTimer !== undefined;
-    this.cancelQueuePress({ clearSuppression: false });
-    this.suppressQueueClickForActivation();
-    if (hadTimer && rail.canInvokeQueue) this.submitDraft("followUp");
+    const shouldQueue = press.outcome === "pending" && rail.canInvokeQueue;
+    this.clearQueuePressTimer();
+    this.queueKeyboardPress = undefined;
+    this.armQueueClickSuppression();
+    if (shouldQueue) this.submitDraft("followUp");
   }
 
   private onQueueContextMenu(event: MouseEvent, rail: ComposerRail): void {
     if (!rail.canSteer || !rail.canInvokeQueue) return;
     event.preventDefault();
     this.cancelQueuePress({ clearSuppression: true });
-    this.suppressQueueClickForActivation();
+    this.armQueueClickSuppression();
     this.openSteerDisclosure();
   }
 
   private openSteerFromQueueHold(): void {
-    this.cancelQueuePress({ clearSuppression: false });
-    this.suppressQueueClickForActivation();
+    if (!this.consumeQueuePressForHold()) return;
     this.openSteerDisclosure();
   }
 
@@ -796,16 +814,45 @@ export class PromptEditor extends LitElement {
   }
 
   private cancelQueuePress(options: { clearSuppression: boolean }): void {
-    if (this.queuePressTimer !== undefined) clearTimeout(this.queuePressTimer);
-    this.queuePressTimer = undefined;
+    this.clearQueuePressTimer();
     const pointerPress = this.queuePointerPress;
-    if (pointerPress?.button.hasPointerCapture(pointerPress.pointerId) === true) pointerPress.button.releasePointerCapture(pointerPress.pointerId);
+    if (pointerPress !== undefined) this.releaseQueuePointerCapture(pointerPress);
     this.queuePointerPress = undefined;
     this.queueKeyboardPress = undefined;
     if (options.clearSuppression) this.clearQueueClickSuppression();
   }
 
-  private suppressQueueClickForActivation(): void {
+  private consumeQueuePressForHold(): boolean {
+    if (this.queuePointerPress?.outcome === "pending") {
+      this.consumeQueuePointerPress();
+      return true;
+    }
+    if (this.queueKeyboardPress?.outcome === "pending") {
+      this.clearQueuePressTimer();
+      this.queueKeyboardPress = { ...this.queueKeyboardPress, outcome: "consumed" };
+      return true;
+    }
+    return false;
+  }
+
+  private consumeQueuePointerPress(): void {
+    const press = this.queuePointerPress;
+    if (press === undefined || press.outcome === "consumed") return;
+    this.clearQueuePressTimer();
+    this.releaseQueuePointerCapture(press);
+    this.queuePointerPress = { ...press, outcome: "consumed" };
+  }
+
+  private clearQueuePressTimer(): void {
+    if (this.queuePressTimer !== undefined) clearTimeout(this.queuePressTimer);
+    this.queuePressTimer = undefined;
+  }
+
+  private releaseQueuePointerCapture(press: QueuePointerPress): void {
+    if (press.button.hasPointerCapture(press.pointerId)) press.button.releasePointerCapture(press.pointerId);
+  }
+
+  private armQueueClickSuppression(): void {
     this.clearQueueClickSuppression();
     this.queueSuppressClick = true;
     this.queueSuppressClickTimer = setTimeout(() => { this.clearQueueClickSuppression(); }, 0);
