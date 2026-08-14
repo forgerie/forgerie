@@ -229,7 +229,9 @@ export class PromptEditor extends LitElement {
     const shellMode = shellInputMode !== undefined;
     const rail = this.rail();
     const dictationBlocksComposer = this.dictationBlocksComposer();
-    const busy = this.sending || this.guidancePending || this.attachmentCapturePending || dictationBlocksComposer;
+    // Attachment capture blocks send/queue through rail(), but it must not set
+    // ComposerDraft.submissionDisabled or the draft will reject its own result.
+    const busy = this.sending || this.guidancePending || dictationBlocksComposer;
     const resting = this.isResting();
     return html`
       ${this.openChoice === undefined || this.capabilities.model === undefined ? nothing : this.renderChoicePopover(this.capabilities.model)}
@@ -674,6 +676,12 @@ export class PromptEditor extends LitElement {
     const stop = this.capabilities.stop;
     if (this.disabled || stop?.stoppable !== true) return;
     this.resetSteerDisclosure();
+    if (this.dictationBlocksComposer()) {
+      this.resetDictationGesture();
+      // cancel() releases the draft lock synchronously before it awaits track
+      // cleanup, so restored queued messages can safely replace the draft.
+      this.dictationController?.cancel();
+    }
     stop.onStop();
   }
 
@@ -1120,7 +1128,11 @@ export class PromptEditor extends LitElement {
       createCaptureSession: capability.createCaptureSession,
       onStateChange: (state) => {
         this.dictationState = state;
-        if (this.dictationBlocksComposer()) this.closeChoice(false);
+        if (this.dictationBlocksComposer()) {
+          this.closeChoice(false);
+          this.resetSteerDisclosure();
+          this.closeGuidance(false, true);
+        }
         this.applyPendingDictationStatusIfSettled();
       },
     });

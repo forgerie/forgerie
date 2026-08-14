@@ -508,7 +508,7 @@ describe("PromptEditor local dictation", () => {
     expect(document.activeElement).not.toBe(editor);
   });
 
-  it("blocks mutable composer controls and public operations while capture is active, but keeps emergency stop", async () => {
+  it("locks the streaming Queue and disclosures, but aborts dictation before emergency Stop restores the draft", async () => {
     const dictation = fakeDictation();
     const onSend = vi.fn();
     const onStop = vi.fn();
@@ -521,14 +521,26 @@ describe("PromptEditor local dictation", () => {
         stop: { stoppable: true, onStop },
       },
     });
+    onStop.mockImplementation(() => {
+      expect(editor.replaceText("restored queued draft")).toBe(true);
+    });
+    editor.canSteer = true;
     editor.replaceText("locked");
     await editor.updateComplete;
+
+    const queue = button(editor, ".queue-button");
+    queue.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+    await settle(editor);
+    expect(editor.shadowRoot?.querySelector(".steer-confirm-button")).not.toBeNull();
 
     pointer(requiredMic(editor), "pointerdown");
     dictation.captureReady();
     await settle(editor);
 
     expect(editor.shadowRoot?.querySelector(".send-button")).toBeNull();
+    expect(editor.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+    expect(queue.disabled).toBe(true);
+    queue.click();
     expect(onSend).not.toHaveBeenCalled();
     expect(attachButton(editor).disabled).toBe(true);
     expect(button(editor, ".select-model").disabled).toBe(true);
@@ -539,6 +551,8 @@ describe("PromptEditor local dictation", () => {
 
     button(editor, ".stop-button").click();
     expect(onStop).toHaveBeenCalledTimes(1);
+    expect(dictation.abortCalls).toBe(1);
+    expect(editor.getText()).toBe("restored queued draft");
   });
 });
 
