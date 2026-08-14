@@ -6,6 +6,7 @@ import { sessionGuidanceSummary } from "../../../shared/sessionGuidance";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import { createSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import { composerRail, type ComposerRail } from "../composerRail";
+import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointerPress, isQueueHoldKey, readComposerQueuePress } from "../composerQueuePress";
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
@@ -76,6 +77,8 @@ export class PromptEditor extends LitElement {
   @query(".guidance-trigger") private guidanceTrigger?: HTMLButtonElement;
   @query(".select-model") private modelTrigger?: HTMLButtonElement;
   @query(".select-thinking") private thinkingTrigger?: HTMLButtonElement;
+  @query(".queue-button") private queueTrigger?: HTMLButtonElement;
+  @query(".steer-confirm-button") private steerConfirmButton?: HTMLButtonElement;
 
   @state() private composerFocused = false;
   @state() private currentInputMode: InputMode = { kind: "normal" };
@@ -90,20 +93,32 @@ export class PromptEditor extends LitElement {
   @state() private choiceLoading = false;
   @state() private guidancePending = false;
   @state() private guidanceError: string | undefined = undefined;
+  @state() private steerOpen = false;
   private guidanceRequestVersion = 0;
   private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
   private pendingReplacement: { kind: "text"; text: string } | { kind: "snapshot"; snapshot: ComposerDraftSubmitSnapshot } | undefined;
   private cachedRuntimeKey = "";
   private cachedRuntime: ComposerRuntime = createSessionComposerRuntime({ machineId: "local" });
+  private queuePointerPress: { readonly x: number; readonly y: number; readonly pointerId: number; readonly button: HTMLButtonElement } | undefined;
+  private queuePressTimer: ReturnType<typeof setTimeout> | undefined;
+  private queueKeyboardPress: { readonly key: " " | "Enter" } | undefined;
+  private queueSuppressClick = false;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     const sessionChanged = changed.has("sessionId") || changed.has("machineId");
     if (sessionChanged) {
       this.lastEscapeTime = 0;
       this.resetGuidanceDisclosure();
+      this.resetSteerDisclosure();
     }
-    if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) this.resetGuidanceDisclosure();
+    if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) {
+      this.resetGuidanceDisclosure();
+      this.resetSteerDisclosure();
+    }
+    if (changed.has("canSteer") || changed.has("isCompacting") || changed.has("disabled") || changed.has("submissionAvailable") || changed.has("sendAvailable")) {
+      if (!this.rail().canSteer) this.resetSteerDisclosure();
+    }
   }
 
   protected override shouldUpdate(changed: PropertyValues<this>): boolean {
@@ -123,6 +138,7 @@ export class PromptEditor extends LitElement {
 
   override disconnectedCallback(): void {
     this.resetGuidanceDisclosure();
+    this.resetSteerDisclosure();
     super.disconnectedCallback();
   }
 
@@ -134,6 +150,7 @@ export class PromptEditor extends LitElement {
     const resting = this.isResting();
     return html`
       ${this.openChoice === undefined || this.capabilities.model === undefined ? nothing : this.renderChoicePopover(this.capabilities.model)}
+      ${this.steerOpen && rail.canSteer ? this.renderSteerPopover() : nothing}
       ${this.guidanceOpen ? html`
         <composer-popover
           label="Session guidance"
@@ -186,7 +203,7 @@ export class PromptEditor extends LitElement {
               data-action="new-session"
               title=${NEW_SESSION_LABEL}
               aria-label=${NEW_SESSION_LABEL}
-              @click=${() => { this.closeGuidance(false, true); this.capabilities.newSession?.onNewSession(); }}
+              @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.capabilities.newSession?.onNewSession(); }}
             >${renderNewSessionIcon()}</button>
           `}
           ${this.renderDismissAction()}
@@ -334,7 +351,7 @@ export class PromptEditor extends LitElement {
         ?disabled=${this.disabled || dismiss.disabled === true}
         title=${label}
         aria-label=${label}
-        @click=${() => { this.closeGuidance(false, true); this.closeChoice(false); dismiss.onDismiss(); }}
+        @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.closeChoice(false); dismiss.onDismiss(); }}
       >${renderDismissIcon()}</button>
     `;
   }
@@ -368,14 +385,47 @@ export class PromptEditor extends LitElement {
 
   private renderQueueAction(rail: ComposerRail) {
     if (!rail.canQueue) return nothing;
+    const steerAvailable = rail.canSteer;
+    const descriptionId = "queue-steer-description";
     return html`
       <button
-        class="icon-button queue-button"
+        class=${`icon-button queue-button${steerAvailable ? " has-steer" : ""}`}
         ?disabled=${!rail.canInvokeQueue}
-        title="Queue until the current activity finishes"
+        title=${steerAvailable ? "Queue until the current activity finishes; hold for Steer" : "Queue until the current activity finishes"}
         aria-label="Queue message"
-        @click=${() => { this.submitDraft("followUp"); }}
-      >${renderQueueIcon()}</button>
+        aria-describedby=${steerAvailable ? descriptionId : nothing}
+        aria-haspopup=${steerAvailable ? "dialog" : nothing}
+        aria-expanded=${steerAvailable ? String(this.steerOpen) : nothing}
+        aria-controls=${steerAvailable ? "queue-steer-popover" : nothing}
+        @click=${(event: MouseEvent) => { this.onQueueClick(event, rail); }}
+        @pointerdown=${steerAvailable ? (event: PointerEvent) => { this.onQueuePointerDown(event, rail); } : nothing}
+        @pointermove=${steerAvailable ? (event: PointerEvent) => { this.onQueuePointerMove(event); } : nothing}
+        @pointerup=${steerAvailable ? () => { this.onQueuePointerUp(); } : nothing}
+        @pointercancel=${steerAvailable ? () => { this.cancelQueuePress({ clearSuppression: true }); } : nothing}
+        @keydown=${steerAvailable ? (event: KeyboardEvent) => { this.onQueueKeyDown(event, rail); } : nothing}
+        @keyup=${steerAvailable ? (event: KeyboardEvent) => { this.onQueueKeyUp(event, rail); } : nothing}
+        @blur=${steerAvailable ? () => { this.cancelQueuePress({ clearSuppression: true }); } : nothing}
+        @contextmenu=${steerAvailable ? (event: MouseEvent) => { this.onQueueContextMenu(event, rail); } : nothing}
+      >${renderQueueIcon()}${steerAvailable ? html`<span class="queue-steer-cue" aria-hidden="true">⋯</span><span id=${descriptionId} class="visually-hidden">Hold for Steer current response.</span>` : nothing}</button>
+    `;
+  }
+
+  private renderSteerPopover() {
+    return html`
+      <composer-popover
+        id="queue-steer-popover"
+        label="Steer current response"
+        .anchor=${this.queueTrigger}
+        .onClose=${(restoreFocus: boolean) => { this.closeSteer(restoreFocus); }}
+      >
+        <div class="steer-confirmation">
+          <button
+            class="steer-confirm-button"
+            type="button"
+            @click=${() => { this.confirmSteer(); }}
+          >Steer current response</button>
+        </div>
+      </composer-popover>
     `;
   }
 
@@ -493,6 +543,7 @@ export class PromptEditor extends LitElement {
   private selectModel(): void {
     const model = this.capabilities.model;
     if (this.disabled || model === undefined || model.changeable === false) return;
+    this.closeSteer(false);
     this.closeGuidance(false, true);
     if (this.openChoice === "model") {
       this.closeChoice(true);
@@ -505,6 +556,7 @@ export class PromptEditor extends LitElement {
   private selectThinking(): void {
     const model = this.capabilities.model;
     if (this.disabled || model === undefined || model.changeable === false) return;
+    this.closeSteer(false);
     this.closeGuidance(false, true);
     this.openChoice = this.openChoice === "thinking" ? undefined : "thinking";
   }
@@ -569,6 +621,7 @@ export class PromptEditor extends LitElement {
       this.closeGuidance(true);
       return;
     }
+    this.closeSteer(false);
     this.draftElement?.closeCompletionMenu();
     this.guidanceError = undefined;
     this.guidanceOpen = true;
@@ -620,7 +673,7 @@ export class PromptEditor extends LitElement {
         class="composer-archive icon-button"
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
-        @click=${() => { this.closeGuidance(false, true); this.capabilities.archive?.onArchiveAndNext(); }}
+        @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.capabilities.archive?.onArchiveAndNext(); }}
       >${renderArchiveIcon()}</button>
     `;
   }
@@ -632,9 +685,115 @@ export class PromptEditor extends LitElement {
         ?disabled=${this.disabled || busy}
         title="Attach files"
         aria-label="Attach files"
-        @click=${() => { this.closeGuidance(false, true); this.openAttachmentPicker(); }}
+        @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.openAttachmentPicker(); }}
       >${renderAttachIcon()}</button>
     `;
+  }
+
+  private onQueueClick(event: MouseEvent, rail: ComposerRail): void {
+    if (this.queueSuppressClick) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.queueSuppressClick = false;
+      return;
+    }
+    if (!rail.canInvokeQueue) return;
+    this.submitDraft("followUp");
+  }
+
+  private onQueuePointerDown(event: PointerEvent, rail: ComposerRail): void {
+    if (!rail.canSteer || !rail.canInvokeQueue || !isPrimaryQueuePointerPress(event)) return;
+    const button = event.currentTarget;
+    if (!(button instanceof HTMLButtonElement)) return;
+    this.cancelQueuePress({ clearSuppression: true });
+    this.queuePointerPress = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, button };
+    button.setPointerCapture(event.pointerId);
+    this.queuePressTimer = setTimeout(() => { this.openSteerFromQueueHold(); }, COMPOSER_QUEUE_HOLD_MS);
+  }
+
+  private onQueuePointerMove(event: PointerEvent): void {
+    const origin = this.queuePointerPress;
+    if (origin === undefined) return;
+    const travel = composerQueuePressTravel(event.clientX - origin.x, event.clientY - origin.y);
+    if (readComposerQueuePress(travel, 0) === "abandoned") this.cancelQueuePress({ clearSuppression: true });
+  }
+
+  private onQueuePointerUp(): void {
+    this.cancelQueuePress({ clearSuppression: false });
+  }
+
+  private onQueueKeyDown(event: KeyboardEvent, rail: ComposerRail): void {
+    if (!rail.canSteer || !rail.canInvokeQueue || !isQueueHoldKey(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat || this.queueKeyboardPress !== undefined) return;
+    const key = event.key === "Enter" ? "Enter" : " ";
+    this.cancelQueuePress({ clearSuppression: true });
+    this.queueKeyboardPress = { key };
+    this.queuePressTimer = setTimeout(() => { this.openSteerFromQueueHold(); }, COMPOSER_QUEUE_HOLD_MS);
+  }
+
+  private onQueueKeyUp(event: KeyboardEvent, rail: ComposerRail): void {
+    if (event.key !== this.queueKeyboardPress?.key) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const hadTimer = this.queuePressTimer !== undefined;
+    this.cancelQueuePress({ clearSuppression: false });
+    this.queueSuppressClick = true;
+    if (hadTimer && rail.canInvokeQueue) this.submitDraft("followUp");
+  }
+
+  private onQueueContextMenu(event: MouseEvent, rail: ComposerRail): void {
+    if (!rail.canSteer || !rail.canInvokeQueue) return;
+    event.preventDefault();
+    this.cancelQueuePress({ clearSuppression: true });
+    this.openSteerDisclosure();
+  }
+
+  private openSteerFromQueueHold(): void {
+    const pointerPress = this.queuePointerPress;
+    this.cancelQueuePress({ clearSuppression: false });
+    this.queueSuppressClick = true;
+    if (pointerPress?.button.hasPointerCapture(pointerPress.pointerId) === true) pointerPress.button.releasePointerCapture(pointerPress.pointerId);
+    this.openSteerDisclosure();
+  }
+
+  private openSteerDisclosure(): void {
+    if (!this.rail().canSteer) return;
+    this.closeGuidance(false, true);
+    this.closeChoice(false);
+    this.draftElement?.closeCompletionMenu();
+    this.steerOpen = true;
+    void this.updateComplete.then(() => { this.steerConfirmButton?.focus(); });
+  }
+
+  private closeSteer(restoreFocus: boolean): void {
+    if (!this.steerOpen) return;
+    this.steerOpen = false;
+    if (!restoreFocus) return;
+    void this.updateComplete.then(() => {
+      if (this.isConnected && this.rail().canSteer) this.queueTrigger?.focus();
+    });
+  }
+
+  private resetSteerDisclosure(): void {
+    this.cancelQueuePress({ clearSuppression: true });
+    this.steerOpen = false;
+  }
+
+  private cancelQueuePress(options: { clearSuppression: boolean }): void {
+    if (this.queuePressTimer !== undefined) clearTimeout(this.queuePressTimer);
+    this.queuePressTimer = undefined;
+    this.queuePointerPress = undefined;
+    this.queueKeyboardPress = undefined;
+    if (options.clearSuppression) this.queueSuppressClick = false;
+  }
+
+  private confirmSteer(): void {
+    if (!this.rail().canSteer) return;
+    this.closeSteer(false);
+    this.submitDraft("steer");
+    void this.updateComplete.then(() => { this.focusInput(); });
   }
 
   private submitDraft(streamingBehavior?: "steer" | "followUp"): void {

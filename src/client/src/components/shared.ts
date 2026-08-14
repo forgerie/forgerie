@@ -935,11 +935,13 @@ export const promptEditorStyles = css`
   @container (min-width: 700px) {
   }
   .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
-  /* Queue and steer read as one control with two targets: steering is a way of
-     answering the running turn, not a separate errand. */
   .primary-action { flex: 0 0 auto; display: inline-flex; align-items: center; }
-  .primary-action:has(.steer-button) .send-button { border-start-end-radius: 0; border-end-end-radius: 0; }
-  .primary-action .steer-button { margin-inline-start: -1px; border-start-start-radius: 0; border-end-start-radius: 0; }
+  .queue-button { position: relative; touch-action: manipulation; -webkit-touch-callout: none; }
+  .queue-button.has-steer { touch-action: none; }
+  .queue-steer-cue { position: absolute; inset-block-start: 2px; inset-inline-end: 4px; font: 700 10px/1 system-ui, sans-serif; color: currentColor; opacity: .72; pointer-events: none; }
+  .steer-confirmation { padding: 8px; }
+  .steer-confirm-button { min-width: 180px; text-align: start; }
+  .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; clip-path: inset(50%) !important; white-space: nowrap !important; border: 0 !important; }
   .icon-button .prompt-action-icon, .icon-button .prompt-thinking-gauge, .icon-button .new-session-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .icon-button .prompt-action-icon-filled { fill: currentColor; stroke: none; }
   .send-button:not(:disabled) { color: var(--pi-accent, var(--pi-text)); }
