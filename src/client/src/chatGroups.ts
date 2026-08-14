@@ -116,19 +116,16 @@ export function chatTurns(groups: ChatGroup[]): ChatTurn[] {
   return turns;
 }
 
-export interface ChatResponseStart {
+export interface ChatTurnStart {
   readonly turn: ChatTurn;
   readonly group: ChatGroup;
 }
 
-/** The first rendered agent content in the newest turn whose human opener is loaded. */
-export function latestChatResponseStart(groups: ChatGroup[]): ChatResponseStart | undefined {
+/** The human opener of the newest turn, when that opener is loaded. */
+export function latestChatTurnStart(groups: ChatGroup[]): ChatTurnStart | undefined {
   const turn = chatTurns(groups).at(-1);
   if (turn?.openedByIndex === undefined) return undefined;
-  const group = turn.groups.slice(1).find((candidate) => (
-    candidate.kind === "tool-image"
-    || (candidate.kind === "message" && (candidate.message.role === "assistant" || candidate.message.role === "system"))
-  ));
+  const group = turn.groups[0];
   return group === undefined ? undefined : { turn, group };
 }
 

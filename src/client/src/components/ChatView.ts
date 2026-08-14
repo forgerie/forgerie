@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
-import { chatTurns, foldMetaSources, groupChatMessages, latestChatResponseStart, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
+import { chatTurns, foldMetaSources, groupChatMessages, latestChatTurnStart, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
 import { livenessStep } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
@@ -36,7 +36,7 @@ export interface QueuedMessageSection {
 }
 
 export interface ChatInitialReadingTarget {
-  readonly kind: "latest-response";
+  readonly kind: "latest-turn";
   readonly id: string;
 }
 
@@ -45,6 +45,8 @@ type ImageLoadScrollSettlement =
   | { readonly kind: "anchor"; readonly sessionId: string; readonly position: ChatAnchorScrollPosition };
 
 const INACTIVE_IMAGE_LOAD_SCROLL_SETTLEMENT: ImageLoadScrollSettlement = { kind: "inactive" };
+// Container reflow can finish after the resize event's first animation frame.
+const VIEWPORT_RESIZE_RESTORE_SETTLE_FRAMES = 3;
 
 export function chatQueuedMessageSections(
   clientQueued: QueuedSessionMessage[],
@@ -281,6 +283,7 @@ export class ChatView extends LitElement {
   private loadMoreCheckFrame: number | undefined;
   private scrollToBottomFrame: number | undefined;
   private alignAnchoredTurnFrame: number | undefined;
+  private viewportResizeRestoreFrame: number | undefined;
   private scrollToOpenAskFrame: number | undefined;
   private scrollToOpenDialogFrame: number | undefined;
   private initialReadingTargetFrame: number | undefined;
@@ -322,6 +325,24 @@ export class ChatView extends LitElement {
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
+    if (this.imageLoadScrollSettlement.kind === "anchor") {
+      if (this.viewportResizeRestoreFrame !== undefined) return;
+      let frames = 0;
+      const settle = () => {
+        if (!this.restoreSettlingScrollAnchor()) {
+          this.viewportResizeRestoreFrame = undefined;
+          return;
+        }
+        frames += 1;
+        if (frames < VIEWPORT_RESIZE_RESTORE_SETTLE_FRAMES) {
+          this.viewportResizeRestoreFrame = requestAnimationFrame(settle);
+          return;
+        }
+        this.viewportResizeRestoreFrame = undefined;
+      };
+      this.viewportResizeRestoreFrame = requestAnimationFrame(settle);
+      return;
+    }
     if (this.followMode.kind === "tail" && this.initialReadingTarget === undefined && !this.defaultScrollRestoreDeferred) this.scrollToBottom();
     else if (this.followMode.kind === "turn") this.alignAnchoredTurn();
     else this.lastClientHeight = this.chat?.clientHeight ?? 0;
@@ -371,6 +392,7 @@ export class ChatView extends LitElement {
     if (this.loadMoreCheckFrame !== undefined) cancelAnimationFrame(this.loadMoreCheckFrame);
     if (this.scrollToBottomFrame !== undefined) cancelAnimationFrame(this.scrollToBottomFrame);
     if (this.alignAnchoredTurnFrame !== undefined) cancelAnimationFrame(this.alignAnchoredTurnFrame);
+    if (this.viewportResizeRestoreFrame !== undefined) cancelAnimationFrame(this.viewportResizeRestoreFrame);
     if (this.scrollToOpenAskFrame !== undefined) {
       cancelAnimationFrame(this.scrollToOpenAskFrame);
       this.scrollToOpenAskFrame = undefined;
@@ -417,6 +439,10 @@ export class ChatView extends LitElement {
     if (this.alignAnchoredTurnFrame !== undefined) {
       cancelAnimationFrame(this.alignAnchoredTurnFrame);
       this.alignAnchoredTurnFrame = undefined;
+    }
+    if (this.viewportResizeRestoreFrame !== undefined) {
+      cancelAnimationFrame(this.viewportResizeRestoreFrame);
+      this.viewportResizeRestoreFrame = undefined;
     }
     if (this.restoreScrollFrame !== undefined) {
       cancelAnimationFrame(this.restoreScrollFrame);
@@ -569,8 +595,8 @@ export class ChatView extends LitElement {
     this.applyingInitialReadingTargetId = target.id;
     let restartAfterRender = false;
     try {
-      let response = latestChatResponseStart(this.groupedMessages());
-      if (response === undefined) {
+      let turnStart = latestChatTurnStart(this.groupedMessages());
+      if (turnStart === undefined) {
         const latestTurn = this.turns().at(-1);
         if (latestTurn?.openedByIndex === undefined && this.hasMore) {
           this.requestLoadMore();
@@ -581,21 +607,21 @@ export class ChatView extends LitElement {
         return;
       }
 
-      const turnKey = this.turnRenderKey(response.turn);
+      const turnKey = this.turnRenderKey(turnStart.turn);
       if (this.reservedTurnKey !== turnKey) {
         this.reservedTurnKey = turnKey;
         await this.updateComplete;
         if (!this.isCurrentInitialReadingTarget(target)) return;
-        const currentResponse = latestChatResponseStart(this.groupedMessages());
-        if (currentResponse === undefined || this.turnRenderKey(currentResponse.turn) !== turnKey) {
-          if (currentResponse !== undefined) this.reservedTurnKey = this.turnRenderKey(currentResponse.turn);
+        const currentTurnStart = latestChatTurnStart(this.groupedMessages());
+        if (currentTurnStart === undefined || this.turnRenderKey(currentTurnStart.turn) !== turnKey) {
+          if (currentTurnStart !== undefined) this.reservedTurnKey = this.turnRenderKey(currentTurnStart.turn);
           restartAfterRender = true;
           return;
         }
-        response = currentResponse;
+        turnStart = currentTurnStart;
       }
 
-      const anchorId = this.groupRenderKeyFor(response.group);
+      const anchorId = this.groupRenderKeyFor(turnStart.group);
       const anchor = this.scrollAnchorElements().find((element) => element.dataset["scrollAnchorId"] === anchorId);
       const chat = this.chat;
       if (chat === undefined || anchor === undefined) return;

@@ -2980,7 +2980,7 @@ export class PiWebApp extends LitElement {
       identity,
       catalogId: projection.catalogId,
       completionOrder: summary.completionOrder,
-      target: { kind: "latest-response", id: JSON.stringify([seq, projection.catalogId, summary.completionOrder, identity]) },
+      target: { kind: "latest-turn", id: JSON.stringify([seq, projection.catalogId, summary.completionOrder, identity]) },
     };
   }
 

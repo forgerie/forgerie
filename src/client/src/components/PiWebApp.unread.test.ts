@@ -58,7 +58,7 @@ describe("PiWebApp session unread wiring", () => {
     handleRealtimeEvent(app, unreadEvent(1, unreadSummary(background, 1)));
 
     const identity = JSON.stringify(["local", background.id, background.cwd]);
-    const target = { kind: "latest-response" as const, id: "reading-target-1" };
+    const target = { kind: "latest-turn" as const, id: "reading-target-1" };
     if (!Reflect.set(app, "pendingChatReadingTarget", { seq: 1, identity, target })) throw new Error("Could not install reading target");
     setState(app, { selectedSession: background });
     exposeSelectedChat(app);
@@ -435,7 +435,7 @@ function exposeSelectedChat(app: PiWebApp): void {
   invokeUpdated(app);
 }
 
-function applyInitialReadingTarget(app: PiWebApp, target: { readonly kind: "latest-response"; readonly id: string }): void {
+function applyInitialReadingTarget(app: PiWebApp, target: { readonly kind: "latest-turn"; readonly id: string }): void {
   const handler: unknown = Reflect.get(app, "handleInitialReadingTargetApplied");
   if (typeof handler !== "function") throw new Error("Initial reading target handler is unavailable");
   Reflect.apply(handler, app, [target]);

@@ -84,7 +84,7 @@ describe("PiWebApp chat opening", () => {
     await vi.waitFor(() => { expect(selectSession).toHaveBeenCalledWith(target); });
   });
 
-  it("carries a one-shot latest-response target when the selected inbox session is unread", async () => {
+  it("carries a one-shot latest-turn target when the selected inbox session is unread", async () => {
     const app = new PiWebApp();
     const previous = session("previous", "/repo", "Previous session");
     const target = session("target", "/repo", "Target session");
@@ -113,7 +113,7 @@ describe("PiWebApp chat opening", () => {
     const chat = requiredElement(container.querySelector<ChatView>("chat-view"), "opening unread chat view");
     await chat.updateComplete;
     expect(chat.sessionId).toBe(target.id);
-    expect(chat.initialReadingTarget?.kind).toBe("latest-response");
+    expect(chat.initialReadingTarget?.kind).toBe("latest-turn");
     expect(typeof chat.initialReadingTarget?.id).toBe("string");
 
     frames.releaseAll();
