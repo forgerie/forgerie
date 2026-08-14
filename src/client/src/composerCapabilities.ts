@@ -1,4 +1,8 @@
 import type { SessionStatus } from "../../shared/apiTypes";
+import type { SpeechServiceStatusResponse } from "../../shared/speechContracts";
+import type { PromptDictationCaptureOptions, PromptDictationSpeechApi } from "./controllers/promptDictationController";
+import type { SpeechApiRequestOptions } from "./api/speech";
+import type { SpeechCaptureSession } from "./speechCapture";
 
 /**
  * What a composer host can actually do.
@@ -16,6 +20,7 @@ export interface ComposerCapabilities {
   readonly archive?: ComposerArchiveCapability;
   readonly newSession?: ComposerNewSessionCapability;
   readonly dismiss?: ComposerDismissCapability;
+  readonly dictation?: ComposerDictationCapability;
   /** Drawn as the island's own top edge; absent below the reporting threshold. */
   readonly contextUsage?: SessionStatus["contextUsage"];
   /** Where the composer stands: a session's identity, or a chosen destination. */
@@ -83,6 +88,13 @@ export interface ComposerDismissCapability {
   readonly label?: string;
   readonly disabled?: boolean;
   readonly onDismiss: () => void;
+}
+
+export interface ComposerDictationCapability {
+  readonly getStatus: (options?: SpeechApiRequestOptions) => Promise<SpeechServiceStatusResponse>;
+  readonly createCaptureSession: (options: PromptDictationCaptureOptions) => Promise<SpeechCaptureSession>;
+  readonly speechApi: PromptDictationSpeechApi;
+  readonly statusPollIntervalMs?: number;
 }
 
 /**

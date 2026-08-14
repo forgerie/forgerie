@@ -329,10 +329,10 @@ describe("PromptDictationController", () => {
     await flushPromises();
 
     expect(harness.state()).toMatchObject({ tag: "retained-retry", reason: "network" });
-    expect(harness.controller.press()).toBe(false);
+    expect(harness.controller.press()).toBe(true);
     expect(harness.createCaptureSession).toHaveBeenCalledOnce();
 
-    expect(harness.controller.retryRetained()).toBe(true);
+    expect(harness.controller.retryRetained()).toBe(false);
     await flushPromises();
     expect(harness.transcribe).toHaveBeenCalledTimes(2);
     expect(harness.transcribe.mock.calls[1]?.[0]).toEqual(new Float32Array([5, 6]));
@@ -365,7 +365,7 @@ describe("PromptDictationController", () => {
     await flushPromises();
     await flushPromises();
     expect(empty.draft.events).toEqual(["begin:owner-a", "finish"]);
-    expect(empty.state()).toEqual({ tag: "idle" });
+    expect(empty.state()).toEqual({ tag: "empty" });
 
     const failed = await startedAutoHarness([1]);
     failed.transcribe.mockRejectedValue(new SpeechApiError("transcription_empty", "empty", { retryable: false }));

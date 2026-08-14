@@ -931,6 +931,15 @@ export const promptEditorStyles = css`
     .composer-context-chip { display: inline-flex; }
   }
   .icon-button { flex: 0 0 auto; display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; }
+  .dictation-button { touch-action: none; user-select: none; -webkit-user-select: none; }
+  .dictation-button[aria-pressed="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-accent); }
+  .dictation-held[aria-pressed="true"], .dictation-manual-only[aria-pressed="true"] { border-color: var(--pi-warning-border, var(--pi-accent)); color: var(--pi-warning); }
+  .dictation-transcribing { color: var(--pi-accent); }
+  .dictation-status { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-muted); font-size: 12px; text-align: right; }
+  .dictation-privacy { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+  .dictation-retry-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; }
+  .dictation-retry-actions button { min-height: 28px; padding: 4px 7px; font-size: 12px; }
+  .dictation-acquiring[aria-pressed="true"], .dictation-auto[aria-pressed="true"], .dictation-checking[aria-pressed="true"] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--pi-accent) 18%, transparent); }
   .composer-archive { border-color: var(--pi-border-muted); color: var(--pi-muted); }
   @container (min-width: 700px) {
   }

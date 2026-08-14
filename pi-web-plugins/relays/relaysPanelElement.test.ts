@@ -765,7 +765,7 @@ function panelContext(fake: WorkspaceFilesFake, workspaceId = "ws-1"): Workspace
     workspace: { id: workspaceId, projectId: "project-1", path: "/repo", label: "repo", isMain: true, isGitRepo: true, isGitWorktree: false },
     files: fake.files,
     host: { requestRender: () => undefined },
-    prompt: { insertText: () => undefined, getText: () => "", getSelection: () => null },
+    prompt: { insertText: () => true, getText: () => "", getSelection: () => null },
     terminal: { open: () => undefined, runCommand: () => Promise.reject(new Error("terminal not used")) },
   };
 }

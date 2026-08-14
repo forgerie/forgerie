@@ -17,7 +17,7 @@ import { MachineController } from "../controllers/machineController";
 import { ProjectController } from "../controllers/projectController";
 import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActivityOwnershipCoordinator";
 import { PiWebStatusController } from "../controllers/piWebStatusController";
-import type { ComposerCapabilities } from "../composerCapabilities";
+import type { ComposerCapabilities, ComposerDictationCapability } from "../composerCapabilities";
 import { composerBranchIdentity } from "../composerIdentity";
 import { SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot, type SessionTranscriptPreview } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
@@ -39,6 +39,8 @@ import { promptHistoryEntries } from "../promptHistory";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
 import { selectedNotificationView } from "../sessionNotifications";
 import { createChatOpenTiming } from "../chatOpenTiming";
+import { checkSpeechTurn, getSpeechStatus, transcribeSpeech } from "../api/speech";
+import { createSpeechCaptureSession } from "../speechCapture";
 import { selectedChatCanUseRuntime, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget, selectedChatTargetsEqual, type SelectedChatLoad } from "../selectedChatLoad";
 import { SessionUnreadController } from "../sessionUnread";
 import { deriveUnreadPresence, EMPTY_UNREAD_PRESENCE, sameUnreadPresence, type UnreadPresence } from "../unreadPresence";
@@ -240,9 +242,8 @@ export class PiWebApp extends LitElement {
         await this.updateComplete;
         const promptEditor = this.promptEditor;
         if (selectedMachineId(this.state) !== machineId || this.state.selectedSession?.id !== sessionId || promptEditor === undefined) return false;
-        if (snapshot === undefined) promptEditor.replaceText(text);
-        else promptEditor.restoreSnapshot({ ...snapshot, attachments: snapshot.attachments?.map((attachment) => ({ ...attachment })) });
-        return true;
+        if (snapshot === undefined) return promptEditor.replaceText(text);
+        return promptEditor.restoreSnapshot({ ...snapshot, attachments: snapshot.attachments?.map((attachment) => ({ ...attachment })) });
       },
     },
   );
@@ -317,6 +318,12 @@ export class PiWebApp extends LitElement {
     onRefreshError: (error) => { console.warn("Failed to refresh after browser resume", error); },
   });
   private readonly panelIntent = new PanelIntentController(this);
+  private readonly sessionDictationSpeechApi: ComposerDictationCapability["speechApi"] = { checkTurn: checkSpeechTurn, transcribe: transcribeSpeech };
+  private readonly sessionDictationCapabilityValue: ComposerDictationCapability = {
+    getStatus: getSpeechStatus,
+    createCaptureSession: createSpeechCaptureSession,
+    speechApi: this.sessionDictationSpeechApi,
+  };
   private readonly panelPeek = new PanelPeekController(this, {
     peekable: (panel) => !this.panelIntent.isDocked(panel),
     sheetWidth: () => peekSheetWidth(this.clientWidth),
@@ -2901,6 +2908,7 @@ export class PiWebApp extends LitElement {
         changeable: runtimeAvailable,
         onSet: this.handleSetGuidance,
       },
+      dictation: this.sessionDictationCapability(),
       stop: { stoppable: runtimeAvailable && isActive(state), onStop: this.handleStopActiveWork },
       ...(this.canArchiveSelectedSession(state) ? { archive: { onArchiveAndNext: this.handleArchiveAndNext } } : {}),
       ...(state.status?.contextUsage === undefined ? {} : { contextUsage: state.status.contextUsage }),
@@ -2910,7 +2918,14 @@ export class PiWebApp extends LitElement {
   /** A chat still opening has a place but no runtime to ask about it yet. */
   private openingComposerCapabilities(workspace: Workspace | undefined): ComposerCapabilities {
     const branch = composerBranchIdentity(workspace);
-    return branch === undefined ? {} : { context: [{ id: "branch", kind: "branch", label: branch.name, title: branch.title }] };
+    return {
+      ...(branch === undefined ? {} : { context: [{ id: "branch", kind: "branch" as const, label: branch.name, title: branch.title }] }),
+      dictation: this.sessionDictationCapability(),
+    };
+  }
+
+  private sessionDictationCapability(): NonNullable<ComposerCapabilities["dictation"]> {
+    return this.sessionDictationCapabilityValue;
   }
 
   private selectedPromptHistory(state: AppState): readonly string[] {

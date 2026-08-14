@@ -116,7 +116,7 @@ const workspaceContext: WorkspacePanelContext = {
     deleteFile: () => Promise.reject(new Error("not implemented")),
     moveFile: () => Promise.reject(new Error("not implemented")),
   },
-  prompt: { insertText: () => undefined, getText: () => "", getSelection: () => null },
+  prompt: { insertText: () => true, getText: () => "", getSelection: () => null },
   terminal: { open: () => undefined, runCommand: () => Promise.reject(new Error("not implemented")) },
   host: { requestRender: () => undefined },
   fileTree: [],

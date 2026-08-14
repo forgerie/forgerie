@@ -3,7 +3,7 @@ export type PromptDictationGestureLifecycle =
   | { readonly tag: "pressed" };
 
 export interface PromptDictationGestureCallbacks {
-  readonly onPressStart: () => void;
+  readonly onPressStart: () => boolean | undefined;
   readonly onRelease: () => void;
   readonly onCancel: () => void;
 }
@@ -26,8 +26,8 @@ export class PromptDictationGesture {
 
   public press(): boolean {
     if (this.disposed || this.stateValue.tag !== "idle") return false;
+    if (this.options.callbacks.onPressStart() === false) return false;
     this.stateValue = { tag: "pressed" };
-    this.options.callbacks.onPressStart();
     return true;
   }
 

@@ -16,6 +16,7 @@ export type PromptDictationState =
   | { readonly tag: "manual-only"; readonly reason: PromptDictationManualReason }
   | { readonly tag: "checking" }
   | { readonly tag: "transcribing" }
+  | { readonly tag: "empty" }
   | { readonly tag: "retained-retry"; readonly expiresAtMs: number; readonly reason: string }
   | { readonly tag: "error"; readonly reason: PromptDictationErrorReason; readonly message: string; readonly retryable: boolean };
 
@@ -105,13 +106,14 @@ export class PromptDictationController {
 
   public press(): boolean {
     if (this.disposed) return false;
-    if (this.stateValue.tag !== "idle" && this.stateValue.tag !== "error" && !this.isOwnerCurrent()) return false;
-    if (this.stateValue.tag === "unavailable" || this.stateValue.tag === "transcribing" || this.stateValue.tag === "retained-retry") return false;
+    if (this.stateValue.tag !== "idle" && this.stateValue.tag !== "error" && this.stateValue.tag !== "empty" && !this.isOwnerCurrent()) return false;
+    if (this.stateValue.tag === "retained-retry") return this.retryRetained();
+    if (this.stateValue.tag === "unavailable" || this.stateValue.tag === "transcribing") return false;
     if (this.stateValue.tag === "auto" || this.stateValue.tag === "manual-only" || this.stateValue.tag === "checking" || this.stateValue.tag === "held") {
       void this.completeFromCurrentCapture();
       return true;
     }
-    if (this.stateValue.tag !== "idle" && this.stateValue.tag !== "error") return false;
+    if (this.stateValue.tag !== "idle" && this.stateValue.tag !== "error" && this.stateValue.tag !== "empty") return false;
     if (this.capability.tag === "warming" || this.capability.tag === "unavailable") {
       this.setState({ tag: "unavailable", reason: this.capability.reason });
       return false;
@@ -440,7 +442,12 @@ export class PromptDictationController {
       if (!this.accepts(generation, ownerKey) || this.transcriptionAbort !== abort || abort.signal.aborted) return;
       this.transcriptionAbort = undefined;
       this.clearRetained();
-      if (response.text.trim() !== "" && !this.options.draft.commitTranscript(response.text)) {
+      if (response.text.trim() === "") {
+        this.finishDraftLock();
+        this.setState({ tag: "empty" });
+        return;
+      }
+      if (!this.options.draft.commitTranscript(response.text)) {
         this.abortDraftLock();
         this.setState({ tag: "error", reason: "transcription-failed", message: "Dictation transcript could not be inserted.", retryable: false });
         return;

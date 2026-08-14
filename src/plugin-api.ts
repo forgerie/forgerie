@@ -78,8 +78,8 @@ export interface PluginRuntimeState {
 export interface PluginPromptEditor {
   /** Insert text at the current cursor position. Replaces any selection.
    *  If the editor is not focused, focuses it first.
-   *  No-op if the editor is not mounted. */
-  insertText(text: string): void;
+   *  Returns false if the editor is not mounted or cannot accept edits. */
+  insertText(text: string): boolean;
   /** Get the current prompt text content. Returns "" if the editor is not mounted. */
   getText(): string;
   /** Get the current selection range, or null if no selection or editor not mounted. */

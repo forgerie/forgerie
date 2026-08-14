@@ -159,6 +159,14 @@ function deferredPromptResourceCatalog(): {
 }
 
 describe("new-session-composer editing and submission", () => {
+  it("does not expose composer dictation before a session exists", async () => {
+    const composer = await mountComposer({ initialDestination: completeNewSessionDestination(machine("local"), project("project-a"), workspace("main", "project-a")) });
+
+    const editor = promptEditor(composer);
+    expect(editor.capabilities.dictation).toBeUndefined();
+    expect(editor.shadowRoot?.querySelector(".dictation-button")).toBeNull();
+  });
+
   it("focuses a complete default's prompt and refuses to launch an empty draft", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));

@@ -5,18 +5,21 @@ import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery, Se
 import { sessionGuidanceSummary } from "../../../shared/sessionGuidance";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import { createSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
+import { PromptDictationController, type PromptDictationCapability, type PromptDictationState } from "../controllers/promptDictationController";
+import { PromptDictationGesture } from "../controllers/promptDictationGesture";
 import { composerRail, type ComposerRail } from "../composerRail";
 import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointerPress, isQueueHoldKey, readComposerQueuePress } from "../composerQueuePress";
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderGuidanceIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderGuidanceIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
-import type { ComposerCapabilities, ComposerContextChip, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
+import type { ComposerCapabilities, ComposerContextChip, ComposerDictationCapability, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
 import { modelChoiceGroups } from "./modelChoiceGroups";
 import "./ComposerChoiceList";
 import type { ComposerDraft, ComposerDraftCompletionError, ComposerDraftDisplayState, ComposerDraftEscapeContext, ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import type { SpeechServiceStatusResponse } from "../../../shared/speechContracts";
 import "./ComposerDraft";
 import "./ContextUsageMeter";
 import "./GuidancePicker";
@@ -38,6 +41,16 @@ interface QueueKeyboardPress {
   readonly activationId: number;
   readonly key: " " | "Enter";
 }
+
+const DICTATION_STATUS_TIMEOUT_MS = 5_000;
+
+type PendingDictationStatus =
+  | { readonly kind: "status"; readonly status: SpeechServiceStatusResponse }
+  | { readonly kind: "error"; readonly message: string };
+
+type DictationGestureSource =
+  | { readonly tag: "pointer"; readonly pointerId: number; readonly target: HTMLElement | undefined }
+  | { readonly tag: "space" };
 
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
@@ -111,6 +124,16 @@ export class PromptEditor extends LitElement {
   @state() private guidancePending = false;
   @state() private guidanceError: string | undefined = undefined;
   @state() private steerOpen = false;
+  @state() private dictationState: PromptDictationState = { tag: "idle" };
+  @state() private dictationCapability: PromptDictationCapability = "warming";
+  @state() private dictationStatusMessage = "Speech dictation is warming up.";
+  private dictationController: PromptDictationController | undefined;
+  private dictationStatusAbort: AbortController | undefined;
+  private dictationStatusTimer: number | undefined;
+  private dictationStatusVersion = 0;
+  private pendingDictationStatus: PendingDictationStatus | undefined;
+  private dictationGesture = this.createDictationGesture();
+  private dictationGestureSource: DictationGestureSource | undefined;
   private guidanceRequestVersion = 0;
   private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
@@ -134,14 +157,25 @@ export class PromptEditor extends LitElement {
     document.addEventListener("pointerup", this.handleQueuePointerUpDocument, { capture: true });
     document.addEventListener("pointercancel", this.handleQueuePointerCancelDocument, { capture: true });
     document.addEventListener("keyup", this.handleQueueKeyUpDocument, { capture: true });
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
+    window.addEventListener("pagehide", this.handlePageHidden);
+    window.addEventListener("freeze", this.handlePageHidden);
+    window.addEventListener("resize", this.handleResizeOrOrientation);
+    window.addEventListener("orientationchange", this.handleResizeOrOrientation);
   }
 
   protected override willUpdate(changed: PropertyValues<this>): void {
-    const sessionChanged = changed.has("sessionId") || changed.has("machineId");
+    const sessionChanged = changed.has("sessionId") || changed.has("machineId") || changed.has("cwd");
     if (sessionChanged) {
       this.lastEscapeTime = 0;
       this.resetGuidanceDisclosure();
       this.resetSteerDisclosure();
+      this.resetDictationGesture();
+      this.dictationController?.ownerChanged();
+    }
+    if (changed.has("disabled") && this.disabled) {
+      this.resetDictationGesture();
+      this.dictationController?.surfaceDisabled();
     }
     if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) {
       this.resetGuidanceDisclosure();
@@ -151,6 +185,7 @@ export class PromptEditor extends LitElement {
       const rail = this.rail();
       if (!rail.canSteer || !rail.canInvokeQueue) this.resetSteerDisclosure();
     }
+    if (changed.has("capabilities") && changed.get("capabilities")?.dictation !== this.capabilities.dictation) this.resetDictationCapability();
   }
 
   protected override shouldUpdate(changed: PropertyValues<this>): boolean {
@@ -166,6 +201,7 @@ export class PromptEditor extends LitElement {
 
   protected override updated(): void {
     this.flushPendingReplacement();
+    this.syncDictationCapability();
   }
 
   override disconnectedCallback(): void {
@@ -176,6 +212,12 @@ export class PromptEditor extends LitElement {
     this.resetGuidanceDisclosure();
     this.cancelQueuePress({ clearSuppression: true });
     this.steerOpen = false;
+    this.disposeDictation();
+    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    window.removeEventListener("pagehide", this.handlePageHidden);
+    window.removeEventListener("freeze", this.handlePageHidden);
+    window.removeEventListener("resize", this.handleResizeOrOrientation);
+    window.removeEventListener("orientationchange", this.handleResizeOrOrientation);
     super.disconnectedCallback();
   }
 
@@ -183,7 +225,8 @@ export class PromptEditor extends LitElement {
     const shellInputMode = this.currentInputMode.kind === "shell" ? this.currentInputMode : undefined;
     const shellMode = shellInputMode !== undefined;
     const rail = this.rail();
-    const busy = this.sending || this.guidancePending;
+    const dictationBlocksComposer = this.dictationBlocksComposer();
+    const busy = this.sending || this.guidancePending || this.attachmentCapturePending || dictationBlocksComposer;
     const resting = this.isResting();
     return html`
       ${this.openChoice === undefined || this.capabilities.model === undefined ? nothing : this.renderChoicePopover(this.capabilities.model)}
@@ -232,6 +275,7 @@ export class PromptEditor extends LitElement {
         ></composer-draft>
         <div class="actions">
           ${this.renderAttachmentAction(busy)}
+          ${this.renderDictationAction()}
           ${this.renderArchiveAction()}
           ${this.renderCompactStatus()}
           ${this.capabilities.newSession === undefined ? nothing : html`
@@ -345,24 +389,28 @@ export class PromptEditor extends LitElement {
     this.draftElement?.openAttachmentPicker();
   }
 
-  replaceText(text: string): void {
+  replaceText(text: string): boolean {
+    if (this.dictationBlocksComposer()) return false;
     if (this.draftElement === undefined || this.draftElement === null) {
       this.pendingReplacement = { kind: "text", text };
       this.currentInputMode = inputModeForDraft(text);
       this.draftEmpty = text.trim() === "";
-      return;
+      return true;
     }
     this.draftElement.replaceText(text);
+    return true;
   }
 
-  restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
+  restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): boolean {
+    if (this.dictationBlocksComposer()) return false;
     if (this.draftElement === undefined || this.draftElement === null) {
       this.pendingReplacement = { kind: "snapshot", snapshot };
       this.currentInputMode = inputModeForDraft(snapshot.text);
       this.draftEmpty = snapshot.text.trim() === "";
-      return;
+      return true;
     }
     this.draftElement.restoreTransientSnapshot(snapshot);
+    return true;
   }
 
   /** Get the underlying CM6 EditorView, or undefined if not yet mounted. */
@@ -382,12 +430,45 @@ export class PromptEditor extends LitElement {
       disabled: this.disabled,
       submissionAvailable: this.submissionAvailable,
       sendAvailable: this.sendAvailable,
-      sending: this.sending || this.guidancePending || this.attachmentCapturePending,
+      sending: this.sending || this.guidancePending || this.attachmentCapturePending || this.dictationBlocksComposer(),
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
       stoppable: this.capabilities.stop?.stoppable === true,
     });
   }
+
+  private renderDictationAction() {
+    if (this.capabilities.dictation === undefined) return nothing;
+    const view = this.dictationView();
+    return html`
+      <span id="composer-dictation-privacy" class="dictation-privacy">Audio goes to this Forgerie gateway for endpointing and transcription, not to the selected machine. Raw audio is not stored as application data.</span>
+      <span id="composer-dictation-status" class="dictation-status" role="status" aria-live="polite">${view.status}</span>
+      ${this.dictationState.tag === "retained-retry" ? html`
+        <span class="dictation-retry-actions">
+          <button type="button" class="dictation-discard" @click=${() => { this.dictationController?.discardRetained(); }}>Discard</button>
+        </span>
+      ` : nothing}
+      <button
+        class=${`icon-button dictation-button dictation-${this.dictationState.tag}`}
+        type="button"
+        data-action="dictation"
+        title=${view.label}
+        aria-label=${view.label}
+        aria-pressed=${view.pressed ? "true" : "false"}
+        aria-describedby="composer-dictation-privacy composer-dictation-status"
+        ?disabled=${view.disabled}
+        @pointerdown=${(event: PointerEvent) => { this.handleDictationPointerDown(event); }}
+        @pointerup=${(event: PointerEvent) => { this.handleDictationPointerUp(event); }}
+        @pointercancel=${(event: PointerEvent) => { this.handleDictationPointerCancel(event); }}
+        @lostpointercapture=${(event: PointerEvent) => { this.handleDictationLostPointerCapture(event); }}
+        @contextmenu=${(event: Event) => { event.preventDefault(); }}
+        @click=${(event: Event) => { event.preventDefault(); event.stopPropagation(); }}
+        @keydown=${(event: KeyboardEvent) => { this.handleDictationKeyDown(event); }}
+        @keyup=${(event: KeyboardEvent) => { this.handleDictationKeyUp(event); }}
+      >${renderMicrophoneIcon()}</button>
+    `;
+  }
+
 
   /** The way out sits beside the way in, at the same size. */
   private renderDismissAction() {
@@ -491,6 +572,7 @@ export class PromptEditor extends LitElement {
             class="icon-button guidance-trigger"
             aria-controls="session-guidance-picker"
             aria-expanded=${this.guidanceOpen ? "true" : "false"}
+            ?disabled=${this.disabled || this.dictationBlocksComposer()}
             title=${sessionGuidanceSummary(guidance.activeIds)}
             aria-label=${sessionGuidanceSummary(guidance.activeIds)}
             @click=${() => { this.toggleGuidance(); }}
@@ -533,6 +615,10 @@ export class PromptEditor extends LitElement {
   }
 
   private pickChoice(model: ComposerModelCapability, value: string): void {
+    if (this.openChoice === undefined || this.disabled || this.dictationBlocksComposer() || model.changeable === false) {
+      this.closeChoice(false);
+      return;
+    }
     if (this.openChoice === "thinking") {
       model.onChooseThinkingLevel(value);
     } else {
@@ -550,8 +636,8 @@ export class PromptEditor extends LitElement {
     const thinking = thinkingLevelLabel(capability.thinkingLevel);
     return html`
       <div class="model-capsule">
-        <button class="select-model" ?disabled=${this.disabled || !changeable} title=${`Select model: ${identity}`} @click=${() => { this.selectModel(); }}>${name}</button>
-        <button class="select-thinking icon-button" ?disabled=${this.disabled || !changeable} title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => { this.selectThinking(); }}>
+        <button class="select-model" ?disabled=${this.disabled || !changeable || this.dictationBlocksComposer()} title=${`Select model: ${identity}`} @click=${() => { this.selectModel(); }}>${name}</button>
+        <button class="select-thinking icon-button" ?disabled=${this.disabled || !changeable || this.dictationBlocksComposer()} title=${`Thinking level: ${thinking}`} aria-label=${`Thinking level: ${thinking}`} @click=${() => { this.selectThinking(); }}>
           ${renderThinkingGauge(thinkingGauge(capability.thinkingLevel, capability.availableThinkingLevels ?? []))}
         </button>
       </div>
@@ -590,7 +676,7 @@ export class PromptEditor extends LitElement {
 
   private selectModel(): void {
     const model = this.capabilities.model;
-    if (this.disabled || model === undefined || model.changeable === false) return;
+    if (this.disabled || this.dictationBlocksComposer() || model === undefined || model.changeable === false) return;
     this.closeSteer(false);
     this.closeGuidance(false, true);
     if (this.openChoice === "model") {
@@ -603,7 +689,7 @@ export class PromptEditor extends LitElement {
 
   private selectThinking(): void {
     const model = this.capabilities.model;
-    if (this.disabled || model === undefined || model.changeable === false) return;
+    if (this.disabled || this.dictationBlocksComposer() || model === undefined || model.changeable === false) return;
     this.closeSteer(false);
     this.closeGuidance(false, true);
     this.openChoice = this.openChoice === "thinking" ? undefined : "thinking";
@@ -665,6 +751,7 @@ export class PromptEditor extends LitElement {
   }
 
   private toggleGuidance(): void {
+    if (this.disabled || this.dictationBlocksComposer()) return;
     if (this.guidanceOpen) {
       this.closeGuidance(true);
       return;
@@ -695,7 +782,7 @@ export class PromptEditor extends LitElement {
   }
 
   private async setGuidance(entryId: string, enabled: boolean): Promise<void> {
-    if (this.guidancePending || this.disabled || !this.runtimeControlsAvailable) return;
+    if (this.guidancePending || this.disabled || this.dictationBlocksComposer() || !this.runtimeControlsAvailable) return;
     const requestVersion = ++this.guidanceRequestVersion;
     this.guidancePending = true;
     this.guidanceError = undefined;
@@ -719,9 +806,10 @@ export class PromptEditor extends LitElement {
     return html`
       <button
         class="composer-archive icon-button"
+        ?disabled=${this.dictationBlocksComposer()}
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
-        @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.capabilities.archive?.onArchiveAndNext(); }}
+        @click=${() => { if (this.dictationBlocksComposer()) return; this.closeSteer(false); this.closeGuidance(false, true); this.capabilities.archive?.onArchiveAndNext(); }}
       >${renderArchiveIcon()}</button>
     `;
   }
@@ -942,6 +1030,7 @@ export class PromptEditor extends LitElement {
   }
 
   private submitDraft(streamingBehavior?: "steer" | "followUp"): void {
+    if (this.dictationBlocksComposer()) return;
     this.draftElement?.submit(streamingBehavior);
   }
 
@@ -996,6 +1085,287 @@ export class PromptEditor extends LitElement {
     return this.draftElement ?? undefined;
   }
 
+  private syncDictationCapability(): void {
+    const capability = this.capabilities.dictation;
+    if (capability === undefined) {
+      if (this.dictationController !== undefined || this.dictationStatusAbort !== undefined || this.dictationStatusTimer !== undefined) this.disposeDictation();
+      return;
+    }
+    this.ensureDictationController(capability);
+    if (this.dictationStatusTimer === undefined && this.dictationStatusAbort === undefined) this.loadDictationStatus();
+  }
+
+  private ensureDictationController(capability: ComposerDictationCapability): PromptDictationController | undefined {
+    if (this.draftElement === undefined || this.draftElement === null) return undefined;
+    if (this.dictationController !== undefined) return this.dictationController;
+    const ownerKey = () => dictationOwnerKey(this.machineId, this.sessionId, this.cwd);
+    this.dictationController = new PromptDictationController({
+      scheduler: {
+        now: () => Date.now(),
+        setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+        clearTimeout: (handle) => { if (typeof handle === "number") window.clearTimeout(handle); },
+      },
+      draft: {
+        get ownerKey() { return ownerKey(); },
+        beginDictation: () => this.draftElement?.beginDictationEdit() ?? false,
+        commitTranscript: (transcript) => this.draftElement?.commitDictationTranscript(transcript) ?? false,
+        finishDictation: () => { this.draftElement?.finishDictationEdit(); },
+        abortDictation: () => { this.draftElement?.abortDictationEdit(); },
+      },
+      speechApi: capability.speechApi,
+      createCaptureSession: capability.createCaptureSession,
+      onStateChange: (state) => {
+        this.dictationState = state;
+        if (this.dictationBlocksComposer()) this.closeChoice(false);
+        this.applyPendingDictationStatusIfSettled();
+      },
+    });
+    this.dictationController.setCapability(this.dictationCapability, this.dictationStatusMessage);
+    return this.dictationController;
+  }
+
+  private resetDictationCapability(): void {
+    this.disposeDictation();
+    if (this.capabilities.dictation !== undefined) {
+      this.dictationCapability = "warming";
+      this.dictationStatusMessage = "Speech dictation is warming up.";
+      this.dictationState = { tag: "idle" };
+    }
+  }
+
+  private disposeDictation(): void {
+    this.dictationController?.dispose();
+    this.dictationController = undefined;
+    this.dictationState = { tag: "idle" };
+    this.pendingDictationStatus = undefined;
+    this.resetDictationGesture();
+    this.stopDictationStatusPolling();
+  }
+
+  private loadDictationStatus(): void {
+    const capability = this.capabilities.dictation;
+    if (capability === undefined) return;
+    this.stopDictationStatusRequest();
+    const version = ++this.dictationStatusVersion;
+    const abort = new AbortController();
+    this.dictationStatusAbort = abort;
+    void capability.getStatus({ signal: abort.signal, timeoutMs: DICTATION_STATUS_TIMEOUT_MS }).then((status) => {
+      if (this.dictationStatusVersion !== version || abort.signal.aborted) return;
+      this.receiveDictationStatus({ kind: "status", status });
+    }).catch((error: unknown) => {
+      if (this.dictationStatusVersion !== version || abort.signal.aborted) return;
+      this.receiveDictationStatus({
+        kind: "error",
+        message: error instanceof Error && error.message !== "" ? error.message : "Speech dictation status is unavailable.",
+      });
+    }).finally(() => {
+      if (this.dictationStatusVersion !== version) return;
+      this.dictationStatusAbort = undefined;
+      this.scheduleDictationStatusPoll();
+    });
+  }
+
+  private receiveDictationStatus(status: PendingDictationStatus): void {
+    if (this.dictationBlocksComposer() && !pendingDictationStatusCanApplyDuringActiveTurn(status)) {
+      this.pendingDictationStatus = status;
+      return;
+    }
+    this.pendingDictationStatus = undefined;
+    this.applyDictationStatus(status);
+  }
+
+  private applyPendingDictationStatusIfSettled(): void {
+    if (this.pendingDictationStatus === undefined || this.dictationBlocksComposer()) return;
+    const status = this.pendingDictationStatus;
+    this.pendingDictationStatus = undefined;
+    this.applyDictationStatus(status);
+  }
+
+  private applyDictationStatus(status: PendingDictationStatus): void {
+    if (status.kind === "error") {
+      this.dictationCapability = "unavailable";
+      this.dictationStatusMessage = status.message;
+      this.dictationController?.setCapability("unavailable", status.message);
+      return;
+    }
+    this.dictationCapability = status.status.capability;
+    this.dictationStatusMessage = dictationStatusMessage(status.status);
+    this.dictationController?.setCapability(status.status.capability, status.status.capability === "manual-only" ? "smart-turn-unavailable" : this.dictationStatusMessage);
+  }
+
+  private scheduleDictationStatusPoll(): void {
+    const capability = this.capabilities.dictation;
+    if (capability === undefined || !this.isConnected) return;
+    if (this.dictationStatusTimer !== undefined) window.clearTimeout(this.dictationStatusTimer);
+    this.dictationStatusTimer = window.setTimeout(() => {
+      this.dictationStatusTimer = undefined;
+      this.loadDictationStatus();
+    }, capability.statusPollIntervalMs ?? 10_000);
+  }
+
+  private stopDictationStatusPolling(): void {
+    this.dictationStatusVersion += 1;
+    this.stopDictationStatusRequest();
+    if (this.dictationStatusTimer !== undefined) window.clearTimeout(this.dictationStatusTimer);
+    this.dictationStatusTimer = undefined;
+  }
+
+  private stopDictationStatusRequest(): void {
+    this.dictationStatusAbort?.abort();
+    this.dictationStatusAbort = undefined;
+  }
+
+  private handleDictationPointerDown(event: PointerEvent): void {
+    if (event.button !== 0 || this.dictationGestureSource !== undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const button = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined;
+    this.dictationGestureSource = { tag: "pointer", pointerId: event.pointerId, target: button };
+    if (!this.dictationGesture.press()) {
+      this.dictationGestureSource = undefined;
+      return;
+    }
+    try { button?.setPointerCapture(event.pointerId); } catch { /* happy-dom and lost pointers may not support capture. */ }
+  }
+
+  private handleDictationPointerUp(event: PointerEvent): void {
+    if (!this.matchesDictationPointer(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.releaseDictationPointerCapture();
+    this.dictationGestureSource = undefined;
+    this.dictationGesture.release();
+  }
+
+  private handleDictationPointerCancel(event: PointerEvent): void {
+    if (!this.matchesDictationPointer(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.releaseDictationPointerCapture();
+    this.dictationGestureSource = undefined;
+    this.dictationGesture.cancel();
+  }
+
+  private handleDictationLostPointerCapture(event: PointerEvent): void {
+    if (!this.matchesDictationPointer(event)) return;
+    this.dictationGestureSource = undefined;
+    this.dictationGesture.cancel();
+  }
+
+  private matchesDictationPointer(event: PointerEvent): boolean {
+    return this.dictationGestureSource?.tag === "pointer" && this.dictationGestureSource.pointerId === event.pointerId;
+  }
+
+  private releaseDictationPointerCapture(): void {
+    const source = this.dictationGestureSource;
+    if (source?.tag !== "pointer") return;
+    try {
+      if (source.target?.hasPointerCapture(source.pointerId) === true) source.target.releasePointerCapture(source.pointerId);
+    } catch { /* ignored */ }
+  }
+
+  private handleDictationKeyDown(event: KeyboardEvent): void {
+    if (event.repeat) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.releaseDictationPointerCapture();
+      this.dictationGestureSource = undefined;
+      if (!this.dictationGesture.cancel()) this.dictationController?.cancel();
+      return;
+    }
+    if (event.key === "Enter" && this.dictationCanCompleteFromKey()) {
+      event.preventDefault();
+      this.dictationController?.press();
+      return;
+    }
+    if (event.key !== " ") return;
+    event.preventDefault();
+    if (this.dictationCanCompleteFromKey()) {
+      this.dictationController?.press();
+      return;
+    }
+    if (this.dictationGestureSource !== undefined) return;
+    this.dictationGestureSource = { tag: "space" };
+    if (!this.dictationGesture.press()) this.dictationGestureSource = undefined;
+  }
+
+  private handleDictationKeyUp(event: KeyboardEvent): void {
+    if (event.key !== " " || this.dictationGestureSource?.tag !== "space") return;
+    event.preventDefault();
+    this.dictationGestureSource = undefined;
+    this.dictationGesture.release();
+  }
+
+  private createDictationGesture(): PromptDictationGesture {
+    return new PromptDictationGesture({
+      callbacks: {
+        onPressStart: () => this.dictationController?.press() === true,
+        onRelease: () => { this.dictationController?.release(); },
+        onCancel: () => { this.dictationController?.cancel(); },
+      },
+    });
+  }
+
+  private resetDictationGesture(): void {
+    this.releaseDictationPointerCapture();
+    this.dictationGestureSource = undefined;
+    this.dictationGesture.dispose();
+    this.dictationGesture = this.createDictationGesture();
+  }
+
+  private dictationCanCompleteFromKey(): boolean {
+    return this.dictationState.tag === "auto" || this.dictationState.tag === "manual-only" || this.dictationState.tag === "checking" || this.dictationState.tag === "held";
+  }
+
+  private dictationBlocksComposer(): boolean {
+    return this.dictationState.tag === "acquiring"
+      || this.dictationState.tag === "pressed"
+      || this.dictationState.tag === "auto"
+      || this.dictationState.tag === "held"
+      || this.dictationState.tag === "manual-only"
+      || this.dictationState.tag === "checking"
+      || this.dictationState.tag === "transcribing"
+      || this.dictationState.tag === "retained-retry";
+  }
+
+  private dictationView(): { readonly label: string; readonly status: string; readonly pressed: boolean; readonly disabled: boolean } {
+    const state = this.dictationState;
+    if (this.dictationCapability === "warming" && (state.tag === "idle" || state.tag === "unavailable")) return { label: "Speech dictation warming up", status: this.dictationStatusMessage, pressed: false, disabled: true };
+    if (this.dictationCapability === "unavailable" && (state.tag === "idle" || state.tag === "unavailable")) return { label: "Speech dictation unavailable", status: this.dictationStatusMessage, pressed: false, disabled: true };
+    switch (state.tag) {
+      case "acquiring": return { label: "Starting speech dictation", status: state.gesture === "held" ? "Starting held dictation…" : "Starting microphone…", pressed: true, disabled: false };
+      case "pressed": return { label: "Release for automatic speech dictation, or hold to keep listening", status: "Release for automatic dictation, or hold to keep listening.", pressed: true, disabled: false };
+      case "auto": return { label: "Finish speech dictation", status: "Listening. Press again to transcribe, or pause for automatic completion.", pressed: true, disabled: false };
+      case "held": return { label: "Release to transcribe held speech dictation", status: "Holding dictation. Release to transcribe.", pressed: true, disabled: false };
+      case "manual-only": return { label: "Finish manual speech dictation", status: manualOnlyDictationStatus(state.reason), pressed: true, disabled: false };
+      case "checking": return { label: "Finish speech dictation", status: "Checking whether the speech turn is complete…", pressed: true, disabled: false };
+      case "transcribing": return { label: "Transcribing speech dictation", status: "Transcribing speech…", pressed: false, disabled: true };
+      case "empty": return { label: "Start speech dictation", status: "No speech was transcribed. Press the microphone to try again.", pressed: false, disabled: false };
+      case "retained-retry": return { label: "Retry speech dictation from retained audio", status: retainedRetryDictationStatus(state), pressed: false, disabled: false };
+      case "error": return { label: state.retryable ? "Retry speech dictation" : "Speech dictation error", status: state.message, pressed: false, disabled: false };
+      case "unavailable": return { label: "Speech dictation unavailable", status: state.reason, pressed: false, disabled: true };
+      case "idle": return this.dictationCapability === "manual-only"
+        ? { label: "Start manual speech dictation", status: `${this.dictationStatusMessage} This gateway, not the selected machine · raw audio not stored.`, pressed: false, disabled: false }
+        : { label: "Start speech dictation", status: `${this.dictationStatusMessage} This gateway, not the selected machine · raw audio not stored.`, pressed: false, disabled: false };
+    }
+  }
+
+  private readonly handleVisibilityChange = (): void => {
+    if (document.visibilityState !== "visible") {
+      this.resetDictationGesture();
+      this.dictationController?.pageBackgrounded();
+    }
+  };
+
+  private readonly handlePageHidden = (): void => {
+    this.resetDictationGesture();
+    this.dictationController?.pageBackgrounded();
+  };
+
+  private readonly handleResizeOrOrientation = (): void => {
+    this.dictationController?.resizeOrOrientationChanged();
+  };
+
   private updateDraftDisplayState(state: ComposerDraftDisplayState): void {
     this.onDraftDisplayStateChange?.(state);
     this.currentInputMode = state.inputMode;
@@ -1030,6 +1400,58 @@ function sessionStatusRenderEqual(a: SessionStatus | undefined, b: SessionStatus
 
 function stringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function dictationOwnerKey(machineId: unknown, sessionId: unknown, cwd: unknown): string {
+  return JSON.stringify({ machineId: dictationOwnerPart(machineId), sessionId: dictationOwnerPart(sessionId), cwd: dictationOwnerPart(cwd) });
+}
+
+function dictationOwnerPart(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function pendingDictationStatusCanApplyDuringActiveTurn(status: PendingDictationStatus): boolean {
+  return status.kind === "status" && (status.status.capability === "ready" || status.status.capability === "manual-only");
+}
+
+function dictationStatusMessage(status: SpeechServiceStatusResponse): string {
+  if (status.capability === "ready") return "Speech dictation is ready.";
+  if (status.capability === "manual-only") return "Speech dictation is ready for manual completion. Automatic completion is unavailable.";
+  if (status.capability === "warming") return "Speech dictation is warming up.";
+  if (status.whisper !== "ready") return "Speech dictation is unavailable because Whisper is not ready.";
+  return "Speech dictation is unavailable.";
+}
+
+function manualOnlyDictationStatus(reason: Extract<PromptDictationState, { readonly tag: "manual-only" }>["reason"]): string {
+  const readable = manualOnlyReasonLabel(reason);
+  return `Automatic completion unavailable (${readable}). Press the microphone to transcribe.`;
+}
+
+function manualOnlyReasonLabel(reason: Extract<PromptDictationState, { readonly tag: "manual-only" }>["reason"]): string {
+  switch (reason) {
+    case "detector-failed": return "detector failed";
+    case "endpoint-busy": return "endpoint busy";
+    case "endpoint-budget": return "endpoint budget reached";
+    case "endpoint-failed": return "endpoint failed";
+    case "smart-turn-unavailable": return "Smart Turn unavailable";
+  }
+}
+
+function retainedRetryDictationStatus(state: Extract<PromptDictationState, { readonly tag: "retained-retry" }>): string {
+  return `Transcription failed (${retainedRetryReasonLabel(state.reason)}). Press the microphone to retry retained audio, or discard. Audio expires in ${String(retainedRetrySecondsRemaining(state.expiresAtMs))}s.`;
+}
+
+function retainedRetryReasonLabel(reason: string): string {
+  if (reason === "overloaded") return "service busy";
+  if (reason === "timeout") return "request timed out";
+  if (reason === "network") return "network error";
+  if (reason === "speech_failed") return "speech failed";
+  if (reason === "speech_unavailable") return "speech unavailable";
+  return reason;
+}
+
+function retainedRetrySecondsRemaining(expiresAtMs: number): number {
+  return Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1_000));
 }
 
 function draftStorageKey(machineId: unknown, sessionId: unknown): string | undefined {

@@ -30,7 +30,7 @@ function runtimeContext(patch: Partial<PluginRuntimeContext> = {}): PluginRuntim
   const noop = () => undefined;
   return {
     state: {},
-    prompt: { insertText: noop, getText: () => "", getSelection: () => null },
+    prompt: { insertText: () => true, getText: () => "", getSelection: () => null },
     openActionPalette: noop,
     focusPrompt: noop,
     addProject: noop,

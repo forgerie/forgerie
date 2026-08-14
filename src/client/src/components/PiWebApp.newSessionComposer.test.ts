@@ -416,11 +416,15 @@ describe("PiWebApp New session composer root", () => {
   it("reports whether ambiguous prompt restoration still targets the selected editor", async () => {
     const app = new PiWebApp();
     const selected = session("selected", mainWorkspace.path);
-    const replaceText = vi.fn();
+    const replaceText = vi.fn(() => true);
     setAppState(app, { selectedMachine: localMachine, selectedSession: selected });
     Object.defineProperty(app, "updateComplete", { configurable: true, value: Promise.resolve(true) });
     Object.defineProperty(app, "promptEditor", { configurable: true, value: { replaceText } });
     await expect(callSessionPromptEditorReplacement(app, { machineId: localMachine.id, sessionId: selected.id, text: "Restore me" })).resolves.toBe(true);
+
+    Object.defineProperty(app, "promptEditor", { configurable: true, value: { replaceText: vi.fn(() => false) } });
+    await expect(callSessionPromptEditorReplacement(app, { machineId: localMachine.id, sessionId: selected.id, text: "Locked out" })).resolves.toBe(false);
+    Object.defineProperty(app, "promptEditor", { configurable: true, value: { replaceText } });
 
     let finishUpdate: (() => void) | undefined;
     Object.defineProperty(app, "updateComplete", {

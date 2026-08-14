@@ -51,6 +51,17 @@ export function renderStopIcon(): TemplateResult {
   `;
 }
 
+export function renderMicrophoneIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 4.5a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0v-4a3 3 0 0 1 3-3Z"></path>
+      <path d="M6.5 10.5v1a5.5 5.5 0 0 0 11 0v-1"></path>
+      <path d="M12 17v3"></path>
+      <path d="M9 20h6"></path>
+    </svg>
+  `;
+}
+
 /** Marks a place that is not the project's main worktree. */
 export function renderBranchIcon(): TemplateResult {
   return svg`
