@@ -38,6 +38,24 @@ describe("PromptEditor control rail", () => {
     expect(rendered).not.toContain("steer-confirm-button");
   });
 
+  it("announces the streaming Queue Steer affordance and expanded state", async () => {
+    vi.useFakeTimers();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }) });
+    const queue = button(composer, ".queue-button");
+
+    expect(queue.textContent).toContain("⋯");
+    expect(queue.title).toBe("Queue until the current activity finishes; hold for Steer");
+    expect(queue.getAttribute("aria-describedby")).toBe("queue-steer-description");
+    expect(composer.shadowRoot?.getElementById("queue-steer-description")?.textContent).toBe("Hold for Steer current response.");
+    expect(queue.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(queue.getAttribute("aria-controls")).toBe("queue-steer-popover");
+    expect(queue.getAttribute("aria-expanded")).toBe("false");
+
+    await openSteerByPointerHold(composer, queue);
+
+    expect(button(composer, ".queue-button").getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("puts Stop in the send slot and queues without steering while history is compacting", () => {
     const rendered = templateText(render(editor({ isCompacting: true, capabilities: sessionCapabilities({ stoppable: true }) })));
 
@@ -47,10 +65,12 @@ describe("PromptEditor control rail", () => {
     expect(rendered).not.toContain("Steer current response");
   });
 
-  it("shows Stop without Send, Queue, or Steer when work is stoppable but follow-up delivery is unavailable", () => {
+  it("shows Stop without Send, Queue, or Steer when work is stoppable but follow-up delivery is unavailable", async () => {
     const rendered = templateText(render(editor({ capabilities: sessionCapabilities({ stoppable: true }) })));
+    const composer = await mountEditor({ capabilities: sessionCapabilities({ stoppable: true }) });
 
     expect(rendered).toContain("Stop current work");
+    expect(button(composer, ".stop-button").title).toBe("Stop current work and restore queued messages to the draft");
     expect(rendered).not.toContain("Send message");
     expect(rendered).not.toContain("Queue message");
     expect(rendered).not.toContain("Steer current response");
@@ -117,17 +137,72 @@ describe("PromptEditor control rail", () => {
     expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
   });
 
-  it("cancels a pending pointer hold when movement or cancellation wins", async () => {
+  it("cancels a moved pointer hold through release and consumes the following click", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("do not queue after drift");
+    const queue = button(composer, ".queue-button");
+    const capture = recordPointerCapture(queue);
+
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 8, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    queue.dispatchEvent(pointerEvent("pointermove", { pointerId: 8, pointerType: "touch", button: 0, clientX: 11, clientY: 0 }));
+    queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 8, pointerType: "touch", button: 0, clientX: 11, clientY: 0 }));
+    queue.click();
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+
+    expect(capture.released).toEqual([8]);
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("matches pointer move, up, and cancellation by pointerId", async () => {
+    vi.useFakeTimers();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }) });
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 18, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    queue.dispatchEvent(pointerEvent("pointermove", { pointerId: 19, pointerType: "touch", button: 0, clientX: 40, clientY: 0 }));
+    queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 19, pointerType: "touch", button: 0, clientX: 40, clientY: 0 }));
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).not.toBeNull();
+
+    composer.canSteer = false;
+    await composer.updateComplete;
+    composer.canSteer = true;
+    await composer.updateComplete;
+    const nextQueue = button(composer, ".queue-button");
+    nextQueue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 20, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    nextQueue.dispatchEvent(pointerEvent("pointercancel", { pointerId: 21, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).not.toBeNull();
+  });
+
+  it("queues exactly once from a primary pointer release before the hold threshold", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("short touch queue");
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 10, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    vi.advanceTimersByTime(499);
+    queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 10, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    queue.click();
+    await composer.updateComplete;
+
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("short touch queue", "followUp", undefined, undefined);
+  });
+
+  it("cancels a pending pointer hold when cancellation wins", async () => {
     vi.useFakeTimers();
     const onSend = vi.fn();
     const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
     const queue = button(composer, ".queue-button");
-
-    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 8, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
-    queue.dispatchEvent(pointerEvent("pointermove", { pointerId: 8, pointerType: "touch", button: 0, clientX: 11, clientY: 0 }));
-    vi.advanceTimersByTime(500);
-    await composer.updateComplete;
-    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
 
     queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 9, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
     queue.dispatchEvent(pointerEvent("pointercancel", { pointerId: 9, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
@@ -142,6 +217,7 @@ describe("PromptEditor control rail", () => {
     vi.useFakeTimers();
     const onSend = vi.fn();
     const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("context steer instead of queue");
     const queue = button(composer, ".queue-button");
 
     queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 12, pointerType: "mouse", button: 2, clientX: 4, clientY: 4 }));
@@ -151,13 +227,19 @@ describe("PromptEditor control rail", () => {
 
     const menuEvent = mouseEvent("contextmenu", { button: 2, clientX: 4, clientY: 4 });
     queue.dispatchEvent(menuEvent);
-    vi.advanceTimersByTime(500);
     await composer.updateComplete;
 
     expect(menuEvent.defaultPrevented).toBe(true);
     expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
     queue.click();
     expect(onSend).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(0);
+    queue.click();
+    await composer.updateComplete;
+
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("context steer instead of queue", "followUp", undefined, undefined);
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
   });
 
   it("supports short and held keyboard Queue activation without repeat or native-click duplication", async () => {
@@ -186,6 +268,25 @@ describe("PromptEditor control rail", () => {
 
     expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("expires keyboard click suppression when no native click follows the activation", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("first keyboard queue");
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(keyEvent("keydown", "Enter"));
+    vi.advanceTimersByTime(499);
+    queue.dispatchEvent(keyEvent("keyup", "Enter"));
+    vi.advanceTimersByTime(0);
+    composer.replaceText("later normal click");
+    queue.click();
+
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenNthCalledWith(1, "first keyboard queue", "followUp", undefined, undefined);
+    expect(onSend).toHaveBeenNthCalledWith(2, "later normal click", "followUp", undefined, undefined);
   });
 
   it("keeps compaction Queue plain for long press, keyboard hold, and context menu", async () => {
@@ -269,6 +370,26 @@ describe("PromptEditor control rail", () => {
     expect(onStop).toHaveBeenCalledTimes(2);
   });
 
+  it("resets pending and open Steer state before Stop runs", async () => {
+    vi.useFakeTimers();
+    const onStop = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true, onStop }) });
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 41, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    button(composer, ".stop-button").click();
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+
+    await openSteerByPointerHold(composer, button(composer, ".queue-button"));
+    button(composer, ".stop-button").click();
+    await composer.updateComplete;
+
+    expect(onStop).toHaveBeenCalledTimes(2);
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+  });
+
   it("sends straight through when nothing is running", async () => {
     const onSend = vi.fn();
     const composer = await mountEditor({ onSend });
@@ -302,9 +423,13 @@ describe("PromptEditor control rail", () => {
     expect(composer.shadowRoot?.querySelector<HTMLInputElement>(".attachment-delivery input[value='folder']")?.checked).toBe(true);
   });
 
-  it("keeps Stop invocable when Queue submission is busy", async () => {
+  it.each([
+    { name: "submission", overrides: { submissionAvailable: false } },
+    { name: "send", overrides: { sendAvailable: false } },
+    { name: "sending", overrides: { sending: true } },
+  ])("keeps Stop invocable when the $name gate blocks Queue", async ({ overrides }) => {
     const onStop = vi.fn();
-    const composer = await mountEditor({ canSteer: true, sending: true, capabilities: sessionCapabilities({ stoppable: true, onStop }) });
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true, onStop }), ...overrides });
 
     const stop = button(composer, ".stop-button");
     const queue = button(composer, ".queue-button");
@@ -371,6 +496,18 @@ async function openSteerByPointerHold(composer: PromptEditor, queue: HTMLButtonE
 
 function popover(composer: PromptEditor): HTMLElement {
   return requiredElement(composer.shadowRoot?.querySelector<HTMLElement>("composer-popover"), "Steer popover");
+}
+
+function recordPointerCapture(button: HTMLButtonElement): { released: number[] } {
+  const captured = new Set<number>();
+  const released: number[] = [];
+  button.setPointerCapture = (pointerId: number) => { captured.add(pointerId); };
+  button.hasPointerCapture = (pointerId: number) => captured.has(pointerId);
+  button.releasePointerCapture = (pointerId: number) => {
+    released.push(pointerId);
+    captured.delete(pointerId);
+  };
+  return { released };
 }
 
 function pointerEvent(type: string, init: PointerEventInit): Event {

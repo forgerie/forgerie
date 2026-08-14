@@ -45,6 +45,20 @@ describe("composerRail", () => {
     expect(rail.canInvokePrimary).toBe(false);
   });
 
+  it.each([
+    { gate: "submission", patch: { submissionAvailable: false } },
+    { gate: "send", patch: { sendAvailable: false } },
+    { gate: "sending", patch: { sending: true } },
+  ] as const)("keeps Stop invocable when the $gate gate blocks Send and Queue", ({ patch }) => {
+    const rail = composerRail(input({ isStreaming: true, stoppable: true, ...patch }));
+
+    expect(rail.kind).toBe("queueCapable");
+    expect(rail.primaryAction).toBe("stop");
+    expect(rail.canInvokePrimary).toBe(true);
+    expect(rail.canStop).toBe(true);
+    expect(rail.canInvokeQueue).toBe(false);
+  });
+
   it("keeps stop visible but not queue while work is stoppable without follow-up delivery", () => {
     const rail = composerRail(input({ stoppable: true }));
 
@@ -68,5 +82,14 @@ describe("composerRail", () => {
 });
 
 function input(overrides: Partial<ComposerRailInput> = {}): ComposerRailInput {
-  return { disabled: false, sending: false, isStreaming: false, isCompacting: false, stoppable: false, ...overrides };
+  return {
+    disabled: false,
+    submissionAvailable: true,
+    sendAvailable: true,
+    sending: false,
+    isStreaming: false,
+    isCompacting: false,
+    stoppable: false,
+    ...overrides,
+  };
 }

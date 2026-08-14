@@ -1,3 +1,4 @@
+import { isSessionActive } from "../../../shared/activity";
 import type { SessionStatus } from "../api";
 import type { ComposerCapabilities, ComposerSelectableModel } from "../composerCapabilities";
 
@@ -26,7 +27,7 @@ export function sessionCapabilities(options: SessionCapabilityOptions = {}): Com
   const status = options.status;
   const runtimeAvailable = options.runtimeAvailable ?? true;
   const label = options.sessionLabel;
-  const stoppable = options.stoppable ?? sessionStatusHasActiveWork(status);
+  const stoppable = options.stoppable ?? isSessionActive(status);
   return {
     ...(label === undefined || label === "" ? {} : { context: [{ id: "session", label, title: label }] }),
     model: {
@@ -48,11 +49,4 @@ export function sessionCapabilities(options: SessionCapabilityOptions = {}): Com
     ...(options.onArchiveAndNext === undefined ? {} : { archive: { onArchiveAndNext: options.onArchiveAndNext } }),
     ...(status?.contextUsage === undefined ? {} : { contextUsage: status.contextUsage }),
   };
-}
-
-function sessionStatusHasActiveWork(status: SessionStatus | undefined): boolean {
-  return status?.isStreaming === true
-    || status?.isBashRunning === true
-    || status?.isCompacting === true
-    || (status?.pendingMessageCount ?? 0) > 0;
 }

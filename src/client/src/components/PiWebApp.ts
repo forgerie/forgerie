@@ -2918,17 +2918,10 @@ export class PiWebApp extends LitElement {
         changeable: runtimeAvailable,
         onSet: this.handleSetGuidance,
       },
-      stop: { stoppable: runtimeAvailable && this.selectedSessionHasActiveWork(state), onStop: this.handleStopActiveWork },
+      stop: { stoppable: runtimeAvailable && isActive(state), onStop: this.handleStopActiveWork },
       ...(this.canArchiveSelectedSession(state) ? { archive: { onArchiveAndNext: this.handleArchiveAndNext } } : {}),
       ...(state.status?.contextUsage === undefined ? {} : { contextUsage: state.status.contextUsage }),
     };
-  }
-
-  private selectedSessionHasActiveWork(state: AppState): boolean {
-    return state.status?.isStreaming === true
-      || state.status?.isBashRunning === true
-      || state.status?.isCompacting === true
-      || (state.status?.pendingMessageCount ?? 0) > 0;
   }
 
   /** A chat still opening has a place but no runtime to ask about it yet. */

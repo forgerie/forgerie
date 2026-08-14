@@ -37,6 +37,7 @@ describe("PromptEditor Escape behavior", () => {
     { state: "streaming", patch: { isStreaming: true } },
     { state: "compacting", patch: { isCompacting: true } },
     { state: "running bash", patch: { isBashRunning: true } },
+    { state: "pending queued messages", patch: { pendingMessageCount: 1 } },
   ])("stops active work while $state", async ({ patch }) => {
     const onStop = vi.fn();
     const editor = await mountEditor({ status: status(patch), canStop: true, onStop });

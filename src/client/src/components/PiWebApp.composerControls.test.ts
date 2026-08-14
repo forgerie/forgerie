@@ -2,7 +2,7 @@
 
 import { render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Project, SessionInfo, SessionStatus, Workspace } from "../api";
+import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { selectedChatLiveReady, selectedChatTarget } from "../selectedChatLoad";
 import { PiWebApp } from "./PiWebApp";
@@ -40,15 +40,46 @@ describe("PiWebApp composer controls", () => {
 
     expect(editor.capabilities.stop?.stoppable).toBe(true);
   });
+
+  it("uses activity-only active work for Stop availability", async () => {
+    const editor = await renderSelectedEditor(status(), activity({ phase: "active", label: "Running tool" }));
+
+    expect(editor.capabilities.stop?.stoppable).toBe(true);
+    expect(editor.shadowRoot?.querySelector(".stop-button")).not.toBeNull();
+    expect(editor.shadowRoot?.querySelector(".queue-button")).toBeNull();
+  });
+
+  it("does not expose Stop for startup activity", async () => {
+    const editor = await renderSelectedEditor(status(), activity({ phase: "active", label: "Opening session", startup: true }));
+
+    expect(editor.capabilities.stop?.stoppable).toBe(false);
+    expect(editor.shadowRoot?.querySelector(".stop-button")).toBeNull();
+    expect(editor.shadowRoot?.querySelector(".send-button")).not.toBeNull();
+  });
+
+  it.each([
+    { name: "streaming", patch: { isStreaming: true }, steerable: true, queue: true },
+    { name: "compaction", patch: { isCompacting: true }, steerable: false, queue: true },
+    { name: "shell-only", patch: { isBashRunning: true }, steerable: false, queue: false },
+    { name: "pending-only", patch: { pendingMessageCount: 1 }, steerable: false, queue: false },
+  ])("renders the $name composer controls", async ({ patch, steerable, queue }) => {
+    const editor = await renderSelectedEditor(status(patch));
+
+    expect(editor.shadowRoot?.querySelector(".stop-button")).not.toBeNull();
+    expect(editor.shadowRoot?.querySelector(".send-button")).toBeNull();
+    expect(editor.shadowRoot?.querySelector(".queue-button") !== null).toBe(queue);
+    expect(editor.shadowRoot?.querySelector(".queue-button.has-steer") !== null).toBe(steerable);
+  });
 });
 
-async function renderSelectedEditor(sessionStatus: SessionStatus): Promise<PromptEditor> {
+async function renderSelectedEditor(sessionStatus: SessionStatus, sessionActivity?: SessionActivity): Promise<PromptEditor> {
   const app = new PiWebApp();
   const selected = session("selected", "/repo", "Selected session");
   setAppState(app, {
     ...appState({ selectedSession: selected, sessions: [selected], inboxSessions: [selected] }),
     mainView: "chat",
     status: sessionStatus,
+    activity: sessionActivity,
     selectedChatLoad: selectedChatLiveReady(selectedChatTarget("local", selected)),
   });
   const container = document.createElement("div");
@@ -107,6 +138,16 @@ function session(id: string, cwd: string, title: string): SessionInfo {
 
 function setAppState(app: PiWebApp, state: AppState): void {
   if (!Reflect.set(app, "state", state)) throw new Error("Could not set PiWebApp state");
+}
+
+function activity(overrides: Partial<SessionActivity> = {}): SessionActivity {
+  return {
+    sessionId: "selected",
+    phase: "active",
+    label: "Working",
+    at: "2026-08-10T00:00:00.000Z",
+    ...overrides,
+  };
 }
 
 function status(overrides: Partial<SessionStatus> = {}): SessionStatus {

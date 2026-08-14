@@ -9,6 +9,10 @@
 export interface ComposerRailInput {
   /** The session cannot be used at all — archived, or otherwise closed to input. */
   disabled: boolean;
+  /** The draft cannot be submitted right now. */
+  submissionAvailable: boolean;
+  /** This host currently has a send destination. */
+  sendAvailable: boolean;
   /** A send is already in flight from this client. */
   sending: boolean;
   /** The agent is producing a reply right now. */
@@ -33,18 +37,18 @@ export interface ComposerRail {
 
 export function composerRail(input: ComposerRailInput): ComposerRail {
   const usable = !input.disabled;
+  const sendGateOpen = usable && input.submissionAvailable && input.sendAvailable && !input.sending;
   const queueCapable = input.isStreaming || input.isCompacting;
   const kind: ComposerRail["kind"] = queueCapable ? "queueCapable" : input.stoppable ? "stopOnly" : "idle";
   const primaryAction: ComposerRail["primaryAction"] = kind === "idle" ? "send" : "stop";
   const canStop = usable && input.stoppable;
-  const canInvokeSend = usable && !input.sending;
-  const canInvokePrimary = primaryAction === "send" ? canInvokeSend : canStop;
+  const canInvokePrimary = primaryAction === "send" ? sendGateOpen : canStop;
   return {
     kind,
     primaryAction,
     canInvokePrimary,
     canQueue: queueCapable,
-    canInvokeQueue: usable && queueCapable && !input.sending,
+    canInvokeQueue: sendGateOpen && queueCapable,
     // Compaction has no reply in flight to redirect, so steering is offered
     // only while the agent is actually speaking.
     canSteer: usable && input.isStreaming && !input.isCompacting,
