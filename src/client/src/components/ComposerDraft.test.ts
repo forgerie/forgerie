@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { undo } from "@codemirror/commands";
 import { EditorSelection } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComposerRuntime } from "../composerRuntime";
@@ -54,6 +55,78 @@ describe("ComposerDraft", () => {
     expect(loadDraft("remote-a:session-1")).toBe("!pwd");
     expect(menu(draft)?.items).toEqual([]);
     expect(draft.textContent).toContain("Shell command");
+  });
+
+  it("commits dictation through one persisted, editable, undoable draft transaction", async () => {
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const onDraftEdited = vi.fn();
+    const draft = await mountDraft({ storageKey: "remote-a:dictation", onSubmit, onDraftEdited });
+    draft.replaceText("replace this phrase");
+    draft.view?.dispatch({ selection: EditorSelection.range(8, 12) });
+    onDraftEdited.mockClear();
+
+    expect(draft.beginDictationEdit()).toBe(true);
+    expect(draft.commitDictationTranscript("spoken")).toBe(true);
+    expect(draft.finishDictationEdit()).toBe(true);
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("replace spoken phrase");
+    expect(loadDraft("remote-a:dictation")).toBe("replace spoken phrase");
+    expect(onDraftEdited).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+    const view = draft.view;
+    if (view === undefined) throw new Error("Expected CodeMirror to mount");
+    expect(undo(view)).toBe(true);
+    expect(view.state.doc.toString()).toBe("replace this phrase");
+  });
+
+  it("locks mutation surfaces while dictation owns the draft", async () => {
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const draft = await mountDraft({ promptHistory: ["history"], onSubmit });
+    draft.replaceText("owned draft");
+    await attachFile(draft, new File(["kept"], "kept.png", { type: "image/png" }));
+    draft.view?.dispatch({ selection: EditorSelection.range(0, 5) });
+
+    expect(draft.beginDictationEdit()).toBe(true);
+    setEditorText(draft, "typed over");
+    startAttachFile(draft, new File(["blocked"], "blocked.txt", { type: "text/plain" }));
+    draft.querySelector<HTMLButtonElement>(".attachment-remove")?.click();
+    draft.querySelector<HTMLInputElement>(".attachment-delivery input[value='folder']")?.click();
+    press(draft, "ArrowUp");
+    draft.submit();
+
+    await Promise.resolve();
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("owned draft");
+    expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1);
+    expect(draft.querySelector<HTMLInputElement>(".attachment-delivery input[value='inline']")?.checked).toBe(true);
+    expect(draft.querySelector<HTMLInputElement>(".attachment-delivery input[value='folder']")?.checked).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(draft.insertTextAtSelection("plugin")).toBe(false);
+    expect(draft.focusInput()).toBe(false);
+    expect(draft.getText()).toBe("owned draft");
+    expect(draft.getSelection()).toEqual({ start: 0, end: 5, text: "owned" });
+  });
+
+  it("aborts dictation ownership before owner and wholesale replacement changes", async () => {
+    saveDraft("remote-a:session-2", "session two");
+    const draft = await mountDraft({ storageKey: "remote-a:session-1" });
+    draft.replaceText("session one");
+    draft.view?.dispatch({ selection: EditorSelection.range(0, 7) });
+    expect(draft.beginDictationEdit()).toBe(true);
+
+    draft.storageKey = "remote-a:session-2";
+    await draft.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("session two");
+    expect(draft.commitDictationTranscript("late")).toBe(false);
+
+    expect(draft.beginDictationEdit()).toBe(true);
+    draft.replaceText("host replacement");
+
+    expect(draft.view?.state.doc.toString()).toBe("host replacement");
+    expect(draft.commitDictationTranscript("late")).toBe(false);
   });
 
   it("submits text, attachment-only, and delivery snapshots through one public callback", async () => {
@@ -515,6 +588,7 @@ async function mountDraft(options: {
   promptHistory?: readonly string[];
   onSubmit?: (snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
   onCompletionError?: (error: { kind: string; message: string }) => void;
+  onDraftEdited?: () => void;
   host?: HTMLElement;
 } = {}): Promise<ComposerDraft> {
   const host = options.host ?? document.createElement("div");
@@ -524,6 +598,7 @@ async function mountDraft(options: {
   if (options.promptHistory !== undefined) draft.promptHistory = options.promptHistory;
   if (options.onSubmit !== undefined) draft.onSubmit = options.onSubmit;
   if (options.onCompletionError !== undefined) draft.onCompletionError = options.onCompletionError;
+  if (options.onDraftEdited !== undefined) draft.onDraftEdited = options.onDraftEdited;
   host.append(draft);
   document.body.append(host);
   await draft.updateComplete;

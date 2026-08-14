@@ -16,6 +16,7 @@ import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
 import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
+import { abortComposerDraftDictation, beginComposerDraftDictation, commitComposerDraftDictationTranscript, composerDraftDictation, finishComposerDraftDictation, isComposerDraftDictationActive } from "./composerDraftDictation";
 import "./AutocompleteMenu";
 
 type PendingAttachment = CapturedAttachment & { id: string };
@@ -113,7 +114,9 @@ export class ComposerDraft extends LitElement {
   private readonly attachmentDeliveryGroupName = `${this.instanceId}-attachment-delivery`;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
+    if (changed.has("disabled") && this.disabled) this.abortDictationEdit();
     if (changed.has("storageKey")) {
+      this.abortDictationEdit();
       const previousKey = changed.get("storageKey");
       if (typeof previousKey === "string" && previousKey !== "") saveDraft(previousKey, this.draft);
       this.draft = this.storageKey !== undefined && this.storageKey !== "" ? loadDraft(this.storageKey) : this.draft;
@@ -158,6 +161,7 @@ export class ComposerDraft extends LitElement {
         this.attachmentGeneration += 1;
       }
     });
+    this.abortDictationEdit();
     this.editor?.destroy();
     this.editor = undefined;
     super.disconnectedCallback();
@@ -209,16 +213,20 @@ export class ComposerDraft extends LitElement {
     `;
   }
 
-  focusInput(): void {
-    this.editor?.focus();
+  focusInput(): boolean {
+    if (this.isDictationActive()) return false;
+    if (this.editor === undefined) return false;
+    this.editor.focus();
+    return true;
   }
 
   openAttachmentPicker(): void {
-    if (this.disabled || this.submissionDisabled) return;
+    if (!this.canMutateAttachments()) return;
     this.attachmentInput?.click();
   }
 
   replaceText(text: string): void {
+    this.abortDictationEdit();
     this.promptHistoryState = leavePromptHistory(this.promptHistoryState);
     if (this.draft !== text) this.mutationVersion += 1;
     this.draft = text;
@@ -245,6 +253,59 @@ export class ComposerDraft extends LitElement {
     return this.editor;
   }
 
+  beginDictationEdit(): boolean {
+    const editor = this.editor;
+    if (editor === undefined || this.disabled || this.submissionDisabled || this.attachmentCaptureCount > 0) return false;
+    this.completions = [];
+    this.selectedIndex = 0;
+    this.completionError = undefined;
+    this.requestVersion += 1;
+    this.syncEditorAccessibility();
+    return beginComposerDraftDictation(editor);
+  }
+
+  commitDictationTranscript(transcript: string): boolean {
+    const editor = this.editor;
+    if (editor === undefined) return false;
+    return commitComposerDraftDictationTranscript(editor, transcript);
+  }
+
+  finishDictationEdit(): boolean {
+    const editor = this.editor;
+    if (editor === undefined) return false;
+    return finishComposerDraftDictation(editor);
+  }
+
+  abortDictationEdit(): boolean {
+    const editor = this.editor;
+    if (editor === undefined) return false;
+    return abortComposerDraftDictation(editor);
+  }
+
+  insertTextAtSelection(text: string): boolean {
+    const editor = this.editor;
+    if (editor === undefined || this.disabled || this.submissionDisabled || this.isDictationActive()) return false;
+    if (!editor.hasFocus) editor.focus();
+    const selection = editor.state.selection.main;
+    editor.dispatch({
+      changes: { from: selection.from, to: selection.to, insert: text },
+      selection: EditorSelection.cursor(selection.from + text.length),
+    });
+    return true;
+  }
+
+  getText(): string {
+    return this.draft;
+  }
+
+  getSelection(): { start: number; end: number; text: string } | null {
+    const editor = this.editor;
+    if (editor === undefined) return null;
+    const selection = editor.state.selection.main;
+    if (selection.empty) return null;
+    return { start: selection.from, end: selection.to, text: editor.state.sliceDoc(selection.from, selection.to) };
+  }
+
   currentSnapshot(): ComposerDraftSubmitSnapshot {
     const attachments = this.attachments.length > 0 ? this.currentAttachments() : undefined;
     return {
@@ -269,7 +330,7 @@ export class ComposerDraft extends LitElement {
   }
 
   submit(streamingBehavior?: "steer" | "followUp"): void {
-    if (this.disabled || this.submissionDisabled || this.attachmentCaptureCount > 0) return;
+    if (this.disabled || this.submissionDisabled || this.attachmentCaptureCount > 0 || this.isDictationActive()) return;
     const snapshot = this.createSubmitSnapshot();
     if (snapshot === undefined) return;
     const submittedMutationVersion = this.mutationVersion;
@@ -291,23 +352,28 @@ export class ComposerDraft extends LitElement {
   restoreSeed(seed: ComposerDraftSeed): boolean {
     if (this.restoredSeedIds.has(seed.id)) return false;
     this.restoredSeedIds.add(seed.id);
+    this.abortDictationEdit();
     this.applySnapshot(seed.snapshot, false);
     return true;
   }
 
   restoreSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
+    this.abortDictationEdit();
     this.applySnapshot(snapshot, true);
   }
 
   restoreTransientSnapshot(snapshot: ComposerDraftSubmitSnapshot): void {
+    this.abortDictationEdit();
     this.applySnapshot(snapshot, false);
   }
 
   clearAfterAcceptance(): void {
+    this.abortDictationEdit();
     this.resetComposer();
   }
 
   discardDraft(): void {
+    this.abortDictationEdit();
     this.resetComposer();
   }
 
@@ -388,6 +454,10 @@ export class ComposerDraft extends LitElement {
 
   private changeDelivery(event: Event): void {
     if (!(event.target instanceof HTMLInputElement) || event.target.type !== "radio" || !event.target.checked) return;
+    if (!this.canMutateAttachments()) {
+      this.syncAttachmentDeliveryInputs();
+      return;
+    }
     const requested = event.target.value === "folder" ? "folder" : "inline";
     if (requested === "inline" && !promptAttachmentsCanUseInlineDelivery(this.attachments)) {
       event.target.checked = false;
@@ -404,6 +474,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private removeAttachment(id: string): void {
+    if (!this.canMutateAttachments()) return;
     const index = this.attachments.findIndex((attachment) => attachment.id === id);
     const removed = index === -1 ? undefined : this.attachments[index];
     const total = this.attachments.length;
@@ -494,7 +565,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private canMutateAttachments(): boolean {
-    return this.isConnected && !this.disabled && !this.submissionDisabled;
+    return this.isConnected && !this.disabled && !this.submissionDisabled && !this.isDictationActive();
   }
 
   private canAcceptAttachmentResult(generation: number): boolean {
@@ -502,7 +573,8 @@ export class ComposerDraft extends LitElement {
     return generation === this.attachmentGeneration
       && (this.isConnected || ownsDisconnectedSettlement)
       && !this.disabled
-      && !this.submissionDisabled;
+      && !this.submissionDisabled
+      && !this.isDictationActive();
   }
 
   private clearAttachmentOwnership(): void {
@@ -521,6 +593,12 @@ export class ComposerDraft extends LitElement {
     return effectivePromptAttachmentDelivery(this.attachmentDelivery, this.attachments);
   }
 
+  private syncAttachmentDeliveryInputs(): void {
+    const delivery = this.effectiveAttachmentDelivery();
+    const inputs = this.querySelectorAll<HTMLInputElement>(".attachment-delivery input[type='radio']");
+    for (const input of inputs) input.checked = input.value === delivery;
+  }
+
   private createEditor(): void {
     if (!this.editorHost || this.editor !== undefined) return;
     const root = this.editorHost.getRootNode();
@@ -537,6 +615,7 @@ export class ComposerDraft extends LitElement {
           indentUnit.of("  "),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           EditorView.lineWrapping,
+          composerDraftDictation(),
           EditorView.contentAttributes.of((view) => inputAssistanceContentAttributes(this.resolveInputMode(view.state.sliceDoc(0, view.state.selection.main.head)))),
           EditorView.domEventHandlers({
             keyup: (event) => this.handleEditorKeyUp(event),
@@ -547,7 +626,7 @@ export class ComposerDraft extends LitElement {
           this.readOnlyCompartment.of(EditorState.readOnly.of(this.disabled)),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !this.applyingSnapshot) this.updateDraft(update.state.doc.toString());
-            else if (update.selectionSet && !this.applyingSnapshot) void this.refreshCompletions();
+            else if (update.selectionSet && !this.applyingSnapshot && !this.isDictationActive()) void this.refreshCompletions();
           }),
           keymap.of([
             { any: (view, event) => this.handleEditorKeyDown(event, view) },
@@ -631,6 +710,13 @@ export class ComposerDraft extends LitElement {
   }
 
   private async refreshCompletions(): Promise<void> {
+    if (this.isDictationActive()) {
+      this.completions = [];
+      this.selectedIndex = 0;
+      this.completionError = undefined;
+      this.syncEditorAccessibility();
+      return;
+    }
     const trigger = this.currentTrigger();
     const version = ++this.requestVersion;
     this.selectedIndex = 0;
@@ -675,6 +761,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private handleEditorEscape(): boolean {
+    if (this.isDictationActive()) return true;
     if (this.closeCompletions()) return true;
     if (this.onEscape?.({ draft: this.draft, inputMode: this.currentInputMode }) === true) return true;
     if (this.currentInputMode.kind === "shell") {
@@ -685,6 +772,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private movePromptHistory(view: EditorView, direction: "older" | "newer"): boolean {
+    if (this.isDictationActive()) return true;
     const selection = view.state.selection.main;
     if (!selection.empty || this.promptHistoryState.entries.length === 0) return false;
     if (direction === "newer" && this.promptHistoryState.position.kind === "draft") return false;
@@ -714,6 +802,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private handleEditorKeyDown(event: KeyboardEvent, view: EditorView): boolean {
+    if (this.isDictationActive()) return true;
     if (event.key === "Shift") {
       this.explicitShiftKeyActive = true;
       return false;
@@ -753,6 +842,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private handleEditorTab(view: EditorView): boolean {
+    if (this.isDictationActive()) return true;
     if (this.completions.length) {
       const completion = this.completions[this.selectedIndex];
       if (completion !== undefined) this.pick(completion);
@@ -768,7 +858,7 @@ export class ComposerDraft extends LitElement {
 
   private pick(item: CompletionItem): void {
     const editor = this.editor;
-    if (!editor) return;
+    if (!editor || this.isDictationActive()) return;
     const suffix = item.kind === "file" && (item.insertText.endsWith("/") || item.cursorOffset !== undefined) ? "" : " ";
     const cursor = item.replaceFrom + (item.cursorOffset ?? item.insertText.length) + suffix.length;
     const replaceTo = item.insertText.endsWith("\"") && this.draft.slice(item.replaceTo).startsWith("\"") ? item.replaceTo + 1 : item.replaceTo;
@@ -783,6 +873,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private resetComposer(): void {
+    this.abortDictationEdit();
     this.mutationVersion += 1;
     this.draft = "";
     this.currentInputMode = { kind: "normal" };
@@ -846,6 +937,11 @@ export class ComposerDraft extends LitElement {
     const availableInsideBoundary = Math.floor(boundaryRect.height - 16);
     const available = Math.min(availableAboveEditor > 0 ? availableAboveEditor : availableInsideBoundary, availableInsideBoundary);
     return Math.max(64, available);
+  }
+
+  private isDictationActive(): boolean {
+    const editor = this.editor;
+    return editor !== undefined && isComposerDraftDictationActive(editor.state);
   }
 
   private announcePolite(message: string): void {

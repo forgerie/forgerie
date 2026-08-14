@@ -2457,26 +2457,9 @@ export class PiWebApp extends LitElement {
 
   private createPromptEditor(): PluginPromptEditor {
     return {
-      insertText: (text: string) => {
-        const editor = this.promptEditor?.view;
-        if (!editor) return;
-        if (!editor.hasFocus) editor.focus();
-        const sel = editor.state.selection.main;
-        editor.dispatch({
-          changes: { from: sel.from, to: sel.to, insert: text },
-          selection: { anchor: sel.from + text.length },
-        });
-      },
-      getText: () => {
-        return this.promptEditor?.view?.state.doc.toString() ?? "";
-      },
-      getSelection: () => {
-        const editor = this.promptEditor?.view;
-        if (!editor) return null;
-        const sel = editor.state.selection.main;
-        if (sel.empty) return null;
-        return { start: sel.from, end: sel.to, text: editor.state.sliceDoc(sel.from, sel.to) };
-      },
+      insertText: (text: string) => this.promptEditor?.insertTextAtSelection(text) ?? false,
+      getText: () => this.promptEditor?.getText() ?? "",
+      getSelection: () => this.promptEditor?.getSelection() ?? null,
     };
   }
 

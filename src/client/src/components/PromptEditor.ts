@@ -317,8 +317,20 @@ export class PromptEditor extends LitElement {
     });
   }
 
-  focusInput(): void {
-    this.draftElement?.focusInput();
+  focusInput(): boolean {
+    return this.draftElement?.focusInput() ?? false;
+  }
+
+  insertTextAtSelection(text: string): boolean {
+    return this.draftElement?.insertTextAtSelection(text) ?? false;
+  }
+
+  getText(): string {
+    return this.draftElement?.getText() ?? "";
+  }
+
+  getSelection(): { start: number; end: number; text: string } | null {
+    return this.draftElement?.getSelection() ?? null;
   }
 
   /**
