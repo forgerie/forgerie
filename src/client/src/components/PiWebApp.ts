@@ -2918,10 +2918,17 @@ export class PiWebApp extends LitElement {
         changeable: runtimeAvailable,
         onSet: this.handleSetGuidance,
       },
-      stop: { stoppable: runtimeAvailable, onStop: this.handleStopActiveWork },
+      stop: { stoppable: runtimeAvailable && this.selectedSessionHasActiveWork(state), onStop: this.handleStopActiveWork },
       ...(this.canArchiveSelectedSession(state) ? { archive: { onArchiveAndNext: this.handleArchiveAndNext } } : {}),
       ...(state.status?.contextUsage === undefined ? {} : { contextUsage: state.status.contextUsage }),
     };
+  }
+
+  private selectedSessionHasActiveWork(state: AppState): boolean {
+    return state.status?.isStreaming === true
+      || state.status?.isBashRunning === true
+      || state.status?.isCompacting === true
+      || (state.status?.pendingMessageCount ?? 0) > 0;
   }
 
   /** A chat still opening has a place but no runtime to ask about it yet. */
@@ -3045,7 +3052,6 @@ export class PiWebApp extends LitElement {
       .runtimeControlsAvailable=${false}
       .canSteer=${false}
       .isCompacting=${false}
-      .canStop=${false}
       .status=${undefined}
       .sending=${this.state.sendingPrompts[intent.session.id] === true}
       .chromeSummoned=${this.appShell.isChromeSummoned}
@@ -3068,7 +3074,6 @@ export class PiWebApp extends LitElement {
       .runtimeControlsAvailable=${runtimeAvailable}
       .canSteer=${runtimeAvailable && state.status?.isStreaming === true}
       .isCompacting=${runtimeAvailable && state.status?.isCompacting === true}
-      .canStop=${runtimeAvailable && (state.status?.isStreaming === true || state.status?.isBashRunning === true || state.status?.isCompacting === true || (state.status?.pendingMessageCount ?? 0) > 0)}
       .status=${state.status}
       .sending=${state.sendingPrompts[session.id] === true}
       .chromeSummoned=${this.appShell.isChromeSummoned}

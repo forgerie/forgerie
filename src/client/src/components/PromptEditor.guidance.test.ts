@@ -51,6 +51,7 @@ describe("PromptEditor session guidance", () => {
     const calls: { entryId: string; enabled: boolean }[] = [];
     const onSend = vi.fn();
     const editor = await mountEditor(status([]));
+    editor.canSteer = true;
     editor.capabilities = { ...editor.capabilities, stop: { stoppable: true, onStop: () => undefined } };
     editor.onSend = onSend;
     setGuidanceHandler(editor, (entryId: string, enabled: boolean) => {
@@ -66,7 +67,7 @@ describe("PromptEditor session guidance", () => {
     guidanceOption(editor).click();
 
     expect(calls).toEqual([{ entryId: "technical-english", enabled: true }]);
-    expect(required(editor.shadowRoot?.querySelector<HTMLButtonElement>(".send-button")).disabled).toBe(true);
+    expect(required(editor.shadowRoot?.querySelector<HTMLButtonElement>(".queue-button")).disabled).toBe(true);
     expect(required(editor.shadowRoot?.querySelector<HTMLButtonElement>(".stop-button")).disabled).toBe(false);
 
     editor.replaceText("do not send yet");

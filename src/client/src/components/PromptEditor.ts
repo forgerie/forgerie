@@ -9,7 +9,7 @@ import { composerRail, type ComposerRail } from "../composerRail";
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderGuidanceIcon, renderQueueIcon, renderSendIcon, renderSteerIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderGuidanceIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
@@ -162,7 +162,7 @@ export class PromptEditor extends LitElement {
         <composer-draft
           .disabled=${this.disabled}
           .submissionDisabled=${busy || !this.submissionAvailable}
-          .working=${rail.kind === "working"}
+          .working=${rail.kind === "queueCapable"}
           .compacting=${this.isCompacting}
           .resting=${resting}
           .runtime=${this.runtime()}
@@ -191,7 +191,7 @@ export class PromptEditor extends LitElement {
           `}
           ${this.renderDismissAction()}
           ${this.renderPrimaryAction(rail)}
-          ${this.capabilities.stop === undefined ? nothing : html`<button class="icon-button stop-button" ?disabled=${!rail.canStop} title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"} aria-label="Stop current work" @click=${() => { this.stop(); }}>${renderStopIcon()}</button>`}
+          ${this.renderQueueAction(rail)}
         </div>
       </footer>
     `;
@@ -307,8 +307,9 @@ export class PromptEditor extends LitElement {
   /**
    * What the rail offers right now.
    *
-   * `canSteer` arrives as "the agent is speaking"; the rail turns that plus
-   * compaction into the one question the controls actually ask.
+   * `canSteer` arrives as "the agent is speaking"; the rail keeps that separate
+   * from the broader stoppable-work state so shell-only and pending-only work
+   * can stop without exposing unsupported follow-up delivery.
    */
   private rail(): ComposerRail {
     return composerRail({
@@ -320,12 +321,6 @@ export class PromptEditor extends LitElement {
     });
   }
 
-  /**
-   * Send and queue are the same slot, not two controls: a session that is not
-   * working has nothing to queue behind. Steering joins the primary control as
-   * its second half while the agent is speaking, so the rail gains a target
-   * rather than a row.
-   */
   /** The way out sits beside the way in, at the same size. */
   private renderDismissAction() {
     const dismiss = this.capabilities.dismiss;
@@ -345,24 +340,42 @@ export class PromptEditor extends LitElement {
   }
 
   private renderPrimaryAction(rail: ComposerRail) {
-    const queues = rail.primaryAction === "queue";
+    if (rail.primaryAction === "stop") {
+      return html`
+        <div class="primary-action">
+          <button
+            class="icon-button stop-button"
+            ?disabled=${!rail.canInvokePrimary}
+            title=${rail.canStop ? "Stop current work and clear queued messages" : "Nothing running"}
+            aria-label="Stop current work"
+            @click=${() => { this.stop(); }}
+          >${renderStopIcon()}</button>
+        </div>
+      `;
+    }
     return html`
       <div class="primary-action">
         <button
           class="icon-button send-button"
           ?disabled=${!rail.canInvokePrimary}
-          title=${queues ? "Queue until the current activity finishes" : "Send message"}
-          aria-label=${queues ? "Queue message" : "Send message"}
-          @click=${() => { this.submitDraft("followUp"); }}
-        >${queues ? renderQueueIcon() : renderSendIcon()}</button>
-        ${rail.canSteer ? html`<button
-          class="icon-button steer-button"
-          ?disabled=${!rail.canInvokePrimary}
-          title="Steer the current response before the next model call"
-          aria-label="Steer current response"
-          @click=${() => { this.submitDraft("steer"); }}
-        >${renderSteerIcon()}</button>` : null}
+          title="Send message"
+          aria-label="Send message"
+          @click=${() => { this.submitDraft(); }}
+        >${renderSendIcon()}</button>
       </div>
+    `;
+  }
+
+  private renderQueueAction(rail: ComposerRail) {
+    if (!rail.canQueue) return nothing;
+    return html`
+      <button
+        class="icon-button queue-button"
+        ?disabled=${!rail.canInvokeQueue}
+        title="Queue until the current activity finishes"
+        aria-label="Queue message"
+        @click=${() => { this.submitDraft("followUp"); }}
+      >${renderQueueIcon()}</button>
     `;
   }
 
@@ -637,6 +650,7 @@ export class PromptEditor extends LitElement {
   }
 
   private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome> {
+    if (this.rail().kind === "stopOnly") return "rejected";
     if (this.onDraftSubmit !== undefined) return this.onDraftSubmit(snapshot);
     void this.onSend?.(snapshot.text, streamingBehavior, snapshot.attachments, snapshot.delivery);
     return "accepted";
@@ -690,8 +704,8 @@ function promptHistoryChanged(value: readonly string[], previous: readonly strin
 
 // The only `status` fields the template reads directly are the model identity,
 // thinking level, and guidance summary (shown in renderCompactStatus). Everything else the editor
-// cares about (canSteer/canStop/isCompacting/sending) is passed as a separate
-// property that Lit already diffs by value. Comparing just these fields lets us
+// cares about (canSteer/isCompacting/sending) is passed as a separate
+// property or capability that Lit already diffs by value. Comparing just these fields lets us
 // ignore the per-token status churn that does not change anything on screen.
 function sessionStatusRenderEqual(a: SessionStatus | undefined, b: SessionStatus | undefined): boolean {
   if (a === b) return true;
