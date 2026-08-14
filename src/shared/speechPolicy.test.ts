@@ -6,6 +6,9 @@ describe("speech runtime policy", () => {
     expect(SPEECH_POLICY.audio.sampleRateHz).toBe(16_000);
     expect(SPEECH_POLICY.audio.channels).toBe(1);
     expect(SPEECH_POLICY.audio.bytesPerSample).toBe(4);
+    expect(SPEECH_POLICY.audio.minRequestMs).toBe(100);
+    expect(SPEECH_POLICY.audio.minRequestSamples).toBe(speechPcmSamplesForSeconds(SPEECH_POLICY.audio.minRequestMs / 1_000));
+    expect(SPEECH_POLICY.audio.minRequestBytes).toBe(speechPcmBytesForSeconds(SPEECH_POLICY.audio.minRequestMs / 1_000));
     expect(speechPcmSamplesForSeconds(3)).toBe(48_000);
     expect(speechPcmBytesForSeconds(3)).toBe(192_000);
     expect(SPEECH_POLICY.audio.maxTurnSamples).toBe(speechPcmSamplesForSeconds(SPEECH_POLICY.audio.maxTurnSeconds));
@@ -80,11 +83,12 @@ describe("speech runtime policy", () => {
   });
 
   it("records cancellation and restart probes with remaining adapter-only proof explicit", () => {
-    expect(SPEECH_POLICY_EVIDENCE.queuedCancellationObservation).toContain("direct Whisper HTTP client");
-    expect(SPEECH_POLICY_EVIDENCE.activeCancellationObservation).toContain("backend slot");
+    expect(SPEECH_POLICY_EVIDENCE.queuedCancellationObservation).toContain("before a Whisper frame write");
+    expect(SPEECH_POLICY_EVIDENCE.activeCancellationObservation).toContain("no per-request cancellation frame");
     expect(SPEECH_POLICY_EVIDENCE.forcedTerminationObservation).toContain("SIGKILL");
     expect(SPEECH_POLICY_EVIDENCE.forcedTerminationRestartMs).toBeLessThan(SPEECH_POLICY.timing.operationDeadlineMs);
     expect(SPEECH_POLICY_EVIDENCE.replacementOverlapObserved).toBe(false);
     expect(SPEECH_POLICY_EVIDENCE.evidenceGaps.some((gap) => gap.includes("U2 process-adapter tests"))).toBe(true);
+    expect(SPEECH_POLICY_EVIDENCE.evidenceGaps.some((gap) => gap.includes("no per-request cancellation message"))).toBe(true);
   });
 });

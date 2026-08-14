@@ -16,12 +16,12 @@
       let
         pkgs = import nixpkgs { inherit system; };
         smartTurnWorker = import ./nix/smart-turn.nix { inherit pkgs; };
-        whisperSttServer = import ./nix/whisper-stt.nix { inherit pkgs; };
+        whisperSttWorker = import ./nix/whisper-stt.nix { inherit pkgs; };
       in
       {
         packages = nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
           forgerie-smart-turn-worker = smartTurnWorker;
-          forgerie-whisper-stt-server = whisperSttServer;
+          forgerie-whisper-stt-worker = whisperSttWorker;
         };
 
         apps = nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
@@ -29,9 +29,9 @@
             type = "app";
             program = "${smartTurnWorker}/bin/forgerie-smart-turn-worker";
           };
-          forgerie-whisper-stt-server = {
+          forgerie-whisper-stt-worker = {
             type = "app";
-            program = "${whisperSttServer}/bin/forgerie-whisper-stt-server";
+            program = "${whisperSttWorker}/bin/forgerie-whisper-stt-worker";
           };
         };
       }

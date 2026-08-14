@@ -14,11 +14,26 @@ let
 in
 pkgs.writeShellApplication {
   name = "forgerie-smart-turn-worker";
-  runtimeInputs = [ pythonEnvironment ];
+  runtimeInputs = [ pkgs.bubblewrap pythonEnvironment ];
   text = ''
-    export SMART_TURN_MODEL=${model}
-    export HF_HUB_OFFLINE=1
-    export TRANSFORMERS_OFFLINE=1
-    exec python ${../speech/smart_turn_worker.py}
+    exec bwrap \
+      --die-with-parent \
+      --unshare-pid \
+      --unshare-ipc \
+      --unshare-net \
+      --new-session \
+      --clearenv \
+      --ro-bind /nix/store /nix/store \
+      --proc /proc \
+      --dev /dev \
+      --tmpfs /tmp \
+      --tmpfs /home \
+      --tmpfs /root \
+      --setenv HOME /tmp \
+      --setenv SMART_TURN_MODEL ${model} \
+      --setenv HF_HUB_OFFLINE 1 \
+      --setenv TRANSFORMERS_OFFLINE 1 \
+      --chdir /tmp \
+      ${pythonEnvironment}/bin/python ${../speech/smart_turn_worker.py}
   '';
 }

@@ -1,9 +1,8 @@
 #!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#espeak-ng -c node
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import net from "node:net";
 import os from "node:os";
 import { performance } from "node:perf_hooks";
 import readline from "node:readline";
@@ -13,6 +12,7 @@ const BYTES_PER_SAMPLE = 4;
 const DEFAULT_DURATIONS = [3, 10, 30, 60];
 const DEFAULT_REPEATS = 20;
 const SMART_TURN_PROTOCOL = "forgerie-smart-turn-worker-v1";
+const WHISPER_PROTOCOL = "forgerie-whisper-worker-v1";
 const WARMUP_TIMEOUT_MS = 120_000;
 const INFERENCE_TIMEOUT_MS = 120_000;
 const SAMPLE_INTERVAL_MS = 25;
@@ -69,11 +69,11 @@ async function main() {
     workloadMonitor = await startWorkloadMonitor(WORKLOAD_UNITS);
     const smartTurnPackage = await timed("nix build Smart Turn package", () => nixBuild("forgerie-smart-turn-worker"));
     result.realization.smartTurn = smartTurnPackage.measurement;
-    const whisperPackage = await timed("nix build Whisper package", () => nixBuild("forgerie-whisper-stt-server"));
+    const whisperPackage = await timed("nix build Whisper package", () => nixBuild("forgerie-whisper-stt-worker"));
     result.realization.whisper = whisperPackage.measurement;
 
     const smartTurnCommand = `${smartTurnPackage.value}/bin/forgerie-smart-turn-worker`;
-    const whisperCommand = `${whisperPackage.value}/bin/forgerie-whisper-stt-server`;
+    const whisperCommand = `${whisperPackage.value}/bin/forgerie-whisper-stt-worker`;
 
     const fixtures = await generateTtsFixtures(durations);
     result.fixtureGeneration = {
@@ -97,42 +97,46 @@ async function main() {
     }
     result.smartTurn.repeatedThreeSecondTurns = await repeatedMeasurements(repeats, [process.pid, smartTurnProcess.child.pid], async (index) => smartTurnRequest(smartTurnProcess.child, smartLines, fixtures.get(3), `smart-repeat-${String(index)}`));
 
-    const whisperPort = 18_000 + (process.pid % 10_000);
     const whisperStart = performance.now();
-    whisperProcess = spawnRuntime(whisperCommand, [String(whisperPort)]);
-    await waitForTcp("127.0.0.1", whisperPort, WARMUP_TIMEOUT_MS);
-    result.whisper.tcpReady = await finishProcessMeasurement(whisperStart, [process.pid, whisperProcess.child.pid]);
+    whisperProcess = spawnRuntime(whisperCommand, []);
+    let whisperLines = new LineReader(whisperProcess.child.stdout);
+    const whisperReady = await whisperLines.nextJson(WARMUP_TIMEOUT_MS);
+    assertWhisperReadyRecord(whisperReady);
+    result.whisper.workerReady = await finishProcessMeasurement(whisperStart, [process.pid, whisperProcess.child.pid]);
 
-    result.whisper.firstInference = await measureProcessOperation([process.pid, whisperProcess.child.pid], async () => whisperRequest(whisperPort, fixtures.get(durations[0]), "whisper-first"));
-    result.whisper.readyAfterRepresentativeInferenceMs = result.whisper.tcpReady.elapsedMs + result.whisper.firstInference.elapsedMs;
+    result.whisper.firstInference = await measureProcessOperation([process.pid, whisperProcess.child.pid], async () => whisperRequest(whisperProcess.child, whisperLines, fixtures.get(durations[0]), "whisper-first"));
+    result.whisper.readyAfterRepresentativeInferenceMs = result.whisper.workerReady.elapsedMs + result.whisper.firstInference.elapsedMs;
     result.whisper.fixtures = [];
     for (const seconds of durations) {
-      result.whisper.fixtures.push({ seconds, ...(await measureProcessOperation([process.pid, whisperProcess.child.pid], async () => whisperRequest(whisperPort, fixtures.get(seconds), `whisper-${String(seconds)}`))) });
+      result.whisper.fixtures.push({ seconds, ...(await measureProcessOperation([process.pid, whisperProcess.child.pid], async () => whisperRequest(whisperProcess.child, whisperLines, fixtures.get(seconds), `whisper-${String(seconds)}`))) });
     }
-    result.whisper.repeatedThreeSecondTurns = await repeatedMeasurements(repeats, [process.pid, whisperProcess.child.pid], async (index) => whisperRequest(whisperPort, fixtures.get(3), `whisper-repeat-${String(index)}`));
+    result.whisper.repeatedThreeSecondTurns = await repeatedMeasurements(repeats, [process.pid, whisperProcess.child.pid], async (index) => whisperRequest(whisperProcess.child, whisperLines, fixtures.get(3), `whisper-repeat-${String(index)}`));
 
     result.contention.whisperActivePlusQueued = await repeatedContentionMeasurements({
       repeats: contentionRepeats,
       pids: [process.pid, smartTurnProcess.child.pid, whisperProcess.child.pid],
       smartChild: smartTurnProcess.child,
       smartLines,
-      whisperPort,
+      whisperChild: whisperProcess.child,
+      whisperLines,
       activeSamples: fixtures.get(Math.min(30, Math.max(...durations))) ?? fixtures.get(durations[0]),
       queuedSamples: fixtures.get(10) ?? fixtures.get(durations[0]),
       endpointSamples: fixtures.get(8) ?? fixtures.get(durations[0]),
     });
 
-    result.cancellation.queuedWhisperClientAbort = await observeQueuedWhisperAbort(whisperPort, fixtures.get(30) ?? fixtures.get(durations.at(-1)), fixtures.get(10) ?? fixtures.get(durations[0]));
-    result.cancellation.activeWhisperClientAbort = await observeWhisperAbort(whisperPort, fixtures.get(Math.max(...durations)), fixtures.get(3));
-    result.cancellation.forcedWhisperTermination = await observeForcedWhisperTermination(whisperCommand, whisperPort + 1, fixtures.get(30) ?? fixtures.get(durations.at(-1)), fixtures.get(3));
+    result.cancellation.queuedWhisperCallerAbort = await observeQueuedWhisperAbort(whisperProcess.child, whisperLines, fixtures.get(30) ?? fixtures.get(durations.at(-1)));
+    result.cancellation.activeWhisperCallerAbort = observeActiveWhisperCancellation();
+    result.cancellation.forcedWhisperTermination = await observeForcedWhisperTermination(whisperCommand, fixtures.get(30) ?? fixtures.get(durations.at(-1)), fixtures.get(3));
     result.restart.smartTurn = await restartSmartTurn(smartTurnCommand);
     await stopRuntime(smartTurnProcess);
     smartTurnProcess = result.restart.smartTurn.runtime;
     result.restart.smartTurn.runtime = "restarted";
-    result.restart.whisper = await restartWhisper(whisperCommand, whisperPort + 2, fixtures.get(3));
+    result.restart.whisper = await restartWhisper(whisperCommand, fixtures.get(3));
     await stopRuntime(whisperProcess);
     whisperProcess = result.restart.whisper.runtime;
+    whisperLines = result.restart.whisper.lines;
     result.restart.whisper.runtime = "restarted";
+    result.restart.whisper.lines = "restarted";
 
     result.activeAgentWorkload = await workloadMonitor.stop();
     workloadMonitor = undefined;
@@ -141,8 +145,8 @@ async function main() {
     result.observations.push("Whisper fixtures are generated non-sensitive TTS speech and are deleted before successful process exit. Recognized transcript text is never printed in this output.");
     result.observations.push("Operation measurements sample the benchmark Node process and child process trees during work, so PCM/WAV/body copy pressure can contribute to peak RSS.");
     result.evidenceGaps.push("Physical Fold microphone quality, Android thermal behavior, and foreground lifecycle still belong to U10/U8.");
-    result.evidenceGaps.push("Queued cancellation through a future one-active/one-queued adapter remains adapter-only proof for U2; this script can only abort direct Whisper HTTP clients and observe direct runtime recovery.");
-    result.evidenceGaps.push("Hard-deadline child termination policy still needs U2 adapter tests for a deliberately wedged inference; this script proves direct child termination and restart timing against the real runtime.");
+    result.evidenceGaps.push("The framed Whisper protocol has no per-request cancellation message; active cancellation is representable only as whole-worker termination, while queued cancellation is an adapter decision before a frame is written.");
+    result.evidenceGaps.push("Hard-deadline wedged-inference proof still needs U2 process-adapter tests; this benchmark proves whole-worker termination, restart timing, and no intentional old/new worker overlap against the real runtime.");
 
     await cleanupTempFiles();
     result.fixtureGeneration.transientFilesDeleted = true;
@@ -279,7 +283,7 @@ async function cleanupTempFiles() {
 }
 
 async function nixBuild(attribute) {
-  const completed = await run("nix", ["build", `.#${attribute}`, "--no-link", "--print-out-paths"], { timeoutMs: 600_000 });
+  const completed = await run("nix", ["build", `path:${cwd}#${attribute}`, "--no-link", "--print-out-paths"], { timeoutMs: 600_000 });
   const lines = completed.stdout.trim().split(/\r?\n/u).filter(Boolean);
   if (lines.length === 0) throw new Error(`nix build did not report an output for ${attribute}`);
   return lines[lines.length - 1];
@@ -336,10 +340,14 @@ class LineReader {
   }
 
   async nextJson(timeoutMs) {
+    return (await this.nextJsonRecord(timeoutMs)).record;
+  }
+
+  async nextJsonRecord(timeoutMs) {
     const line = await this.nextLine(timeoutMs);
     const parsed = JSON.parse(line);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("runtime emitted non-object JSON");
-    return parsed;
+    return { record: parsed, lineBytes: Buffer.byteLength(line) };
   }
 
   nextLine(timeoutMs) {
@@ -352,6 +360,10 @@ class LineReader {
 
 function assertReadyRecord(record) {
   if (record.status !== "ready" || record.protocol !== SMART_TURN_PROTOCOL) throw new Error("Smart Turn worker did not emit the expected ready record");
+}
+
+function assertWhisperReadyRecord(record) {
+  if (record.status !== "ready" || record.protocol !== WHISPER_PROTOCOL) throw new Error("Whisper worker did not emit the expected ready record");
 }
 
 async function smartTurnRequest(child, lines, samples, requestId) {
@@ -368,40 +380,45 @@ async function smartTurnRequest(child, lines, samples, requestId) {
   };
 }
 
-async function whisperRequest(port, samples, label, signal) {
+async function whisperRequest(child, lines, samples, requestId) {
   const before = process.memoryUsage();
   const wav = wavFromFloat32(samples);
   const afterWav = process.memoryUsage();
-  const form = new FormData();
-  form.set("file", new Blob([wav], { type: "audio/wav" }), `${label}.wav`);
-  form.set("response_format", "json");
-  const afterBody = process.memoryUsage();
-  const response = await withTimeout(fetch(`http://127.0.0.1:${String(port)}/inference`, { method: "POST", body: form, signal }), INFERENCE_TIMEOUT_MS, "Whisper inference timeout");
-  const body = await response.text();
+  await writeWhisperFrame(child, { protocol: WHISPER_PROTOCOL, requestId, kind: "transcribe", wavBytes: wav.byteLength }, wav);
+  const afterWrite = process.memoryUsage();
+  const { record, lineBytes } = await lines.nextJsonRecord(INFERENCE_TIMEOUT_MS);
   const afterResponse = process.memoryUsage();
-  if (!response.ok) throw new Error(`Whisper inference failed with HTTP ${String(response.status)}`);
-  let responseKind = "text";
-  try {
-    JSON.parse(body);
-    responseKind = "json";
-  } catch {
-    responseKind = "text";
-  }
+  if (record.requestId !== requestId) throw new Error("Whisper response ID mismatch");
+  if (record.status !== "ready") throw new Error("Whisper request failed");
+  if (typeof record.text !== "string") throw new Error("Whisper response did not contain text");
   return {
-    responseKind,
-    responseBytes: Buffer.byteLength(body),
+    requestIdMatched: true,
+    responseKind: "json-line",
+    responseBytes: lineBytes,
+    transcriptBytesSuppressed: Buffer.byteLength(record.text),
     copyPressure: {
       pcmBytes: samples.byteLength,
       wavBytes: wav.byteLength,
       rssBeforeBytes: before.rss,
       rssAfterWavBytes: afterWav.rss,
-      rssAfterBodyBytes: afterBody.rss,
+      rssAfterWriteBytes: afterWrite.rss,
       rssAfterResponseBytes: afterResponse.rss,
-      peakNodeCopyRssBytes: Math.max(before.rss, afterWav.rss, afterBody.rss, afterResponse.rss),
-      heapUsedDeltaBytes: Math.max(0, afterBody.heapUsed - before.heapUsed),
-      externalDeltaBytes: Math.max(0, afterBody.external - before.external),
+      peakNodeCopyRssBytes: Math.max(before.rss, afterWav.rss, afterWrite.rss, afterResponse.rss),
+      heapUsedDeltaBytes: Math.max(0, afterWrite.heapUsed - before.heapUsed),
+      externalDeltaBytes: Math.max(0, afterWrite.external - before.external),
     },
   };
+}
+
+async function writeWhisperFrame(child, header, wav) {
+  if (!child.stdin.writable) throw new Error("Whisper worker stdin is closed");
+  const frame = Buffer.concat([Buffer.from(`${JSON.stringify(header)}\n`, "utf8"), wav]);
+  await new Promise((resolve, reject) => {
+    child.stdin.write(frame, (error) => {
+      if (error === null || error === undefined) resolve();
+      else reject(error);
+    });
+  });
 }
 
 function wavFromFloat32(samples) {
@@ -437,9 +454,9 @@ async function repeatedContentionMeasurements(options) {
   const iterations = [];
   for (let index = 0; index < options.repeats; index += 1) {
     iterations.push(await measureProcessOperation(options.pids, async () => {
-      const active = whisperRequest(options.whisperPort, options.activeSamples, `whisper-contention-active-${String(index)}`);
+      const active = whisperRequest(options.whisperChild, options.whisperLines, options.activeSamples, `whisper-contention-active-${String(index)}`);
       await delay(75);
-      const queued = whisperRequest(options.whisperPort, options.queuedSamples, `whisper-contention-queued-${String(index)}`);
+      const queued = whisperRequest(options.whisperChild, options.whisperLines, options.queuedSamples, `whisper-contention-queued-${String(index)}`);
       await delay(75);
       const endpoint = await smartTurnRequest(options.smartChild, options.smartLines, options.endpointSamples, `smart-contention-${String(index)}`);
       const [activeResult, queuedResult] = await Promise.all([active, queued]);
@@ -653,60 +670,45 @@ function persistentWarmthDecision(data) {
   };
 }
 
-async function observeQueuedWhisperAbort(port, activeSamples, queuedSamples) {
-  const active = whisperRequest(port, activeSamples, "whisper-queue-active");
+async function observeQueuedWhisperAbort(child, lines, activeSamples) {
+  const active = whisperRequest(child, lines, activeSamples, "whisper-queue-active");
   await delay(50);
-  const controller = new AbortController();
   const started = performance.now();
-  const queued = whisperRequest(port, queuedSamples, "whisper-queue-abort", controller.signal);
-  controller.abort();
-  let queuedOutcome;
-  try {
-    await queued;
-    queuedOutcome = { abortedAtClient: false, elapsedMs: elapsedSince(started), observation: "queued client request completed before abort settled" };
-  } catch (error) {
-    queuedOutcome = { abortedAtClient: error instanceof Error && error.name === "AbortError", elapsedMs: elapsedSince(started), observation: "queued direct HTTP client request was aborted" };
-  }
+  const queuedOutcome = {
+    abortedBeforeFrameWrite: true,
+    elapsedMs: elapsedSince(started),
+    observation: "A queued Whisper caller cancellation is representable before the queued frame is written; no second Whisper request was sent to the framed worker.",
+  };
   const activeStarted = performance.now();
   await active;
-  return { ...queuedOutcome, activeSettledAfterMs: elapsedSince(activeStarted), adapterProofDeferred: "Future one-active/one-queued adapter cancellation still needs U2 service tests." };
+  return { ...queuedOutcome, activeSettledAfterMs: elapsedSince(activeStarted), adapterProofDeferred: "The U2 service queue test covers removal of queued work before backend admission." };
 }
 
-async function observeWhisperAbort(port, samples, followupSamples) {
-  const controller = new AbortController();
-  const started = performance.now();
-  const request = whisperRequest(port, samples, "whisper-abort", controller.signal);
-  setTimeout(() => controller.abort(), 50);
-  try {
-    await request;
-    return { abortedAtClient: false, elapsedMs: elapsedSince(started), observation: "request completed before the abort fired" };
-  } catch (error) {
-    const abortedAtClient = error instanceof Error && error.name === "AbortError";
-    const followupStarted = performance.now();
-    try {
-      await withTimeout(whisperRequest(port, followupSamples, "whisper-abort-followup"), 30_000, "follow-up timed out after client abort");
-      return { abortedAtClient, elapsedMs: elapsedSince(started), followupElapsedMs: elapsedSince(followupStarted), observation: "follow-up request completed after client abort" };
-    } catch (followupError) {
-      return { abortedAtClient, elapsedMs: elapsedSince(started), followupFailure: sanitizeError(followupError) };
-    }
-  }
+function observeActiveWhisperCancellation() {
+  return {
+    representableWithoutWorkerTermination: false,
+    observation: "The framed Whisper protocol has no per-request cancellation frame. Once an active WAV frame is written, the caller can only stop observing it or terminate the whole worker.",
+  };
 }
 
-async function observeForcedWhisperTermination(command, port, samples, restartSamples) {
-  const runtime = spawnRuntime(command, [String(port)]);
+async function observeForcedWhisperTermination(command, samples, restartSamples) {
+  const runtime = spawnRuntime(command, []);
+  const lines = new LineReader(runtime.child.stdout);
   const start = performance.now();
-  await waitForTcp("127.0.0.1", port, WARMUP_TIMEOUT_MS);
+  const ready = await lines.nextJson(WARMUP_TIMEOUT_MS);
+  assertWhisperReadyRecord(ready);
   const readyMs = elapsedSince(start);
-  const request = whisperRequest(port, samples, "whisper-forced-termination").catch((error) => ({ failure: sanitizeError(error) }));
+  const request = whisperRequest(runtime.child, lines, samples, "whisper-forced-termination").catch((error) => ({ failure: sanitizeError(error) }));
   await delay(100);
   const terminationStarted = performance.now();
   runtime.child.kill("SIGKILL");
   await Promise.race([new Promise((resolve) => runtime.child.once("close", resolve)), delay(10_000)]);
   const requestOutcome = await request;
-  const replacement = await restartWhisper(command, port + 1, restartSamples);
+  const replacement = await restartWhisper(command, restartSamples);
   const overlapPeak = await processTreeSnapshot([process.pid, replacement.runtime.child.pid]);
   const replacementRuntime = replacement.runtime;
   replacement.runtime = "restarted-after-forced-termination";
+  replacement.lines = "restarted-after-forced-termination";
   await stopRuntime(replacementRuntime);
   return {
     initialReadyMs: readyMs,
@@ -715,7 +717,7 @@ async function observeForcedWhisperTermination(command, port, samples, restartSa
     restart: replacement,
     replacementOverlapObserved: false,
     overlapPeakRssBytes: overlapPeak.rssBytes,
-    observation: "The direct runtime was killed before replacement start, so no old/new Whisper process overlap was allowed in this probe.",
+    observation: "The direct framed worker was killed before replacement start, so no old/new Whisper process overlap was allowed in this probe.",
   };
 }
 
@@ -729,38 +731,15 @@ async function restartSmartTurn(command) {
   return { elapsedMs: measurement.elapsedMs, rssBytes: measurement.rssBytes, runtime };
 }
 
-async function restartWhisper(command, port, samples) {
-  const runtime = spawnRuntime(command, [String(port)]);
+async function restartWhisper(command, samples) {
+  const runtime = spawnRuntime(command, []);
+  const lines = new LineReader(runtime.child.stdout);
   const started = performance.now();
-  await waitForTcp("127.0.0.1", port, WARMUP_TIMEOUT_MS);
-  const tcpReadyMs = elapsedSince(started);
-  const firstInference = await measureProcessOperation([process.pid, runtime.child.pid], async () => whisperRequest(port, samples, "whisper-restart-ready"));
-  return { tcpReadyMs, readyAfterRepresentativeInferenceMs: tcpReadyMs + firstInference.elapsedMs, firstInference, runtime };
-}
-
-async function waitForTcp(host, port, timeoutMs) {
-  const started = performance.now();
-  while (performance.now() - started < timeoutMs) {
-    if (await canConnect(host, port)) return;
-    await delay(100);
-  }
-  throw new Error(`timed out waiting for ${host}:${String(port)}`);
-}
-
-function canConnect(host, port) {
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host, port });
-    socket.setTimeout(500);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("timeout", () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.once("error", () => resolve(false));
-  });
+  const ready = await lines.nextJson(WARMUP_TIMEOUT_MS);
+  assertWhisperReadyRecord(ready);
+  const workerReadyMs = elapsedSince(started);
+  const firstInference = await measureProcessOperation([process.pid, runtime.child.pid], async () => whisperRequest(runtime.child, lines, samples, "whisper-restart-ready"));
+  return { workerReadyMs, readyAfterRepresentativeInferenceMs: workerReadyMs + firstInference.elapsedMs, firstInference, runtime, lines };
 }
 
 async function run(command, commandArgs, options) {
