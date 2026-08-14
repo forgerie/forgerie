@@ -937,7 +937,6 @@ export const promptEditorStyles = css`
   .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
   .primary-action { flex: 0 0 auto; display: inline-flex; align-items: center; }
   .queue-button { position: relative; touch-action: manipulation; -webkit-touch-callout: none; }
-  .queue-button.has-steer { touch-action: none; }
   .queue-steer-cue { position: absolute; inset-block-start: 2px; inset-inline-end: 4px; font: 700 10px/1 system-ui, sans-serif; color: currentColor; opacity: .72; pointer-events: none; }
   .steer-confirmation { padding: 8px; }
   .steer-confirm-button { min-width: 180px; text-align: start; }

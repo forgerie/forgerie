@@ -100,20 +100,27 @@ describe("PromptEditor control rail", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("keeps held pointer activation suppression until the release click", async () => {
+  it("keeps pointer capture and activation suppression until the held release click", async () => {
     vi.useFakeTimers();
     const onSend = vi.fn();
     const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
     composer.replaceText("do not queue after held pointer");
     const queue = button(composer, ".queue-button");
+    const capture = recordPointerCapture(queue);
 
     queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 42, pointerType: "touch", button: 0, clientX: 10, clientY: 10 }));
     vi.advanceTimersByTime(500);
     await composer.updateComplete;
+
+    expect(capture.has(42)).toBe(true);
+    expect(capture.released).toEqual([]);
+
     vi.runOnlyPendingTimers();
     queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 42, pointerType: "touch", button: 0, clientX: 10, clientY: 10 }));
     queue.click();
 
+    expect(capture.has(42)).toBe(false);
+    expect(capture.released).toEqual([42]);
     expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
     expect(onSend).not.toHaveBeenCalled();
   });
@@ -155,7 +162,7 @@ describe("PromptEditor control rail", () => {
     expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
   });
 
-  it("cancels a moved pointer hold through release and consumes the following click", async () => {
+  it("keeps moved pointer capture until cancellation and accepts the next Queue press", async () => {
     vi.useFakeTimers();
     const onSend = vi.fn();
     const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
@@ -165,14 +172,24 @@ describe("PromptEditor control rail", () => {
 
     queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 8, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
     queue.dispatchEvent(pointerEvent("pointermove", { pointerId: 8, pointerType: "touch", button: 0, clientX: 11, clientY: 0 }));
-    queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 8, pointerType: "touch", button: 0, clientX: 11, clientY: 0 }));
-    queue.click();
+
+    expect(capture.has(8)).toBe(true);
+    expect(capture.released).toEqual([]);
+
+    queue.dispatchEvent(pointerEvent("pointercancel", { pointerId: 8, pointerType: "touch", button: 0, clientX: 11, clientY: 0 }));
     vi.advanceTimersByTime(500);
     await composer.updateComplete;
 
+    expect(capture.has(8)).toBe(false);
     expect(capture.released).toEqual([8]);
     expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
-    expect(onSend).not.toHaveBeenCalled();
+
+    composer.replaceText("next queue press works");
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 9, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    queue.dispatchEvent(pointerEvent("pointerup", { pointerId: 9, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    queue.click();
+
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("next queue press works", "followUp", undefined, undefined);
   });
 
   it("matches pointer move, up, and cancellation by pointerId", async () => {
@@ -304,6 +321,36 @@ describe("PromptEditor control rail", () => {
 
     expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([" ", "Enter"])("captures held %s Queue keyup from the focused Steer confirmation", async (key) => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText(`steer from ${key === " " ? "Space" : key}`);
+    const queue = button(composer, ".queue-button");
+    queue.focus();
+
+    queue.dispatchEvent(keyEvent("keydown", key));
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    await composer.updateComplete;
+    const focused = deepActiveElement();
+    const confirm = button(composer, ".steer-confirm-button");
+
+    expect(focused).toBe(confirm);
+
+    const release = keyEvent("keyup", key);
+    focused?.dispatchEvent(release);
+    await composer.updateComplete;
+
+    expect(release.defaultPrevented).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+
+    confirm.click();
+    await composer.updateComplete;
+
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(`steer from ${key === " " ? "Space" : key}`, "steer", undefined, undefined);
   });
 
   it("expires keyboard click suppression when no native click follows the activation", async () => {
@@ -535,7 +582,7 @@ function popover(composer: PromptEditor): HTMLElement {
   return requiredElement(composer.shadowRoot?.querySelector<HTMLElement>("composer-popover"), "Steer popover");
 }
 
-function recordPointerCapture(button: HTMLButtonElement): { released: number[] } {
+function recordPointerCapture(button: HTMLButtonElement): { has: (pointerId: number) => boolean; released: number[] } {
   const captured = new Set<number>();
   const released: number[] = [];
   button.setPointerCapture = (pointerId: number) => { captured.add(pointerId); };
@@ -544,7 +591,7 @@ function recordPointerCapture(button: HTMLButtonElement): { released: number[] }
     released.push(pointerId);
     captured.delete(pointerId);
   };
-  return { released };
+  return { has: (pointerId: number) => captured.has(pointerId), released };
 }
 
 function pointerEvent(type: string, init: PointerEventInit): Event {
