@@ -26,6 +26,7 @@ type QueuePressOutcome = "pending" | "consumed";
 
 interface QueuePointerPress {
   readonly outcome: QueuePressOutcome;
+  readonly activationId: number;
   readonly x: number;
   readonly y: number;
   readonly pointerId: number;
@@ -34,6 +35,7 @@ interface QueuePointerPress {
 
 interface QueueKeyboardPress {
   readonly outcome: QueuePressOutcome;
+  readonly activationId: number;
   readonly key: " " | "Enter";
 }
 
@@ -119,12 +121,19 @@ export class PromptEditor extends LitElement {
   private queuePressTimer: ReturnType<typeof setTimeout> | undefined;
   private queueSuppressClickTimer: ReturnType<typeof setTimeout> | undefined;
   private queueKeyboardPress: QueueKeyboardPress | undefined;
-  private queueSuppressClick = false;
-  private readonly handleQueueKeyUpCapture = (event: KeyboardEvent): void => { this.onQueueKeyUp(event); };
+  private queueSuppressedClickId: number | undefined;
+  private nextQueueActivationId = 0;
+  private readonly handleQueuePointerMoveDocument = (event: PointerEvent): void => { this.onQueuePointerMove(event); };
+  private readonly handleQueuePointerUpDocument = (event: PointerEvent): void => { this.onQueuePointerUp(event); };
+  private readonly handleQueuePointerCancelDocument = (event: PointerEvent): void => { this.onQueuePointerCancel(event); };
+  private readonly handleQueueKeyUpDocument = (event: KeyboardEvent): void => { this.onQueueKeyUp(event); };
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this.addEventListener("keyup", this.handleQueueKeyUpCapture, { capture: true });
+    document.addEventListener("pointermove", this.handleQueuePointerMoveDocument, { capture: true });
+    document.addEventListener("pointerup", this.handleQueuePointerUpDocument, { capture: true });
+    document.addEventListener("pointercancel", this.handleQueuePointerCancelDocument, { capture: true });
+    document.addEventListener("keyup", this.handleQueueKeyUpDocument, { capture: true });
   }
 
   protected override willUpdate(changed: PropertyValues<this>): void {
@@ -138,8 +147,9 @@ export class PromptEditor extends LitElement {
       this.resetGuidanceDisclosure();
       this.resetSteerDisclosure();
     }
-    if (changed.has("canSteer") || changed.has("isCompacting") || changed.has("disabled") || changed.has("submissionAvailable") || changed.has("sendAvailable")) {
-      if (!this.rail().canSteer) this.resetSteerDisclosure();
+    if (changed.has("canSteer") || changed.has("isCompacting") || changed.has("disabled") || changed.has("submissionAvailable") || changed.has("sendAvailable") || changed.has("sending")) {
+      const rail = this.rail();
+      if (!rail.canSteer || !rail.canInvokeQueue) this.resetSteerDisclosure();
     }
   }
 
@@ -159,9 +169,13 @@ export class PromptEditor extends LitElement {
   }
 
   override disconnectedCallback(): void {
-    this.removeEventListener("keyup", this.handleQueueKeyUpCapture, { capture: true });
+    document.removeEventListener("pointermove", this.handleQueuePointerMoveDocument, { capture: true });
+    document.removeEventListener("pointerup", this.handleQueuePointerUpDocument, { capture: true });
+    document.removeEventListener("pointercancel", this.handleQueuePointerCancelDocument, { capture: true });
+    document.removeEventListener("keyup", this.handleQueueKeyUpDocument, { capture: true });
     this.resetGuidanceDisclosure();
-    this.resetSteerDisclosure();
+    this.cancelQueuePress({ clearSuppression: true });
+    this.steerOpen = false;
     super.disconnectedCallback();
   }
 
@@ -422,14 +436,11 @@ export class PromptEditor extends LitElement {
         aria-haspopup=${steerAvailable ? "dialog" : nothing}
         aria-expanded=${steerAvailable ? String(this.steerOpen) : nothing}
         aria-controls=${steerAvailable ? "queue-steer-popover" : nothing}
-        @click=${(event: MouseEvent) => { this.onQueueClick(event, rail); }}
-        @pointerdown=${steerAvailable ? (event: PointerEvent) => { this.onQueuePointerDown(event, rail); } : nothing}
-        @pointermove=${steerAvailable ? (event: PointerEvent) => { this.onQueuePointerMove(event); } : nothing}
-        @pointerup=${steerAvailable ? (event: PointerEvent) => { this.onQueuePointerUp(event); } : nothing}
-        @pointercancel=${steerAvailable ? (event: PointerEvent) => { this.onQueuePointerCancel(event); } : nothing}
-        @keydown=${steerAvailable ? (event: KeyboardEvent) => { this.onQueueKeyDown(event, rail); } : nothing}
+        @click=${(event: MouseEvent) => { this.onQueueClick(event); }}
+        @pointerdown=${steerAvailable ? (event: PointerEvent) => { this.onQueuePointerDown(event); } : nothing}
+        @keydown=${steerAvailable ? (event: KeyboardEvent) => { this.onQueueKeyDown(event); } : nothing}
         @blur=${steerAvailable ? () => { this.onQueueBlur(); } : nothing}
-        @contextmenu=${steerAvailable ? (event: MouseEvent) => { this.onQueueContextMenu(event, rail); } : nothing}
+        @contextmenu=${steerAvailable ? (event: MouseEvent) => { this.onQueueContextMenu(event); } : nothing}
       >${renderQueueIcon()}${steerAvailable ? html`<span class="queue-steer-cue" aria-hidden="true">⋯</span><span id=${descriptionId} class="visually-hidden">Hold for Steer current response.</span>` : nothing}</button>
     `;
   }
@@ -715,25 +726,26 @@ export class PromptEditor extends LitElement {
     `;
   }
 
-  private onQueueClick(event: MouseEvent, rail: ComposerRail): void {
-    if (this.queueSuppressClick) {
+  private onQueueClick(event: MouseEvent): void {
+    if (this.queueSuppressedClickId !== undefined) {
       event.preventDefault();
       event.stopPropagation();
       this.clearQueueClickSuppression();
       return;
     }
-    if (!rail.canInvokeQueue) return;
+    if (!this.rail().canInvokeQueue) return;
     this.closeSteer(false);
     this.submitDraft("followUp");
   }
 
-  private onQueuePointerDown(event: PointerEvent, rail: ComposerRail): void {
+  private onQueuePointerDown(event: PointerEvent): void {
+    const rail = this.rail();
     if (!rail.canSteer || !rail.canInvokeQueue || !isPrimaryQueuePointerPress(event)) return;
     const button = event.currentTarget;
     if (!(button instanceof HTMLButtonElement)) return;
     if (this.queuePointerPress !== undefined) return;
     this.cancelQueuePress({ clearSuppression: true });
-    this.queuePointerPress = { outcome: "pending", x: event.clientX, y: event.clientY, pointerId: event.pointerId, button };
+    this.queuePointerPress = { outcome: "pending", activationId: this.nextQueueActivation(), x: event.clientX, y: event.clientY, pointerId: event.pointerId, button };
     button.setPointerCapture(event.pointerId);
     this.queuePressTimer = setTimeout(() => { this.openSteerFromQueueHold(); }, COMPOSER_QUEUE_HOLD_MS);
   }
@@ -752,22 +764,26 @@ export class PromptEditor extends LitElement {
     this.clearQueuePressTimer();
     this.releaseQueuePointerCapture(press);
     this.queuePointerPress = undefined;
-    if (press.outcome === "consumed") this.armQueueClickSuppression();
+    if (press.outcome === "consumed") this.armQueueClickSuppression(press.activationId);
   }
 
   private onQueuePointerCancel(event: PointerEvent): void {
-    if (event.pointerId !== this.queuePointerPress?.pointerId) return;
-    this.cancelQueuePress({ clearSuppression: true });
+    const press = this.queuePointerPress;
+    if (event.pointerId !== press?.pointerId) return;
+    this.clearQueuePressTimer();
+    this.releaseQueuePointerCapture(press);
+    this.queuePointerPress = undefined;
   }
 
-  private onQueueKeyDown(event: KeyboardEvent, rail: ComposerRail): void {
+  private onQueueKeyDown(event: KeyboardEvent): void {
+    const rail = this.rail();
     if (!rail.canSteer || !rail.canInvokeQueue || !isQueueHoldKey(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.repeat || this.queueKeyboardPress !== undefined) return;
     const key = event.key === "Enter" ? "Enter" : " ";
     this.cancelQueuePress({ clearSuppression: true });
-    this.queueKeyboardPress = { outcome: "pending", key };
+    this.queueKeyboardPress = { outcome: "pending", activationId: this.nextQueueActivation(), key };
     this.queuePressTimer = setTimeout(() => { this.openSteerFromQueueHold(); }, COMPOSER_QUEUE_HOLD_MS);
   }
 
@@ -779,21 +795,21 @@ export class PromptEditor extends LitElement {
     const shouldQueue = press.outcome === "pending" && this.rail().canInvokeQueue;
     this.clearQueuePressTimer();
     this.queueKeyboardPress = undefined;
-    this.armQueueClickSuppression();
+    this.armQueueClickSuppression(press.activationId);
     if (shouldQueue) this.submitDraft("followUp");
   }
 
   private onQueueBlur(): void {
     if (this.queueKeyboardPress?.outcome !== "pending") return;
-    this.clearQueuePressTimer();
-    this.queueKeyboardPress = undefined;
+    this.consumeQueueKeyboardPress();
   }
 
-  private onQueueContextMenu(event: MouseEvent, rail: ComposerRail): void {
+  private onQueueContextMenu(event: MouseEvent): void {
+    const rail = this.rail();
     if (!rail.canSteer || !rail.canInvokeQueue) return;
     event.preventDefault();
     this.cancelQueuePress({ clearSuppression: true });
-    this.armQueueClickSuppression();
+    this.armQueueClickSuppression(this.nextQueueActivation());
     this.openSteerDisclosure();
   }
 
@@ -803,7 +819,11 @@ export class PromptEditor extends LitElement {
   }
 
   private openSteerDisclosure(): void {
-    if (!this.rail().canSteer) return;
+    const rail = this.rail();
+    if (!rail.canSteer || !rail.canInvokeQueue) {
+      this.resetSteerDisclosure();
+      return;
+    }
     this.closeGuidance(false, true);
     this.closeChoice(false);
     this.draftElement?.closeCompletionMenu();
@@ -821,7 +841,7 @@ export class PromptEditor extends LitElement {
   }
 
   private resetSteerDisclosure(): void {
-    this.cancelQueuePress({ clearSuppression: true });
+    this.consumeQueuePressForInvalidation();
     this.steerOpen = false;
   }
 
@@ -840,11 +860,15 @@ export class PromptEditor extends LitElement {
       return true;
     }
     if (this.queueKeyboardPress?.outcome === "pending") {
-      this.clearQueuePressTimer();
-      this.queueKeyboardPress = { ...this.queueKeyboardPress, outcome: "consumed" };
+      this.consumeQueueKeyboardPress();
       return true;
     }
     return false;
+  }
+
+  private consumeQueuePressForInvalidation(): void {
+    this.consumeQueuePointerPress();
+    this.consumeQueueKeyboardPress();
   }
 
   private consumeQueuePointerPress(): void {
@@ -852,6 +876,13 @@ export class PromptEditor extends LitElement {
     if (press === undefined || press.outcome === "consumed") return;
     this.clearQueuePressTimer();
     this.queuePointerPress = { ...press, outcome: "consumed" };
+  }
+
+  private consumeQueueKeyboardPress(): void {
+    const press = this.queueKeyboardPress;
+    if (press === undefined || press.outcome === "consumed") return;
+    this.clearQueuePressTimer();
+    this.queueKeyboardPress = { ...press, outcome: "consumed" };
   }
 
   private clearQueuePressTimer(): void {
@@ -863,20 +894,31 @@ export class PromptEditor extends LitElement {
     if (press.button.hasPointerCapture(press.pointerId)) press.button.releasePointerCapture(press.pointerId);
   }
 
-  private armQueueClickSuppression(): void {
+  private nextQueueActivation(): number {
+    this.nextQueueActivationId += 1;
+    return this.nextQueueActivationId;
+  }
+
+  private armQueueClickSuppression(activationId: number): void {
     this.clearQueueClickSuppression();
-    this.queueSuppressClick = true;
-    this.queueSuppressClickTimer = setTimeout(() => { this.clearQueueClickSuppression(); }, 0);
+    this.queueSuppressedClickId = activationId;
+    this.queueSuppressClickTimer = setTimeout(() => {
+      if (this.queueSuppressedClickId === activationId) this.clearQueueClickSuppression();
+    }, 0);
   }
 
   private clearQueueClickSuppression(): void {
     if (this.queueSuppressClickTimer !== undefined) clearTimeout(this.queueSuppressClickTimer);
     this.queueSuppressClickTimer = undefined;
-    this.queueSuppressClick = false;
+    this.queueSuppressedClickId = undefined;
   }
 
   private confirmSteer(): void {
-    if (!this.rail().canSteer) return;
+    const rail = this.rail();
+    if (!rail.canSteer || !rail.canInvokeQueue) {
+      this.resetSteerDisclosure();
+      return;
+    }
     this.closeSteer(false);
     this.submitDraft("steer");
     void this.updateComplete.then(() => { this.focusInput(); });
@@ -895,10 +937,18 @@ export class PromptEditor extends LitElement {
   }
 
   private sendSnapshot(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp"): ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome> {
-    if (this.rail().kind === "stopOnly") return "rejected";
+    const rail = this.rail();
+    if (!this.canSubmitDraftSnapshot(rail, streamingBehavior)) return "rejected";
     if (this.onDraftSubmit !== undefined) return this.onDraftSubmit(snapshot);
     void this.onSend?.(snapshot.text, streamingBehavior, snapshot.attachments, snapshot.delivery);
     return "accepted";
+  }
+
+  private canSubmitDraftSnapshot(rail: ComposerRail, streamingBehavior: "steer" | "followUp" | undefined): boolean {
+    if (rail.kind === "stopOnly") return false;
+    if (rail.kind === "idle") return streamingBehavior === undefined && rail.canInvokePrimary;
+    if (!rail.canInvokeQueue) return false;
+    return streamingBehavior !== "steer" || rail.canSteer;
   }
 
   private handleDraftEscape(context: ComposerDraftEscapeContext): boolean {
