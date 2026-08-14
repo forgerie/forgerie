@@ -48,18 +48,20 @@ describe("PromptEditor local dictation", () => {
     expect(dictation.statusCalls).toBe(0);
   });
 
-  it("renders one persistent microphone with privacy text and omits it without host capability", async () => {
+  it("renders one persistent microphone with accessible privacy and status text outside the visible rail", async () => {
     const without = await mount();
     expect(mic(without)).toBeNull();
     without.remove();
 
     const editor = await mount({ dictation: fakeDictation().capability });
     const button = requiredMic(editor);
+    const status = editor.shadowRoot?.querySelector(".dictation-status");
     expect(editor.shadowRoot?.querySelectorAll(".dictation-button")).toHaveLength(1);
     expect(button.getAttribute("aria-describedby")).toContain("composer-dictation-privacy");
     expect(button.getAttribute("aria-describedby")).toContain("composer-dictation-status");
     expect(editor.shadowRoot?.textContent).toContain("Audio goes to this Forgerie gateway");
     expect(editor.shadowRoot?.textContent).toContain("not to the selected machine");
+    expect(status?.classList.contains("dictation-privacy")).toBe(true);
     expect(statusText(editor)).toContain("This gateway, not the selected machine · raw audio not stored.");
   });
 
@@ -506,6 +508,37 @@ describe("PromptEditor local dictation", () => {
     expect(onChooseModel).not.toHaveBeenCalled();
     expect(onChooseThinkingLevel).not.toHaveBeenCalled();
     expect(document.activeElement).not.toBe(editor);
+  });
+
+  it("locks destination changes but aborts dictation before emergency dismiss restores the draft", async () => {
+    const dictation = fakeDictation();
+    const onChangeDestination = vi.fn();
+    const onDismiss = vi.fn();
+    const editor = await mount({
+      dictation: dictation.capability,
+      capabilities: {
+        context: [{ id: "destination", label: "Project · main", action: { label: "Change", onActivate: onChangeDestination } }],
+        dismiss: { label: "Cancel", onDismiss },
+      },
+    });
+    onDismiss.mockImplementation(() => {
+      expect(editor.replaceText("restored new-session draft")).toBe(true);
+    });
+    editor.replaceText("locked");
+
+    pointer(requiredMic(editor), "pointerdown");
+    dictation.captureReady();
+    await settle(editor);
+
+    const changeDestination = button(editor, ".composer-context-chip-action");
+    expect(changeDestination.disabled).toBe(true);
+    changeDestination.click();
+    expect(onChangeDestination).not.toHaveBeenCalled();
+
+    button(editor, ".composer-dismiss").click();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(dictation.abortCalls).toBe(1);
+    expect(editor.getText()).toBe("restored new-session draft");
   });
 
   it("locks the streaming Queue and disclosures, but aborts dictation before emergency Stop restores the draft", async () => {

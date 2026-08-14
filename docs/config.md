@@ -26,7 +26,7 @@ For a nested deployment, redirect the slashless prefix to the trailing-slash URL
 
 ## Local speech dictation runtime
 
-Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends it to the Forgerie web/API process that served the page. That gateway performs Smart Turn endpointing and Whisper transcription, then inserts final text into the selected session draft. Audio is not proxied to the selected federated machine, even when the prompt text will later be sent to a remote machine.
+Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends it to the Forgerie web/API process that served the page. That gateway performs Smart Turn endpointing and Whisper transcription, then inserts final text into the current active-session or new-session draft. Audio is not proxied to the selected federated machine, even when the prompt text will later be sent to a remote machine.
 
 The current first slice packages the model workers with Nix for `x86_64-linux` only:
 
@@ -60,7 +60,7 @@ Browser-classified speech POSTs also pass a gateway Host allowlist. `FORGERIE_SP
 
 Speech limits are fixed in code for this slice: 16 kHz mono float32 PCM, a 60-second maximum turn, an eight-second Smart Turn endpoint window, 100 ms minimum request duration, at most 16 endpoint checks per turn, 10-second body upload and operation deadlines, one active plus one queued operation per backend, 96 endpoint checks and 12 transcriptions per gateway minute, and a 60-second warmup deadline. Raw microphone audio is kept only in memory for the active bounded turn, endpoint window, and 30-second retry buffer; Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session behavior.
 
-In the composer, tap the microphone for automatic completion, hold it to keep listening until release, and press it again during hands-free or manual-only capture to transcribe immediately. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
+In active-session and new-session composers, tap the microphone for automatic completion, hold it to keep listening until release, and press it again during hands-free or manual-only capture to transcribe immediately. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
 
 ## Precedence and reloads
 

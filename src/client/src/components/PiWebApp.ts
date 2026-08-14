@@ -3415,6 +3415,7 @@ export class PiWebApp extends LitElement {
           .recoverySeedId=${state.newSessionComposer.recoverySeedId}
           .catalog=${this.newSessionDestinationCatalog}
           .loadAgentDefaults=${(cwd: string, machineId: string) => sessionsApi.newSessionModels(cwd, machineId)}
+          .dictation=${this.sessionDictationCapability()}
           .onCancel=${() => { this.closeNewSessionComposer(); }}
           .onSubmit=${(intent: NewSessionLaunchIntent) => this.submitNewSession(intent)}
           .onClaimRecoveryDraft=${(recoverySeedId: string) => this.sessions.claimSessionLaunchRecoveryDraft(recoverySeedId)}

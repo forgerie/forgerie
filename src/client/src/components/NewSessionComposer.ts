@@ -4,7 +4,7 @@ import type { PromptResourceCatalogResponse } from "../../../shared/promptResour
 import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
 import { workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import { createPreSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
-import type { ComposerCapabilities } from "../composerCapabilities";
+import type { ComposerCapabilities, ComposerDictationCapability } from "../composerCapabilities";
 import type { NewSessionAgentChoices, NewSessionModelSelectionResponse, SessionModel as ClientSessionModel } from "../../../shared/apiTypes";
 import { KNOWN_THINKING_LEVELS } from "../../../shared/thinkingLevels";
 import { setSessionGuidance } from "../../../shared/sessionGuidance";
@@ -61,6 +61,7 @@ export class NewSessionComposer extends LitElement {
   @property({ attribute: false }) promptResourceCatalog: (projectId: string, workspaceId: string, machineId: string) => Promise<PromptResourceCatalogResponse> = (projectId, workspaceId, machineId) => workspacesApi.promptResourceCatalog(projectId, workspaceId, machineId);
   /** The host supplies destination-scoped Pi defaults. Previews may omit it. */
   @property({ attribute: false }) loadAgentDefaults?: (cwd: string, machineId: string) => Promise<NewSessionModelSelectionResponse>;
+  @property({ attribute: false }) dictation?: ComposerDictationCapability;
 
   @state() private composerState: NewSessionComposerState = createNewSessionComposerState();
   @state() private draftDisplay: ComposerDraftDisplayState = { inputMode: { kind: "normal" }, empty: true, focused: false, attachmentCount: 0, attachmentCapturePending: false };
@@ -135,6 +136,7 @@ export class NewSessionComposer extends LitElement {
 
   override render(): TemplateResult {
     const state = this.composerState;
+    const destination = this.currentDestination();
     const submitting = state.kind === "submitting";
     const attachmentCapturePending = this.draftDisplay.attachmentCapturePending;
     const busy = submitting || this.validationPending || attachmentCapturePending;
@@ -161,6 +163,10 @@ export class NewSessionComposer extends LitElement {
               .editorLabel=${"First prompt"}
               .placeholderText=${this.placeholderForState(state)}
               .composerRuntime=${this.runtime}
+              .machineId=${destination?.machine.id ?? "local"}
+              .cwd=${destination?.workspace.path}
+              .projectId=${destination?.project.id}
+              .workspaceId=${destination?.workspace.id}
               .disabled=${submitting}
               .sending=${submitting || this.validationPending}
               .submissionAvailable=${this.composerDraftAvailable()}
@@ -361,6 +367,7 @@ export class NewSessionComposer extends LitElement {
           return Promise.resolve(true);
         },
       },
+      ...(this.dictation === undefined ? {} : { dictation: this.dictation }),
     };
   }
 
@@ -519,6 +526,7 @@ export class NewSessionComposer extends LitElement {
     const requestId = this.nextRequest();
     const next = startNewSessionDestinationChoice(this.composerState, requestId);
     if (next === this.composerState) return;
+    this.cancelDictationForDestinationTransition();
     this.composerState = next;
     void this.loadMachines(requestId);
   }
@@ -537,6 +545,7 @@ export class NewSessionComposer extends LitElement {
     const requestId = this.requestGeneration + 1;
     const next = chooseNewSessionMachine(this.composerState, machine, requestId);
     if (next === this.composerState || next.kind !== "choosing" || next.choice.step !== "project") return;
+    this.cancelDictationForDestinationTransition();
     this.requestGeneration = requestId;
     this.composerState = next;
     void this.loadProjects(next.choice.machine.id, requestId);
@@ -546,6 +555,7 @@ export class NewSessionComposer extends LitElement {
     const requestId = this.requestGeneration + 1;
     const next = chooseNewSessionProject(this.composerState, project, requestId);
     if (next === this.composerState || next.kind !== "choosing" || next.choice.step !== "workspace") return;
+    this.cancelDictationForDestinationTransition();
     this.requestGeneration = requestId;
     this.composerState = next;
     void this.loadWorkspaces(next.choice.machine.id, next.choice.project.id, requestId);
@@ -554,6 +564,7 @@ export class NewSessionComposer extends LitElement {
   private selectWorkspace(workspace: Workspace): void {
     const next = chooseNewSessionWorkspace(this.composerState, workspace);
     if (next === this.composerState) return;
+    this.cancelDictationForDestinationTransition();
     this.requestGeneration += 1;
     this.composerState = next;
     this.clearValidationError();
@@ -564,6 +575,7 @@ export class NewSessionComposer extends LitElement {
   private backToMachines(): void {
     if (this.composerState.kind !== "choosing" || this.composerState.choice.step !== "project") return;
     const requestId = this.nextRequest();
+    this.cancelDictationForDestinationTransition();
     this.composerState = backToMachineChoice(this.composerState, requestId);
     void this.loadMachines(requestId);
   }
@@ -572,6 +584,7 @@ export class NewSessionComposer extends LitElement {
     if (this.composerState.kind !== "choosing" || this.composerState.choice.step !== "workspace") return;
     const machineId = this.composerState.choice.machine.id;
     const requestId = this.nextRequest();
+    this.cancelDictationForDestinationTransition();
     this.composerState = backToProjectChoice(this.composerState, requestId);
     void this.loadProjects(machineId, requestId);
   }
@@ -613,10 +626,15 @@ export class NewSessionComposer extends LitElement {
     return this.requestGeneration;
   }
 
+  private cancelDictationForDestinationTransition(): void {
+    this.editor?.cancelDictation();
+  }
+
   private requestCancel(): void {
     if (this.composerState.kind === "submitting" || this.draftDisplay.attachmentCapturePending) return;
     this.requestGeneration += 1;
     this.invalidatePendingSubmission();
+    this.editor?.cancelDictation();
     this.returnClaimedRecoveryDraft();
     this.draft?.discardDraft();
     this.onCancel?.();

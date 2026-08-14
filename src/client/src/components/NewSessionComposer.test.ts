@@ -3,6 +3,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, workspacesApi, type Machine, type Project, type Workspace } from "../api";
+import type { ComposerDictationCapability } from "../composerCapabilities";
 import type { NewSessionDestinationCatalog, NewSessionLaunchIntent, NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination } from "../newSessionComposer";
 import { PromptEditor } from "./PromptEditor";
@@ -31,6 +32,7 @@ async function mountComposer(options: {
   onSubmit?: NewSessionComposer["onSubmit"];
   onReturnRecoveryDraft?: NewSessionComposer["onReturnRecoveryDraft"];
   promptResourceCatalog?: NewSessionComposer["promptResourceCatalog"];
+  dictation?: ComposerDictationCapability;
 } = {}): Promise<NewSessionComposer> {
   const composer = new NewSessionComposer();
   if (options.initialDestination !== undefined) composer.initialDestination = options.initialDestination;
@@ -39,6 +41,7 @@ async function mountComposer(options: {
   if (options.onSubmit !== undefined) composer.onSubmit = options.onSubmit;
   if (options.onReturnRecoveryDraft !== undefined) composer.onReturnRecoveryDraft = options.onReturnRecoveryDraft;
   if (options.promptResourceCatalog !== undefined) composer.promptResourceCatalog = options.promptResourceCatalog;
+  if (options.dictation !== undefined) composer.dictation = options.dictation;
   document.body.append(composer);
   await settleRenderedDialog(composer);
   if (options.initialPrompt !== undefined) {
@@ -158,13 +161,35 @@ function deferredPromptResourceCatalog(): {
   return { promise, resolve };
 }
 
+function fakeDictationCapability(): ComposerDictationCapability {
+  return {
+    getStatus: () => Promise.resolve({
+      smartTurn: "ready",
+      whisper: "ready",
+      capability: "ready",
+      limits: { sampleRateHz: 16_000, maxTurnSeconds: 60, maxTurnBytes: 3_840_000, endpointWindowSeconds: 8, endpointWindowBytes: 512_000 },
+    }),
+    createCaptureSession: () => Promise.reject(new Error("Capture is not used by this test.")),
+    speechApi: {
+      checkTurn: () => Promise.resolve({ complete: true, probability: 1, samples: 1 }),
+      transcribe: () => Promise.resolve({ text: "new session dictation" }),
+    },
+  };
+}
+
 describe("new-session-composer editing and submission", () => {
-  it("does not expose composer dictation before a session exists", async () => {
-    const composer = await mountComposer({ initialDestination: completeNewSessionDestination(machine("local"), project("project-a"), workspace("main", "project-a")) });
+  it("exposes host dictation before a session exists and scopes ownership to the destination", async () => {
+    const dictation = fakeDictationCapability();
+    const destination = completeNewSessionDestination(machine("remote-a"), project("project-a"), workspace("branch-a", "project-a"));
+    const composer = await mountComposer({ initialDestination: destination, dictation });
 
     const editor = promptEditor(composer);
-    expect(editor.capabilities.dictation).toBeUndefined();
-    expect(editor.shadowRoot?.querySelector(".dictation-button")).toBeNull();
+    expect(editor.capabilities.dictation).toBe(dictation);
+    expect(editor.shadowRoot?.querySelector(".dictation-button")).not.toBeNull();
+    expect(editor.machineId).toBe("remote-a");
+    expect(editor.cwd).toBe("/repos/project-a/branch-a");
+    expect(editor.projectId).toBe("project-a");
+    expect(editor.workspaceId).toBe("branch-a");
   });
 
   it("focuses a complete default's prompt and refuses to launch an empty draft", async () => {
@@ -448,6 +473,27 @@ describe("new-session-composer editing and submission", () => {
 });
 
 describe("new-session-composer destination choice", () => {
+  it("cancels dictation before each chooser destination transition", async () => {
+    const catalog = new InMemoryNewSessionDestinationCatalog({
+      machines: [machine("remote")],
+      projectsByMachine: { remote: [project("forge")] },
+      workspacesByMachineAndProject: { "remote:forge": [workspace("feature", "forge")] },
+    });
+    const composer = await mountComposer({ catalog, dictation: fakeDictationCapability() });
+    const cancelDictation = vi.spyOn(promptEditor(composer), "cancelDictation");
+
+    destinationAction(composer).click();
+    await settleCatalog(composer);
+    button(composer, "[data-machine-id='remote']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-project-id='forge']").click();
+    await settleCatalog(composer);
+    button(composer, "[data-workspace-id='feature']").click();
+    await composer.updateComplete;
+
+    expect(cancelDictation).toHaveBeenCalledTimes(4);
+  });
+
   it("requires a destination without a default and retains the prompt across a cross-machine choice", async () => {
     const catalog = new InMemoryNewSessionDestinationCatalog({
       machines: [machine("local"), machine("remote")],

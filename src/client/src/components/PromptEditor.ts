@@ -418,6 +418,11 @@ export class PromptEditor extends LitElement {
     return true;
   }
 
+  /** Abort any active dictation before the host changes composer ownership. */
+  cancelDictation(): void {
+    this.cancelDictationBeforeSurfaceExit();
+  }
+
   /** Get the underlying CM6 EditorView, or undefined if not yet mounted. */
   get view(): EditorView | undefined {
     return this.draftElement?.view;
@@ -447,7 +452,7 @@ export class PromptEditor extends LitElement {
     const view = this.dictationView();
     return html`
       <span id="composer-dictation-privacy" class="dictation-privacy">Audio goes to this Forgerie gateway for endpointing and transcription, not to the selected machine. Raw audio is not stored as application data.</span>
-      <span id="composer-dictation-status" class="dictation-status" role="status" aria-live="polite">${view.status}</span>
+      <span id="composer-dictation-status" class="dictation-status dictation-privacy" role="status" aria-live="polite">${view.status}</span>
       ${this.dictationState.tag === "retained-retry" ? html`
         <span class="dictation-retry-actions">
           <button type="button" class="dictation-discard" @click=${() => { this.dictationController?.discardRetained(); }}>Discard</button>
@@ -488,7 +493,13 @@ export class PromptEditor extends LitElement {
         ?disabled=${this.disabled || dismiss.disabled === true}
         title=${label}
         aria-label=${label}
-        @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.closeChoice(false); dismiss.onDismiss(); }}
+        @click=${() => {
+          this.closeSteer(false);
+          this.closeGuidance(false, true);
+          this.closeChoice(false);
+          this.cancelDictationBeforeSurfaceExit();
+          dismiss.onDismiss();
+        }}
       >${renderDismissIcon()}</button>
     `;
   }
@@ -657,10 +668,10 @@ export class PromptEditor extends LitElement {
         ${action === undefined ? nothing : html`<button
           class="composer-context-chip-action"
           data-action="change-destination"
-          ?disabled=${this.disabled || action.disabled === true}
+          ?disabled=${this.disabled || action.disabled === true || this.dictationBlocksComposer()}
           title=${action.label}
           aria-label=${action.label}
-          @click=${() => { action.onActivate(); }}
+          @click=${() => { if (!this.dictationBlocksComposer()) action.onActivate(); }}
         >${action.label}</button>`}
       </span>
     `;
@@ -676,13 +687,16 @@ export class PromptEditor extends LitElement {
     const stop = this.capabilities.stop;
     if (this.disabled || stop?.stoppable !== true) return;
     this.resetSteerDisclosure();
-    if (this.dictationBlocksComposer()) {
-      this.resetDictationGesture();
-      // cancel() releases the draft lock synchronously before it awaits track
-      // cleanup, so restored queued messages can safely replace the draft.
-      this.dictationController?.cancel();
-    }
+    this.cancelDictationBeforeSurfaceExit();
     stop.onStop();
+  }
+
+  private cancelDictationBeforeSurfaceExit(): void {
+    if (!this.dictationBlocksComposer()) return;
+    this.resetDictationGesture();
+    // cancel() releases the draft lock synchronously before it awaits track
+    // cleanup, so the exit action can safely restore or discard the draft.
+    this.dictationController?.cancel();
   }
 
   private selectModel(): void {

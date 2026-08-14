@@ -106,7 +106,7 @@ describe("PiWebApp composer dictation capability", () => {
     expect(abortCalls).toBe(0);
   });
 
-  it("declares dictation for an opening session composer, but not for the new-session composer", async () => {
+  it("declares dictation for opening-session and new-session composers", async () => {
     const app = new PiWebApp();
     const target = session("opening");
     Reflect.set(app, "state", {
@@ -129,8 +129,8 @@ describe("PiWebApp composer dictation capability", () => {
     await app.updateComplete;
 
     const newSessionEditor = app.shadowRoot?.querySelector("new-session-composer")?.shadowRoot?.querySelector<PromptEditor>("prompt-editor");
-    expect(newSessionEditor?.capabilities.dictation).toBeUndefined();
-    expect(newSessionEditor?.shadowRoot?.querySelector(".dictation-button")).toBeNull();
+    expect(newSessionEditor?.capabilities.dictation).not.toBeUndefined();
+    expect(newSessionEditor?.shadowRoot?.querySelector(".dictation-button")).not.toBeNull();
   });
 });
 

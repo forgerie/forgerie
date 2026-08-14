@@ -157,8 +157,9 @@
               <p>
                 Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends
                 it to the Forgerie web/API process that served the page. That gateway performs Smart Turn endpointing and
-                Whisper transcription, then inserts final text into the selected session draft. Audio is not proxied to
-                the selected federated machine, even when the prompt text will later be sent to a remote machine.
+                Whisper transcription, then inserts final text into the current active-session or new-session draft. Audio
+                is not proxied to the selected federated machine, even when the prompt text will later be sent to a remote
+                machine.
               </p>
               <p>The current first slice packages the model workers with Nix for <code>x86_64-linux</code> only:</p>
               <div class="code-card">
@@ -213,10 +214,10 @@ nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</
                 behavior.
               </p>
               <p>
-                In the composer, tap the microphone for automatic completion, hold it to keep listening until release, and
-                press it again during hands-free or manual-only capture to transcribe immediately. Permission denial,
-                missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep
-                existing draft text unchanged.
+                In active-session and new-session composers, tap the microphone for automatic completion, hold it to keep
+                listening until release, and press it again during hands-free or manual-only capture to transcribe
+                immediately. Permission denial, missing microphone hardware, model failures, status failures, and timeouts
+                release the microphone and keep existing draft text unchanged.
               </p>
             </section>
 
