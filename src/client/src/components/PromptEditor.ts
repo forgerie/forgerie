@@ -727,6 +727,11 @@ export class PromptEditor extends LitElement {
   }
 
   private onQueueClick(event: MouseEvent): void {
+    if (this.queuePointerPress !== undefined || this.queueKeyboardPress !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (this.queueSuppressedClickId !== undefined) {
       event.preventDefault();
       event.stopPropagation();
@@ -915,7 +920,7 @@ export class PromptEditor extends LitElement {
 
   private confirmSteer(): void {
     const rail = this.rail();
-    if (!rail.canSteer || !rail.canInvokeQueue) {
+    if (!this.steerOpen || !rail.canSteer || !rail.canInvokeQueue) {
       this.resetSteerDisclosure();
       return;
     }
@@ -948,7 +953,7 @@ export class PromptEditor extends LitElement {
     if (rail.kind === "stopOnly") return false;
     if (rail.kind === "idle") return streamingBehavior === undefined && rail.canInvokePrimary;
     if (!rail.canInvokeQueue) return false;
-    return streamingBehavior !== "steer" || rail.canSteer;
+    return streamingBehavior === "followUp" || (streamingBehavior === "steer" && rail.canSteer);
   }
 
   private handleDraftEscape(context: ComposerDraftEscapeContext): boolean {

@@ -100,6 +100,36 @@ describe("PromptEditor control rail", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("ignores Queue clicks while a consumed pointer hold is still unreleased", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("do not queue from stale click");
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 50, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    const unreleasedClick = mouseEvent("click");
+    queue.dispatchEvent(unreleasedClick);
+
+    expect(unreleasedClick.defaultPrevented).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(composer.shadowRoot?.querySelectorAll(".steer-confirm-button")).toHaveLength(1);
+
+    document.dispatchEvent(pointerEvent("pointerup", { pointerId: 50, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    const releaseClick = mouseEvent("click");
+    queue.dispatchEvent(releaseClick);
+
+    expect(releaseClick.defaultPrevented).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+
+    composer.replaceText("later queue action works");
+    queue.dispatchEvent(mouseEvent("click"));
+
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("later queue action works", "followUp", undefined, undefined);
+  });
+
   it("keeps pointer capture and activation suppression until the held release click", async () => {
     vi.useFakeTimers();
     const onSend = vi.fn();
@@ -465,6 +495,60 @@ describe("PromptEditor control rail", () => {
     expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
   });
 
+  it("invalidates a pending Steer hold when the session identity changes", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend, sessionId: "session-a" });
+    composer.replaceText("do not queue for the old session");
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(pointerEvent("pointerdown", { pointerId: 60, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    composer.sessionId = "session-b";
+    await composer.updateComplete;
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    document.dispatchEvent(pointerEvent("pointerup", { pointerId: 60, pointerType: "touch", button: 0, clientX: 0, clientY: 0 }));
+    queue.dispatchEvent(mouseEvent("click"));
+
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("invalidates an open Steer confirmation when the machine identity changes", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend, machineId: "local" });
+    composer.replaceText("do not steer for the old machine");
+    await openSteerByPointerHold(composer, button(composer, ".queue-button"));
+    const staleConfirm = button(composer, ".steer-confirm-button");
+
+    composer.machineId = "remote";
+    await composer.updateComplete;
+    staleConfirm.click();
+
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("invalidates a pending keyboard Steer hold when runtime controls close", async () => {
+    vi.useFakeTimers();
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend, runtimeControlsAvailable: true });
+    composer.replaceText("do not queue after controls close");
+    const queue = button(composer, ".queue-button");
+
+    queue.dispatchEvent(keyEvent("keydown", "Enter"));
+    composer.runtimeControlsAvailable = false;
+    await composer.updateComplete;
+    vi.advanceTimersByTime(500);
+    await composer.updateComplete;
+    document.dispatchEvent(keyEvent("keyup", "Enter"));
+    queue.dispatchEvent(mouseEvent("click"));
+
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("cancels pending Steer when Queue invocability closes before the hold threshold", async () => {
     vi.useFakeTimers();
     const onSend = vi.fn();
@@ -652,6 +736,34 @@ describe("PromptEditor control rail", () => {
     expect(composer.view?.state.doc.toString()).toBe("keep this");
     expect(composer.shadowRoot?.querySelector(".attachment-chip")?.textContent).toContain("note.txt");
     expect(composer.shadowRoot?.querySelector<HTMLInputElement>(".attachment-delivery input[value='folder']")?.checked).toBe(true);
+  });
+
+  it("rejects imperative queue-capable submit without a streaming behavior and preserves the draft", async () => {
+    const onSend = vi.fn();
+    const onDraftSubmit = vi.fn(() => "accepted" as const);
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend, onDraftSubmit });
+    composer.replaceText("keep queued draft");
+    await composer.updateComplete;
+    await composer.draft?.updateComplete;
+
+    requiredDraft(composer).submit();
+    await composer.updateComplete;
+    await composer.draft?.updateComplete;
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onDraftSubmit).not.toHaveBeenCalled();
+    expect(composer.view?.state.doc.toString()).toBe("keep queued draft");
+  });
+
+  it("accepts Enter as a follow-up submit while queue-capable", async () => {
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("queue from Enter");
+
+    pressEnter(composer);
+    await composer.updateComplete;
+
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("queue from Enter", "followUp", undefined, undefined);
   });
 
   it.each([
