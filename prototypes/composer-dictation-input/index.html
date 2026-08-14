@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Composer dictation input probe</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --pi-bg: #0d111d;
+      --pi-bg-elevated: #121827;
+      --pi-surface: #171f31;
+      --pi-surface-strong: #1d2840;
+      --pi-border: #2a3550;
+      --pi-border-muted: #1d2639;
+      --pi-text: #e8ecf6;
+      --pi-text-secondary: #b4bfd3;
+      --pi-muted: #7e8aa3;
+      --pi-accent: #78dce8;
+      --pi-success: #8ee6a8;
+      --pi-success-bg: #102117;
+      --pi-warning: #ffd479;
+      --pi-danger: #ff8a8a;
+      --pi-shadow: rgb(0 0 0 / 0.34);
+      --calm-measure: 760px;
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #182033 0, var(--pi-bg) 34rem);
+      color: var(--pi-text);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100svh;
+      margin: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 14px;
+      padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    }
+
+    header, main, footer { width: min(100%, var(--calm-measure)); margin-inline: auto; }
+
+    header { display: grid; gap: 4px; }
+    h1 { margin: 0; font-size: clamp(1.05rem, 0.92rem + 1cqi, 1.4rem); letter-spacing: -0.02em; }
+    .lede { margin: 0; max-width: 64ch; color: var(--pi-text-secondary); }
+
+    main { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
+
+    .composer-shell {
+      container-type: inline-size;
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--pi-border);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--pi-bg-elevated) 94%, transparent);
+      box-shadow: 0 6px 18px var(--pi-shadow);
+    }
+
+    .draft {
+      min-height: 74px;
+      padding: 10px 12px;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 12px;
+      background: var(--pi-bg);
+      color: var(--pi-text-secondary);
+    }
+
+    .draft strong { color: var(--pi-text); }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .compact-status {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--pi-muted);
+      font-size: 12px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: var(--pi-muted);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--pi-muted) 16%, transparent);
+    }
+
+    .status-dot[data-kind="active"] { background: var(--pi-accent); box-shadow-color: color-mix(in srgb, var(--pi-accent) 18%, transparent); }
+    .status-dot[data-kind="held"] { background: var(--pi-warning); box-shadow-color: color-mix(in srgb, var(--pi-warning) 22%, transparent); }
+    .status-dot[data-kind="error"] { background: var(--pi-danger); box-shadow-color: color-mix(in srgb, var(--pi-danger) 18%, transparent); }
+
+    .status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+    button {
+      border: 1px solid var(--pi-border);
+      border-radius: 8px;
+      background: var(--pi-surface);
+      color: var(--pi-text);
+      padding: 7px 9px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+
+    .icon-button {
+      flex: 0 0 auto;
+      display: inline-grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .mic-button[data-mode="acquiring"],
+    .mic-button[data-mode="pressed"],
+    .mic-button[data-mode="auto-listening"],
+    .mic-button[data-mode="manual-only"] { color: var(--pi-accent); border-color: var(--pi-accent); }
+    .mic-button[data-mode="held-listening"] { color: var(--pi-warning); border-color: var(--pi-warning); }
+    .mic-button[data-mode="error"] { color: var(--pi-danger); border-color: var(--pi-danger); }
+
+    .mic-button[data-mode="pressed"] .pulse,
+    .mic-button[data-mode="auto-listening"] .pulse,
+    .mic-button[data-mode="held-listening"] .pulse,
+    .mic-button[data-mode="manual-only"] .pulse { animation: probe-pulse 1.15s ease-in-out infinite; transform-origin: center; }
+
+    .prompt-action-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+
+    .secondary-action { flex: 0 0 auto; color: var(--pi-muted); }
+
+    .probe-grid { min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 12px; }
+    .panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 12px; border: 1px solid var(--pi-border-muted); border-radius: 14px; background: rgb(18 24 39 / .72); }
+    .panel h2 { margin: 0; font-size: .86rem; letter-spacing: .06em; text-transform: uppercase; color: var(--pi-text-secondary); }
+    .metrics { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; align-content: start; color: var(--pi-text-secondary); }
+    .metrics dt { color: var(--pi-muted); }
+    .metrics dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--pi-text); }
+
+    .log {
+      min-height: 170px;
+      max-height: 40svh;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 10px;
+      background: #090d17;
+      color: #cad2e5;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+
+    .privacy {
+      padding: 10px 12px;
+      border: 1px dashed var(--pi-border);
+      border-radius: 12px;
+      color: var(--pi-text-secondary);
+      background: color-mix(in srgb, var(--pi-surface) 54%, transparent);
+    }
+
+    .privacy strong { color: var(--pi-text); }
+
+    @container (max-width: 640px) {
+      .composer-shell { gap: 8px; padding: 8px; }
+      .actions { gap: 6px; }
+      .compact-status { flex-basis: 220px; gap: 4px; }
+      button { padding: 6px 8px; }
+    }
+
+    @container (max-width: 430px) {
+      .compact-status { flex-basis: 170px; font-size: 11px; }
+      button { padding: 5px 7px; }
+    }
+
+    @keyframes probe-pulse {
+      0%, 100% { opacity: .72; transform: scale(.94); }
+      50% { opacity: 1; transform: scale(1.08); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .mic-button .pulse { animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Composer dictation input probe</h1>
+    <p class="lede">Disposable harness for the microphone gesture. It calls browser media APIs only. It does not call Smart Turn, Whisper, or any network route.</p>
+  </header>
+
+  <main>
+    <section class="composer-shell" aria-label="Composer speech input probe">
+      <div class="draft" aria-label="Mock composer draft"><strong>Composer draft</strong><br>Tap or hold the microphone. This box must not receive focus or open the keyboard when capture starts.</div>
+      <div class="actions">
+        <div class="compact-status" aria-live="polite">
+          <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+          <span id="statusText" class="status-text">Idle. Press microphone to request permission and start capture.</span>
+        </div>
+        <button id="degradeButton" class="secondary-action" type="button" title="Simulate Smart Turn unavailable while keeping capture active">Manual-only</button>
+        <button
+          id="micButton"
+          class="icon-button mic-button"
+          type="button"
+          data-mode="idle"
+          aria-label="Start composer dictation"
+          aria-describedby="privacyHelp gestureHelp"
+          aria-pressed="false"
+          title="Press for automatic endpointing; hold to keep recording through pauses"
+        >
+          <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path>
+            <path d="M5 11a7 7 0 0 0 14 0"></path>
+            <path d="M12 18v3"></path>
+            <path d="M9 21h6"></path>
+            <circle class="pulse" cx="18" cy="6" r="1.8"></circle>
+          </svg>
+        </button>
+      </div>
+      <div id="privacyHelp" class="privacy"><strong>Privacy boundary:</strong> production audio will go to this Forgerie gateway for endpointing and transcription, not the selected machine. This probe keeps no samples, writes no audio, and logs metadata only.</div>
+      <div id="gestureHelp" class="privacy"><strong>Gesture contract:</strong> Space down starts or holds, Space up releases, Enter or Space completes auto/manual listening, Escape aborts. Pointer cancel and page hidden/frozen/pagehide stop tracks fail-closed.</div>
+    </section>
+
+    <section class="probe-grid" aria-label="Probe readings">
+      <article class="panel">
+        <h2>Capture state</h2>
+        <dl class="metrics" id="captureMetrics"></dl>
+      </article>
+      <article class="panel">
+        <h2>Metadata log</h2>
+        <pre id="log" class="log" aria-live="polite"></pre>
+      </article>
+    </section>
+  </main>
+
+  <footer class="privacy">Run from the repo with <code>node prototypes/serve.mjs prototypes/composer-dictation-input 8600</code>, then open <code>http://127.0.0.1:8600/</code> or a same-origin tailnet URL on the Fold.</footer>
+
+  <script type="module">
+    const HOLD_THRESHOLD_MS = 450;
+    const MAX_LOG_LINES = 180;
+
+    const micButton = document.querySelector("#micButton");
+    const degradeButton = document.querySelector("#degradeButton");
+    const statusText = document.querySelector("#statusText");
+    const statusDot = document.querySelector("#statusDot");
+    const captureMetrics = document.querySelector("#captureMetrics");
+    const logElement = document.querySelector("#log");
+
+    const state = {
+      mode: "idle",
+      stream: undefined,
+      audioContext: undefined,
+      sourceNode: undefined,
+      pointerId: undefined,
+      pointerDown: false,
+      keyDown: false,
+      acquisitionId: 0,
+      startedAt: 0,
+      readyAt: 0,
+      holdTimer: undefined,
+      holdThresholdElapsed: false,
+      releasedWhileAcquiring: false,
+      cancelledWhileAcquiring: false,
+      lastInput: "none",
+      logLines: [],
+    };
+
+    render();
+    log("probe-ready", { holdThresholdMs: HOLD_THRESHOLD_MS, secureContext: window.isSecureContext, viewport: viewportInfo() });
+
+    micButton.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary) return;
+      event.preventDefault();
+      if (state.mode === "auto-listening" || state.mode === "manual-only") {
+        completeTurn("second-pointerdown", event.pointerType);
+        return;
+      }
+      if (state.mode !== "idle" && state.mode !== "error") return;
+      state.pointerId = event.pointerId;
+      state.pointerDown = true;
+      state.lastInput = `pointer:${event.pointerType}`;
+      micButton.setPointerCapture?.(event.pointerId);
+      beginAcquisition("pointerdown", event.pointerType);
+    });
+
+    micButton.addEventListener("pointerup", (event) => {
+      if (state.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      releasePointer(event.pointerType);
+    });
+
+    micButton.addEventListener("pointercancel", (event) => {
+      if (state.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      state.cancelledWhileAcquiring = state.mode === "acquiring";
+      abortTurn("pointercancel", { pointerType: event.pointerType, latchedWhileAcquiring: state.cancelledWhileAcquiring });
+    });
+
+    micButton.addEventListener("lostpointercapture", () => {
+      if (state.mode === "pressed" || state.mode === "held-listening") abortTurn("lostpointercapture", {});
+    });
+
+    micButton.addEventListener("contextmenu", (event) => {
+      if (state.mode !== "idle" && state.mode !== "error") {
+        event.preventDefault();
+        log("contextmenu-suppressed", { mode: state.mode });
+      }
+    });
+
+    micButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      log("synthetic-click-suppressed", { mode: state.mode });
+    });
+
+    micButton.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        abortTurn("keyboard-escape", {});
+        return;
+      }
+      if (event.repeat) {
+        if (event.key === " " || event.key === "Enter") {
+          event.preventDefault();
+          log("keyboard-repeat-ignored", { key: keyName(event.key), mode: state.mode });
+        }
+        return;
+      }
+      if (event.key === "Enter" && (state.mode === "auto-listening" || state.mode === "manual-only")) {
+        event.preventDefault();
+        completeTurn("keyboard-enter", "keyboard");
+        return;
+      }
+      if (event.key !== " ") return;
+      event.preventDefault();
+      if (state.mode === "auto-listening" || state.mode === "manual-only") {
+        completeTurn("keyboard-space", "keyboard");
+        return;
+      }
+      if (state.mode !== "idle" && state.mode !== "error") return;
+      state.keyDown = true;
+      state.lastInput = "keyboard:space";
+      beginAcquisition("keyboard-space-down", "keyboard");
+    });
+
+    micButton.addEventListener("keyup", (event) => {
+      if (event.key !== " ") return;
+      event.preventDefault();
+      if (!state.keyDown && state.lastInput !== "keyboard:space") return;
+      state.keyDown = false;
+      releasePointer("keyboard");
+    });
+
+    degradeButton.addEventListener("click", () => {
+      if (state.mode === "pressed" || state.mode === "auto-listening" || state.mode === "held-listening") {
+        setMode("manual-only", "Detector unavailable. Press microphone, Space, or Enter to complete manually.");
+        log("manual-only-simulated", { trackState: trackSummary() });
+      } else {
+        log("manual-only-request-ignored", { mode: state.mode });
+      }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      log("visibilitychange", { visibilityState: document.visibilityState, mode: state.mode });
+      if (document.visibilityState === "hidden") abortTurn("visibility-hidden", { failClosed: true });
+    });
+    window.addEventListener("pagehide", (event) => abortTurn("pagehide", { persisted: event.persisted, failClosed: true }));
+    document.addEventListener("freeze", () => abortTurn("freeze", { failClosed: true }));
+    window.addEventListener("blur", () => log("window-blur", { mode: state.mode }));
+    window.addEventListener("focus", () => log("window-focus", { mode: state.mode }));
+    window.addEventListener("resize", () => log("resize", { viewport: viewportInfo(), mode: state.mode }));
+    screen.orientation?.addEventListener?.("change", () => log("orientation-change", { viewport: viewportInfo(), orientation: screen.orientation.type, mode: state.mode }));
+
+    async function beginAcquisition(reason, inputKind) {
+      clearHoldTimer();
+      const acquisitionId = state.acquisitionId + 1;
+      state.acquisitionId = acquisitionId;
+      state.startedAt = performance.now();
+      state.readyAt = 0;
+      state.holdThresholdElapsed = false;
+      state.releasedWhileAcquiring = false;
+      state.cancelledWhileAcquiring = false;
+      setMode("acquiring", "Requesting microphone permission… release/cancel will be latched until the browser answers.");
+      log("capture-acquiring", { reason, inputKind, holdThresholdMs: HOLD_THRESHOLD_MS });
+      state.holdTimer = window.setTimeout(() => {
+        state.holdThresholdElapsed = true;
+        log("hold-threshold", { mode: state.mode, elapsedMs: elapsedPressMs() });
+        if (state.mode === "pressed" && isStillHeld()) setMode("held-listening", "Held. Smart Turn completion is suppressed until release.");
+      }, HOLD_THRESHOLD_MS);
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        failAcquisition(acquisitionId, "media-unsupported", "This browser does not expose getUserMedia.");
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: { ideal: 1 },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+        if (acquisitionId !== state.acquisitionId) {
+          stopStream(stream);
+          log("stale-acquisition-stopped", { acquisitionId });
+          return;
+        }
+        state.stream = stream;
+        attachTrackObservers(stream);
+        try {
+          const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+          state.audioContext = new AudioContextCtor({ sampleRate: 16000 });
+          state.sourceNode = state.audioContext.createMediaStreamSource(stream);
+        } catch (error) {
+          stopCaptureResources();
+          failAcquisition(acquisitionId, "audio-context-failed", error instanceof Error ? error.name : "unknown");
+          return;
+        }
+        if (state.audioContext.state === "suspended") await state.audioContext.resume().catch(() => undefined);
+        state.readyAt = performance.now();
+        log("capture-ready", {
+          acquireMs: Math.round(state.readyAt - state.startedAt),
+          audioContext: audioContextSummary(),
+          trackState: trackSummary(),
+          releasedWhileAcquiring: state.releasedWhileAcquiring,
+          cancelledWhileAcquiring: state.cancelledWhileAcquiring,
+        });
+        if (state.cancelledWhileAcquiring) {
+          abortTurn("latched-cancel-after-ready", { failClosed: true });
+        } else if (state.releasedWhileAcquiring) {
+          clearHoldTimer();
+          setMode("auto-listening", "Short release before readiness latched. Auto-listening after permission grant.");
+          log("latched-release-entered-auto", { elapsedMs: elapsedPressMs() });
+        } else if (state.holdThresholdElapsed && isStillHeld()) {
+          setMode("held-listening", "Held through permission grant. Release to complete.");
+          log("held-through-acquisition", { elapsedMs: elapsedPressMs() });
+        } else {
+          setMode("pressed", "Capturing. Release before threshold for auto; keep holding for explicit completion.");
+        }
+      } catch (error) {
+        failAcquisition(acquisitionId, "permission-or-device-failure", error instanceof Error ? error.name : "unknown");
+      }
+    }
+
+    function releasePointer(inputKind) {
+      releasePointerCaptureIfNeeded();
+      state.pointerDown = false;
+      if (state.mode === "acquiring") {
+        state.releasedWhileAcquiring = true;
+        log("release-latched-while-acquiring", { inputKind, elapsedMs: elapsedPressMs() });
+        render();
+        return;
+      }
+      if (state.mode === "pressed") {
+        clearHoldTimer();
+        setMode("auto-listening", "Auto-listening. Press microphone again, Space, or Enter to complete manually.");
+        log("short-release-auto", { inputKind, elapsedMs: elapsedPressMs() });
+        return;
+      }
+      if (state.mode === "held-listening") {
+        completeTurn("held-release", inputKind);
+      }
+    }
+
+    function completeTurn(reason, inputKind) {
+      const durationMs = elapsedPressMs();
+      log("turn-complete", { reason, inputKind, captureDurationMs: durationMs, audioContext: audioContextSummary(), trackState: trackSummary() });
+      stopCaptureResources();
+      clearGestureState();
+      setMode("idle", "Completed locally. No audio was saved or sent.");
+    }
+
+    function abortTurn(reason, extra) {
+      if (state.mode === "idle" && !state.stream && !state.audioContext) return;
+      if (state.mode === "acquiring") state.acquisitionId += 1;
+      log("turn-abort", { reason, elapsedMs: elapsedPressMs(), ...extra, trackState: trackSummary() });
+      stopCaptureResources();
+      clearGestureState();
+      setMode(reason.includes("permission") ? "error" : "idle", reason.includes("permission") ? "Microphone was not acquired. Try again when ready." : "Aborted. Microphone resources released.");
+    }
+
+    function failAcquisition(acquisitionId, kind, message) {
+      if (acquisitionId !== state.acquisitionId) return;
+      clearHoldTimer();
+      stopCaptureResources();
+      clearGestureState();
+      setMode("error", "Microphone unavailable. No draft or audio state remains locked.");
+      log("capture-failed", { kind, message });
+    }
+
+    function setMode(mode, message) {
+      state.mode = mode;
+      statusText.textContent = message;
+      render();
+    }
+
+    function clearGestureState() {
+      clearHoldTimer();
+      releasePointerCaptureIfNeeded();
+      state.pointerId = undefined;
+      state.pointerDown = false;
+      state.keyDown = false;
+      state.holdThresholdElapsed = false;
+      state.releasedWhileAcquiring = false;
+      state.cancelledWhileAcquiring = false;
+    }
+
+    function clearHoldTimer() {
+      if (state.holdTimer !== undefined) window.clearTimeout(state.holdTimer);
+      state.holdTimer = undefined;
+    }
+
+    function isStillHeld() {
+      return state.pointerDown || state.keyDown;
+    }
+
+    function elapsedPressMs() {
+      return state.startedAt === 0 ? 0 : Math.round(performance.now() - state.startedAt);
+    }
+
+    function releasePointerCaptureIfNeeded() {
+      if (state.pointerId === undefined) return;
+      try {
+        if (micButton.hasPointerCapture?.(state.pointerId)) micButton.releasePointerCapture(state.pointerId);
+      } catch {
+        // Pointer capture can already be gone after browser cancellation.
+      }
+    }
+
+    function stopCaptureResources() {
+      const source = state.sourceNode;
+      state.sourceNode = undefined;
+      try { source?.disconnect(); } catch {}
+      const context = state.audioContext;
+      state.audioContext = undefined;
+      if (context !== undefined && context.state !== "closed") void context.close().catch(() => undefined);
+      stopStream(state.stream);
+      state.stream = undefined;
+      render();
+    }
+
+    function stopStream(stream) {
+      for (const track of stream?.getTracks?.() ?? []) track.stop();
+    }
+
+    function attachTrackObservers(stream) {
+      for (const track of stream.getAudioTracks()) {
+        track.addEventListener("ended", () => {
+          log("track-ended", { trackState: trackSummary() });
+          if (state.stream === stream) abortTurn("track-ended", { failClosed: true });
+        });
+        track.addEventListener("mute", () => log("track-muted", { trackState: trackSummary() }));
+        track.addEventListener("unmute", () => log("track-unmuted", { trackState: trackSummary() }));
+      }
+    }
+
+    function audioContextSummary() {
+      const context = state.audioContext;
+      if (context === undefined) return { present: false };
+      return { present: true, sampleRate: context.sampleRate, state: context.state, baseLatency: Number(context.baseLatency?.toFixed?.(4) ?? 0) };
+    }
+
+    function trackSummary() {
+      const track = state.stream?.getAudioTracks?.()[0];
+      if (track === undefined) return { present: false };
+      const settings = track.getSettings?.() ?? {};
+      return {
+        present: true,
+        readyState: track.readyState,
+        enabled: track.enabled,
+        muted: track.muted,
+        channelCount: numberOrNull(settings.channelCount),
+        sampleRate: numberOrNull(settings.sampleRate),
+        echoCancellation: booleanOrNull(settings.echoCancellation),
+        noiseSuppression: booleanOrNull(settings.noiseSuppression),
+        autoGainControl: booleanOrNull(settings.autoGainControl),
+      };
+    }
+
+    function numberOrNull(value) { return typeof value === "number" && Number.isFinite(value) ? value : null; }
+    function booleanOrNull(value) { return typeof value === "boolean" ? value : null; }
+    function keyName(key) { return key === " " ? "Space" : key; }
+    function viewportInfo() { return { width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio }; }
+
+    function render() {
+      micButton.dataset.mode = state.mode;
+      micButton.setAttribute("aria-pressed", state.mode === "pressed" || state.mode === "held-listening" || state.mode === "auto-listening" || state.mode === "manual-only" ? "true" : "false");
+      micButton.setAttribute("aria-label", labelForMode(state.mode));
+      statusDot.dataset.kind = dotKind(state.mode);
+      captureMetrics.replaceChildren(...metricNodes({
+        mode: state.mode,
+        holdThresholdMs: HOLD_THRESHOLD_MS,
+        pressElapsedMs: elapsedPressMs(),
+        pointerDown: state.pointerDown,
+        keyDown: state.keyDown,
+        releasedWhileAcquiring: state.releasedWhileAcquiring,
+        cancelledWhileAcquiring: state.cancelledWhileAcquiring,
+        secureContext: window.isSecureContext,
+        viewport: `${window.innerWidth} × ${window.innerHeight} @ ${window.devicePixelRatio}x`,
+        audioContext: audioContextSummary(),
+        track: trackSummary(),
+      }));
+    }
+
+    function labelForMode(mode) {
+      switch (mode) {
+        case "acquiring": return "Requesting microphone permission";
+        case "pressed": return "Release for automatic dictation or hold for explicit dictation";
+        case "auto-listening": return "Complete automatic dictation now";
+        case "held-listening": return "Release to complete held dictation";
+        case "manual-only": return "Complete manual-only dictation now";
+        case "error": return "Retry composer dictation";
+        default: return "Start composer dictation";
+      }
+    }
+
+    function dotKind(mode) {
+      if (mode === "held-listening") return "held";
+      if (mode === "error") return "error";
+      if (mode !== "idle") return "active";
+      return "idle";
+    }
+
+    function metricNodes(values) {
+      const fragment = document.createDocumentFragment();
+      for (const [key, value] of Object.entries(flatten(values))) {
+        const dt = document.createElement("dt");
+        dt.textContent = key;
+        const dd = document.createElement("dd");
+        dd.textContent = String(value);
+        fragment.append(dt, dd);
+      }
+      return Array.from(fragment.childNodes);
+    }
+
+    function flatten(value, prefix = "") {
+      const output = {};
+      for (const [key, item] of Object.entries(value)) {
+        const name = prefix === "" ? key : `${prefix}.${key}`;
+        if (item !== null && typeof item === "object" && !Array.isArray(item)) Object.assign(output, flatten(item, name));
+        else output[name] = item;
+      }
+      return output;
+    }
+
+    function log(event, metadata) {
+      const entry = JSON.stringify({ t: new Date().toISOString(), event, mode: state.mode, ...metadata });
+      state.logLines.push(entry);
+      if (state.logLines.length > MAX_LOG_LINES) state.logLines.splice(0, state.logLines.length - MAX_LOG_LINES);
+      logElement.textContent = state.logLines.join("\n");
+      logElement.scrollTop = logElement.scrollHeight;
+      render();
+    }
+  </script>
+</body>
+</html>
