@@ -93,6 +93,8 @@
             <a href="#node-pty-native-module">node-pty native module is missing</a>
             <a href="#systemd-not-found">User service manager is unavailable</a>
             <a href="#cannot-open">I cannot open the web UI</a>
+            <a href="#speech-unavailable">Speech dictation is unavailable or manual-only</a>
+            <a href="#speech-capture-fails">Speech permission, empty audio, or timeouts</a>
             <a href="#public-internet">Can I expose this publicly?</a>
             <a href="#remote-machines">How do remote machines work?</a>
             <a href="#laptop-or-server">Laptop or server?</a>
@@ -232,6 +234,70 @@
                 <li>Make sure port <code>8504</code> is not already in use.</li>
                 <li>On a remote server, use an SSH tunnel: <code>ssh -L 8504:127.0.0.1:8504 user@server</code>.</li>
               </ul>
+            </article>
+
+            <article id="speech-unavailable" class="faq-item">
+              <h2>Speech dictation is unavailable, stuck warming, or manual-only</h2>
+              <p>
+                Speech workers are owned by the web/API service. Agent sessions can continue while speech is unavailable.
+                Check the gateway's status endpoint. For a local service:
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Check speech readiness</strong>
+                  <button class="copy-button" data-copy="#speech-status-command">Copy</button>
+                </div>
+                <pre id="speech-status-command"><code><span class="prompt">$</span> curl -s http://127.0.0.1:8504/api/speech/status</code></pre>
+              </div>
+              <ul>
+                <li><code>unavailable</code> usually means Whisper is missing, not executable, or failed to start.</li>
+                <li><code>warming</code> means Whisper is still starting; if it does not settle, check web/API logs.</li>
+                <li><code>manual-only</code> means Whisper is ready but Smart Turn is not, so press the microphone again to finish a turn manually.</li>
+                <li>A browser status error usually means the gateway web/API service is unreachable from that origin, the reverse proxy is not forwarding the request, or the speech Host allowlist does not include the browser Host.</li>
+              </ul>
+              <p>
+                On the current Nix first slice, realize or install the pinned worker packages from the Forgerie checkout on <code>x86_64-linux</code>:
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Install local speech workers</strong>
+                  <button class="copy-button" data-copy="#speech-workers-command">Copy</button>
+                </div>
+                <pre id="speech-workers-command"><code><span class="prompt">$</span> nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker
+<span class="prompt">$</span> forgerie restart</code></pre>
+              </div>
+              <p>
+                If the commands are not on the web service <code>PATH</code>, set
+                <code>FORGERIE_SMART_TURN_WORKER</code> and <code>FORGERIE_WHISPER_STT_WORKER</code> to absolute executable
+                paths in that service environment and restart the web/API service. Relative paths are ignored.
+                Installer-managed, Docker, and macOS model packaging are not available yet.
+              </p>
+              <p>
+                If the browser reaches Forgerie through a VPN or reverse-proxy hostname, add that browser Host value to
+                <code>FORGERIE_SPEECH_ALLOWED_HOSTS</code> and restart the web/API service. See
+                <a href="config#local-speech">Local speech dictation runtime</a> for the full contract.
+              </p>
+            </article>
+
+            <article id="speech-capture-fails" class="faq-item">
+              <h2>Speech permission is denied, nothing transcribes, or speech times out</h2>
+              <ul>
+                <li><strong>Permission denied:</strong> allow microphone access for the Forgerie origin in the browser or Android site settings, then press the microphone again. Forgerie does not add a separate consent gate.</li>
+                <li><strong>No microphone or track ended:</strong> choose a usable input device and make sure no OS privacy control has disabled it.</li>
+                <li><strong>No speech detected:</strong> Forgerie stops the capture if speech does not start within 10 seconds. Press the microphone again and speak after the browser permission prompt has cleared.</li>
+                <li><strong>Empty transcription:</strong> Whisper returned no text. Existing draft text is preserved; try again with clearer audio.</li>
+                <li><strong>Timeout, busy, or network error:</strong> the composer may offer a 30-second retry from retained in-memory audio. Press the microphone to retry before the timer expires, or discard it.</li>
+              </ul>
+              <p>
+                Dictation accepts one bounded turn: 16 kHz mono float32 PCM, up to 60 seconds, with an eight-second Smart
+                Turn endpoint window. A tap starts hands-free capture, a hold keeps listening until release, and a second
+                press during capture transcribes immediately. Raw microphone audio is kept only in memory for the active
+                bounded turn and 30-second retry buffer; it is not stored durably.
+              </p>
+              <p>
+                Changing session, disabling the surface, closing the page, or sending the page to the background aborts
+                unfinished capture and keeps existing draft text unchanged. Foreground resize and rotation do not end a turn.
+              </p>
             </article>
 
             <article id="public-internet" class="faq-item">

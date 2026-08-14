@@ -88,6 +88,7 @@
             <strong>On this page</strong>
             <a href="#files">Config files</a>
             <a href="#deployment-paths">Deployment paths</a>
+            <a href="#local-speech">Local speech dictation</a>
             <a href="#precedence">Precedence and reloads</a>
             <a href="#global-config">Global config</a>
             <a href="#project-config">Project config</a>
@@ -150,6 +151,75 @@
               </p>
             </section>
 
+
+            <section id="local-speech">
+              <h2>Local speech dictation runtime</h2>
+              <p>
+                Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends
+                it to the Forgerie web/API process that served the page. That gateway performs Smart Turn endpointing and
+                Whisper transcription, then inserts final text into the selected session draft. Audio is not proxied to
+                the selected federated machine, even when the prompt text will later be sent to a remote machine.
+              </p>
+              <p>The current first slice packages the model workers with Nix for <code>x86_64-linux</code> only:</p>
+              <div class="code-card">
+                <pre><code>nix build .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker
+nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</code></pre>
+              </div>
+              <p>
+                The flake pins and realizes the Smart Turn v3.2 ONNX model and the <code>whisper.cpp</code>
+                <code>ggml-base.en.bin</code> model. Wider installer integration and Docker or macOS model packaging are not
+                available yet. Missing or unusable worker commands degrade speech only; they do not stop the web UI or
+                session daemon.
+              </p>
+              <p>At web/API startup Forgerie resolves the named worker commands from the web process <code>PATH</code>:</p>
+              <ul>
+                <li><code>forgerie-smart-turn-worker</code></li>
+                <li><code>forgerie-whisper-stt-worker</code></li>
+              </ul>
+              <p>Resolution produces absolute real paths and the workers are spawned without a shell. To bypass <code>PATH</code>, set absolute executable overrides:</p>
+              <ul>
+                <li><code>FORGERIE_SMART_TURN_WORKER=/absolute/path/to/forgerie-smart-turn-worker</code></li>
+                <li><code>FORGERIE_WHISPER_STT_WORKER=/absolute/path/to/forgerie-whisper-stt-worker</code></li>
+              </ul>
+              <p>
+                Relative paths, launcher strings, and shell snippets are ignored. Restart the web/API service or process
+                after changing either override or the <code>PATH</code> visible to that service.
+              </p>
+              <p>
+                The web/API process warms both workers eagerly after the HTTP listener starts. Readiness is reported by
+                <code>GET /api/speech/status</code>:
+              </p>
+              <ul>
+                <li><code>ready</code>: Smart Turn and Whisper are ready. Tap mode can complete automatically.</li>
+                <li><code>manual-only</code>: Whisper is ready but Smart Turn is not. Dictation can still transcribe when the user presses the microphone again or releases a held press.</li>
+                <li><code>warming</code>: Whisper is still starting.</li>
+                <li><code>unavailable</code>: Whisper is unavailable, so composer dictation is disabled.</li>
+              </ul>
+              <p>
+                Browser-classified speech POSTs also pass a gateway Host allowlist.
+                <code>FORGERIE_SPEECH_ALLOWED_HOSTS</code> is a comma-separated list of allowed browser <code>Host</code>
+                values for speech requests, such as <code>forgerie.example.ts.net:8504,forgerie.example.ts.net</code>. When
+                unset, Forgerie allows the configured web/API host and localhost variants for the configured port. Set
+                this when a reverse proxy or VPN hostname serves the browser, and restart the web/API service after
+                changing it.
+              </p>
+              <p>
+                Speech limits are fixed in code for this slice: 16 kHz mono float32 PCM, a 60-second maximum turn, an
+                eight-second Smart Turn endpoint window, 100 ms minimum request duration, at most 16 endpoint checks per
+                turn, 10-second body upload and operation deadlines, one active plus one queued operation per backend, 96
+                endpoint checks and 12 transcriptions per gateway minute, and a 60-second warmup deadline. Raw microphone
+                audio is kept only in memory for the active bounded turn, endpoint window, and 30-second retry buffer;
+                Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session
+                behavior.
+              </p>
+              <p>
+                In the composer, tap the microphone for automatic completion, hold it to keep listening until release, and
+                press it again during hands-free or manual-only capture to transcribe immediately. Permission denial,
+                missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep
+                existing draft text unchanged.
+              </p>
+            </section>
+
             <section id="precedence">
               <h2>Precedence and reloads</h2>
               <p>Machine-global runtime values are resolved in this order:</p>
@@ -165,10 +235,12 @@
                 <code>PI_WEB_ALLOWED_HOSTS</code>, <code>PI_WEB_MAX_UPLOAD_BYTES</code>, <code>PI_WEB_AGENT_COMMAND</code>,
                 <code>PI_WEB_AGENT_DIR</code>, <code>PI_WEB_AGENT_SESSION_DIR</code>, <code>PI_CODING_AGENT_DIR</code> /
                 <code>PI_CODING_AGENT_SESSION_DIR</code> for Pi compatibility, <code>PI_WEB_SPAWN_SESSIONS</code>,
-                <code>PI_WEB_SUBSESSIONS</code>, and <code>PI_WEB_ASK_USER</code>.
+                <code>PI_WEB_SUBSESSIONS</code>, and <code>PI_WEB_ASK_USER</code>. Speech uses runtime-only web/API
+                environment variables described in <a href="#local-speech">Local speech dictation runtime</a>.
               </p>
               <ul>
                 <li><code>host</code> / <code>port</code>: restart the gateway web/API service or process.</li>
+                <li><code>FORGERIE_SMART_TURN_WORKER</code> / <code>FORGERIE_WHISPER_STT_WORKER</code> / <code>FORGERIE_SPEECH_ALLOWED_HOSTS</code>: restart the gateway web/API service or process. Speech workers are web-owned, not session-daemon-owned.</li>
                 <li><code>maxUploadBytes</code>: restart both the web/API process and the session daemon on that machine.</li>
                 <li><code>agent.command</code> / <code>agent.dir</code> / <code>spawnSessions</code> / <code>subsessions</code> / <code>askUser</code> / <code>extensionDialogsTimeoutMs</code>: restart the session daemon on that machine.</li>
                 <li><code>pathAccess</code>: applies on the next request; existing file views may need a browser refresh.</li>
@@ -466,6 +538,30 @@ worktree_path="$1"
                       <td>Next project-config read</td>
                     </tr>
                     <tr class="table-section"><th scope="rowgroup" colspan="6">Runtime-only environment variables</th></tr>
+                    <tr>
+                      <td>Speech Smart Turn worker</td>
+                      <td>—</td>
+                      <td><code>FORGERIE_SMART_TURN_WORKER</code></td>
+                      <td>Gateway web/API env</td>
+                      <td>Not supported locally</td>
+                      <td>Restart web/API; absolute executable override only; otherwise resolved from <code>PATH</code></td>
+                    </tr>
+                    <tr>
+                      <td>Speech Whisper worker</td>
+                      <td>—</td>
+                      <td><code>FORGERIE_WHISPER_STT_WORKER</code></td>
+                      <td>Gateway web/API env</td>
+                      <td>Not supported locally</td>
+                      <td>Restart web/API; absolute executable override only; otherwise resolved from <code>PATH</code></td>
+                    </tr>
+                    <tr>
+                      <td>Speech browser Host allowlist</td>
+                      <td>—</td>
+                      <td><code>FORGERIE_SPEECH_ALLOWED_HOSTS</code></td>
+                      <td>Gateway web/API env</td>
+                      <td>Not supported locally</td>
+                      <td>Restart web/API</td>
+                    </tr>
                     <tr>
                       <td>Global config file path</td>
                       <td>—</td>

@@ -90,6 +90,7 @@
             <a href="#one-line">One-line install</a>
             <a href="#pi-package">Install through Pi</a>
             <a href="#manual-run">WSL / manual run</a>
+            <a href="#local-speech-nix">Local speech with Nix</a>
             <a href="#remote-access">Remote access</a>
             <a href="#reverse-proxy-prefix">Reverse proxy prefixes</a>
             <a href="#federated-machines">Federated machines</a>
@@ -177,6 +178,42 @@
               <p>
                 From a Forgerie checkout, <code>forgerie install --dev</code> installs the split development services on supported user-service platforms.
                 <code>forgerie uninstall</code> removes both production and development service files; no uninstall flags are needed.
+              </p>
+            </section>
+
+            <section id="local-speech-nix">
+              <h2>Local speech dictation with Nix</h2>
+              <p>
+                Composer dictation is an optional first-slice local speech setup. The flake currently publishes its worker
+                packages only for <code>x86_64-linux</code>; installer-managed, Docker, and macOS model packaging are not
+                available yet.
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Realize the pinned local speech workers</strong>
+                  <button class="copy-button" data-copy="#speech-nix-build">Copy</button>
+                </div>
+                <pre id="speech-nix-build"><code><span class="comment"># From the Forgerie checkout on x86_64-linux:</span>
+<span class="prompt">$</span> nix build .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker
+
+<span class="comment"># Optional, when the web/API service inherits this profile PATH:</span>
+<span class="prompt">$</span> nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</code></pre>
+              </div>
+              <p>
+                The web/API service must be able to run <code>forgerie-smart-turn-worker</code> and
+                <code>forgerie-whisper-stt-worker</code> from its <code>PATH</code>, or you must set
+                <code>FORGERIE_SMART_TURN_WORKER</code> and <code>FORGERIE_WHISPER_STT_WORKER</code> to absolute executable
+                paths in that service environment. Restart the web/API service after changing worker paths or
+                <code>FORGERIE_SPEECH_ALLOWED_HOSTS</code>.
+              </p>
+              <div class="callout">
+                Missing or unusable speech worker commands degrade speech only. The web UI and session daemon continue to
+                run; the composer microphone reports speech unavailable, or manual-only when Whisper is ready but Smart Turn
+                is not.
+              </div>
+              <p>
+                See the <a href="config#local-speech">configuration reference</a> for PATH resolution, browser Host
+                allowlists, limits, federation boundaries, and privacy notes.
               </p>
             </section>
 
