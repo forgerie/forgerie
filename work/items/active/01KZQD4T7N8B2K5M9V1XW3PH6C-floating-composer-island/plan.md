@@ -1,78 +1,50 @@
 ---
-title: "feat: Floating composer island"
-type: feat
+title: "fix: Align composer working controls"
+type: fix
 status: active
-date: 2026-08-10
+date: 2026-08-13
 origin: work/items/active/01KZQD4T7N8B2K5M9V1XW3PH6C-floating-composer-island/requirements.md
 verify_command: "npm run verify"
 ---
 
-# feat: Floating composer island
+# fix: Align composer working controls
 
 ## Summary
 
-Reshape the existing composer into one inset island with a single control rail, absorb the
-context meter into its top edge, fold the retired status-bar readings into the sheet the
-composer already summons, and delete the status bar. The composer element keeps its identity
-and its CodeMirror instance; what changes is its shape, its rail composition, and where the
-occasional readings live.
+Revise the existing composer rail around truthful idle, stop-only, and queue-capable states. Send and Stop share the primary slot, Queue remains direct only while the server accepts follow-up delivery, and the existing press and popover patterns provide a discoverable, confirmable held-Queue path to Steer.
 
 ---
 
 ## Problem Frame
 
-Resident chrome above the transcript was removed by the content-first mobile chrome work
-(`prototypes/mobile-chrome/README.md`), but the area below it was left as it was: a two-row
-composer plus a permanent status bar. On the folded-portrait posture that area is the direct
-competitor of the only region that matters for reading, and every new composer capability has
-arrived as another band. Full pain framing lives in the origin requirements doc.
+The capability refactor left the real active-work value on a dead host binding while declaring Stop stoppable whenever the runtime was available. The composer therefore renders Send and Stop as separate controls even when the session is idle. The current visible Steer button also gives a secondary action equal weight with the more valuable Queue action.
 
 ---
 
 ## Requirements
 
-- R1. One inset floating island; transcript visible around it.
-- R2. Resting single control line; grows only for draft, attachments, or a mode hint.
-- R3. Less resident vertical space than composer plus status bar, at every posture.
-- R4. No separate status bar at any pane size.
-- R5. Context use stays visible on the island without a control row.
-- R6. At most one control row; it never wraps; controls replace rather than accumulate.
-- R7. Model and thinking are one control reporting both values.
-- R8. Attachments and the summoned session controls share one rail control.
-- R9. Idle offers send; streaming offers queue with steer plus direct stop; compacting offers queue and stop without steer; height unchanged.
-- R10. Every existing capability reachable in one tap, or one tap plus one menu step.
-- R11. Liveness stays in the transcript, not on a permanent row.
-- R12. Tokens, cost, queued count, and the warning control remain available from the island menu.
-- R13. Warning and notification signals stay perceivable, including announcements.
-- R14. Draft editing, completions, prompt history, and draft persistence unchanged.
-- R15. Attachment chips, delivery choice, and errors stay visible and operable.
-- R16. Shell-mode and compaction hints stay visible and do not overlap controls.
-- R17. Archived or disabled sessions still show a disabled input and its reason.
-- R18. One composition at every size; no new viewport breakpoints in 499-979; no device sniffing.
-- R19. Draft, attachments, scroll position, and open menu survive fold, rotate, keyboard.
-- R20. Island stays above the on-screen keyboard; transcript keeps the rest.
-- R21. Touch targets keep at least today's size; no overlap.
-- R22. `npm run verify` passes and all four Fold 8 postures are captured and reviewed.
+- R9. Idle shows Send without Stop. Stoppable work replaces Send with Stop in the same slot. Queue appears beside Stop only while the server accepts follow-up delivery during streaming or compaction. Shell-only and pending-only work show Stop without Queue, and the draft stays intact until submission is available again. Steer is available only during streaming.
+- R10. Touch, mouse, keyboard, and assistive-technology users can reach the same actions. While streaming, Queue includes a subtle secondary-action cue plus tooltip and accessible text for the held-Steer path. During compaction, Queue remains a plain follow-up action without a Steer cue or hold behavior. Short Queue activation queues. Holding Queue while streaming reveals Steer without submitting. Steer requires confirmation, cancellation returns to Queue, and one interaction cannot trigger two actions.
+- R14. Draft editing, completion, prompt history, and session-scoped persistence remain unchanged.
+- R17. Archived or otherwise disabled sessions keep a disabled input and its reason.
+- R18. The control composition responds to its container without new viewport breakpoints inside or near the current 475–932 px Fold 8 posture range.
+- R21. Stop and Queue keep the established touch target size and do not overlap other rail controls.
+- R22. Repository verification passes, and all four Fold 8 posture captures are reviewed.
 
 **Origin actors:** A1 (Forgerie user), A2 (Pi session)
-**Origin flows:** F1 (write and send), F2 (act while the agent works), F3 (reach a retired status reading)
-**Origin acceptance examples:** AE1 (R2, R3), AE2 (R6, R9), AE3 (R9, R10), AE4 (R4, R12), AE5 (R15), AE6 (R16), AE7 (R19, R20), AE8 (R18, R21)
+**Origin flow:** F2 (act while the agent works)
+**Origin acceptance examples:** AE2 (Send/Stop and Queue state transition), AE3 (short Queue versus held Queue disclosure and confirmed Steer)
 
 ---
 
 ## Scope Boundaries
 
-- No response guidance, instruction presets, or model-facing prompt changes.
-- No dictation behavior; the rail must leave room for it, not implement it.
-- No transcript typography, message card, or reading-column changes.
-- No navigation or session-inbox changes beyond the sheet absorbing retired readings.
-- No retirement of width breakpoints outside the composer area (backlog `01KZKS6M89CS8JKQSN32JHXG1D`).
-- No server, session daemon, or protocol changes.
-
-### Deferred to Follow-Up Work
-
-- Sheet swipe-down dismissal and animation polish: inherited from the chrome work's own deferral.
-- A dedicated steer control at wide container widths: revisit after the posture review (see Open Questions).
+- No server, daemon, protocol, queue-ordering, or Stop-semantics changes.
+- No draft, attachment, completion, or CodeMirror ownership changes.
+- No permanent third Steer control.
+- No viewport, user-agent, touch-capability, or device-model branching.
+- No generic press-gesture framework or refactor of the existing session-row hold interaction.
+- No unrelated composer or floating-island cleanup.
 
 ---
 
@@ -80,46 +52,40 @@ arrived as another band. Full pain framing lives in the origin requirements doc.
 
 ### Relevant Code and Patterns
 
-- `src/client/src/components/PromptEditor.ts` — the composer. Owns the persistent CodeMirror `EditorView`, `promptComposerIsResting()`, the `.compact-status` row (model, thinking, identity, archive, summon), attachments, hints, and the send/steer/stop cluster. This is the element that becomes the island.
-- `src/client/src/components/shared.ts` — `promptEditorStyles` (composer footer, resting rules, the two viewport media queries at 640px and 430px), `appStyles` (main column layout, `status-bar, context-usage-meter { flex: 0 0 auto }`, the `main:has(context-usage-meter) prompt-editor { --pi-composer-rule: transparent }` trick), and `controlSheetStyles`.
-- `src/client/src/components/StatusBar.ts` — the bar to retire. Exports `statusBarWarningControlContent()`, consumed only by itself today.
-- `src/client/src/components/ContextUsageMeter.ts` — 2 px rule plus `contextUsageWorthShowing()`; currently a sibling of the composer in the main column.
-- `src/client/src/components/appShell/AppControlSheet.ts` — the summoned sheet: absolute inside `<main>`, scrim dismissal, context bar, main tabs, notification count. The island menu extends this rather than introducing a second overlay type.
-- `src/client/src/components/PiWebApp.ts` — composition root. Renders chat view, context meter, prompt editor, status bar, control sheet; owns `sessionWarningVisibility`, `handleToggleWarnings`, `handleArchiveAndNext`, `handleOpenControlSheet`, and the model/thinking pickers.
-- `src/client/src/appShell/shellLayoutMode.ts` + `appShellController.ts` — content-derived layout constants, `chromeDisclosure()`, `isChromeSummoned`. The island adds no new width axis; internal reveals come from container queries.
-- `src/client/src/sessionStatusStrip.ts` — `sessionActivityIndicator()`, the single derivation of session status text, already consumed by the transcript liveness line.
-- `src/client/src/utils/format.ts` — `formatTokenCount`, `formatCost`, needed by whatever renders the retired readings.
-- Container-query precedents: `SessionInboxPanel.ts`, `WorkspaceAgentsPanel.ts`, `AskUserCard.ts`, and `chatStyles` in `shared.ts`.
-- Test precedents: `src/client/src/components/PromptEditor.summonedChrome.test.ts` (template inspection), `src/client/src/components/PiWebApp.chromeDisclosure.test.ts` (asserts the meter sits above the bottom controls — this assertion changes), `src/client/src/components/appShell/AppControlSheet.test.ts`, `src/client/src/templateInspection.testSupport.ts`.
-- `scripts/capture-postures.mjs` + `scripts/lib/cdp.mjs` — the four-posture capture path using CDP emulated viewports.
+- `src/client/src/composerRail.ts` centralizes the rail state but still models Send becoming Queue and Stop as an independent flag.
+- `src/client/src/components/PromptEditor.ts` renders Queue and Steer together, then renders Stop as a separate sibling. It owns the composer's existing anchored disclosures and their lifecycle.
+- `src/client/src/components/PiWebApp.ts` computes the real active-work condition but sends runtime availability into the Stop capability. Its separate `canStop` binding is no longer consumed.
+- `src/client/src/composerCapabilities.ts` already separates capability existence from whether the action is currently stoppable.
+- `src/server/sessions/piSessionService.ts` applies follow-up queue behavior only while streaming or compacting; shell-only and pending-only work are stoppable but not queue-capable.
+- `src/client/src/rowPress.ts` and `src/client/src/components/SessionInboxPanel.ts` establish a 500 ms hold, 10 px movement tolerance, timer cancellation, and consumed-click suppression.
+- `src/client/src/components/ComposerPopover.ts` establishes the anchored disclosure, outside-press dismissal, Escape handling, placement, and focus-restoration callback.
+- `src/client/src/components/PromptEditor.escape.test.ts` establishes fake-timer testing in this component and verifies that Escape retains direct Stop parity with Pi.
+- `src/client/src/components/PromptEditor.rail.test.ts` is the component-boundary home for rail rendering and interaction assertions.
 
 ### Institutional Learnings
 
-`docs/solutions/` does not exist. The equivalent records are:
-
-- `prototypes/mobile-chrome/README.md` — measured chrome and transcript heights per posture, and the rejected alternatives (hairline bar, scroll-driven chrome, flex-overflow fit detection). Supplies the "before" numbers this plan re-measures against.
-- `work/items/active/01KZKV9P4SJ69Z018FXQ6FVEJZ-content-first-mobile-chrome/plan.md` — landed predecessor. Establishes: delete a band rather than conditionally hide it; one derivation of session status; sheets are modals in behavior; archive moved into the composer specifically so the thread-header band could be deleted.
-- `work/items/active/01KZKXSTMDPYHZQ2FDZJQAP5Y7-composer-live-dictation/plan.md` — the CodeMirror DOM must never be recreated on collapse or expand; this is a correctness constraint for touch, not a performance preference.
-- `AGENTS.md` — acceptance postures, intrinsic design rules, the standing ban on new breakpoints inside 499-979 px, and the requirement to look at captures rather than only take them.
-- `AGENTS.local.md` — rebuild and restart the systemd user units after user-facing changes land on `main`.
+- The CodeMirror host must survive every rail transition. Only the action subtree may change.
+- A successful hold ends with a synthetic click. The hold must consume that click or Queue will also submit.
+- Long-press controls must suppress browser callouts and abandon the hold when pointer movement indicates scrolling.
+- Stop is an emergency action. Queue disclosure state must never disable or hide Stop.
+- A hidden hold action needs a visible cue plus a pre-activation accessible description; expanded state alone does not make Steer discoverable.
+- The current acceptance matrix is 704 × 783, 932 × 553, 475 × 638, and 711 × 374 CSS pixels.
 
 ### External References
 
-None. Local patterns are strong for every part of this work.
+None. The repository contains direct patterns for the state derivation, held interaction, anchored disclosure, accessibility, and tests.
 
 ---
 
 ## Key Technical Decisions
 
-- **The island is the composer's own shape, not a wrapper element**: `PromptEditor` already owns the draft, attachments, hints, and controls. Wrapping it would add a seam that only forwards properties, and would put a second element between the CodeMirror host and the layout. Cost: `PromptEditor` stays large; mitigated by extracting rail composition into a pure module.
-- **The island keeps its own layout slot and is opaque**: it stays `flex: 0 0 auto` in the main column with a gutter around it, rather than floating over the transcript. Overlaying would require scroll padding, obscure the last message, and interact badly with the transcript's anchoring work. Cost: less literally "floating" than the reference screenshot.
-- **The context meter moves inside the island's top edge**: today the shell blanks the composer's border with `--pi-composer-rule` so two hairlines do not stack. Inside the island the meter is the top edge by construction, so that coupling between `appStyles` and the composer border retires.
-- **Retired readings join the existing summoned sheet**: a second overlay type would duplicate scrim, dismissal, and layering behavior that `AppControlSheet` already gets right. The sheet gains sections so it does not read as one undifferentiated list. Cost: the sheet takes on a second job and must not become a junk drawer.
-- **One rail control opens that sheet, including attach**: it satisfies "one row, never wraps" at the narrowest posture and keeps a single mental model for "everything else". Cost: attaching a file becomes one tap plus one menu step.
-- **Model and thinking merge into one capsule that opens a chooser**: they are always read together and each picker stays unchanged. Cost: switching model costs one extra step compared with today.
-- **Identity and archive become container-width reveals**: the rail has a fixed priority order and reveals them when the island's own container affords it, with the sheet as their narrow-width home. This is what keeps R6 true without shrinking labels into codes.
-- **Rail composition is a pure module**: idle versus working is a tagged union derived once from session status, not a set of booleans re-derived inside the render. It is testable on the fast node environment.
-- **No new width axis in the shell**: reveals come from the island's own `container-type: inline-size`, never from viewport media queries, per AGENTS.md.
+- **Model idle, stop-only, and queue-capable cases explicitly:** The first slot is Send or Stop. Queue visibility and Steer disclosure availability are separate fields. Streaming and compaction are queue-capable; shell-only and pending-only work are stop-only.
+- **Derive stoppability once at the chat composition boundary:** Streaming, running shell work, compaction, or pending queued messages make work stoppable when the runtime is available. The Stop capability carries that value; the dead `canStop` binding is removed. Queue capability remains derived from streaming or compaction so the client matches server delivery semantics.
+- **Keep hold interpretation composer-specific:** A small pure module names the Queue press outcomes and uses the established 500 ms threshold and 10 px movement tolerance. It does not turn the session-row contract into a generic gesture framework.
+- **Reuse the composer’s one anchored disclosure layer:** Holding Queue opens a single-action Steer confirmation through the existing popover. Model, thinking, guidance, and Steer disclosures remain mutually exclusive.
+- **Disclose the secondary action before activation:** While `canSteer` is true, Queue carries a subtle secondary-action indicator. Its tooltip and accessible description state that holding Queue reveals Steer. Compaction Queue omits the cue and all Steer disclosure paths.
+- **Support each input path deliberately:** Pointer hold serves touch and mouse. Holding Space or Enter on the focused Queue control follows the same threshold. Right-click or the platform context-menu action opens the same disclosure as a non-timed alternative. Untracked synthetic activation continues to Queue for assistive technology.
+- **Keep submission and emergency control independent:** Queue is disabled during its own in-flight submission, but Stop remains available. Opening or closing Steer never mutates the draft.
 
 ---
 
@@ -127,16 +93,18 @@ None. Local patterns are strong for every part of this work.
 
 ### Resolved During Planning
 
-- How is the island menu organised so attachments and status readings do not feel like one list? — Sections inside the existing sheet: actions first, session readings second, existing navigation last.
-- Is the island opaque or translucent over the transcript? — Opaque, in its own layout slot; see Key Technical Decisions.
-- What does the rail reveal as width grows? — Fixed priority order: menu, model and thinking, primary action, stop always; then session identity; then archive.
-- Where does the before/after height measurement come from? — Re-measured with the existing CDP posture script rather than derived from CSS.
+- **Hold threshold:** Use the established 500 ms threshold and 10 px movement tolerance. A shorter threshold increases accidental disclosure without adding a new user capability.
+- **Steer surface:** Reuse the existing anchored composer popover with one explicit confirmation action.
+- **Keyboard path:** Holding Space or Enter reveals Steer. The context-menu action provides an additional non-timed route.
+- **Invalidation:** Cancel a pending hold and close Steer without restoring stale focus when streaming ends, the session changes, runtime controls disappear, or the component disconnects.
+- **Posture source:** Use the current Fold 8 viewport matrix in `AGENTS.md`, not the older dimensions preserved in the first island plan.
+- **Queue scope:** Keep Queue client-only and show it only during streaming or compaction, matching the server's existing follow-up semantics. Shell-only and pending-only work show Stop without a submission action.
+- **Steer discoverability:** While streaming, add a subtle secondary-action indicator inside Queue plus tooltip and accessible text such as “Queue message; hold for Steer.” During compaction, keep Queue plain because Steer is unavailable.
 
 ### Deferred to Implementation
 
-- A dedicated steer control at wide container widths is follow-up work after the posture review; this implementation keeps steer in the primary action's menu at every width.
-- Whether the sheet needs its own internal scroll once it carries readings as well as navigation: decide when the sections exist.
-- Exact resting height of the island after the gutter is applied: it depends on the final padding, and R3 is verified by measurement, not by prediction.
+- Exact internal names for the press state and rail case fields may follow the clearest types found during implementation.
+- Exact popover and accessible wording may follow the existing composer choice language, provided it communicates the held-Steer path before activation and keeps the confirmation action named “Steer current response.”
 
 ---
 
@@ -145,331 +113,181 @@ None. Local patterns are strong for every part of this work.
 > *This illustrates the intended approach and is directional guidance for review, not implementation specification. The implementing agent should treat it as context, not code to reproduce.*
 
 ```mermaid
-flowchart TB
-  Status[session status] --> Rail["composerRail: idle | working"]
-  Rail --> Primary[primary action: send or queue]
-  Rail --> Steer[steer offered from the primary action]
-  Rail --> Stop[stop, direct]
-  Width[island container width] --> Reveal[reveal order: identity then archive]
-  Editor[persistent CodeMirror view] --> Island[island surface]
-  Meter[context meter] --> Island
-  Island --> Menu[one menu control]
-  Menu --> Sheet[AppControlSheet: actions / session readings / navigation]
-  StatusBarOld[status-bar element] -.deleted.-> Sheet
+stateDiagram-v2
+  [*] --> Idle
+  Idle: Send
+  Idle --> StopOnly: shell-only or pending-only work starts
+  Idle --> QueueCapable: streaming or compaction starts
+  StopOnly: Stop
+  StopOnly --> Idle: work ends
+  StopOnly --> QueueCapable: follow-up delivery becomes available
+  QueueCapable: Stop + Queue
+  QueueCapable --> StopOnly: follow-up delivery ends while work remains
+  QueueCapable --> Idle: work ends
+  QueueCapable --> HoldingQueue: Queue press remains within tolerance
+  HoldingQueue --> QueueCapable: release before threshold / Queue once
+  HoldingQueue --> SteerChoice: threshold reached during streaming / no Queue
+  HoldingQueue --> QueueCapable: move, cancel, or streaming ends
+  SteerChoice --> QueueCapable: cancel / no submission
+  SteerChoice --> QueueCapable: confirm / Steer once
 ```
 
-Island composition, at rest and in hand:
-
-```
-[ context meter — the island's top edge                         ]
-[ draft text (CodeMirror, never recreated)                      ]
-[ menu | model · thinking | (identity) | (archive) | primary | stop ]
-```
+The persistent draft remains outside this state machine. Only the action slot, Queue control, and temporary Steer disclosure change.
 
 ---
 
 ## Implementation Units
 
-### U1. Rail composition as a pure module
+### U9. Make stoppable work the rail’s source of truth
 
-**Goal:** One derivation of what the rail offers, from session status, expressed as a tagged union rather than booleans re-read inside the render.
+**Goal:** Fix the lost active-work state and derive one explicit rail contract for Send, Stop, Queue, and Steer availability.
 
-**Requirements:** R6, R9
-
-**Dependencies:** None
-
-**Files:**
-- Create: `src/client/src/composerRail.ts`
-- Test: `src/client/src/composerRail.test.ts`
-
-**Approach:**
-- Model the rail as a tagged union with an idle case and a working case, derived from the inputs the composer already receives: streaming, compacting, sending, stoppable, and disabled.
-- Expose the primary action (send or queue), whether steer is available, and whether stop is live, so the render reads named cases instead of recomputing `canSteer || isCompacting`.
-- Keep it free of Lit and DOM so it runs on the default node environment.
-- Follow the flat domain-module convention used by `src/client/src/chatFollowMode.ts` and `src/client/src/sessionStatusStrip.ts`.
-
-**Patterns to follow:**
-- `src/client/src/chatFollowMode.ts` for a tagged union plus pure transition helpers.
-- `promptComposerIsResting()` in `src/client/src/components/PromptEditor.ts` for an exported pure predicate with a small input object.
-
-**Test scenarios:**
-- Happy path: idle session with a draft yields the send primary action, with steer unavailable and stop not live.
-- Happy path: streaming session yields the queue primary action with steer available and stop live.
-- Edge case: compacting session yields queue without steer, because steering has nothing to steer.
-- Edge case: sending in flight keeps the primary action present but not invocable.
-- Edge case: archived or disabled session yields no invocable action.
-- Edge case: stoppable without streaming (queued work only) still offers stop.
-
-**Verification:**
-- The composer render can name its state without arithmetic on booleans, and the module's cases cover every combination the session status can produce.
-
----
-
-### U2. Island surface, context edge, and container queries
-
-**Goal:** The composer renders as one inset island with a gutter around it, absorbs the context meter as its top edge, and replaces its viewport media queries with container queries.
-
-**Requirements:** R1, R2, R5, R18, R20, R21
+**Requirements:** R9, R14, R17; F2; AE2
 
 **Dependencies:** None
 
 **Files:**
-- Modify: `src/client/src/components/shared.ts` (`promptEditorStyles`, `appStyles`)
-- Modify: `src/client/src/components/PromptEditor.ts`
+- Modify: `src/client/src/composerRail.ts`
 - Modify: `src/client/src/components/PiWebApp.ts`
-- Modify: `src/client/src/components/ContextUsageMeter.ts`
-- Test: `src/client/src/components/PromptEditor.island.test.ts`
-- Test: `src/client/src/components/PiWebApp.chromeDisclosure.test.ts`
+- Modify: `src/client/src/components/PromptEditor.ts`
+- Modify: `src/client/src/components/promptEditorTestSupport.ts`
+- Test: `src/client/src/composerRail.test.ts`
+- Test: `src/client/src/components/PromptEditor.rail.test.ts`
+- Test: `src/client/src/components/PiWebApp.composerControls.test.ts`
 
 **Approach:**
-- Give the composer host a gutter and draw the island as an inset surface with a radius, a border, and the sheet's shadow language, keeping it in the main column's flex slot rather than overlaying the transcript.
-- Declare `container-type: inline-size` on the island so every internal decision reads its own width.
-- Replace the `640px` and `430px` viewport media queries in `promptEditorStyles` with container queries expressed against the island.
-- Render the context meter inside the island's top edge and stop rendering it as a sibling in `PiWebApp`; retire the `main:has(context-usage-meter) prompt-editor` rule and the `--pi-composer-rule` blanking it depends on.
-- Keep the persistent CodeMirror host and the resting behavior exactly as they are: the island changes the box, not the editor lifecycle.
-- Preserve the safe-area inset handling so the island clears the home indicator and the on-screen keyboard.
+- Replace the old Send-or-Queue primary-action model with explicit idle, stop-only, and queue-capable rail cases.
+- In the idle case, render Send and no Stop or Queue. In every stoppable case, put Stop in Send’s slot. Render Queue beside Stop only while streaming or compacting.
+- Keep Steer availability as metadata for U10. It is true only while streaming and never renders a direct Steer button.
+- Let Enter submit normally while idle and queue a follow-up while queue-capable. During shell-only or pending-only work, return the existing `rejected` submit outcome from `PromptEditor` before `onSend` runs. Do not use `submissionDisabled` or disable the draft: text, attachments, delivery choice, completion, and editing remain active until delivery becomes available again.
+- Feed the Stop capability the actual active-work condition from the selected session. Remove both dead `canStop` bindings and stale comments.
+- Keep Stop invocable when Queue submission is busy. Disabled or archived sessions retain visible but non-invocable controls only when stoppable work exists.
+
+**Execution note:** Start with failing pure rail tests and a component-boundary reproduction of idle Send plus resident Stop.
 
 **Patterns to follow:**
-- `controlSheetStyles` in `src/client/src/components/shared.ts` for radius, border, and shadow language.
-- `SessionInboxPanel.ts` and `WorkspaceAgentsPanel.ts` for `container-type: inline-size` plus `@container` rules.
-- `promptComposerIsResting()` for the untouched resting contract.
+- `src/client/src/composerRail.ts` for pure state conversion.
+- `src/client/src/components/promptEditorTestSupport.ts` for one shared chat-capability fixture.
+- `ComposerDraftSubmitOutcome` in `src/client/src/components/ComposerDraft.ts` for preserving a snapshot when the host returns `rejected`.
+- Existing selected-chat composition tests in `src/client/src/components/PiWebApp.chatOpening.test.ts` for mounting real app state without replacing the component under test.
 
 **Test scenarios:**
-- Happy path: with a context reading above the visibility threshold, the meter renders inside the composer and not as a sibling of it.
-- Happy path: below the threshold, no meter renders and the island still has a top edge.
-- Edge case: an empty unfocused draft keeps the resting single-line composition.
-- Edge case: focus or a non-empty draft expands the island without recreating the editor host.
-- Integration: the shell no longer renders a `context-usage-meter` element between the transcript and the composer.
-- Integration: no `@media (max-width: …)` rule remains in the composer's styles.
+- Covers AE2. Idle runtime: Send exists; Stop and Queue are absent.
+- Covers AE2. Streaming starts: Send is replaced by Stop in the same primary group; Queue appears; no direct Steer control appears.
+- Covers AE2. Work ends: Stop and Queue leave; Send returns; the persistent draft element remains the same node.
+- Happy path: compaction yields Stop plus Queue without Steer availability.
+- Happy path: running shell-only and pending-only work each yield Stop without Send, Queue, or Steer; Enter returns `rejected`, does not call `onSend`, and preserves text, attachments, delivery choice, and prompt history.
+- Preservation edge case: stop-only state still permits draft edits, completion, attachment add or remove, and delivery-choice changes.
+- Edge case: streaming with a Queue submission in flight disables Queue but leaves Stop invocable.
+- Edge case: archived or disabled stoppable session invokes neither Stop nor Queue.
+- Integration: an idle selected session maps to `stoppable: false`; streaming, shell, compaction, and pending-message states map to `stoppable: true`.
+- Regression: the removed `canStop` property binding is not needed to update the rail.
 
 **Verification:**
-- At every posture the island reads as one surface with a gutter, and the only hairline between transcript and controls is the island's own edge.
+- One named state controls all rail rendering. Idle renders Send, queue-capable work renders Stop plus Queue, and other stoppable work renders Stop without exposing an unsupported submission path.
 
 ---
 
-### U3. State-swapped primary action, steer, and stop
+### U10. Reveal confirmed Steer from a held Queue action
 
-**Goal:** The rail offers send when idle and queue with steer plus a direct stop while working, using U1, without changing island height.
+**Goal:** Add the secondary held-Queue interaction without accidental Queue submission, inaccessible paths, or competing composer layers.
 
-**Requirements:** R6, R9, R10
+**Requirements:** R9, R10, R14; F2; AE3
 
-**Dependencies:** U1, U2
+**Dependencies:** U9
 
 **Files:**
+- Create: `src/client/src/composerQueuePress.ts`
+- Test: `src/client/src/composerQueuePress.test.ts`
 - Modify: `src/client/src/components/PromptEditor.ts`
 - Modify: `src/client/src/components/shared.ts`
 - Test: `src/client/src/components/PromptEditor.rail.test.ts`
+- Test: `src/client/src/components/PromptEditor.runtimeControls.test.ts`
 
 **Approach:**
-- Drive the action cluster from the rail state instead of the current inline conditionals, so send and queue occupy the same slot rather than sitting side by side.
-- Offer steer from the primary action rather than as a separate always-present control, keeping the same handler and streaming behavior it has today.
-- Keep stop a direct control whenever work can be stopped.
-- Keep the accessible names explicit for each state so assistive technology reports queue, steer, and stop distinctly.
+- Put threshold, movement tolerance, and press outcomes in a pure composer-specific module. Keep timers, pointer capture, consumed-click state, and disclosure ownership inside `PromptEditor`.
+- Only when `rail.canSteer` is true, arm the pointer or keyboard hold, render the cue and held-Steer description, and route context-menu activation to Steer. During compaction, Queue remains a plain follow-up button for any press duration.
+- Arm pointer hold only for primary-button presses. Track origin and abandon the hold when movement exceeds tolerance or cancellation occurs. A short activation follows the existing Queue submission path.
+- When the hold threshold fires, reveal Steer, consume the release click, and release pointer capture so the disclosure can receive the next action.
+- On the first non-repeat Space or Enter keydown, prevent the native button action and arm one hold timer. Ignore `event.repeat`. Resolve the owned press on keyup, blur, cancellation, or state invalidation, and suppress any following native click. Preserve untracked click activation for assistive technology.
+- Prevent the browser context menu and touch callout on the streaming Queue control. Before right-click or a keyboard context-menu action opens Steer, cancel any pending hold and suppression state so the disclosure opens exactly once.
+- Render the secondary-action indicator inside the existing streaming Queue target. Give it pre-activation tooltip and accessible text that explain the held-Steer path without reducing its touch target.
+- Anchor the disclosure to Queue. Focus the confirmation action when it opens. Escape or outside activation closes it without submission and restores Queue focus when Queue is still valid. Confirmation submits Steer once, closes the layer, and returns focus to the draft.
+- Close other composer disclosures before Steer opens. Close and clean up Steer when streaming ends, the session changes, runtime controls disappear, or the component disconnects.
+- Do not disable Stop while a hold is pending or the Steer disclosure is open.
+
+**Execution note:** Implement the press outcomes and gesture arbitration test-first. Time, movement, and synthetic-click ordering are the regression surface.
 
 **Patterns to follow:**
-- The existing send, steer, and stop handlers and their `title` and `aria-label` conventions in `PromptEditor.ts`.
-- `src/client/src/components/PromptEditor.summonedChrome.test.ts` for template-level assertions on rendered controls.
+- `src/client/src/rowPress.ts` for pure threshold and movement interpretation.
+- `src/client/src/components/SessionInboxPanel.ts` for timer cleanup, pointer capture, and consumed-click suppression.
+- `src/client/src/components/ComposerPopover.ts` for placement, outside dismissal, Escape, and focus restoration.
+- `src/client/src/components/PromptEditor.escape.test.ts` for fake-timer setup and cleanup.
 
 **Test scenarios:**
-- Happy path: idle session renders one primary action that sends.
-- Happy path: streaming session renders the queue action and invoking steer from it calls the steer path with the same behavior as today.
-- Edge case: compacting session queues and does not offer steer.
-- Edge case: stop is disabled when nothing is running and enabled when it is.
-- Edge case: a disabled or archived session offers no invocable action.
-- Integration: switching from idle to working does not change the number of rendered control rows.
+- Covers AE3. Releasing Queue before 500 ms submits one follow-up and never opens Steer.
+- Covers AE3. Holding Queue through 500 ms opens Steer, submits nothing on release, and suppresses the following synthetic click.
+- Covers AE3. Confirming the disclosed action submits one Steer message and not a follow-up.
+- Covers AE3. Escape and outside activation close Steer without submission or draft mutation.
+- Pointer edge case: movement beyond 10 px cancels the hold and does not disclose Steer.
+- Pointer edge case: pointer cancellation and component disconnection clear timers and pending suppression state.
+- Mouse edge case: secondary-button pointerdown does not arm a hold; context-menu activation cancels pending press state, opens Steer once, and never queues.
+- Keyboard happy path: short Space or Enter queues once; holding it reveals Steer and key release does not queue.
+- Keyboard edge case: repeated Space or Enter keydowns arm one timer, open at most one disclosure, and cannot queue before or after held disclosure.
+- Accessibility path: before activation, streaming Queue's accessible description identifies the held-Steer path; untracked button activation queues, context-menu activation reveals Steer, and Queue reports its expanded state and controlled disclosure.
+- Compaction path: Queue has no Steer cue or description; long pointer or key activation and context-menu activation do not disclose Steer, while ordinary activation queues exactly once.
+- State transition: streaming ending during a pending hold or open Steer disclosure closes it without stale focus restoration.
+- Layer ordering: opening Steer closes model, thinking, or guidance disclosure; opening another composer disclosure closes Steer.
+- Emergency path: Stop remains invocable while the Queue hold is pending and while Steer is open.
+- Disabled path: a disabled Queue cannot arm a hold, open Steer, or submit.
 
 **Verification:**
-- Sending, queueing, steering, and stopping all behave as they do today, with one control fewer on the rail while idle.
+- Each input path produces exactly one observable result: Queue, reveal, confirmed Steer, or cancellation. No path can produce two.
 
 ---
 
-### U4. Merged model and thinking control
+### U11. Verify posture behavior and record the fix
 
-**Goal:** One capsule reports the current model and thinking level and routes to the existing pickers.
+**Goal:** Prove the revised controls across the acceptance matrix, record the user-visible fix, and update the running local instance after landing.
 
-**Requirements:** R7, R10
+**Requirements:** R18, R21, R22; AE2, AE3
 
-**Dependencies:** U2
-
-**Files:**
-- Modify: `src/client/src/components/PromptEditor.ts`
-- Modify: `src/client/src/components/shared.ts`
-- Modify: `src/client/src/components/PiWebApp.ts`
-- Test: `src/client/src/components/PromptEditor.modelThinking.test.ts`
-
-**Approach:**
-- Replace the separate model button and thinking gauge with one capsule that shows both current values and truncates the model name rather than wrapping.
-- Opening the capsule presents the two destinations and routes to the existing model and thinking pickers unchanged.
-- Keep the thinking gauge glyph as the capsule's secondary mark so the current level stays readable at a glance.
-- Keep the existing callbacks so `PiWebApp` remains the owner of both pickers.
-
-**Patterns to follow:**
-- `renderThinkingGauge()` and `thinkingLevelLabel()` usage in `PromptEditor.ts`.
-- `command-picker` invocation from `PiWebApp.ts` for both pickers.
-
-**Test scenarios:**
-- Happy path: the capsule reports the session's model and thinking level.
-- Happy path: choosing the model destination opens the model picker; choosing thinking opens the thinking picker.
-- Edge case: a session with no model reports the absent state without breaking the rail.
-- Edge case: a very long model identifier truncates instead of wrapping the rail.
-- Integration: picking a model or thinking level still updates the session through the existing paths.
-
-**Verification:**
-- Both pickers remain reachable and unchanged, and the rail spends one slot where it used to spend two.
-
----
-
-### U5. Island menu: attachments, retired readings, warnings
-
-**Goal:** One rail control opens the summoned sheet, and that sheet gains an actions section and a session-readings section.
-
-**Requirements:** R8, R10, R12, R13, R15
-
-**Dependencies:** U2
+**Dependencies:** U9, U10
 
 **Files:**
-- Modify: `src/client/src/components/appShell/AppControlSheet.ts`
-- Modify: `src/client/src/components/shared.ts` (`controlSheetStyles`)
-- Modify: `src/client/src/components/PromptEditor.ts`
-- Modify: `src/client/src/components/PiWebApp.ts`
-- Test: `src/client/src/components/appShell/AppControlSheet.test.ts`
-- Test: `src/client/src/components/PromptEditor.menu.test.ts`
+- Create: `.changeset/swap-send-stop.md`
 
 **Approach:**
-- Collapse today's separate attach button and summon button into one rail control that opens the sheet.
-- Give the sheet three labelled sections so it does not read as one list: actions (attach files, archive and next when it is not on the rail), session readings (input and output tokens, cost, queued count, and the warning control), then the existing navigation content.
-- Move the warning toggle's rendering into the sheet while keeping `PiWebApp` as the owner of warning visibility and the transcript as the place the warnings themselves appear.
-- Reuse `formatTokenCount` and `formatCost` rather than re-deriving any reading, and keep attachment chips, delivery choice, and errors inside the island itself.
-- Register the sheet with the modal layer registry if it is not already, so global shortcuts stay suppressed while it is open.
+- Add a patch changeset written for users. Do not edit `CHANGELOG.md` directly.
+- Capture and inspect all four Fold 8 CSS viewports in idle, stop-only, and queue-capable states. Also inspect the Steer disclosure at the narrowest and shortest postures.
+- Verify that Stop occupies Send’s position, the Queue cue remains legible inside a full touch target, the rail never wraps, and the disclosure stays reachable without covering Stop.
+- Exercise fold, unfold, rotation, and keyboard transitions with a draft present and Steer open. The draft, transcript position, and composer ownership must survive.
+- Run the repository verification gate. Because this is user-facing work on `main`, rebuild and restart the local user services after confirming that no session is mid-run, then smoke-test the local HTTP endpoint and running UI.
 
 **Patterns to follow:**
-- `AppControlSheet`'s existing scrim, dismissal, and section composition.
-- `statusBarWarningControlContent()` from `src/client/src/components/StatusBar.ts` — move it with the behavior rather than rewriting it.
-- `src/client/src/components/modalLayerRegistry.ts` for modality registration.
+- `AGENTS.md` for the current posture matrix and required image review.
+- `AGENTS.local.md` for build, restart, and local smoke-test requirements.
+- `.agents/skills/changeset-changelog/SKILL.md` for a patch changeset and user-facing release note.
 
 **Test scenarios:**
-- Happy path: opening the menu from the rail opens the sheet.
-- Happy path: the sheet reports input tokens, output tokens, cost, and queued count for the current session.
-- Happy path: the warning control in the sheet toggles warning visibility through the same handler the status bar used.
-- Edge case: a session with no warnings does not render a warning control.
-- Edge case: a session with no queued messages omits the queued reading rather than showing zero.
-- Edge case: choosing attach from the sheet opens the file picker and dismisses the sheet.
-- Integration: attachment chips, delivery choice, and errors still render inside the island, not in the sheet.
+- Covers AE2. Each posture shows only Send while idle, Stop plus Queue while queue-capable, and Stop only during other stoppable work, with no overlap or third resident action.
+- Covers AE3. The Steer confirmation remains visible and operable at 475 × 638 and 711 × 374.
+- Transition: fold, unfold, rotate, and open or close the keyboard while the draft and Steer disclosure exist; state remains coherent and no unrelated layout paradigm appears.
+- Test expectation: visual and operational verification complements the automated behavior tests in U9 and U10.
 
 **Verification:**
-- Every reading and action the status bar carried is reachable in one tap plus one menu step, and the sheet reads as three sections rather than one list.
-
----
-
-### U6. Delete the status bar
-
-**Goal:** The status-bar element stops existing.
-
-**Requirements:** R4, R11, R13
-
-**Dependencies:** U5
-
-**Files:**
-- Delete: `src/client/src/components/StatusBar.ts`
-- Delete: `src/client/src/components/StatusBar.test.ts`
-- Modify: `src/client/src/components/PiWebApp.ts`
-- Modify: `src/client/src/components/shared.ts` (`appStyles`, `statusBarStyles`)
-- Test: `src/client/src/components/PiWebApp.chromeDisclosure.test.ts`
-- Test: `src/client/src/components/PiWebApp.warningVisibility.test.ts`
-
-**Approach:**
-- Remove the element, its import, its render method, and the keyboard-open guard that only existed to hide it.
-- Remove `status-bar` from the shell's layout selectors and delete `statusBarStyles` once nothing references it, so knip stays clean.
-- Preserve `statusBarWarningControlContent()` in its new home from U5 rather than deleting it with the component.
-- Confirm the transcript's liveness line remains the only continuous status signal, using the existing single derivation.
-
-**Patterns to follow:**
-- The predecessor work's rule: delete a band rather than conditionally hide it.
-
-**Test scenarios:**
-- Integration: the shell renders no `status-bar` element at any pane width.
-- Integration: session liveness still renders inside the transcript while work is running.
-- Integration: warning and notification announcements still reach the live regions after the bar is gone.
-- Edge case: opening the on-screen keyboard no longer needs a special case to hide a bottom band.
-- Edge case: warning visibility toggling still works from its new home, replacing the status-bar-based assertions.
-
-**Verification:**
-- `npm run verify` passes with no unused exports or dead styles, and nothing below the transcript remains except the island.
-
----
-
-### U7. Container-width reveals for identity and archive
-
-**Goal:** The rail reveals session identity and archive as its own container affords them, and never wraps at the narrowest posture.
-
-**Requirements:** R6, R10, R18, R21
-
-**Dependencies:** U3, U4, U5
-
-**Files:**
-- Modify: `src/client/src/components/shared.ts` (`promptEditorStyles`)
-- Modify: `src/client/src/components/PromptEditor.ts`
-- Test: `src/client/src/components/PromptEditor.reveal.test.ts`
-
-**Approach:**
-- Define one priority order for the rail: menu, model and thinking, primary action, and stop are always present; session identity reveals next; archive and next reveals last.
-- Express the reveals as container queries against the island, with no viewport media query and no device check.
-- Keep archive reachable from the sheet whenever it is not on the rail, so the triage loop never disappears.
-- Keep the rail a single non-wrapping row in every case.
-
-**Patterns to follow:**
-- `@container` usage in `SessionInboxPanel.ts` and `WorkspaceAgentsPanel.ts`.
-- The existing archive conditions in `PromptEditor.ts` so a dead control is never shown.
-
-**Test scenarios:**
-- Happy path: archive is invocable from the rail when revealed, and from the sheet when it is not.
-- Edge case: a session that cannot be archived shows no archive control in either place.
-- Edge case: a long session label truncates rather than pushing controls out of the row.
-- Integration: the composer's styles contain container queries and no viewport media queries.
-
-**Verification:**
-- At 499 px the rail holds its core controls on one row; at wider container widths identity and then archive appear without any layout paradigm change.
-
----
-
-### U8. Posture measurement, captures, and changeset
-
-**Goal:** Prove the space claim and the posture behavior, and record the user-visible change.
-
-**Requirements:** R3, R19, R20, R22
-
-**Dependencies:** U2, U3, U4, U5, U6, U7
-
-**Files:**
-- Create: `.changeset/floating-composer-island.md`
-- Modify: `prototypes/mobile-chrome/README.md`
-
-**Approach:**
-- Measure resident height below the transcript before and after, per posture, with the existing CDP posture script rather than deriving numbers from CSS.
-- Capture all four postures and read the images, judging overlap, wrapping, truncation, and the gutter.
-- Exercise the transitions by hand on the device: fold, unfold, rotate, and keyboard open and close, with a draft and a pending attachment in place and the menu open.
-- Record the measured before and after numbers beside the predecessor's table so the two chrome reductions read as one story.
-
-**Patterns to follow:**
-- `scripts/capture-postures.mjs` and the CDP emulated-viewport rule from AGENTS.md.
-- The measured-height table in `prototypes/mobile-chrome/README.md`.
-
-**Test scenarios:**
-- Test expectation: none — this unit is measurement, capture review, and documentation. The behavior it checks is covered by U1 through U7 unit tests plus manual device acceptance.
-
-**Verification:**
-- Each posture shows a smaller resident area than before, the four captures are reviewed rather than only taken, and the recorded transitions preserve draft, attachments, scroll position, and menu state.
+- `npm run verify` passes. All required captures are read and accepted. The rebuilt local instance serves the corrected interaction.
 
 ---
 
 ## System-Wide Impact
 
-- **Interaction graph:** `PiWebApp` keeps ownership of warnings, archive, pickers, and sheet visibility; the island fires callbacks upward. The chat view keeps its own warning toggle and liveness line.
-- **Error propagation:** attachment capture errors keep surfacing inside the island; no error path moves into the sheet.
-- **State lifecycle risks:** the persistent CodeMirror view must survive every island state change; recreating it would lose draft selection and break touch gestures.
-- **API surface parity:** none. This work is client-only and changes no wire contract.
-- **Integration coverage:** the shell's render order changes when the meter moves inside the island and the status bar disappears; the existing chrome-disclosure test asserts the old order and must be updated deliberately rather than deleted.
-- **Unchanged invariants:** draft persistence keys, prompt history, autocomplete behavior, attachment delivery preference storage, the model and thinking pickers, `sessionActivityIndicator()` as the single status derivation, and `shellLayoutMode` thresholds all stay as they are.
+- **Interaction graph:** Selected session status flows through `PiWebApp` into the Stop capability, while streaming and compaction continue to define queue-capable delivery. The pure rail state carries both facts into `PromptEditor`; Queue and Steer continue through the existing draft submission callback.
+- **Error propagation:** Submission failures keep their existing controller path. The hold and disclosure add no new remote failure mode.
+- **State lifecycle risks:** Timers, pointer capture, synthetic-click suppression, focus, and the disclosure must reset on session and runtime transitions. The draft owner must never disconnect.
+- **API surface parity:** Wire payloads and streaming behavior values remain unchanged. Only the browser interaction that selects follow-up or Steer changes.
+- **Integration coverage:** Pure rail tests cannot prove the host capability mapping. A real `PiWebApp` component test must cover idle and active selected-session states.
+- **Unchanged invariants:** Stop restores queued text according to its current contract. Queue ordering, draft persistence, attachments, completions, model choice, guidance, and Escape-to-stop behavior stay unchanged.
 
 ---
 
@@ -477,27 +295,33 @@ Island composition, at rest and in hand:
 
 | Risk | Mitigation |
 |------|------------|
-| Sibling worktrees touch the same composer files | Rebase against `main` immediately before editing `PromptEditor.ts` and `shared.ts`; land units in small commits |
-| The island rebuilds the CodeMirror host on state change | Change only the surrounding box and visibility; assert the editor host survives expansion in U2's tests |
-| The sheet becomes a junk drawer | Three named sections, with the ordering fixed in U5 and reviewed in the posture captures |
-| Attach costs one extra step | Accepted; revisit only if the posture review shows it hurting a common flow |
-| Rail wraps at 499 px once identity or archive appear | Reveals are container-driven and tested; U7 verification checks the narrowest posture explicitly |
-| Space claim asserted rather than proven | U8 measures before and after per posture with the existing CDP script |
+| A held Queue also fires its release click and queues | Use the proven consumed-click pattern and test timer-to-release ordering |
+| Custom keyboard handling breaks native button or screen-reader activation | Own only tracked Space/Enter presses; keep ordinary click activation and context-menu disclosure |
+| Stop disappears because stoppability is confused with runtime availability again | Derive the condition once at the composition boundary and cover it through a real app component test |
+| The disclosure remains open after streaming ends or session selection changes | Invalidate it from lifecycle updates and component cleanup |
+| Stop plus Queue crowds the folded rail | Keep Steer non-resident, keep its cue inside Queue, and review idle, stop-only, queue-capable, and disclosed captures at 475 px and 711 px |
+| Another composer popover competes with Steer | Preserve the one-layer invariant and test cross-disclosure replacement |
+| User-facing changes run from stale built output | Follow the local rebuild and restart rule after landing on `main` |
 
 ---
 
 ## Documentation / Operational Notes
 
-- Add a changeset describing the island and the retired status bar as one user-visible change.
-- Record measured before and after heights beside the predecessor table in `prototypes/mobile-chrome/README.md`.
-- After landing on `main`, follow `AGENTS.local.md`: `npm run build`, then restart the `forgerie-sessiond` and `forgerie-web` user units, checking first that no session is mid-run.
+- Add a patch changeset for the corrected Send, Stop, Queue, and Steer interaction.
+- Do not edit `CHANGELOG.md`; release tooling consumes the changeset.
+- The origin requirements now use the current Fold 8 dimensions from `AGENTS.md`.
+- After landing on `main`, rebuild and restart `forgerie-sessiond.service` and `forgerie-web.service` only when no session is mid-run. Confirm the local endpoint and inspect the running UI.
 
 ---
 
 ## Sources & References
 
 - **Origin document:** `work/items/active/01KZQD4T7N8B2K5M9V1XW3PH6C-floating-composer-island/requirements.md`
-- Design record: `work/items/active/01KZQD4T7N8B2K5M9V1XW3PH6C-floating-composer-island/island-states.png`
-- Predecessor plan: `work/items/active/01KZKV9P4SJ69Z018FXQ6FVEJZ-content-first-mobile-chrome/plan.md`
-- Measured baselines: `prototypes/mobile-chrome/README.md`
-- Sibling constraint: `work/items/active/01KZKXSTMDPYHZQ2FDZJQAP5Y7-composer-live-dictation/plan.md`
+- Rail state: `src/client/src/composerRail.ts`
+- Composer surface: `src/client/src/components/PromptEditor.ts`
+- Chat composition root: `src/client/src/components/PiWebApp.ts`
+- Hold precedent: `src/client/src/rowPress.ts`
+- Hold integration: `src/client/src/components/SessionInboxPanel.ts`
+- Anchored disclosure: `src/client/src/components/ComposerPopover.ts`
+- Testing guidance: `.agents/skills/testing-guide/SKILL.md`
+- Release-note guidance: `.agents/skills/changeset-changelog/SKILL.md`

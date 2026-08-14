@@ -18,7 +18,7 @@ when the draft needs room, and swaps its controls by session state instead of ad
 The area below the transcript has grown by accumulation. A focused composer already spends two
 stacked rows on the draft and its controls, a separate status bar sits under it, and each new
 capability arrives as another band. On the acceptance device's folded portrait posture
-(499 × 789 CSS px) this area is the direct competitor of the only region that matters for
+(475 × 638 CSS px) this area is the direct competitor of the only region that matters for
 reading.
 
 The bottom status bar is the clearest symptom. It reports token counts, cost, queued messages,
@@ -45,8 +45,11 @@ current stacking pattern cannot absorb one more control without feeling crowded.
 flowchart TB
     Rest[At rest: one control line] -->|focus or type| Draft[Draft in hand: text plus one control rail]
     Draft -->|attach or shell mode| Extend[Island extends downward for chips and hints]
-    Draft -->|send| Working[Working: queue with steer, plus stop]
-    Working -->|work ends| Draft
+    Draft -->|stream or compact| Queueable[Queue-capable work: stop plus queue]
+    Draft -->|shell-only or pending-only work| StopOnly[Other stoppable work: stop only]
+    Queueable -->|queue delivery ends; work continues| StopOnly
+    Queueable -->|work ends| Draft
+    StopOnly -->|work ends| Draft
     Draft -->|clear and blur| Rest
     Rest -->|open the island menu| Secondary[Attachments and summoned session controls]
 ```
@@ -59,10 +62,10 @@ flowchart TB
   - **Covered by:** R1-R3, R6, R9, R14
 
 - F2. Act while the agent works
-  - **Trigger:** A2 starts streaming or compacting.
+  - **Trigger:** A2 starts work that can be stopped.
   - **Actors:** A1, A2
-  - **Steps:** The rail swaps send for a queue action that also offers steer, and shows a direct stop. Island height does not change.
-  - **Outcome:** A1 can queue, steer, or stop without the island growing.
+  - **Steps:** Send becomes Stop in place. Queue appears beside it only while the server accepts follow-up delivery during streaming or compaction. A short Queue press submits a follow-up. During streaming, holding Queue reveals Steer without submitting it; A1 confirms Steer separately or cancels back to Queue.
+  - **Outcome:** A1 can always stop stoppable work, can queue directly when follow-up delivery is supported, and can reach the lower-priority Steer action without a third resident control or a taller island.
   - **Covered by:** R6, R9, R10
 
 - F3. Reach a retired status reading
@@ -89,8 +92,8 @@ flowchart TB
 - R6. Control rows never accumulate. The island exposes at most one row of controls, that row never wraps, and new or state-specific controls replace or collapse existing ones rather than adding a row.
 - R7. Model and thinking level are one control that reports both current values and opens the existing pickers.
 - R8. Attachment actions and the summoned session controls are reachable from a single control on the rail.
-- R9. While the session is idle the rail offers send. While the session is streaming the rail offers a queue action that also offers steer, plus a direct stop. While the session is compacting the rail offers queue and stop without steer, matching today's behavior. Island height is identical in every state.
-- R10. Every capability the composer area offers today remains reachable in at most one tap plus one menu step: attach, attachment delivery choice, attachment removal, send, queue, steer, stop, model selection, thinking level, session identity, archive and next, and the summoned session controls.
+- R9. While the session is idle, the rail offers Send and does not show Stop. While work can be stopped, Send becomes Stop in the same slot. Queue appears beside Stop only while the server accepts follow-up delivery during streaming or compaction. Shell-only and pending-only work show Stop without Queue, and the draft remains intact until submission is available again. Steer is available only while a response is streaming. Island height is identical in every state.
+- R10. Every current composer capability remains reachable with touch, mouse, and keyboard. While streaming, Queue includes a subtle secondary-action cue plus tooltip and accessible text that explain that holding it reveals Steer. During compaction, Queue remains a plain follow-up action without a Steer cue or hold behavior. A short Queue activation submits a follow-up. Holding Queue while streaming reveals Steer without submitting it. Steer requires separate confirmation, cancellation returns to Queue, and one interaction cannot both queue and reveal Steer.
 
 **Retired status bar content**
 
@@ -107,7 +110,7 @@ flowchart TB
 
 **Device and layout behavior**
 
-- R18. The island uses one composition at every size, sized by the space it is given. No new viewport breakpoints are introduced inside or near the 499-979 px posture range, and no user-agent or device-model checks drive its layout.
+- R18. The island uses one composition at every size, sized by the space it is given. No new viewport breakpoints are introduced inside or near the 475–932 px posture range, and no user-agent or device-model checks drive its layout.
 - R19. Draft text, pending attachments, transcript scroll position, and any open island menu survive fold, unfold, rotation, and keyboard open or close.
 - R20. With the on-screen keyboard open, the island remains fully visible above the keyboard and the transcript keeps the remaining space.
 - R21. Interactive controls keep at least today's touch-target size and never overlap each other or the draft text at any supported posture.
@@ -117,9 +120,9 @@ flowchart TB
 
 ## Acceptance Examples
 
-- AE1. **Covers R2, R3.** Given an empty draft and an unfocused composer, when the session is open at 499 × 789, the island shows one control line and the transcript has more visible height than it does today.
-- AE2. **Covers R6, R9.** Given a session that starts streaming while a draft is in hand, when the state changes, send is replaced by the queue control with steer available from it and a stop appears, and the island's height is unchanged.
-- AE3. **Covers R9, R10.** Given a streaming session, when A1 chooses steer from the queue control, the message is steered exactly as it is today.
+- AE1. **Covers R2, R3.** Given an empty draft and an unfocused composer, when the session is open at 475 × 638, the island shows one control line and the transcript has more visible height than it does today.
+- AE2. **Covers R6, R9.** Given an idle session with Send visible, when streaming or compaction starts, Send becomes Stop in the same position, Queue appears beside it, no third action appears, and the island's height is unchanged. Given shell-only or pending-only work, the same slot shows Stop without Queue and a draft cannot submit until delivery is available again. When work ends, Stop becomes Send and Queue leaves the rail.
+- AE3. **Covers R9, R10.** Given a streaming session and a draft, when A1 activates Queue briefly, the draft is queued. When A1 holds Queue, no message is submitted and Steer is revealed. Confirming Steer submits it once; cancelling restores Queue without changing the draft.
 - AE4. **Covers R4, R12.** Given a session with recorded token use, cost, and one warning, when A1 opens the island's secondary menu, all of those readings are present and the warning area can be opened from there.
 - AE5. **Covers R15.** Given two pending attachments, when A1 opens the island, the chips, the delivery choice, and any error are fully visible and the control rail still fits on one row.
 - AE6. **Covers R16.** Given a draft that begins with a shell prefix, when the composer enters shell mode, the mode hint is visible and no rail control is covered.
@@ -152,11 +155,12 @@ flowchart TB
 ## Key Decisions
 
 - One floating island instead of stacked bands: it is the shape the reference asks for and it makes "no new rows" a structural rule rather than a habit.
-- Replace controls by state rather than reveal them additively: an idle session has no use for queue, steer, or stop, so the rail can stay one row without shrinking labels.
+- Replace controls by state rather than reveal them additively: Send and Stop share one slot, Queue appears only when the server accepts follow-up delivery, and Steer stays behind Queue's held disclosure. The rail preserves direct access to supported working actions without carrying three equal controls.
 - Model and thinking merge into one capsule: they are always read together and each pickers' behavior is unchanged.
 - Retired status readings move under a menu rather than into the transcript: they are consulted occasionally, and the transcript already carries the reading that matters continuously.
 - One composition at every size: this follows the project's intrinsic design rules and avoids a second desktop-only design. The cost is that roomy panes get a composer built for a narrow one, mitigated only by revealing more inside the same rail as space allows.
-- Stop stays a direct control: it is the one action a user needs under time pressure, so it does not go behind a menu.
+- Stop stays direct but not resident: it replaces Send only while work can actually be stopped. This keeps its position predictable without showing an inert control during idle time.
+- Queue stays first-class while follow-up delivery is supported; shell-only and pending-only work show Stop without Queue. Steer is second-class because it is used less often. A subtle cue and accessible description disclose the held-Queue path, and confirmation prevents an accidental hold from submitting a different action.
 
 ---
 
