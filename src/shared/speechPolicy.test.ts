@@ -44,6 +44,9 @@ describe("speech runtime policy", () => {
     expect(SPEECH_POLICY.timing.operationDeadlineMs).toBe(10_000);
     expect(SPEECH_POLICY.timing.endpointDeadlineMs).toBeLessThan(SPEECH_POLICY.timing.operationDeadlineMs);
     expect(SPEECH_POLICY.timing.initialSpeechTimeoutMs).toBeLessThan(SPEECH_POLICY.audio.maxTurnSeconds * 1_000);
+    expect(SPEECH_POLICY.timing.endpointCompletionGraceMs).toBe(60);
+    expect(SPEECH_POLICY.timing.holdThresholdMs).toBe(450);
+    expect(SPEECH_POLICY.timing.holdThresholdMs).toBeLessThan(SPEECH_POLICY.timing.pauseAfterSpeechMs);
     expect("queueDeadlineMs" in SPEECH_POLICY.timing).toBe(false);
     expect("transcriptionDeadlineMs" in SPEECH_POLICY.timing).toBe(false);
     expect("queueDeadlineMs" in SPEECH_POLICY.admission).toBe(false);

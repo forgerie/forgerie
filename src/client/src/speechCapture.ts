@@ -73,6 +73,7 @@ export interface SpeechCaptureOptions {
   readonly signal?: AbortSignal;
   readonly rmsThreshold?: number;
   readonly onPauseCandidate?: (candidate: { readonly samples: Float32Array; readonly endSample: number }) => void;
+  readonly onSpeechActivity?: (activity: { readonly startSample: number; readonly endSample: number; readonly sampleCount: number }) => void;
   readonly onTerminal?: (terminal: SpeechCaptureTerminal) => void;
 }
 
@@ -283,7 +284,7 @@ export async function createSpeechCaptureSession(options: SpeechCaptureOptions =
     worklet.connect(gain);
     gain.connect(context.destination);
     throwIfCaptureAborted(signal);
-    const session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, signal, onPauseCandidate: options.onPauseCandidate, onTerminal: options.onTerminal });
+    const session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, signal, onPauseCandidate: options.onPauseCandidate, onSpeechActivity: options.onSpeechActivity, onTerminal: options.onTerminal });
     session.start();
     return session;
   } catch (error) {
@@ -345,6 +346,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
       rms: message.rms,
       voiced: message.voiced,
     });
+    if (message.voiced) this.options.onSpeechActivity?.({ startSample: message.startSample, endSample: message.endSample, sampleCount: message.samples.length });
     this.options.worklet.port.postMessage({ kind: "ack" });
     if (candidate !== undefined) this.options.onPauseCandidate?.({ endSample: candidate.endSample, samples: this.endpointWindow() });
   };
@@ -362,6 +364,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     readonly gain: SpeechGainNodeLike;
     readonly signal: AbortSignal | undefined;
     readonly onPauseCandidate: SpeechCaptureOptions["onPauseCandidate"];
+    readonly onSpeechActivity: SpeechCaptureOptions["onSpeechActivity"];
     readonly onTerminal: SpeechCaptureOptions["onTerminal"];
   }) {
     this.chunks = new SpeechChunkDeque(options.policy.audio.maxTurnSamples);

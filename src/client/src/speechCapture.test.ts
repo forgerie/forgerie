@@ -174,6 +174,22 @@ describe("speech capture browser lifecycle", () => {
     expect(host.workletAcks).toBe(2);
   });
 
+  it("emits voiced activity with sample timing so pending endpoint checks can be cancelled on resumed speech", async () => {
+    const host = fakeHost();
+    const activity: { readonly startSample: number; readonly endSample: number; readonly sampleCount: number }[] = [];
+    const session = await createSpeechCaptureSession({ host, onSpeechActivity: (event) => { activity.push(event); } });
+
+    host.emitWorkletMessage(workletBatch(0, [0.02, 0.02], 0.02));
+    host.emitWorkletMessage(workletBatch(2, [0, 0], 0.001));
+    host.emitWorkletMessage(workletBatch(4, [0.03], 0.03));
+
+    expect(activity).toEqual([
+      { startSample: 0, endSample: 2, sampleCount: 2 },
+      { startSample: 4, endSample: 5, sampleCount: 1 },
+    ]);
+    await session.abort();
+  });
+
   it("flushes the worklet before stopAndFinalize snapshots and clears retained chunks exactly once", async () => {
     const host = fakeHost();
     const terminals: SpeechCaptureTerminal[] = [];

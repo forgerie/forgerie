@@ -25,7 +25,9 @@ export interface SpeechTimingPolicy {
   readonly operationDeadlineMs: number;
   readonly initialSpeechTimeoutMs: number;
   readonly pauseAfterSpeechMs: number;
+  readonly endpointCompletionGraceMs: number;
   readonly finalRetryTtlMs: number;
+  readonly holdThresholdMs: number;
 }
 
 export interface SpeechEndpointPolicy {
@@ -82,6 +84,7 @@ const endpointWindowBytes = speechPcmBytesForSeconds(endpointWindowSeconds);
 const maxTurnBytes = speechPcmBytesForSeconds(maxTurnSeconds);
 const endpointMaxRequestsPerTurn = 16;
 const pauseAfterSpeechMs = 650;
+const endpointCompletionGraceMs = 60;
 const bodyUploadDeadlineMs = 10_000;
 const operationDeadlineMs = 10_000;
 const persistentWarmthMaxMemoryFraction = 0.75;
@@ -108,7 +111,9 @@ export const SPEECH_POLICY: SpeechRuntimePolicy = {
     operationDeadlineMs,
     initialSpeechTimeoutMs: 10_000,
     pauseAfterSpeechMs,
+    endpointCompletionGraceMs,
     finalRetryTtlMs: 30_000,
+    holdThresholdMs: 450,
   },
   endpoint: {
     minIntervalMs: 900,
