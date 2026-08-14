@@ -17,6 +17,9 @@ import { registerPromptResourceCatalogProxyRoutes } from "./resources/promptReso
 import { registerGitRoutes } from "./gitRoutes.js";
 import { registerTerminalProxyRoutes } from "./terminalProxyRoutes.js";
 import { registerWorkspaceDeletionRoutes } from "./workspaces/workspaceDeletionRoutes.js";
+import { createUnavailableSpeechService, registerSpeechRoutes } from "./speech/speechRoutes.js";
+import type { SpeechService } from "./speech/speechService.js";
+import type { SpeechRuntimePolicy } from "../shared/speechPolicy.js";
 import { createFilePiWebConfigService, registerConfigRoutes, registerLocalMachineConfigRoutes, type PiWebConfigService } from "./configRoutes.js";
 import { PiWebPluginService } from "./piWebPluginService.js";
 import { createActiveProfilePiPackageService, type PiPackageService } from "./piPackageService.js";
@@ -45,6 +48,9 @@ export interface AppDependencies {
   piPackages?: PiPackageService;
   piWebStatusCache?: PiWebStatusCache;
   config?: PiWebConfigService;
+  speech?: SpeechService;
+  speechPolicy?: SpeechRuntimePolicy;
+  speechAllowedHosts?: readonly string[];
   clientDist?: string | false;
   logger?: FastifyServerOptions["logger"];
   /** Maximum accepted HTTP request body size in bytes. */
@@ -193,6 +199,8 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   const invalidatingConfigService = invalidatePiWebStatusOnWrite(configService, piWebStatusCache);
   registerConfigRoutes(app, invalidatingConfigService);
   registerLocalMachineConfigRoutes(app, invalidatingConfigService);
+
+  registerSpeechRoutes(app, deps.speech ?? createUnavailableSpeechService(), { ...(deps.speechPolicy === undefined ? {} : { policy: deps.speechPolicy }), ...(deps.speechAllowedHosts === undefined ? {} : { speechAllowedHosts: deps.speechAllowedHosts }) });
 
   registerMachineRoutes(app, machines);
   registerMachinePluginProxyRoutes(app, machines);

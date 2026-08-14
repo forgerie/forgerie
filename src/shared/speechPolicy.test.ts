@@ -39,6 +39,8 @@ describe("speech runtime policy", () => {
   it("admits one active and one queued operation per backend under one queue-inclusive operation deadline", () => {
     expect(SPEECH_POLICY.admission.activeOperationsPerBackend).toBe(1);
     expect(SPEECH_POLICY.admission.queuedOperationsPerBackend).toBe(1);
+    expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBe(10_000);
+    expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBe(SPEECH_POLICY.timing.operationDeadlineMs);
     expect(SPEECH_POLICY.timing.operationDeadlineMs).toBe(10_000);
     expect(SPEECH_POLICY.timing.endpointDeadlineMs).toBeLessThan(SPEECH_POLICY.timing.operationDeadlineMs);
     expect(SPEECH_POLICY.timing.initialSpeechTimeoutMs).toBeLessThan(SPEECH_POLICY.audio.maxTurnSeconds * 1_000);

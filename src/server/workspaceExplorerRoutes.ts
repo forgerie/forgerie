@@ -10,6 +10,8 @@ import { resolveWorkspaceContext } from "./workspaces/workspaceContext.js";
 import { pathAccessForWorkspaceContext } from "./workspaces/effectivePathAccess.js";
 import type { WorkspaceService } from "./workspaces/workspaceService.js";
 
+const arbitraryFileContentType = /^([a-z]+\/[a-z0-9.+-]+)$/u;
+
 export interface WorkspaceExplorerRouteOptions {
   config?: Pick<PiWebConfigService, "read">;
 }
@@ -103,7 +105,7 @@ function registerWorkspaceFileContentParsers(app: FastifyInstance): void {
   // Fastify's default parser only handles JSON; workspace file writes need to
   // accept text and arbitrary binary payloads. This route module is registered
   // for both local aliases, so parser registration must tolerate repeats.
-  try { app.addContentTypeParser("text/plain", { parseAs: "string" }, (_request, body, done) => { done(null, Buffer.from(body)); }); } catch { /* already registered */ }
-  try { app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_request, body, done) => { done(null, body); }); } catch { /* already registered */ }
-  try { app.addContentTypeParser(/^([a-z]+\/[a-z0-9.+-]+)$/u, { parseAs: "buffer" }, (_request, body, done) => { done(null, body); }); } catch { /* already registered */ }
+  if (!app.hasContentTypeParser("text/plain")) app.addContentTypeParser("text/plain", { parseAs: "string" }, (_request, body, done) => { done(null, Buffer.from(body)); });
+  if (!app.hasContentTypeParser("application/octet-stream")) app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_request, body, done) => { done(null, body); });
+  if (!app.hasContentTypeParser(arbitraryFileContentType)) app.addContentTypeParser(arbitraryFileContentType, { parseAs: "buffer" }, (_request, body, done) => { done(null, body); });
 }

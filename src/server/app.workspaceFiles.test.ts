@@ -151,6 +151,15 @@ describe("buildApp workspace file routes", () => {
     const readDeepResponse = await appTestContext.app.inject({ method: "GET", url: `/api/projects/${project.id}/workspaces/${workspace.id}/file?path=${encodeURIComponent("deep/nested/dir/file.txt")}` });
     expect(readDeepResponse.json<{ content: unknown }>().content).toBe("deep content");
 
+    const writeArbitraryTypeThroughLocalAlias = await appTestContext.app.inject({
+      method: "PUT",
+      url: `/api/machines/local/projects/${project.id}/workspaces/${workspace.id}/file?path=${encodeURIComponent("document.pdf")}`,
+      payload: Buffer.from([0x25, 0x50, 0x44, 0x46]),
+      headers: { "content-type": "application/pdf" },
+    });
+    expect(writeArbitraryTypeThroughLocalAlias.statusCode).toBe(200);
+    expect(writeArbitraryTypeThroughLocalAlias.json()).toMatchObject({ path: "document.pdf", size: 4, created: true });
+
     const overwriteResponse = await appTestContext.app.inject({
       method: "PUT",
       url: `/api/projects/${project.id}/workspaces/${workspace.id}/file?path=${encodeURIComponent("hello.txt")}`,

@@ -12,6 +12,7 @@ import {
   raceChildExit,
   spawnOptions,
   terminateChild,
+  withTimeout,
   writeLine,
   type SandboxedSpeechCommand,
   type SpeechComponentStatus,
@@ -142,9 +143,12 @@ export class SmartTurnProcess {
     if (child === undefined || lineReader === undefined || !isChildAlive(child)) throw new SpeechProcessError("unavailable", "Smart Turn worker is unavailable.");
     const requestId = randomUUID();
     const audio = Buffer.from(pcm.bytes.buffer, pcm.bytes.byteOffset, pcm.bytes.byteLength).toString("base64");
+    const deadline = Date.now() + timeoutMs;
     try {
-      await writeLine(child, JSON.stringify({ protocol: SMART_TURN_PROTOCOL, requestId, audio }));
-      const response = await raceChildExit(child, lineReader.nextJson(timeoutMs), "timeout");
+      const response = await raceChildExit(child, withTimeout((async () => {
+        await writeLine(child, JSON.stringify({ protocol: SMART_TURN_PROTOCOL, requestId, audio }));
+        return await lineReader.nextJson(Math.max(1, deadline - Date.now()));
+      })(), timeoutMs, "Smart Turn inference timed out.", "timeout"), "timeout");
       if (!isObject(response) || response["requestId"] !== requestId) throw new SpeechProcessError("protocol", "Smart Turn response request ID did not match.");
       if (response["status"] !== "ready") throw new SpeechProcessError("inference_failed", "Smart Turn request failed.");
       if (typeof response["complete"] !== "boolean" || typeof response["probability"] !== "number" || !Number.isFinite(response["probability"]) || response["probability"] < 0 || response["probability"] > 1) {

@@ -20,6 +20,7 @@ export interface SpeechAudioPolicy {
 export interface SpeechTimingPolicy {
   readonly warmupDeadlineMs: number;
   readonly endpointDeadlineMs: number;
+  readonly bodyUploadDeadlineMs: number;
   /** Queue-inclusive deadline for one admitted endpoint or transcription operation. */
   readonly operationDeadlineMs: number;
   readonly initialSpeechTimeoutMs: number;
@@ -126,6 +127,7 @@ const endpointWindowBytes = speechPcmBytesForSeconds(endpointWindowSeconds);
 const maxTurnBytes = speechPcmBytesForSeconds(maxTurnSeconds);
 const endpointMaxRequestsPerTurn = 16;
 const pauseAfterSpeechMs = 650;
+const bodyUploadDeadlineMs = 10_000;
 const operationDeadlineMs = 10_000;
 const persistentWarmthMaxMemoryFraction = 0.75;
 
@@ -147,6 +149,7 @@ export const SPEECH_POLICY: SpeechRuntimePolicy = {
   timing: {
     warmupDeadlineMs: 60_000,
     endpointDeadlineMs: 2_500,
+    bodyUploadDeadlineMs,
     operationDeadlineMs,
     initialSpeechTimeoutMs: 10_000,
     pauseAfterSpeechMs,

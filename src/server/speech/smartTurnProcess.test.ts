@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SPEECH_POLICY } from "../../shared/speechPolicy.js";
 import { validateSpeechPcm, type ValidatedSpeechPcm } from "./speechAudio.js";
+import { createSpeechService } from "./speechService.js";
 import { SmartTurnProcess, buildSandboxedSpeechCommand } from "./smartTurnProcess.js";
 
 const helpers: string[] = [];
@@ -66,6 +67,38 @@ describe("SmartTurnProcess", () => {
     expect(decision).toMatchObject({ complete: true, probability: 0.875, samples: SPEECH_POLICY.audio.minRequestSamples });
     expect(processClient.diagnostics().spawn).toMatchObject({ shell: false, envKeys: [] });
     await processClient.close();
+  });
+
+  it("times out a ready child that stops reading a pipe-sized request and releases the service slot", async () => {
+    const script = await helperScript(`
+      console.log(${readyRecord});
+      process.stdin.pause();
+      setInterval(() => {}, 1000);
+    `);
+    const policy = { ...SPEECH_POLICY, timing: { ...SPEECH_POLICY.timing, operationDeadlineMs: 80, endpointDeadlineMs: 80 } };
+    const processClient = new SmartTurnProcess({ commandPath: process.execPath, args: [script], sandbox: { enabled: false }, startupTimeoutMs: 500, operationTimeoutMs: 80, policy });
+    const service = createSpeechService({
+      policy,
+      smartTurn: {
+        status: () => processClient.status(),
+        start: () => processClient.start(),
+        close: () => processClient.close(),
+        checkTurn: (bytes, options) => processClient.checkTurn(bytes, options),
+      },
+      whisper: {
+        status: () => "unavailable",
+        start: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      },
+    });
+    await processClient.start();
+
+    await expect(service.checkTurn(new Uint8Array(SPEECH_POLICY.audio.endpointWindowBytes))).rejects.toMatchObject({ kind: "timeout" });
+
+    await expect.poll(() => service.debugQueue("smartTurn")).toEqual({ active: false, queued: 0, queuedBytes: 0 });
+    expect(processClient.status()).toBe("unavailable");
+    await expect(service.checkTurn(new Uint8Array(SPEECH_POLICY.audio.minRequestBytes))).rejects.toMatchObject({ kind: "unavailable" });
+    await service.close();
   });
 
   it("starts single-flight when warmup and work race", async () => {

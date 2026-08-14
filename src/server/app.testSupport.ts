@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach } from "vitest";
 import { buildApp } from "./app.js";
+import { createUnavailableSpeechService } from "./speech/speechRoutes.js";
 import { ProjectService } from "./projects/projectService.js";
 import { ProjectStore } from "./storage/projectStore.js";
 import type { MachineClient } from "./machines/machineClient.js";
@@ -106,6 +107,7 @@ export function registerAppTestHooks(): void {
       sessionDaemon: fakeSessionDaemon(),
       agentProfileProvider: { getActiveAgentProfile: () => Promise.resolve(agentProfileResult) },
       config: fakeConfigService(),
+      speech: createUnavailableSpeechService(),
       piPackages: fakePiPackageService(),
       piWebPlugins: {
         manifest: () => Promise.resolve({ plugins: [{ id: "fake", module: "/pi-web-plugins/fake/plugin.js?v=1", source: "test", scope: "local", machineSpecific: false }] }),
