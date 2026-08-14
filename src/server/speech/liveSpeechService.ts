@@ -35,23 +35,11 @@ export async function resolveLiveSpeechCommands(env: LiveSpeechCommandEnvironmen
 }
 
 function smartTurnBackend(commandPath: string): SpeechBackend {
-  const processClient = new SmartTurnProcess({ commandPath });
-  return {
-    status: () => processClient.status(),
-    start: () => processClient.start(),
-    close: () => processClient.close(),
-    checkTurn: (pcm, options) => processClient.checkTurn(pcm, options),
-  };
+  return new SmartTurnProcess({ commandPath });
 }
 
 function whisperBackend(commandPath: string): SpeechBackend {
-  const processClient = new WhisperProcess({ commandPath });
-  return {
-    status: () => processClient.status(),
-    start: () => processClient.start(),
-    close: () => processClient.close(),
-    transcribe: (pcm, options) => processClient.transcribe(pcm, options),
-  };
+  return new WhisperProcess({ commandPath });
 }
 
 async function resolveCommand(override: string | undefined, commandName: string, pathValue: string | undefined): Promise<string | undefined> {

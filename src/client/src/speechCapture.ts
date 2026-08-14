@@ -191,7 +191,6 @@ export class SpeechChunkDeque {
 
 export interface SpeechPauseCandidateDetectorOptions {
   readonly sampleRateHz: number;
-  readonly rmsThreshold: number;
   readonly pauseAfterSpeechMs: number;
   readonly minNewVoicedAudioMs: number;
   readonly minIntervalMs: number;
@@ -230,23 +229,6 @@ export class SpeechPauseCandidateDetector {
     this.emittedFirstCandidate = true;
     return { endSample: batch.endSample, voicedAtSample: this.lastVoicedEndSample };
   }
-}
-
-export function downsampleMonoTo16Khz(input: Float32Array, sourceSampleRate: number): Float32Array {
-  const targetRate = SPEECH_POLICY.audio.sampleRateHz;
-  if (sourceSampleRate === targetRate) return input;
-  if (sourceSampleRate <= 0 || input.length === 0) return new Float32Array();
-  const outputLength = Math.floor(input.length * targetRate / sourceSampleRate);
-  const output = new Float32Array(outputLength);
-  const ratio = sourceSampleRate / targetRate;
-  for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
-    const start = Math.floor(outputIndex * ratio);
-    const end = Math.max(start + 1, Math.min(input.length, Math.floor((outputIndex + 1) * ratio)));
-    let sum = 0;
-    for (let inputIndex = start; inputIndex < end; inputIndex += 1) sum += input[inputIndex] ?? 0;
-    output[outputIndex] = sum / (end - start);
-  }
-  return output;
 }
 
 export async function createSpeechCaptureSession(options: SpeechCaptureOptions = {}): Promise<SpeechCaptureSession> {
@@ -301,7 +283,7 @@ export async function createSpeechCaptureSession(options: SpeechCaptureOptions =
     worklet.connect(gain);
     gain.connect(context.destination);
     throwIfCaptureAborted(signal);
-    const session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, rmsThreshold: options.rmsThreshold ?? 0.012, signal, onPauseCandidate: options.onPauseCandidate, onTerminal: options.onTerminal });
+    const session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, signal, onPauseCandidate: options.onPauseCandidate, onTerminal: options.onTerminal });
     session.start();
     return session;
   } catch (error) {
@@ -378,7 +360,6 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     readonly filter: SpeechBiquadFilterLike | undefined;
     readonly worklet: SpeechAudioWorkletNodeLike;
     readonly gain: SpeechGainNodeLike;
-    readonly rmsThreshold: number;
     readonly signal: AbortSignal | undefined;
     readonly onPauseCandidate: SpeechCaptureOptions["onPauseCandidate"];
     readonly onTerminal: SpeechCaptureOptions["onTerminal"];
@@ -386,7 +367,6 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     this.chunks = new SpeechChunkDeque(options.policy.audio.maxTurnSamples);
     this.detector = new SpeechPauseCandidateDetector({
       sampleRateHz: options.policy.audio.sampleRateHz,
-      rmsThreshold: options.rmsThreshold,
       pauseAfterSpeechMs: options.policy.timing.pauseAfterSpeechMs,
       minNewVoicedAudioMs: options.policy.endpoint.minNewVoicedAudioMs,
       minIntervalMs: options.policy.endpoint.minIntervalMs,

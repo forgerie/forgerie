@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { isAbsolute } from "node:path";
 import { SPEECH_POLICY, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
 import { float32PcmToWav, type ValidatedSpeechPcm } from "./speechAudio.js";
 import {
@@ -62,7 +61,6 @@ export class WhisperProcess {
   private generation = 0;
 
   public constructor(private readonly options: WhisperProcessOptions) {
-    if (!isAbsolute(options.commandPath)) throw new SpeechProcessError("unavailable", "commandPath must be an absolute executable path.");
     this.policy = options.policy ?? SPEECH_POLICY;
     this.env = options.env ?? {};
     this.maxDiagnosticBytes = options.maxDiagnosticBytes ?? defaultMaxDiagnosticBytes;
@@ -205,9 +203,6 @@ function assertValidatedPcm(pcm: ValidatedSpeechPcm, policy: SpeechRuntimePolicy
   if (pcm.bytes.byteLength % policy.audio.bytesPerSample !== 0 || pcm.samples.length * policy.audio.bytesPerSample !== pcm.bytes.byteLength) throw new SpeechProcessError("protocol", "Speech PCM byte length is invalid.");
   if (pcm.bytes.byteLength < policy.audio.minRequestBytes) throw new SpeechProcessError("too_short", "Speech PCM is shorter than the minimum request duration.");
   if (pcm.bytes.byteLength > policy.audio.maxTurnBytes) throw new SpeechProcessError("overloaded", "Speech PCM exceeds the operation byte limit.");
-  for (const sample of pcm.samples) {
-    if (!Number.isFinite(sample) || sample < -1 || sample > 1) throw new SpeechProcessError("protocol", "Speech PCM samples are invalid.");
-  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

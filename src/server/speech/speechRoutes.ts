@@ -1,11 +1,9 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { SPEECH_POLICY, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
+import { SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
 import { parseSpeechTranscriptionResponse, parseSpeechTurnDecisionResponse, type SpeechErrorKind, type SpeechErrorResponse, type SpeechServiceStatusResponse } from "../../shared/speechContracts.js";
 import { SpeechAudioValidationError, type SpeechPcmOperation } from "./speechAudio.js";
 import { SpeechProcessError } from "./speechProcess.js";
 import { createSpeechService, speechServiceUnavailable, type SpeechService } from "./speechService.js";
-
-const speechPaths = new Set(["/api/speech/check-turn", "/api/speech/transcribe"]);
 
 export interface SpeechRouteOptions {
   readonly policy?: SpeechRuntimePolicy;
@@ -58,7 +56,7 @@ function statusResponse(service: SpeechService, policy: SpeechRuntimePolicy): Sp
   return {
     ...service.status(),
     limits: {
-      sampleRateHz: 16_000,
+      sampleRateHz: SPEECH_SAMPLE_RATE_HZ,
       maxTurnSeconds: policy.audio.maxTurnSeconds,
       maxTurnBytes: policy.audio.maxTurnBytes,
       endpointWindowSeconds: policy.audio.endpointWindowSeconds,
@@ -69,7 +67,6 @@ function statusResponse(service: SpeechService, policy: SpeechRuntimePolicy): Sp
 
 function speechRequestGuard(policy: SpeechRuntimePolicy, admission: SpeechBodyAdmission, budget: TokenBudget, operation: SpeechPcmOperation, browserAllowedHosts: ReadonlySet<string>) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!speechPaths.has(request.url.split("?")[0] ?? request.url)) return;
     if (!isBrowserOriginAllowed(request, browserAllowedHosts)) {
       await sendPreParseSpeechError(request, reply, 403, "forbidden", "Speech request origin is not allowed.", false);
       return;

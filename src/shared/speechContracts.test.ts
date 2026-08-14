@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
+import { SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
 import {
   SpeechErrorResponseSchema,
   SpeechServiceStatusResponseSchema,
@@ -18,7 +19,7 @@ describe("speech HTTP contracts", () => {
       whisper: "ready",
       capability: "ready",
       limits: {
-        sampleRateHz: 16_000,
+        sampleRateHz: SPEECH_SAMPLE_RATE_HZ,
         maxTurnSeconds: 60,
         maxTurnBytes: 3_840_000,
         endpointWindowSeconds: 8,

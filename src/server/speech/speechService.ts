@@ -26,7 +26,6 @@ export interface SpeechService {
   checkTurn(pcmBytes: Uint8Array, options?: SpeechOperationOptions): Promise<SmartTurnDecision>;
   transcribe(pcmBytes: Uint8Array, options?: SpeechOperationOptions): Promise<WhisperTranscription>;
   close(): Promise<void>;
-  debugQueue(component: "smartTurn" | "whisper"): { active: boolean; queued: number; queuedBytes: number };
 }
 
 export interface SpeechServiceOptions {
@@ -73,7 +72,6 @@ export function createSpeechService(options: SpeechServiceOptions): SpeechServic
       whisperQueue.close();
       await Promise.allSettled([options.smartTurn.close(), options.whisper.close()]);
     },
-    debugQueue: (component) => component === "smartTurn" ? smartQueue.debug() : whisperQueue.debug(),
   };
 }
 
@@ -97,6 +95,7 @@ function serviceStatus(smartTurn: SpeechComponentStatus, whisper: SpeechComponen
 }
 
 class ServiceAdmissionQueue<T> {
+  // One active backend operation is the queue invariant. Callers may queue one more operation by policy.
   private active: Promise<void> | undefined;
   private readonly queued: QueuedServiceJob<T>[] = [];
   private queuedBytes = 0;
@@ -138,10 +137,6 @@ class ServiceAdmissionQueue<T> {
       job.reject?.(new SpeechProcessError("closed", `${this.label} queue is closed.`));
     }
     this.queuedBytes = 0;
-  }
-
-  public debug(): { active: boolean; queued: number; queuedBytes: number } {
-    return { active: this.active !== undefined, queued: this.queued.length, queuedBytes: this.queuedBytes };
   }
 
   private runActive(job: QueuedServiceJob<T>): Promise<T> {

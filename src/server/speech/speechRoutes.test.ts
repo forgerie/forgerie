@@ -63,7 +63,6 @@ function speechService(options: ServiceOptions = {}): SpeechService {
     checkTurn: options.checkTurn ?? vi.fn(() => Promise.resolve({ complete: true, probability: 0.75, samples: SPEECH_POLICY.audio.minRequestSamples })),
     transcribe: options.transcribe ?? vi.fn(() => Promise.resolve({ text: "spoken words" })),
     close: options.close ?? vi.fn(() => Promise.resolve()),
-    debugQueue: () => ({ active: false, queued: 0, queuedBytes: 0 }),
   };
 }
 

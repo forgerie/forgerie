@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { SPEECH_POLICY, SPEECH_POLICY_EVIDENCE, speechPcmBytesForSeconds, speechPcmSamplesForSeconds } from "./speechPolicy";
+import { SPEECH_POLICY, speechPcmBytesForSeconds, speechPcmSamplesForSeconds } from "./speechPolicy";
+import { SPEECH_POLICY_EVIDENCE } from "./speechPolicyEvidence";
 
 describe("speech runtime policy", () => {
   it("uses one internally consistent 16 kHz float32 PCM contract", () => {
@@ -36,8 +37,7 @@ describe("speech runtime policy", () => {
     expect(SPEECH_POLICY.endpoint.minIntervalMs).toBeGreaterThanOrEqual(SPEECH_POLICY.timing.pauseAfterSpeechMs);
   });
 
-  it("admits one active and one queued operation per backend under one queue-inclusive operation deadline", () => {
-    expect(SPEECH_POLICY.admission.activeOperationsPerBackend).toBe(1);
+  it("admits one queued operation per backend under one queue-inclusive operation deadline", () => {
     expect(SPEECH_POLICY.admission.queuedOperationsPerBackend).toBe(1);
     expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBe(10_000);
     expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBe(SPEECH_POLICY.timing.operationDeadlineMs);

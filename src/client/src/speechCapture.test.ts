@@ -4,7 +4,6 @@ import {
   SpeechChunkDeque,
   SpeechPauseCandidateDetector,
   createSpeechCaptureSession,
-  downsampleMonoTo16Khz,
   mapSpeechCaptureFailure,
   type SpeechAudioContextLike,
   type SpeechAudioNodeLike,
@@ -20,14 +19,6 @@ import {
 } from "./speechCapture";
 
 describe("speech capture DSP", () => {
-  it("downsamples higher-rate mono input with bounded averaging and leaves native 16 kHz unchanged", () => {
-    const native = new Float32Array([0, 0.5, -0.5, 1]);
-    expect(downsampleMonoTo16Khz(native, 16_000)).toEqual(native);
-
-    const source48k = new Float32Array([0, 0.3, 0.6, 0.6, 0.3, 0, -0.3, -0.6, -0.3]);
-    expect([...downsampleMonoTo16Khz(source48k, 48_000)].map((value) => Number(value.toFixed(4)))).toEqual([0.3, 0.3, -0.4]);
-  });
-
   it("stores full-turn samples once and exposes logical latest-window views", () => {
     const deque = new SpeechChunkDeque(6);
     deque.push(new Float32Array([1, 2, 3]), 0);
@@ -51,7 +42,6 @@ describe("speech capture DSP", () => {
   it("emits one pause candidate from audio-frame time after speech and configured silence", () => {
     const detector = new SpeechPauseCandidateDetector({
       sampleRateHz: 16_000,
-      rmsThreshold: 0.012,
       pauseAfterSpeechMs: 650,
       minNewVoicedAudioMs: 650,
       minIntervalMs: 900,

@@ -11,7 +11,7 @@ const SAMPLE_RATE = 16_000;
 const BYTES_PER_SAMPLE = 4;
 const DEFAULT_DURATIONS = [3, 10, 30, 60];
 const DEFAULT_REPEATS = 20;
-const SMART_TURN_PROTOCOL = "forgerie-smart-turn-worker-v1";
+const SMART_TURN_PROTOCOL = "forgerie-smart-turn-worker-v2";
 const WHISPER_PROTOCOL = "forgerie-whisper-worker-v1";
 const WARMUP_TIMEOUT_MS = 120_000;
 const INFERENCE_TIMEOUT_MS = 120_000;
@@ -307,6 +307,7 @@ function spawnRuntime(command, runtimeArgs) {
     stderr.push(String(chunk).slice(0, 500));
     if (stderr.length > 8) stderr.shift();
   });
+  child.stdin.on("error", () => undefined);
   child.on("error", () => undefined);
   return { child, stderr };
 }
@@ -368,7 +369,7 @@ function assertWhisperReadyRecord(record) {
 
 async function smartTurnRequest(child, lines, samples, requestId) {
   const raw = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
-  child.stdin.write(`${JSON.stringify({ protocol: SMART_TURN_PROTOCOL, requestId, audio: raw.toString("base64") })}\n`);
+  await writeFrame(child, { protocol: SMART_TURN_PROTOCOL, requestId, kind: "check_turn", pcmBytes: raw.byteLength }, raw);
   const response = await lines.nextJson(INFERENCE_TIMEOUT_MS);
   if (response.requestId !== requestId) throw new Error("Smart Turn response ID mismatch");
   if (response.status !== "ready") throw new Error("Smart Turn request failed");
@@ -384,7 +385,7 @@ async function whisperRequest(child, lines, samples, requestId) {
   const before = process.memoryUsage();
   const wav = wavFromFloat32(samples);
   const afterWav = process.memoryUsage();
-  await writeWhisperFrame(child, { protocol: WHISPER_PROTOCOL, requestId, kind: "transcribe", wavBytes: wav.byteLength }, wav);
+  await writeFrame(child, { protocol: WHISPER_PROTOCOL, requestId, kind: "transcribe", wavBytes: wav.byteLength }, wav);
   const afterWrite = process.memoryUsage();
   const { record, lineBytes } = await lines.nextJsonRecord(INFERENCE_TIMEOUT_MS);
   const afterResponse = process.memoryUsage();
@@ -410,9 +411,9 @@ async function whisperRequest(child, lines, samples, requestId) {
   };
 }
 
-async function writeWhisperFrame(child, header, wav) {
-  if (!child.stdin.writable) throw new Error("Whisper worker stdin is closed");
-  const frame = Buffer.concat([Buffer.from(`${JSON.stringify(header)}\n`, "utf8"), wav]);
+async function writeFrame(child, header, body) {
+  if (!child.stdin.writable) throw new Error("speech worker stdin is closed");
+  const frame = Buffer.concat([Buffer.from(`${JSON.stringify(header)}\n`, "utf8"), body]);
   await new Promise((resolve, reject) => {
     child.stdin.write(frame, (error) => {
       if (error === null || error === undefined) resolve();

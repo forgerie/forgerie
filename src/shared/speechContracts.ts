@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
+import { SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
 
 export const SpeechComponentStatusSchema = Type.Union([
   Type.Literal("warming"),
@@ -15,7 +16,7 @@ export const SpeechCapabilitySchema = Type.Union([
 ]);
 
 export const SpeechLimitsSchema = Type.Object({
-  sampleRateHz: Type.Literal(16_000),
+  sampleRateHz: Type.Literal(SPEECH_SAMPLE_RATE_HZ),
   maxTurnSeconds: Type.Number({ minimum: 0 }),
   maxTurnBytes: Type.Integer({ minimum: 1 }),
   endpointWindowSeconds: Type.Number({ minimum: 0 }),

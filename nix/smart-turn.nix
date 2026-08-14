@@ -31,6 +31,7 @@ pkgs.writeShellApplication {
       --tmpfs /root \
       --setenv HOME /tmp \
       --setenv SMART_TURN_MODEL ${model} \
+      --setenv SMART_TURN_MAX_PCM_BYTES 3840000 \
       --setenv HF_HUB_OFFLINE 1 \
       --setenv TRANSFORMERS_OFFLINE 1 \
       --chdir /tmp \

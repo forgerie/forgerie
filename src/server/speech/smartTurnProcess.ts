@@ -13,7 +13,7 @@ import {
   spawnOptions,
   terminateChild,
   withTimeout,
-  writeLine,
+  writeFramedBinaryRequest,
   type SandboxedSpeechCommand,
   type SpeechComponentStatus,
   type SpeechOperationOptions,
@@ -21,7 +21,7 @@ import {
   type SpeechProcessSandbox,
 } from "./speechProcess.js";
 
-const SMART_TURN_PROTOCOL = "forgerie-smart-turn-worker-v1";
+const SMART_TURN_PROTOCOL = "forgerie-smart-turn-worker-v2";
 const defaultMaxDiagnosticBytes = 4096;
 
 export type { SpeechComponentStatus, SpeechOperationOptions, SpeechProcessDiagnostics, SpeechProcessSandbox } from "./speechProcess.js";
@@ -142,11 +142,11 @@ export class SmartTurnProcess {
     const lineReader = this.lineReader;
     if (child === undefined || lineReader === undefined || !isChildAlive(child)) throw new SpeechProcessError("unavailable", "Smart Turn worker is unavailable.");
     const requestId = randomUUID();
-    const audio = Buffer.from(pcm.bytes.buffer, pcm.bytes.byteOffset, pcm.bytes.byteLength).toString("base64");
+    const audio = Buffer.from(pcm.bytes.buffer, pcm.bytes.byteOffset, pcm.bytes.byteLength);
     const deadline = Date.now() + timeoutMs;
     try {
       const response = await raceChildExit(child, withTimeout((async () => {
-        await writeLine(child, JSON.stringify({ protocol: SMART_TURN_PROTOCOL, requestId, audio }));
+        await writeFramedBinaryRequest(child, { protocol: SMART_TURN_PROTOCOL, requestId, kind: "check_turn", pcmBytes: audio.byteLength }, audio);
         return await lineReader.nextJson(Math.max(1, deadline - Date.now()));
       })(), timeoutMs, "Smart Turn inference timed out.", "timeout"), "timeout");
       if (!isObject(response) || response["requestId"] !== requestId) throw new SpeechProcessError("protocol", "Smart Turn response request ID did not match.");
@@ -202,9 +202,6 @@ function assertValidatedPcm(pcm: ValidatedSpeechPcm, policy: SpeechRuntimePolicy
   if (pcm.bytes.byteLength % policy.audio.bytesPerSample !== 0 || pcm.samples.length * policy.audio.bytesPerSample !== pcm.bytes.byteLength) throw new SpeechProcessError("protocol", "Speech PCM byte length is invalid.");
   if (pcm.bytes.byteLength < policy.audio.minRequestBytes) throw new SpeechProcessError("too_short", "Speech PCM is shorter than the minimum request duration.");
   if (pcm.bytes.byteLength > maxBytes) throw new SpeechProcessError("overloaded", "Speech PCM exceeds the operation byte limit.");
-  for (const sample of pcm.samples) {
-    if (!Number.isFinite(sample) || sample < -1 || sample > 1) throw new SpeechProcessError("protocol", "Speech PCM samples are invalid.");
-  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

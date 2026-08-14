@@ -66,7 +66,6 @@ describe("speech service", () => {
     await expect(service.checkTurn(pcmWith(2))).rejects.toMatchObject({ kind: "out_of_range" });
     await expect(service.checkTurn(new Uint8Array(SPEECH_POLICY.audio.endpointWindowBytes + 4))).rejects.toMatchObject({ kind: "too_large" });
     expect(calls).toBe(0);
-    expect(service.debugQueue("smartTurn")).toEqual({ active: false, queued: 0, queuedBytes: 0 });
   });
 
   it("admits one active and one queued operation and rejects overload before retaining more PCM", async () => {
@@ -118,7 +117,6 @@ describe("speech service", () => {
     queuedAbort.abort();
     await expect(active).rejects.toMatchObject({ kind: "aborted" });
     await expect(queued).rejects.toMatchObject({ kind: "aborted" });
-    expect(service.debugQueue("smartTurn")).toMatchObject({ active: true, queued: 0 });
 
     const replacement = service.checkTurn(pcm());
     expect(calls).toBe(1);
@@ -150,9 +148,12 @@ describe("speech service", () => {
     const queued = service.transcribe(pcm());
     await expect(queued).rejects.toMatchObject({ kind: "timeout" });
     expect(calls).toBe(1);
-    expect(service.debugQueue("whisper")).toMatchObject({ active: true, queued: 0 });
+    const followUp = service.transcribe(pcm());
+    expect(calls).toBe(1);
     activeGate.resolve({ text: "done" });
     await activeExpectation;
+    await expect(followUp).resolves.toEqual({ text: "done" });
+    expect(calls).toBe(2);
   });
 
   it("passes only the remaining backend budget after queued wait", async () => {

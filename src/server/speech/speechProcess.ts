@@ -276,11 +276,6 @@ export class JsonLineReader {
   }
 }
 
-export async function writeLine(child: ChildProcessWithoutNullStreams, line: string): Promise<void> {
-  if (!child.stdin.writable) throw new SpeechProcessError("child_exit", "Runtime stdin is closed.");
-  await writeBuffer(child, Buffer.from(`${line}\n`, "utf8"));
-}
-
 export async function writeFramedBinaryRequest(child: ChildProcessWithoutNullStreams, header: Readonly<Record<string, unknown>>, body: Buffer): Promise<void> {
   if (!child.stdin.writable) throw new SpeechProcessError("child_exit", "Runtime stdin is closed.");
   await writeBuffer(child, Buffer.concat([Buffer.from(`${JSON.stringify(header)}\n`, "utf8"), body]));

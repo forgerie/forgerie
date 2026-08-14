@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SPEECH_POLICY } from "../../shared/speechPolicy.js";
@@ -7,6 +9,7 @@ import { validateSpeechPcm, type ValidatedSpeechPcm } from "./speechAudio.js";
 import { createSpeechService } from "./speechService.js";
 import { SmartTurnProcess, buildSandboxedSpeechCommand } from "./smartTurnProcess.js";
 
+const execFileAsync = promisify(execFile);
 const helpers: string[] = [];
 
 async function helperScript(source: string): Promise<string> {
@@ -38,22 +41,42 @@ function belowMinimumPcm(): ValidatedSpeechPcm {
   };
 }
 
-const readyRecord = `JSON.stringify({ status: 'ready', protocol: 'forgerie-smart-turn-worker-v1' })`;
+const readyRecord = `JSON.stringify({ status: 'ready', protocol: 'forgerie-smart-turn-worker-v2' })`;
+const framedReader = `
+  function readSmartFrames(onRequest) {
+    let buffer = Buffer.alloc(0);
+    process.stdin.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      drain();
+    });
+    function drain() {
+      for (;;) {
+        const newline = buffer.indexOf(10);
+        if (newline === -1) return;
+        const request = JSON.parse(buffer.subarray(0, newline).toString('utf8'));
+        const pcmBytes = request.pcmBytes;
+        if (!Number.isInteger(pcmBytes) || pcmBytes < 0) throw new Error('invalid pcmBytes');
+        if (buffer.length < newline + 1 + pcmBytes) return;
+        const body = buffer.subarray(newline + 1, newline + 1 + pcmBytes);
+        buffer = buffer.subarray(newline + 1 + pcmBytes);
+        onRequest(request, body);
+      }
+    }
+  }
+`;
 
 describe("SmartTurnProcess", () => {
-  it("spawns a real correlated JSONL worker with minimal environment", async () => {
+  it("spawns a real correlated framed-binary worker with minimal environment", async () => {
     const script = await helperScript(`
-      import readline from 'node:readline';
       console.log(${readyRecord});
-      const rl = readline.createInterface({ input: process.stdin });
-      rl.on('line', (line) => {
-        const request = JSON.parse(line);
+      ${framedReader}
+      readSmartFrames((request, body) => {
         console.log(JSON.stringify({
           requestId: request.requestId,
           status: 'ready',
           complete: true,
           probability: 0.875,
-          samples: Buffer.from(request.audio, 'base64').byteLength / 4,
+          samples: body.byteLength / 4,
           envHasHome: Object.hasOwn(process.env, 'HOME'),
           envHasPiData: Object.hasOwn(process.env, 'PI_WEB_DATA_DIR')
         }));
@@ -79,12 +102,7 @@ describe("SmartTurnProcess", () => {
     const processClient = new SmartTurnProcess({ commandPath: process.execPath, args: [script], sandbox: { enabled: false }, startupTimeoutMs: 500, operationTimeoutMs: 80, policy });
     const service = createSpeechService({
       policy,
-      smartTurn: {
-        status: () => processClient.status(),
-        start: () => processClient.start(),
-        close: () => processClient.close(),
-        checkTurn: (bytes, options) => processClient.checkTurn(bytes, options),
-      },
+      smartTurn: processClient,
       whisper: {
         status: () => "unavailable",
         start: () => Promise.resolve(),
@@ -95,8 +113,7 @@ describe("SmartTurnProcess", () => {
 
     await expect(service.checkTurn(new Uint8Array(SPEECH_POLICY.audio.endpointWindowBytes))).rejects.toMatchObject({ kind: "timeout" });
 
-    await expect.poll(() => service.debugQueue("smartTurn")).toEqual({ active: false, queued: 0, queuedBytes: 0 });
-    expect(processClient.status()).toBe("unavailable");
+    await expect.poll(() => processClient.status()).toBe("unavailable");
     await expect(service.checkTurn(new Uint8Array(SPEECH_POLICY.audio.minRequestBytes))).rejects.toMatchObject({ kind: "unavailable" });
     await service.close();
   });
@@ -107,12 +124,10 @@ describe("SmartTurnProcess", () => {
     const launches = join(dir, "launches");
     const script = await helperScript(`
       import { appendFile } from 'node:fs/promises';
-      import readline from 'node:readline';
       await appendFile(process.argv[2], '1');
       setTimeout(() => console.log(${readyRecord}), 80);
-      const rl = readline.createInterface({ input: process.stdin });
-      rl.on('line', (line) => {
-        const request = JSON.parse(line);
+      ${framedReader}
+      readSmartFrames((request) => {
         console.log(JSON.stringify({ requestId: request.requestId, status: 'ready', complete: true, probability: 1, samples: 1 }));
       });
     `);
@@ -132,14 +147,12 @@ describe("SmartTurnProcess", () => {
     const marker = join(dir, "started");
     const script = await helperScript(`
       import { access, writeFile } from 'node:fs/promises';
-      import readline from 'node:readline';
       let first = false;
       try { await access(process.argv[2]); } catch { first = true; await writeFile(process.argv[2], 'seen'); }
       console.log(${readyRecord});
       if (first) setTimeout(() => process.exit(17), 20);
-      const rl = readline.createInterface({ input: process.stdin });
-      rl.on('line', (line) => {
-        const request = JSON.parse(line);
+      ${framedReader}
+      readSmartFrames((request) => {
         console.log(JSON.stringify({ requestId: request.requestId, status: 'ready', complete: true, probability: 0.5, samples: 1 }));
       });
     `);
@@ -200,6 +213,14 @@ describe("SmartTurnProcess", () => {
     expect(launch.args).toEqual(expect.arrayContaining(["--unshare-pid", "--proc", "/proc", "--tmpfs", "/home", "--tmpfs", "/tmp", "--unshare-net"]));
     expect(launch.args.join(" ")).not.toContain(process.env["HOME"] ?? "/home");
     expect(launch.args.join(" ")).not.toContain(".pi");
+  });
+
+  it("packages the v2 worker with a bounded raw-PCM frame limit", async () => {
+    const wrapper = await readFile("nix/smart-turn.nix", "utf8");
+
+    expect(wrapper).toContain("name = \"forgerie-smart-turn-worker\"");
+    expect(wrapper).toContain("SMART_TURN_MAX_PCM_BYTES 3840000");
+    expect(wrapper).toContain("--unshare-net");
   });
 
   it("fails closed on malformed readiness and truncates child diagnostics", async () => {
@@ -275,11 +296,8 @@ describe("SmartTurnProcess", () => {
 
   it("escalates SIGTERM-resistant children to SIGKILL and settles close", async () => {
     const script = await helperScript(`
-      import readline from 'node:readline';
       process.on('SIGTERM', () => {});
       console.log(${readyRecord});
-      const rl = readline.createInterface({ input: process.stdin });
-      rl.on('line', () => {});
       setInterval(() => {}, 1000);
     `);
     const processClient = new SmartTurnProcess({ commandPath: process.execPath, args: [script], sandbox: { enabled: false }, startupTimeoutMs: 500, operationTimeoutMs: 500 });
@@ -293,13 +311,22 @@ describe("SmartTurnProcess", () => {
     expect(child.signalCode).toBe("SIGKILL");
   });
 
+  it.runIf(process.env["FORGERIE_REAL_NIX_SMOKE"] === "1")("checks turns through the real packaged Nix worker", async () => {
+    const { stdout } = await execFileAsync("nix", ["build", `path:${process.cwd()}#forgerie-smart-turn-worker`, "--print-out-paths"], { timeout: 180_000 });
+    const outPath = stdout.trim().split("\n").at(-1);
+    if (outPath === undefined || outPath === "") throw new Error("nix build did not print an output path.");
+    const processClient = new SmartTurnProcess({ commandPath: `${outPath}/bin/forgerie-smart-turn-worker`, startupTimeoutMs: 120_000, operationTimeoutMs: 120_000 });
+
+    await processClient.start();
+    await expect(processClient.checkTurn(pcm(SPEECH_POLICY.audio.endpointWindowSamples))).resolves.toMatchObject({ samples: SPEECH_POLICY.audio.endpointWindowSamples });
+    await processClient.close();
+  }, 180_000);
+
   it("does not accumulate child exit listeners after successful requests", async () => {
     const script = await helperScript(`
-      import readline from 'node:readline';
       console.log(${readyRecord});
-      const rl = readline.createInterface({ input: process.stdin });
-      rl.on('line', (line) => {
-        const request = JSON.parse(line);
+      ${framedReader}
+      readSmartFrames((request) => {
         console.log(JSON.stringify({ requestId: request.requestId, status: 'ready', complete: true, probability: 0.75, samples: 1 }));
       });
     `);

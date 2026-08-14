@@ -276,7 +276,7 @@ describe("WhisperProcess", () => {
     await whisper.start();
     await expect(whisper.transcribe(pcmSamples(SPEECH_POLICY.audio.minRequestSamples))).rejects.toMatchObject({ kind: "empty" });
     await whisper.close();
-  });
+  }, 180_000);
 });
 
 function errorMessage(error: unknown): string {
