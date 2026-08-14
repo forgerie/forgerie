@@ -35,6 +35,19 @@ afterEach(() => {
 });
 
 describe("PromptEditor local dictation", () => {
+  it("does not start dictation status work after removal before the first update", async () => {
+    const dictation = fakeDictation();
+    const editor = new PromptEditor();
+    editor.capabilities = { dictation: dictation.capability };
+
+    document.body.append(editor);
+    editor.remove();
+    await editor.updateComplete;
+    await Promise.resolve();
+
+    expect(dictation.statusCalls).toBe(0);
+  });
+
   it("renders one persistent microphone with privacy text and omits it without host capability", async () => {
     const without = await mount();
     expect(mic(without)).toBeNull();
@@ -192,7 +205,6 @@ describe("PromptEditor local dictation", () => {
     expect(statusText(editor)).toContain("Listening");
 
     key(button, "keydown", "Enter");
-    button.click();
     await settle(editor);
     dictation.resolveStop(new Float32Array([0.4]));
     await settle(editor);
@@ -207,14 +219,15 @@ describe("PromptEditor local dictation", () => {
     expect(statusText(editor)).toContain("Listening");
   });
 
-  it("suppresses duplicate synthetic clicks after pointer and Space gestures", async () => {
+  it("ignores delayed pointer compatibility clicks and keeps Space activation singular", async () => {
     const dictation = fakeDictation();
     const editor = await mount({ dictation: dictation.capability });
     const button = requiredMic(editor);
 
     pointer(button, "pointerdown", 21);
     pointer(button, "pointerup", 21);
-    button.click();
+    await vi.advanceTimersByTimeAsync(1);
+    compatibilityClick(button);
     dictation.captureReady();
     await settle(editor);
     expect(dictation.captureCalls).toBe(1);
@@ -228,7 +241,6 @@ describe("PromptEditor local dictation", () => {
 
     key(button, "keydown", " ");
     key(button, "keyup", " ");
-    button.click();
     dictation.captureReady();
     await settle(editor);
     expect(dictation.captureCalls).toBe(2);
@@ -696,6 +708,10 @@ function pointer(target: HTMLElement, type: string, pointerId = 1): void {
 
 function key(target: HTMLElement, type: "keydown" | "keyup", keyValue: string, options: { repeat?: boolean } = {}): void {
   target.dispatchEvent(new KeyboardEvent(type, { key: keyValue, repeat: options.repeat ?? false, bubbles: true, cancelable: true }));
+}
+
+function compatibilityClick(target: HTMLElement): void {
+  target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
 }
 
 function selectText(editor: PromptEditor, from: number, to: number): void {

@@ -134,7 +134,6 @@ export class PromptEditor extends LitElement {
   private pendingDictationStatus: PendingDictationStatus | undefined;
   private dictationGesture = this.createDictationGesture();
   private dictationGestureSource: DictationGestureSource | undefined;
-  private suppressNextDictationClick = false;
   private guidanceRequestVersion = 0;
   private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
@@ -163,6 +162,7 @@ export class PromptEditor extends LitElement {
     window.addEventListener("freeze", this.handlePageHidden);
     window.addEventListener("resize", this.handleResizeOrOrientation);
     window.addEventListener("orientationchange", this.handleResizeOrOrientation);
+    if (this.hasUpdated) this.syncDictationCapability();
   }
 
   protected override willUpdate(changed: PropertyValues<this>): void {
@@ -1089,6 +1089,7 @@ export class PromptEditor extends LitElement {
   }
 
   private syncDictationCapability(): void {
+    if (!this.isConnected) return;
     const capability = this.capabilities.dictation;
     if (capability === undefined) {
       if (this.dictationController !== undefined || this.dictationStatusAbort !== undefined || this.dictationStatusTimer !== undefined) this.disposeDictation();
@@ -1146,6 +1147,7 @@ export class PromptEditor extends LitElement {
   }
 
   private loadDictationStatus(): void {
+    if (!this.isConnected) return;
     const capability = this.capabilities.dictation;
     if (capability === undefined) return;
     this.stopDictationStatusRequest();
@@ -1237,7 +1239,6 @@ export class PromptEditor extends LitElement {
     event.stopPropagation();
     this.releaseDictationPointerCapture();
     this.dictationGestureSource = undefined;
-    this.suppressNextDictationSyntheticClick();
     this.dictationGesture.release();
   }
 
@@ -1271,10 +1272,10 @@ export class PromptEditor extends LitElement {
   private handleDictationClick(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
-    if (this.suppressNextDictationClick) {
-      this.suppressNextDictationClick = false;
-      return;
-    }
+    // Pointer activation is owned by pointerdown/up so hold duration remains
+    // observable. Native keyboard and assistive activation has detail 0 and
+    // reaches this click path as one short tap.
+    if (event instanceof MouseEvent && event.detail > 0) return;
     if (this.dictationGestureSource !== undefined) return;
     this.activateDictationShortTap();
   }
@@ -1289,13 +1290,9 @@ export class PromptEditor extends LitElement {
       return;
     }
     if (event.key === "Enter") {
+      if (!this.dictationCanCompleteFromKey()) return;
       event.preventDefault();
-      this.suppressNextDictationSyntheticClick();
-      if (this.dictationCanCompleteFromKey()) {
-        this.dictationController?.press();
-      } else {
-        this.activateDictationShortTap();
-      }
+      this.dictationController?.press();
       return;
     }
     if (event.key !== " ") return;
@@ -1313,18 +1310,12 @@ export class PromptEditor extends LitElement {
     if (event.key !== " " || this.dictationGestureSource?.tag !== "space") return;
     event.preventDefault();
     this.dictationGestureSource = undefined;
-    this.suppressNextDictationSyntheticClick();
     this.dictationGesture.release();
   }
 
   private activateDictationShortTap(): void {
     if (!this.dictationGesture.press()) return;
     this.dictationGesture.release();
-  }
-
-  private suppressNextDictationSyntheticClick(): void {
-    this.suppressNextDictationClick = true;
-    window.setTimeout(() => { this.suppressNextDictationClick = false; }, 0);
   }
 
   private createDictationGesture(): PromptDictationGesture {
@@ -1340,7 +1331,6 @@ export class PromptEditor extends LitElement {
   private resetDictationGesture(): void {
     this.releaseDictationPointerCapture();
     this.dictationGestureSource = undefined;
-    this.suppressNextDictationClick = false;
     this.dictationGesture.dispose();
     this.dictationGesture = this.createDictationGesture();
   }
