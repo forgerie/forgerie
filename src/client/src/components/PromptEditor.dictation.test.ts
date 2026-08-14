@@ -528,7 +528,7 @@ describe("PromptEditor local dictation", () => {
     dictation.captureReady();
     await settle(editor);
 
-    sendButton(editor).click();
+    expect(editor.shadowRoot?.querySelector(".send-button")).toBeNull();
     expect(onSend).not.toHaveBeenCalled();
     expect(attachButton(editor).disabled).toBe(true);
     expect(button(editor, ".select-model").disabled).toBe(true);
