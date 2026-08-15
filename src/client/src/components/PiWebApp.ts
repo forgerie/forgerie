@@ -100,6 +100,7 @@ import "./SessionInboxPanel";
 import "./WorkspaceManagementDialog";
 import { navigateToInboxSession, type InboxNavigationResult } from "../controllers/inboxNavigation";
 import { deriveSessionInboxBoard } from "../sessionBoard";
+import { sessionInboxAttention } from "../sessionInboxAttention";
 import "./appShell/AppPanelControls";
 import "./appShell/AppPanelOpener";
 import "./appShell/AppPanelEdgeControl";
@@ -3131,9 +3132,18 @@ export class PiWebApp extends LitElement {
         side=${side}
         controls=${`${side}-panel`}
         label=${`Show ${noun}`}
+        .attention=${side === "navigation" ? this.navigationPanelOpenerAttention() : undefined}
         .onPress=${() => { this.panelPeek.open(side); }}
       ></app-panel-opener>
     `;
+  }
+
+  private navigationPanelOpenerAttention(): "blocked" | "unread" | undefined {
+    return sessionInboxAttention(buildInboxBoard(
+      this.state,
+      this.unreadSessionIds,
+      this.cachedUnreadCompletedAt,
+    ).counts);
   }
 
   /**

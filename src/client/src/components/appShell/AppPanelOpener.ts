@@ -2,6 +2,8 @@ import { LitElement, css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { ShellPanel } from "../../appShell/panelIntent";
 
+export type AppPanelOpenerAttention = "blocked" | "unread";
+
 /**
  * The click that asks for a side panel.
  *
@@ -19,6 +21,7 @@ export class AppPanelOpener extends LitElement {
   @property({ type: String }) controls = "";
   @property({ type: String }) label = "";
   @property({ type: Boolean, reflect: true }) open = false;
+  @property({ attribute: false }) attention?: AppPanelOpenerAttention;
   @property({ attribute: false }) onPress?: () => void;
 
   override render() {
@@ -27,14 +30,23 @@ export class AppPanelOpener extends LitElement {
         type="button"
         class="opener"
         title=${this.label}
-        aria-label=${this.label}
+        aria-label=${this.buttonLabel()}
         aria-controls=${this.controls}
         aria-expanded=${String(this.open)}
         @click=${() => { this.onPress?.(); }}
       >
         ${this.renderIcon()}
+        ${this.attention === undefined ? null : html`
+          <span class=${`attention ${this.attention}`} data-attention=${this.attention} aria-hidden="true"></span>
+        `}
       </button>
     `;
+  }
+
+  private buttonLabel(): string {
+    if (this.attention === "blocked") return `${this.label}, Blocked on you`;
+    if (this.attention === "unread") return `${this.label}, Unread sessions`;
+    return this.label;
   }
 
   /**
@@ -63,9 +75,12 @@ export class AppPanelOpener extends LitElement {
      * Quiet until wanted. It sits over the transcript, so it stays muted and
      * gains contrast on approach rather than holding a border all the time.
      */
-    .opener { display: grid; place-items: center; width: 40px; height: 40px; margin: 4px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--pi-muted); opacity: .6; cursor: pointer; }
+    .opener { position: relative; display: grid; place-items: center; width: 40px; height: 40px; margin: 4px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--pi-muted); opacity: .6; cursor: pointer; }
     .opener:hover, .opener:focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); opacity: 1; }
     .opener-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+    .attention { position: absolute; inset-block-start: 7px; inset-inline-end: 7px; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 2px var(--pi-bg); pointer-events: none; }
+    .attention.blocked { background: var(--pi-warning, #ffb000); }
+    .attention.unread { background: var(--pi-purple, #b7a2ff); }
   `;
 }
 

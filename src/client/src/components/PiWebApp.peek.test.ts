@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { SessionInfo } from "../api";
+import type { SessionInfo, SessionStatus } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { PANEL_PEEK, PEEK_EXIT_MS, peekSheetWidth } from "../appShell/panelPeek";
 import { PiWebApp } from "./PiWebApp";
 import { AppPanelControls } from "./appShell/AppPanelControls";
+import { AppPanelOpener } from "./appShell/AppPanelOpener";
 import { AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
 
@@ -137,6 +138,25 @@ describe("PiWebApp panel peek", () => {
     expect(await pin(app)).toBeNull();
   });
 
+  it("marks the sessions opener for unread work", async () => {
+    const unread = session("unread");
+    const app = await mountAppWithInbox([unread], {}, new Set([unread.id]));
+
+    expect(navigationOpener(app).attention).toBe("unread");
+  });
+
+  it("gives blocked work priority over unread work on the sessions opener", async () => {
+    const blocked = session("blocked");
+    const unread = session("unread");
+    const app = await mountAppWithInbox(
+      [blocked, unread],
+      { [blocked.id]: blockedStatus(blocked.id) },
+      new Set([unread.id]),
+    );
+
+    expect(navigationOpener(app).attention).toBe("blocked");
+  });
+
   it("arms over a transcript turn, whose content spills but cannot scroll", async () => {
     const app = await mountApp(FOLDED_PORTRAIT);
     const shell = shellElement(app);
@@ -266,6 +286,22 @@ async function mountApp(shellWidth: number): Promise<PiWebApp> {
   return app;
 }
 
+async function mountAppWithInbox(
+  sessions: SessionInfo[],
+  statuses: Record<string, SessionStatus>,
+  unreadSessionIds: ReadonlySet<string>,
+): Promise<PiWebApp> {
+  localStorage.setItem("pi-web-panel-intents", JSON.stringify({ navigation: "dismissed", workspace: "auto" }));
+  const app = await mountApp(1000);
+  if (!Reflect.set(app, "state", {
+    ...appStateWithSession(),
+    globalSessions: { machineId: "local", status: "fresh", sessions, statuses, activities: {} },
+  })) throw new Error("Could not seed PiWebApp inbox state");
+  if (!Reflect.set(app, "unreadSessionIds", unreadSessionIds)) throw new Error("Could not seed unread sessions");
+  await app.updateComplete;
+  return app;
+}
+
 async function dragAcross(
   app: PiWebApp,
   distancePx: number,
@@ -338,6 +374,12 @@ async function navigationSheetScroller(panel: AppNavigationPanel): Promise<HTMLE
   return scroller;
 }
 
+function navigationOpener(app: PiWebApp): AppPanelOpener {
+  const opener = shadowRoot(app).querySelector("app-panel-opener[side='navigation']");
+  if (!(opener instanceof AppPanelOpener)) throw new Error("PiWebApp did not render the sessions opener");
+  return opener;
+}
+
 async function pin(app: PiWebApp, side: "navigation" | "workspace" = "navigation"): Promise<HTMLElement | null> {
   const controls = await findPanelControls(app, side);
   const button = controls?.shadowRoot?.querySelector("button[data-action='pin']");
@@ -364,15 +406,33 @@ function appStateWithSession(): AppState {
   };
 }
 
-function session(): SessionInfo {
+function session(id = "session-1"): SessionInfo {
   return {
-    id: "session-1",
-    path: "/tmp/session-1.jsonl",
+    id,
+    path: `/tmp/${id}.jsonl`,
     cwd: "/repo",
     created: "2026-01-01T00:00:00.000Z",
     modified: "2026-01-01T00:00:00.000Z",
     messageCount: 2,
     firstMessage: "Initial prompt",
+  };
+}
+
+function blockedStatus(sessionId: string): SessionStatus {
+  return {
+    sessionId,
+    isStreaming: false,
+    isCompacting: false,
+    isBashRunning: false,
+    pendingAsk: {
+      askId: "ask-1",
+      askedAt: "2026-08-07T10:00:00.000Z",
+      questions: [{ id: "q1", question: "Proceed?", options: [] }],
+    },
+    pendingMessageCount: 0,
+    queuedMessages: [],
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
   };
 }
 
