@@ -19,6 +19,26 @@ export type InputMode = "mouse" | "touch";
 export const ROW_ACTIONS_DISPLAY_PROPERTY = "--pi-row-actions-display";
 
 /**
+ * Whether prose may be selected by dragging a finger across it.
+ *
+ * On a touch platform, a long press on selectable text raises the system
+ * selection callout, and the callout takes the pointer stream with it. Any
+ * long-press gesture the application defines over prose therefore never fires:
+ * the platform wins the race every time, and the gesture reads as broken
+ * rather than as unavailable.
+ *
+ * So while a finger is the input, prose stops being selectable and the hold
+ * belongs to the application. Code keeps its selection — see the style rules
+ * that consume this — because code is what a reader actually copies out of a
+ * transcript, and it is also the one place where a long press has an obvious
+ * competing meaning.
+ *
+ * A mouse is unaffected. It has no long-press gesture to protect, and a drag
+ * to select is the only way it has to copy anything.
+ */
+export const PROSE_USER_SELECT_PROPERTY = "--pi-prose-user-select";
+
+/**
  * The value each mode gives to the row actions.
  *
  * Touch removes the actions instead of hiding them. A transparent control
@@ -27,6 +47,11 @@ export const ROW_ACTIONS_DISPLAY_PROPERTY = "--pi-row-actions-display";
  */
 const ROW_ACTIONS_DISPLAY: Readonly<Record<InputMode, string>> = {
   mouse: "flex",
+  touch: "none",
+};
+
+const PROSE_USER_SELECT: Readonly<Record<InputMode, string>> = {
+  mouse: "text",
   touch: "none",
 };
 
@@ -69,6 +94,7 @@ export function observeInputMode(root: InputModeTarget, source: InputModeSource)
     if (mode === next) return;
     mode = next;
     root.style.setProperty(ROW_ACTIONS_DISPLAY_PROPERTY, ROW_ACTIONS_DISPLAY[next]);
+    root.style.setProperty(PROSE_USER_SELECT_PROPERTY, PROSE_USER_SELECT[next]);
   };
 
   apply("mouse");

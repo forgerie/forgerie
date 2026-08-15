@@ -579,6 +579,23 @@ export const chatStyles = css`
      end into the bleed -- see the feature rule in the prose sheet. The bleed is
      free space beside the column, not part of it: a column as wide as the
      widest table would leave that much emptiness on every screen without one. */
+  /*
+   * While a finger is the input, prose stops being selectable so the shell's
+   * long press can survive. On a touch platform the system selection callout
+   * fires first and takes the pointer stream with it, so any hold over text
+   * reads as broken rather than as unavailable. Code keeps its selection: it
+   * is what a reader actually copies out of a transcript, and the summon
+   * gesture stands aside over it for the same reason.
+   *
+   * A mouse is unaffected -- observeInputMode sets the property to 'text'.
+   */
+  .chat { -webkit-user-select: var(--pi-prose-user-select, text); user-select: var(--pi-prose-user-select, text); -webkit-touch-callout: none; }
+  .chat pre, .chat code, .chat textarea, .chat input {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
   .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
   /* One human message and its reply share a box. The box is what the reading
      position holds at the top of the viewport when a turn opens, and what

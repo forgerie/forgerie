@@ -2214,6 +2214,12 @@ export class PiWebApp extends LitElement {
       if (!(node instanceof HTMLElement)) continue;
       if (node.classList.contains("panel-surface")) return false;
       if (node.tagName === "BUTTON" || node.tagName === "A" || node.tagName === "INPUT" || node.tagName === "TEXTAREA") return false;
+      // Code stays selectable on touch, so a hold over it belongs to the
+      // platform's selection rather than to the wheel. The style rule that
+      // keeps code selectable and this test are two halves of one decision:
+      // if they disagree, a hold over code either selects nothing or does
+      // both things at once.
+      if (node.tagName === "PRE" || node.tagName === "CODE") return false;
     }
     return true;
   }
