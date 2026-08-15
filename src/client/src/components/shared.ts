@@ -861,8 +861,8 @@ export const autocompleteStyles = css`
   :host { display: block; }
   .menu {
     position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
-    max-height: min(260px, var(--composer-completion-menu-max-block-size, 260px));
-    max-block-size: min(260px, var(--composer-completion-menu-max-block-size, 260px));
+    max-height: var(--composer-completion-menu-max-block-size, 260px);
+    max-block-size: var(--composer-completion-menu-max-block-size, 260px);
     overflow: auto; overscroll-behavior: contain;
     border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); box-shadow: 0 10px 30px var(--pi-shadow);
   }

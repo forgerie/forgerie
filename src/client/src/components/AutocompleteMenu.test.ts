@@ -50,7 +50,8 @@ describe("AutocompleteMenu", () => {
   it("uses an internally scrolling bounded menu block", () => {
     const styles = autocompleteStyles.cssText.replaceAll(/\s+/g, " ");
 
-    expect(styles).toContain("max-block-size: min(260px, var(--composer-completion-menu-max-block-size, 260px));");
+    expect(styles).toContain("max-block-size: var(--composer-completion-menu-max-block-size, 260px);");
+    expect(styles).not.toContain("min(260px");
     expect(styles).toContain("overflow: auto;");
     expect(styles).not.toContain("@media");
   });

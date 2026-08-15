@@ -421,6 +421,40 @@ describe("ComposerDraft", () => {
     expect(draft.view?.state.doc.toString()).toBe("/");
   });
 
+  it("sizes completions from the composed chat boundary instead of the footer", async () => {
+    const chat = document.createElement("main");
+    chat.className = "chat-view";
+    const promptEditor = document.createElement("prompt-editor");
+    const footer = document.createElement("footer");
+    promptEditor.attachShadow({ mode: "open" }).append(footer);
+    chat.append(promptEditor);
+    document.body.append(chat);
+    const draft = await mountDraft({
+      host: footer,
+      runtime: runtimeWith(({ kind, from, to }) => kind === "command"
+        ? Array.from({ length: 12 }, (_, index) => ({ kind: "command", replaceFrom: from, replaceTo: to, insertText: `/command-${String(index + 1)}`, detail: "skill" }))
+        : []),
+    });
+    let chatHeight = 553;
+    let editorTop = 438;
+    vi.spyOn(chat, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, 0, 591, chatHeight));
+    vi.spyOn(footer, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 429, 563, 116));
+    const editorHost = draft.querySelector<HTMLElement>(".markdown-editor");
+    if (editorHost === null) throw new Error("Expected markdown editor host");
+    vi.spyOn(editorHost, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, editorTop, 545, 54));
+
+    setEditorText(draft, "/");
+    await waitForMenuItems(draft, 12);
+
+    expect(menu(draft)?.style.getPropertyValue("--composer-completion-menu-max-block-size")).toBe("430px");
+
+    chatHeight = 783;
+    editorTop = 668;
+    window.dispatchEvent(new Event("resize"));
+
+    expect(menu(draft)?.style.getPropertyValue("--composer-completion-menu-max-block-size")).toBe("660px");
+  });
+
   it("keeps completion navigation ahead of prompt history and updates combobox state", async () => {
     const draft = await mountDraft({
       promptHistory: ["previous"],
@@ -600,7 +634,7 @@ async function mountDraft(options: {
   if (options.onCompletionError !== undefined) draft.onCompletionError = options.onCompletionError;
   if (options.onDraftEdited !== undefined) draft.onDraftEdited = options.onDraftEdited;
   host.append(draft);
-  document.body.append(host);
+  if (!host.isConnected) document.body.append(host);
   await draft.updateComplete;
   if (draft.view === undefined) throw new Error("Expected CodeMirror to mount");
   return draft;

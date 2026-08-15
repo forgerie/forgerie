@@ -112,6 +112,7 @@ export class ComposerDraft extends LitElement {
   private readonly completionListboxId = `${this.instanceId}-completion-listbox`;
   private readonly completionOptionIdPrefix = `${this.instanceId}-completion-option-`;
   private readonly attachmentDeliveryGroupName = `${this.instanceId}-attachment-delivery`;
+  private readonly handleCompletionBoundaryChange = (): void => { this.syncCompletionMenuBoundary(); };
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     if (changed.has("disabled") && this.disabled) this.abortDictationEdit();
@@ -151,6 +152,9 @@ export class ComposerDraft extends LitElement {
   }
 
   override disconnectedCallback(): void {
+    window.removeEventListener("resize", this.handleCompletionBoundaryChange);
+    window.removeEventListener("orientationchange", this.handleCompletionBoundaryChange);
+    window.visualViewport?.removeEventListener("resize", this.handleCompletionBoundaryChange);
     this.requestVersion += 1;
     this.completions = [];
     this.selectedIndex = 0;
@@ -169,6 +173,9 @@ export class ComposerDraft extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    window.addEventListener("resize", this.handleCompletionBoundaryChange);
+    window.addEventListener("orientationchange", this.handleCompletionBoundaryChange);
+    window.visualViewport?.addEventListener("resize", this.handleCompletionBoundaryChange);
     if (!this.hasUpdated) return;
     void this.updateComplete.then(() => {
       if (!this.isConnected) return;
@@ -928,7 +935,7 @@ export class ComposerDraft extends LitElement {
   private completionMenuBlockSize(): number | undefined {
     const editorHost = this.editorHost;
     if (editorHost === undefined || this.completions.length === 0) return undefined;
-    const boundary = this.closest(".composer") ?? this.closest("footer") ?? this.parentElement;
+    const boundary = completionMenuBoundary(this) ?? this.parentElement;
     if (!(boundary instanceof HTMLElement)) return undefined;
     const boundaryRect = boundary.getBoundingClientRect();
     const editorRect = editorHost.getBoundingClientRect();
@@ -955,6 +962,23 @@ export class ComposerDraft extends LitElement {
   static override styles = promptEditorStyles;
 }
 
+
+function completionMenuBoundary(element: Element): HTMLElement | undefined {
+  return closestComposed(element, ".composer")
+    ?? closestComposed(element, ".chat-view")
+    ?? closestComposed(element, "footer");
+}
+
+function closestComposed(element: Element, selector: string): HTMLElement | undefined {
+  let current: Element | null = element;
+  while (current !== null) {
+    const match = current.closest<HTMLElement>(selector);
+    if (match !== null) return match;
+    const root = current.getRootNode();
+    current = root instanceof ShadowRoot ? root.host : null;
+  }
+  return undefined;
+}
 
 function attachmentAccessibleLabel(attachment: PendingAttachment, index: number, total: number): string {
   const position = total <= 1 ? "attachment 1 of 1" : `attachment ${String(index + 1)} of ${String(total)}`;
