@@ -30,6 +30,11 @@ export interface RadialMenuEntry {
  * decided in `appShell/radialMenu.ts`, so the shape on screen and the hit test
  * come from one set of numbers and cannot drift apart.
  *
+ * There is no centre label. The icons carry the meaning, and a name in the hub
+ * put a second thing to read in the middle of a gesture whose whole point is
+ * that it is aimed rather than read. Each wedge carries its name as an SVG
+ * title instead, which costs no pixels.
+ *
  * Every slot is drawn on every press, including the ones whose icons ran off
  * the edge of the screen. A wedge that cannot show its icon still occupies its
  * direction, and selection reads bearing rather than position, so it remains
@@ -53,7 +58,6 @@ export class AppRadialMenu extends LitElement {
     return html`
       <div class="scrim" aria-hidden="true"></div>
       ${this.renderWheel(layout)}
-      ${this.renderHub(layout)}
     `;
   }
 
@@ -94,7 +98,9 @@ export class AppRadialMenu extends LitElement {
 
     const point = radialGlyphPoint(layout, wedge);
     return svg`
-      <path class=${`wedge ${state}`} d=${radialSectorPath(layout, wedge)}></path>
+      <path class=${`wedge ${state}`} d=${radialSectorPath(layout, wedge)}>
+        ${entry === undefined ? null : svg`<title>${entry.enabled ? entry.label : `${entry.label} (empty)`}</title>`}
+      </path>
       ${point === undefined || entry === undefined ? null : svg`
         <g class=${`glyph ${state}`} transform=${`translate(${String(point.x)} ${String(point.y)})`}>
           <foreignObject x="-11" y="-11" width="22" height="22">
@@ -109,29 +115,6 @@ export class AppRadialMenu extends LitElement {
     `;
   }
 
-  /**
-   * The name of whatever is under the finger, in the middle of the wheel.
-   *
-   * The hub is empty by construction and sits where the eye already is, so it
-   * costs no arc room and needs no leader line. One name at a time is also all
-   * a reader takes in during a gesture.
-   */
-  private renderHub(layout: RadialLayout): TemplateResult {
-    const entry = this.entries.find((candidate) => candidate.slot === this.hovered);
-    const size = layout.inner * 2 - 8;
-    const label = entry === undefined
-      ? "Cancel"
-      : (entry.enabled ? entry.label : `${entry.label} · none`);
-
-    return html`
-      <div
-        class=${`hub ${entry?.enabled === true ? "" : "quiet"}`}
-        role="status"
-        aria-live="polite"
-        style=${`left: ${String(layout.press.x)}px; top: ${String(layout.press.y)}px; width: ${String(size)}px; height: ${String(size)}px`}
-      >${label}</div>
-    `;
-  }
 
   static override styles = css`
     :host { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
@@ -167,22 +150,6 @@ export class AppRadialMenu extends LitElement {
 
     .badge-dot { fill: var(--pi-purple, #b7a2ff); }
     .badge-text { fill: var(--pi-bg); font: 600 9px system-ui, sans-serif; }
-
-    .hub {
-      position: absolute;
-      translate: -50% -50%;
-      display: grid;
-      place-items: center;
-      padding: 0 6px;
-      border: 1px solid var(--pi-border);
-      border-radius: 50%;
-      background: var(--pi-bg);
-      color: var(--pi-text);
-      font: 550 13px/1.3 system-ui, sans-serif;
-      text-align: center;
-      overflow: hidden;
-    }
-    .hub.quiet { color: var(--pi-muted); font-weight: 400; }
 
     .arm-ring {
       position: absolute;
