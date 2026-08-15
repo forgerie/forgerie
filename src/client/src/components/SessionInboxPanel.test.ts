@@ -9,6 +9,7 @@
  * and semantic accessibility attributes.
  */
 
+import { html } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
@@ -388,6 +389,20 @@ describe("default collapse", () => {
     await panel.updateComplete;
 
     expect(root.querySelector("[data-action='toggle-archived']")).toBeNull();
+  });
+
+  it("pins plugin shelves to the inbox floor outside the session scroller", async () => {
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("open-one")]),
+      inboxShelves: [html`<div data-plugin-shelf>Quota</div>`],
+    });
+    const root = shadowRoot(panel);
+    const pluginShelves = root.querySelector("[data-inbox-plugin-shelves]");
+    const boardScroll = root.querySelector(".board-scroll");
+
+    expect(pluginShelves?.querySelector("[data-plugin-shelf]")?.textContent).toBe("Quota");
+    expect(root.lastElementChild).toBe(pluginShelves);
+    expect(boardScroll?.contains(pluginShelves)).toBe(false);
   });
 
   it("blocked group is expanded by default", async () => {

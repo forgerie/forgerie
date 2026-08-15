@@ -8,11 +8,13 @@
  * `shouldShowMachinesSection` logic, and the inbox panel is rendered.
  */
 
+import { html } from "lit";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Machine } from "../../api";
 import type { UnreadPresence } from "../../unreadPresence";
 import { MachineList } from "../MachineList";
 import { MachineSwitcher } from "../MachineSwitcher";
+import { SessionInboxPanel } from "../SessionInboxPanel";
 import { AppNavigationPanel, shouldShowMachinesSection } from "./AppNavigationPanel";
 
 afterEach(() => {
@@ -68,6 +70,19 @@ describe("machine unread presence wiring", () => {
 
     const inbox = panel.shadowRoot?.querySelector("session-inbox-panel");
     expect(inbox).not.toBeNull();
+  });
+
+  it("forwards plugin shelves to the inbox floor", async () => {
+    const panel = new AppNavigationPanel();
+    const shelves = [html`<p>Quota</p>`];
+    panel.machines = [machine("local")];
+    panel.inboxShelves = shelves;
+    document.body.append(panel);
+    await panel.updateComplete;
+
+    const inbox = panel.shadowRoot?.querySelector("session-inbox-panel");
+    if (!(inbox instanceof SessionInboxPanel)) throw new Error("Expected session-inbox-panel");
+    expect(inbox.inboxShelves).toBe(shelves);
   });
 });
 

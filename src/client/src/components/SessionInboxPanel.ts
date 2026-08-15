@@ -204,6 +204,8 @@ export class SessionInboxPanel extends LitElement {
    * Cleared by PiWebApp when navigation succeeds or when machine/topology refreshes.
    */
   @property({ attribute: false }) unavailableCwds: ReadonlySet<string> = new Set();
+  /** Trusted plugin surfaces pinned below the inbox scroller. */
+  @property({ attribute: false }) inboxShelves: readonly unknown[] = [];
 
   // -------------------------------------------------------------------------
   // Internal state (persisted to localStorage)
@@ -408,6 +410,7 @@ export class SessionInboxPanel extends LitElement {
         <div class="board-state" data-state="loading" role="status" aria-live="polite">
           Loading sessions…
         </div>
+        ${this.renderInboxShelves()}
       `;
     }
 
@@ -422,6 +425,7 @@ export class SessionInboxPanel extends LitElement {
         <div class="board-state" data-state="empty">
           <p>No sessions yet.</p>
         </div>
+        ${this.renderInboxShelves()}
       `;
     }
 
@@ -443,6 +447,7 @@ export class SessionInboxPanel extends LitElement {
           <p>All clear — nothing waiting for you.</p>
         </div>
         ${this.renderBoardScroll(board, resolveLocation)}
+        ${this.renderInboxShelves()}
       `;
     }
 
@@ -452,7 +457,13 @@ export class SessionInboxPanel extends LitElement {
       </div>
       ${gs.status === "stale" ? html`<div class="stale-notice" data-state="stale" role="status">Reconnecting…</div>` : nothing}
       ${this.renderBoardScroll(board, resolveLocation)}
+      ${this.renderInboxShelves()}
     `;
+  }
+
+  private renderInboxShelves(): TemplateResult | typeof nothing {
+    if (this.inboxShelves.length === 0) return nothing;
+    return html`<div class="inbox-plugin-shelves" data-inbox-plugin-shelves>${this.inboxShelves}</div>`;
   }
 
   /**
@@ -1553,6 +1564,12 @@ export class SessionInboxPanel extends LitElement {
       outline: 2px solid var(--pi-accent, #7c3cff);
       outline-offset: 2px;
       border-radius: 6px;
+    }
+
+    .inbox-plugin-shelves {
+      flex: 0 0 auto;
+      min-width: 0;
+      min-height: 0;
     }
 
     /* ---- undo toast ---- */

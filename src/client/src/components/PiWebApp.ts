@@ -46,7 +46,7 @@ import { SessionUnreadController } from "../sessionUnread";
 import { deriveUnreadPresence, EMPTY_UNREAD_PRESENCE, sameUnreadPresence, type UnreadPresence } from "../unreadPresence";
 import { initialSessionWarningVisibilityState, reconcileSessionWarningVisibility, toggleSessionWarnings } from "../sessionWarningVisibility";
 import { RealtimeSocket, type BrowserRealtimeEvent } from "../sessionSocket";
-import type { PiWebPluginRegistration, PluginMachine, PluginPromptEditor, QualifiedContributionId, QualifiedThemeContribution, QualifiedThemePairContribution, QualifiedWorkspacePanelContribution, PluginRuntimeContext, TerminalCommandRunsInternalRuntime, WorkspaceFiles, WorkspaceHost, WorkspaceLabelContext, WorkspaceLabelItem, WorkspacePanelContext } from "../plugins/types";
+import type { InboxShelfContext, PiWebPluginRegistration, PluginMachine, PluginPromptEditor, QualifiedContributionId, QualifiedThemeContribution, QualifiedThemePairContribution, QualifiedWorkspacePanelContribution, PluginRuntimeContext, TerminalCommandRunsInternalRuntime, WorkspaceFiles, WorkspaceHost, WorkspaceLabelContext, WorkspaceLabelItem, WorkspacePanelContext } from "../plugins/types";
 import { CLASSIC_THEME_ID, DEFAULT_THEME_PREFERENCE, applyPiWebTheme, findThemePairForTheme, readStoredThemePreference, resolveThemePreference, writeStoredThemePreference, type ThemePreference, type ThemePreferenceResolution } from "../theme";
 import { corePlugin } from "../plugins/core";
 import { themePackPlugin } from "../plugins/themes";
@@ -1549,6 +1549,7 @@ export class PiWebApp extends LitElement {
         .onManageWorkspaces=${() => { this.setState({ workspaceManagementDialog: { step: "project" } }); }}
         .onCancelKeyboardNavigation=${() => { void this.openChat(); }}
         .unavailableCwds=${this.unavailableCwds}
+        .inboxShelves=${this.inboxShelves()}
       ></app-navigation-panel>
     `;
   }
@@ -2254,6 +2255,19 @@ export class PiWebApp extends LitElement {
       case "core:workspace.terminal": return "terminal";
       default: return undefined;
     }
+  }
+
+  private inboxShelves(): unknown[] {
+    const context = this.createInboxShelfContext();
+    return this.plugins.getInboxShelves(context).map((shelf) => shelf.render(context));
+  }
+
+  private createInboxShelfContext(): InboxShelfContext {
+    return {
+      machine: pluginMachineFromState(this.state),
+      state: this.state,
+      host: this.createWorkspaceHost(),
+    };
   }
 
   private workspaceLabelItems(workspace: Workspace): WorkspaceLabelItem[] {

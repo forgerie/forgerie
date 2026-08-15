@@ -7,7 +7,7 @@ import { machineScopedPluginId } from "../../../shared/machinePluginIds";
 import { corePlugin } from "./core";
 import { PluginRegistry } from "./registry";
 import { themePackPlugin } from "./themes";
-import type { PluginRuntimeContext, ThemeTokens, WorkspaceFiles, WorkspaceHost, WorkspaceLabelContext, WorkspaceLabelItem, WorkspacePanelContext } from "./types";
+import type { InboxShelfContext, PluginRuntimeContext, ThemeTokens, WorkspaceFiles, WorkspaceHost, WorkspaceLabelContext, WorkspaceLabelItem, WorkspacePanelContext } from "./types";
 
 function createContext(statePatch: Partial<AppState> = {}) {
   const calls: string[] = [];
@@ -106,6 +106,34 @@ describe("PluginRegistry", () => {
 
     expect(panel?.icon).toBeDefined();
     expect(panel?.render(createWorkspacePanelContext("local"))).toBeDefined();
+  });
+
+  it("qualifies inbox shelves and renders them for the selected machine", () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      id: "quota",
+      plugin: {
+        apiVersion: 1,
+        name: "Quota",
+        activate: ({ html }) => ({
+          contributions: {
+            inboxShelves: [
+              {
+                id: "inbox.quota",
+                order: 20,
+                render: (context) => html`<p>${context.machine.name}</p>`,
+              },
+            ],
+          },
+        }),
+      },
+    });
+
+    const shelves = registry.getInboxShelves(createInboxShelfContext("local"));
+
+    expect(shelves).toHaveLength(1);
+    expect(shelves[0]?.id).toBe("quota:inbox.quota");
+    expect(shelves[0]?.render(createInboxShelfContext("local"))).toBeDefined();
   });
 
   it("exposes the prompt helper to workspace panel callbacks", () => {
@@ -687,6 +715,14 @@ function createWorkspaceLabelContext(machineId: string, workspace = testWorkspac
     state: { ...initialAppState(), selectedMachine: testMachine(machineId) },
     files,
     host,
+  };
+}
+
+function createInboxShelfContext(machineId: string): InboxShelfContext {
+  return {
+    machine: { id: machineId, name: machineId === "local" ? "zao" : machineId, kind: machineId === "local" ? "local" : "remote" },
+    state: initialAppState(),
+    host: { requestRender: vi.fn() },
   };
 }
 

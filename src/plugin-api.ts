@@ -53,6 +53,7 @@ export interface PluginActivationResult {
 
 export interface PluginContributions {
   actions?: PluginAction[];
+  inboxShelves?: InboxShelfContribution[];
   workspacePanels?: WorkspacePanelContribution[];
   workspaceLabels?: WorkspaceLabelContribution[];
   themes?: ThemeContribution[];
@@ -160,6 +161,19 @@ export interface WorkspaceHost {
 }
 
 export type WorkspacePanelHost = WorkspaceHost;
+
+export interface InboxShelfContext {
+  machine: PluginMachine;
+  state?: PluginRuntimeState;
+  host: WorkspaceHost;
+}
+
+export interface InboxShelfContribution {
+  id: LocalContributionId;
+  order?: number;
+  visible?: (context: InboxShelfContext) => boolean;
+  render: (context: InboxShelfContext) => TemplateResult;
+}
 
 export interface WorkspaceContext {
   machine: PluginMachine;

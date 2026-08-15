@@ -1,5 +1,5 @@
 import { html, svg } from "lit";
-import type { PiWebPluginRegistration, PluginAction, PluginRuntimeContext, QualifiedContributionId, QualifiedPluginAction, QualifiedThemeContribution, QualifiedThemePairContribution, QualifiedWorkspaceLabelContribution, QualifiedWorkspacePanelContribution, ThemeContribution, ThemePairContribution, WorkspaceLabelContext, WorkspaceLabelContribution, WorkspaceLabelItem, WorkspacePanelContext, WorkspacePanelContribution } from "./types";
+import type { InboxShelfContext, InboxShelfContribution, PiWebPluginRegistration, PluginAction, PluginRuntimeContext, QualifiedContributionId, QualifiedInboxShelfContribution, QualifiedPluginAction, QualifiedThemeContribution, QualifiedThemePairContribution, QualifiedWorkspaceLabelContribution, QualifiedWorkspacePanelContribution, ThemeContribution, ThemePairContribution, WorkspaceLabelContext, WorkspaceLabelContribution, WorkspaceLabelItem, WorkspacePanelContext, WorkspacePanelContribution } from "./types";
 
 const idPattern = /^[a-z][a-z0-9.-]*$/u;
 const localIdPattern = /^[a-z][a-z0-9.-]*$/u;
@@ -16,6 +16,7 @@ type RegisteredPluginAction = Omit<PluginAction, "id"> & {
 
 export class PluginRegistry {
   private readonly actions: RegisteredPluginAction[] = [];
+  private readonly inboxShelves: QualifiedInboxShelfContribution[] = [];
   private readonly workspacePanels: QualifiedWorkspacePanelContribution[] = [];
   private readonly workspaceLabels: QualifiedWorkspaceLabelContribution[] = [];
   private readonly themes: QualifiedThemeContribution[] = [];
@@ -39,6 +40,7 @@ export class PluginRegistry {
     const result = plugin.activate({ apiVersion: 1, pluginId: id, html, svg });
     const contributions = result.contributions;
     for (const action of contributions.actions ?? []) this.actions.push(this.qualifyAction(id, action, registration.machineId, registration.sourcePluginId));
+    for (const shelf of contributions.inboxShelves ?? []) this.inboxShelves.push(this.qualifyInboxShelf(id, shelf, registration.machineId, registration.sourcePluginId));
     for (const panel of contributions.workspacePanels ?? []) this.workspacePanels.push(this.qualifyWorkspacePanel(id, panel, registration.machineId, registration.sourcePluginId));
     for (const contribution of contributions.workspaceLabels ?? []) this.workspaceLabels.push(this.qualifyWorkspaceLabelContribution(id, contribution, registration.machineId, registration.sourcePluginId));
     if (registration.machineId === undefined) {
@@ -78,6 +80,12 @@ export class PluginRegistry {
     });
   }
 
+  getInboxShelves(context: InboxShelfContext): QualifiedInboxShelfContribution[] {
+    return this.inboxShelves
+      .filter((shelf) => this.isContributionActive(shelf.pluginId, shelf.machineId, context.machine.id, shelf.sourcePluginId) && (shelf.visible?.(context) ?? true))
+      .sort((left, right) => (left.order ?? 1000) - (right.order ?? 1000) || left.id.localeCompare(right.id));
+  }
+
   getWorkspacePanels(): QualifiedWorkspacePanelContribution[] {
     return [...this.workspacePanels].sort((left, right) => (left.order ?? 1000) - (right.order ?? 1000) || left.title.localeCompare(right.title));
   }
@@ -102,6 +110,18 @@ export class PluginRegistry {
   private qualifyAction(pluginId: string, action: PluginAction, machineId: string | undefined, sourcePluginId: string | undefined): RegisteredPluginAction {
     const id = this.qualify(pluginId, action.id);
     return { ...action, id, pluginId, localId: action.id, ...(machineId === undefined ? {} : { machineId }), ...(sourcePluginId === undefined ? {} : { sourcePluginId }) };
+  }
+
+  private qualifyInboxShelf(pluginId: string, shelf: InboxShelfContribution, machineId: string | undefined, sourcePluginId: string | undefined): QualifiedInboxShelfContribution {
+    const id = this.qualify(pluginId, shelf.id);
+    return {
+      ...shelf,
+      id,
+      pluginId,
+      localId: shelf.id,
+      ...(machineId === undefined ? {} : { machineId }),
+      ...(sourcePluginId === undefined ? {} : { sourcePluginId }),
+    };
   }
 
   private qualifyWorkspacePanel(pluginId: string, panel: WorkspacePanelContribution, machineId: string | undefined, sourcePluginId: string | undefined): QualifiedWorkspacePanelContribution {

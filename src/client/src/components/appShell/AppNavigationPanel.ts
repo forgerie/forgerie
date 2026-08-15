@@ -61,6 +61,7 @@ export class AppNavigationPanel extends LitElement {
   /** Dismiss the navigation overlay. Only meaningful while `compact` is set. */
   @property({ attribute: false }) refreshControl?: unknown;
   @property({ attribute: false }) panelControls?: unknown;
+  @property({ attribute: false }) inboxShelves: readonly unknown[] = [];
 
   @query("machine-list") private machineList?: KeyboardNavigableSection;
   @query("machine-switcher") private machineSwitcher?: KeyboardNavigableSection;
@@ -129,6 +130,7 @@ export class AppNavigationPanel extends LitElement {
         .onUndoArchive=${this.onUndoArchive}
         .onDismissUndoToast=${this.onDismissUndoToast}
         .unavailableCwds=${this.unavailableCwds}
+        .inboxShelves=${this.inboxShelves}
         .compact=${this.compact}
         data-machine=${machineId ?? ""}
       ></session-inbox-panel>

@@ -5,6 +5,7 @@ Forgerie plugins are trusted browser-side ES modules that extend the Forgerie UI
 Plugins can currently:
 
 - add action-palette commands;
+- add collapsible or persistent shelves below the inbox scroller;
 - add workspace tools/panels next to Files, Git, and Terminal;
 - add compact workspace-label items in the workspace list, panel header, and status bar;
 - call browser APIs and documented Forgerie plugin context helpers;
@@ -431,6 +432,7 @@ export default {
   activate: ({ pluginId, html }) => ({
     contributions: {
       actions: [],
+      inboxShelves: [],
       workspacePanels: [],
       workspaceLabels: [],
     },
@@ -455,6 +457,7 @@ For example, plugin `info` with action `workspace.show-path` becomes `info:works
 ```ts
 interface PluginContributions {
   actions?: PluginAction[];
+  inboxShelves?: InboxShelfContribution[];
   workspacePanels?: WorkspacePanelContribution[];
   workspaceLabels?: WorkspaceLabelContribution[];
 }
@@ -568,6 +571,43 @@ Use `focusPrompt()` on `PluginRuntimeContext` to move focus to the prompt editor
 - Future Forgerie versions may allow users to override or disable action shortcuts by action id, so plugins should treat `shortcut` as a default rather than a guaranteed final binding.
 - Choose shortcuts carefully to avoid conflicts. There is no user-facing shortcut override or conflict resolver yet.
 - Local text input, terminal input, list navigation, and dialog keys such as Enter, Escape, and arrow keys do not need to be plugin actions unless they are app-level commands.
+
+### Inbox shelves
+
+Inbox shelves render below the session scroller. They stay attached to the inbox floor in docked and compact navigation layouts. A shelf owns its internal state, height, scrolling, and controls. Keep its collapsed height small because it always takes space from the session list.
+
+```js
+inboxShelves: [
+  {
+    id: "inbox.quota",
+    order: 100,
+    render: (context) => html`
+      <my-quota-shelf .context=${context}></my-quota-shelf>
+    `,
+  },
+]
+```
+
+Shelf type:
+
+```ts
+interface InboxShelfContribution {
+  id: string;
+  order?: number;
+  visible?: (context: InboxShelfContext) => boolean;
+  render: (context: InboxShelfContext) => TemplateResult;
+}
+
+interface InboxShelfContext {
+  machine: PluginMachine;
+  state?: PluginRuntimeState;
+  host: {
+    requestRender(): void;
+  };
+}
+```
+
+Use `machineSpecific: true` when a shelf depends on services or files that exist only on its source machine. The shelf is trusted browser code. It can fetch a separate service directly when that service permits the Forgerie origin through CORS.
 
 ### Workspace panels
 
@@ -1014,7 +1054,7 @@ If you are an AI agent building or editing a Forgerie plugin, follow this checkl
 1. Create or update a plugin folder with `package.json` and a JavaScript module such as `pi-web-plugin.js`.
 2. Use the single supported package metadata shape: `piWeb.plugins` array with `{ id, module, machineSpecific? }` entries.
 3. Default-export `{ apiVersion: 1, name, activate }` from the module.
-4. Return `{ contributions: { actions, workspacePanels, workspaceLabels } }` from `activate()`.
+4. Return any supported contributions, such as `{ contributions: { actions, inboxShelves, workspacePanels, workspaceLabels } }`, from `activate()`.
 5. Use ids matching `^[a-z][a-z0-9.-]*$`.
 6. Use the activation context's `html` function for Lit templates.
 7. Keep `activate()` synchronous and cheap; return contribution definitions only.
