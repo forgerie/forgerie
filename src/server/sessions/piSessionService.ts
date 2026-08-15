@@ -27,6 +27,7 @@ import { projectBrowserMessage } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
+import { markAgentSpawned } from "./agentSpawnedMarks.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
 import { buildActiveCommandCatalog, buildActiveCommandList, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
 import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
@@ -3015,18 +3016,18 @@ export class PiSessionService implements SessionRouteService {
 
   private async markSessionsSpawnedByTool(event: unknown): Promise<void> {
     for (const sessionFile of spawnedSessionFiles(event)) {
-      try {
-        await markAgentSpawned(sessionFile);
+      // The run has ended, so the child process that owned this file has
+      // exited. That is the proof the quiet period stands in for elsewhere.
+      const outcome = await markAgentSpawned(sessionFile, { requireQuietForMs: 0 });
+      if (outcome.kind === "marked") {
         this.sessionHeaderCache.delete(sessionFile);
         this.sessionManager.invalidateSessionFile(sessionFile);
-      } catch (error: unknown) {
-        // A spawned session that was never persisted has no file to mark, and
-        // that is not a failure worth reporting.
-        const code = isRecord(error) ? error["code"] : undefined;
-        if (code === "ENOENT") continue;
-        const message = error instanceof Error ? error.message : String(error);
-        process.stderr.write(`[sessions] could not mark spawned session ${sessionFile}: ${message}\n`);
+        continue;
       }
+      // A spawned session that was never persisted has no file to mark, and an
+      // already-marked one needs nothing. Neither is worth reporting.
+      if (outcome.kind === "absent" || outcome.kind === "already") continue;
+      process.stderr.write(`[sessions] could not mark spawned session ${sessionFile}: ${outcome.kind}\n`);
     }
   }
 
@@ -4863,14 +4864,6 @@ async function rewriteSessionHeader(
   if (!isRecord(header) || header["type"] !== "session") throw new Error("Invalid session file header");
   if (!mutate(header)) return;
   await writeFile(sessionFile, `${JSON.stringify(header)}${rest}`, "utf8");
-}
-
-async function markAgentSpawned(sessionFile: string): Promise<void> {
-  await rewriteSessionHeader(sessionFile, (header) => {
-    if (header["agentSpawned"] === true) return false;
-    header["agentSpawned"] = true;
-    return true;
-  });
 }
 
 /**
