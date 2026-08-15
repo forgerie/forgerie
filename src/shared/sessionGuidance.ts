@@ -10,9 +10,31 @@ export const SESSION_GUIDANCE_ENTRIES = [
     name: "Technical English",
     description: "Use short, direct sentences and consistent terms.",
   },
+  {
+    id: "concise-responses",
+    name: "Progressive answers",
+    description: "Answer first, then offer detail instead of delivering it.",
+  },
+  {
+    id: "honest-claims",
+    name: "Honest claims",
+    description: "Label claims, verify before asserting, and lead with corrections.",
+  },
 ] as const satisfies readonly SessionGuidanceEntry[];
 
 export type SessionGuidanceId = (typeof SESSION_GUIDANCE_ENTRIES)[number]["id"];
+
+/**
+ * Applied when a session has never stored a choice. An explicit clear is
+ * stored as an empty list and is honoured, so turning everything off stays
+ * off; only the absence of any stored choice falls back to these.
+ *
+ * The id `concise-responses` no longer matches its name. Renaming it would
+ * drop the guidance from every session that already stored it, because
+ * `normalizeSessionGuidanceIds` silently discards unknown ids.
+ */
+export const DEFAULT_SESSION_GUIDANCE_IDS: readonly SessionGuidanceId[] =
+  SESSION_GUIDANCE_ENTRIES.map((entry) => entry.id);
 
 export interface SessionGuidanceChange {
   readonly activeIds: string[];

@@ -57,8 +57,10 @@ describe("session guidance bridge", () => {
     slot.replace(["technical-english"]);
     const handlers = createSessionGuidanceBridgeHandlers(slot);
 
+    // No stored choice means the defaults apply, so session start turns every
+    // guidance on rather than leaving the session unguided.
     handlers.sessionStart(() => []);
-    expect(slot.snapshot()).toEqual([]);
+    expect(slot.snapshot()).toEqual(["technical-english", "concise-responses", "honest-claims"]);
     slot.replace(["technical-english"]);
     handlers.sessionShutdown();
     expect(slot.snapshot()).toEqual([]);

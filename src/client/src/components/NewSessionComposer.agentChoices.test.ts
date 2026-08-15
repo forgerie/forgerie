@@ -26,7 +26,7 @@ describe("new-session composer agent choices", () => {
 
     await pickModel(composer, { provider: "anthropic", id: "claude-opus-5" });
     await pickThinking(composer, "high");
-    await setGuidance(composer, "technical-english", true);
+    await setGuidance(composer, "technical-english", false);
     setText(composer, "start the review");
     sendButton(composer).click();
     await settleRenderedDialog(composer);
@@ -35,7 +35,7 @@ describe("new-session composer agent choices", () => {
     expect(submitted[0]?.agentChoices).toEqual({
       modelSpec: "anthropic/claude-opus-5",
       thinkingLevel: "high",
-      guidanceIds: ["technical-english"],
+      guidanceIds: ["concise-responses", "honest-claims"],
     });
   });
 
@@ -62,6 +62,7 @@ describe("new-session composer agent choices", () => {
     expect(submitted[0]?.agentChoices).toEqual({
       modelSpec: "anthropic/claude-opus-5",
       thinkingLevel: "high",
+      guidanceIds: ["technical-english", "concise-responses", "honest-claims"],
     });
   });
 

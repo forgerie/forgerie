@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SESSION_GUIDANCE_IDS,
   SESSION_GUIDANCE_ENTRIES,
   normalizeSessionGuidanceIds,
   sessionGuidanceSummary,
@@ -7,12 +8,28 @@ import {
 } from "./sessionGuidance";
 
 describe("session guidance domain", () => {
-  it("publishes only the Technical English entry in version 1", () => {
-    expect(SESSION_GUIDANCE_ENTRIES).toEqual([{
-      id: "technical-english",
-      name: "Technical English",
-      description: "Use short, direct sentences and consistent terms.",
-    }]);
+  it("publishes the built-in guidance catalog", () => {
+    expect(SESSION_GUIDANCE_ENTRIES).toEqual([
+      {
+        id: "technical-english",
+        name: "Technical English",
+        description: "Use short, direct sentences and consistent terms.",
+      },
+      {
+        id: "concise-responses",
+        name: "Progressive answers",
+        description: "Answer first, then offer detail instead of delivering it.",
+      },
+      {
+        id: "honest-claims",
+        name: "Honest claims",
+        description: "Label claims, verify before asserting, and lead with corrections.",
+      },
+    ]);
+  });
+
+  it("defaults every built-in guidance to on", () => {
+    expect(DEFAULT_SESSION_GUIDANCE_IDS).toEqual(["technical-english", "concise-responses", "honest-claims"]);
   });
 
   it("enables, disables, and re-enables entries without losing stable order", () => {

@@ -11,6 +11,15 @@ function entry(data: unknown) {
 }
 
 describe("persisted session guidance", () => {
+  it("turns every guidance on when no choice was ever stored", () => {
+    expect(restoreSessionGuidance([])).toEqual(["technical-english", "concise-responses", "honest-claims"]);
+    expect(restoreSessionGuidance([{ type: "custom", customType: "other", data: {} }])).toEqual([
+      "technical-english",
+      "concise-responses",
+      "honest-claims",
+    ]);
+  });
+
   it("restores the latest full snapshot, including an empty clear", () => {
     const entries = [
       entry(persistedSessionGuidance(["technical-english"])),
@@ -48,8 +57,33 @@ describe("session guidance prompt block", () => {
     expect(block).toContain("Use sentences of 20 words or fewer when practical.");
     expect(block).toContain("Explain necessary technical terms when you first use them.");
     expect(block).toContain("Before sending, split sentences that contain more than one action, cause, result, or qualification.");
+    expect(block).toContain("Before sending, replace any second word you used for a concept you already named.");
     expect(block).not.toContain("Use short, direct sentences and consistent terms.");
     expect(block).not.toContain("technical-english");
+  });
+
+  it("keeps concise responses short and answer-first", () => {
+    const block = sessionGuidancePromptBlock(["concise-responses"]);
+
+    expect(block).toContain("Give the answer first.");
+    expect(block).toContain("Do not repeat the question, narrate the process, or add an unsolicited recap.");
+    expect(block).toContain("Expand only when the user asks for detail or the task requires it for safety.");
+    expect(block).toContain("Before sending, delete each sentence that does not change what the user does or decides.");
+    expect(block).toContain("Offer deeper detail instead of including it, and name what you can expand on in one line.");
+    expect(block).not.toContain("Mark each factual claim");
+  });
+
+  it("uses strict server instruction text for honest claims", () => {
+    const block = sessionGuidancePromptBlock(["honest-claims"]);
+
+    expect(block).toContain("Open the reply with any correction to earlier work.");
+    expect(block).toContain("This includes a defect in work you delivered in this same session.");
+    expect(block).toContain("Mark each factual claim as verified, inferred, or opinion.");
+    expect(block).toContain("Call a claim verified only if you checked the source in this session.");
+    expect(block).toContain("Do not mix an unchecked claim into a list of checked claims.");
+    expect(block).toContain("State the cost of each recommendation.");
+    expect(block).toContain("Never defer a correction or a safety-relevant cost, even when you offer other detail instead.");
+    expect(block).toContain("Before sending, check each factual sentence; label it or delete it if you did not verify it.");
   });
 
   it("drops unknown active IDs", () => {

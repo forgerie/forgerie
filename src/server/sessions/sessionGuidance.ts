@@ -1,4 +1,9 @@
-import { isSessionGuidanceId, normalizeSessionGuidanceIds, type SessionGuidanceId } from "../../shared/sessionGuidance.js";
+import {
+  DEFAULT_SESSION_GUIDANCE_IDS,
+  isSessionGuidanceId,
+  normalizeSessionGuidanceIds,
+  type SessionGuidanceId,
+} from "../../shared/sessionGuidance.js";
 
 export const SESSION_GUIDANCE_CUSTOM_TYPE = "forgerie.session-guidance";
 const SESSION_GUIDANCE_VERSION = 1;
@@ -13,6 +18,25 @@ const instructions = {
     "Use one term for each concept.",
     "Explain necessary technical terms when you first use them.",
     "Before sending, split sentences that contain more than one action, cause, result, or qualification.",
+    "Before sending, replace any second word you used for a concept you already named.",
+  ].join(" "),
+  "concise-responses": [
+    "Give the answer first.",
+    "Do not repeat the question, narrate the process, or add an unsolicited recap.",
+    "Expand only when the user asks for detail or the task requires it for safety.",
+    "Offer deeper detail instead of including it, and name what you can expand on in one line.",
+    "Before sending, delete each sentence that does not change what the user does or decides.",
+  ].join(" "),
+  "honest-claims": [
+    "Open the reply with any correction to earlier work.",
+    "This includes a defect in work you delivered in this same session.",
+    "Mark each factual claim as verified, inferred, or opinion.",
+    "Call a claim verified only if you checked the source in this session.",
+    "Name the file, command, or document that you checked.",
+    "Do not mix an unchecked claim into a list of checked claims.",
+    "State the cost of each recommendation.",
+    "Never defer a correction or a safety-relevant cost, even when you offer other detail instead.",
+    "Before sending, check each factual sentence; label it or delete it if you did not verify it.",
   ].join(" "),
 } satisfies Readonly<Record<SessionGuidanceId, string>>;
 
@@ -33,7 +57,13 @@ export function restoreSessionGuidance(entries: readonly unknown[]): string[] {
     latest = entry.data;
     found = true;
   }
-  if (!found || !isRecord(latest) || latest["version"] !== SESSION_GUIDANCE_VERSION || !Array.isArray(latest["activeIds"])) return [];
+  // No stored choice at all means the session predates the picker or has
+  // never opened it, so every guidance starts on. A stored snapshot is
+  // honoured as written, including an empty list, so an explicit clear is
+  // not silently undone. A malformed snapshot stays empty rather than
+  // turning guidance back on behind the user's back.
+  if (!found) return [...DEFAULT_SESSION_GUIDANCE_IDS];
+  if (!isRecord(latest) || latest["version"] !== SESSION_GUIDANCE_VERSION || !Array.isArray(latest["activeIds"])) return [];
   return normalizeSessionGuidanceIds(latest["activeIds"]);
 }
 

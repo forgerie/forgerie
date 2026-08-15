@@ -228,7 +228,7 @@ describe("new-session-composer editing and submission", () => {
     sendButton(composer).click();
     await settleCatalog(composer);
 
-    expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "  exact prompt  " } });
+    expect(onSubmit).toHaveBeenCalledWith({ agentChoices: { guidanceIds: ["technical-english", "concise-responses", "honest-claims"] }, destination, firstPrompt: { text: "  exact prompt  " } });
     expect(dialogSurface(composer).busy).toBe(true);
     expect(cancelButton(composer).disabled).toBe(true);
     surfaceBackdrop(composer).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
@@ -305,7 +305,7 @@ describe("new-session-composer editing and submission", () => {
     setEditorText(composer, "/review now");
     sendButton(composer).click();
     await settleCatalog(composer);
-    expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
+    expect(onSubmit).toHaveBeenCalledWith({ agentChoices: { guidanceIds: ["technical-english", "concise-responses", "honest-claims"] }, destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
   });
 
   it("blocks unknown slash commands after validation without creating a session through footer or Enter", async () => {
@@ -414,7 +414,7 @@ describe("new-session-composer editing and submission", () => {
     sendButton(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-action='retry-prompt-resource-validation']").click();
-    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review", promptResourceCommandIdentity: identity } }); });
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledWith({ agentChoices: { guidanceIds: ["technical-english", "concise-responses", "honest-claims"] }, destination, firstPrompt: { text: "/review", promptResourceCommandIdentity: identity } }); });
 
     document.body.replaceChildren();
     const missingName = await mountComposer({ initialDestination: destination, initialPrompt: "/", onSubmit });
@@ -449,7 +449,7 @@ describe("new-session-composer editing and submission", () => {
     const textComposer = await mountComposer({ initialDestination: destination, initialPrompt: "plain text", onSubmit: textSubmit });
     sendButton(textComposer).click();
     await settleCatalog(textComposer);
-    expect(textSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "plain text" } });
+    expect(textSubmit).toHaveBeenCalledWith({ agentChoices: { guidanceIds: ["technical-english", "concise-responses", "honest-claims"] }, destination, firstPrompt: { text: "plain text" } });
 
     document.body.replaceChildren();
     const attachmentSubmit = vi.fn((intent: NewSessionLaunchIntent): Promise<NewSessionSubmissionOutcome> => {

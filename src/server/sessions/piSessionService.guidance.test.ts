@@ -104,7 +104,7 @@ describe("PiSessionService session guidance", () => {
     let rebindSession: ((session: PiAgentSession) => Promise<void>) | undefined;
     original.runtime.setRebindSession = (callback) => { rebindSession = callback; };
     replacement.session.bindExtensions = () => {
-      expect(slot.snapshot()).toEqual([]);
+      expect(slot.snapshot()).toEqual(["technical-english", "concise-responses", "honest-claims"]);
       return Promise.resolve();
     };
     const service = new PiSessionService(new CapturingSessionEventHub(), {
@@ -120,7 +120,7 @@ describe("PiSessionService session guidance", () => {
     if (!Reflect.set(original.runtime, "session", replacement.session)) throw new Error("Could not replace runtime session");
     await rebindSession(replacement.session);
 
-    expect(slot.snapshot()).toEqual([]);
+    expect(slot.snapshot()).toEqual(["technical-english", "concise-responses", "honest-claims"]);
     await service.dispose();
   });
 
@@ -151,7 +151,7 @@ describe("PiSessionService session guidance", () => {
     if (!Reflect.set(original.runtime, "session", replacement.session)) throw new Error("Could not replace runtime session");
     await expect(rebindSession(replacement.session)).rejects.toThrow("bind failed");
 
-    expect(slot.snapshot()).toEqual([]);
+    expect(slot.snapshot()).toEqual(["technical-english", "concise-responses", "honest-claims"]);
     await service.dispose();
   });
 
