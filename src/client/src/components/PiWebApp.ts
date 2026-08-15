@@ -1,4 +1,4 @@
-import { LitElement, html } from "lit";
+import { LitElement, html, type TemplateResult } from "lit";
 
 import { customElement, query, state } from "lit/decorators.js";
 import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
@@ -60,6 +60,8 @@ import { NavigationSectionsController, type NavigationSection } from "../appShel
 import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
 import { PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
 import { PanelPeekController } from "../appShell/panelPeekController";
+import { RadialMenuController } from "../appShell/radialMenuController";
+import { RADIAL_SLOT_COUNT, radialSlotsEqual, readStoredRadialSlots, reconcileRadialSlots, writeStoredRadialSlots, type RadialSlotMap } from "../appShell/radialSlots";
 import { peekSheetWidth } from "../appShell/panelPeek";
 import { canDockAt, type ShellPanel } from "../appShell/panelIntent";
 import { chromeDisclosureClass, shellLayoutModeClass } from "../appShell/shellLayoutMode";
@@ -104,6 +106,8 @@ import { sessionInboxAttention } from "../sessionInboxAttention";
 import "./appShell/AppPanelControls";
 import "./appShell/AppPanelOpener";
 import "./appShell/AppPanelEdgeControl";
+import "./appShell/AppRadialMenu";
+import type { RadialMenuEntry } from "./appShell/AppRadialMenu";
 import "./appShell/AppRefreshControl";
 import { appStyles, NEW_SESSION_LABEL, renderNewSessionIcon, type ChatLine } from "./shared";
 
@@ -333,6 +337,22 @@ export class PiWebApp extends LitElement {
   });
 
   /**
+   * The wheel. Shares the shell's pointer stream with the peek: a drag is a
+   * peek, a hold is a wheel, and the peek's still-timer gives up at exactly the
+   * moment this one arms.
+   */
+  private readonly radialMenu = new RadialMenuController(this, {
+    slotCount: () => RADIAL_SLOT_COUNT,
+    viewport: () => ({ width: this.clientWidth, height: this.clientHeight }),
+    canOpenAt: (event) => this.radialMenuCanOpenAt(event),
+    isSlotEnabled: (slot) => this.radialEntries()[slot]?.enabled ?? false,
+    onCommit: (slot) => { this.openRadialSlot(slot); },
+  });
+
+  /** Reconciled against the installed panels on read, and written only when it moves. */
+  private radialSlotAssignment: RadialSlotMap = readStoredRadialSlots();
+
+  /**
    * Puts the sheet where the finger is without a render.
    *
    * Travel arrives every frame. A render here is a render of the whole
@@ -406,6 +426,12 @@ export class PiWebApp extends LitElement {
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
     if (this.isRenderedModalOpen()) return;
+    // The wheel is a look too, and it is on top, so it answers Escape first.
+    if (event.key === "Escape" && this.radialMenu.state.kind !== "closed") {
+      event.preventDefault();
+      this.radialMenu.close();
+      return;
+    }
     // A peek is a look, so it yields to the first key that asks it to.
     if (event.key === "Escape" && this.panelPeek.panel !== undefined) {
       event.preventDefault();
@@ -2175,6 +2201,93 @@ export class PiWebApp extends LitElement {
     `;
   }
 
+  /**
+   * The wheel opens over the conversation, not over the shell's own controls.
+   *
+   * A hold on a button is a hold on that button, and a hold inside an open
+   * panel belongs to whatever is in the panel. Without this the gesture would
+   * quietly take over every long press in the application.
+   */
+  private radialMenuCanOpenAt(event: PointerEvent): boolean {
+    if (this.panelPeek.panel !== undefined) return false;
+    for (const node of event.composedPath()) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.classList.contains("panel-surface")) return false;
+      if (node.tagName === "BUTTON" || node.tagName === "A" || node.tagName === "INPUT" || node.tagName === "TEXTAREA") return false;
+    }
+    return true;
+  }
+
+  /**
+   * The slot map, grown into but never rewritten.
+   *
+   * Reconciled against every registered panel rather than the visible ones: a
+   * panel that is conditionally hidden must keep its direction, or the slots
+   * behind it shift the moment it disappears.
+   */
+  private radialSlotMap(): RadialSlotMap {
+    const available = this.plugins.getWorkspacePanels().map((panel) => panel.id);
+    const next = reconcileRadialSlots(this.radialSlotAssignment, available);
+    if (!radialSlotsEqual(next, this.radialSlotAssignment)) {
+      this.radialSlotAssignment = next;
+      writeStoredRadialSlots(next);
+    }
+    return this.radialSlotAssignment;
+  }
+
+  private radialEntries(): RadialMenuEntry[] {
+    const slots = this.radialSlotMap();
+    const workspace = this.state.selectedWorkspace;
+    const context = workspace === undefined ? undefined : this.createWorkspacePanelContext(workspace);
+    const panels = this.plugins.getWorkspacePanels();
+
+    return slots.map((target, slot) => {
+      if (target === undefined) return { slot, label: "Empty", icon: undefined, enabled: false };
+      if (target.kind === "navigation") {
+        return { slot, label: "Inbox", icon: renderRadialIcon("inbox"), enabled: true };
+      }
+      if (target.kind === "overflow") {
+        return { slot, label: "More", icon: renderRadialIcon("more"), enabled: true };
+      }
+
+      const panel = panels.find((candidate) => candidate.id === target.tool);
+      if (panel === undefined || context === undefined) {
+        return { slot, label: panel?.title ?? "Empty", icon: panel?.icon, enabled: false };
+      }
+      return {
+        slot,
+        label: panel.title,
+        icon: panel.icon,
+        badge: countBadge(panel.badge?.(context)),
+        enabled: panel.visible?.(context) ?? true,
+      };
+    });
+  }
+
+  private openRadialSlot(slot: number): void {
+    const target = this.radialSlotMap()[slot];
+    if (target === undefined) return;
+    if (target.kind === "navigation") { this.panelPeek.open("navigation"); return; }
+    // Overflow opens the workspace sheet, whose tab strip already lists every
+    // panel. The wheel does not need a second list of its own.
+    if (target.kind === "overflow") { this.panelPeek.open("workspace"); return; }
+    this.openWorkspaceTool(target.tool);
+  }
+
+  private renderRadialMenu() {
+    const state = this.radialMenu.state;
+    if (state.kind === "closed") return null;
+    return html`
+      <app-radial-menu
+        .holdMs=${this.radialMenu.holdMs}
+        .arming=${state.kind === "arming" ? state.press : undefined}
+        .layout=${state.kind === "open" ? state.layout : undefined}
+        .hovered=${state.kind === "open" ? state.hovered : undefined}
+        .entries=${state.kind === "open" ? this.radialEntries() : []}
+      ></app-radial-menu>
+    `;
+  }
+
   private visibleWorkspacePanels(): QualifiedWorkspacePanelContribution[] {
     const workspace = this.state.selectedWorkspace;
     if (workspace === undefined) return [];
@@ -3410,13 +3523,14 @@ export class PiWebApp extends LitElement {
       <div
         class=${`${this.panelIntent.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`}
         style=${`${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })} ${this.dockedWidthStyle()}`}
-        @pointerdown=${(event: PointerEvent) => { this.panelPeek.onPointerDown(event); }}
-        @pointermove=${(event: PointerEvent) => { this.panelPeek.onPointerMove(event); }}
-        @pointerup=${(event: PointerEvent) => { this.panelPeek.onPointerUp(event); }}
-        @pointercancel=${() => { this.panelPeek.onPointerCancel(); }}
-        @touchmove=${(event: TouchEvent) => { this.panelPeek.onTouchMove(event); }}
+        @pointerdown=${(event: PointerEvent) => { this.panelPeek.onPointerDown(event); this.radialMenu.onPointerDown(event); }}
+        @pointermove=${(event: PointerEvent) => { this.panelPeek.onPointerMove(event); this.radialMenu.onPointerMove(event); }}
+        @pointerup=${(event: PointerEvent) => { this.panelPeek.onPointerUp(event); this.radialMenu.onPointerUp(event); }}
+        @pointercancel=${() => { this.panelPeek.onPointerCancel(); this.radialMenu.onPointerCancel(); }}
+        @touchmove=${(event: TouchEvent) => { this.panelPeek.onTouchMove(event); this.radialMenu.onTouchMove(event); }}
         @wheel=${(event: WheelEvent) => { this.panelPeek.onWheel(event); }}
       >
+        ${this.renderRadialMenu()}
         ${this.renderPeekScrim()}
         ${this.renderPanelSurface("navigation")}
         ${this.renderNavigationPanelEdgeControl()}
@@ -3625,6 +3739,39 @@ function thinkingDescription(level: string): string | undefined {
     case "xhigh": return "Maximum reasoning (~32k tokens)";
     default: return undefined; // unknown level from a newer pi: no description
   }
+}
+
+/**
+ * Icons for the two wedges that are not workspace panels.
+ *
+ * Drawn here rather than reused from the tab strip because they answer a
+ * different question: on the wheel they name a direction, not a tab. Three
+ * lines mean a list, which is what the inbox is; three dots mean the rest,
+ * which is what overflow holds.
+ */
+function renderRadialIcon(kind: "inbox" | "more"): TemplateResult {
+  if (kind === "inbox") {
+    return html`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" />
+    </svg>`;
+  }
+  return html`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
+  </svg>`;
+}
+
+/**
+ * A wedge shows a short count, or nothing.
+ *
+ * A panel may return rendered markup as its badge. There is no room for that
+ * on a wedge and a truncated badge would be worse than an absent one, so
+ * anything that is not a short scalar is dropped.
+ */
+function countBadge(badge: string | number | TemplateResult | undefined): string | undefined {
+  if (typeof badge === "number") return badge > 0 ? String(badge) : undefined;
+  if (typeof badge !== "string") return undefined;
+  const trimmed = badge.trim();
+  return trimmed === "" || trimmed.length > 3 ? undefined : trimmed;
 }
 
 /**
