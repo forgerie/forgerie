@@ -68,6 +68,32 @@ describe("PiWebApp panel peek", () => {
     expect(peekSheet(app)).toBeNull();
   });
 
+  it("restores the same panel and scroll position after the sheet leaves sight", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+    if (!Reflect.set(app, "state", {
+      ...appStateWithSession(),
+      globalSessions: { machineId: "local", status: "fresh", sessions: [session()], statuses: {}, activities: {} },
+    })) throw new Error("Could not seed the navigation panel");
+    await app.updateComplete;
+    await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+    const firstPanel = navigationSheetPanel(app);
+    const firstScroller = await navigationSheetScroller(firstPanel);
+    firstScroller.scrollTop = 211;
+
+    tapScrim(app);
+    await settle(app);
+    expect(firstPanel.isConnected).toBe(true);
+    expect(shadowRoot(app).querySelector(".panel-surface[data-side='navigation']")?.hasAttribute("hidden")).toBe(true);
+
+    await dragAcross(app, peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+    const returnedPanel = navigationSheetPanel(app);
+    const returnedScroller = await navigationSheetScroller(returnedPanel);
+
+    expect(returnedPanel).toBe(firstPanel);
+    expect(returnedScroller).toBe(firstScroller);
+    expect(returnedScroller.scrollTop).toBe(211);
+  });
+
   it("opens the sheet when the look was carried far enough", async () => {
     const app = await mountApp(FOLDED_PORTRAIT);
 
@@ -294,6 +320,22 @@ function scrim(app: PiWebApp): HTMLElement | null {
 function peekSheet(app: PiWebApp): HTMLElement | null {
   const sheet = shadowRoot(app).querySelector(".panel-surface[data-mode=\"sheet\"]");
   return sheet instanceof HTMLElement ? sheet : null;
+}
+
+function navigationSheetPanel(app: PiWebApp): AppNavigationPanel {
+  const panel = peekSheet(app)?.querySelector("app-navigation-panel");
+  if (!(panel instanceof AppNavigationPanel)) throw new Error("The sheet did not carry the navigation panel");
+  return panel;
+}
+
+async function navigationSheetScroller(panel: AppNavigationPanel): Promise<HTMLElement> {
+  await panel.updateComplete;
+  const inbox = panel.shadowRoot?.querySelector("session-inbox-panel");
+  if (!(inbox instanceof HTMLElement) || !("updateComplete" in inbox)) throw new Error("The navigation panel did not render its inbox");
+  await Reflect.get(inbox, "updateComplete");
+  const scroller = inbox.shadowRoot?.querySelector(".board-scroll");
+  if (!(scroller instanceof HTMLElement)) throw new Error("The inbox did not render its scroll container");
+  return scroller;
 }
 
 async function pin(app: PiWebApp, side: "navigation" | "workspace" = "navigation"): Promise<HTMLElement | null> {

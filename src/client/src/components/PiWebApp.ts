@@ -318,6 +318,7 @@ export class PiWebApp extends LitElement {
     onRefreshError: (error) => { console.warn("Failed to refresh after browser resume", error); },
   });
   private readonly panelIntent = new PanelIntentController(this);
+  private readonly mountedPanelSides = new Set<ShellPanel>();
   private readonly sessionDictationSpeechApi: ComposerDictationCapability["speechApi"] = { checkTurn: checkSpeechTurn, transcribe: transcribeSpeech };
   private readonly sessionDictationCapabilityValue: ComposerDictationCapability = {
     getStatus: getSpeechStatus,
@@ -3122,7 +3123,7 @@ export class PiWebApp extends LitElement {
    * trap the seam arrow used to spring.
    */
   private renderPanelOpener(side: ShellPanel) {
-    if (this.renderPanelSurface(side) !== null) return null;
+    if (this.panelSurfacePresentation(side).visible) return null;
     if (side === "navigation" && this.appShell.isMobileNavigationLayout) return null;
     const noun = side === "navigation" ? "sessions" : "workspace";
     return html`
@@ -3145,16 +3146,9 @@ export class PiWebApp extends LitElement {
    * therefore moves nothing.
    */
   private renderPanelSurface(side: ShellPanel) {
-    const docked = this.panelIntent.isDocked(side);
-    // Docked wins. While a peek was still finishing, a panel that had just been
-    // pinned kept rendering as a sheet and played the exit slide first.
-    const peeked = !docked && this.panelPeek.panel === side;
-    // A third presentation, and the reason this cannot just test peek and pin:
-    // on a narrow shell the workspace panel is also a main view of its own,
-    // chosen from the tab strip rather than pinned.
-    const isMainView = side === "workspace" && mainViewClass(this.state.mainView) === "workspace-view";
-    if (!peeked && !docked && !isMainView) return null;
-    if (side === "navigation" && this.appShell.isMobileNavigationLayout && !peeked) return null;
+    const presentation = this.panelSurfacePresentation(side);
+    if (presentation.visible) this.mountedPanelSides.add(side);
+    if (!this.mountedPanelSides.has(side)) return null;
     const label = side === "navigation" ? "Sessions" : "Workspace";
     const width = this.panelSurfaceWidth(side);
     return html`
@@ -3162,17 +3156,32 @@ export class PiWebApp extends LitElement {
         id=${`${side}-panel`}
         class="panel-surface"
         data-side=${side}
-        data-mode=${peeked ? "sheet" : "docked"}
-        ?data-tracking=${this.panelPeek.isTracking}
-        role=${peeked ? "dialog" : "complementary"}
+        data-mode=${presentation.visible ? (presentation.peeked ? "sheet" : "docked") : "hidden"}
+        ?data-tracking=${presentation.peeked && this.panelPeek.isTracking}
+        ?hidden=${!presentation.visible}
+        aria-hidden=${String(!presentation.visible)}
+        role=${presentation.peeked ? "dialog" : "complementary"}
         aria-label=${label}
-        style=${peeked ? `width: ${String(width)}px; --peek-progress: ${String(this.panelPeek.progress(side))}` : ""}
+        style=${presentation.peeked ? `width: ${String(width)}px; --peek-progress: ${String(this.panelPeek.progress(side))}` : ""}
       >
         ${side === "navigation"
           ? this.renderNavigationPanel(this.renderPanelControls(side))
           : this.renderWorkspacePanel(this.renderPanelControls(side))}
       </aside>
     `;
+  }
+
+  private panelSurfacePresentation(side: ShellPanel): { readonly peeked: boolean; readonly visible: boolean } {
+    const docked = this.panelIntent.isDocked(side);
+    // Docked wins. While a peek was still finishing, a panel that had just been
+    // pinned kept rendering as a sheet and played the exit slide first.
+    const peeked = !docked && this.panelPeek.panel === side;
+    // A third presentation, and the reason visibility cannot just test peek and
+    // pin: on a narrow shell the workspace panel is also a main view of its own.
+    const isMainView = side === "workspace" && mainViewClass(this.state.mainView) === "workspace-view";
+    const visible = (peeked || docked || isMainView)
+      && (side !== "navigation" || !this.appShell.isMobileNavigationLayout || peeked);
+    return { peeked, visible };
   }
 
   /**

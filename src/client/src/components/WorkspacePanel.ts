@@ -1,5 +1,6 @@
 import { LitElement, html, type TemplateResult } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 import type { Workspace } from "../api";
 import type { QualifiedContributionId, QualifiedWorkspacePanelContribution, WorkspacePanelContext } from "../plugins/types";
 import { NEW_SESSION_LABEL, renderNewSessionIcon, workspacePanelStyles } from "./shared";
@@ -29,9 +30,21 @@ export class WorkspacePanel extends LitElement {
 
   private observedWorkspaceHeaderStrip: HTMLElement | undefined;
   private workspaceHeaderResizeObserver: ResizeObserver | undefined;
+  private mountedWorkspaceId: string | undefined;
+  private readonly mountedToolIds = new Set<QualifiedContributionId>();
   private readonly onWorkspaceHeaderScroll = () => {
     this.updateWorkspaceHeaderScrollState();
   };
+
+  override willUpdate(): void {
+    const workspaceId = this.workspace?.id;
+    if (workspaceId !== this.mountedWorkspaceId) {
+      this.mountedWorkspaceId = workspaceId;
+      this.mountedToolIds.clear();
+    }
+    const selectedPanel = this.selectedPanel();
+    if (selectedPanel !== undefined) this.mountedToolIds.add(selectedPanel.id);
+  }
 
   override firstUpdated(): void {
     this.observeWorkspaceHeaderStrip();
@@ -62,7 +75,8 @@ export class WorkspacePanel extends LitElement {
       body: "Try selecting the workspace again.",
     });
     const visiblePanels = this.panels;
-    const selectedPanel = visiblePanels.find((panel) => panel.id === this.tool) ?? visiblePanels[0];
+    const selectedPanel = this.selectedPanel();
+    const mountedPanels = visiblePanels.filter((panel) => this.mountedToolIds.has(panel.id));
     return html`
       <header>
         ${this.hideToolTabs ? null : html`
@@ -97,12 +111,23 @@ export class WorkspacePanel extends LitElement {
       ${selectedPanel === undefined ? this.renderEmptyState({
         title: "No workspace tools available",
         body: "No tools are available for this workspace.",
-      }) : html`
-        <div class="panel-content">
-          ${selectedPanel.render(context)}
-        </div>
-      `}
+      }) : repeat(
+        mountedPanels,
+        (panel) => `${workspace.id}:${panel.id}`,
+        (panel) => {
+          const selected = panel.id === selectedPanel.id;
+          return html`
+            <div class="panel-content" data-panel-id=${panel.id} ?hidden=${!selected} aria-hidden=${String(!selected)}>
+              ${panel.render(context)}
+            </div>
+          `;
+        },
+      )}
     `;
+  }
+
+  private selectedPanel(): QualifiedWorkspacePanelContribution | undefined {
+    return this.panels.find((panel) => panel.id === this.tool) ?? this.panels[0];
   }
 
   private panelTabClass(panel: QualifiedWorkspacePanelContribution, selected: boolean): string {

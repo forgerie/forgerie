@@ -55,6 +55,35 @@ describe("WorkspacePanel header", () => {
     expect(panel.shadowRoot?.querySelector("[data-action='new-session']")).toBeNull();
   });
 
+  it("keeps a visited tool and its scroll position while another tool is in sight", async () => {
+    const panel = await mountPanel({
+      panels: [
+        workspacePanel("core:workspace.files", "Files", () => html`<div data-tool="files"><div>Files content</div></div>`),
+        workspacePanel("core:workspace.git", "Git", () => html`<section data-tool="git"><div>Git content</div></section>`),
+      ],
+    });
+    const root = required(panel.shadowRoot, "workspace panel shadow root");
+    const files = required(root.querySelector<HTMLElement>("[data-tool='files']"), "Files content");
+    const filesContainer = required(files.closest<HTMLElement>(".panel-content"), "Files panel container");
+    filesContainer.scrollTop = 137;
+    files.scrollTop = 211;
+
+    panel.tool = "core:workspace.git";
+    await panel.updateComplete;
+
+    expect(files.isConnected).toBe(true);
+    expect(filesContainer.hasAttribute("hidden")).toBe(true);
+
+    panel.tool = "core:workspace.files";
+    await panel.updateComplete;
+    const returnedFiles = required(root.querySelector<HTMLElement>("[data-tool='files']"), "returned Files content");
+
+    expect(returnedFiles).toBe(files);
+    expect(returnedFiles.closest(".panel-content")).toBe(filesContainer);
+    expect(filesContainer.scrollTop).toBe(137);
+    expect(returnedFiles.scrollTop).toBe(211);
+  });
+
   it("leaves tabs horizontally scrollable while the fixed action owns no overlay", () => {
     const css = WorkspacePanel.styles.toString().replace(/\/\*[\s\S]*?\*\//gu, "");
 

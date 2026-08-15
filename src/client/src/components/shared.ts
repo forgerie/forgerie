@@ -121,6 +121,7 @@ export const appStyles = css`
    * panel up without moving the panel.
    */
   .panel-surface { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+  .panel-surface[hidden] { display: none; }
   .panel-surface[data-side="navigation"] { grid-column: 1; }
   .panel-surface[data-side="workspace"] { grid-column: 5; }
   .panel-surface > * { flex: 1 1 auto; min-height: 0; }
@@ -421,6 +422,7 @@ export const workspacePanelStyles = css`
     .tabs button.icon-tab .tab-label, .workspace-header-action-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
   }
   .panel-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+  .panel-content[hidden] { display: none; }
   /* An empty panel keeps a header for its own controls, and nothing else. */
   header.empty-state-header { justify-content: flex-end; align-items: center; padding: 6px; border-bottom: 0; }
   .empty-state { box-sizing: border-box; width: min(100%, 380px); margin: auto; padding: 24px; display: grid; gap: 8px; color: var(--pi-muted); text-align: center; }
