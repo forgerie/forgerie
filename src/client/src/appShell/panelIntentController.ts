@@ -65,6 +65,11 @@ export function mainViewClass(mainView: AppState["mainView"]): "navigation-view"
   return "workspace-view";
 }
 
+/** Workspace tools select the right panel; they never replace the main surface. */
+export function mainSurfaceView(view: AppState["mainView"]): "navigation" | "chat" {
+  return view === "navigation" ? "navigation" : "chat";
+}
+
 export function readStoredPanelIntents(): PanelIntents {
   try {
     const raw = window.localStorage.getItem(PANEL_INTENT_STORAGE_KEY);

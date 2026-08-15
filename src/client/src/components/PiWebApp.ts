@@ -58,7 +58,7 @@ import { AppShellController } from "../appShell/appShellController";
 import { BrowserResumeController } from "../appShell/browserResumeController";
 import { NavigationSectionsController, type NavigationSection } from "../appShell/navigationState";
 import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
-import { PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
+import { mainSurfaceView, PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
 import { PanelPeekController } from "../appShell/panelPeekController";
 import { RadialMenuController } from "../appShell/radialMenuController";
 import { RADIAL_SLOT_COUNT, radialSlotsEqual, readStoredRadialSlots, reconcileRadialSlots, writeStoredRadialSlots, type RadialSlotMap } from "../appShell/radialSlots";
@@ -810,7 +810,7 @@ export class PiWebApp extends LitElement {
       if (!this.isCurrentRouteRestore(restoreSeq)) return;
       this.setState({
         workspaceTool: route.tool ?? this.state.workspaceTool,
-        mainView: restoredMainView ?? route.view ?? this.defaultRouteView(),
+        mainView: mainSurfaceView(restoredMainView ?? route.view ?? this.defaultRouteView()),
         selectedFilePath: routeSurface.selectedFilePath,
         selectedDiffPath: routeSurface.selectedDiffPath,
         selectedTerminalId: routeSurface.selectedTerminalId,
@@ -1079,9 +1079,18 @@ export class PiWebApp extends LitElement {
     return snapshot.projectId !== undefined && this.state.selectedProject?.id !== snapshot.projectId && this.state.error !== "";
   }
 
+  /**
+   * Select a workspace tool without turning the panel into the main view.
+   *
+   * The workspace is a side surface. When it cannot dock, the same surface
+   * becomes a sheet over the resident chat. Tool selection and panel
+   * presentation are separate decisions; coupling them is what made every
+   * right-panel entry replace chat at narrow widths.
+   */
   private openWorkspaceTool(tool: QualifiedContributionId) {
     if (tool === "core:workspace.terminal") this.terminalAutoStartWorkspaceId = this.state.selectedWorkspace?.id;
-    this.setState({ workspaceTool: tool, mainView: tool });
+    this.setState({ workspaceTool: tool, mainView: "chat" });
+    if (!this.panelIntent.isDocked("workspace") && this.panelPeek.panel !== "workspace") this.panelPeek.open("workspace");
     this.updateUrl();
     this.refreshSelectedWorkspaceTool(tool);
     this.git.updatePolling();
@@ -3378,8 +3387,17 @@ export class PiWebApp extends LitElement {
   }
 
   private closePanelSurface(side: ShellPanel) {
-    if (this.panelIntent.isDocked(side)) this.panelIntent.toggle(side);
-    else this.panelPeek.close();
+    if (this.panelIntent.isDocked(side)) {
+      this.panelIntent.toggle(side);
+      return;
+    }
+    if (this.panelPeek.panel === side) {
+      this.panelPeek.close();
+      return;
+    }
+    // Old URLs can still name a workspace tool as the main view. Keep them
+    // readable, but let the panel's own Close return to the resident chat.
+    if (side === "workspace" && mainViewClass(this.state.mainView) === "workspace-view") this.selectMainView("chat");
   }
 
   /**

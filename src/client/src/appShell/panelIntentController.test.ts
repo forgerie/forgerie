@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { afterEach, describe, expect, it } from "vitest";
-import { PanelIntentController, readStoredPanelIntents } from "./panelIntentController";
+import { mainSurfaceView, PanelIntentController, readStoredPanelIntents } from "./panelIntentController";
 
 const DESKTOP = 1440;
 const FOLDED_PORTRAIT = 499;
@@ -65,6 +65,12 @@ describe("PanelIntentController", () => {
     controller.toggle("navigation");
 
     expect(controller.shellClass("chat")).toBe("shell chat-view navigation-panel-collapsed");
+  });
+
+  it("keeps restored workspace tools out of the main surface", () => {
+    expect(mainSurfaceView("chat")).toBe("chat");
+    expect(mainSurfaceView("navigation")).toBe("navigation");
+    expect(mainSurfaceView("core:workspace.files")).toBe("chat");
   });
 
   it("re-renders the host when a request changes", () => {

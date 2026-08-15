@@ -195,6 +195,46 @@ describe("PiWebApp panel peek", () => {
     expect(panel.hideToolTabs).toBe(false);
   });
 
+  it("keeps chat resident when a right-panel entry selects another workspace tool", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+    await dragAcross(app, -peekSheetWidth(FOLDED_PORTRAIT) * 0.9, { release: true });
+    const panel = workspaceSheetPanel(app);
+
+    panel.onSelectTool("core:workspace.git");
+    await app.updateComplete;
+
+    expect(appMainView(app)).toBe("chat");
+    expect(appWorkspaceTool(app)).toBe("core:workspace.git");
+    expect(peekSheet(app)?.getAttribute("data-side")).toBe("workspace");
+  });
+
+  it("keeps chat resident when a docked right-panel entry selects another tool", async () => {
+    const app = await mountApp(DESKTOP);
+    const panel = shadowRoot(app).querySelector(".panel-surface[data-side='workspace'] workspace-panel");
+    if (!(panel instanceof WorkspacePanel)) throw new Error("The docked surface did not carry the workspace panel");
+
+    panel.onSelectTool("core:workspace.git");
+    await app.updateComplete;
+
+    expect(appMainView(app)).toBe("chat");
+    expect(appWorkspaceTool(app)).toBe("core:workspace.git");
+    expect(peekSheet(app)).toBeNull();
+  });
+
+  it("closes a legacy full-width workspace view back to chat", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+    setAppState(app, { mainView: "core:workspace.files" });
+    await app.updateComplete;
+    const controls = await findPanelControls(app, "workspace");
+    const close = controls?.shadowRoot?.querySelector<HTMLButtonElement>("button[data-action='close']");
+    if (close === undefined || close === null) throw new Error("The workspace view had no close control");
+
+    close.click();
+    await app.updateComplete;
+
+    expect(appMainView(app)).toBe("chat");
+  });
+
   it("always leaves a way to undock a panel it docked", async () => {
     // A docked panel has no sheet, so its edge control is the only way back out.
     // Losing it strands the panel exactly as a stored pin once did.
@@ -364,6 +404,12 @@ function navigationSheetPanel(app: PiWebApp): AppNavigationPanel {
   return panel;
 }
 
+function workspaceSheetPanel(app: PiWebApp): WorkspacePanel {
+  const panel = peekSheet(app)?.querySelector("workspace-panel");
+  if (!(panel instanceof WorkspacePanel)) throw new Error("The sheet did not carry the workspace panel");
+  return panel;
+}
+
 async function navigationSheetScroller(panel: AppNavigationPanel): Promise<HTMLElement> {
   await panel.updateComplete;
   const inbox = panel.shadowRoot?.querySelector("session-inbox-panel");
@@ -393,6 +439,28 @@ function storedIntents(): { navigation: string; workspace: string } {
   if (typeof parsed !== "object" || parsed === null) return { navigation: "auto", workspace: "auto" };
   const record: Record<string, unknown> = { ...parsed };
   return { navigation: String(record["navigation"]), workspace: String(record["workspace"]) };
+}
+
+function setAppState(app: PiWebApp, patch: Partial<AppState>): void {
+  const state: unknown = Reflect.get(app, "state");
+  if (typeof state !== "object" || state === null) throw new Error("PiWebApp state was unavailable");
+  if (!Reflect.set(app, "state", { ...state, ...patch })) throw new Error("Could not update PiWebApp state");
+}
+
+function appMainView(app: PiWebApp): string {
+  const state: unknown = Reflect.get(app, "state");
+  if (typeof state !== "object" || state === null) throw new Error("PiWebApp state was unavailable");
+  const mainView: unknown = Reflect.get(state, "mainView");
+  if (typeof mainView !== "string") throw new Error("PiWebApp main view was invalid");
+  return mainView;
+}
+
+function appWorkspaceTool(app: PiWebApp): string {
+  const state: unknown = Reflect.get(app, "state");
+  if (typeof state !== "object" || state === null) throw new Error("PiWebApp state was unavailable");
+  const workspaceTool: unknown = Reflect.get(state, "workspaceTool");
+  if (typeof workspaceTool !== "string") throw new Error("PiWebApp workspace tool was invalid");
+  return workspaceTool;
 }
 
 function appStateWithSession(): AppState {
