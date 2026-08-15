@@ -139,8 +139,10 @@ function groupingValue(panel: SessionInboxPanel): string | undefined {
   return shadowRoot(panel).querySelector(".board-grouping-value")?.textContent.trim();
 }
 
-/** Reveal the archive, which is opt-in: the toggle also expands the group. */
+/** Reveal the archive through the inbox overflow menu. */
 async function revealArchived(panel: SessionInboxPanel): Promise<void> {
+  clickSelector(shadowRoot(panel), "[data-action='board-menu']");
+  await panel.updateComplete;
   clickSelector(shadowRoot(panel), "[data-action='toggle-archived']");
   await panel.updateComplete;
 }
@@ -334,7 +336,7 @@ describe("group rendering", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Default collapse — Open and Archived start collapsed
+// Default visibility — Open starts collapsed and Archived starts hidden
 // ---------------------------------------------------------------------------
 
 describe("default collapse", () => {
@@ -347,27 +349,45 @@ describe("default collapse", () => {
     expect(openGroup?.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("keeps the archive shelf shut until it is asked to open", async () => {
+  it("keeps the archive hidden behind the overflow menu until it is asked to open", async () => {
     const sessions = [mkSession("archived-one", { archived: true })];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    // The shelf announces the archive without spending the list on it.
-    const shelf = root.querySelector("[data-archive-shelf]");
-    expect(shelf?.getAttribute("aria-expanded")).toBe("false");
-    expect(shelf?.querySelector("[data-archive-count]")?.textContent).toBe("1");
+    expect(root.querySelector("[data-archive-shelf]")).toBeNull();
     expect(root.querySelector("[data-session='archived-one']")).toBeNull();
 
-    await revealArchived(panel);
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+
+    const toggle = root.querySelector("[data-action='toggle-archived']");
+    expect(toggle?.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(toggle?.getAttribute("aria-checked")).toBe("false");
+    expect(toggle?.textContent).toContain("1");
+
+    clickSelector(root, "[data-action='toggle-archived']");
+    await panel.updateComplete;
 
     expect(root.querySelector("[data-group='archived']")?.getAttribute("aria-expanded")).toBe("true");
     expect(root.querySelector("[data-session='archived-one']")).not.toBeNull();
+
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+    expect(root.querySelector("[data-action='toggle-archived']")?.getAttribute("aria-checked")).toBe("true");
+
+    clickSelector(root, "[data-action='toggle-archived']");
+    await panel.updateComplete;
+    expect(root.querySelector("[data-session='archived-one']")).toBeNull();
   });
 
-  it("renders no shelf when the machine has never archived anything", async () => {
+  it("omits the archived visibility command when the machine has never archived anything", async () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    const root = shadowRoot(panel);
 
-    expect(shadowRoot(panel).querySelector("[data-group='archived']")).toBeNull();
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+
+    expect(root.querySelector("[data-action='toggle-archived']")).toBeNull();
   });
 
   it("blocked group is expanded by default", async () => {
@@ -545,9 +565,14 @@ describe("selected session group auto-expand", () => {
       globalSessions: mkGlobalSessions([archived]),
       selectedSession: archived,
     });
+    const root = shadowRoot(panel);
 
-    expect(shadowRoot(panel).querySelector("[data-session='archived-one']")).toBeNull();
-    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
+    expect(root.querySelector("[data-session='archived-one']")).toBeNull();
+    expect(root.querySelector("[data-archive-shelf]")).toBeNull();
+
+    clickSelector(root, "[data-action='board-menu']");
+    await panel.updateComplete;
+    expect(root.querySelector("[data-action='toggle-archived']")?.getAttribute("aria-checked")).toBe("false");
   });
 
   it("expands the destination group when the same selected id moves via live activity", async () => {
@@ -1064,14 +1089,16 @@ describe("archived visibility toggle", () => {
     const sessions = [mkSession("open-one"), mkSession("archived-one", { archived: true })];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
 
-    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
-
     await revealArchived(panel);
-    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("true");
+    expect(shadowRoot(panel).querySelector("[data-session='archived-one']")).not.toBeNull();
 
     const remounted = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
-    expect(shadowRoot(remounted).querySelector("[data-session='archived-one']")).toBeNull();
-    expect(shadowRoot(remounted).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
+    const root = shadowRoot(remounted);
+    expect(root.querySelector("[data-session='archived-one']")).toBeNull();
+
+    clickSelector(root, "[data-action='board-menu']");
+    await remounted.updateComplete;
+    expect(root.querySelector("[data-action='toggle-archived']")?.getAttribute("aria-checked")).toBe("false");
   });
 
   it("keeps archived out of the project grouping until it is revealed", async () => {
@@ -1183,7 +1210,7 @@ describe("board shortcuts", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, composed: true }));
     await panel.updateComplete;
 
-    expect(shadowRoot(panel).querySelector("[data-action='toggle-archived']")?.getAttribute("aria-expanded")).toBe("false");
+    expect(shadowRoot(panel).querySelector("[data-session='archived-one']")).toBeNull();
   });
 });
 
@@ -1400,11 +1427,7 @@ async function mountRowForPress(options: {
     onRestoreSession: options.onRestoreSession ?? noop,
   });
   const root = shadowRoot(panel);
-  if (group === "archived") {
-    const shelf = root.querySelector("[data-archive-shelf]");
-    if (shelf instanceof HTMLElement) shelf.click();
-    await panel.updateComplete;
-  }
+  if (group === "archived") await revealArchived(panel);
   const disclosure = root.querySelector(`[data-group='${group}'] button`);
   if (disclosure instanceof HTMLElement) disclosure.click();
   await panel.updateComplete;

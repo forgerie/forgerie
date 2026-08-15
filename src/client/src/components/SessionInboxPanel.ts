@@ -7,7 +7,7 @@
  *
  * Design rules (from AGENTS.md + plan):
  *  - Six groups in BOARD_GROUPS order; Open collapsed by default, Archived hidden
- *    behind its own toggle so the archive is opt-in rather than ambient.
+ *    behind the inbox overflow menu so the archive is opt-in rather than ambient.
  *  - Archive action ≥44px hit area via min-height.
  *  - Theme tokens only; pane-level container query so rows respond to pane width.
  *  - Group-by and collapsed-groups persist per machine in localStorage
@@ -579,8 +579,17 @@ export class SessionInboxPanel extends LitElement {
 
   private renderBoardMenu(): TemplateResult | typeof nothing {
     if (this.openMenu !== "board") return nothing;
+    const archivedCount = this.updateDerivation?.board.counts.archived ?? 0;
     return html`
       <div class="menu-panel" id="inbox-board-menu" role="menu" aria-label="Inbox commands">
+        ${archivedCount === 0 ? nothing : html`
+          <button
+            role="menuitemcheckbox"
+            data-action="toggle-archived"
+            aria-checked=${String(this.showArchived)}
+            @click=${() => { this.runMenuCommand(() => { this.setShowArchived(!this.showArchived); }); }}
+          >Show archived (${String(archivedCount)})</button>
+        `}
         <button
           role="menuitem"
           data-action="manage-workspaces"
@@ -601,14 +610,12 @@ export class SessionInboxPanel extends LitElement {
     // Compute once per render so every row in this frame shares the same timestamp.
     const now = Date.now();
 
-    // The archive is disclosed from a pinned shelf, so it only takes list space
-    // once it has been asked for.
+    // The archive stays out of the list until the overflow command reveals it.
     const groups: readonly InboxGroup[] = this.groupBy === "project"
       ? groupSessionsByProject(board, { includeArchived: this.showArchived }).groups
       : board.groups.filter((group) => group.kind !== "archived" || this.showArchived);
 
     const visibleGroups = groups.filter((g) => g.rows.length > 0);
-    const archivedRows = board.groups.find((group) => group.kind === "archived")?.rows ?? [];
     // Keyboard J/K walks exactly what the eye can walk: expanded groups only.
     this.navigableSessions = visibleGroups
       .filter((group) => !this.collapsedGroups.has(group.kind))
@@ -618,32 +625,7 @@ export class SessionInboxPanel extends LitElement {
       <div class="board-scroll" role="listbox" aria-label="Sessions">
         ${visibleGroups.map((group) => this.renderGroup(group, resolveLocation, now))}
       </div>
-      ${archivedRows.length === 0 ? nothing : this.renderArchiveShelf(archivedRows.length)}
       ${this.renderUndoToast()}
-    `;
-  }
-
-  /**
-   * The archive's disclosure, pinned below the list rather than placed at the
-   * end of it: with thousands of open sessions, "last in the list" is a place
-   * no one scrolls to. Opening it reveals the group in the list itself, so the
-   * archive is browsed the same way every other group is.
-   */
-  private renderArchiveShelf(count: number): TemplateResult {
-    return html`
-      <button
-        class="archive-shelf"
-        data-action="toggle-archived"
-        data-archive-shelf
-        aria-expanded=${String(this.showArchived)}
-        aria-controls="group-rows-archived"
-        title="Show archived sessions"
-        @click=${() => { this.setShowArchived(!this.showArchived); }}
-      >
-        <span class="group-chevron" aria-hidden="true">▾</span>
-        <span class="group-label">Archived</span>
-        <span class="group-count" data-archive-count>${String(count)}</span>
-      </button>
     `;
   }
 
@@ -673,7 +655,7 @@ export class SessionInboxPanel extends LitElement {
 
   private renderGroup(group: InboxGroup, resolveLocation: InboxLocationResolver, now: number): TemplateResult {
     const kind = group.kind;
-    // The archive has one control, the shelf; it is never also collapsed.
+    // The overflow command owns archive visibility, so the revealed group is not also collapsed.
     const collapsed = kind === "archived" ? false : this.collapsedGroups.has(kind);
     const tone = this.groupBy === "project"
       ? "var(--pi-muted)"
@@ -904,7 +886,7 @@ export class SessionInboxPanel extends LitElement {
 
   private setShowArchived(showArchived: boolean): void {
     this.showArchived = showArchived;
-    // Opening the shelf reveals a group far below the fold; take the reader there.
+    // Revealing the archive can place its group far below the fold; take the reader there.
     if (showArchived) void this.scrollArchivedIntoView();
   }
 
@@ -1328,21 +1310,6 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .group-spacer { flex: 1 1 auto; }
-
-    /*
-     * The archive is a shelf, not a state you are working through: it sits
-     * last, stays quiet, and does not stick to the top while scrolling past.
-     */
-    .archive-shelf { margin-top: 8px; }
-
-    .archive-shelf .group-header {
-      position: static;
-      background: none;
-      backdrop-filter: none;
-    }
-
-    .archive-shelf .group-label,
-    .archive-shelf .group-count { color: var(--pi-dim, #817a99); }
 
     /* ---- rows ---- */
 
