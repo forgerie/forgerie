@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#08090a" />
+    <title>Number</title>
+    <link rel="stylesheet" href="./app.css" />
+    <style>
+      /* The inbox says 25. That number has never meant anything. Two of them
+         are actually stopped, waiting on a decision only you can make. Show
+         the honest number; put the misleading one in the explanation. */
+      .stage {
+        min-height: 58svh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: var(--sp-6) var(--gutter) var(--sp-5);
+        text-align: center;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .figure {
+        font-size: var(--step-5);
+        font-weight: 600;
+        letter-spacing: -0.055em;
+        line-height: 0.95;
+        font-variant-numeric: tabular-nums;
+        transition: transform 0.45s var(--ease), opacity 0.3s var(--ease);
+      }
+      .stage.open .figure {
+        transform: scale(0.52) translateY(-0.35em);
+      }
+
+      .caption {
+        margin-top: var(--sp-3);
+        font-size: var(--step-1);
+        font-weight: 480;
+        letter-spacing: -0.02em;
+        color: var(--text-2);
+        transition: opacity 0.3s var(--ease);
+      }
+      .stage.open .caption {
+        opacity: 0;
+        height: 0;
+        margin: 0;
+      }
+
+      .subline {
+        margin-top: var(--sp-4);
+        font-size: var(--step--1);
+        color: var(--text-3);
+        max-width: 24rem;
+        line-height: 1.55;
+        transition: opacity 0.3s var(--ease);
+      }
+      .stage.open .subline { opacity: 0; }
+
+      .hint {
+        margin-top: var(--sp-5);
+        font-size: var(--step--1);
+        color: var(--text-3);
+        opacity: 0.75;
+        animation: breathe 3.2s var(--ease) infinite;
+      }
+      @keyframes breathe {
+        0%, 100% { opacity: 0.35; }
+        50% { opacity: 0.9; }
+      }
+      .stage.open .hint { display: none; }
+
+      /* The subtraction: what the 25 is actually made of. */
+      .stack {
+        border-top: 1px solid var(--line);
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.5s var(--ease);
+      }
+      .stack.open { max-height: 900px; }
+
+      .line {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--sp-3);
+        padding: var(--sp-3) var(--gutter);
+        border-bottom: 1px solid var(--line);
+      }
+      .line__what { font-size: var(--step-0); }
+      .line__why {
+        display: block;
+        margin-top: 0.15rem;
+        font-size: var(--step--1);
+        color: var(--text-3);
+      }
+      .line__n {
+        font-size: var(--step-0);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        color: var(--text-2);
+      }
+      .line--sum {
+        border-bottom: 0;
+        padding-top: var(--sp-4);
+      }
+      .line--sum .line__what { font-weight: 560; }
+      .line--sum .line__n { color: var(--text); font-weight: 560; }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <div class="bar bleed" style="padding: var(--sp-4) var(--gutter) 0">
+        <div class="eyebrow">Right now</div>
+      </div>
+
+      <div class="stage" id="stage">
+        <div class="figure warn">2</div>
+        <div class="caption">need a decision</div>
+        <p class="subline">
+          Your inbox says 25 sessions. That number has never meant anything.
+          Twenty-three are finished, idle, or still working without you.
+        </p>
+        <div class="hint">tap to see the subtraction</div>
+      </div>
+
+      <div class="stack" id="stack">
+        <div class="line">
+          <span class="line__what">
+            In your inbox
+            <span class="line__why">every session on every machine</span>
+          </span>
+          <span class="line__n num">25</span>
+        </div>
+        <div class="line">
+          <span class="line__what">
+            Idle
+            <span class="line__why">finished, nothing pending</span>
+          </span>
+          <span class="line__n num">-19</span>
+        </div>
+        <div class="line">
+          <span class="line__what">
+            Running
+            <span class="line__why">working, no input needed yet</span>
+          </span>
+          <span class="line__n num">-3</span>
+        </div>
+        <div class="line">
+          <span class="line__what">
+            Blocked
+            <span class="line__why">stopped, but needs a fix, not an answer</span>
+          </span>
+          <span class="line__n num">-1</span>
+        </div>
+        <div class="line line--sum">
+          <span class="line__what">Waiting on you</span>
+          <span class="line__n num warn">2</span>
+        </div>
+
+        <div class="shock">
+          <p>
+            <b>Both have been stopped for hours.</b> The worklet migration has
+            waited 2 hours for a yes or no on dropping the old capture path.
+            The tablet dock has waited 3 hours for a viewport measurement only
+            you can take. Neither will move until you answer.
+          </p>
+        </div>
+      </div>
+    </main>
+
+    <nav class="switch">
+      <a href="./number.html" aria-current="page"><span>Number</span></a>
+      <a href="./pace.html"><span>Pace</span></a>
+      <a href="./drill.html"><span>Drill</span></a>
+    </nav>
+
+    <script>
+      const stage = document.getElementById("stage");
+      const stack = document.getElementById("stack");
+      stage.addEventListener("click", () => {
+        stage.classList.toggle("open");
+        stack.classList.toggle("open");
+      });
+    </script>
+  </body>
+</html>
