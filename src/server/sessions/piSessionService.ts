@@ -29,6 +29,7 @@ import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
 import { markAgentSpawned } from "./agentSpawnedMarks.js";
 import { repairAgentSpawnedMarks, type AgentSpawnedRepairMemo, type AgentSpawnedRepairReport } from "./agentSpawnedRepair.js";
+import { hideChildrenOfDelegatingSessions } from "./inFlightSpawnedSessions.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
 import { buildActiveCommandCatalog, buildActiveCommandList, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
 import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
@@ -1262,7 +1263,10 @@ export class PiSessionService implements SessionRouteService {
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, listedById.get(record.sessionId)))
       .filter(isDefined);
-    const sessions = withMachineSessionRelationships([...unarchivedSessions, ...archivedSessions]);
+    const sessions = hideChildrenOfDelegatingSessions(
+      withMachineSessionRelationships([...unarchivedSessions, ...archivedSessions]),
+      this.delegatingSessionFiles(),
+    );
 
     const cwds = new Set([
       ...listedSessions.map((session) => session.cwd),
@@ -3015,6 +3019,24 @@ export class PiSessionService implements SessionRouteService {
     if (running === 0) this.workingAgentsBySession.delete(session.sessionId);
     else this.workingAgentsBySession.set(session.sessionId, running);
     this.publishStatus(session);
+  }
+
+  /**
+   * Session files whose sessions are running a delegating tool right now.
+   *
+   * A fork those runs create has no durable mark until the run reports the file
+   * it made, so this is the only thing that can keep it out of the inbox in the
+   * meantime. It is read fresh on every listing and never stored, because the
+   * claim it supports is true only for as long as the run is.
+   */
+  private delegatingSessionFiles(): ReadonlySet<string> {
+    const files = new Set<string>();
+    for (const active of new Set(this.active.values())) {
+      const session = active.runtime.session;
+      if ((this.workingAgentsBySession.get(session.sessionId) ?? 0) === 0) continue;
+      if (session.sessionFile !== undefined) files.add(session.sessionFile);
+    }
+    return files;
   }
 
   /**
