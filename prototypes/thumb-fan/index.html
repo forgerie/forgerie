@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Mirrors src/client/index.html: zoom stays available on purpose, so the
+         prototype meets the same platform gestures the real app does. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>Thumb fan — throwaway prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="stage">
+      <header class="bar">
+        <h1>Thumb fan</h1>
+        <nav id="variants" aria-label="Design variation"></nav>
+        <p id="blurb"></p>
+      </header>
+
+      <main id="transcript"></main>
+
+      <div id="readout" role="status" aria-live="polite"></div>
+    </div>
+
+    <div id="surface" aria-hidden="true"></div>
+
+    <div id="controls">
+      <button class="controls-toggle" type="button">settings</button>
+      <div class="controls-body"></div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
