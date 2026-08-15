@@ -28,6 +28,7 @@ import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
 import { markAgentSpawned } from "./agentSpawnedMarks.js";
+import { repairAgentSpawnedMarks, type AgentSpawnedRepairMemo, type AgentSpawnedRepairReport } from "./agentSpawnedRepair.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
 import { buildActiveCommandCatalog, buildActiveCommandList, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
 import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
@@ -950,6 +951,8 @@ export class PiSessionService implements SessionRouteService {
    * time. Headers are written once, so identity-verified reads are cached.
    */
   private readonly sessionHeaderCache = new Map<string, CachedSessionHeader>();
+  /** Carried across repair sweeps so an unchanged transcript is read once. */
+  private readonly agentSpawnedRepairMemo: AgentSpawnedRepairMemo = new Map();
   /**
    * Agents each session currently has working, keyed by session id.
    *
@@ -3012,6 +3015,27 @@ export class PiSessionService implements SessionRouteService {
     if (running === 0) this.workingAgentsBySession.delete(session.sessionId);
     else this.workingAgentsBySession.set(session.sessionId, running);
     this.publishStatus(session);
+  }
+
+  /**
+   * Recover spawn marks the live rule could not have written.
+   *
+   * Marking at tool end only reaches runs this daemon streamed. Sessions driven
+   * from the terminal, and runs that outlived a restart, leave children nothing
+   * ever marked. Their parents' transcripts still name them, so the fact is
+   * read back instead of being lost.
+   *
+   * Reads whole transcripts, so callers run it in the background and never in
+   * front of a listing.
+   */
+  async repairSpawnMarks(): Promise<AgentSpawnedRepairReport | undefined> {
+    const sessionsRoot = this.sessionManager.defaultSessionsRoot?.();
+    if (sessionsRoot === undefined) return undefined;
+    const report = await repairAgentSpawnedMarks(sessionsRoot, { memo: this.agentSpawnedRepairMemo });
+    // Rewritten headers changed the files the catalog remembers by mtime, so
+    // the scan re-reads them on its own. Only this cache is keyed by path.
+    if (report.marked > 0) this.sessionHeaderCache.clear();
+    return report;
   }
 
   private async markSessionsSpawnedByTool(event: unknown): Promise<void> {

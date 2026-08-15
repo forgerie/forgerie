@@ -62,7 +62,8 @@
     "prepare": "node scripts/install-git-hooks.mjs",
     "changeset": "changeset",
     "release:version": "changeset version",
-    "changelog:status": "changeset status"
+    "changelog:status": "changeset status",
+    "repair:spawn-marks": "tsx scripts/repair-agent-spawned.ts"
   },
   "dependencies": {
     "@aliou/pi-processes": "file:vendor/pi-processes/aliou-pi-processes-0.10.4-forgerie.1.tgz",

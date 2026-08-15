@@ -183,6 +183,15 @@ async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, cat
   process.once("SIGINT", (signal) => { void shutdown(signal); });
   process.once("SIGTERM", (signal) => { void shutdown(signal); });
 
+  // Runs while the daemon serves. Sessions an agent made while no daemon was
+  // watching are unmarked, and only their parents' transcripts still say so;
+  // without this they stay in the inbox forever. Reading every transcript is
+  // slow, so it must never gate startup or a listing.
+  void sessions.repairSpawnMarks().then(
+    (report) => { if (report !== undefined && report.marked > 0) app.log.info(report, "recovered agent-spawned session marks"); },
+    (error: unknown) => { app.log.warn({ err: error }, "agent-spawned mark repair failed"); },
+  );
+
   const portValue = daemonEnvironment["PI_WEB_SESSIOND_PORT"];
   const port = portValue !== undefined && portValue !== "" ? Number(portValue) : undefined;
   const host = daemonEnvironment["PI_WEB_SESSIOND_HOST"] ?? "127.0.0.1";
