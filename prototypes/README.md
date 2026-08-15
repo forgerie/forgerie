@@ -33,10 +33,6 @@ python3 -m http.server 8600
   `node serve.mjs . 8600 0.0.0.0` and open it on the tablet at
   <https://zao.hummingbird-lake.ts.net:8444/pen-context/> (https is needed for
   the voice experiment).
-- [`thumb-fan/`](./thumb-fan/) — press and hold in the transcript and a fan of
-  panels opens **where the thumb landed**, not in a fixed corner. For the
-  one-handed tablet grip. `check-fan.mjs` proves the geometry across every
-  posture; `capture-fan.mjs` photographs it mid-gesture.
 - [`session-board/`](./session-board/) — the inbox redesign. Sessions become
   the root list, grouped by **what they need from you** instead of **where they
   live**. Open `session-board/index.html` through the prototype server.
