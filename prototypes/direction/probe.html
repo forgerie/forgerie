@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overflow probe</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font: 12px/1.5 ui-monospace, monospace; }
+  iframe { border: 0; display: block; }
+  .rig { position: absolute; left: -9999px; top: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #333; }
+  th { color: #888; font-weight: 400; }
+  .ok { color: #46c08a; }
+  .bad { color: #e56a6a; }
+  .detail { color: #888; }
+</style>
+</head>
+<body>
+<div class="rig" id="rig"></div>
+<table id="out">
+  <thead><tr><th>direction</th><th>posture</th><th>vw</th><th>scrollW</th><th>verdict</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<script>
+  const FILES = ["a-ledger", "b-quiet", "c-floor"];
+  const POSTURES = [
+    ["unfolded-portrait", 704, 783],
+    ["unfolded-landscape", 932, 553],
+    ["folded-portrait", 475, 638],
+    ["folded-landscape", 711, 374],
+  ];
+
+  const rig = document.getElementById("rig");
+  const body = document.querySelector("#out tbody");
+
+  function load(file, w, h) {
+    return new Promise((resolve) => {
+      const frame = document.createElement("iframe");
+      frame.width = w;
+      frame.height = h;
+      frame.src = file + ".html";
+      frame.addEventListener("load", () => setTimeout(() => resolve(frame), 250));
+      rig.appendChild(frame);
+    });
+  }
+
+  function inspect(frame) {
+    const doc = frame.contentDocument;
+    const vw = doc.documentElement.clientWidth;
+    const offenders = [];
+    for (const el of doc.querySelectorAll("*")) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;
+      if (r.right > vw + 0.5) {
+        const cls = typeof el.className === "string" ? el.className : "";
+        offenders.push(el.tagName.toLowerCase() + (cls ? "." + cls.split(" ")[0] : "")
+          + " right=" + Math.round(r.right));
+      }
+      if (offenders.length >= 4) break;
+    }
+    return { vw, scrollW: doc.documentElement.scrollWidth, offenders };
+  }
+
+  (async () => {
+    for (const file of FILES) {
+      for (const [name, w, h] of POSTURES) {
+        const frame = await load(file, w, h);
+        const { vw, scrollW, offenders } = inspect(frame);
+        const bad = scrollW > vw + 0.5 || offenders.length > 0;
+        const row = document.createElement("tr");
+        row.innerHTML =
+          "<td>" + file + "</td><td>" + name + "</td><td>" + vw + "</td><td>" + scrollW + "</td>" +
+          "<td class='" + (bad ? "bad" : "ok") + "'>" + (bad ? "OVERFLOW" : "ok") + "</td>";
+        body.appendChild(row);
+        if (offenders.length) {
+          const detail = document.createElement("tr");
+          detail.innerHTML = "<td colspan='5' class='detail'>" + offenders.join(" | ") + "</td>";
+          body.appendChild(detail);
+        }
+        frame.remove();
+      }
+    }
+    document.title = "probe done";
+  })();
+</script>
+</body>
+</html>

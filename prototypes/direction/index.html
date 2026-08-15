@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Direction</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --canvas: #0b0c0e; --surface: #101216; --raised: #16191f;
+    --line: #1e222a; --text: #e8eaed; --muted: #9aa1ad; --faint: #626a77;
+    --ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; min-width: 0; }
+  body {
+    margin: 0; min-height: 100dvh;
+    background: var(--canvas); color: var(--text);
+    font: 400 15px/1.6 var(--ui);
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.005em;
+    padding: clamp(20px, 5vw, 56px);
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { margin: 0 0 6px; font-size: clamp(20px, 3vw, 26px); font-weight: 600; letter-spacing: -0.02em; }
+  .lede { margin: 0 0 clamp(24px, 4vw, 40px); color: var(--muted); max-width: 58ch; }
+  .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+  a.card {
+    display: grid; gap: 8px; align-content: start;
+    padding: 16px 17px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--surface); color: inherit; text-decoration: none;
+  }
+  a.card:hover { background: var(--raised); border-color: #2a3140; }
+  a.card:focus-visible { outline: 2px solid #4f8cff; outline-offset: 2px; }
+  .k { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+  .t { font-size: 16px; font-weight: 550; letter-spacing: -0.012em; }
+  .d { font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+  .c { font: 400 12px/1.5 var(--mono); color: var(--faint); }
+  .tools { margin-top: clamp(24px, 4vw, 40px); padding-top: 16px; border-top: 1px solid var(--line); }
+  .tools a { color: var(--muted); font: 400 13px/1.8 var(--mono); display: block; }
+  .tools a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Direction</h1>
+  <p class="lede">Three theses about what Forgerie is. Not three colour schemes.
+    Pick the thesis first; the visual system follows from it.</p>
+
+  <div class="grid">
+    <a class="card" href="a-ledger.html">
+      <span class="k">A</span>
+      <span class="t">Ledger</span>
+      <span class="d">A register of work. Everything is a row. The list is permanent furniture.</span>
+      <span class="c">cost: transcript never gets the full screen</span>
+    </a>
+
+    <a class="card" href="b-quiet.html">
+      <span class="k">B</span>
+      <span class="t">Quiet</span>
+      <span class="d">A place you read. The transcript is the app; navigation is summoned.</span>
+      <span class="c">cost: supervising several agents means constant jumping</span>
+    </a>
+
+    <a class="card" href="c-floor.html">
+      <span class="k">C</span>
+      <span class="t">Floor</span>
+      <span class="d">A control room. Lanes ordered by what the work needs from you.</span>
+      <span class="c">cost: reading a long transcript is second class</span>
+    </a>
+  </div>
+
+  <div class="tools">
+    <a href="probe.html">probe.html - overflow check, all directions, all four postures</a>
+    <a href="README.md">README.md</a>
+  </div>
+</div>
+</body>
+</html>
