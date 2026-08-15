@@ -10,11 +10,21 @@ const FALLBACK_FILLER_WORDS = new Set([
 ]);
 const RELAY_HANDOFF_FIRST_LINE = /^Relay\s+"([^"\n]+)"\s+leg\s+(\d+)\s+begins now\.?\s*(?:\n|$)/;
 const SKILL_COMMAND = /^\/skill:([a-z0-9][a-z0-9_-]*)\s*$/i;
+const EXPANDED_SKILL = /^<skill name="([^"]+)" location="[^"]+">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/;
+
+export function sessionNameIntent(firstMessage: string): string {
+  const input = firstMessage.trim();
+  const expandedSkill = EXPANDED_SKILL.exec(input);
+  if (expandedSkill === null) return input;
+
+  const request = expandedSkill[2]?.trim();
+  return request === undefined || request === "" ? `/skill:${expandedSkill[1] ?? ""}` : request;
+}
 
 export function deterministicSessionName(firstMessage: unknown): string | undefined {
   if (typeof firstMessage !== "string") return undefined;
 
-  const input = firstMessage.trimStart();
+  const input = sessionNameIntent(firstMessage);
   return skillCommandSessionName(input) ?? relayHandoffSessionName(input);
 }
 
@@ -25,7 +35,7 @@ export async function generateShortSessionName<TApi extends Api>(streamFn: Strea
       systemPrompt: "Generate a 1-4 word retrieval label for a coding-agent chat session. Maximize signal per word. Return only the label, with no quotes or punctuation wrapper.",
       messages: [{
         role: "user",
-        content: `Label this request for recognition in a session list. Prefer specific names and compact noun phrases. Keep products, components, files, errors, or decisions that distinguish it. Omit framing and generic task verbs such as understand, explore, investigate, help, fix, update, and implement. Prefer 2-3 words when they remain clear; use 1 for a distinctive standalone term and 4 only when needed.\n\nRequest:\n${truncateInput(firstMessage)}`,
+        content: `Label this request for recognition in a session list. Prefer specific names and compact noun phrases. Keep products, components, files, errors, or decisions that distinguish it. Omit framing and generic task verbs such as understand, explore, investigate, help, fix, update, and implement. Prefer 2-3 words when they remain clear; use 1 for a distinctive standalone term and 4 only when needed.\n\nRequest:\n${truncateInput(sessionNameIntent(firstMessage))}`,
         timestamp: Date.now(),
       }],
     },
@@ -50,7 +60,7 @@ export async function generateShortSessionName<TApi extends Api>(streamFn: Strea
 export function fallbackSessionName(firstMessage: unknown): string | undefined {
   if (typeof firstMessage !== "string") return undefined;
 
-  return cleanSessionName(firstMessage
+  return cleanSessionName(sessionNameIntent(firstMessage)
     .replace(/<skill name="[^"]+" location="[^"]+">[\s\S]*?<\/skill>/g, "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/[`*_#[\](){}<>]/g, " ")

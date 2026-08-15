@@ -2,7 +2,7 @@ import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
-import { cleanSessionName, deterministicSessionName, fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
+import { cleanSessionName, deterministicSessionName, fallbackSessionName, generateShortSessionName, sessionNameIntent } from "./sessionNameGenerator.js";
 
 function fakeModel(): Model<Api> {
   return { id: "fake-model", name: "Fake Model", api: "anthropic-messages", provider: "anthropic", baseUrl: "https://example.test", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000, maxTokens: 100 };
@@ -60,6 +60,22 @@ describe("sessionNameGenerator", () => {
     expect(requestedContext?.messages[0]?.content).toContain("Prefer specific names and compact noun phrases");
   });
 
+  it("uses the request after an expanded skill instead of the skill instructions", async () => {
+    let requestedContext: Parameters<StreamFn>[1] | undefined;
+    const stream = streamThatCompletes("Skill Session Naming");
+    const streamFn: StreamFn = (model, context, options) => {
+      requestedContext = context;
+      return stream(model, context, options);
+    };
+    const expandedSkill = `<skill name="se-debug" location="/skills/se-debug/SKILL.md">\n${"Generic debugging workflow. ".repeat(300)}\n</skill>\n\nauto session naming has degraded when i use skills`;
+
+    const name = await generateShortSessionName(streamFn, fakeModel(), expandedSkill);
+
+    expect(name).toBe("Skill Session Naming");
+    expect(requestedContext?.messages[0]?.content).toContain("auto session naming has degraded when i use skills");
+    expect(requestedContext?.messages[0]?.content).not.toContain("Generic debugging workflow");
+  });
+
   it("returns undefined when the stream reports an error", async () => {
     const streamFn = streamThatErrors();
 
@@ -75,6 +91,13 @@ describe("sessionNameGenerator", () => {
   it("rejects generated titles longer than four words before character truncation", () => {
     expect(cleanSessionName("Generic Session Title With Filler")).toBeUndefined();
     expect(cleanSessionName(`${"x".repeat(50)} two three four five`)).toBeUndefined();
+  });
+
+  it("extracts title intent from expanded skills", () => {
+    expect(sessionNameIntent('<skill name="se-debug" location="/skills/se-debug/SKILL.md">\nDebug workflow\n</skill>\n\nFix session naming'))
+      .toBe("Fix session naming");
+    expect(sessionNameIntent('<skill name="se-debug" location="/skills/se-debug/SKILL.md">\nDebug workflow\n</skill>'))
+      .toBe("/skill:se-debug");
   });
 
   it("builds deterministic names only for skill commands without request text", () => {
