@@ -103,7 +103,7 @@ export class SettingsPanelFrame extends LitElement {
     button:disabled { opacity: .55; cursor: not-allowed; }
     .secondary { flex: 0 0 auto; }
     .notice-stack { display: grid; gap: 12px; margin-bottom: 14px; }
-    .notice { border: 1px solid var(--pi-border); border-radius: 10px; background: var(--pi-surface); padding: 12px; line-height: 1.45; }
+    .notice { border: 1px solid var(--pi-border-muted); border-radius: 10px; background: var(--pi-surface); padding: 12px; line-height: 1.45; }
     .notice.error { border-color: var(--pi-danger); color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-surface)); }
     .notice.success { border-color: var(--pi-success-border); color: var(--pi-success); background: var(--pi-success-surface); }
     .notice.warning { border-color: var(--pi-warning-border); color: var(--pi-text); background: var(--pi-warning-surface); }

@@ -48,7 +48,7 @@ describe("composer island styles", () => {
     expect(islandCss).toContain("padding: var(--composer-island-pad)");
     expect(islandCss).toContain("border: var(--composer-island-edge) solid var(--pi-border)");
     expect(islandCss).toContain("padding: var(--composer-draft-pad, 8px)");
-    expect(islandCss).toContain("border: var(--composer-draft-edge, 1px) solid var(--pi-border)");
+    expect(islandCss).toContain("border: var(--composer-draft-edge, 1px) solid var(--pi-border-muted)");
   });
 
   it("keeps the context reading on the island's own edge", () => {

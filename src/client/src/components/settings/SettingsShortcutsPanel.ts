@@ -349,8 +349,8 @@ export class SettingsShortcutsPanel extends LitElement {
     button, input { font: inherit; }
     button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
     button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
-    .primary { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-text-bright); }
-    .loading-card, .config-path-card, .prompt-enter-card { border: 1px solid var(--pi-border); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
+    .primary { border-color: var(--pi-accent-border); background: var(--pi-accent); color: var(--pi-bg); }
+    .loading-card, .prompt-enter-card { border: 1px solid var(--pi-border-muted); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
     .loading-card, .config-path-card { color: var(--pi-muted); }
     .config-path-card { display: grid; gap: 5px; }
     .config-path-card span, .card-eyebrow { color: var(--pi-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
@@ -366,7 +366,7 @@ export class SettingsShortcutsPanel extends LitElement {
     code { border: 1px solid var(--pi-border-muted); border-radius: 5px; background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     .shortcut-group { margin: 0; }
     .shortcut-group h3 { margin: 0 0 8px; color: var(--pi-muted); font-size: 12px; text-transform: uppercase; }
-    .shortcut-list { border: 1px solid var(--pi-border); border-radius: 10px; overflow: hidden; }
+    .shortcut-list { border: 1px solid var(--pi-border-muted); border-radius: 10px; overflow: hidden; }
     .shortcut-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 48%); gap: 14px; align-items: start; padding: 12px; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-surface); }
     .shortcut-row.shadowed { background: color-mix(in srgb, var(--pi-warning) 5%, var(--pi-surface)); }
     .shortcut-row.shadowing { background: color-mix(in srgb, var(--pi-accent) 5%, var(--pi-surface)); }

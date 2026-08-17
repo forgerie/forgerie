@@ -129,6 +129,10 @@
        * Vertical overscroll is left alone: pull-to-refresh is not in the way.
        */
       html { overscroll-behavior-x: none; }
+      /* Thin, palette-tinted scrollbars in every scroll container. These two
+         properties inherit through shadow roots, unlike ::-webkit-scrollbar
+         rules, so one declaration themes both modes everywhere. */
+      html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--pi-muted) 40%, transparent) transparent; }
       /* Tabular figures everywhere a number lives: times, counts, and meters
          align into columns instead of jittering. font-variant-numeric inherits
          through shadow roots, so one declaration covers every component. */

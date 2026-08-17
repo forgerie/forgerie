@@ -193,7 +193,7 @@ export class SettingsPackagesPanel extends LitElement {
     label { font-weight: 700; }
     .secondary { flex: 0 0 auto; }
     .danger { border-color: color-mix(in srgb, var(--pi-danger) 55%, var(--pi-border)); color: var(--pi-danger); }
-    .loading-card, .install-card, .package-card { border: 1px solid var(--pi-border); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
+    .loading-card, .install-card, .package-card { border: 1px solid var(--pi-border-muted); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
     .field-error { color: var(--pi-danger); font-size: 12px; }
     .install-card { display: grid; gap: 8px; }
     .install-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }

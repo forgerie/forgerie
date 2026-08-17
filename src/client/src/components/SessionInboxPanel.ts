@@ -992,7 +992,7 @@ export class SessionInboxPanel extends LitElement {
       align-items: center;
       gap: 8px;
       padding: 6px 12px;
-      border-bottom: 1px solid var(--pi-border);
+      border-bottom: 1px solid var(--pi-border-muted);
       background: var(--pi-surface, #101527);
     }
 
@@ -1144,7 +1144,7 @@ export class SessionInboxPanel extends LitElement {
        * row touching it. The near edge is the one the drawer is drawn out of and
        * needs a line of its own.
        */
-      border-block: 1px solid var(--pi-border);
+      border-block: 1px solid var(--pi-border-muted);
       background: var(--pi-surface-hover);
       box-shadow: inset 0 6px 8px -8px var(--pi-shadow);
     }
@@ -1191,8 +1191,9 @@ export class SessionInboxPanel extends LitElement {
       font: inherit;
       font-size: 1rem;
       color: var(--pi-muted, #aaa4bd);
-      background: var(--pi-surface, #101527);
-      border: 1px solid var(--pi-border, #26304f);
+      /* Ghost: header utilities separate by hover surface, not by outline. */
+      background: transparent;
+      border: 1px solid transparent;
       border-radius: 8px;
       cursor: pointer;
     }
@@ -1582,7 +1583,7 @@ export class SessionInboxPanel extends LitElement {
       gap: 8px;
       padding: 10px 12px;
       background: var(--pi-surface, #101527);
-      border-top: 1px solid var(--pi-border, #26304f);
+      border-top: 1px solid var(--pi-border-muted, #26304f);
       animation: toast-slide-up 200ms ease;
     }
 
