@@ -71,12 +71,16 @@ code reading. Others are anticipated; audits may resize them.
       stays pinned deliberately for content fidelity; stale fallbacks aligned
 - [x] Classic theme untouched as legacy fallback; full suite green
 
-## Slice 4 — Copy & metadata
+## Slice 4 — Copy & metadata (done 2026-08-16, eef7124)
 
-- [ ] Transcript meta: humanize model names, label effort, short timestamps ◆
-- [ ] Composer placeholder: one short line; sigil lesson → progressive help ◆
-- [ ] Inbox header: fix "Grouped by Sta…" truncation; rationalize controls ◆
-- [ ] Usage meters: label or redesign into a legible quota affordance ◆
+- [x] Transcript meta: provider route dropped, model ids humanized,
+      distance-proportional timestamps, "high effort" labeling ◆
+- [x] Composer placeholder one quiet line; sigil menus teach themselves ◆
+- [x] Inbox header shows the grouping value directly; sr text keeps the
+      full phrasing ◆
+- [x] Usage meters re-scoped: rendered by the profile extension
+      multi-account-usage.ts, outside this repo/release → backlog
+      01M06SX5MWA4NH0G8T2X863JNJ ◆
 
 ## Slice 5 — Posture & intrinsic defects
 
