@@ -55,7 +55,9 @@ export interface ComposerDraftEscapeContext {
 }
 
 /** Shared so a host can fall back to them without restating the copy. */
-export const DEFAULT_COMPOSER_PLACEHOLDER = "Message pi... Use / for commands, @ for tracked files, @ space for all files, # for models";
+/* One quiet line. The sigil lesson (/ commands, @ files, # models) lives in
+   the completion menus themselves: typing any sigil opens its menu. */
+export const DEFAULT_COMPOSER_PLACEHOLDER = "Message pi\u2026";
 export const DEFAULT_COMPOSER_EDITOR_LABEL = "Message pi";
 
 @customElement("composer-draft")

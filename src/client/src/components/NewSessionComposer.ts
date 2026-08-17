@@ -312,7 +312,7 @@ export class NewSessionComposer extends LitElement {
 
   private placeholderForState(state: NewSessionComposerState): string {
     return state.destination.kind === "complete"
-      ? "Describe the first task… Use / for prompt resources, @ for tracked files, @ space for all files"
+      ? "Describe the first task…"
       : "Describe the first task… Choose a destination to enable / and @ completions";
   }
 

@@ -488,7 +488,7 @@ export class SessionInboxPanel extends LitElement {
             @click=${() => { this.toggleMenu("group-by"); }}
           >
             <span class="board-title">Inbox</span>
-            <span class="board-grouping">Grouped by <span class="board-grouping-value">${groupByLabel(this.groupBy)}</span><span class="board-caret" aria-hidden="true">▾</span></span>
+            <span class="board-grouping"><span class="board-grouping-hidden">Grouped by </span><span class="board-grouping-value">${groupByLabel(this.groupBy)}</span><span class="board-caret" aria-hidden="true">▾</span></span>
           </button>
         </h2>
       </div>
@@ -1061,6 +1061,9 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .board-grouping-value { color: var(--pi-text, #f7f4ff); font-weight: 600; }
+    /* The words "Grouped by" truncated on narrow sidebars; the value plus the
+       caret carries the meaning visually, the prefix stays for readers. */
+    .board-grouping-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
     .board-caret { margin-inline-start: 3px; }
 
     .board-actions {

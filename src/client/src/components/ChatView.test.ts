@@ -206,26 +206,39 @@ describe("ChatView session-warning dismiss wiring", () => {
 });
 
 describe("chatMessageMetadataLabel", () => {
-  it("uses one full date and model label without a model prefix", () => {
-    const timestamp = "2026-07-10T19:15:30.000Z";
-    const formattedTimestamp = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(timestamp));
+  const timestamp = "2026-07-10T19:15:30.000Z";
+  const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(timestamp));
+  const sameDay = new Date(timestamp);
+  const sameYear = new Date("2026-12-01T00:00:00.000Z");
+  const otherYear = new Date("2027-03-01T00:00:00.000Z");
 
+  it("shows only the time for same-day messages and drops the provider route", () => {
     expect(chatMessageMetadataLabel({
       role: "assistant",
       parts: [],
-      meta: { timestamp, model: { provider: "provider", id: "model" } },
-    })).toBe(`${formattedTimestamp} · provider/model`);
+      meta: { timestamp, model: { provider: "cliproxyapi", id: "claude-fable-5" } },
+    }, sameDay)).toBe(`${time} · Claude Fable 5`);
   });
 
-  it("appends the thinking level after the model when present", () => {
-    const timestamp = "2026-07-10T19:15:30.000Z";
-    const formattedTimestamp = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(timestamp));
+  it("adds month and day within the year and the full date beyond it", () => {
+    const day = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(timestamp));
+    const fullDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(timestamp));
+    const line = (now: Date) => chatMessageMetadataLabel({
+      role: "assistant",
+      parts: [],
+      meta: { timestamp, model: { provider: "provider", id: "gpt-5.6-sol" } },
+    }, now);
 
+    expect(line(sameYear)).toBe(`${day}, ${time} · GPT 5.6 Sol`);
+    expect(line(otherYear)).toBe(`${fullDate}, ${time} · GPT 5.6 Sol`);
+  });
+
+  it("labels the thinking level as effort after the model", () => {
     expect(chatMessageMetadataLabel({
       role: "assistant",
       parts: [],
       meta: { timestamp, model: { provider: "provider", id: "model" }, thinkingLevel: "high" },
-    })).toBe(`${formattedTimestamp} · provider/model · high`);
+    }, sameDay)).toBe(`${time} · Model · high effort`);
   });
 });
 

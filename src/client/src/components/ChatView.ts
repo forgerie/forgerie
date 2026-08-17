@@ -26,7 +26,9 @@ import { registerRenderedModal, type RenderedModalRegistration } from "./modalLa
 import "./FormattedText";
 import "./ToolExecutionView";
 
-const messageTimestampFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
+const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+const messageDayFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const messageDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 export interface QueuedMessageSection {
   source: "client" | "server";
@@ -198,26 +200,53 @@ export function chatSessionWarningRows(status: SessionStatus | undefined): ChatS
   }));
 }
 
-export function chatMessageMetadataLabel(message: ChatLine): string {
+export function chatMessageMetadataLabel(message: ChatLine, now: Date = new Date()): string {
   const timestamp = message.meta?.timestamp;
-  const time = timestamp === undefined ? undefined : formatMessageTimestamp(timestamp);
+  const time = timestamp === undefined ? undefined : formatMessageTimestamp(timestamp, now);
   const model = chatMessageModelLabel(message);
-  const parts = [time, model, message.meta?.thinkingLevel].filter((part): part is string => part !== undefined && part !== "");
+  const effort = message.meta?.thinkingLevel;
+  const parts = [time, model, effort === undefined || effort === "" ? undefined : `${effort} effort`]
+    .filter((part): part is string => part !== undefined && part !== "");
   return parts.length === 0 ? "No Pi message metadata available" : parts.join(" · ");
 }
 
-function formatMessageTimestamp(timestamp: string): string | undefined {
+/*
+ * The meta line is glanced at, not read: today's messages carry only a time,
+ * this year's carry month and day, and only other years spend space on the
+ * full date. `now` is a parameter so the boundary is testable.
+ */
+export function formatMessageTimestamp(timestamp: string, now: Date = new Date()): string | undefined {
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) return undefined;
-  return messageTimestampFormatter.format(date);
+  const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  if (sameDay) return messageTimeFormatter.format(date);
+  const day = date.getFullYear() === now.getFullYear() ? messageDayFormatter.format(date) : messageDateFormatter.format(date);
+  return `${day}, ${messageTimeFormatter.format(date)}`;
 }
 
-function chatMessageModelLabel(message: ChatLine): string | undefined {
+const MODEL_WORD_CAPS: Record<string, string> = { gpt: "GPT", glm: "GLM", ai: "AI", api: "API" };
+
+/*
+ * A transcript answers "which model said this"; the provider route is
+ * plumbing and stays out of the line. Dashed ids read as names:
+ * claude-fable-5 -> Claude Fable 5, gpt-5.6-sol -> GPT 5.6 Sol.
+ */
+export function chatMessageModelLabel(message: ChatLine): string | undefined {
   const model = message.meta?.model;
   if (model === undefined) return undefined;
   const id = model.responseId ?? model.id;
   if (id === undefined || id === "") return model.provider;
-  return model.provider !== undefined && model.provider !== "" ? `${model.provider}/${id}` : id;
+  return humanizeModelId(id);
+}
+
+function humanizeModelId(id: string): string {
+  return id.split("-").map((word) => {
+    const cap = MODEL_WORD_CAPS[word.toLowerCase()];
+    if (cap !== undefined) return cap;
+    const first = word[0];
+    if (first === undefined || /^[0-9]/.test(word)) return word;
+    return first.toUpperCase() + word.slice(1);
+  }).join(" ");
 }
 
 @customElement("chat-view")
