@@ -142,7 +142,18 @@ code reading. Others are anticipated; audits may resize them.
       command palette/picker; ask-user + extension cards; process cards
 - [ ] Empty state: useful first screen (projects/recent sessions + brand) ◆
 
-## Slice 8 — Motion
+## Slice 8 — Motion (done 2026-08-16, fa81493)
+
+- [x] Two-token motion scale in index.html: --pi-motion-fast (120ms micro
+      feedback), --pi-motion-move (180ms structural travel); seven scattered
+      durations across ten files normalized onto it
+- [x] Ambient status pulses (1s–1.8s) deliberately off the scale
+- [x] Reduced-motion audit: guarded the inbox drawer/undo-toast slides, the
+      machine-switcher pulse, and shared activity indicators; radial menu,
+      shell panels, liveness dot, inbox marker were already guarded
+- [x] THEME_TOKENS note extended: motion is geometry, not palette
+
+### Original scope
 
 - [ ] 2–3 intentional transitions (panel slide, composer state, list settle)
 - [ ] prefers-reduced-motion respected
