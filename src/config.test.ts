@@ -23,7 +23,7 @@ describe("Forgerie config persistence", () => {
       port: 9000,
       allowedHosts: ["example.local"],
       shortcuts: { "core:view.chat": "mod+1", "core:session.stop": null },
-      plugins: { "workspace-tasks": { enabled: false, settings: { configPath: ".forgerie/tasks.json" } } },
+      plugins: { info: { enabled: false, settings: { compact: true } } },
       pathAccess: { allowedPaths: ["/tmp", "~/SDKs"] },
       uploads: { defaultFolder: "manual\\incoming" },
     };

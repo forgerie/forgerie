@@ -107,8 +107,8 @@ class PiWebRelaysPanel extends HTMLElement {
     const previousKey = this.contextValue === undefined ? undefined : contextKey(this.contextValue);
     const nextKey = value === undefined ? undefined : contextKey(value);
     this.contextValue = value;
-    // Parent app updates should not rescan or re-render this panel for the
-    // same workspace (mirrors the workspace-tasks panel).
+    // Parent app updates for the same workspace must preserve the panel's
+    // loaded data, selection, scroll position, and focus.
     if (previousKey === nextKey) return;
     // A different workspace starts with every folder collapsed.
     this.expandedDirs = new Set();

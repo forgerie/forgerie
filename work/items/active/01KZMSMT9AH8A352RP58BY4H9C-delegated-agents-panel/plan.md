@@ -86,7 +86,7 @@ The inbox is the wrong surface for this. Delegated agents are execution detail o
 - **`--window-size` is not the CSS viewport** — it undersizes by roughly 87px and invalidates all four postures. Use `scripts/capture-screenshots.mjs` (CDP `Emulation.setDeviceMetricsOverride`). Capturing without reading the PNGs is not validation (`AGENTS.md`).
 - **The 499–979px posture cliff is a known, backlogged defect** (`work/items/parking-lot/01KZKS6M89CS8JKQSN32JHXG1D-…`). No new breakpoint may land inside that range.
 - **Dispatch on type, parse `details` all-optional, enforce a minimum shape, fall back to raw** — the pattern established by `01KZFNG5XM0Y6CN7B39KFZFCE5-first-class-pi-processes` U5 for `ad-process:notification`. `details` here is `unknown` off the wire and must be parsed defensively.
-- **Four explicit panel states are required**, not a boolean plus nullable payload (`workspace-tasks` exemplar).
+- **Four explicit panel states are required**: no selection, empty, populated, and loaded-window boundary. Do not combine booleans with nullable payloads.
 - **happy-dom is opt-in per file**; pure derivation tests stay on node.
 
 ### External References
