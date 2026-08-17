@@ -101,7 +101,7 @@ import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/A
 import "./SessionInboxPanel";
 import "./WorkspaceManagementDialog";
 import { navigateToInboxSession, type InboxNavigationResult } from "../controllers/inboxNavigation";
-import { deriveSessionInboxBoard } from "../sessionBoard";
+import { deriveSessionInboxBoard, relativeTime } from "../sessionBoard";
 import { sessionInboxAttention } from "../sessionInboxAttention";
 import "./appShell/AppPanelControls";
 import "./appShell/AppPanelOpener";
@@ -2355,10 +2355,32 @@ export class PiWebApp extends LitElement {
     return "Select a project and workspace to start a session.";
   }
 
+  /**
+   * Up to five conversations to come back to, newest first. Agent-spawned
+   * sessions belong to the session that owns them, and archived ones were
+   * deliberately put away, so neither earns a place on the first screen.
+   */
+  private recentSessions(): SessionInfo[] {
+    const sessions = this.state.globalSessions?.sessions ?? [];
+    return [...sessions.filter((session) => session.archived !== true && session.agentSpawned !== true)]
+      .sort((a, b) => Date.parse(b.modified) - Date.parse(a.modified))
+      .slice(0, 5);
+  }
+
+  /**
+   * The first screen, not an apology. The brand says where you are, the one
+   * filled primary starts the next conversation, and the recent list carries
+   * you back into the last few — useful even while the inbox is a closed
+   * drawer on a folded phone.
+   */
   private renderSessionEmptyState() {
+    const recents = this.recentSessions();
+    const resolveLocation = createInboxLocationResolver(this.state.projects, this.state.workspacesByProjectId);
+    const now = Date.now();
     return html`
       <div class="empty">
-        <span>${this.sessionEmptyMessage()}</span>
+        <div class="empty-brand" aria-hidden="true"><span class="empty-brand-bar"></span>Forgerie</div>
+        <span class="empty-message">${this.sessionEmptyMessage()}</span>
         <button
           class="empty-session-action"
           data-action="new-session"
@@ -2366,6 +2388,26 @@ export class PiWebApp extends LitElement {
           aria-label=${NEW_SESSION_LABEL}
           @click=${() => { this.openNewSessionComposer(); }}
         >${renderNewSessionIcon()}<span>${NEW_SESSION_LABEL}</span></button>
+        ${recents.length === 0 ? null : html`
+          <div class="empty-recents" data-empty-recents>
+            <h2 class="empty-recents-label" id="empty-recents-label">Recent</h2>
+            <div role="list" aria-labelledby="empty-recents-label">
+              ${recents.map((session) => {
+                const location = resolveLocation(session.cwd);
+                return html`
+                  <button
+                    class="empty-recent-row"
+                    role="listitem"
+                    @click=${() => { void this.selectInboxSession(session); }}
+                  >
+                    <span class="empty-recent-title">${session.name ?? (session.firstMessage || session.id)}</span>
+                    <span class="empty-recent-meta">${location?.projectName ?? ""} · ${relativeTime(session.modified, now)}</span>
+                  </button>
+                `;
+              })}
+            </div>
+          </div>
+        `}
       </div>
     `;
   }

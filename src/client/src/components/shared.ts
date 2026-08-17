@@ -295,9 +295,24 @@ export const appStyles = css`
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
-  .empty { margin: auto; display: grid; justify-items: center; gap: 12px; padding: 24px; color: var(--pi-muted); text-align: center; }
-  .empty-session-action { display: inline-flex; align-items: center; gap: 6px; color: var(--pi-text); }
+  /*
+   * The first screen: brand, one message, one filled primary, and the last
+   * few conversations. Widths are intrinsic — the column caps itself and the
+   * rows ellipsize — so every posture gets the same composition.
+   */
+  .empty { box-sizing: border-box; width: min(100%, 30rem); margin: auto; display: grid; justify-items: center; gap: var(--pi-space-md); padding: var(--pi-space-lg); color: var(--pi-muted); text-align: center; }
+  .empty-brand { display: grid; justify-items: center; gap: 10px; margin-bottom: var(--pi-space-xs); color: var(--pi-dim); font-size: var(--pi-text-sm); font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+  .empty-brand-bar { width: 40px; height: 6px; border-radius: var(--pi-radius-pill); background: var(--pi-accent); }
+  .empty-message { color: var(--pi-text); font-size: var(--pi-text-md); }
+  .empty-session-action { display: inline-flex; align-items: center; gap: 6px; border-color: var(--pi-accent-border, var(--pi-accent)); background: var(--pi-accent); color: var(--pi-bg); font-weight: 650; }
+  .empty-session-action:hover { background: color-mix(in srgb, var(--pi-accent) 86%, white); }
   .empty-session-action .new-session-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  .empty-recents { width: 100%; margin-top: var(--pi-space-md); display: grid; gap: 4px; text-align: left; }
+  .empty-recents-label { margin: 0 0 4px; padding-inline: 10px; color: var(--pi-dim); font-size: var(--pi-text-xs); font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+  .empty-recent-row { display: flex; align-items: baseline; gap: 12px; width: 100%; border: 0; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-text); padding: 8px 10px; text-align: left; cursor: pointer; }
+  .empty-recent-row:hover { background: var(--pi-surface); }
+  .empty-recent-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--pi-text-sm); }
+  .empty-recent-meta { flex: 0 0 auto; color: var(--pi-dim); font-size: var(--pi-text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .error { padding: 10px 16px; border-bottom: 1px solid var(--pi-border); color: var(--pi-danger); }
 
 `;
