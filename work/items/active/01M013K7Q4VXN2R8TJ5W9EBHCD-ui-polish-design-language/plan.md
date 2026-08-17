@@ -59,13 +59,17 @@ code reading. Others are anticipated; audits may resize them.
 - [x] Tabular numerals verified in monospace surfaces (inherited
       font-variant-numeric; ui-monospace is fixed-pitch)
 
-## Slice 3 — Color semantics
+## Slice 3 — Color semantics (done 2026-08-16, 29dda01)
 
-- [ ] Status-color audit: WORKING/UNREAD headers, dots, badges ◆
-- [ ] One accent focus ring everywhere
-- [ ] WCAG AA contrast pass over both canvases
-- [ ] Align DEFAULT_TERMINAL_ANSI_THEME + terminal selection with palette
-- [ ] Classic theme: keep as legacy contribution; verify fallback path renders
+- [x] Status-color audit: count badges neutralized, skill disclosures to
+      accent; status uses kept (working/unread, pulses, shell mode, machine
+      health, process outcomes, tree kind tones) ◆
+- [x] One 2px accent focus ring; field focus keeps border+ring convention
+- [x] WCAG AA audit script passes both palettes; light muted/dim darkened one
+      step (were 4.48:1 / 2.98:1)
+- [x] Terminal chrome reads live tokens (verified); ANSI 16-color palette
+      stays pinned deliberately for content fidelity; stale fallbacks aligned
+- [x] Classic theme untouched as legacy fallback; full suite green
 
 ## Slice 4 — Copy & metadata
 
