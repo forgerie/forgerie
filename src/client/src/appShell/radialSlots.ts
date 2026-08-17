@@ -17,6 +17,7 @@
  * error state.
  */
 
+import { parseMachineScopedPluginId } from "../../../shared/machinePluginIds";
 import type { QualifiedContributionId } from "../plugins/types";
 
 /** Eight slots: seven panels and an overflow, at 45 degrees each. */
@@ -43,9 +44,9 @@ export type RadialSlotMap = readonly (RadialTarget | undefined)[];
  * The shipped map.
  *
  * Order follows the panels' own `order` values rather than taste: Files 10,
- * Git 20, Terminal 30, Notifications 40, Tasks 40, Processes 50. Agents sits
- * behind overflow because `plugins/core/panels.ts` describes it as the
- * least-reached-for tool.
+ * Git 20, Terminal 30, Notifications 40, Processes and Relays 50, Agents 60,
+ * Updates 100, Info 1000. Agents sits behind overflow because
+ * `plugins/core/panels.ts` describes it as the least-reached-for tool.
  *
  * Most-used sits in the upper half deliberately. The lower wedges point toward
  * the palm, and they are also the half that clips when the thumb is near the
@@ -137,7 +138,11 @@ export function radialSlotsEqual(left: RadialSlotMap, right: RadialSlotMap): boo
 export function readStoredRadialSlots(): RadialSlotMap {
   try {
     const raw = window.localStorage.getItem(RADIAL_SLOT_STORAGE_KEY);
-    return raw === null ? DEFAULT_RADIAL_SLOTS : parseRadialSlots(raw);
+    if (raw === null) return DEFAULT_RADIAL_SLOTS;
+    const stored = parseRadialSlots(raw);
+    const migrated = removeWorkspaceTasksTargets(stored);
+    if (!radialSlotsEqual(stored, migrated)) writeStoredRadialSlots(migrated);
+    return migrated;
   } catch {
     return DEFAULT_RADIAL_SLOTS;
   }
@@ -176,6 +181,20 @@ function parseTarget(value: unknown): RadialTarget | undefined {
   if (record["kind"] !== "tool") return undefined;
   const tool = record["tool"];
   return isQualifiedContributionId(tool) ? { kind: "tool", tool } : undefined;
+}
+
+function removeWorkspaceTasksTargets(slots: RadialSlotMap): RadialSlotMap {
+  return slots.map((slot) => isWorkspaceTasksTarget(slot) ? undefined : slot);
+}
+
+function isWorkspaceTasksTarget(target: RadialTarget | undefined): boolean {
+  if (target?.kind !== "tool") return false;
+  const separator = target.tool.indexOf(":");
+  const pluginId = target.tool.slice(0, separator);
+  const localId = target.tool.slice(separator + 1);
+  if (localId !== "workspace.tasks") return false;
+  if (pluginId === "workspace-tasks") return true;
+  return parseMachineScopedPluginId(pluginId)?.pluginId === "workspace-tasks";
 }
 
 /**
