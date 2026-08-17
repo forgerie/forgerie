@@ -158,7 +158,18 @@ code reading. Others are anticipated; audits may resize them.
 - [ ] 2–3 intentional transitions (panel slide, composer state, list settle)
 - [ ] prefers-reduced-motion respected
 
-## Slice 9 — Codify
+## Slice 9 — Codify (done 2026-08-17, 72012f1 + d2fb94c)
+
+- [x] docs/design-system.md rewritten as the as-built language (principles,
+      full token contract, component grammar, verification ritual); the
+      draft-target --fg- spec superseded, docs/design-audit.md marked
+      historical
+- [x] Focus ring → one token (--pi-focus-ring), 33 outlines across 17
+      components consume it with a safe fallback; no visual change
+- [x] Dead-duplicate audit: text-secondary is distinct from muted in every
+      shipped palette — both stay
+
+### Original scope
 
 - [ ] Durable design-language doc (tokens, ramps, elevation, color semantics,
       chrome rules) under docs/
