@@ -1,6 +1,12 @@
-# Design audit — current UI vs target system
+# Design audit — pre-polish UI vs target system (historical)
 
-Measured against `docs/design-system.md`.
+Status: **superseded 2026-08**. These findings drove the ui-polish program
+(`work/items/active/01M013K7Q4VXN2R8TJ5W9EBHCD-ui-polish-design-language/`),
+which addressed them across nine slices; `docs/design-system.md` now
+describes the as-built system. Kept as history of the starting point.
+
+Measured against the earlier draft-target version of
+`docs/design-system.md`.
 
 **Headline: Forgerie has a color theme, not a design system.** Tokens cover
 color only. Spacing, type, and form are open-coded across ~2,000 raw values,
