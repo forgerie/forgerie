@@ -1279,7 +1279,7 @@ describe("stylesheet integrity", () => {
 });
 
 describe("working runtime", () => {
-  it("replaces message recency with the active turn runtime and a clock", async () => {
+  it("replaces message recency with the active turn runtime", async () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-08-11T10:02:30.000Z");
     const session = mkSession("running", { modified: "2026-08-01T00:00:00.000Z" });
@@ -1303,7 +1303,6 @@ describe("working runtime", () => {
     if (runtimeRoot === null) throw new Error("No runtime shadow root");
     expect(runtime.startedAt).toBe("2026-08-11T10:00:00.000Z");
     expect(runtimeRoot.textContent.trim()).toBe("2m");
-    expect(runtimeRoot.querySelector("[data-runtime-clock]")).not.toBeNull();
   });
 
   it("keeps the first observed start until a Working row settles", async () => {

@@ -961,12 +961,12 @@ export class SessionInboxPanel extends LitElement {
        * top-level declaration is a parse error, and CSS error recovery then
        * discards the whole rule that follows it.
        */
-      --tone-blocked: var(--pi-warning, #ffb000);
-      --tone-errored: var(--pi-danger, #ff4f7b);
-      --tone-working: var(--pi-success, #00f0d8);
-      --tone-unread: var(--pi-purple, #b7a2ff);
-      --tone-open: var(--pi-dim, #817a99);
-      --tone-archived: var(--pi-dim, #817a99);
+      --tone-blocked: var(--pi-warning, #d0a04a);
+      --tone-errored: var(--pi-danger, #e06c75);
+      --tone-working: var(--pi-success, #56b380);
+      --tone-unread: var(--pi-purple, #a89ede);
+      --tone-open: var(--pi-dim, #62656b);
+      --tone-archived: var(--pi-dim, #62656b);
     }
 
     /*
@@ -993,7 +993,7 @@ export class SessionInboxPanel extends LitElement {
       gap: 8px;
       padding: 6px 12px;
       border-bottom: 1px solid var(--pi-border-muted);
-      background: var(--pi-surface, #101527);
+      background: var(--pi-surface, #191a1d);
     }
 
     .board-identity {
@@ -1036,7 +1036,7 @@ export class SessionInboxPanel extends LitElement {
       cursor: pointer;
     }
 
-    .board-title-btn:hover { background: var(--pi-surface-hover, #151b31); }
+    .board-title-btn:hover { background: var(--pi-surface-hover, #202225); }
     .board-title-btn:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
 
     .board-title,
@@ -1048,19 +1048,19 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .board-title {
-      font-size: clamp(1rem, 0.98rem + 0.12cqi, 1.0625rem);
+      font-size: var(--pi-text-lg);
       font-weight: 650;
       line-height: 1.15;
       color: var(--pi-text-bright, #fff);
     }
 
     .board-grouping {
-      font-size: clamp(0.75rem, 0.73rem + 0.1cqi, 0.8125rem);
+      font-size: var(--pi-text-sm);
       line-height: 1.2;
-      color: var(--pi-muted, #aaa4bd);
+      color: var(--pi-muted, #85888e);
     }
 
-    .board-grouping-value { color: var(--pi-text, #f7f4ff); font-weight: 600; }
+    .board-grouping-value { color: var(--pi-text, #e6e7e9); font-weight: 600; }
     /* The words "Grouped by" truncated on narrow sidebars; the value plus the
        caret carries the meaning visually, the prefix stays for readers. */
     .board-grouping-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
@@ -1079,16 +1079,16 @@ export class SessionInboxPanel extends LitElement {
       min-height: 40px;
       padding: 0 12px;
       font: inherit;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-text, #f7f4ff);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-text, #e6e7e9);
       white-space: nowrap;
-      background: var(--pi-surface, #101527);
-      border: 1px solid var(--pi-border, #26304f);
+      background: var(--pi-surface, #191a1d);
+      border: 1px solid var(--pi-border, #2a2c30);
       border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
-    .new-session-btn:hover { background: var(--pi-surface-hover, #151b31); }
+    .new-session-btn:hover { background: var(--pi-surface-hover, #202225); }
 
     /* Fixed to the viewport, like every other action menu in the shell. */
     /*
@@ -1167,8 +1167,8 @@ export class SessionInboxPanel extends LitElement {
       cursor: pointer;
     }
 
-    .menu-panel button:hover { background: var(--pi-surface-hover, #151b31); }
-    .menu-panel button[aria-checked="true"] { color: var(--pi-text-bright, #fff); background: var(--pi-selection-bg, #1d2547); }
+    .menu-panel button:hover { background: var(--pi-surface-hover, #202225); }
+    .menu-panel button[aria-checked="true"] { color: var(--pi-text-bright, #fff); background: var(--pi-selection-bg, #1d2331); }
     .menu-panel button.danger { color: var(--pi-danger); }
 
     /* Which row the commands belong to, since a held finger covers the row. */
@@ -1193,7 +1193,7 @@ export class SessionInboxPanel extends LitElement {
       padding: 0;
       font: inherit;
       font-size: 1rem;
-      color: var(--pi-muted, #aaa4bd);
+      color: var(--pi-muted, #85888e);
       /* Ghost: header utilities separate by hover surface, not by outline. */
       background: transparent;
       border: 1px solid transparent;
@@ -1202,8 +1202,8 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .icon-btn:hover {
-      color: var(--pi-text, #f7f4ff);
-      background: var(--pi-surface-hover, #151b31);
+      color: var(--pi-text, #e6e7e9);
+      background: var(--pi-surface-hover, #202225);
     }
 
     .icon-btn svg {
@@ -1221,8 +1221,8 @@ export class SessionInboxPanel extends LitElement {
       gap: 12px;
       padding: 24px;
       text-align: center;
-      color: var(--pi-dim, #817a99);
-      font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
+      color: var(--pi-dim, #62656b);
+      font-size: var(--pi-text-md);
     }
 
     .board-state button {
@@ -1233,8 +1233,8 @@ export class SessionInboxPanel extends LitElement {
       padding: 8px 16px;
       font: inherit;
       color: var(--pi-text-bright, #fff);
-      background: var(--pi-accent, #7c3cff);
-      border: 1px solid var(--pi-accent-border, #5a47b0);
+      background: var(--pi-accent, #6699e0);
+      border: 1px solid var(--pi-accent-border, #4a7cc4);
       border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
@@ -1251,10 +1251,10 @@ export class SessionInboxPanel extends LitElement {
     .stale-notice {
       flex: 0 0 auto;
       padding: 4px 12px;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-warning, #ffb000);
-      background: color-mix(in srgb, var(--pi-warning, #ffb000) 10%, transparent);
-      border-bottom: 1px solid var(--pi-border-muted, #1b2340);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-warning, #d0a04a);
+      background: color-mix(in srgb, var(--pi-warning, #d0a04a) 10%, transparent);
+      border-bottom: 1px solid var(--pi-border-muted, #202225);
     }
 
     /* ---- board scroll ---- */
@@ -1264,8 +1264,7 @@ export class SessionInboxPanel extends LitElement {
       min-height: 0;
       overflow-y: auto;
       overscroll-behavior: contain;
-      scrollbar-width: thin;
-      scrollbar-color: var(--pi-border, #26304f) transparent;
+      /* Scrollbar style inherits from the document root (index.html). */
     }
 
     /* ---- groups ---- */
@@ -1286,17 +1285,17 @@ export class SessionInboxPanel extends LitElement {
       text-align: left;
       font: inherit;
       cursor: pointer;
-      background: color-mix(in srgb, var(--pi-bg, #070912) 88%, transparent);
+      background: color-mix(in srgb, var(--pi-bg, #111214) 88%, transparent);
       backdrop-filter: blur(8px);
       border: none;
-      border-block: 1px solid var(--pi-border-muted, #1b2340);
+      border-block: 1px solid var(--pi-border-muted, #202225);
       color: inherit;
     }
 
     .group-chevron {
       flex: 0 0 auto;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-dim, #817a99);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-dim, #62656b);
       transition: transform 140ms ease;
     }
 
@@ -1305,22 +1304,22 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .group-label {
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      font-size: var(--pi-text-sm);
       font-weight: 650;
       letter-spacing: 0.04em;
       text-transform: uppercase;
-      color: var(--group-tone, var(--pi-muted, #aaa4bd));
+      color: var(--group-tone, var(--pi-muted, #85888e));
     }
 
     .group-count {
       flex: 0 0 auto;
       min-width: 1.5em;
       padding: 1px 6px;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      font-size: var(--pi-text-sm);
       font-variant-numeric: tabular-nums;
       text-align: center;
-      color: var(--group-tone, var(--pi-muted, #aaa4bd));
-      background: color-mix(in srgb, var(--group-tone, var(--pi-dim, #817a99)) 14%, transparent);
+      color: var(--group-tone, var(--pi-muted, #85888e));
+      background: color-mix(in srgb, var(--group-tone, var(--pi-dim, #62656b)) 14%, transparent);
       border-radius: var(--pi-radius-pill);
     }
 
@@ -1341,7 +1340,7 @@ export class SessionInboxPanel extends LitElement {
       width: 100%;
       padding: 8px 12px;
       text-align: left;
-      border-bottom: 1px solid var(--pi-border-muted, #1b2340);
+      border-bottom: 1px solid var(--pi-border-muted, #202225);
       cursor: pointer;
       transition: background 120ms ease;
       /*
@@ -1353,10 +1352,10 @@ export class SessionInboxPanel extends LitElement {
       -webkit-touch-callout: none;
     }
 
-    .row:hover { background: var(--pi-surface, #101527); }
+    .row:hover { background: var(--pi-surface, #191a1d); }
 
     .row[aria-selected="true"] {
-      background: var(--pi-selection-bg, #1d2547);
+      background: var(--pi-selection-bg, #1d2331);
     }
 
     .row[aria-selected="true"]::before {
@@ -1365,7 +1364,7 @@ export class SessionInboxPanel extends LitElement {
       inset-block: 0;
       inset-inline-start: 0;
       width: 2px;
-      background: var(--pi-accent, #7c3cff);
+      background: var(--pi-accent, #6699e0);
     }
 
     .row[aria-disabled="true"] {
@@ -1391,12 +1390,12 @@ export class SessionInboxPanel extends LitElement {
 
     /* Blocked is the one state that is waiting on the person reading the row. */
     .row[data-state="blocked"] .row-marker {
-      box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone-blocked, #ffb000) 22%, transparent);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone-blocked, #d0a04a) 22%, transparent);
     }
 
     @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone-working, #00f0d8) 40%, transparent); }
-      50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone-working, #00f0d8) 0%, transparent); }
+      0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone-working, #56b380) 40%, transparent); }
+      50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone-working, #56b380) 0%, transparent); }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1407,8 +1406,8 @@ export class SessionInboxPanel extends LitElement {
     .row-title {
       grid-column: 2;
       min-width: 0;
-      font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
-      color: var(--pi-text, #f7f4ff);
+      font-size: var(--pi-text-md);
+      color: var(--pi-text, #e6e7e9);
       line-height: 1.35;
       display: -webkit-box;
       -webkit-box-orient: vertical;
@@ -1422,7 +1421,7 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-text-bright, #fff);
     }
 
-    .row[data-state="archived"] .row-title { color: var(--pi-muted, #aaa4bd); }
+    .row[data-state="archived"] .row-title { color: var(--pi-muted, #85888e); }
 
     .row-meta {
       grid-column: 2;
@@ -1431,8 +1430,8 @@ export class SessionInboxPanel extends LitElement {
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-dim, #817a99);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-dim, #62656b);
     }
 
     .chip {
@@ -1441,14 +1440,14 @@ export class SessionInboxPanel extends LitElement {
       gap: 3px;
       flex: 0 1 auto;
       min-width: 0;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-dim, #817a99);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-dim, #62656b);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    .chip-branch { color: var(--pi-muted, #aaa4bd); }
+    .chip-branch { color: var(--pi-muted, #85888e); }
 
     /* Live work sits with the location chip: icon plus count, never a word. */
     .live-work { display: inline-flex; align-items: center; gap: 8px; }
@@ -1456,23 +1455,23 @@ export class SessionInboxPanel extends LitElement {
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      color: var(--pi-muted, #aaa4bd);
+      color: var(--pi-muted, #85888e);
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
     }
     .live-work-item .tab-icon { width: 13px; height: 13px; }
-    .chip-deleted { color: var(--pi-danger, #ff4f7b); font-style: italic; }
+    .chip-deleted { color: var(--pi-danger, #e06c75); font-style: italic; }
 
     .row-detail {
       flex: 0 1 auto;
       min-width: 0;
-      color: var(--pi-dim, #817a99);
+      color: var(--pi-dim, #62656b);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    .row[data-state="errored"] .row-detail { color: var(--pi-danger, #ff4f7b); }
+    .row[data-state="errored"] .row-detail { color: var(--pi-danger, #e06c75); }
 
     /*
      * The right column mirrors the left's two-line rhythm: when on the title's
@@ -1484,9 +1483,9 @@ export class SessionInboxPanel extends LitElement {
       grid-row: 1;
       justify-self: end;
       align-self: baseline;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      font-size: var(--pi-text-sm);
       font-variant-numeric: tabular-nums;
-      color: var(--pi-dim, #817a99);
+      color: var(--pi-dim, #62656b);
       white-space: nowrap;
     }
 
@@ -1533,9 +1532,9 @@ export class SessionInboxPanel extends LitElement {
       min-height: 28px;
       padding: 0;
       font: inherit;
-      font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
+      font-size: var(--pi-text-md);
       line-height: 1;
-      color: var(--pi-dim, #817a99);
+      color: var(--pi-dim, #62656b);
       background: none;
       border: 1px solid transparent;
       border-radius: var(--pi-radius-control);
@@ -1557,15 +1556,15 @@ export class SessionInboxPanel extends LitElement {
 
     .row-action:hover {
       color: var(--pi-text-bright, #fff);
-      border-color: var(--pi-accent-border, #5a47b0);
-      background: var(--pi-surface-hover, #151b31);
+      border-color: var(--pi-accent-border, #4a7cc4);
+      background: var(--pi-surface-hover, #202225);
     }
 
     :host(:focus-visible),
     .row:focus-visible,
     .group-header:focus-visible,
     .row-action:focus-visible {
-      outline: 2px solid var(--pi-accent, #7c3cff);
+      outline: 2px solid var(--pi-accent, #6699e0);
       outline-offset: 2px;
       border-radius: var(--pi-radius-control);
     }
@@ -1585,8 +1584,8 @@ export class SessionInboxPanel extends LitElement {
       justify-content: space-between;
       gap: 8px;
       padding: 10px 12px;
-      background: var(--pi-surface, #101527);
-      border-top: 1px solid var(--pi-border-muted, #26304f);
+      background: var(--pi-surface, #191a1d);
+      border-top: 1px solid var(--pi-border-muted, #2a2c30);
       animation: toast-slide-up 200ms ease;
     }
 
@@ -1598,8 +1597,8 @@ export class SessionInboxPanel extends LitElement {
     .undo-label {
       flex: 1 1 auto;
       min-width: 0;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-text, #f7f4ff);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-text, #e6e7e9);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1607,7 +1606,7 @@ export class SessionInboxPanel extends LitElement {
 
     .undo-label em {
       font-style: normal;
-      color: var(--pi-muted, #aaa4bd);
+      color: var(--pi-muted, #85888e);
     }
 
     .undo-actions {
@@ -1623,17 +1622,17 @@ export class SessionInboxPanel extends LitElement {
       min-height: 44px;
       padding: 0 12px;
       font: inherit;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
+      font-size: var(--pi-text-sm);
       font-weight: 600;
-      color: var(--pi-accent, #7c3cff);
-      background: color-mix(in srgb, var(--pi-accent, #7c3cff) 12%, transparent);
-      border: 1px solid var(--pi-accent-border, #5a47b0);
+      color: var(--pi-accent, #6699e0);
+      background: color-mix(in srgb, var(--pi-accent, #6699e0) 12%, transparent);
+      border: 1px solid var(--pi-accent-border, #4a7cc4);
       border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
     .undo-btn:hover {
-      background: color-mix(in srgb, var(--pi-accent, #7c3cff) 22%, transparent);
+      background: color-mix(in srgb, var(--pi-accent, #6699e0) 22%, transparent);
     }
 
     .undo-dismiss {
@@ -1643,7 +1642,7 @@ export class SessionInboxPanel extends LitElement {
       min-height: 44px;
       padding: 0;
       font: inherit;
-      color: var(--pi-dim, #817a99);
+      color: var(--pi-dim, #62656b);
       background: none;
       border: 1px solid transparent;
       border-radius: var(--pi-radius-control);
@@ -1651,8 +1650,8 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .undo-dismiss:hover {
-      color: var(--pi-text, #f7f4ff);
-      border-color: var(--pi-border-muted, #1b2340);
+      color: var(--pi-text, #e6e7e9);
+      border-color: var(--pi-border-muted, #202225);
     }
   `;
 }

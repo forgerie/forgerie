@@ -1,13 +1,6 @@
-import { LitElement, css, html, svg } from "lit";
+import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { elapsedSince, formatWorkingRuntime, nextWorkingRuntimeTick, workingRuntimeLabel } from "../sessionWorkingRuntime";
-
-const clockIcon = svg`
-  <svg data-runtime-clock viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-    <circle cx="8" cy="8" r="5.75"></circle>
-    <path d="M8 4.5v3.8l2.4 1.5"></path>
-  </svg>
-`;
 
 /** The quiet minute-precision runtime shown in a Working inbox row. */
 @customElement("session-working-runtime")
@@ -33,8 +26,10 @@ export class SessionWorkingRuntime extends LitElement {
   }
 
   override render() {
+    // No clock glyph: the pulsing row marker already says "working", and a
+    // glyph on every working row read as a column of repeated chrome.
     const elapsed = elapsedSince(this.startedAt, this.now) ?? 0;
-    return html`${clockIcon}<span aria-label=${workingRuntimeLabel(elapsed)}>${formatWorkingRuntime(elapsed)}</span>`;
+    return html`<span aria-label=${workingRuntimeLabel(elapsed)}>${formatWorkingRuntime(elapsed)}</span>`;
   }
 
   private scheduleTick(): void {
@@ -58,17 +53,7 @@ export class SessionWorkingRuntime extends LitElement {
     :host {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-    }
-
-    svg {
-      width: 13px;
-      height: 13px;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 1.35;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+      font-variant-numeric: tabular-nums;
     }
   `;
 }

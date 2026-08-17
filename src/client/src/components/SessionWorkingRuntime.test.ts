@@ -37,7 +37,7 @@ describe("formatWorkingRuntime", () => {
 });
 
 describe("SessionWorkingRuntime", () => {
-  it("shows a clock and updates at the next minute without ticking through seconds", async () => {
+  it("updates at the next minute without ticking through seconds", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-08-11T10:00:00.000Z";
     vi.setSystemTime("2026-08-11T10:00:59.500Z");
@@ -48,7 +48,8 @@ describe("SessionWorkingRuntime", () => {
     await runtime.updateComplete;
 
     expect(shadowRoot(runtime).textContent.trim()).toBe("<1m");
-    expect(shadowRoot(runtime).querySelector("[data-runtime-clock]")).not.toBeNull();
+    // No clock glyph: the pulsing row marker already carries "working".
+    expect(shadowRoot(runtime).querySelector("[data-runtime-clock]")).toBeNull();
     expect(shadowRoot(runtime).querySelector("[aria-label]")?.getAttribute("aria-label")).toBe("Working for less than 1 minute");
 
     await vi.advanceTimersByTimeAsync(500);
