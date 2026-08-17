@@ -1297,6 +1297,13 @@ export interface SessionTreeSnapshot {
 
 export const SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH = 10_000;
 
+/**
+ * Prefix the tree projection gives an assistant turn that only called tools and
+ * produced no prose. Clients filter on it, so server and client share the one
+ * literal instead of sniffing each other's wording.
+ */
+export const SESSION_TREE_TOOL_CALL_SUMMARY_PREFIX = "Tool call: ";
+
 export type SessionTreeSummaryChoice =
   | { mode: "none" }
   | { mode: "default" }

@@ -3,6 +3,7 @@
 import type { TemplateResult } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeNodeKind, SessionTreeSnapshot, SessionTreeSummaryChoice } from "../api";
+import type { SessionTreeFilterMode } from "../sessionTreeModel";
 // The modal-surface shell (focus on open, Escape/backdrop routing) is exercised
 // through real DOM interaction; keyboard state and hierarchy stay covered through
 // the pure sessionTreeModel, and TemplateResult extraction is limited to pointer
@@ -21,6 +22,56 @@ afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
   vi.restoreAllMocks();
+});
+
+describe("session-tree-navigator reading lenses", () => {
+  it("opens on the user lens and lands the cursor on the nearest user message", async () => {
+    const navigator = await mountNavigator({ filter: "default" });
+
+    expect(visibleRowIds(navigator)).toEqual(["root"]);
+    expect(filterButton(navigator, "User").getAttribute("aria-pressed")).toBe("true");
+    expect(deepActiveElement()).toBe(treeItem(navigator, "root"));
+  });
+
+  it("returns to the anchored entry when the lens widens again", async () => {
+    const navigator = await mountNavigator({ filter: "default" });
+
+    await selectFilter(navigator, "All");
+
+    expect(visibleRowIds(navigator)).toEqual(["root", "active", "side"]);
+    expect(componentProperty(navigator, "selectedId")).toBe("active");
+  });
+
+  it("keeps a hand-picked entry across a lens change", async () => {
+    const navigator = await mountNavigator();
+    treeItem(navigator, "side").click();
+    await settleRenderedDialog(navigator);
+
+    await selectFilter(navigator, "User");
+    expect(componentProperty(navigator, "selectedId")).toBe("root");
+
+    await selectFilter(navigator, "All");
+    expect(componentProperty(navigator, "selectedId")).toBe("side");
+  });
+
+  it("counts the selected position within the active lens", async () => {
+    const navigator = await mountNavigator();
+
+    expect(countText(navigator)).toBe("2 / 3");
+
+    await selectFilter(navigator, "User");
+    expect(countText(navigator)).toBe("1 / 1");
+  });
+
+  it("explains an empty lens differently from an empty session", async () => {
+    const navigator = await mountNavigator();
+
+    await selectFilter(navigator, "Labeled");
+
+    expect(renderedTree(navigator)).toBeNull();
+    expect(shadowText(navigator)).toContain("No history entries match this filter");
+    expect(footerButton(navigator, "Next").disabled).toBe(true);
+  });
 });
 
 describe("session-tree-navigator modal surface", () => {
@@ -619,6 +670,8 @@ interface MountedNavigatorProps {
   onFork?: ForkCallback;
   onAbort?: () => Promise<void>;
   onCancel?: () => void;
+  /** "default" keeps the shipped opening lens instead of widening to All. */
+  filter?: "default";
 }
 
 async function mountNavigator(props: MountedNavigatorProps = {}): Promise<SessionTreeNavigator> {
@@ -631,7 +684,22 @@ async function mountNavigator(props: MountedNavigatorProps = {}): Promise<Sessio
   if (props.onCancel !== undefined) element.onCancel = props.onCancel;
   document.body.append(element);
   await settleRenderedDialog(element);
+  // These cases drive navigation over the whole fixture forest, so they open the
+  // widest lens through the real control. The default lens has its own tests.
+  if (props.filter !== "default") await selectFilter(element, "All");
   return element;
+}
+
+async function selectFilter(navigator: SessionTreeNavigator, label: string): Promise<void> {
+  filterButton(navigator, label).click();
+  await settleRenderedDialog(navigator);
+}
+
+function filterButton(navigator: SessionTreeNavigator, label: string): HTMLButtonElement {
+  for (const button of navigator.renderRoot.querySelectorAll(".filters button")) {
+    if (button instanceof HTMLButtonElement && button.textContent.trim() === label) return button;
+  }
+  throw new Error(`Filter "${label}" was unavailable`);
 }
 
 async function advanceToAction(navigator: SessionTreeNavigator): Promise<void> {
@@ -641,6 +709,17 @@ async function advanceToAction(navigator: SessionTreeNavigator): Promise<void> {
 
 function renderedTree(navigator: SessionTreeNavigator): Element | null {
   return navigator.shadowRoot?.querySelector("[role='tree']") ?? null;
+}
+
+function visibleRowIds(navigator: SessionTreeNavigator): string[] {
+  return [...navigator.renderRoot.querySelectorAll("[data-tree-node-id]")]
+    .map((row) => (row instanceof HTMLElement ? row.dataset["treeNodeId"] ?? "" : ""));
+}
+
+function countText(navigator: SessionTreeNavigator): string {
+  const count = navigator.renderRoot.querySelector(".count");
+  if (!(count instanceof HTMLElement)) throw new Error("Entry count was unavailable");
+  return count.textContent.replace(/\s+/g, " ").trim();
 }
 
 function backdropPress(navigator: SessionTreeNavigator): void {
@@ -729,11 +808,24 @@ function shadowText(navigator: SessionTreeNavigator): string {
 
 // Method-level harness for the interaction tests: drives the navigator without
 // a DOM attachment and reads private state by name.
-function initializedNavigator(): SessionTreeNavigator {
+function initializedNavigator(filter: "default" | "all" = "all"): SessionTreeNavigator {
   const navigator = new SessionTreeNavigator();
   navigator.tree = tree();
   callVoidMethod(navigator, "resetTree");
+  // The fixture's leaf is an assistant answer, which the shipped opening lens
+  // hides. Widen unless the case is specifically about that lens.
+  if (filter === "all") callFilterMethod(navigator, "all");
   return navigator;
+}
+
+function callFilterMethod(navigator: SessionTreeNavigator, filter: SessionTreeFilterMode): void {
+  const method: unknown = Reflect.get(navigator, "selectFilter");
+  if (!isFilterMethod(method)) throw new Error("SessionTreeNavigator.selectFilter is not callable");
+  method.call(navigator, filter);
+}
+
+function isFilterMethod(value: unknown): value is (mode: SessionTreeFilterMode) => void {
+  return typeof value === "function";
 }
 
 function renderNavigator(navigator: SessionTreeNavigator): TemplateResult {

@@ -1,5 +1,5 @@
-import type { SessionTreeNode, SessionTreeSnapshot, SessionTreeSummaryChoice } from "./api";
-import { SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH } from "../../shared/apiTypes";
+import type { SessionTreeNode, SessionTreeNodeKind, SessionTreeSnapshot, SessionTreeSummaryChoice } from "./api";
+import { SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_TREE_TOOL_CALL_SUMMARY_PREFIX } from "../../shared/apiTypes";
 
 export interface SessionTreeModel {
   readonly nodesById: ReadonlyMap<string, SessionTreeNode>;
@@ -23,9 +23,59 @@ export interface SessionTreeRow {
   readonly activeLeaf: boolean;
 }
 
+/**
+ * Reading lenses over one history, mirroring the Pi TUI's tree filters.
+ * "conversation" is the TUI's "default": prose and tools without bookkeeping.
+ */
+export type SessionTreeFilterMode = "user-only" | "no-tools" | "conversation" | "labeled-only" | "all";
+
+export interface SessionTreeFilterOption {
+  readonly mode: SessionTreeFilterMode;
+  readonly label: string;
+  readonly description: string;
+}
+
+/** Presentation order, narrowest lens first. */
+export const SESSION_TREE_FILTER_OPTIONS: readonly SessionTreeFilterOption[] = [
+  { mode: "user-only", label: "User", description: "Only your messages" },
+  { mode: "no-tools", label: "No tools", description: "Conversation without tool results" },
+  { mode: "conversation", label: "Conversation", description: "Prose and tool results, no bookkeeping" },
+  { mode: "labeled-only", label: "Labeled", description: "Only labeled entries" },
+  { mode: "all", label: "All", description: "Every retained entry" },
+];
+
+/**
+ * Navigating usually means "go back to something I asked", and a user message is
+ * the only entry whose text returns to the composer. The narrow lens is the
+ * useful first screen; the TUI instead opens on its "conversation" lens.
+ */
+export const SESSION_TREE_DEFAULT_FILTER: SessionTreeFilterMode = "user-only";
+
+/** Bookkeeping entries: settings and housekeeping, never conversation. */
+const SESSION_TREE_BOOKKEEPING_KINDS: ReadonlySet<SessionTreeNodeKind> = new Set<SessionTreeNodeKind>([
+  "label",
+  "custom",
+  "model-change",
+  "thinking-level-change",
+  "session-info",
+]);
+
+export interface SessionTreeViewState {
+  readonly foldedIds: ReadonlySet<string>;
+  readonly filter: SessionTreeFilterMode;
+}
+
+export interface SessionTreeView {
+  readonly rows: readonly SessionTreeRow[];
+  /** Nearest retained ancestor per visible node, so filtering never orphans a row. */
+  readonly visibleParentById: ReadonlyMap<string, string | null>;
+  readonly visibleChildrenById: ReadonlyMap<string, readonly string[]>;
+}
+
 export interface SessionTreeKeyState {
   readonly selectedId: string | undefined;
   readonly foldedIds: ReadonlySet<string>;
+  readonly filter?: SessionTreeFilterMode;
 }
 
 export interface SessionTreeKeyTransition extends SessionTreeKeyState {
@@ -106,35 +156,120 @@ export function buildSessionTreeModel(snapshot: SessionTreeSnapshot): SessionTre
   return { nodesById, orderedIds, rootIds, parentById, childrenById, depthById, branchDepthById, activePathIds, activeLeafId };
 }
 
-export function visibleSessionTreeRows(model: SessionTreeModel, foldedIds: ReadonlySet<string>): SessionTreeRow[] {
-  const rows: SessionTreeRow[] = [];
-  const visited = new Set<string>();
-  const stack = [...model.rootIds].reverse();
-
-  while (stack.length > 0) {
-    const id = stack.pop();
-    if (id === undefined || visited.has(id)) continue;
+/**
+ * Project the model through a reading lens. Hidden entries do not orphan their
+ * descendants: every retained node re-attaches to its nearest retained
+ * ancestor, and indentation is recomputed over that visible forest, so a lens
+ * change never drifts the tree rightward.
+ */
+export function sessionTreeView(model: SessionTreeModel, state: SessionTreeViewState): SessionTreeView {
+  const retained = new Set<string>();
+  for (const id of model.orderedIds) {
     const node = model.nodesById.get(id);
     if (node === undefined) continue;
-    visited.add(id);
-    const childIds = model.childrenById.get(id) ?? [];
+    if (retainsSessionTreeNode(node, state.filter, model.activeLeafId)) retained.add(id);
+  }
+
+  const visibleParentById = new Map<string, string | null>();
+  const mutableChildren = new Map<string, string[]>();
+  const visibleRootIds: string[] = [];
+  // orderedIds is pre-order, so children keep their sibling order here.
+  for (const id of model.orderedIds) {
+    if (!retained.has(id)) continue;
+    let ancestorId = model.parentById.get(id) ?? null;
+    while (ancestorId !== null && !retained.has(ancestorId)) ancestorId = model.parentById.get(ancestorId) ?? null;
+    visibleParentById.set(id, ancestorId);
+    if (ancestorId === null) {
+      visibleRootIds.push(id);
+      continue;
+    }
+    const siblings = mutableChildren.get(ancestorId);
+    if (siblings === undefined) mutableChildren.set(ancestorId, [id]);
+    else siblings.push(id);
+  }
+
+  const rows: SessionTreeRow[] = [];
+  const visited = new Set<string>();
+  const stack = [...visibleRootIds].reverse().map((id) => ({ id, depth: 0, branchDepth: 0 }));
+  while (stack.length > 0) {
+    const next = stack.pop();
+    if (next === undefined || visited.has(next.id)) continue;
+    const node = model.nodesById.get(next.id);
+    if (node === undefined) continue;
+    visited.add(next.id);
+    const childIds = mutableChildren.get(next.id) ?? [];
     rows.push({
       node,
-      depth: model.depthById.get(id) ?? 0,
-      branchDepth: model.branchDepthById.get(id) ?? 0,
-      parentId: model.parentById.get(id) ?? null,
+      depth: next.depth,
+      branchDepth: next.branchDepth,
+      parentId: visibleParentById.get(next.id) ?? null,
       childIds,
-      activePath: model.activePathIds.has(id),
-      activeLeaf: model.activeLeafId === id,
+      activePath: model.activePathIds.has(next.id),
+      activeLeaf: model.activeLeafId === next.id,
     });
-    if (foldedIds.has(id)) continue;
+    if (state.foldedIds.has(next.id)) continue;
+    // Only forks earn another lane, exactly as buildSessionTreeModel does.
+    const childBranchDepth = next.branchDepth + (childIds.length > 1 ? 1 : 0);
     for (let index = childIds.length - 1; index >= 0; index -= 1) {
       const childId = childIds[index];
-      if (childId !== undefined) stack.push(childId);
+      if (childId !== undefined) stack.push({ id: childId, depth: next.depth + 1, branchDepth: childBranchDepth });
     }
   }
 
-  return rows;
+  const visibleChildrenById = new Map<string, readonly string[]>();
+  for (const [id, children] of mutableChildren) visibleChildrenById.set(id, children);
+  return { rows, visibleParentById, visibleChildrenById };
+}
+
+export function visibleSessionTreeRows(
+  model: SessionTreeModel,
+  foldedIds: ReadonlySet<string>,
+  filter: SessionTreeFilterMode = "all",
+): SessionTreeRow[] {
+  return [...sessionTreeView(model, { foldedIds, filter }).rows];
+}
+
+/**
+ * Repair a selection after a lens change by walking up the original parent
+ * chain, so the cursor lands on the retained entry that contains the old one.
+ */
+export function nearestVisibleSessionTreeId(
+  model: SessionTreeModel,
+  visibleIds: readonly string[],
+  selectedId: string | undefined,
+): string | undefined {
+  if (visibleIds.length === 0) return undefined;
+  const visible = new Set(visibleIds);
+  let currentId = selectedId;
+  while (currentId !== undefined) {
+    if (visible.has(currentId)) return currentId;
+    currentId = model.parentById.get(currentId) ?? undefined;
+  }
+  return visibleIds.at(-1);
+}
+
+function retainsSessionTreeNode(node: SessionTreeNode, filter: SessionTreeFilterMode, activeLeafId: string | null): boolean {
+  // A tool-call-only assistant turn is scaffolding around the tool result that
+  // follows it, so it stays hidden in every lens. The active leaf is exempt:
+  // the cursor's own position must always be reachable.
+  if (
+    node.kind === "assistant"
+    && node.id !== activeLeafId
+    && node.summary.startsWith(SESSION_TREE_TOOL_CALL_SUMMARY_PREFIX)
+  ) return false;
+
+  switch (filter) {
+    case "user-only":
+      return node.kind === "user";
+    case "no-tools":
+      return !SESSION_TREE_BOOKKEEPING_KINDS.has(node.kind) && node.kind !== "tool-result";
+    case "conversation":
+      return !SESSION_TREE_BOOKKEEPING_KINDS.has(node.kind);
+    case "labeled-only":
+      return node.label !== undefined;
+    case "all":
+      return true;
+  }
 }
 
 export function initialSessionTreeSelection(model: SessionTreeModel): string | undefined {
@@ -143,7 +278,8 @@ export function initialSessionTreeSelection(model: SessionTreeModel): string | u
 }
 
 export function transitionSessionTreeKey(model: SessionTreeModel, state: SessionTreeKeyState, key: string): SessionTreeKeyTransition {
-  const rows = visibleSessionTreeRows(model, state.foldedIds);
+  const view = sessionTreeView(model, { foldedIds: state.foldedIds, filter: state.filter ?? "all" });
+  const rows = view.rows;
   const visibleIds = rows.map((row) => row.node.id);
   const selectedId = normalizedVisibleSelection(visibleIds, state.selectedId);
   const selectedIndex = selectedId === undefined ? -1 : visibleIds.indexOf(selectedId);
@@ -161,22 +297,22 @@ export function transitionSessionTreeKey(model: SessionTreeModel, state: Session
       return select(visibleIds.at(-1));
     case "ArrowLeft": {
       if (selectedId === undefined) return select(undefined);
-      const children = model.childrenById.get(selectedId) ?? [];
+      const children = view.visibleChildrenById.get(selectedId) ?? [];
       if (children.length > 0 && !state.foldedIds.has(selectedId)) {
         const foldedIds = new Set(state.foldedIds);
         foldedIds.add(selectedId);
-        return { selectedId, foldedIds, handled: true };
+        return { ...state, selectedId, foldedIds, handled: true };
       }
-      return select(model.parentById.get(selectedId) ?? selectedId);
+      return select(view.visibleParentById.get(selectedId) ?? selectedId);
     }
     case "ArrowRight": {
       if (selectedId === undefined) return select(undefined);
-      const children = model.childrenById.get(selectedId) ?? [];
+      const children = view.visibleChildrenById.get(selectedId) ?? [];
       if (children.length === 0) return select(selectedId);
       if (state.foldedIds.has(selectedId)) {
         const foldedIds = new Set(state.foldedIds);
         foldedIds.delete(selectedId);
-        return { selectedId, foldedIds, handled: true };
+        return { ...state, selectedId, foldedIds, handled: true };
       }
       return select(children[0]);
     }
@@ -190,12 +326,13 @@ export function transitionSessionTreeKey(model: SessionTreeModel, state: Session
 }
 
 export function toggleSessionTreeFold(model: SessionTreeModel, state: SessionTreeKeyState, id: string): SessionTreeKeyState {
-  const children = model.childrenById.get(id) ?? [];
+  const view = sessionTreeView(model, { foldedIds: state.foldedIds, filter: state.filter ?? "all" });
+  const children = view.visibleChildrenById.get(id) ?? [];
   if (children.length === 0) return { ...state, selectedId: id };
   const foldedIds = new Set(state.foldedIds);
   if (foldedIds.has(id)) foldedIds.delete(id);
   else foldedIds.add(id);
-  return { selectedId: id, foldedIds };
+  return { ...state, selectedId: id, foldedIds };
 }
 
 export function validateSessionTreeSummaryChoice(mode: SessionTreeSummaryChoice["mode"], customInstructions: string): SessionTreeSummaryValidation {

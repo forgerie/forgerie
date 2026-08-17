@@ -1,4 +1,4 @@
-import type { SessionTreeNode, SessionTreeNodeKind, SessionTreeSnapshot } from "../../shared/apiTypes.js";
+import { SESSION_TREE_TOOL_CALL_SUMMARY_PREFIX, type SessionTreeNode, type SessionTreeNodeKind, type SessionTreeSnapshot } from "../../shared/apiTypes.js";
 
 const SUMMARY_MAX_LENGTH = 360;
 const SUMMARY_SOURCE_MAX_LENGTH = SUMMARY_MAX_LENGTH * 2;
@@ -143,7 +143,7 @@ function assistantSummary(message: Record<string, unknown>): string {
   if (text !== "") return summary(text, "Assistant response");
 
   const toolNames = assistantToolNames(message["content"]);
-  if (toolNames.length > 0) return summary(`Tool call: ${toolNames.join(", ")}`, "Assistant tool call");
+  if (toolNames.length > 0) return summary(`${SESSION_TREE_TOOL_CALL_SUMMARY_PREFIX}${toolNames.join(", ")}`, "Assistant tool call");
   if (message["stopReason"] === "error") return "Assistant error";
   if (message["stopReason"] === "aborted") return "Assistant response aborted";
   return "Assistant response";

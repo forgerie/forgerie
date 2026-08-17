@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing, type PropertyValues, type TemplateResul
 import { customElement, property, state } from "lit/decorators.js";
 import type { SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeNodeKind, SessionTreeSnapshot, SessionTreeSummaryChoice } from "../api";
 import { SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH } from "../../../shared/apiTypes";
-import { buildSessionTreeModel, initialSessionTreeSelection, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice, visibleSessionTreeRows, type SessionTreeModel, type SessionTreeRow } from "../sessionTreeModel";
+import { buildSessionTreeModel, initialSessionTreeSelection, nearestVisibleSessionTreeId, SESSION_TREE_DEFAULT_FILTER, SESSION_TREE_FILTER_OPTIONS, sessionTreeView, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice, type SessionTreeFilterMode, type SessionTreeModel, type SessionTreeRow } from "../sessionTreeModel";
 import { relativeTime } from "../sessionBoard";
 // Side-effect import: registers <modal-surface> (a value import would be dropped
 // by esbuild under vitest because nothing from the module is referenced).
@@ -48,6 +48,7 @@ export class SessionTreeNavigator extends LitElement {
 
   @state() private selectedId: string | undefined;
   @state() private foldedIds: ReadonlySet<string> = new Set();
+  @state() private filter: SessionTreeFilterMode = SESSION_TREE_DEFAULT_FILTER;
   @state() private step: NavigatorStep = "tree";
   @state() private operation: NavigatorOperation = "continue";
   @state() private summaryMode: SessionTreeSummaryChoice["mode"] = "none";
@@ -58,6 +59,12 @@ export class SessionTreeNavigator extends LitElement {
   @state() private statusMessage = "";
 
   private model: SessionTreeModel = buildSessionTreeModel(EMPTY_TREE);
+  /**
+   * The entry the reader actually means, which can be hidden by the current
+   * lens. Selection is a repair of this anchor, so widening the lens returns to
+   * the intended entry instead of stranding the cursor on its ancestor.
+   */
+  private selectionAnchorId: string | undefined;
   private pendingFocus: PendingFocus | undefined;
   private operationGeneration = 0;
 
@@ -98,12 +105,13 @@ export class SessionTreeNavigator extends LitElement {
   }
 
   private renderTreeStep(): TemplateResult {
-    const rows = visibleSessionTreeRows(this.model, this.foldedIds);
+    const rows = sessionTreeView(this.model, { foldedIds: this.foldedIds, filter: this.filter }).rows;
     // Carets mark true branch points only: a linear history is a single-child
     // chain, and a caret on every chain link is pure chrome. Keyboard folding
     // of chain nodes still works; the column returns when a real fork exists.
     const branching = rows.some((row) => row.childIds.length > 1);
     const now = Date.now();
+    const position = this.selectedId === undefined ? -1 : rows.findIndex((row) => row.node.id === this.selectedId);
     return html`
       <div class="body tree-step">
         <div class="tree-intro">
@@ -113,10 +121,27 @@ export class SessionTreeNavigator extends LitElement {
             <span><span class="marker leaf" aria-hidden="true"></span>Active leaf</span>
           </div>
         </div>
+        <div class="tree-controls">
+          <div class="filters" role="group" aria-label="Filter history entries">
+            ${SESSION_TREE_FILTER_OPTIONS.map((option) => html`
+              <button
+                class=${this.filter === option.mode ? "selected" : ""}
+                aria-pressed=${this.filter === option.mode ? "true" : "false"}
+                title=${option.description}
+                @click=${() => { this.selectFilter(option.mode); }}
+              >${option.label}</button>
+            `)}
+          </div>
+          ${rows.length === 0 ? null : html`
+            <span class="count" title="Selected entry position in this filter">${position < 0 ? "—" : position + 1} / ${rows.length}</span>
+          `}
+        </div>
         ${this.statusMessage === "" ? null : html`<div class="dialog-status" role="status">${this.statusMessage}</div>`}
         ${this.error === "" ? null : html`<div class="dialog-error" role="alert">${this.error}</div>`}
         ${rows.length === 0 ? html`
-          <div class="empty" role="status">This session does not contain any selectable history entries.</div>
+          <div class="empty" role="status">${this.model.orderedIds.length === 0
+            ? "This session does not contain any selectable history entries."
+            : "No history entries match this filter."}</div>
         ` : html`
           <div class=${`tree${branching ? "" : " no-branches"}`} role="tree" aria-label="Complete session history">
             ${rows.map((row) => this.renderTreeRow(row, now))}
@@ -299,7 +324,9 @@ export class SessionTreeNavigator extends LitElement {
   private resetTree(): void {
     this.operationGeneration += 1;
     this.model = buildSessionTreeModel(this.tree);
-    this.selectedId = initialSessionTreeSelection(this.model);
+    this.filter = SESSION_TREE_DEFAULT_FILTER;
+    this.selectionAnchorId = initialSessionTreeSelection(this.model);
+    this.selectedId = this.visibleSelection(SESSION_TREE_DEFAULT_FILTER, this.selectionAnchorId);
     this.foldedIds = new Set();
     this.step = "tree";
     this.operation = "continue";
@@ -314,16 +341,35 @@ export class SessionTreeNavigator extends LitElement {
 
   private selectNode(id: string): void {
     if (!this.model.nodesById.has(id)) return;
+    this.selectionAnchorId = id;
     this.selectedId = id;
     this.error = "";
     this.statusMessage = "";
     this.pendingFocus = "tree";
   }
 
+  // Narrowing the lens must not lose the reader's place: the cursor climbs to
+  // the retained entry that still contains the old selection.
+  private selectFilter(filter: SessionTreeFilterMode): void {
+    if (this.busy || this.filter === filter) return;
+    this.filter = filter;
+    this.foldedIds = new Set();
+    this.selectedId = this.visibleSelection(filter, this.selectionAnchorId);
+    this.error = "";
+    this.statusMessage = "";
+    this.pendingFocus = "tree";
+  }
+
+  private visibleSelection(filter: SessionTreeFilterMode, selectedId: string | undefined): string | undefined {
+    const visibleIds = sessionTreeView(this.model, { foldedIds: new Set(), filter }).rows.map((row) => row.node.id);
+    return nearestVisibleSessionTreeId(this.model, visibleIds, selectedId);
+  }
+
   private toggleNode(id: string, event: MouseEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    const next = toggleSessionTreeFold(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds }, id);
+    const next = toggleSessionTreeFold(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds, filter: this.filter }, id);
+    this.selectionAnchorId = next.selectedId;
     this.selectedId = next.selectedId;
     this.foldedIds = next.foldedIds;
     this.error = "";
@@ -335,7 +381,7 @@ export class SessionTreeNavigator extends LitElement {
     // The modal surface owns Escape everywhere; the pure model still maps it for
     // consumers that drive a tree without the surface.
     if (event.key === "Escape") return;
-    const next = transitionSessionTreeKey(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds }, event.key);
+    const next = transitionSessionTreeKey(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds, filter: this.filter }, event.key);
     if (!next.handled) return;
     event.preventDefault();
     event.stopPropagation();
@@ -343,6 +389,7 @@ export class SessionTreeNavigator extends LitElement {
       this.continueToAction();
       return;
     }
+    this.selectionAnchorId = next.selectedId;
     this.selectedId = next.selectedId;
     this.foldedIds = next.foldedIds;
     this.pendingFocus = "tree";
@@ -540,6 +587,16 @@ export class SessionTreeNavigator extends LitElement {
     .tree-step { display: flex; flex-direction: column; gap: var(--pi-space-md); padding: 14px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left)); overflow: hidden; }
     .tree-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: var(--pi-text-sm); }
+    .tree-controls { display: flex; align-items: center; gap: var(--pi-space-sm); }
+    /* Lens chips are wayfinding, so they stay ghost; selection is the one fill.
+       They scroll rather than wrap: a second chip row would cost more height
+       than the tree can spare in a folded posture. */
+    .filters { display: flex; align-items: center; gap: var(--pi-space-xs); min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    .filters::-webkit-scrollbar { display: none; }
+    .filters button { flex: none; border-color: transparent; background: transparent; color: var(--pi-muted); padding: 4px 9px; font-size: var(--pi-text-xs); font-weight: 600; }
+    .filters button:not(:disabled):hover { background: var(--pi-surface); color: var(--pi-text); }
+    .filters button.selected { background: var(--pi-selection-bg); color: var(--pi-text); }
+    .count { margin-inline-start: auto; color: var(--pi-dim, var(--pi-muted)); font-size: var(--pi-text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .legend > span { display: inline-flex; align-items: center; gap: 6px; }
     .marker { width: 8px; height: 8px; border-radius: var(--pi-radius-pill); }
     .marker.path { background: var(--pi-accent); }
@@ -604,7 +661,10 @@ export class SessionTreeNavigator extends LitElement {
     @container (max-width: 760px) {
       header { padding-top: max(12px, env(safe-area-inset-top)); }
       .tree-step { padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)); }
-      .tree-intro { padding-inline: 4px; }
+      .tree-intro, .tree-controls { padding-inline: 4px; }
+      /* The instruction is first-run guidance; the title and footer already say
+         what this dialog does. Height goes to the tree instead. */
+      .tree-intro p { display: none; }
       .tree-row { grid-template-columns: 14px 18px minmax(0, 1fr) auto; row-gap: 2px; padding-inline-start: calc(7px + min(var(--tree-indent-mobile), 48px)); }
       .tree-row > .kind { grid-column: 3; grid-row: 1; }
       .tree-row > time, .tree-row > .time-spacer { grid-column: 4; grid-row: 1; }

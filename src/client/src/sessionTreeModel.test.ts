@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, type SessionTreeNode, type SessionTreeSnapshot } from "../../shared/apiTypes";
-import { buildSessionTreeModel, initialSessionTreeSelection, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice, visibleSessionTreeRows } from "./sessionTreeModel";
+import { buildSessionTreeModel, initialSessionTreeSelection, nearestVisibleSessionTreeId, SESSION_TREE_DEFAULT_FILTER, sessionTreeView, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice, visibleSessionTreeRows } from "./sessionTreeModel";
 
 describe("session tree hierarchy model", () => {
   it("builds a complete forest while normalizing orphans, cycles, self-links, and duplicate IDs", () => {
@@ -162,6 +162,79 @@ describe("session tree keyboard state", () => {
     expect([...folded.foldedIds]).toEqual(["root"]);
     expect([...originalFolded]).toEqual([]);
     expect([...toggleSessionTreeFold(model, folded, "root").foldedIds]).toEqual([]);
+  });
+});
+
+describe("session tree reading lenses", () => {
+  const lensSnapshot: SessionTreeSnapshot = {
+    nodes: [
+      { id: "ask", parentId: null, kind: "user", summary: "first question" },
+      { id: "calls", parentId: "ask", kind: "assistant", summary: "Tool call: read, bash" },
+      { id: "result", parentId: "calls", kind: "tool-result", summary: "Tool result (read): ok" },
+      { id: "reply", parentId: "result", kind: "assistant", summary: "here is the answer", label: "checkpoint" },
+      { id: "mode", parentId: "reply", kind: "custom", summary: "Custom entry: flow-mode" },
+      { id: "ask-2", parentId: "mode", kind: "user", summary: "second question" },
+    ],
+    activeLeafId: "ask-2",
+    activePathIds: ["ask", "calls", "result", "reply", "mode", "ask-2"],
+  };
+  const model = buildSessionTreeModel(lensSnapshot);
+  const idsFor = (filter: Parameters<typeof visibleSessionTreeRows>[2]): string[] =>
+    visibleSessionTreeRows(model, new Set(), filter).map((row) => row.node.id);
+
+  it("opens on user messages, the only entries whose text returns to the composer", () => {
+    expect(SESSION_TREE_DEFAULT_FILTER).toBe("user-only");
+    expect(idsFor(SESSION_TREE_DEFAULT_FILTER)).toEqual(["ask", "ask-2"]);
+  });
+
+  it("drops bookkeeping from the conversation lens and tool results from the no-tools lens", () => {
+    expect(idsFor("conversation")).toEqual(["ask", "result", "reply", "ask-2"]);
+    expect(idsFor("no-tools")).toEqual(["ask", "reply", "ask-2"]);
+    expect(idsFor("labeled-only")).toEqual(["reply"]);
+  });
+
+  it("hides tool-call-only assistant turns in every lens, including all", () => {
+    expect(idsFor("all")).toEqual(["ask", "result", "reply", "mode", "ask-2"]);
+  });
+
+  it("keeps the active leaf reachable even when its lens would hide it", () => {
+    const leafIsScaffolding = buildSessionTreeModel({
+      nodes: [
+        { id: "ask", parentId: null, kind: "user", summary: "question" },
+        { id: "calls", parentId: "ask", kind: "assistant", summary: "Tool call: read" },
+      ],
+      activeLeafId: "calls",
+      activePathIds: ["ask", "calls"],
+    });
+
+    expect(visibleSessionTreeRows(leafIsScaffolding, new Set(), "all").map((row) => row.node.id)).toEqual(["ask", "calls"]);
+  });
+
+  it("re-parents survivors onto their nearest retained ancestor instead of orphaning them", () => {
+    const view = sessionTreeView(model, { foldedIds: new Set(), filter: "user-only" });
+
+    expect(view.visibleParentById.get("ask-2")).toBe("ask");
+    expect(view.visibleChildrenById.get("ask")).toEqual(["ask-2"]);
+    expect(view.rows.map((row) => [row.node.id, row.depth, row.branchDepth])).toEqual([["ask", 0, 0], ["ask-2", 1, 0]]);
+  });
+
+  it("repairs a selection a lens hides by walking up to the retained ancestor", () => {
+    const visibleIds = idsFor("user-only");
+
+    expect(nearestVisibleSessionTreeId(model, visibleIds, "reply")).toBe("ask");
+    expect(nearestVisibleSessionTreeId(model, visibleIds, "ask-2")).toBe("ask-2");
+    expect(nearestVisibleSessionTreeId(model, [], "ask")).toBeUndefined();
+  });
+
+  it("walks and folds the filtered forest, not the underlying one", () => {
+    const state = { selectedId: "ask", foldedIds: new Set<string>(), filter: "user-only" as const };
+
+    expect(transitionSessionTreeKey(model, state, "ArrowDown").selectedId).toBe("ask-2");
+    expect(transitionSessionTreeKey(model, { ...state, selectedId: "ask-2" }, "ArrowLeft").selectedId).toBe("ask");
+
+    const folded = toggleSessionTreeFold(model, state, "ask");
+    expect([...folded.foldedIds]).toEqual(["ask"]);
+    expect(visibleSessionTreeRows(model, folded.foldedIds, "user-only").map((row) => row.node.id)).toEqual(["ask"]);
   });
 });
 
