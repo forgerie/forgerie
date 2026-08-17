@@ -359,7 +359,7 @@ export class ExtensionDialogCard extends LitElement {
     }
     button:hover:not(:disabled) { background: var(--pi-surface-hover); }
     button:disabled { cursor: wait; opacity: .65; }
-    button:focus-visible, .dialog-input:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+    button:focus-visible, .dialog-input:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
     .primary-action { border-color: var(--pi-accent); background: var(--pi-accent); color: var(--pi-bg, #111214); font-weight: 650; }
     .primary-action:hover:not(:disabled) { background: color-mix(in srgb, var(--pi-accent) 86%, white); }
     .closed-summary {

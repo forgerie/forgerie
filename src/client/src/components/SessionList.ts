@@ -592,7 +592,7 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     .action-name-line .action-name { flex: 1 1 auto; min-width: 0; }
     .fork-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; min-height: 24px; margin: -2px 0; padding: 1px 6px 1px 4px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-muted); font: var(--pi-text-xs) system-ui, sans-serif; cursor: pointer; }
     .fork-toggle:hover, .fork-toggle:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
-    .fork-toggle:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
+    .fork-toggle:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
     .fork-chevron { display: inline-block; line-height: 1; transition: transform var(--pi-motion-fast) ease-out; }
     .fork-chevron.expanded { transform: rotate(90deg); }
     .fork-count { font-variant-numeric: tabular-nums; }

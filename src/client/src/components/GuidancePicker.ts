@@ -82,7 +82,7 @@ export class GuidancePicker extends LitElement {
     header { padding: 9px 11px; border-bottom: 1px solid var(--pi-border-muted); }
     .guidance-options button { box-sizing: border-box; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; border: 0; border-bottom: 1px solid var(--pi-border-muted); border-radius: 0; background: transparent; color: var(--pi-text); font: inherit; text-align: left; cursor: pointer; }
     .guidance-options button:hover:not(:disabled), .guidance-options button:focus-visible { background: var(--pi-selection-bg); }
-    .guidance-options button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+    .guidance-options button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
     .guidance-options button:disabled { opacity: .65; cursor: wait; }
     .guidance-copy { min-width: 0; display: grid; gap: 3px; }
     .guidance-copy small { color: var(--pi-muted); line-height: 1.35; white-space: normal; }

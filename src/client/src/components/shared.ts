@@ -169,7 +169,7 @@ export const appStyles = css`
   .context-actions::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; z-index: 0; width: 26px; background: var(--pi-bg); pointer-events: none; }
   .context-chip { flex: 0 0 auto; min-width: 0; display: inline-flex; align-items: baseline; gap: 5px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-text); padding: 4px 8px; font: inherit; text-align: left; }
   .context-chip:hover { background: var(--pi-surface-hover); }
-  .context-chip:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .context-chip:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .context-chip.empty { border-style: dashed; color: var(--pi-muted); }
   .context-kind { display: none; }
   .context-value { min-width: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }
@@ -343,7 +343,7 @@ export const composerDraftStyles = css`
   .attachment-file-preview { display: grid; place-items: center; width: 34px; height: 26px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-inline); background: var(--pi-surface); color: var(--pi-muted); font: 700 10px/1 system-ui, sans-serif; letter-spacing: .03em; }
   .attachment-file-name { position: absolute; right: 4px; bottom: 3px; left: 4px; overflow: hidden; color: var(--pi-muted); font-size: var(--pi-text-xs); line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
   .attachment-remove { position: absolute; top: 1px; right: 1px; width: 18px; min-height: 18px; height: 18px; padding: 0; line-height: 16px; border-radius: 50%; border: 1px solid var(--pi-border); background: var(--pi-surface); color: var(--pi-text); font-size: var(--pi-text-sm); cursor: pointer; }
-  .attachment-chip:focus-visible, .attachment-remove:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .attachment-chip:focus-visible, .attachment-remove:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .attachment-delivery { min-width: min(100%, 18rem); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 7px 9px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); }
   .attachment-delivery legend { padding: 0 4px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
   .attachment-delivery label { display: inline-flex; align-items: center; gap: 5px; color: var(--pi-text); font-size: var(--pi-text-sm); }
@@ -387,7 +387,7 @@ export const newSessionComposerStyles = css`
   .destination-copy small { min-width: 0; color: var(--pi-muted); overflow-wrap: anywhere; white-space: normal; }
   .destination-required { display: grid; gap: 0.2rem; color: var(--pi-muted); }
   .chooser { min-width: 0; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); overflow: hidden; }
-  .chooser:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .chooser:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .chooser-heading { margin: 0; padding: 0.75rem; border-bottom: 1px solid var(--pi-border-muted); color: var(--pi-text); font-size: 0.875rem; }
   .catalog-state { display: grid; gap: 0.75rem; justify-items: start; padding: clamp(1rem, 3cqi, 1.5rem) 0.75rem; color: var(--pi-muted); }
   .catalog-state p { margin: 0; overflow-wrap: anywhere; }
@@ -396,7 +396,7 @@ export const newSessionComposerStyles = css`
   .catalog-item { width: 100%; min-height: 2.75rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border: 0; border-bottom: 1px solid var(--pi-border-muted); border-radius: 0; background: transparent; color: var(--pi-text); font: inherit; text-align: left; cursor: pointer; }
   .catalog-list li:last-child .catalog-item { border-bottom: 0; }
   .catalog-item:hover, .catalog-item:focus-visible { background: var(--pi-surface-hover); }
-  .catalog-item:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+  .catalog-item:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
   .catalog-item:disabled { color: var(--pi-dim); cursor: not-allowed; }
   .catalog-item-copy { min-width: 0; display: grid; gap: 0.2rem; }
   .catalog-item-copy strong, .catalog-item-copy small { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
@@ -409,7 +409,7 @@ export const newSessionComposerStyles = css`
   .dialog-footer { flex: 0 0 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; padding: clamp(0.625rem, 2cqi, 0.875rem) clamp(0.875rem, 2.5cqi, 1.25rem); border-top: 1px solid var(--pi-border); background: var(--pi-bg); }
   button { min-height: 2.75rem; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 0 1rem; font: inherit; cursor: pointer; }
   button:hover:not(:disabled), button:focus-visible { background: var(--pi-surface-hover); }
-  button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   .primary { border-color: var(--pi-accent-border, var(--pi-accent)); background: var(--pi-selection-bg); }
   .busy-label { align-self: center; margin-right: auto; color: var(--pi-muted); }
@@ -503,7 +503,7 @@ export const listStyles = css`
   .section-toggle .section-count { flex: 0 0 auto; display: inline; color: var(--pi-muted); font-size: inherit; }
   .section-toggle small { display: inline; color: inherit; font-size: inherit; }
   .action-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: 6px 0; cursor: pointer; }
-  .action-row:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; border-radius: var(--pi-radius-control); }
+  .action-row:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; border-radius: var(--pi-radius-control); }
   .action-row.selected .action-main, .action-row.selected .action-menu-toggle { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
   .action-row.archived .action-main { color: var(--pi-muted); }
   .action-main { position: relative; box-sizing: border-box; min-width: 0; width: 100%; border: 1px solid var(--pi-border); border-top-right-radius: 0; border-bottom-right-radius: 0; border-top-left-radius: 8px; border-bottom-left-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 22px 7px calc(9px + var(--depth, 0) * 16px); text-align: left; }
@@ -574,7 +574,7 @@ export const chatStyles = css`
   .session-warnings-controls { display: flex; justify-content: flex-end; }
   .session-warnings-collapse { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-muted); padding: 4px 7px; font: var(--pi-text-sm) system-ui, sans-serif; cursor: pointer; }
   .session-warnings-collapse:hover, .session-warnings-collapse:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); background: var(--pi-bg-overlay); }
-  .session-warnings-collapse:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .session-warnings-collapse:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .session-warnings-collapse-icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .session-warning { position: relative; display: grid; gap: 4px; box-sizing: border-box; padding: 10px 34px 10px 12px; border: 1px solid var(--pi-warning-border); border-radius: var(--pi-radius-surface); background: var(--pi-warning-surface); color: var(--pi-text); }
   .session-warning.error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 12%, var(--pi-surface)); }
@@ -587,7 +587,7 @@ export const chatStyles = css`
   .session-warning-source { color: var(--pi-muted); font-size: var(--pi-text-xs); text-transform: uppercase; letter-spacing: .04em; }
   .session-warning-dismiss { position: absolute; top: 6px; right: 6px; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-muted); font: 15px/1 system-ui, sans-serif; cursor: pointer; }
   .session-warning-dismiss:hover, .session-warning-dismiss:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); background: var(--pi-bg-overlay); }
-  .session-warning-dismiss:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .session-warning-dismiss:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; clip-path: inset(50%) !important; white-space: nowrap !important; border: 0 !important; }
   .notification-live span { display: block; }
   /* Reading column. A centred single-track grid rather than per-child
@@ -716,14 +716,14 @@ export const chatStyles = css`
   .msg.event-group > summary .msg-meta.expanded { flex: 0 1 auto; }
   .group-body { display: grid; gap: 18px; margin-top: 14px; padding: 0; }
   .chat-image { display: block; max-width: 100%; max-height: 320px; margin: 8px 0 0; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); object-fit: contain; cursor: zoom-in; }
-  .chat-image:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .chat-image:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   dialog.image-zoom { position: fixed; inset: 0; margin: auto; max-width: calc(96vw - env(safe-area-inset-left) - env(safe-area-inset-right)); max-height: calc(96vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)); width: fit-content; height: fit-content; padding: 0; border: none; background: transparent; overflow: visible; }
   dialog.image-zoom[open] { display: flex; }
   dialog.image-zoom::backdrop { background: rgba(0, 0, 0, 0.8); }
   .image-zoom-full { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: var(--pi-radius-control); object-fit: contain; cursor: zoom-out; }
   .image-zoom-close { position: absolute; top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; font: 16px/1 system-ui, sans-serif; color: var(--pi-muted); background: color-mix(in srgb, var(--pi-surface) 88%, transparent); border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); cursor: pointer; }
   .image-zoom-close:hover, .image-zoom-close:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
-  .image-zoom-close:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .image-zoom-close:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .group-msg { max-width: 100%; min-width: 0; box-sizing: border-box; padding: 0 0 0 12px; border-top: 0; border-left: 1px solid var(--calm-rule); color: var(--calm-ink-dim); overflow: visible; }
   .group-msg.tool, .group-msg.tool-execution-shell, .group-msg.bash { color: var(--calm-ink-dim); }
   .group-msg.system { color: var(--calm-ink-muted); }
@@ -788,7 +788,7 @@ export const chatStyles = css`
   .msg-meta { min-width: 0; opacity: .28; border: 0; background: transparent; color: var(--pi-dim); padding: 0; font: var(--pi-text-xs) system-ui, sans-serif; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity var(--pi-motion-fast) ease; cursor: pointer; user-select: text; -webkit-user-select: text; }
   .msg-meta:focus, .msg-meta.expanded { opacity: 1; }
   .msg-meta.expanded { flex: 1 1 auto; max-width: 100%; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; }
-  .msg-meta:focus { outline: 2px solid var(--pi-accent); outline-offset: 3px; border-radius: var(--pi-radius-inline); }
+  .msg-meta:focus { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 3px; border-radius: var(--pi-radius-inline); }
   @media (hover: none) {
     .msg-meta { opacity: .75; max-width: 26px; }
     .msg-meta:not(.expanded) { display: inline-grid; width: 26px; height: 22px; place-items: center; font-size: 0; text-overflow: clip; }
@@ -878,7 +878,7 @@ export const formattedTextStyles = css`
   h3 { font-size: var(--pi-text-md); }
   h4 { font-size: var(--pi-text-md); }
   .table-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
-  .table-scroll:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
+  .table-scroll:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   table { border-collapse: collapse; width: max-content; min-width: 100%; max-width: none; }
   th, td { border: 1px solid var(--pi-border); padding: 4px 8px; max-width: 48ch; overflow-wrap: anywhere; }
   th { background: var(--pi-surface); }
@@ -896,7 +896,7 @@ export const autocompleteStyles = css`
   button { display: grid; grid-template-columns: minmax(120px, 1fr) auto; gap: 4px 10px; width: 100%; border: 0; border-bottom: 1px solid var(--pi-border); border-radius: 0; background: transparent; color: var(--pi-text); padding: 8px 10px; text-align: left; cursor: pointer; }
   button:last-child { border-bottom: 0; }
   button.selected, button:hover { background: var(--pi-selection-bg); }
-  button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+  button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
   span { color: var(--pi-muted); font-size: var(--pi-text-sm); }
   small { grid-column: 1 / -1; color: var(--pi-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `;

@@ -277,7 +277,7 @@ export class WorkspaceManagementDialog extends LitElement {
     }
 
     .item-btn:focus-visible {
-      outline: 2px solid var(--pi-accent, #6699e0);
+      outline: var(--pi-focus-ring, 2px solid var(--pi-accent));
       outline-offset: -2px;
     }
 
@@ -369,7 +369,7 @@ export class WorkspaceManagementDialog extends LitElement {
     }
 
     .footer-btn:focus-visible {
-      outline: 2px solid var(--pi-accent, #6699e0);
+      outline: var(--pi-focus-ring, 2px solid var(--pi-accent));
       outline-offset: 2px;
     }
   `;

@@ -547,7 +547,7 @@ export class SessionTreeNavigator extends LitElement {
     .tree-row:last-child { border-bottom: 0; }
     .tree-row:hover { background: var(--pi-surface-hover); }
     .tree-row.selected { background: var(--pi-selection-bg); box-shadow: inset 3px 0 var(--pi-accent); }
-    .tree-row:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+    .tree-row:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
     .tree-row.active-path:not(.selected) { background: color-mix(in srgb, var(--pi-accent) 7%, var(--pi-surface)); }
     .tree-row.active-leaf { box-shadow: inset 3px 0 var(--pi-accent); }
     .tree-row.bookkeeping { color: var(--pi-muted); }
@@ -589,7 +589,7 @@ export class SessionTreeNavigator extends LitElement {
     .choice-option small { color: var(--pi-muted); }
     .custom-focus { display: grid; gap: 6px; margin: 2px 0 0 30px; font-weight: 600; }
     textarea { width: 100%; resize: vertical; min-height: 94px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 9px 10px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
-    textarea:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
+    textarea:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
     .character-count { justify-self: end; color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 400; }
     .validation-error { margin-inline-start: 30px; color: var(--pi-danger); font-size: var(--pi-text-sm); }
     .side-effects-note { border-color: var(--pi-warning-border); background: var(--pi-warning-surface); }
@@ -598,7 +598,7 @@ export class SessionTreeNavigator extends LitElement {
     .empty { color: var(--pi-muted); background: var(--pi-surface); }
     button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 8px 11px; font: inherit; cursor: pointer; }
     button:not(:disabled):hover { background: var(--pi-surface-hover); }
-    button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
+    button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
     button:disabled { opacity: .52; cursor: not-allowed; }
     button.primary { border-color: var(--pi-accent); background: var(--pi-accent); color: var(--pi-bg); font-weight: 700; }
     button.primary:not(:disabled):hover { filter: brightness(1.08); }

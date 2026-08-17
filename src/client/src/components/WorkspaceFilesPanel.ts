@@ -419,7 +419,7 @@ export class WorkspaceFilesPanel extends LitElement {
       form > label { display: grid; gap: 6px; }
       form > label > span, .review-files > strong { font-weight: 600; }
       input[type="text"], form > label > input:not([type]) { box-sizing: border-box; width: 100%; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 8px 9px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
-      input:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
+      input:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
       .dialog-options { display: grid; gap: 8px; }
       .dialog-options label { display: flex; align-items: center; gap: 8px; color: var(--pi-text); }
       .review-files { display: grid; gap: 6px; min-height: 0; max-height: 180px; overflow: auto; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); padding: 8px; }

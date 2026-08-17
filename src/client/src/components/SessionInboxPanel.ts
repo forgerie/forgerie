@@ -1037,7 +1037,7 @@ export class SessionInboxPanel extends LitElement {
     }
 
     .board-title-btn:hover { background: var(--pi-surface-hover, #202225); }
-    .board-title-btn:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+    .board-title-btn:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
 
     .board-title,
     .board-grouping {
@@ -1566,7 +1566,7 @@ export class SessionInboxPanel extends LitElement {
     .row:focus-visible,
     .group-header:focus-visible,
     .row-action:focus-visible {
-      outline: 2px solid var(--pi-accent, #6699e0);
+      outline: var(--pi-focus-ring, 2px solid var(--pi-accent));
       outline-offset: 2px;
       border-radius: var(--pi-radius-control);
     }

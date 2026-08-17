@@ -178,7 +178,7 @@ export class ComposerChoiceList extends LitElement {
     }
     .choice-options button + button { border-top: 1px solid var(--pi-border-muted); }
     .choice-options button:hover:not(:disabled), .choice-options button:focus-visible { background: var(--pi-selection-bg); }
-    .choice-options button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+    .choice-options button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
     .choice-options button[aria-checked="true"] { background: var(--pi-selection-bg); }
     .choice-options button[data-muted] .choice-label { color: var(--pi-muted); }
     .choice-options button:disabled { cursor: default; }

@@ -144,11 +144,11 @@ export class SessionNotificationsPanel extends LitElement {
     css`
       :host { flex: 1 1 auto; }
       .notifications-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-      .notification-header:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -3px; }
+      .notification-header:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -3px; }
       .notification-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; padding: 0 10px 5px; }
       .notification-overflow { margin: 0; padding: 7px 2px; border-bottom: 1px solid var(--pi-border-muted); color: var(--pi-muted); font-size: var(--pi-text-xs); overflow-wrap: anywhere; }
       .notification-row { position: relative; min-width: 0; display: grid; gap: 4px; padding: 9px 38px 9px 2px; border-bottom: 1px solid var(--pi-border-muted); color: var(--pi-text); }
-      .notification-row:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: -2px; }
+      .notification-row:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
       .notification-metadata { min-width: 0; display: flex; align-items: baseline; gap: 5px; color: var(--pi-muted); font-size: var(--pi-text-xs); }
       .notification-severity { color: var(--pi-muted); font-size: inherit; font-weight: 600; }
       .notification-row.warning .notification-severity { color: var(--pi-warning); }
@@ -157,7 +157,7 @@ export class SessionNotificationsPanel extends LitElement {
       .notification-truncated { margin: 0; color: var(--pi-muted); font-size: var(--pi-text-xs); overflow-wrap: anywhere; }
       .notification-row-dismiss { position: absolute; top: 5px; right: 0; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--pi-muted); }
       .notification-row-dismiss:hover, .notification-row-dismiss:focus-visible { background: var(--pi-selection-bg); color: var(--pi-text-bright); }
-      .notification-row-dismiss:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
+      .notification-row-dismiss:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
       .notification-row-dismiss:disabled { opacity: .5; background: transparent; cursor: default; }
       .notification-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
       .empty-state { box-sizing: border-box; width: min(100%, 380px); margin: auto; padding: 24px; color: var(--pi-muted); text-align: center; }
