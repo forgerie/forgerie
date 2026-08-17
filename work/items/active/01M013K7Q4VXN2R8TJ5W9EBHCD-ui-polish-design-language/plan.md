@@ -46,12 +46,18 @@ code reading. Others are anticipated; audits may resize them.
       dark shadow tokens
 - [x] Thin palette-tinted scrollbars via inherited scrollbar-color ◆
 
-## Slice 2 — Scales (intrinsic)
+## Slice 2 — Scales (done 2026-08-16, ae07446)
 
-- [ ] Fluid 4-step type ramp (clamp/cqi tokens); sweep ad-hoc 10–16px sizes
-- [ ] Named fluid space tokens; sweep ad-hoc 4–14px paddings
-- [ ] Two-tier static radius system + pill; sweep 2/4/5/6/7/14px outliers ◆
-- [ ] Verify tabular numerals hold in shadow-DOM monospace surfaces
+- [x] Fluid 4-step type ramp (`--pi-text-xs/sm/md/lg`); swept simple
+      `font-size`/`font:` declarations in 41 files. Display glyph sizes
+      (20–25px) and the inbox's local clamps remain — harmonize in Slices 6–7
+- [x] Named fluid space tokens defined; adopted on settings cards. Broad
+      padding sweep continues per-surface in Slice 7
+- [x] Radius scale (`inline 4 / control 8 / surface 12 / pill`); swept all
+      nine ad-hoc radii; deliberate literals remain (0, 50%, 2–3px).
+      Absorbed parked item 01KZRYRH8AP4HCQA18H4S3NMRV ◆
+- [x] Tabular numerals verified in monospace surfaces (inherited
+      font-variant-numeric; ui-monospace is fixed-pitch)
 
 ## Slice 3 — Color semantics
 

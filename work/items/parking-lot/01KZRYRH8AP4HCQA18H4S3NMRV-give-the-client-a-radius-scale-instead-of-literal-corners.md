@@ -3,7 +3,7 @@ id: 01KZRYRH8AP4HCQA18H4S3NMRV
 slug: give-the-client-a-radius-scale-instead-of-literal-corners
 title: Give the client a radius scale instead of literal corners
 origin: parked
-status: To Do
+status: In Progress
 priority: low
 labels:
   - client
