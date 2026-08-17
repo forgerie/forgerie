@@ -34,13 +34,17 @@ code reading. Others are anticipated; audits may resize them.
 - [x] `index.html` `:root` fallback palette → match new dark (pre-theme flash) ◆
 - [x] `npm run verify` (only the parked defaults-test flake); commit; deployed
 
-## Slice 1 — Elevation sweep (borders → surfaces)
+## Slice 1 — Elevation sweep (done 2026-08-16, 53be76a)
 
-- [ ] Audit all bordered constructs; demote to border-muted or remove where a
-      surface step suffices (inbox rows, chips, cards)
-- [ ] Settings dialog: flatten 4-level box nesting to 2 ◆
-- [ ] Consistent overlay/popover shadow treatment
-- [ ] Scrollbar styling for both modes ◆
+- [x] Demote major bordered constructs (settings cards, inbox header chrome,
+      undo toast, composer draft edge); remaining per-surface demotions fold
+      into Slice 7
+- [x] Settings dialog: flatten box nesting; config-path card becomes a
+      labeled readout; primary buttons filled accent (fixed nonexistent
+      --pi-accent-contrast reference) ◆
+- [x] Overlay/popover shadows verified consistent with the new visible
+      dark shadow tokens
+- [x] Thin palette-tinted scrollbars via inherited scrollbar-color ◆
 
 ## Slice 2 — Scales (intrinsic)
 
