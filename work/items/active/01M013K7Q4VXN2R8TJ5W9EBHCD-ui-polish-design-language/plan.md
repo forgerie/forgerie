@@ -158,6 +158,48 @@ code reading. Others are anticipated; audits may resize them.
 - [ ] 2–3 intentional transitions (panel slide, composer state, list settle)
 - [ ] prefers-reduced-motion respected
 
+## Slice 11 — TUI parity for the session tree (done 2026-08-17)
+
+User asked for parity with the Pi TUI's tree (`tree-selector.ts` in
+pi-coding-agent 0.84.0). Gap analysis found ten differences; a, b and c
+were taken, d and e deferred.
+
+- [x] **11a reading lenses** (4c2397a): five filters (User / No tools /
+      Conversation / Labeled / All). Opens on **User** — a deliberate
+      divergence from the TUI's conversation default, at the user's
+      request: a user message is the only entry whose text returns to the
+      composer. Bookkeeping leaves the conversation lenses; tool-call-only
+      assistant turns hide everywhere but as the active leaf (shared
+      literal SESSION_TREE_TOOL_CALL_SUMMARY_PREFIX rather than sniffing
+      server prose). Filtering re-parents survivors onto the nearest
+      retained ancestor and recomputes branch depth, so no lens drifts the
+      tree rightward. Position counter; empty-lens copy distinct from
+      empty-session copy. Selection follows an **anchor**: narrowing
+      repairs upward, widening returns to the anchor.
+- [x] **11b search, copy, branch order** (3d3a79d): every-term search over
+      label/kind/text; copy acts on the selection from the control row (no
+      per-row chrome); at a fork the active branch sorts before abandoned
+      siblings.
+- [x] **11c branch rails** (eb30f3f): per-lane hairlines with elbows,
+      ancestor lanes drawn only while their fork still has rows below.
+      Folded entries keep a caret — closes the slice 10 residual.
+
+Deferred (need server work, quoted to the user):
+- 11d tool-call detail (`[read: ~/foo.ts:1-20]`): the projection drops
+  tool arguments, so `SessionTreeNode` needs a new field.
+- 11e label editing + label-timestamp toggle: no label-write endpoint
+  exists.
+
+Capture note: `/tree` needs a live session, and every idle session's
+composer was disabled ("no model") during this slice, so captures used
+`/tmp/forgerie-v2/capture-tree-fixture.mjs`, which mounts the real
+component against a synthetic history containing a fork, labels,
+bookkeeping and tool entries. Richer than any live session available.
+
+Defect caught in capture, not tests: rows without rails lost a grid
+column and overlapped kind with summary. The lane track is now always
+emitted.
+
 ## Slice 10 — Session-tree navigator deep clean (done 2026-08-17, 9e87e4f)
 
 User-requested follow-up: the /tree dialog predated the language. Restyle
@@ -184,10 +226,8 @@ in place, no interaction changes:
       click Next for the confirmation step. Ran against an idle session —
       the server refuses /tree while a session is active.
 
-Residual (deferred): fold state of a collapsed *chain* node has no visual
-cue once its caret is hidden — keyboard-only folders see the subtree
-vanish with aria-expanded=false only. Low traffic; revisit if real
-branch-heavy sessions surface confusion.
+Residual (closed in slice 11c): fold state of a collapsed *chain* node had
+no visual cue once its caret was hidden. A folded row now keeps its caret.
 
 ## Slice 9 — Codify (done 2026-08-17, 72012f1 + d2fb94c)
 
