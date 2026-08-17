@@ -158,15 +158,15 @@ export class ComposerChoiceList extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; color: var(--pi-text); font: 13px system-ui, sans-serif; }
+    :host { display: block; color: var(--pi-text); font: var(--pi-text-sm) system-ui, sans-serif; }
     .choice-search { padding: 8px 10px 4px; }
-    .choice-search input { box-sizing: border-box; width: 100%; padding: 6px 8px; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); font: inherit; }
+    .choice-search input { box-sizing: border-box; width: 100%; padding: 6px 8px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); font: inherit; }
     /*
      * One label style, two ranks. A section and a provider differ by weight
      * alone: colour is spoken for, since a tinted row already means "selected"
      * and a filled band would read as a stuck hover state.
      */
-    .choice-group { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 6px 11px 4px; color: var(--pi-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .choice-group { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 6px 11px 4px; color: var(--pi-muted); font-size: var(--pi-text-xs); text-transform: uppercase; letter-spacing: .06em; }
     .choice-group.section { font-weight: 700; }
     .choice-group.provider { font-weight: 500; }
     .choice-group[data-divider] { margin-top: 2px; border-top: 1px solid var(--pi-border); padding-top: 8px; }
@@ -186,10 +186,10 @@ export class ComposerChoiceList extends LitElement {
     .choice-copy { min-width: 0; display: grid; gap: 2px; }
     .choice-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .choice-copy small { color: var(--pi-muted); line-height: 1.35; white-space: normal; }
-    .choice-meta { color: var(--pi-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-    .choice-empty, .choice-error { margin: 0; padding: 10px 11px; color: var(--pi-muted); font-size: 12px; }
+    .choice-meta { color: var(--pi-muted); font-size: var(--pi-text-xs); font-variant-numeric: tabular-nums; }
+    .choice-empty, .choice-error { margin: 0; padding: 10px 11px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .choice-error { display: grid; gap: 8px; color: var(--pi-danger); }
-    .choice-error button { justify-self: start; padding: 4px 10px; border: 1px solid var(--pi-border); border-radius: 6px; background: transparent; color: var(--pi-text); font: inherit; cursor: pointer; }
+    .choice-error button { justify-self: start; padding: 4px 10px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-text); font: inherit; cursor: pointer; }
   `;
 }
 

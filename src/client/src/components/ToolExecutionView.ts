@@ -125,31 +125,31 @@ export class ToolExecutionView extends LitElement {
     .tool-title { flex: 1 1 auto; display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; }
     .status-icon { flex: 0 0 auto; color: var(--pi-muted); }
     strong { flex: 0 0 auto; color: var(--calm-ink-muted); font-weight: 500; }
-    .path, .summary { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; white-space: pre; color: var(--pi-accent); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
+    .path, .summary { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; white-space: pre; color: var(--pi-accent); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
     .summary { color: var(--pi-muted); font-family: inherit; }
-    .tool-meta { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 8px; color: var(--pi-muted); font-size: 12px; }
+    .tool-meta { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 8px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .diff-stats { display: inline-flex; gap: 3px; }
     .added, .diff .added { color: var(--pi-success); }
     .removed, .diff .removed { color: var(--pi-danger); }
     .status-label { text-transform: uppercase; letter-spacing: .04em; color: var(--pi-muted); }
     .notice { margin: 0; color: var(--pi-warning); }
     .muted { margin: 0; color: var(--pi-muted); }
-    .error-text { margin: 0; border: 0; border-radius: 0; background: none; color: var(--calm-danger); padding: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .error-text { margin: 0; border: 0; border-radius: 0; background: none; color: var(--calm-danger); padding: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .text-body { border-top: 1px solid var(--pi-border-muted); padding-top: 6px; }
     .detail-target, .detail-result { display: grid; gap: 4px; margin-top: 8px; min-width: 0; }
-    .detail-label { color: var(--pi-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-    .text-body pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--calm-ink-dim); }
+    .detail-label { color: var(--pi-muted); font-size: var(--pi-text-sm); text-transform: uppercase; letter-spacing: .04em; }
+    .text-body pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--calm-ink-dim); }
     .detail-result pre { box-sizing: border-box; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; border: 0; border-radius: 0; background: none; padding: 0; color: var(--calm-ink-dim); white-space: pre; overflow-wrap: normal; direction: ltr; text-align: left; unicode-bidi: isolate; }
-    .detail-target-value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pi-accent); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
+    .detail-target-value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pi-accent); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
     .diff-details { min-width: 0; max-width: 100%; border-top: 1px solid var(--pi-border-muted); padding-top: 6px; }
     .diff-details > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; color: var(--pi-muted); cursor: pointer; }
     .diff-details > summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .diff-details > summary small { flex: 0 0 auto; color: var(--pi-dim); }
-    .diff-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin-top: 8px; color: var(--pi-muted); font-size: 12px; }
+    .diff-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin-top: 8px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .diff-toolbar span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    button { border: 0; border-radius: 6px; background: none; color: var(--calm-ink-dim); padding: 3px 0; font: 12px system-ui, sans-serif; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+    button { border: 0; border-radius: var(--pi-radius-control); background: none; color: var(--calm-ink-dim); padding: 3px 0; font: var(--pi-text-sm) system-ui, sans-serif; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
     button:hover, button:focus { color: var(--calm-ink-muted); }
-    .diff { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; margin: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; border: 1px solid var(--pi-border-muted); border-radius: 7px; background: var(--pi-bg); padding: 8px 0; color: var(--pi-muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.45; }
+    .diff { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; margin: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); background: var(--pi-bg); padding: 8px 0; color: var(--pi-muted); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.45; }
     .diff-content { display: block; width: max-content; min-width: 100%; }
     .diff span { display: block; min-height: 1.45em; padding: 0 8px; white-space: pre; }
     .diff .context { color: var(--pi-muted); }

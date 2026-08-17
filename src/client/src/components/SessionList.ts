@@ -579,18 +579,18 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     h2 { min-height: 30px; }
     h2 > .section-count { flex: 0 0 auto; display: inline; color: var(--pi-muted); font-size: inherit; }
     h2 > .section-unread-count { flex: 0 0 auto; display: inline; color: var(--pi-accent); font-size: inherit; text-transform: none; }
-    .bulk-select-entry { box-sizing: border-box; flex: 0 0 auto; display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; font-size: 13px; line-height: 1; text-transform: none; }
+    .bulk-select-entry { box-sizing: border-box; flex: 0 0 auto; display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; font-size: var(--pi-text-sm); line-height: 1; text-transform: none; }
     .start-session-button { box-sizing: border-box; flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 30px; height: 30px; padding: 0 9px; }
-    .cleanup-entry { flex: 0 0 auto; padding: 5px 7px; font-size: 12px; text-transform: none; }
+    .cleanup-entry { flex: 0 0 auto; padding: 5px 7px; font-size: var(--pi-text-sm); text-transform: none; }
     .bulk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; }
-    .bulk-row button { padding: 5px 7px; font-size: 12px; white-space: nowrap; }
+    .bulk-row button { padding: 5px 7px; font-size: var(--pi-text-sm); white-space: nowrap; }
     .bulk-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin-left: auto; }
     .action-name, .section-selected { text-align: start; unicode-bidi: plaintext; }
     .action-row.unread .action-name { color: var(--pi-text-bright); font-weight: 650; }
     .plain-heading { min-width: 0; }
     .action-name-line { min-width: 0; display: flex; align-items: flex-start; gap: 6px; }
     .action-name-line .action-name { flex: 1 1 auto; min-width: 0; }
-    .fork-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; min-height: 24px; margin: -2px 0; padding: 1px 6px 1px 4px; border: 1px solid var(--pi-border-muted); border-radius: 999px; background: var(--pi-surface); color: var(--pi-muted); font: 11px system-ui, sans-serif; cursor: pointer; }
+    .fork-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; min-height: 24px; margin: -2px 0; padding: 1px 6px 1px 4px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-muted); font: var(--pi-text-xs) system-ui, sans-serif; cursor: pointer; }
     .fork-toggle:hover, .fork-toggle:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
     .fork-toggle:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
     .fork-chevron { display: inline-block; line-height: 1; transition: transform 120ms ease-out; }
@@ -605,12 +605,12 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     .row-badges .badge { margin-left: 0; white-space: nowrap; }
     /* Same glyph as a normal child marker, dimmed: the row is a child whose parent is not displayed here. */
     .orphan-marker { color: var(--pi-dim); opacity: .65; }
-    .bulk-row.selecting { padding: 6px; border: 1px solid var(--pi-border-muted); border-radius: 8px; background: color-mix(in srgb, var(--pi-surface) 65%, transparent); }
+    .bulk-row.selecting { padding: 6px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); background: color-mix(in srgb, var(--pi-surface) 65%, transparent); }
     button.danger, .action-menu-panel button.danger { color: var(--pi-danger); }
     button.danger:hover, .action-menu-panel button.danger:hover { background: color-mix(in srgb, var(--pi-danger) 14%, transparent); }
     .action-row.bulk-selected .action-main { border-color: var(--pi-accent); box-shadow: inset 3px 0 0 var(--pi-accent); }
     .pending-session-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); margin: 6px 0; cursor: default; }
-    .pending-session-row.starting-session .action-main { border-radius: 8px; border-style: dashed; color: var(--pi-muted); }
+    .pending-session-row.starting-session .action-main { border-radius: var(--pi-radius-control); border-style: dashed; color: var(--pi-muted); }
     .pending-session-row.starting-session .action-name { display: flex; align-items: center; gap: 6px; max-height: none; -webkit-line-clamp: 1; }
     .pending-session-row.starting-session .activity-indicator { flex: 0 0 auto; margin: 0; }
     .action-main.selecting { padding-left: calc(32px + var(--depth, 0) * 16px); }

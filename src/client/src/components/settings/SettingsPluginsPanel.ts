@@ -96,9 +96,9 @@ export class SettingsPluginsPanel extends LitElement {
     :host { display: block; container-type: inline-size; }
     input { font: inherit; }
     input:disabled { opacity: .55; cursor: not-allowed; }
-    .loading-card, .plugin-note, .plugin-card { border: 1px solid var(--pi-border-muted); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
+    .loading-card, .plugin-note, .plugin-card { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); padding: var(--pi-space-md); }
     .loading-card, .plugin-note { color: var(--pi-muted); }
-    code { border: 1px solid var(--pi-border-muted); border-radius: 5px; background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    code { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     .plugin-list { display: grid; gap: 10px; }
     .plugin-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
     .plugin-card.disabled { opacity: .75; }

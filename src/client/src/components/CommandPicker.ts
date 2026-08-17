@@ -92,13 +92,13 @@ export class CommandPicker extends LitElement {
   }
 
   static override styles = css`
-    :host { position: fixed; inset: 0; z-index: 10; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+    :host { position: fixed; inset: 0; z-index: 10; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; }
     modal-surface { --modal-surface-width: min(720px, calc(100vw - 40px)); --modal-surface-max-height: min(640px, calc(100vh - 40px)); }
     header { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid var(--pi-border); }
     .options { min-height: 0; overflow: auto; outline: none; }
     button { border: 0; background: transparent; color: var(--pi-text); cursor: pointer; }
     header button { font-size: 20px; color: var(--pi-muted); }
-    input { margin: 10px 12px; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); padding: 8px 10px; outline: none; }
+    input { margin: 10px 12px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); padding: 8px 10px; outline: none; }
     input:focus { border-color: var(--pi-accent); }
     .options button { display: block; width: 100%; padding: 10px 12px; border-bottom: 1px solid var(--pi-border-muted); text-align: left; }
     .options button.selected, .options button:hover { background: var(--pi-selection-bg); }

@@ -165,16 +165,16 @@ export class AppMobileMainTabs extends LitElement {
     .tab-custom-icon svg { width: 18px; height: 18px; pointer-events: none; }
     .tab-fallback { display: none; font-weight: 650; letter-spacing: .01em; pointer-events: none; }
     .tab-label { min-width: 0; }
-    .tab-badge { flex: 0 0 auto; display: inline-block; min-width: 14px; margin-left: 0; border: 1px solid var(--pi-success-border); border-radius: 999px; background: var(--pi-success-surface); color: var(--pi-success); padding: 0 5px; font-size: 11px; line-height: 16px; text-align: center; }
+    .tab-badge { flex: 0 0 auto; display: inline-block; min-width: 14px; margin-left: 0; border: 1px solid var(--pi-success-border); border-radius: var(--pi-radius-pill); background: var(--pi-success-surface); color: var(--pi-success); padding: 0 5px; font-size: var(--pi-text-xs); line-height: 16px; text-align: center; }
     .tab-badge.unread { border-color: var(--pi-accent-border); background: var(--pi-selection-bg); color: var(--pi-accent); }
-    button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
+    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
     @container (max-width: 760px) {
       .mobile-tabs { gap: 4px; padding: 6px 8px; }
       .mobile-tabs button { min-width: 44px; height: 44px; justify-content: center; gap: 4px; padding: 0 8px; }
       .mobile-tabs .navigation-tab { display: inline-flex; }
       .tab-fallback { display: inline-block; }
       .tab-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
-      .tab-badge { min-width: 13px; padding: 0 4px; font-size: 10px; line-height: 13px; }
+      .tab-badge { min-width: 13px; padding: 0 4px; font-size: var(--pi-text-xs); line-height: 13px; }
     }
   `;
 }

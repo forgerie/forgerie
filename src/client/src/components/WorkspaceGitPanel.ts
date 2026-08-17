@@ -36,7 +36,7 @@ export class WorkspaceGitPanel extends LitElement {
       .view-toggle button:last-child { border-top-right-radius: 7px; border-bottom-right-radius: 7px; margin-left: -1px; }
       .view-toggle button.selected { position: relative; z-index: 1; }
       .row .twisty { color: var(--pi-dim, var(--pi-muted)); }
-      .submodule-badge { display: inline-block; margin-left: 6px; border: 1px solid var(--pi-border); border-radius: 999px; color: var(--pi-muted); padding: 0 5px; font-size: 11px; font-weight: 400; vertical-align: baseline; }
+      .submodule-badge { display: inline-block; margin-left: 6px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-pill); color: var(--pi-muted); padding: 0 5px; font-size: var(--pi-text-xs); font-weight: 400; vertical-align: baseline; }
     `,
   ];
 

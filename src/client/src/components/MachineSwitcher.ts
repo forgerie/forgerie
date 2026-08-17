@@ -277,15 +277,15 @@ export class MachineSwitcher extends LitElement implements KeyboardNavigableSect
   static override styles = css`
     :host { min-width: 0; display: block; }
     .machine-switcher { min-width: 0; }
-    .machine-switcher-button { box-sizing: border-box; width: 100%; min-width: 0; display: flex; align-items: center; gap: 6px; border: 1px solid var(--pi-border); border-radius: 999px; background: var(--pi-surface); color: var(--pi-text); padding: 5px 8px; cursor: pointer; text-align: left; }
+    .machine-switcher-button { box-sizing: border-box; width: 100%; min-width: 0; display: flex; align-items: center; gap: 6px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-text); padding: 5px 8px; cursor: pointer; text-align: left; }
     .machine-switcher-button:hover, .machine-switcher-button:focus-visible { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
     .machine-switcher-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; }
-    .machine-switcher-kicker { color: var(--pi-muted); font-size: 10px; line-height: 1; text-transform: uppercase; letter-spacing: .02em; }
-    .machine-switcher-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; line-height: 1.2; }
-    .machine-status { flex: 0 0 auto; color: var(--pi-muted); font-size: 11px; }
+    .machine-switcher-kicker { color: var(--pi-muted); font-size: var(--pi-text-xs); line-height: 1; text-transform: uppercase; letter-spacing: .02em; }
+    .machine-switcher-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--pi-text-sm); font-weight: 600; line-height: 1.2; }
+    .machine-status { flex: 0 0 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); }
     .machine-status.online { color: var(--pi-success); }
     .machine-status.offline, .machine-status.error { color: var(--pi-danger); }
-    .machine-chevron { flex: 0 0 auto; color: var(--pi-muted); font-size: 11px; }
+    .machine-chevron { flex: 0 0 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); }
     .activity-indicator { flex: 0 0 auto; display: inline-block; width: 7px; height: 7px; background: var(--pi-success); animation: pulse 1s ease-in-out infinite; }
     .activity-indicator.session { border-radius: 50%; background: var(--pi-success); }
     .activity-indicator.terminal { border-radius: 2px; background: var(--pi-accent); }
@@ -293,17 +293,17 @@ export class MachineSwitcher extends LitElement implements KeyboardNavigableSect
     .activity-indicator.unread { border-radius: 50%; background: var(--pi-accent); animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--pi-accent) 20%, transparent); }
     .unread-ring { flex: 0 0 auto; box-sizing: border-box; display: inline-grid; place-items: center; width: 9px; height: 9px; border: 1.5px solid var(--pi-accent); border-radius: 50%; }
     .unread-ring .activity-indicator { width: 5px; height: 5px; }
-    .machine-switcher-menu { position: fixed; z-index: 10000; box-sizing: border-box; min-width: min(280px, calc(100vw - 16px)); overflow: auto; padding: 4px; border: 1px solid var(--pi-border); border-radius: 10px; background: var(--pi-surface); box-shadow: 0 8px 24px var(--pi-shadow); }
+    .machine-switcher-menu { position: fixed; z-index: 10000; box-sizing: border-box; min-width: min(280px, calc(100vw - 16px)); overflow: auto; padding: 4px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); background: var(--pi-surface); box-shadow: 0 8px 24px var(--pi-shadow); }
     .machine-option { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px; align-items: stretch; margin: 2px 0; }
     .machine-option.no-actions { grid-template-columns: minmax(0, 1fr); }
-    .machine-option-main, .machine-option-actions-toggle, .machine-option-actions-panel button { border: 0; border-radius: 7px; background: transparent; color: var(--pi-text); cursor: pointer; }
+    .machine-option-main, .machine-option-actions-toggle, .machine-option-actions-panel button { border: 0; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-text); cursor: pointer; }
     .machine-option-main { min-width: 0; display: grid; gap: 2px; padding: 7px 8px; text-align: left; }
     .machine-option-name { min-width: 0; display: flex; align-items: baseline; gap: 6px; }
     .machine-option-name span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .machine-option-main small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-muted); }
     .machine-option-actions { position: relative; align-self: stretch; }
     .machine-option-actions-toggle { display: grid; place-items: center; height: 100%; min-width: 32px; padding: 0; color: var(--pi-muted); }
-    .machine-option-actions-panel { position: fixed; z-index: 10001; box-sizing: border-box; min-width: min(120px, calc(100vw - 16px)); overflow: auto; padding: 4px; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); box-shadow: 0 8px 24px var(--pi-shadow); }
+    .machine-option-actions-panel { position: fixed; z-index: 10001; box-sizing: border-box; min-width: min(120px, calc(100vw - 16px)); overflow: auto; padding: 4px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); box-shadow: 0 8px 24px var(--pi-shadow); }
     .machine-option-actions-panel button { display: block; width: 100%; padding: 7px 9px; text-align: left; white-space: nowrap; }
     .machine-option-actions-panel button.danger { color: var(--pi-danger); }
     .machine-option-main:hover, .machine-option-main:focus-visible, .machine-option-actions-toggle:hover, .machine-option-actions-toggle:focus-visible, .machine-option.selected .machine-option-main { background: var(--pi-selection-bg); }

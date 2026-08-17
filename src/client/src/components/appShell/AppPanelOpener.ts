@@ -75,7 +75,7 @@ export class AppPanelOpener extends LitElement {
      * Quiet until wanted. It sits over the transcript, so it stays muted and
      * gains contrast on approach rather than holding a border all the time.
      */
-    .opener { position: relative; display: grid; place-items: center; width: 40px; height: 40px; margin: 4px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--pi-muted); opacity: .6; cursor: pointer; }
+    .opener { position: relative; display: grid; place-items: center; width: 40px; height: 40px; margin: 4px; padding: 0; border: 0; border-radius: var(--pi-radius-surface); background: transparent; color: var(--pi-muted); opacity: .6; cursor: pointer; }
     .opener:hover, .opener:focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); opacity: 1; }
     .opener-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; pointer-events: none; }
     .attention { position: absolute; inset-block-start: 7px; inset-inline-end: 7px; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 2px var(--pi-bg); pointer-events: none; }

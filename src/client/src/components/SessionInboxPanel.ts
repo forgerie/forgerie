@@ -952,7 +952,7 @@ export class SessionInboxPanel extends LitElement {
       min-height: 0;
       overflow: hidden;
       color: var(--pi-text);
-      font: 14px system-ui, sans-serif;
+      font: var(--pi-text-md) system-ui, sans-serif;
       container-type: inline-size;
 
       /*
@@ -1032,7 +1032,7 @@ export class SessionInboxPanel extends LitElement {
       text-align: start;
       background: none;
       border: 1px solid transparent;
-      border-radius: 8px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -1081,7 +1081,7 @@ export class SessionInboxPanel extends LitElement {
       white-space: nowrap;
       background: var(--pi-surface, #101527);
       border: 1px solid var(--pi-border, #26304f);
-      border-radius: 8px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -1160,7 +1160,7 @@ export class SessionInboxPanel extends LitElement {
       white-space: nowrap;
       background: transparent;
       border: 0;
-      border-radius: 6px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -1175,7 +1175,7 @@ export class SessionInboxPanel extends LitElement {
       border-bottom: 1px solid var(--pi-border-muted);
       margin-bottom: 4px;
       color: var(--pi-muted);
-      font-size: 12px;
+      font-size: var(--pi-text-sm);
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
@@ -1194,7 +1194,7 @@ export class SessionInboxPanel extends LitElement {
       /* Ghost: header utilities separate by hover surface, not by outline. */
       background: transparent;
       border: 1px solid transparent;
-      border-radius: 8px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -1232,7 +1232,7 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-text-bright, #fff);
       background: var(--pi-accent, #7c3cff);
       border: 1px solid var(--pi-accent-border, #5a47b0);
-      border-radius: 8px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -1318,7 +1318,7 @@ export class SessionInboxPanel extends LitElement {
       text-align: center;
       color: var(--group-tone, var(--pi-muted, #aaa4bd));
       background: color-mix(in srgb, var(--group-tone, var(--pi-dim, #817a99)) 14%, transparent);
-      border-radius: 999px;
+      border-radius: var(--pi-radius-pill);
     }
 
     .group-spacer { flex: 1 1 auto; }
@@ -1535,7 +1535,7 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-dim, #817a99);
       background: none;
       border: 1px solid transparent;
-      border-radius: 6px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -1564,7 +1564,7 @@ export class SessionInboxPanel extends LitElement {
     .row-action:focus-visible {
       outline: 2px solid var(--pi-accent, #7c3cff);
       outline-offset: 2px;
-      border-radius: 6px;
+      border-radius: var(--pi-radius-control);
     }
 
     .inbox-plugin-shelves {
@@ -1625,7 +1625,7 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-accent, #7c3cff);
       background: color-mix(in srgb, var(--pi-accent, #7c3cff) 12%, transparent);
       border: 1px solid var(--pi-accent-border, #5a47b0);
-      border-radius: 6px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -1643,7 +1643,7 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-dim, #817a99);
       background: none;
       border: 1px solid transparent;
-      border-radius: 6px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 

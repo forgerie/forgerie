@@ -699,13 +699,13 @@ export class TerminalPanel extends LitElement {
       .copy-mode-toggle, .soft-keys-toggle { display: inline-flex; }
       terminal-soft-keys { display: block; }
     }
-    button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 180px; border: 1px solid var(--pi-border); border-radius: 7px; background: var(--pi-surface); color: var(--pi-text); padding: 5px 7px; cursor: pointer; }
+    button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 180px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 5px 7px; cursor: pointer; }
     button.selected { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
     button.new { flex: 0 0 auto; color: var(--pi-muted); }
     .soft-keys-toggle { flex: 0 0 auto; }
     .soft-keys-toggle .keyboard-icon { display: block; flex: 0 0 auto; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    button small { color: var(--pi-muted); font-size: 14px; line-height: 1; }
+    button small { color: var(--pi-muted); font-size: var(--pi-text-md); line-height: 1; }
     button small:hover { color: var(--pi-danger); }
     button.danger { color: var(--pi-danger); }
     button:disabled { opacity: .5; cursor: not-allowed; }
@@ -714,20 +714,20 @@ export class TerminalPanel extends LitElement {
     .command-run-notice.succeeded { border-color: var(--pi-success-border); }
     .command-run-notice.failed { border-color: var(--pi-danger); }
     .command-run-notice p { margin: 3px 0; color: var(--pi-muted); }
-    .command-run-notice code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-text-secondary); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .command-run-notice kbd { border: 1px solid var(--pi-border); border-radius: 4px; background: var(--pi-bg); padding: 0 4px; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .command-run-notice code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-text-secondary); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .command-run-notice kbd { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 0 4px; font: var(--pi-text-xs) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .command-run-notice button { justify-self: end; max-width: none; }
     .terminal-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: var(--pi-terminal-bg); }
     .terminal-host { position: absolute; inset: 0; padding: 6px; box-sizing: border-box; overflow: hidden; }
     .terminal-host.copying { visibility: hidden; pointer-events: none; }
     .terminal-copy-view { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: var(--pi-terminal-bg); color: var(--pi-terminal-text); }
-    .terminal-copy-toolbar { box-sizing: border-box; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 47px; padding: 6px; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-bg); color: var(--pi-muted); font: 12px system-ui, sans-serif; }
+    .terminal-copy-toolbar { box-sizing: border-box; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 47px; padding: 6px; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-bg); color: var(--pi-muted); font: var(--pi-text-sm) system-ui, sans-serif; }
     .terminal-copy-toolbar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .terminal-copy-toolbar small { margin-left: auto; white-space: nowrap; color: var(--pi-dim); }
-    .terminal-copy-toolbar button { flex: 0 0 auto; width: auto; min-height: 34px; padding: 6px 9px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .terminal-copy-toolbar button { flex: 0 0 auto; width: auto; min-height: 34px; padding: 6px 9px; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .terminal-copy-layers { flex: 1 1 auto; min-height: 0; display: grid; overflow: hidden; background: var(--pi-terminal-bg); }
     /* xterm renders the configured 13px terminal font in 17px-high cells. */
-    .terminal-copy-content, .terminal-copy-selector { grid-area: 1 / 1; box-sizing: border-box; min-width: 0; min-height: 0; width: 100%; height: 100%; margin: 0; padding: 6px; border: 0; border-radius: 0; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 17px; letter-spacing: normal; font-variant-ligatures: none; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
+    .terminal-copy-content, .terminal-copy-selector { grid-area: 1 / 1; box-sizing: border-box; min-width: 0; min-height: 0; width: 100%; height: 100%; margin: 0; padding: 6px; border: 0; border-radius: 0; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 17px; letter-spacing: normal; font-variant-ligatures: none; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
     .terminal-copy-content { overflow: auto; pointer-events: none; background: var(--pi-terminal-bg); color: var(--pi-terminal-text); -webkit-user-select: none; user-select: none; }
     .terminal-copy-selector { z-index: 1; overflow: auto; resize: none; outline: none; appearance: none; background: transparent; color: transparent; caret-color: var(--pi-accent); -webkit-text-fill-color: transparent; cursor: text; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; touch-action: auto; }
     .terminal-copy-selector::selection { background: var(--pi-terminal-selection); color: transparent; -webkit-text-fill-color: transparent; }

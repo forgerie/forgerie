@@ -96,7 +96,7 @@ export class ActionPalette extends LitElement {
   }
 
   static override styles = css`
-    :host { position: fixed; inset: 0; z-index: 20; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+    :host { position: fixed; inset: 0; z-index: 20; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; }
     modal-surface { --palette-top: min(12dvh, 90px); --palette-bottom: max(20px, env(safe-area-inset-bottom)); --modal-surface-place-items: start center; --modal-surface-backdrop-padding: var(--palette-top) 20px var(--palette-bottom); --modal-surface-max-height: min(640px, calc(100dvh - var(--palette-top) - var(--palette-bottom))); }
     header { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px; border-bottom: 1px solid var(--pi-border); }
     input { min-width: 0; border: 0; outline: none; background: transparent; color: var(--pi-text); font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); padding: 8px; }
@@ -112,8 +112,8 @@ export class ActionPalette extends LitElement {
     strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     small { display: block; color: var(--pi-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .disabled-reason { color: var(--pi-warning); }
-    .group { grid-column: 1 / -1; font-size: 12px; }
-    kbd { align-self: center; border: 1px solid var(--pi-border); border-radius: 6px; background: var(--pi-surface); color: var(--pi-muted); padding: 2px 6px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
+    .group { grid-column: 1 / -1; font-size: var(--pi-text-sm); }
+    kbd { align-self: center; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-muted); padding: 2px 6px; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
     .empty { padding: 24px; color: var(--pi-muted); text-align: center; }
   `;
 }

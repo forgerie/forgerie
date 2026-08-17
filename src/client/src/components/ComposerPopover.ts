@@ -108,14 +108,14 @@ export class ComposerPopover extends LitElement {
   };
 
   static override styles = css`
-    :host { position: absolute; inset-inline: 0; z-index: 20; display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; pointer-events: none; }
+    :host { position: absolute; inset-inline: 0; z-index: 20; display: block; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; pointer-events: none; }
     :host([data-side="above"]) { bottom: calc(100% + 8px); }
     :host([data-side="below"]) { top: calc(100% + 8px); }
     .popover-panel {
       /* Sized by content, capped by placement. A minimum keeps a short list
          from collapsing to the width of its longest word. */
       position: absolute; width: max-content; min-width: 220px; max-height: 320px; overflow-y: auto; pointer-events: auto;
-      border: 1px solid var(--pi-border); border-radius: 12px; background: var(--pi-surface);
+      border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); background: var(--pi-surface);
       box-shadow: 0 10px 30px var(--pi-shadow-strong);
     }
     :host([data-side="below"]) .popover-panel { top: 0; }

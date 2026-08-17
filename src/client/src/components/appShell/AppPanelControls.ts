@@ -59,7 +59,7 @@ export class AppPanelControls extends LitElement {
 
   static override styles = css`
     :host { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
-    .control { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pi-muted); opacity: .75; cursor: pointer; }
+    .control { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-muted); opacity: .75; cursor: pointer; }
     .control:hover, .control:focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); opacity: 1; }
     .control[data-pressed="true"] { color: var(--pi-accent); opacity: 1; }
     .control-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }

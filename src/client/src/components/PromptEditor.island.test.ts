@@ -14,7 +14,7 @@ describe("composer island styles", () => {
   });
 
   it("draws one inset surface rather than a full-width band", () => {
-    expect(islandCss).toContain("--composer-island-radius: 16px");
+    expect(islandCss).toContain("--composer-island-radius: var(--pi-radius-surface)");
     expect(islandCss).toMatch(/border-radius:\s*var\(--composer-island-radius\)/);
     expect(islandCss).not.toContain("--pi-composer-rule");
   });

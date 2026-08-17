@@ -183,7 +183,7 @@ export class WorkspaceManagementDialog extends LitElement {
       inset: 0;
       z-index: 10;
       color: var(--pi-text);
-      font: 14px system-ui, sans-serif;
+      font: var(--pi-text-md) system-ui, sans-serif;
     }
 
     modal-surface {
@@ -219,7 +219,7 @@ export class WorkspaceManagementDialog extends LitElement {
       color: var(--pi-muted, #aaa4bd);
       background: none;
       border: none;
-      border-radius: 6px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
@@ -360,7 +360,7 @@ export class WorkspaceManagementDialog extends LitElement {
       color: var(--pi-text, #f7f4ff);
       background: var(--pi-surface, #101527);
       border: 1px solid var(--pi-border, #26304f);
-      border-radius: 8px;
+      border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 

@@ -276,12 +276,12 @@ export class ExtensionDialogCard extends LitElement {
       width: 100%;
       margin: 0 0 14px;
       color: var(--pi-text);
-      font: 14px system-ui, sans-serif;
+      font: var(--pi-text-md) system-ui, sans-serif;
       container-type: inline-size;
     }
     .card {
       border: 1px solid var(--pi-border);
-      border-radius: 10px;
+      border-radius: var(--pi-radius-surface);
       background: var(--pi-surface);
     }
     .card-header {
@@ -295,7 +295,7 @@ export class ExtensionDialogCard extends LitElement {
       min-height: 22px;
       padding: 8px 16px 7px;
       border-bottom: 1px solid var(--pi-border-muted);
-      border-radius: 9px 9px 0 0;
+      border-radius: calc(var(--pi-radius-surface) - 1px) calc(var(--pi-radius-surface) - 1px) 0 0;
       background: var(--pi-surface);
       box-shadow: 0 8px 18px var(--pi-shadow-soft);
     }
@@ -303,12 +303,12 @@ export class ExtensionDialogCard extends LitElement {
     h2 {
       min-width: 0;
       margin-bottom: 0;
-      font-size: 14px;
+      font-size: var(--pi-text-md);
       font-weight: 650;
       line-height: 1.35;
       overflow-wrap: anywhere;
     }
-    .header-status { flex: 0 0 auto; color: var(--pi-muted); font-size: 11px; text-align: end; }
+    .header-status { flex: 0 0 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); text-align: end; }
     .header-status.answered { color: var(--pi-success); }
     .header-status.timeout, .header-status.aborted, .header-status.session-ended { color: var(--pi-warning); }
     .dialog-message {
@@ -332,7 +332,7 @@ export class ExtensionDialogCard extends LitElement {
       width: calc(100% - 32px);
       margin: 12px 16px 0;
       border: 1px solid var(--pi-border);
-      border-radius: 8px;
+      border-radius: var(--pi-radius-control);
       background: var(--pi-bg);
       color: var(--pi-text);
       padding: 8px;
@@ -350,7 +350,7 @@ export class ExtensionDialogCard extends LitElement {
     .dialog-message + .dialog-footer, .dialog-options + .dialog-footer { border-top: 0; }
     button {
       border: 1px solid var(--pi-border);
-      border-radius: 8px;
+      border-radius: var(--pi-radius-control);
       background: var(--pi-surface);
       color: var(--pi-text);
       padding: 7px 12px;
@@ -366,7 +366,7 @@ export class ExtensionDialogCard extends LitElement {
       margin: 0;
       padding: 12px 16px;
       color: var(--pi-muted);
-      font-size: 13px;
+      font-size: var(--pi-text-sm);
       line-height: 1.4;
       white-space: pre-wrap;
       overflow-wrap: anywhere;

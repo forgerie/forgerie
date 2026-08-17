@@ -206,13 +206,13 @@ export class AuthDialog extends LitElement {
   }
 
   static override styles = [css`
-    :host { position: fixed; inset: 0; z-index: 10; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+    :host { position: fixed; inset: 0; z-index: 10; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; }
     modal-surface { --modal-surface-width: min(720px, calc(100vw - 40px)); --modal-surface-max-height: min(640px, calc(100vh - 40px)); }
     header { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid var(--pi-border); }
     .options { min-height: 0; overflow: auto; outline: none; }
     button { border: 0; background: transparent; color: var(--pi-text); cursor: pointer; }
     header button { font-size: 20px; color: var(--pi-muted); }
-    input { margin: 10px 12px; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); padding: 8px 10px; outline: none; }
+    input { margin: 10px 12px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); padding: 8px 10px; outline: none; }
     input:focus { border-color: var(--pi-accent); }
     .options button { display: block; width: 100%; padding: 10px 12px; border-bottom: 1px solid var(--pi-border-muted); text-align: left; }
     .options button.selected, .options button:hover { background: var(--pi-selection-bg); }
@@ -222,10 +222,10 @@ export class AuthDialog extends LitElement {
     .form { display: grid; gap: 12px; padding: 14px; overflow: auto; }
     .form p { margin: 0; color: var(--pi-text-secondary); overflow-wrap: anywhere; }
     .form a { color: var(--pi-accent); overflow-wrap: anywhere; }
-    .form code { border: 1px solid var(--pi-border); border-radius: 4px; background: var(--pi-surface); padding: 1px 4px; }
+    .form code { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); padding: 1px 4px; }
     label { color: var(--pi-muted); }
     .actions { display: flex; justify-content: flex-end; gap: 8px; }
-    .actions button, .inline-options button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; }
+    .actions button, .inline-options button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; }
     .actions button.primary { border-color: var(--pi-success-border); background: var(--pi-success-surface); color: var(--pi-success); }
     .actions button:disabled { opacity: .6; cursor: wait; }
     .warning { color: var(--pi-warning); }
@@ -235,7 +235,7 @@ export class AuthDialog extends LitElement {
     .inline-options { display: grid; gap: 8px; }
     .inline-options button { display: grid; gap: 2px; text-align: left; }
     .inline-options small { color: var(--pi-muted); }
-    em { color: var(--pi-success); font-style: normal; font-size: 12px; }
+    em { color: var(--pi-success); font-style: normal; font-size: var(--pi-text-sm); }
   `];
 }
 

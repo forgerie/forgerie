@@ -252,13 +252,13 @@ export class SettingsGeneralPanel extends LitElement {
     :host { display: block; container-type: inline-size; }
     .card-heading { display: grid; gap: 6px; min-width: 0; }
     h3, p { margin: 0; }
-    h3 { font-size: 13px; line-height: 1.3; }
+    h3 { font-size: var(--pi-text-sm); line-height: 1.3; }
     p { color: var(--pi-muted); line-height: 1.45; }
     button, input, select, textarea { font: inherit; }
-    button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
+    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     .settings-sections { display: grid; gap: 14px; }
-    .settings-card, .message, .loading-card, .effective-card { border: 1px solid var(--pi-border-muted); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
+    .settings-card, .message, .loading-card, .effective-card { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); padding: var(--pi-space-md); }
     .settings-card { display: grid; gap: 14px; }
     .message { margin-bottom: 12px; }
     .settings-card .message { margin-bottom: 0; }
@@ -267,17 +267,17 @@ export class SettingsGeneralPanel extends LitElement {
     /* A labeled readout, not a card: boxing it made a box inside the section
        card. It separates from the form by its eyebrow label and spacing. */
     .config-path-card { display: grid; gap: 5px; }
-    .config-path-card span, .field-heading, dt { color: var(--pi-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
-    code { border: 1px solid var(--pi-border-muted); border-radius: 5px; background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .config-path-card span, .field-heading, dt { color: var(--pi-muted); font-size: var(--pi-text-sm); font-weight: 700; text-transform: uppercase; }
+    code { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     .config-path-card small, .field small { color: var(--pi-muted); }
     .config-form { display: grid; gap: 14px; }
     .field { display: grid; gap: 7px; }
     .field-heading { display: flex; align-items: center; gap: 8px; }
-    input, select, textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); padding: 9px 10px; outline: none; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
+    input, select, textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 9px 10px; outline: none; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
     input:focus, select:focus, textarea:focus { border-color: var(--pi-accent); box-shadow: 0 0 0 1px var(--pi-accent-border); }
     textarea { resize: vertical; min-height: 94px; font-family: var(--pi-control-monospace-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
     textarea:disabled { opacity: .55; }
-    .override-badge { border: 1px solid var(--pi-warning-border); border-radius: 999px; color: var(--pi-warning); background: var(--pi-warning-surface); padding: 2px 7px; font-size: 11px; font-weight: 600; text-transform: none; }
+    .override-badge { border: 1px solid var(--pi-warning-border); border-radius: var(--pi-radius-pill); color: var(--pi-warning); background: var(--pi-warning-surface); padding: 2px 7px; font-size: var(--pi-text-xs); font-weight: 600; text-transform: none; }
     .effective-card { display: grid; gap: 10px; }
     .effective-card dl { display: grid; gap: 8px; margin: 0; }
     .effective-card dl > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; align-items: baseline; }

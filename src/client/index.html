@@ -11,6 +11,28 @@
     <style>
       :root {
         color-scheme: dark;
+        /* Type ramp: four fluid steps. cqi resolves against the nearest
+           inline-size container at the point of use, so text breathes with
+           the surface that holds it, not the viewport. Controls stay at a
+           static 16px (--pi-control-font-size): mobile browsers zoom any
+           focused input below 16px, so control text must not shrink. */
+        --pi-text-xs: clamp(0.6875rem, 0.67rem + 0.1cqi, 0.75rem);   /* 11 -> 12 */
+        --pi-text-sm: clamp(0.75rem, 0.73rem + 0.1cqi, 0.8125rem);   /* 12 -> 13 */
+        --pi-text-md: clamp(0.875rem, 0.86rem + 0.1cqi, 0.9375rem);  /* 14 -> 15 */
+        --pi-text-lg: clamp(1.0625rem, 1.04rem + 0.15cqi, 1.125rem); /* 17 -> 18 */
+        /* Space ramp: named fluid steps for gaps and padding. */
+        --pi-space-xs: 0.25rem;
+        --pi-space-sm: clamp(0.375rem, 0.35rem + 0.15cqi, 0.5rem);   /* 6 -> 8 */
+        --pi-space-md: clamp(0.625rem, 0.58rem + 0.25cqi, 0.75rem);  /* 10 -> 12 */
+        --pi-space-lg: clamp(0.875rem, 0.8rem + 0.4cqi, 1.125rem);   /* 14 -> 18 */
+        /* Radius scale: deliberately static. A corner that scales with the
+           container reads as a rendering bug, not as fluid design. Three
+           tiers plus the pill: inline chrome (code, kbd), controls, and
+           surfaces (cards, dialogs, islands, popovers). */
+        --pi-radius-inline: 4px;
+        --pi-radius-control: 8px;
+        --pi-radius-surface: 12px;
+        --pi-radius-pill: 999px;
         --pi-control-font-size: 16px;
         --pi-control-font-family: system-ui, sans-serif;
         --pi-control-monospace-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

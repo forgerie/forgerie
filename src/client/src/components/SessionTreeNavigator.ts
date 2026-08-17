@@ -520,7 +520,7 @@ export class SessionTreeNavigator extends LitElement {
   }
 
   static override styles = css`
-    :host { position: fixed; inset: 0; z-index: 40; color: var(--pi-text); font: 14px system-ui, sans-serif; container-type: inline-size; }
+    :host { position: fixed; inset: 0; z-index: 40; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; container-type: inline-size; }
     * { box-sizing: border-box; }
     /* Full-viewport shell: the surface's centered-card defaults are overridden
        so the dialog keeps covering the whole viewport. */
@@ -530,19 +530,19 @@ export class SessionTreeNavigator extends LitElement {
     header > div { min-width: 0; }
     h1, h2, p { margin: 0; }
     h1 { font-size: 21px; line-height: 1.25; }
-    h2 { margin-top: 2px; font-size: 18px; }
-    .eyebrow { display: block; color: var(--pi-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h2 { margin-top: 2px; font-size: var(--pi-text-lg); }
+    .eyebrow { display: block; color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .close-button { width: 36px; height: 36px; margin-inline-start: auto; display: grid; place-items: center; border: 0; background: transparent; color: var(--pi-muted); padding: 0; font-size: 25px; }
     .close-button:not(:disabled):hover, .close-button:not(:disabled):focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); }
     .body { flex: 1 1 auto; min-height: 0; overflow: auto; }
     .tree-step { display: flex; flex-direction: column; gap: 10px; padding: 14px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left)); }
     .tree-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; color: var(--pi-muted); }
-    .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 12px; }
+    .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: var(--pi-text-sm); }
     .legend > span { display: inline-flex; align-items: center; gap: 5px; }
-    .marker { width: 9px; height: 9px; border-radius: 999px; background: var(--pi-border); }
+    .marker { width: 9px; height: 9px; border-radius: var(--pi-radius-pill); background: var(--pi-border); }
     .active-path-marker { background: var(--pi-accent); }
     .active-leaf-marker { box-shadow: 0 0 0 2px var(--pi-accent); background: var(--pi-bg); }
-    .tree { min-height: 0; overflow: auto; border: 1px solid var(--pi-border); border-radius: 10px; background: var(--pi-surface); overscroll-behavior: contain; }
+    .tree { min-height: 0; overflow: auto; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); background: var(--pi-surface); overscroll-behavior: contain; }
     .tree-row { min-height: 48px; display: grid; grid-template-columns: 20px minmax(82px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 10px 7px calc(10px + var(--tree-indent)); border-bottom: 1px solid var(--pi-border-muted); cursor: pointer; outline: none; content-visibility: auto; contain-intrinsic-block-size: 48px; }
     .tree-row:last-child { border-bottom: 0; }
     .tree-row:hover { background: var(--pi-surface-hover); }
@@ -551,7 +551,7 @@ export class SessionTreeNavigator extends LitElement {
     .tree-row.active-path:not(.selected) { background: color-mix(in srgb, var(--pi-accent) 7%, var(--pi-surface)); }
     .tree-row.active-leaf { box-shadow: inset 3px 0 var(--pi-accent); }
     .tree-row.bookkeeping { color: var(--pi-muted); }
-    .disclosure { width: 20px; height: 28px; display: grid; place-items: center; border-radius: 5px; color: var(--pi-muted); font-size: 15px; user-select: none; }
+    .disclosure { width: 20px; height: 28px; display: grid; place-items: center; border-radius: var(--pi-radius-inline); color: var(--pi-muted); font-size: var(--pi-text-md); user-select: none; }
     .disclosure:not(.leaf):hover { color: var(--pi-text); background: var(--pi-surface-hover); }
     .disclosure.leaf { opacity: .5; }
     .metadata { display: contents; }
@@ -559,7 +559,7 @@ export class SessionTreeNavigator extends LitElement {
     .tree-row > .metadata > .kind { grid-column: 2; grid-row: 1; }
     .tree-row > .entry { grid-column: 3; grid-row: 1; }
     .tree-row > .metadata > .badges { grid-column: 4; grid-row: 1; }
-    .kind { --kind-border: var(--pi-border); --kind-background: var(--pi-surface); display: inline-flex; align-items: center; width: fit-content; border: 1px solid var(--kind-border); border-radius: 999px; padding: 2px 7px; color: var(--pi-text); background: var(--kind-background); font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .kind { --kind-border: var(--pi-border); --kind-background: var(--pi-surface); display: inline-flex; align-items: center; width: fit-content; border: 1px solid var(--kind-border); border-radius: var(--pi-radius-pill); padding: 2px 7px; color: var(--pi-text); background: var(--kind-background); font-size: var(--pi-text-xs); font-weight: 700; white-space: nowrap; }
     .kind-tone-user { --kind-border: var(--pi-accent-border); --kind-background: var(--pi-selection-bg); }
     .kind-tone-assistant { --kind-border: var(--pi-border); --kind-background: var(--pi-surface); }
     .kind-tone-tool { --kind-border: var(--pi-warning-border); --kind-background: var(--pi-warning-surface); }
@@ -569,34 +569,34 @@ export class SessionTreeNavigator extends LitElement {
     .entry { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
     .summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-text); }
     .bookkeeping .summary { color: var(--pi-muted); }
-    .label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; border-radius: 4px; padding: 1px 5px; background: var(--pi-bg-overlay); color: var(--pi-muted); font-size: 11px; white-space: nowrap; }
-    time { color: var(--pi-muted); font-size: 11px; white-space: nowrap; }
+    .label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; border-radius: var(--pi-radius-inline); padding: 1px 5px; background: var(--pi-bg-overlay); color: var(--pi-muted); font-size: var(--pi-text-xs); white-space: nowrap; }
+    time { color: var(--pi-muted); font-size: var(--pi-text-xs); white-space: nowrap; }
     .badges { display: flex; align-items: center; justify-content: end; gap: 5px; }
-    .badge { border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .badge { border-radius: var(--pi-radius-pill); padding: 2px 7px; font-size: var(--pi-text-xs); font-weight: 700; white-space: nowrap; }
     .badge.path { background: color-mix(in srgb, var(--pi-accent) 14%, transparent); color: var(--pi-text); }
     .badge.leaf { border: 1px solid var(--pi-accent); color: var(--pi-text); }
     .confirmation-step { padding: 24px max(18px, env(safe-area-inset-right)) 24px max(18px, env(safe-area-inset-left)); }
     .confirmation-card { width: min(760px, 100%); margin: 0 auto; display: grid; gap: 16px; }
-    .selected-entry, .side-effects-note, .dialog-error, .dialog-status, .empty { border: 1px solid var(--pi-border); border-radius: 10px; padding: 12px 14px; }
+    .selected-entry, .side-effects-note, .dialog-error, .dialog-status, .empty { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); padding: 12px 14px; }
     .selected-entry { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px 10px; background: var(--pi-surface); }
-    .selected-entry p { grid-column: 2; color: var(--pi-muted); font-size: 12px; }
+    .selected-entry p { grid-column: 2; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 9px; }
     legend { margin-bottom: 8px; font-weight: 700; }
-    .choice-option { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; border: 1px solid var(--pi-border); border-radius: 10px; padding: 11px 12px; background: var(--pi-surface); cursor: pointer; }
+    .choice-option { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); padding: 11px 12px; background: var(--pi-surface); cursor: pointer; }
     .choice-option.selected { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
     .choice-option input { margin-top: 3px; accent-color: var(--pi-accent); }
     .choice-option span { display: grid; gap: 3px; }
     .choice-option small { color: var(--pi-muted); }
     .custom-focus { display: grid; gap: 6px; margin: 2px 0 0 30px; font-weight: 600; }
-    textarea { width: 100%; resize: vertical; min-height: 94px; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); padding: 9px 10px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
+    textarea { width: 100%; resize: vertical; min-height: 94px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 9px 10px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
     textarea:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
-    .character-count { justify-self: end; color: var(--pi-muted); font-size: 11px; font-weight: 400; }
-    .validation-error { margin-inline-start: 30px; color: var(--pi-danger); font-size: 12px; }
+    .character-count { justify-self: end; color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 400; }
+    .validation-error { margin-inline-start: 30px; color: var(--pi-danger); font-size: var(--pi-text-sm); }
     .side-effects-note { border-color: var(--pi-warning-border); background: var(--pi-warning-surface); }
     .dialog-error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-bg)); color: var(--pi-danger); }
     .dialog-status { border-color: var(--pi-success-border); background: var(--pi-success-bg); }
     .empty { color: var(--pi-muted); background: var(--pi-surface); }
-    button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 8px 11px; font: inherit; cursor: pointer; }
+    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 8px 11px; font: inherit; cursor: pointer; }
     button:not(:disabled):hover { background: var(--pi-surface-hover); }
     button:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 1px; }
     button:disabled { opacity: .52; cursor: not-allowed; }

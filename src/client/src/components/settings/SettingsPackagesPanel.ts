@@ -184,28 +184,28 @@ export class SettingsPackagesPanel extends LitElement {
     .package-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
     .package-toolbar > div, .package-main { display: grid; gap: 6px; min-width: 0; }
     h3, p { margin: 0; }
-    h3 { font-size: 15px; line-height: 1.25; }
+    h3 { font-size: var(--pi-text-md); line-height: 1.25; }
     p, small { color: var(--pi-muted); line-height: 1.45; }
     button, input { font: inherit; }
-    button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
+    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
     button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
-    input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); padding: 8px 9px; }
+    input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 8px 9px; }
     label { font-weight: 700; }
     .secondary { flex: 0 0 auto; }
     .danger { border-color: color-mix(in srgb, var(--pi-danger) 55%, var(--pi-border)); color: var(--pi-danger); }
-    .loading-card, .install-card, .package-card { border: 1px solid var(--pi-border-muted); border-radius: 10px; background: var(--pi-surface); padding: 12px; }
-    .field-error { color: var(--pi-danger); font-size: 12px; }
+    .loading-card, .install-card, .package-card { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); padding: var(--pi-space-md); }
+    .field-error { color: var(--pi-danger); font-size: var(--pi-text-sm); }
     .install-card { display: grid; gap: 8px; }
     .install-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
     .package-section { display: block; }
     .loading-card, .action-note { color: var(--pi-muted); }
-    .action-note { margin-bottom: 10px; font-size: 12px; }
+    .action-note { margin-bottom: 10px; font-size: var(--pi-text-sm); }
     .package-list { display: grid; gap: 10px; }
     .package-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
     .package-card.filtered { opacity: .82; }
     .package-main strong, .package-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .package-actions { display: flex; align-items: center; gap: 8px; }
-    code { border: 1px solid var(--pi-border-muted); border-radius: 5px; background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    code { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 
     @container (max-width: 760px) {
       .package-toolbar { display: grid; gap: 12px; }

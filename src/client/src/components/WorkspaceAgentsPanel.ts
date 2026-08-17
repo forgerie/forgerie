@@ -40,8 +40,8 @@ export class WorkspaceAgentsPanel extends LitElement {
        */
       .runs { container-type: inline-size; min-height: 0; overflow: auto; }
 
-      .summary { padding: 8px 12px; border-bottom: 1px solid var(--pi-border-muted, var(--pi-border)); color: var(--pi-muted); font-size: 12px; }
-      .notice { padding: 8px 12px; border-bottom: 1px solid var(--pi-border-muted, var(--pi-border)); color: var(--pi-muted); font-size: 12px; }
+      .summary { padding: 8px 12px; border-bottom: 1px solid var(--pi-border-muted, var(--pi-border)); color: var(--pi-muted); font-size: var(--pi-text-sm); }
+      .notice { padding: 8px 12px; border-bottom: 1px solid var(--pi-border-muted, var(--pi-border)); color: var(--pi-muted); font-size: var(--pi-text-sm); }
 
       .run {
         display: flex; align-items: center; gap: 8px;
@@ -52,9 +52,9 @@ export class WorkspaceAgentsPanel extends LitElement {
       .run:hover { background: var(--pi-surface-hover, transparent); }
       .run .twisty { color: var(--pi-dim, var(--pi-muted)); width: 10px; }
       /* min-width:0 lets the id shrink instead of pushing the state off a 499px screen. */
-      .run .run-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-      .run .run-label { color: var(--pi-muted); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-      .run .run-state { margin-left: auto; color: var(--pi-muted); font-size: 12px; white-space: nowrap; flex: none; }
+      .run .run-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--pi-text-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .run .run-label { color: var(--pi-muted); font-size: var(--pi-text-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .run .run-state { margin-left: auto; color: var(--pi-muted); font-size: var(--pi-text-sm); white-space: nowrap; flex: none; }
 
       .agent {
         display: flex; align-items: center; gap: 8px;
@@ -63,7 +63,7 @@ export class WorkspaceAgentsPanel extends LitElement {
         border-bottom: 1px solid var(--pi-border-muted, var(--pi-border));
         border-left: 2px solid var(--pi-border);
         margin-left: 12px;
-        font-size: 12px; white-space: nowrap;
+        font-size: var(--pi-text-sm); white-space: nowrap;
       }
       .agent .glyph { flex: 0 0 auto; width: 12px; text-align: center; }
       /*
@@ -76,7 +76,7 @@ export class WorkspaceAgentsPanel extends LitElement {
         min-width: 28px; min-height: 28px;
         padding: 0 6px;
         background: none; border: none;
-        color: var(--pi-dim); font-size: 13px; line-height: 1;
+        color: var(--pi-dim); font-size: var(--pi-text-sm); line-height: 1;
         cursor: pointer;
       }
       .agent-menu-button:hover { color: var(--pi-fg); }
@@ -93,7 +93,7 @@ export class WorkspaceAgentsPanel extends LitElement {
         background: none; border: none;
         border-bottom: 1px solid var(--pi-border-muted, var(--pi-border));
         color: var(--pi-fg);
-        font-size: 12px; text-align: left; white-space: nowrap;
+        font-size: var(--pi-text-sm); text-align: left; white-space: nowrap;
         cursor: pointer;
       }
       .agent-menu button:hover { background: var(--pi-selection-bg); }

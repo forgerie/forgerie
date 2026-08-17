@@ -77,7 +77,7 @@ export class GuidancePicker extends LitElement {
   }
 
   static override styles = css`
-    :host { display: block; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+    :host { display: block; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; }
     .guidance-panel { display: block; }
     header { padding: 9px 11px; border-bottom: 1px solid var(--pi-border-muted); }
     .guidance-options button { box-sizing: border-box; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; border: 0; border-bottom: 1px solid var(--pi-border-muted); border-radius: 0; background: transparent; color: var(--pi-text); font: inherit; text-align: left; cursor: pointer; }
@@ -87,7 +87,7 @@ export class GuidancePicker extends LitElement {
     .guidance-copy { min-width: 0; display: grid; gap: 3px; }
     .guidance-copy small { color: var(--pi-muted); line-height: 1.35; white-space: normal; }
     .guidance-state { color: var(--pi-accent); font-weight: 700; }
-    .guidance-note, .guidance-error { margin: 0; padding: 8px 11px; color: var(--pi-muted); font-size: 12px; }
+    .guidance-note, .guidance-error { margin: 0; padding: 8px 11px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .guidance-error { color: var(--pi-danger); }
   `;
 }

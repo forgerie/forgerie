@@ -25,6 +25,15 @@ export const DEFAULT_THEME_ID: QualifiedContributionId = "themes:pi-web-dark";
 export const DEFAULT_THEME_PREFERENCE: ThemePreference = { themeId: DEFAULT_THEME_ID, auto: true };
 export const THEME_STORAGE_KEY = "pi-web-app-theme";
 
+/*
+ * The theme contract carries color only. The other design scales -- type
+ * (--pi-text-*), space (--pi-space-*), and radius (--pi-radius-*) -- are
+ * defined once in index.html and are deliberately not themeable: a plugin
+ * theme changes the app's palette, not its geometry. Type and space are
+ * fluid (clamp/cqi) so they follow the container that uses them; radius is
+ * static because a corner that scales with its container reads as a
+ * rendering bug rather than as fluid design.
+ */
 export const THEME_TOKENS: ThemeToken[] = [
   "--pi-bg",
   "--pi-surface",

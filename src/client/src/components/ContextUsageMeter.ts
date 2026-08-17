@@ -55,7 +55,7 @@ export class ContextUsageMeter extends LitElement {
    * ends are rounded because it sits between two curved corners.
    */
   static override styles = css`
-    :host { display: block; height: 2px; overflow: hidden; border-radius: 999px; }
+    :host { display: block; height: 2px; overflow: hidden; border-radius: var(--pi-radius-pill); }
     .meter { height: 2px; background: var(--pi-border); }
     .fill {
       width: var(--context-usage);
