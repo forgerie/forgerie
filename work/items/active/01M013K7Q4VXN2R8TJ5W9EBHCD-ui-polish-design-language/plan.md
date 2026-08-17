@@ -126,8 +126,17 @@ code reading. Others are anticipated; audits may resize them.
       focus/selection/primary only)
 - [x] Tooling: capture script walks click paths (route params cannot reach
       tool panels once a session resolves)
-- Residual for 7b: faint stray vertical hairline at the left edge of the
+- Residual for later: faint stray vertical hairline at the left edge of the
   empty viewer region in Files/Git panels (pre-existing; visible both modes)
+
+### 7b — First screen (done 2026-08-16, 0671a70)
+
+- [x] Empty session view → composed first screen: brand bar + wordmark,
+      contextual message, one filled New-session primary, Recent list of the
+      last five conversations (project · age meta via the inbox's resolver
+      and formatter; archived/agent-spawned excluded)
+- [x] Intrinsic: column caps at 30rem, rows ellipsize; judged in
+      true-viewport captures, both schemes, folded and unfolded
 
 - [ ] Files, Git, Terminal panels; Project/Machine/Cleanup/Auth dialogs;
       command palette/picker; ask-user + extension cards; process cards
