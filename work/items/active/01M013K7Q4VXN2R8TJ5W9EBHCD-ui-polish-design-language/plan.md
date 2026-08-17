@@ -158,6 +158,37 @@ code reading. Others are anticipated; audits may resize them.
 - [ ] 2–3 intentional transitions (panel slide, composer state, list settle)
 - [ ] prefers-reduced-motion respected
 
+## Slice 10 — Session-tree navigator deep clean (done 2026-08-17, 9e87e4f)
+
+User-requested follow-up: the /tree dialog predated the language. Restyle
+in place, no interaction changes:
+
+- [x] Per-row "Active path"/"Active leaf" word badges → structural accent
+      dot column + leaf ring (legend now matches rows; sr-only text keeps
+      the path audible)
+- [x] Raw ISO timestamps → inbox relativeTime, tabular, dim, right column
+- [x] Six colored kind chips → quiet muted text labels (kind-tone-*
+      classes kept as semantic hooks only); accent wash over the active
+      path removed — color now only in the marker column and selection
+- [x] Disclosure carets only at true branch points; linear histories drop
+      the column (a linear chain is all single-child nodes — first pass
+      wrongly keyed on childIds > 0 and changed nothing; > 1 is the fix)
+- [x] Bookkeeping rows compress to 36px/sm; tree list is the single
+      scroller inside a hairline-framed surface (no more rows sliding
+      unframed under the toolbar); header/footer/cards → hairlines; h1
+      joins the type ramp; step-2 selected-entry preview clamps to 4 lines
+- [x] Captured via one-off CDP driver (/tmp/forgerie-v2/capture-tree.mjs):
+      /tree is composer-command-only, so the posture script's click paths
+      can't reach it; driver types /tree, Escapes the slash autocomplete
+      (which otherwise eats Enter → /relay-worktree), clicks Send, and can
+      click Next for the confirmation step. Ran against an idle session —
+      the server refuses /tree while a session is active.
+
+Residual (deferred): fold state of a collapsed *chain* node has no visual
+cue once its caret is hidden — keyboard-only folders see the subtree
+vanish with aria-expanded=false only. Low traffic; revisit if real
+branch-heavy sessions surface confusion.
+
 ## Slice 9 — Codify (done 2026-08-17, 72012f1 + d2fb94c)
 
 - [x] docs/design-system.md rewritten as the as-built language (principles,
