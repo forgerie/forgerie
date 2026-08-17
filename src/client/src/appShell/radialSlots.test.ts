@@ -103,6 +103,7 @@ describe("radialSlotsEqual", () => {
 
 describe("stored slots", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     window.localStorage.clear();
   });
 
@@ -142,6 +143,39 @@ describe("stored slots", () => {
     expect(setItem).toHaveBeenCalledTimes(1);
     expect(readStoredRadialSlots()).toEqual(migrated);
     expect(setItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps near-matching local and machine-scoped targets", () => {
+    const stored: RadialSlotMap = [
+      { kind: "tool", tool: "workspace-tasks:workspace.other" },
+      { kind: "tool", tool: "other:workspace.tasks" },
+      { kind: "tool", tool: `${machineScopedPluginId("remote-1", "other")}:workspace.tasks` },
+    ];
+    window.localStorage.setItem("forgerie.radialSlots.v1", JSON.stringify(stored));
+    const setItem = vi.spyOn(window.localStorage, "setItem");
+
+    expect(readStoredRadialSlots().slice(0, 3)).toEqual(stored);
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("returns the migrated map when the storage rewrite is blocked", () => {
+    const stored: RadialSlotMap = [
+      { kind: "tool", tool: REMOVED_TASKS },
+      { kind: "tool", tool: PROCESSES },
+    ];
+    window.localStorage.setItem("forgerie.radialSlots.v1", JSON.stringify(stored));
+    const setItem = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage blocked");
+    });
+
+    try {
+      expect(readStoredRadialSlots().slice(0, 2)).toEqual([
+        undefined,
+        { kind: "tool", tool: PROCESSES },
+      ]);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 
   it("lets reconciliation assign the reclaimed slot without moving surviving targets", () => {

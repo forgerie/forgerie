@@ -9,7 +9,8 @@
  * silently re-teach every direction on install: a panel arriving at `order: 15`
  * would insert between Files (10) and Git (20) and rotate everything after it.
  *
- * So the wheel keeps its own assignment and only ever grows into free slots.
+ * So the wheel keeps its own assignment and normally only grows into free
+ * slots. A one-way migration may reclaim a permanently removed target.
  * A panel that disappears leaves its slot **reserved and empty** rather than
  * letting the slots behind it shuffle forward. Two shipped panels are already
  * conditionally visible — Notifications only while it has a count, Agents only
