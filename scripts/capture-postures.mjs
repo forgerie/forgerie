@@ -110,18 +110,20 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
       await sleep(300);
     }
 
-    if (args.clickTitle !== undefined) {
+    // Repeated --click-title flags run in order, so a capture can walk a
+    // short path (open the workspace sheet, then pick a tool tab).
+    for (const clickTitle of args.clickTitles) {
       await evaluate(cdp, DEEP_QUERY);
       const clicked = await evaluate(cdp, `
         (() => {
           const target = window.__forgerieDeepFind((element) =>
-            element.tagName === "BUTTON" && element.getAttribute("title") === ${JSON.stringify(args.clickTitle)});
+            element.tagName === "BUTTON" && element.getAttribute("title") === ${JSON.stringify(clickTitle)});
           if (!target) return false;
           target.click();
           return true;
         })()
       `);
-      if (clicked !== true) throw new Error(`No button titled ${JSON.stringify(args.clickTitle)} in ${posture.name}`);
+      if (clicked !== true) throw new Error(`No button titled ${JSON.stringify(clickTitle)} in ${posture.name}`);
       await sleep(args.settle);
     }
 
@@ -134,13 +136,13 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
 }
 
 function parseArgs(argv) {
-  const parsed = { out: "/tmp/forgerie-postures", label: "posture", settle: 4000, timeout: 20000 };
+  const parsed = { out: "/tmp/forgerie-postures", label: "posture", settle: 4000, timeout: 20000, clickTitles: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--url") parsed.url = argv[++i];
     else if (arg === "--out") parsed.out = argv[++i];
     else if (arg === "--label") parsed.label = argv[++i];
-    else if (arg === "--click-title") parsed.clickTitle = argv[++i];
+    else if (arg === "--click-title") parsed.clickTitles.push(argv[++i]);
     else if (arg === "--input-mode") parsed.inputMode = argv[++i];
     else if (arg === "--color-scheme") parsed.colorScheme = requireColorScheme(argv[++i]);
     else if (arg === "--chrome-bin") parsed.chromeBin = argv[++i];
