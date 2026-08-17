@@ -285,7 +285,7 @@ nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</
   "askUser": true,
   "extensionDialogsTimeoutMs": 300000,
   "plugins": {
-    "workspace-tasks": { "enabled": true },
+    "relays": { "enabled": true },
     "updates": { "enabled": true },
     "info": { "enabled": false }
   },
@@ -326,10 +326,6 @@ nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</
                 Project-local <code>uploads.defaultFolder</code> overrides the global upload destination for workspaces in
                 that project. Forgerie servers always include this workspace-effective value on local and federated
                 workspace responses.
-              </p>
-              <p>
-                Plugins may own separate project files, such as <code>.forgerie/tasks.json</code> for the built-in Workspace
-                Tasks plugin.
               </p>
               <p>Forgerie also honors one optional project hook; see <a href="#worktree-pre-remove-hook">Worktree pre-remove hook</a>.</p>
             </section>

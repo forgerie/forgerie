@@ -298,59 +298,6 @@ After editing, check the manifest endpoint and browser-console failure cases.</c
 }</code></pre>
               </div>
 
-              <h3>Workspace Tasks</h3>
-              <p>
-                <strong>Workspace Tasks</strong> adds a <strong>Tasks</strong> workspace tab for running configured shell
-                commands in dedicated Forgerie terminals. It is built into Forgerie and enabled by default.
-              </p>
-              <ul>
-                <li>Plugin id: <code>workspace-tasks</code></li>
-                <li>Config file: <code>.forgerie/tasks.json</code></li>
-              </ul>
-              <div class="code-card">
-                <div class="copy-row">
-                  <strong>Disable Workspace Tasks</strong>
-                  <button class="copy-button" data-copy="#workspace-tasks-disable">Copy</button>
-                </div>
-                <pre id="workspace-tasks-disable"><code>{
-  "plugins": {
-    "workspace-tasks": { "enabled": false }
-  }
-}</code></pre>
-              </div>
-              <div class="code-card">
-                <div class="copy-row">
-                  <strong>Example .forgerie/tasks.json</strong>
-                  <button class="copy-button" data-copy="#workspace-tasks-config">Copy</button>
-                </div>
-                <pre id="workspace-tasks-config"><code>{
-  "version": 1,
-  "tasks": [
-    {
-      "id": "app.start",
-      "title": "Start app",
-      "group": "Development",
-      "description": "Start the local development server.",
-      "command": "npm run dev"
-    },
-    {
-      "id": "db.reset",
-      "title": "Reset DB",
-      "group": "Database",
-      "command": "go -C klingit-go run ./cli db reset",
-      "confirm": true
-    }
-  ]
-}</code></pre>
-              </div>
-              <p>
-                Open a workspace, choose the <strong>Tasks</strong> tab, and click <strong>Run</strong> next to a task.
-                Commands run in the workspace root because Forgerie creates the terminal for that workspace.
-              </p>
-              <p>
-                Review task configs before running them, especially in shared projects. Workspace Tasks runs trusted
-                shell commands from your repositories.
-              </p>
             </section>
 
             <section id="manage-plugins">
@@ -377,7 +324,7 @@ After editing, check the manifest endpoint and browser-console failure cases.</c
                 </div>
                 <pre id="plugin-config-shape"><code>{
   "plugins": {
-    "workspace-tasks": {
+    "relays": {
       "enabled": true,
       "settings": {}
     },

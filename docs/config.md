@@ -108,7 +108,7 @@ Process restarts depend on the key:
   "askUser": true,
   "extensionDialogsTimeoutMs": 300000,
   "plugins": {
-    "workspace-tasks": { "enabled": true },
+    "relays": { "enabled": true },
     "updates": { "enabled": true },
     "info": { "enabled": false }
   },
@@ -138,8 +138,6 @@ Project-local config lives at `<project>/.forgerie/config.json`. Use it for sett
 Project-local `pathAccess.allowedPaths` entries are merged after the global list and deduplicated. Paths must still be host-absolute or `~`-prefixed; relative roots are not supported.
 
 Project-local `uploads.defaultFolder` overrides the global upload destination for workspaces in that project. Forgerie servers always include this workspace-effective value on the workspace responses used locally and through machine federation.
-
-Plugins may own separate project files, such as `.forgerie/tasks.json` for the built-in Workspace Tasks plugin.
 
 Forgerie also honors one optional project hook; see [Worktree pre-remove hook](#worktree-pre-remove-hook).
 
@@ -398,7 +396,7 @@ Plugins are enabled by default. Set `plugins.<id>.enabled` to `false` to remove 
 ```json
 {
   "plugins": {
-    "workspace-tasks": { "enabled": true, "settings": {} },
+    "relays": { "enabled": true, "settings": {} },
     "updates": { "enabled": false }
   }
 }
