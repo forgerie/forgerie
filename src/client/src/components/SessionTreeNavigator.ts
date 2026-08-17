@@ -3,6 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import type { SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeNodeKind, SessionTreeSnapshot, SessionTreeSummaryChoice } from "../api";
 import { SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH } from "../../../shared/apiTypes";
 import { buildSessionTreeModel, initialSessionTreeSelection, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice, visibleSessionTreeRows, type SessionTreeModel, type SessionTreeRow } from "../sessionTreeModel";
+import { relativeTime } from "../sessionBoard";
 // Side-effect import: registers <modal-surface> (a value import would be dropped
 // by esbuild under vitest because nothing from the module is referenced).
 import "./ModalSurface";
@@ -98,13 +99,18 @@ export class SessionTreeNavigator extends LitElement {
 
   private renderTreeStep(): TemplateResult {
     const rows = visibleSessionTreeRows(this.model, this.foldedIds);
+    // Carets mark true branch points only: a linear history is a single-child
+    // chain, and a caret on every chain link is pure chrome. Keyboard folding
+    // of chain nodes still works; the column returns when a real fork exists.
+    const branching = rows.some((row) => row.childIds.length > 1);
+    const now = Date.now();
     return html`
       <div class="body tree-step">
         <div class="tree-intro">
           <p>Select the history entry where you would like to continue.</p>
           <div class="legend" aria-label="Session tree markers">
-            <span><span class="marker active-path-marker" aria-hidden="true"></span>Active path</span>
-            <span><span class="marker active-leaf-marker" aria-hidden="true"></span>Active leaf</span>
+            <span><span class="marker path" aria-hidden="true"></span>Active path</span>
+            <span><span class="marker leaf" aria-hidden="true"></span>Active leaf</span>
           </div>
         </div>
         ${this.statusMessage === "" ? null : html`<div class="dialog-status" role="status">${this.statusMessage}</div>`}
@@ -112,15 +118,15 @@ export class SessionTreeNavigator extends LitElement {
         ${rows.length === 0 ? html`
           <div class="empty" role="status">This session does not contain any selectable history entries.</div>
         ` : html`
-          <div class="tree" role="tree" aria-label="Complete session history">
-            ${rows.map((row) => this.renderTreeRow(row))}
+          <div class=${`tree${branching ? "" : " no-branches"}`} role="tree" aria-label="Complete session history">
+            ${rows.map((row) => this.renderTreeRow(row, now))}
           </div>
         `}
       </div>
     `;
   }
 
-  private renderTreeRow(row: SessionTreeRow): TemplateResult {
+  private renderTreeRow(row: SessionTreeRow, now: number): TemplateResult {
     const selected = row.node.id === this.selectedId;
     const expanded = row.childIds.length > 0 && !this.foldedIds.has(row.node.id);
     const kindPresentation = sessionTreeKindPresentation(row.node.kind);
@@ -146,24 +152,20 @@ export class SessionTreeNavigator extends LitElement {
         @click=${() => { this.selectNode(row.node.id); }}
         @keydown=${(event: KeyboardEvent) => { this.handleTreeKeyDown(event); }}
       >
+        <span class=${`path-marker${row.activeLeaf ? " leaf" : row.activePath ? " path" : ""}`} aria-hidden="true"></span>
         <span
-          class=${`disclosure${row.childIds.length === 0 ? " leaf" : ""}`}
-          title=${row.childIds.length === 0 ? "No child entries" : expanded ? "Collapse branch" : "Expand branch"}
+          class="disclosure"
+          title=${row.childIds.length > 1 ? (expanded ? "Collapse branch" : "Expand branch") : nothing}
           aria-hidden="true"
           @click=${(event: MouseEvent) => { this.toggleNode(row.node.id, event); }}
-        >${row.childIds.length === 0 ? "·" : expanded ? "▾" : "▸"}</span>
-        <span class="metadata">
-          ${this.renderKindBadge(kindPresentation)}
-          <span class="badges">
-            ${row.activePath && !row.activeLeaf ? html`<span class="badge path">Active path</span>` : null}
-            ${row.activeLeaf ? html`<span class="badge leaf">Active leaf</span>` : null}
-          </span>
-        </span>
+        >${row.childIds.length > 1 ? (expanded ? "▾" : "▸") : ""}</span>
+        ${this.renderKindBadge(kindPresentation)}
         <span class="entry">
           <span class="summary" dir="auto">${row.node.summary}</span>
           ${row.node.label === undefined ? null : html`<span class="label" title=${row.node.label}>${row.node.label}</span>`}
-          ${row.node.timestamp === undefined ? null : html`<time datetime=${row.node.timestamp}>${row.node.timestamp}</time>`}
+          ${row.activePath && !row.activeLeaf ? html`<span class="sr-only">Active path</span>` : null}
         </span>
+        ${row.node.timestamp === undefined ? html`<span class="time-spacer"></span>` : html`<time datetime=${row.node.timestamp} title=${row.node.timestamp}>${relativeTime(row.node.timestamp, now)}</time>`}
       </div>
     `;
   }
@@ -525,64 +527,58 @@ export class SessionTreeNavigator extends LitElement {
     /* Full-viewport shell: the surface's centered-card defaults are overridden
        so the dialog keeps covering the whole viewport. */
     modal-surface { --modal-surface-width: 100%; --modal-surface-height: 100dvh; --modal-surface-max-height: 100dvh; --modal-surface-border: 0; --modal-surface-radius: 0; --modal-surface-shadow: none; }
-    header, footer { display: flex; align-items: center; gap: 12px; padding: max(14px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 14px max(18px, env(safe-area-inset-left)); border-bottom: 1px solid var(--pi-border); }
-    footer { min-height: 64px; justify-content: end; padding: 12px max(18px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); border-top: 1px solid var(--pi-border); border-bottom: 0; }
+    header, footer { display: flex; align-items: center; gap: 12px; padding: max(14px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 14px max(18px, env(safe-area-inset-left)); border-bottom: 1px solid var(--pi-border-muted); }
+    footer { min-height: 64px; justify-content: end; padding: 12px max(18px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); border-top: 1px solid var(--pi-border-muted); border-bottom: 0; }
     header > div { min-width: 0; }
     h1, h2, p { margin: 0; }
-    h1 { font-size: 21px; line-height: 1.25; }
+    h1 { font-size: var(--pi-text-lg); line-height: 1.25; }
     h2 { margin-top: 2px; font-size: var(--pi-text-lg); }
     .eyebrow { display: block; color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .close-button { width: 36px; height: 36px; margin-inline-start: auto; display: grid; place-items: center; border: 0; background: transparent; color: var(--pi-muted); padding: 0; font-size: 25px; }
     .close-button:not(:disabled):hover, .close-button:not(:disabled):focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); }
     .body { flex: 1 1 auto; min-height: 0; overflow: auto; }
-    .tree-step { display: flex; flex-direction: column; gap: 10px; padding: 14px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left)); }
-    .tree-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; color: var(--pi-muted); }
+    .tree-step { display: flex; flex-direction: column; gap: var(--pi-space-md); padding: 14px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left)); overflow: hidden; }
+    .tree-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: var(--pi-text-sm); }
-    .legend > span { display: inline-flex; align-items: center; gap: 5px; }
-    .marker { width: 9px; height: 9px; border-radius: var(--pi-radius-pill); background: var(--pi-border); }
-    .active-path-marker { background: var(--pi-accent); }
-    .active-leaf-marker { box-shadow: 0 0 0 2px var(--pi-accent); background: var(--pi-bg); }
-    .tree { min-height: 0; overflow: auto; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); background: var(--pi-surface); overscroll-behavior: contain; }
-    .tree-row { min-height: 48px; display: grid; grid-template-columns: 20px minmax(82px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 10px 7px calc(10px + var(--tree-indent)); border-bottom: 1px solid var(--pi-border-muted); cursor: pointer; outline: none; content-visibility: auto; contain-intrinsic-block-size: 48px; }
+    .legend > span { display: inline-flex; align-items: center; gap: 6px; }
+    .marker { width: 8px; height: 8px; border-radius: var(--pi-radius-pill); }
+    .marker.path { background: var(--pi-accent); }
+    .marker.leaf { border: 2px solid var(--pi-accent); background: transparent; }
+    /* The tree is the one scroller: the intro and legend stay put, and rows
+       clip inside the framed surface instead of sliding under the toolbar. */
+    .tree { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); overscroll-behavior: contain; }
+    .tree-row { min-height: 48px; display: grid; grid-template-columns: 14px 18px minmax(82px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 12px 7px calc(8px + var(--tree-indent)); border-bottom: 1px solid var(--pi-border-muted); cursor: pointer; outline: none; content-visibility: auto; contain-intrinsic-block-size: 48px; }
+    .no-branches .tree-row { grid-template-columns: 14px minmax(82px, auto) minmax(0, 1fr) auto; }
+    .no-branches .disclosure { display: none; }
     .tree-row:last-child { border-bottom: 0; }
     .tree-row:hover { background: var(--pi-surface-hover); }
     .tree-row.selected { background: var(--pi-selection-bg); box-shadow: inset 3px 0 var(--pi-accent); }
     .tree-row:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
-    .tree-row.active-path:not(.selected) { background: color-mix(in srgb, var(--pi-accent) 7%, var(--pi-surface)); }
-    .tree-row.active-leaf { box-shadow: inset 3px 0 var(--pi-accent); }
-    .tree-row.bookkeeping { color: var(--pi-muted); }
-    .disclosure { width: 20px; height: 28px; display: grid; place-items: center; border-radius: var(--pi-radius-inline); color: var(--pi-muted); font-size: var(--pi-text-md); user-select: none; }
-    .disclosure:not(.leaf):hover { color: var(--pi-text); background: var(--pi-surface-hover); }
-    .disclosure.leaf { opacity: .5; }
-    .metadata { display: contents; }
-    .tree-row > .disclosure { grid-column: 1; grid-row: 1; }
-    .tree-row > .metadata > .kind { grid-column: 2; grid-row: 1; }
-    .tree-row > .entry { grid-column: 3; grid-row: 1; }
-    .tree-row > .metadata > .badges { grid-column: 4; grid-row: 1; }
-    .kind { --kind-border: var(--pi-border); --kind-background: var(--pi-surface); display: inline-flex; align-items: center; width: fit-content; border: 1px solid var(--kind-border); border-radius: var(--pi-radius-pill); padding: 2px 7px; color: var(--pi-text); background: var(--kind-background); font-size: var(--pi-text-xs); font-weight: 700; white-space: nowrap; }
-    .kind-tone-user { --kind-border: var(--pi-accent-border); --kind-background: var(--pi-selection-bg); }
-    .kind-tone-assistant { --kind-border: var(--pi-border); --kind-background: var(--pi-surface); }
-    .kind-tone-tool { --kind-border: var(--pi-warning-border); --kind-background: var(--pi-warning-surface); }
-    .kind-tone-shell { --kind-border: var(--pi-success); --kind-background: var(--pi-success-bg); }
-    .kind-tone-context { --kind-border: var(--pi-purple-border); --kind-background: var(--pi-purple-surface); }
-    .kind-tone-metadata { --kind-border: var(--pi-border-muted); --kind-background: var(--pi-bg-overlay); color: var(--pi-muted); }
+    .tree-row.bookkeeping { min-height: 36px; contain-intrinsic-block-size: 36px; }
+    .path-marker { width: 8px; height: 8px; justify-self: center; border-radius: var(--pi-radius-pill); }
+    .path-marker.path { background: var(--pi-accent); }
+    .path-marker.leaf { border: 2px solid var(--pi-accent); background: transparent; }
+    .disclosure { width: 18px; height: 28px; display: grid; place-items: center; border-radius: var(--pi-radius-inline); color: var(--pi-muted); font-size: var(--pi-text-sm); user-select: none; }
+    .disclosure:hover { color: var(--pi-text); background: var(--pi-surface-hover); }
+    /* Kind is taxonomy, not status: a quiet label, never a colored chip. The
+       kind-tone-* classes stay as semantic hooks only. */
+    .kind { color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 600; white-space: nowrap; }
     .entry { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
     .summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-text); }
-    .bookkeeping .summary { color: var(--pi-muted); }
+    .bookkeeping .summary { color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; border-radius: var(--pi-radius-inline); padding: 1px 5px; background: var(--pi-bg-overlay); color: var(--pi-muted); font-size: var(--pi-text-xs); white-space: nowrap; }
-    time { color: var(--pi-muted); font-size: var(--pi-text-xs); white-space: nowrap; }
-    .badges { display: flex; align-items: center; justify-content: end; gap: 5px; }
-    .badge { border-radius: var(--pi-radius-pill); padding: 2px 7px; font-size: var(--pi-text-xs); font-weight: 700; white-space: nowrap; }
-    .badge.path { background: color-mix(in srgb, var(--pi-accent) 14%, transparent); color: var(--pi-text); }
-    .badge.leaf { border: 1px solid var(--pi-accent); color: var(--pi-text); }
+    time { color: var(--pi-dim, var(--pi-muted)); font-size: var(--pi-text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: end; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .confirmation-step { padding: 24px max(18px, env(safe-area-inset-right)) 24px max(18px, env(safe-area-inset-left)); }
     .confirmation-card { width: min(760px, 100%); margin: 0 auto; display: grid; gap: 16px; }
-    .selected-entry, .side-effects-note, .dialog-error, .dialog-status, .empty { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); padding: 12px 14px; }
+    .selected-entry, .side-effects-note, .dialog-error, .dialog-status, .empty { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); padding: 12px 14px; }
     .selected-entry { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px 10px; background: var(--pi-surface); }
     .selected-entry p { grid-column: 2; color: var(--pi-muted); font-size: var(--pi-text-sm); }
+    /* Raw payloads can be arbitrarily long; the card previews, it does not dump. */
+    .selected-entry strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; font-weight: 600; }
     fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 9px; }
     legend { margin-bottom: 8px; font-weight: 700; }
-    .choice-option { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); padding: 11px 12px; background: var(--pi-surface); cursor: pointer; }
+    .choice-option { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); padding: 11px 12px; background: var(--pi-surface); cursor: pointer; }
     .choice-option.selected { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
     .choice-option input { margin-top: 3px; accent-color: var(--pi-accent); }
     .choice-option span { display: grid; gap: 3px; }
@@ -609,12 +605,15 @@ export class SessionTreeNavigator extends LitElement {
       header { padding-top: max(12px, env(safe-area-inset-top)); }
       .tree-step { padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)); }
       .tree-intro { padding-inline: 4px; }
-      .tree-row { grid-template-columns: 20px minmax(0, 1fr); padding-inline-start: calc(7px + min(var(--tree-indent-mobile), 48px)); }
-      .tree-row > .metadata { grid-column: 2; grid-row: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
-      .tree-row > .metadata > .badges { margin-inline-start: auto; flex-wrap: wrap; }
-      .tree-row > .entry { grid-column: 2; grid-row: 2; display: grid; gap: 3px; }
+      .tree-row { grid-template-columns: 14px 18px minmax(0, 1fr) auto; row-gap: 2px; padding-inline-start: calc(7px + min(var(--tree-indent-mobile), 48px)); }
+      .tree-row > .kind { grid-column: 3; grid-row: 1; }
+      .tree-row > time, .tree-row > .time-spacer { grid-column: 4; grid-row: 1; }
+      .tree-row > .entry { grid-column: 3 / -1; grid-row: 2; display: grid; gap: 3px; }
+      .no-branches .tree-row { grid-template-columns: 14px minmax(0, 1fr) auto; }
+      .no-branches .tree-row > .kind { grid-column: 2; }
+      .no-branches .tree-row > time, .no-branches .tree-row > .time-spacer { grid-column: 3; }
+      .no-branches .tree-row > .entry { grid-column: 2 / -1; }
       .tree-row .summary { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-      .tree-row time { display: none; }
       .confirmation-step { padding: 18px 12px; }
       .custom-focus, .validation-error { margin-inline-start: 0; }
       footer { flex-wrap: wrap; }
