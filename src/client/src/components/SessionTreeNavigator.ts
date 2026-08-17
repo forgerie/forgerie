@@ -172,7 +172,11 @@ export class SessionTreeNavigator extends LitElement {
 
   private renderTreeRow(row: SessionTreeRow, now: number): TemplateResult {
     const selected = row.node.id === this.selectedId;
-    const expanded = row.childIds.length > 0 && !this.foldedIds.has(row.node.id);
+    const folded = this.foldedIds.has(row.node.id);
+    const expanded = row.childIds.length > 0 && !folded;
+    // A caret marks a real branch point. A folded chain node also earns one:
+    // without it the hidden rows below have no visible cause.
+    const foldable = row.childIds.length > 1 || (folded && row.childIds.length > 0);
     const kindPresentation = sessionTreeKindPresentation(row.node.kind);
     const classes = [
       "tree-row",
@@ -185,7 +189,6 @@ export class SessionTreeNavigator extends LitElement {
     return html`
       <div
         class=${classes}
-        style=${`--tree-indent: ${String(visualDepth * 16)}px; --tree-indent-mobile: ${String(visualDepth * 12)}px;`}
         role="treeitem"
         aria-level=${String(row.depth + 1)}
         aria-selected=${selected ? "true" : "false"}
@@ -196,13 +199,16 @@ export class SessionTreeNavigator extends LitElement {
         @click=${() => { this.selectNode(row.node.id); }}
         @keydown=${(event: KeyboardEvent) => { this.handleTreeKeyDown(event); }}
       >
+        <!-- Always emitted, even with no lanes: the row grid places by source
+             order, so a missing rail track would shift every later column. -->
+        <span class="rails" aria-hidden="true">${this.renderRails(row, visualDepth)}</span>
         <span class=${`path-marker${row.activeLeaf ? " leaf" : row.activePath ? " path" : ""}`} aria-hidden="true"></span>
         <span
           class="disclosure"
-          title=${row.childIds.length > 1 ? (expanded ? "Collapse branch" : "Expand branch") : nothing}
+          title=${foldable ? (expanded ? "Collapse branch" : "Expand branch") : nothing}
           aria-hidden="true"
           @click=${(event: MouseEvent) => { this.toggleNode(row.node.id, event); }}
-        >${row.childIds.length > 1 ? (expanded ? "▾" : "▸") : ""}</span>
+        >${foldable ? (expanded ? "▾" : "▸") : ""}</span>
         ${this.renderKindBadge(kindPresentation)}
         <span class="entry">
           <span class="summary" dir="auto">${row.node.summary}</span>
@@ -212,6 +218,22 @@ export class SessionTreeNavigator extends LitElement {
         ${row.node.timestamp === undefined ? html`<span class="time-spacer"></span>` : html`<time datetime=${row.node.timestamp} title=${row.node.timestamp}>${relativeTime(row.node.timestamp, now)}</time>`}
       </div>
     `;
+  }
+
+  /**
+   * One lane per fork the row sits under. Ancestor lanes draw a hairline only
+   * while that fork still has rows below; the row's own lane draws the elbow.
+   */
+  private renderRails(row: SessionTreeRow, visualDepth: number): TemplateResult[] {
+    const lanes: TemplateResult[] = [];
+    for (let lane = 0; lane < visualDepth; lane += 1) {
+      const own = lane === visualDepth - 1 && row.connector !== "none";
+      const classes = own
+        ? `lane elbow${row.connector === "branch" ? " through" : ""}`
+        : `lane${row.rails[lane] === true ? " line" : ""}`;
+      lanes.push(html`<span class=${classes}></span>`);
+    }
+    return lanes;
   }
 
   private renderKindBadge(presentation: SessionTreeKindPresentation): TemplateResult {
@@ -656,8 +678,19 @@ export class SessionTreeNavigator extends LitElement {
     /* The tree is the one scroller: the intro and legend stay put, and rows
        clip inside the framed surface instead of sliding under the toolbar. */
     .tree { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); overscroll-behavior: contain; }
-    .tree-row { min-height: 48px; display: grid; grid-template-columns: 14px 18px minmax(82px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 12px 7px calc(8px + var(--tree-indent)); border-bottom: 1px solid var(--pi-border-muted); cursor: pointer; outline: none; content-visibility: auto; contain-intrinsic-block-size: 48px; }
-    .no-branches .tree-row { grid-template-columns: 14px minmax(82px, auto) minmax(0, 1fr) auto; }
+    .tree-row { --tree-lane: 15px; min-height: 48px; display: grid; grid-template-columns: auto 14px 18px minmax(82px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--pi-border-muted); cursor: pointer; outline: none; content-visibility: auto; contain-intrinsic-block-size: 48px; }
+    .no-branches .tree-row { grid-template-columns: auto 14px minmax(82px, auto) minmax(0, 1fr) auto; }
+    /* Branch rails: hairlines, not ASCII art. An ancestor lane is drawn only
+       while its fork still has rows below, so closed branches leave no trail. */
+    /* Negative block margins pull the lanes across the row's own padding, so a
+       rail reads as one line down the branch instead of dashes per row. */
+    .rails { align-self: stretch; display: flex; margin-block: -7px; margin-inline-end: -4px; }
+    .lane { position: relative; flex: none; width: var(--tree-lane); }
+    .lane.line::before, .lane.elbow::before { content: ""; position: absolute; left: 50%; border-left: 1px solid var(--pi-border); }
+    .lane.line::before { inset-block: 0; }
+    .lane.elbow::before { top: 0; bottom: 50%; }
+    .lane.elbow.through::before { bottom: 0; }
+    .lane.elbow::after { content: ""; position: absolute; top: 50%; left: 50%; width: 50%; border-top: 1px solid var(--pi-border); }
     .no-branches .disclosure { display: none; }
     .tree-row:last-child { border-bottom: 0; }
     .tree-row:hover { background: var(--pi-surface-hover); }
@@ -717,14 +750,15 @@ export class SessionTreeNavigator extends LitElement {
       /* The instruction is first-run guidance; the title and footer already say
          what this dialog does. Height goes to the tree instead. */
       .tree-intro p { display: none; }
-      .tree-row { grid-template-columns: 14px 18px minmax(0, 1fr) auto; row-gap: 2px; padding-inline-start: calc(7px + min(var(--tree-indent-mobile), 48px)); }
-      .tree-row > .kind { grid-column: 3; grid-row: 1; }
-      .tree-row > time, .tree-row > .time-spacer { grid-column: 4; grid-row: 1; }
-      .tree-row > .entry { grid-column: 3 / -1; grid-row: 2; display: grid; gap: 3px; }
-      .no-branches .tree-row { grid-template-columns: 14px minmax(0, 1fr) auto; }
-      .no-branches .tree-row > .kind { grid-column: 2; }
-      .no-branches .tree-row > time, .no-branches .tree-row > .time-spacer { grid-column: 3; }
-      .no-branches .tree-row > .entry { grid-column: 2 / -1; }
+      .tree-row { --tree-lane: 11px; grid-template-columns: auto 14px 18px minmax(0, 1fr) auto; row-gap: 2px; padding-inline: 7px; }
+      .tree-row > .rails { grid-column: 1; grid-row: 1 / -1; }
+      .tree-row > .kind { grid-column: 4; grid-row: 1; }
+      .tree-row > time, .tree-row > .time-spacer { grid-column: 5; grid-row: 1; }
+      .tree-row > .entry { grid-column: 4 / -1; grid-row: 2; display: grid; gap: 3px; }
+      .no-branches .tree-row { grid-template-columns: auto 14px minmax(0, 1fr) auto; }
+      .no-branches .tree-row > .kind { grid-column: 3; }
+      .no-branches .tree-row > time, .no-branches .tree-row > .time-spacer { grid-column: 4; }
+      .no-branches .tree-row > .entry { grid-column: 3 / -1; }
       .tree-row .summary { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
       .confirmation-step { padding: 18px 12px; }
       .custom-focus, .validation-error { margin-inline-start: 0; }

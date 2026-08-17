@@ -13,6 +13,12 @@ export interface SessionTreeModel {
   readonly activeLeafId: string | null;
 }
 
+/**
+ * How a row meets its lane. Only a fork's direct children get an elbow:
+ * "branch" when siblings follow it, "last" when it closes the fork.
+ */
+export type SessionTreeConnector = "none" | "branch" | "last";
+
 export interface SessionTreeRow {
   readonly node: SessionTreeNode;
   readonly depth: number;
@@ -21,6 +27,9 @@ export interface SessionTreeRow {
   readonly childIds: readonly string[];
   readonly activePath: boolean;
   readonly activeLeaf: boolean;
+  /** Per lane, whether that fork still has rows below this one to reach. */
+  readonly rails: readonly boolean[];
+  readonly connector: SessionTreeConnector;
 }
 
 /**
@@ -204,9 +213,16 @@ export function sessionTreeView(model: SessionTreeModel, state: SessionTreeViewS
     siblings.splice(0, siblings.length, ...active, ...rest);
   }
 
+  interface PendingRow {
+    readonly id: string;
+    readonly depth: number;
+    readonly rails: readonly boolean[];
+    readonly connector: SessionTreeConnector;
+  }
+
   const rows: SessionTreeRow[] = [];
   const visited = new Set<string>();
-  const stack = [...visibleRootIds].reverse().map((id) => ({ id, depth: 0, branchDepth: 0 }));
+  const stack: PendingRow[] = [...visibleRootIds].reverse().map((id) => ({ id, depth: 0, rails: [], connector: "none" as const }));
   while (stack.length > 0) {
     const next = stack.pop();
     if (next === undefined || visited.has(next.id)) continue;
@@ -217,18 +233,25 @@ export function sessionTreeView(model: SessionTreeModel, state: SessionTreeViewS
     rows.push({
       node,
       depth: next.depth,
-      branchDepth: next.branchDepth,
+      branchDepth: next.rails.length,
       parentId: visibleParentById.get(next.id) ?? null,
       childIds,
       activePath: model.activePathIds.has(next.id),
       activeLeaf: model.activeLeafId === next.id,
+      rails: next.rails,
+      connector: next.connector,
     });
     if (state.foldedIds.has(next.id)) continue;
-    // Only forks earn another lane, exactly as buildSessionTreeModel does.
-    const childBranchDepth = next.branchDepth + (childIds.length > 1 ? 1 : 0);
     for (let index = childIds.length - 1; index >= 0; index -= 1) {
       const childId = childIds[index];
-      if (childId !== undefined) stack.push({ id: childId, depth: next.depth + 1, branchDepth: childBranchDepth });
+      if (childId === undefined) continue;
+      const isLast = index === childIds.length - 1;
+      // Only a fork earns another lane, exactly as buildSessionTreeModel does.
+      // A single-child chain inherits its parent's lanes and draws no elbow, so
+      // ordinary history never marches rightward.
+      stack.push(childIds.length > 1
+        ? { id: childId, depth: next.depth + 1, rails: [...next.rails, !isLast], connector: isLast ? "last" : "branch" }
+        : { id: childId, depth: next.depth + 1, rails: next.rails, connector: "none" });
     }
   }
 
