@@ -102,15 +102,25 @@ CSS-pixel viewports measured on the physical device (DPR 2.625):
 | Folded portrait | 475 × 638 |
 | Folded landscape | 711 × 374 |
 
-Headless capture (chromium is on PATH on zao):
+Headless capture — use the posture script, never raw `--window-size`:
 
 ```bash
-chromium --headless=new --disable-gpu --window-size=704,783 \
-  --screenshot=/tmp/forgerie-unfolded-portrait.png \
-  --virtual-time-budget=8000 http://127.0.0.1:8504/
+node scripts/capture-postures.mjs --url http://127.0.0.1:8504/ \
+  --out /tmp/shots --label baseline --color-scheme dark
 ```
 
-Repeat for all four viewports. The agent must **look at** the captures (Read
+The script drives real viewport emulation over CDP
+(`Emulation.setDeviceMetricsOverride`) and emulates `prefers-color-scheme`
+so the app's auto theme pair resolves the way it does on device.
+
+**Do not capture with `chromium --window-size=W,H --screenshot`.** The
+window size is not the viewport: headless Chromium clamps small window
+widths (measured: a 475px request lays out at ~500px and the screenshot
+crops the right edge) and the height budget differs from the viewport.
+This produced false "clipped control" and "dead band" defect reports at
+the folded postures before the discrepancy was caught.
+
+Repeat for both color schemes. The agent must **look at** the captures (Read
 the PNGs) and judge them — capturing without reviewing does not count as
 validation.
 

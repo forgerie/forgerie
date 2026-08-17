@@ -77,6 +77,14 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
       deviceScaleFactor: FOLD8_DPR,
       mobile: true,
     });
+    // Emulate the OS preference rather than force-darkening rendered pixels:
+    // the app's auto theme pair resolves from prefers-color-scheme, so this
+    // exercises the real resolution path.
+    if (args.colorScheme !== undefined) {
+      await cdp.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-color-scheme", value: args.colorScheme }],
+      });
+    }
 
     const loaded = cdp.waitForEvent("Page.loadEventFired", args.timeout).catch(() => undefined);
     await cdp.send("Page.navigate", { url: args.url });
@@ -134,11 +142,18 @@ function parseArgs(argv) {
     else if (arg === "--label") parsed.label = argv[++i];
     else if (arg === "--click-title") parsed.clickTitle = argv[++i];
     else if (arg === "--input-mode") parsed.inputMode = argv[++i];
+    else if (arg === "--color-scheme") parsed.colorScheme = requireColorScheme(argv[++i]);
     else if (arg === "--chrome-bin") parsed.chromeBin = argv[++i];
     else if (arg === "--settle") parsed.settle = Number(argv[++i]);
     else fail(`Unknown argument: ${arg}`);
   }
   return parsed;
+}
+
+function requireColorScheme(value) {
+  if (value === "dark" || value === "light") return value;
+  fail(`--color-scheme must be dark or light, got ${JSON.stringify(value)}`);
+  return undefined;
 }
 
 function fail(message) {
