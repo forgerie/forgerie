@@ -699,8 +699,11 @@ export class TerminalPanel extends LitElement {
       .copy-mode-toggle, .soft-keys-toggle { display: inline-flex; }
       terminal-soft-keys { display: block; }
     }
-    button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 180px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 5px 7px; cursor: pointer; }
-    button.selected { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
+    /* Ghost chrome, matching the workspace tool strip: selection is the one
+       filled state, and the shell tabs carry no boxes of their own. */
+    button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 180px; border: 1px solid transparent; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-muted); padding: 5px 7px; cursor: pointer; }
+    button:hover { background: var(--pi-surface); color: var(--pi-text); }
+    button.selected { background: var(--pi-selection-bg); color: var(--pi-text); }
     button.new { flex: 0 0 auto; color: var(--pi-muted); }
     .soft-keys-toggle { flex: 0 0 auto; }
     .soft-keys-toggle .keyboard-icon { display: block; flex: 0 0 auto; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }

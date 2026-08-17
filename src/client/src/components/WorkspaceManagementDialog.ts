@@ -202,7 +202,7 @@ export class WorkspaceManagementDialog extends LitElement {
     }
 
     .dialog-header strong {
-      font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
+      font-size: var(--pi-text-md);
       color: var(--pi-text-bright, #fff);
     }
 
@@ -216,7 +216,7 @@ export class WorkspaceManagementDialog extends LitElement {
       padding: 0;
       font-size: 20px;
       line-height: 1;
-      color: var(--pi-muted, #aaa4bd);
+      color: var(--pi-muted, #85888e);
       background: none;
       border: none;
       border-radius: var(--pi-radius-control);
@@ -225,7 +225,7 @@ export class WorkspaceManagementDialog extends LitElement {
 
     .icon-btn:hover {
       color: var(--pi-text-bright, #fff);
-      background: var(--pi-surface-hover, #151b31);
+      background: var(--pi-surface-hover, #202225);
     }
 
     /* ---- Steps ---- */
@@ -240,8 +240,8 @@ export class WorkspaceManagementDialog extends LitElement {
     .step-prompt {
       margin: 0;
       padding: 12px 16px 8px;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-muted, #aaa4bd);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-muted, #85888e);
     }
 
     /* ---- Item list (projects / workspaces) ---- */
@@ -264,27 +264,27 @@ export class WorkspaceManagementDialog extends LitElement {
       padding: 10px 16px;
       text-align: left;
       font: inherit;
-      color: var(--pi-text, #f7f4ff);
+      color: var(--pi-text, #e6e7e9);
       background: none;
       border: none;
-      border-bottom: 1px solid var(--pi-border-muted, #1b2340);
+      border-bottom: 1px solid var(--pi-border-muted, #202225);
       cursor: pointer;
       transition: background 120ms ease;
     }
 
     .item-btn:hover {
-      background: var(--pi-surface, #101527);
+      background: var(--pi-surface, #191a1d);
     }
 
     .item-btn:focus-visible {
-      outline: 2px solid var(--pi-accent, #7c3cff);
+      outline: 2px solid var(--pi-accent, #6699e0);
       outline-offset: -2px;
     }
 
     .item-primary {
       grid-column: 1;
       grid-row: 1;
-      font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
+      font-size: var(--pi-text-md);
       font-weight: 500;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -294,8 +294,8 @@ export class WorkspaceManagementDialog extends LitElement {
     .item-secondary {
       grid-column: 1;
       grid-row: 2;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-dim, #817a99);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-dim, #62656b);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -305,8 +305,8 @@ export class WorkspaceManagementDialog extends LitElement {
       grid-column: 2;
       grid-row: 1 / span 2;
       align-self: center;
-      font-size: clamp(0.8125rem, 0.8rem + 0.1cqi, 0.875rem);
-      color: var(--pi-accent, #7c3cff);
+      font-size: var(--pi-text-sm);
+      color: var(--pi-accent, #6699e0);
       white-space: nowrap;
       opacity: 0;
       transition: opacity 120ms ease;
@@ -326,8 +326,8 @@ export class WorkspaceManagementDialog extends LitElement {
     .loading-state,
     .empty-state {
       padding: 24px 16px;
-      color: var(--pi-dim, #817a99);
-      font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
+      color: var(--pi-dim, #62656b);
+      font-size: var(--pi-text-md);
     }
 
     .error-state {
@@ -336,7 +336,7 @@ export class WorkspaceManagementDialog extends LitElement {
 
     .error-state p {
       margin: 0 0 12px;
-      color: var(--pi-danger, #ff4f7b);
+      color: var(--pi-danger, #e06c75);
     }
 
     /* ---- Footer ---- */
@@ -347,7 +347,7 @@ export class WorkspaceManagementDialog extends LitElement {
       align-items: center;
       gap: 8px;
       padding: 10px 16px;
-      border-top: 1px solid var(--pi-border, #26304f);
+      border-top: 1px solid var(--pi-border, #2a2c30);
     }
 
     .footer-btn {
@@ -356,20 +356,20 @@ export class WorkspaceManagementDialog extends LitElement {
       min-height: 44px;
       padding: 0 16px;
       font: inherit;
-      font-size: clamp(0.9375rem, 0.92rem + 0.1cqi, 1rem);
-      color: var(--pi-text, #f7f4ff);
-      background: var(--pi-surface, #101527);
-      border: 1px solid var(--pi-border, #26304f);
+      font-size: var(--pi-text-md);
+      color: var(--pi-text, #e6e7e9);
+      background: var(--pi-surface, #191a1d);
+      border: 1px solid var(--pi-border, #2a2c30);
       border-radius: var(--pi-radius-control);
       cursor: pointer;
     }
 
     .footer-btn:hover {
-      background: var(--pi-surface-hover, #151b31);
+      background: var(--pi-surface-hover, #202225);
     }
 
     .footer-btn:focus-visible {
-      outline: 2px solid var(--pi-accent, #7c3cff);
+      outline: 2px solid var(--pi-accent, #6699e0);
       outline-offset: 2px;
     }
   `;

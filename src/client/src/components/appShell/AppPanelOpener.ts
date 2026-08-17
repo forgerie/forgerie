@@ -79,8 +79,8 @@ export class AppPanelOpener extends LitElement {
     .opener:hover, .opener:focus-visible { color: var(--pi-text); background: var(--pi-surface-hover); opacity: 1; }
     .opener-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; pointer-events: none; }
     .attention { position: absolute; inset-block-start: 7px; inset-inline-end: 7px; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 2px var(--pi-bg); pointer-events: none; }
-    .attention.blocked { background: var(--pi-warning, #ffb000); }
-    .attention.unread { background: var(--pi-purple, #b7a2ff); }
+    .attention.blocked { background: var(--pi-warning, #d0a04a); }
+    .attention.unread { background: var(--pi-purple, #a89ede); }
   `;
 }
 

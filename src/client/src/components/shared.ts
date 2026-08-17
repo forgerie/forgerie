@@ -180,9 +180,12 @@ export const appStyles = css`
   .mobile-tabs-frame::after { right: 0; background: linear-gradient(270deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .mobile-tabs-frame.can-scroll-left::before, .mobile-tabs-frame.can-scroll-right::after { opacity: 1; }
   .mobile-tabs { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 8px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
-  .mobile-tabs button { flex: 0 0 auto; white-space: nowrap; }
+  /* Ghost tabs under the same rule as the workspace tool strip: selection
+     is the one filled state, and no box competes with the content above. */
+  .mobile-tabs button { flex: 0 0 auto; white-space: nowrap; border-color: transparent; background: transparent; color: var(--pi-muted); }
+  .mobile-tabs button:hover { background: var(--pi-surface); color: var(--pi-text); }
   .mobile-navigation-tab, .mobile-navigation-panel { display: none; }
-  .mobile-tabs button.selected { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
+  .mobile-tabs button.selected { border-color: transparent; background: var(--pi-selection-bg); color: var(--pi-text); }
   /* A count is information, not a success state: neutral chrome. */
   .tab-badge { display: inline-block; min-width: 14px; margin-left: 4px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-text-secondary); padding: 0 5px; font-size: var(--pi-text-xs); line-height: 16px; text-align: center; }
   .navigation-panel-edge, .workspace-panel-edge { min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: visible; background: var(--pi-border-muted); z-index: 2; }
@@ -411,8 +414,14 @@ export const workspacePanelStyles = css`
   .tabs { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; }
   .tabs button { flex: 0 0 auto; white-space: nowrap; }
   .tabs button.icon-tab { min-width: 34px; }
-  button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 5px 7px; cursor: pointer; }
-  button.selected { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
+  /*
+   * Panel chrome is ghost by default: the tool strip and header actions are
+   * wayfinding, not content, so they carry no boxes. Selection is the one
+   * filled state; the transparent border keeps layout stable against it.
+   */
+  button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-muted); padding: 5px 7px; cursor: pointer; }
+  button:hover { background: var(--pi-surface); color: var(--pi-text); }
+  button.selected { background: var(--pi-selection-bg); color: var(--pi-text); }
   .tab-icon { flex: 0 0 auto; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .tab-custom-icon { flex: 0 0 auto; width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; pointer-events: none; }
   .tab-custom-icon svg { width: 16px; height: 16px; pointer-events: none; }

@@ -145,10 +145,10 @@ export class AppRadialMenu extends LitElement {
 
     .glyph-slot { display: grid; place-items: center; width: 22px; height: 22px; color: var(--pi-text); }
     .glyph-slot svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    .glyph.on .glyph-slot { color: var(--pi-accent-contrast, white); }
+    .glyph.on .glyph-slot { color: var(--pi-bg, #111214); }
     .glyph.off .glyph-slot { color: var(--pi-dim); }
 
-    .badge-dot { fill: var(--pi-purple, #b7a2ff); }
+    .badge-dot { fill: var(--pi-purple, #a89ede); }
     .badge-text { fill: var(--pi-bg); font: 600 9px system-ui, sans-serif; }
 
     .arm-ring {
