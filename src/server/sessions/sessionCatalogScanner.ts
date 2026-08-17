@@ -3,6 +3,7 @@ import { open, readdir, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
 import type { PiSessionListEntry } from "./piSessionService.js";
 import { boundSessionCatalogFirstMessage } from "./sessionCatalogMetadata.js";
+import { indexedSessionName, indexedSessionNameIsAuthoritative, SessionNameIndex, type SessionNameIndexOptions, type SessionNameState } from "./sessionNameIndex.js";
 
 const CATALOG_WINDOW_BYTES = 64 * 1024;
 const MAX_CONCURRENT_CATALOG_READS = 32;
@@ -29,14 +30,30 @@ interface CachedCatalogEntry {
  * used only as a row title and historical prompts can contain megabytes of
  * injected context. No inbox behavior depends on the complete values.
  */
+export type SessionCatalogScannerOptions = SessionNameIndexOptions;
+
 export class SessionCatalogScanner {
   private readonly memo = new Map<string, CachedCatalogEntry>();
+  private readonly names: SessionNameIndex;
+
+  constructor(options: SessionCatalogScannerOptions = {}) {
+    this.names = new SessionNameIndex(options);
+  }
+
+  rememberSessionName(filePath: string, name: string | undefined): Promise<void> {
+    return this.names.remember(filePath, name);
+  }
+
+  flushSessionNames(): Promise<void> {
+    return this.names.flush();
+  }
 
   async scanDirectories(sessionDirs: readonly string[]): Promise<PiSessionListEntry[]> {
     const filesByDir = await Promise.all(sessionDirs.map(async (dir) => ({ dir, files: await listSessionFiles(dir) })));
     for (const { dir, files } of filesByDir) this.pruneDirectory(dir, files);
     const files = [...new Set(filesByDir.flatMap(({ files }) => files))];
-    const entries = await mapWithConcurrency(files, MAX_CONCURRENT_CATALOG_READS, (file) => this.scanFile(file));
+    const names = await this.names.namesFor(files);
+    const entries = await mapWithConcurrency(files, MAX_CONCURRENT_CATALOG_READS, (file) => this.scanFile(file, names.get(file)));
     return entries.filter(isDefined).sort((a, b) => b.modified.getTime() - a.modified.getTime());
   }
 
@@ -48,7 +65,7 @@ export class SessionCatalogScanner {
     }
   }
 
-  private async scanFile(filePath: string): Promise<PiSessionListEntry | undefined> {
+  private async scanFile(filePath: string, indexedNameState: SessionNameState | undefined): Promise<PiSessionListEntry | undefined> {
     let stats: Stats;
     try {
       stats = await stat(filePath);
@@ -62,10 +79,10 @@ export class SessionCatalogScanner {
       && cached.ino === stats.ino
       && cached.size === stats.size
       && cached.mtimeMs === stats.mtimeMs) {
-      return cached.entry;
+      return applyIndexedName(cached.entry, indexedNameState);
     }
 
-    const entry = await readCatalogEntry(filePath, stats);
+    const entry = applyIndexedName(await readCatalogEntry(filePath, stats), indexedNameState);
     this.memo.set(filePath, {
       dev: stats.dev,
       ino: stats.ino,
@@ -75,6 +92,18 @@ export class SessionCatalogScanner {
     });
     return entry;
   }
+}
+
+function applyIndexedName(
+  entry: PiSessionListEntry | undefined,
+  state: SessionNameState | undefined,
+): PiSessionListEntry | undefined {
+  if (entry === undefined || !indexedSessionNameIsAuthoritative(state)) return entry;
+  const next = { ...entry };
+  delete next.name;
+  const name = indexedSessionName(state);
+  if (name !== undefined) next.name = name;
+  return next;
 }
 
 async function readCatalogEntry(filePath: string, stats: Stats): Promise<PiSessionListEntry | undefined> {

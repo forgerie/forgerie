@@ -62,7 +62,10 @@ export class SessionDirResolver {
   }
 }
 
-export type PiSessionManagerGatewayOptions = SessionDirResolverOptions;
+export interface PiSessionManagerGatewayOptions extends SessionDirResolverOptions {
+  sessionNameIndexFilePath?: string;
+  onSessionNameIndexPersistenceError?: (operation: "load" | "save", error: unknown) => void;
+}
 
 /**
  * Same bound as the summary scanner's: concurrent header opens are capped so
@@ -73,7 +76,13 @@ export type PiSessionManagerGatewayOptions = SessionDirResolverOptions;
 const MAX_CONCURRENT_HEADER_READS = 10;
 
 export function createPiSessionManagerGateway(options: PiSessionManagerGatewayOptions): PiSessionManagerGateway {
-  return new SettingsAwarePiSessionManagerGateway(new SessionDirResolver(options));
+  return new SettingsAwarePiSessionManagerGateway(
+    new SessionDirResolver(options),
+    new SessionCatalogScanner({
+      ...(options.sessionNameIndexFilePath === undefined ? {} : { filePath: options.sessionNameIndexFilePath }),
+      ...(options.onSessionNameIndexPersistenceError === undefined ? {} : { onPersistenceError: options.onSessionNameIndexPersistenceError }),
+    }),
+  );
 }
 
 class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
@@ -85,9 +94,11 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
    * for in-place rewrites and a `clear()` escape hatch.
    */
   private readonly summaryScanner = new SessionSummaryScanner();
-  private readonly catalogScanner = new SessionCatalogScanner();
 
-  constructor(private readonly resolver: SessionDirResolver) {}
+  constructor(
+    private readonly resolver: SessionDirResolver,
+    private readonly catalogScanner: SessionCatalogScanner,
+  ) {}
 
   defaultSessionsRoot(): string {
     return this.resolver.defaultSessionsRoot();
@@ -143,6 +154,14 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
     const dirs = envSessionDir === undefined ? defaultDirs : [...defaultDirs, envSessionDir];
     const sessions = await this.catalogScanner.scanDirectories(dirs);
     return sessions.map((session) => ({ ...session, cwd: canonicalizeStoredCwd(session.cwd) }));
+  }
+
+  rememberSessionName(sessionFile: string, name: string | undefined): Promise<void> {
+    return this.catalogScanner.rememberSessionName(sessionFile, name);
+  }
+
+  flushSessionNames(): Promise<void> {
+    return this.catalogScanner.flushSessionNames();
   }
 
   open(path: string): PiSessionManager {

@@ -40,12 +40,28 @@ describe("PiSessionService machine listing", () => {
         archivedAt: "2026-08-01T13:00:00.000Z",
       },
     ];
-    const calls = { list: 0, listAll: 0, listCatalog: 0, createRuntime: 0 };
+    const rememberedNames: { path: string; name: string | undefined }[] = [];
+    const calls = {
+      list: 0,
+      listAll: 0,
+      listCatalog: 0,
+      createRuntime: 0,
+      flushSessionNames: 0,
+      rememberedNames,
+    };
     const manager = {
       create: (cwd: string) => fakeSessionManager(cwd),
       list: () => { calls.list += 1; return Promise.resolve([]); },
       listAll: () => { calls.listAll += 1; return Promise.reject(new Error("full transcript scan should not be called")); },
       listCatalog: () => { calls.listCatalog += 1; return Promise.resolve(records); },
+      rememberSessionName: (path: string, name: string | undefined) => {
+        calls.rememberedNames.push({ path, name });
+        return Promise.resolve();
+      },
+      flushSessionNames: () => {
+        calls.flushSessionNames += 1;
+        return Promise.resolve();
+      },
       listParentSessionPaths: () => Promise.resolve([]),
       invalidateSessionFile: () => undefined,
       resolveSessionFile: (cwd: string, sessionId: string) => {
@@ -70,7 +86,9 @@ describe("PiSessionService machine listing", () => {
         getSessionId: () => "session-main",
         getSessionFile: () => "/sessions/session-main.jsonl",
       }),
+      sessionFile: "/sessions/session-main.jsonl",
       isStreaming: true,
+      sessionName: "Live session name",
     });
     const service = new PiSessionService(new CapturingSessionEventHub(), {
       agentDir: TEST_AGENT_DIR,
@@ -111,16 +129,27 @@ describe("PiSessionService machine listing", () => {
         parentSessionId: "session-main",
         parentSessionCwd: "/projects/repo",
       });
-      expect(snapshot.sessions.find(({ id }) => id === "session-main")).toMatchObject({ childSessionsElsewhere: 1 });
+      expect(snapshot.sessions.find(({ id }) => id === "session-main")).toMatchObject({
+        childSessionsElsewhere: 1,
+        name: "Live session name",
+      });
       expect(snapshot.statuses).toHaveLength(1);
       expect(snapshot.statuses[0]).toMatchObject({ sessionId: "session-main", isStreaming: true });
       expect(snapshot.statuses[0]?.pendingAsk?.askId).toBe("ask-main");
       expect(snapshot.activities).toMatchObject([
         { sessionId: "session-main", phase: "active", label: "running tool", detail: "read" },
       ]);
-      expect(calls).toEqual({ list: 0, listAll: 0, listCatalog: 1, createRuntime: 1 });
+      expect(calls).toEqual({
+        list: 0,
+        listAll: 0,
+        listCatalog: 1,
+        createRuntime: 1,
+        flushSessionNames: 0,
+        rememberedNames: [{ path: "/sessions/session-main.jsonl", name: "Live session name" }],
+      });
     } finally {
       await service.dispose();
+      expect(calls.flushSessionNames).toBe(1);
     }
   });
 

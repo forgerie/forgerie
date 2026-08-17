@@ -400,6 +400,8 @@ export interface PiSessionManagerGateway {
    * provides it and machine listing falls back to `listAll` for compatibility.
    */
   listCatalog?(): Promise<PiSessionListEntry[]>;
+  rememberSessionName?(sessionFile: string, name: string | undefined): Promise<void>;
+  flushSessionNames?(): Promise<void>;
   /**
    * The directory Pi stores sessions in. Used to confine a path-keyed write to
    * the session store. Optional so existing fakes still satisfy the interface;
@@ -1241,14 +1243,30 @@ export class PiSessionService implements SessionRouteService {
         await active.runtime.dispose();
       }
     }));
+    await this.sessionManager.flushSessionNames?.();
     await this.publishUnreadMutations([]);
   }
 
   async machineListing(): Promise<MachineSessionListingSnapshot> {
-    const [listedSessions, archivedRecords] = await Promise.all([
+    const [catalogSessions, archivedRecords] = await Promise.all([
       this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(),
       this.archiveStore.list(),
     ]);
+    const activeSessions = [...new Set(this.active.values())];
+    const activeNamesByPath = new Map(activeSessions.flatMap((active) => {
+      const session = active.runtime.session;
+      return session.sessionFile === undefined || session.sessionFile === ""
+        ? []
+        : [[session.sessionFile, session.sessionName] as const];
+    }));
+    const listedSessions = catalogSessions.map((session) => {
+      if (!activeNamesByPath.has(session.path)) return session;
+      const next = { ...session };
+      delete next.name;
+      const activeName = activeNamesByPath.get(session.path);
+      if (activeName !== undefined) next.name = activeName;
+      return next;
+    });
     const listedById = new Map(listedSessions.map((session) => [session.id, session]));
     const archivedById = new Map(archivedRecords.map((record) => [record.sessionId, record]));
 
@@ -1286,7 +1304,6 @@ export class PiSessionService implements SessionRouteService {
       await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
     }
 
-    const activeSessions = [...new Set(this.active.values())];
     const statuses = activeSessions.map((active) => this.statusFromSession(active.runtime.session));
     const activities = activeSessions.flatMap((active) => {
       const sessionId = active.runtime.session.sessionId;
@@ -3916,6 +3933,7 @@ export class PiSessionService implements SessionRouteService {
       const eventType = getString(event, "type");
       if (eventType === "session_info_changed") {
         this.cancelSessionTitleGeneration(session);
+        this.rememberSessionName(session);
         this.publishSessionName(session);
       }
       if (eventType === "agent_end") this.abortRunScopedExtensionDialogs(session.sessionId);
@@ -3925,6 +3943,8 @@ export class PiSessionService implements SessionRouteService {
       this.updateSubsessionTracking(session);
     });
     this.active.set(session.sessionId, active);
+    this.rememberSessionName(session);
+    if (session.sessionName !== undefined) this.publishSessionName(session);
   }
 
   private scheduleCompactionQueueDrain(sessionId: string, delayMs = 0): void {
@@ -4096,6 +4116,17 @@ export class PiSessionService implements SessionRouteService {
     for (const key of this.authLossWarnings) {
       if (key.startsWith(prefix)) this.authLossWarnings.delete(key);
     }
+  }
+
+  private rememberSessionName(session: PiAgentSession): void {
+    const sessionFile = session.sessionFile;
+    if (sessionFile === undefined || sessionFile === "" || this.sessionManager.rememberSessionName === undefined) return;
+    void this.sessionManager.rememberSessionName(sessionFile, session.sessionName).catch((error: unknown) => {
+      this.logger.info(
+        { sessionId: session.sessionId, error: error instanceof Error ? error.message : String(error) },
+        "failed to remember session name",
+      );
+    });
   }
 
   private publishSessionName(session: PiAgentSession): void {

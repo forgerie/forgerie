@@ -12,6 +12,7 @@ import { registerAuthRoutes } from "./sessions/authRoutes.js";
 import { ModelCatalogRefresher } from "./sessions/modelCatalogRefresher.js";
 import { PiSessionService } from "./sessions/piSessionService.js";
 import { createPiSessionManagerGateway } from "./sessions/piSessionManagerGateway.js";
+import { defaultSessionNameIndexFilePath } from "./sessions/sessionNameIndex.js";
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
 import { registerProcessRoutes } from "./sessions/processRoutes.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
@@ -122,6 +123,10 @@ async function createSessionDaemonRuntime() {
       agentDir: activeAgentProfile.dir,
       env: daemonEnvironment,
       sessionDirEnvKeys: activeAgentProfile.sessionDirEnvKeys,
+      sessionNameIndexFilePath: defaultSessionNameIndexFilePath(daemonEnvironment),
+      onSessionNameIndexPersistenceError: (operation, error) => {
+        app.log.error({ err: error, operation }, "session name index persistence failed");
+      },
     }),
   }));
   auth.subscribe((change) => { sessions.applyAuthChange(change); });
