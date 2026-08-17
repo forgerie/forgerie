@@ -128,12 +128,12 @@ export class AppRadialMenu extends LitElement {
      * Note for future edits: no backticks in comments inside this template.
      * They close it, and the file stops parsing.
      */
-    .scrim { position: absolute; inset: 0; background: var(--pi-overlay); animation: radial-fade 120ms cubic-bezier(.2,0,0,1) both; }
+    .scrim { position: absolute; inset: 0; background: var(--pi-overlay); animation: radial-fade var(--pi-motion-fast) cubic-bezier(.2,0,0,1) both; }
 
     .wheel { position: absolute; inset: 0; width: 100%; height: 100%; }
 
     /* Opaque, so it separates from the dimmed page behind it whatever the theme. */
-    .wedge { fill: var(--pi-surface); stroke: var(--pi-border); stroke-width: 1; transition: fill 120ms cubic-bezier(.2,0,0,1), stroke 120ms cubic-bezier(.2,0,0,1); }
+    .wedge { fill: var(--pi-surface); stroke: var(--pi-border); stroke-width: 1; transition: fill var(--pi-motion-fast) cubic-bezier(.2,0,0,1), stroke var(--pi-motion-fast) cubic-bezier(.2,0,0,1); }
     .wedge.on { fill: var(--pi-accent); stroke: var(--pi-accent); }
     /*
      * Reserved: its direction is permanent, its content is not here yet. It

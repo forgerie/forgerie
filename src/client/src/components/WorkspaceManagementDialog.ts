@@ -269,7 +269,7 @@ export class WorkspaceManagementDialog extends LitElement {
       border: none;
       border-bottom: 1px solid var(--pi-border-muted, #202225);
       cursor: pointer;
-      transition: background 120ms ease;
+      transition: background var(--pi-motion-fast) ease;
     }
 
     .item-btn:hover {
@@ -309,7 +309,7 @@ export class WorkspaceManagementDialog extends LitElement {
       color: var(--pi-accent, #6699e0);
       white-space: nowrap;
       opacity: 0;
-      transition: opacity 120ms ease;
+      transition: opacity var(--pi-motion-fast) ease;
     }
 
     .item-btn:hover .item-action,

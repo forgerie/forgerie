@@ -125,7 +125,7 @@ export const appStyles = css`
   .panel-surface[data-side="navigation"] { grid-column: 1; }
   .panel-surface[data-side="workspace"] { grid-column: 5; }
   .panel-surface > * { flex: 1 1 auto; min-height: 0; }
-  .panel-surface[data-mode="sheet"] { position: absolute; inset-block: 0; z-index: 41; background: var(--pi-bg); box-shadow: 0 0 24px var(--pi-shadow); transition: transform 180ms ease; }
+  .panel-surface[data-mode="sheet"] { position: absolute; inset-block: 0; z-index: 41; background: var(--pi-bg); box-shadow: 0 0 24px var(--pi-shadow); transition: transform var(--pi-motion-move) ease; }
   /* While a finger is down: no easing, so the sheet cannot lag the hand. */
   .panel-surface[data-mode="sheet"][data-tracking] { transition: none; will-change: transform; }
   /*
@@ -157,7 +157,7 @@ export const appStyles = css`
   /* Positioned in every layout so the summoned control sheet has a pane to fill. */
   main { position: relative; grid-column: 3; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .context-bar { position: relative; flex: 0 0 auto; min-width: 0; display: none; align-items: center; gap: 0; padding: 6px 0; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-bg); }
-  .context-bar::before, .context-bar::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 20px; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+  .context-bar::before, .context-bar::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 20px; opacity: 0; pointer-events: none; transition: opacity var(--pi-motion-fast) ease; }
   .context-bar::before { left: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .context-bar::after { right: 0; background: linear-gradient(270deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .context-bar.can-scroll-left::before, .context-bar.can-scroll-right::after { opacity: 1; }
@@ -175,7 +175,7 @@ export const appStyles = css`
   .context-value { min-width: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }
   app-mobile-main-tabs { display: none; }
   .mobile-tabs-frame { position: relative; display: none; flex: 0 0 auto; min-width: 0; border-bottom: 1px solid var(--pi-border); background: var(--pi-bg); }
-  .mobile-tabs-frame::before, .mobile-tabs-frame::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 20px; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+  .mobile-tabs-frame::before, .mobile-tabs-frame::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 20px; opacity: 0; pointer-events: none; transition: opacity var(--pi-motion-fast) ease; }
   .mobile-tabs-frame::before { left: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .mobile-tabs-frame::after { right: 0; background: linear-gradient(270deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .mobile-tabs-frame.can-scroll-left::before, .mobile-tabs-frame.can-scroll-right::after { opacity: 1; }
@@ -254,7 +254,7 @@ export const appStyles = css`
   .shell.overlay-navigation main.navigation-view .mobile-navigation-panel {
     position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
     background: var(--pi-bg); max-width: 100%;
-    animation: navigation-overlay-in 160ms ease-out;
+    animation: navigation-overlay-in var(--pi-motion-move) ease-out;
   }
   .shell.overlay-navigation main.navigation-view .mobile-navigation-panel app-navigation-panel { flex: 1 1 auto; min-height: 0; }
   @media (prefers-reduced-motion: reduce) {
@@ -273,7 +273,7 @@ export const appStyles = css`
    * under a finger both are written directly and neither eases.
    */
   .peek-scrim {
-    transition: opacity 180ms ease;
+    transition: opacity var(--pi-motion-move) ease;
     position: absolute;
     inset: 0;
     z-index: 40;
@@ -421,7 +421,7 @@ export const workspacePanelStyles = css`
   .workspace-header-scroll-frame { position: relative; flex: 1 1 auto; min-width: 0; background: var(--pi-bg); }
   .workspace-header-action { flex: 0 0 auto; align-self: center; margin: 8px; margin-left: auto; white-space: nowrap; }
   .workspace-header-action .new-session-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
-  .workspace-header-scroll-frame::before, .workspace-header-scroll-frame::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 18px; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+  .workspace-header-scroll-frame::before, .workspace-header-scroll-frame::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 18px; opacity: 0; pointer-events: none; transition: opacity var(--pi-motion-fast) ease; }
   .workspace-header-scroll-frame::before { left: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .workspace-header-scroll-frame::after { right: 0; background: linear-gradient(270deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
   .workspace-header-scroll-frame.can-scroll-left::before, .workspace-header-scroll-frame.can-scroll-right::after { opacity: 1; }
@@ -538,6 +538,7 @@ export const listStyles = css`
   /* Unread + ongoing work: a static accent ring wraps the still-pulsing work dot. */
   .unread-ring { flex: 0 0 auto; box-sizing: border-box; display: inline-grid; place-items: center; width: 9px; height: 9px; margin-right: 6px; border: 1.5px solid var(--pi-accent); border-radius: 50%; vertical-align: 1px; }
   .unread-ring .activity-indicator { width: 5px; height: 5px; margin: 0; vertical-align: 0; }
+  @media (prefers-reduced-motion: reduce) { .activity-indicator { animation: none; } }
   .action-activity .unread-ring { margin: 0; vertical-align: 0; }
   .action-menu { position: relative; align-self: stretch; }
   .action-menu-toggle { display: grid; place-items: center; height: 100%; min-width: 32px; padding: 0; color: var(--pi-muted); border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
@@ -784,7 +785,7 @@ export const chatStyles = css`
   .msg.tool > .msg-header .label, .msg.bash > .msg-header .label, .msg.skill > .msg-header .label, .msg.system > .msg-header .label, .msg.tool-image-output > .msg-header .label, .group-msg > .msg-header .label { color: var(--calm-ink-dim); }
   .label { display: block; color: var(--calm-ink-dim); font-size: var(--pi-text-xs); letter-spacing: .09em; text-transform: uppercase; }
   .msg-header .label { margin: 0; }
-  .msg-meta { min-width: 0; opacity: .28; border: 0; background: transparent; color: var(--pi-dim); padding: 0; font: var(--pi-text-xs) system-ui, sans-serif; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .12s ease; cursor: pointer; user-select: text; -webkit-user-select: text; }
+  .msg-meta { min-width: 0; opacity: .28; border: 0; background: transparent; color: var(--pi-dim); padding: 0; font: var(--pi-text-xs) system-ui, sans-serif; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity var(--pi-motion-fast) ease; cursor: pointer; user-select: text; -webkit-user-select: text; }
   .msg-meta:focus, .msg-meta.expanded { opacity: 1; }
   .msg-meta.expanded { flex: 1 1 auto; max-width: 100%; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; }
   .msg-meta:focus { outline: 2px solid var(--pi-accent); outline-offset: 3px; border-radius: var(--pi-radius-inline); }

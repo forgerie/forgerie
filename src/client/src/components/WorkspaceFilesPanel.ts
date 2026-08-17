@@ -387,7 +387,7 @@ export class WorkspaceFilesPanel extends LitElement {
       .toolbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
       .toolbar .toolbar-actions button { margin-left: 0; }
       .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
-      .drop-overlay { position: absolute; inset: 52px 10px 10px; z-index: 15; display: grid; place-items: center; border: 2px dashed var(--pi-accent); border-radius: var(--pi-radius-surface); background: color-mix(in srgb, var(--pi-bg-overlay) 90%, var(--pi-accent) 10%); color: var(--pi-text); opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+      .drop-overlay { position: absolute; inset: 52px 10px 10px; z-index: 15; display: grid; place-items: center; border: 2px dashed var(--pi-accent); border-radius: var(--pi-radius-surface); background: color-mix(in srgb, var(--pi-bg-overlay) 90%, var(--pi-accent) 10%); color: var(--pi-text); opacity: 0; pointer-events: none; transition: opacity var(--pi-motion-fast) ease; }
       .files-panel.dragging .drop-overlay { opacity: 1; }
       .drop-overlay div { display: grid; gap: 4px; justify-items: center; padding: 18px; border-radius: var(--pi-radius-surface); background: var(--pi-bg-overlay); box-shadow: 0 8px 24px var(--pi-shadow); }
       .drop-overlay span { color: var(--pi-muted); }

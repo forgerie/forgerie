@@ -61,7 +61,7 @@ export class ContextUsageMeter extends LitElement {
       width: var(--context-usage);
       height: 100%;
       background: color-mix(in srgb, var(--pi-accent) 45%, transparent);
-      transition: width 180ms ease-out;
+      transition: width var(--pi-motion-move) ease-out;
     }
     @media (prefers-reduced-motion: reduce) {
       .fill { transition: none; }

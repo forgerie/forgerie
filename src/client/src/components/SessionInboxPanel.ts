@@ -1140,7 +1140,7 @@ export class SessionInboxPanel extends LitElement {
       margin-block-end: -6px;
       width: calc(100% + 24px);
       padding: 4px 12px;
-      animation: drawer-open 180ms ease-out;
+      animation: drawer-open var(--pi-motion-move) ease-out;
       /*
        * A rule at each end. The header's own border is below the drawer, not
        * above it, so it separates the drawer from the list and leaves the title
@@ -1296,7 +1296,7 @@ export class SessionInboxPanel extends LitElement {
       flex: 0 0 auto;
       font-size: var(--pi-text-sm);
       color: var(--pi-dim, #62656b);
-      transition: transform 140ms ease;
+      transition: transform var(--pi-motion-fast) ease;
     }
 
     .group[aria-expanded="false"] .group-chevron {
@@ -1342,7 +1342,7 @@ export class SessionInboxPanel extends LitElement {
       text-align: left;
       border-bottom: 1px solid var(--pi-border-muted, #202225);
       cursor: pointer;
-      transition: background 120ms ease;
+      transition: background var(--pi-motion-fast) ease;
       /*
        * The list keeps its vertical scroll and hands the horizontal movement to
        * the shell, which pulls its side panels in. A hold on a still finger is
@@ -1401,6 +1401,8 @@ export class SessionInboxPanel extends LitElement {
     @media (prefers-reduced-motion: reduce) {
       .row[data-state="working"] .row-marker { animation: none; }
       .group-chevron { transition: none; }
+      .menu-panel { animation: none; }
+      .undo-toast { animation: none; }
     }
 
     .row-title {
@@ -1511,7 +1513,7 @@ export class SessionInboxPanel extends LitElement {
       /* Sits with the location line without making the row taller than it. */
       margin-block-start: -4px;
       opacity: 0;
-      transition: opacity 120ms ease;
+      transition: opacity var(--pi-motion-fast) ease;
     }
 
     .row:hover .row-actions,
@@ -1586,7 +1588,7 @@ export class SessionInboxPanel extends LitElement {
       padding: 10px 12px;
       background: var(--pi-surface, #191a1d);
       border-top: 1px solid var(--pi-border-muted, #2a2c30);
-      animation: toast-slide-up 200ms ease;
+      animation: toast-slide-up var(--pi-motion-move) ease;
     }
 
     @keyframes toast-slide-up {

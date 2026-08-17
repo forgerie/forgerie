@@ -287,6 +287,7 @@ export class MachineSwitcher extends LitElement implements KeyboardNavigableSect
     .machine-status.offline, .machine-status.error { color: var(--pi-danger); }
     .machine-chevron { flex: 0 0 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); }
     .activity-indicator { flex: 0 0 auto; display: inline-block; width: 7px; height: 7px; background: var(--pi-success); animation: pulse 1s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .activity-indicator { animation: none; } }
     .activity-indicator.session { border-radius: 50%; background: var(--pi-success); }
     .activity-indicator.terminal { border-radius: 2px; background: var(--pi-accent); }
     .activity-indicator.sending { border-radius: 50%; background: var(--pi-warning); }

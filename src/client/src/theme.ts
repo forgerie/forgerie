@@ -32,7 +32,10 @@ export const THEME_STORAGE_KEY = "pi-web-app-theme";
  * theme changes the app's palette, not its geometry. Type and space are
  * fluid (clamp/cqi) so they follow the container that uses them; radius is
  * static because a corner that scales with its container reads as a
- * rendering bug rather than as fluid design.
+ * rendering bug rather than as fluid design. Motion (--pi-motion-fast for
+ * micro feedback, --pi-motion-move for structural travel) is likewise
+ * geometry, not palette: two speeds, defined once. Ambient status pulses
+ * keep their own slow rhythms and sit outside the scale.
  */
 export const THEME_TOKENS: ThemeToken[] = [
   "--pi-bg",
