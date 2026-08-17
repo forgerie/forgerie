@@ -82,12 +82,20 @@ code reading. Others are anticipated; audits may resize them.
       multi-account-usage.ts, outside this repo/release → backlog
       01M06SX5MWA4NH0G8T2X863JNJ ◆
 
-## Slice 5 — Posture & intrinsic defects
+## Slice 5 — Posture & intrinsic defects (done 2026-08-16, 9df02e9)
 
-- [ ] Clipped panel toggle + settings ✕ at 475px (container sizing) ◆
-- [ ] Dead band below composer in folded landscape ◆
-- [ ] Audit for width breakpoints near 475–932px
+- [x] RETRACTED: the "clipped controls at 475px" and "dead band in folded
+      landscape" defects were capture artifacts — headless chromium
+      --window-size is not the viewport (width clamps ~500px; height budget
+      differs). CDP measurement at true metrics shows the opener inside the
+      viewport (right 471 < 475) and the composer at its designed 8px margin
+- [x] Capture methodology fixed: scripts/capture-postures.mjs gains
+      --color-scheme (emulated prefers-color-scheme); AGENTS.md recipe
+      replaced and the raw --window-size pitfall documented
+- [x] Width-breakpoint audit: zero width media queries in the client; only
+      capability/preference queries (verified by grep)
 - [ ] User on-device acceptance: Z Fold 8 full posture matrix, both modes
+      (open — the one remaining gate for slices 0–5)
 
 ## Slice 6 — Inbox refinement
 
