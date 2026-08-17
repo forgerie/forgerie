@@ -63,6 +63,8 @@ const SESSION_TREE_BOOKKEEPING_KINDS: ReadonlySet<SessionTreeNodeKind> = new Set
 export interface SessionTreeViewState {
   readonly foldedIds: ReadonlySet<string>;
   readonly filter: SessionTreeFilterMode;
+  /** Whitespace-separated terms, all of which must appear in an entry. */
+  readonly search?: string;
 }
 
 export interface SessionTreeView {
@@ -76,6 +78,7 @@ export interface SessionTreeKeyState {
   readonly selectedId: string | undefined;
   readonly foldedIds: ReadonlySet<string>;
   readonly filter?: SessionTreeFilterMode;
+  readonly search?: string;
 }
 
 export interface SessionTreeKeyTransition extends SessionTreeKeyState {
@@ -163,11 +166,14 @@ export function buildSessionTreeModel(snapshot: SessionTreeSnapshot): SessionTre
  * change never drifts the tree rightward.
  */
 export function sessionTreeView(model: SessionTreeModel, state: SessionTreeViewState): SessionTreeView {
+  const terms = searchTerms(state.search ?? "");
   const retained = new Set<string>();
   for (const id of model.orderedIds) {
     const node = model.nodesById.get(id);
     if (node === undefined) continue;
-    if (retainsSessionTreeNode(node, state.filter, model.activeLeafId)) retained.add(id);
+    if (!retainsSessionTreeNode(node, state.filter, model.activeLeafId)) continue;
+    if (!matchesSessionTreeSearch(node, terms)) continue;
+    retained.add(id);
   }
 
   const visibleParentById = new Map<string, string | null>();
@@ -186,6 +192,16 @@ export function sessionTreeView(model: SessionTreeModel, state: SessionTreeViewS
     const siblings = mutableChildren.get(ancestorId);
     if (siblings === undefined) mutableChildren.set(ancestorId, [id]);
     else siblings.push(id);
+  }
+
+  // At a fork, the branch you are actually on reads first. Sibling order is
+  // otherwise transport order, which buries the live branch under abandoned ones.
+  for (const [, siblings] of mutableChildren) {
+    if (siblings.length < 2) continue;
+    const active = siblings.filter((id) => model.activePathIds.has(id));
+    if (active.length === 0 || active.length === siblings.length) continue;
+    const rest = siblings.filter((id) => !model.activePathIds.has(id));
+    siblings.splice(0, siblings.length, ...active, ...rest);
   }
 
   const rows: SessionTreeRow[] = [];
@@ -225,8 +241,24 @@ export function visibleSessionTreeRows(
   model: SessionTreeModel,
   foldedIds: ReadonlySet<string>,
   filter: SessionTreeFilterMode = "all",
+  search = "",
 ): SessionTreeRow[] {
-  return [...sessionTreeView(model, { foldedIds, filter }).rows];
+  return [...sessionTreeView(model, { foldedIds, filter, search }).rows];
+}
+
+/** Everything a reader can reasonably expect a search over the tree to match. */
+export function sessionTreeSearchText(node: SessionTreeNode): string {
+  return `${node.label ?? ""} ${node.kind} ${node.summary}`.toLowerCase();
+}
+
+function searchTerms(search: string): readonly string[] {
+  return search.toLowerCase().split(/\s+/u).filter((term) => term !== "");
+}
+
+function matchesSessionTreeSearch(node: SessionTreeNode, terms: readonly string[]): boolean {
+  if (terms.length === 0) return true;
+  const text = sessionTreeSearchText(node);
+  return terms.every((term) => text.includes(term));
 }
 
 /**
@@ -278,7 +310,7 @@ export function initialSessionTreeSelection(model: SessionTreeModel): string | u
 }
 
 export function transitionSessionTreeKey(model: SessionTreeModel, state: SessionTreeKeyState, key: string): SessionTreeKeyTransition {
-  const view = sessionTreeView(model, { foldedIds: state.foldedIds, filter: state.filter ?? "all" });
+  const view = sessionTreeView(model, { foldedIds: state.foldedIds, filter: state.filter ?? "all", search: state.search ?? "" });
   const rows = view.rows;
   const visibleIds = rows.map((row) => row.node.id);
   const selectedId = normalizedVisibleSelection(visibleIds, state.selectedId);
@@ -326,7 +358,7 @@ export function transitionSessionTreeKey(model: SessionTreeModel, state: Session
 }
 
 export function toggleSessionTreeFold(model: SessionTreeModel, state: SessionTreeKeyState, id: string): SessionTreeKeyState {
-  const view = sessionTreeView(model, { foldedIds: state.foldedIds, filter: state.filter ?? "all" });
+  const view = sessionTreeView(model, { foldedIds: state.foldedIds, filter: state.filter ?? "all", search: state.search ?? "" });
   const children = view.visibleChildrenById.get(id) ?? [];
   if (children.length === 0) return { ...state, selectedId: id };
   const foldedIds = new Set(state.foldedIds);

@@ -238,6 +238,41 @@ describe("session tree reading lenses", () => {
   });
 });
 
+describe("session tree search and branch order", () => {
+  const model = buildSessionTreeModel({
+    nodes: [
+      { id: "ask", parentId: null, kind: "user", summary: "Rewrite the capture script" },
+      { id: "abandoned", parentId: "ask", kind: "assistant", summary: "Abandoned attempt" },
+      { id: "live", parentId: "ask", kind: "assistant", summary: "Live answer about CAPTURE timing", label: "keep" },
+      { id: "tail", parentId: "live", kind: "user", summary: "thanks" },
+    ],
+    activeLeafId: "tail",
+    activePathIds: ["ask", "live", "tail"],
+  });
+
+  it("reads the live branch before abandoned siblings at a fork", () => {
+    expect(visibleSessionTreeRows(model, new Set(), "all").map((row) => row.node.id)).toEqual(["ask", "live", "tail", "abandoned"]);
+  });
+
+  it("matches every term, case-insensitively, across label, kind and summary", () => {
+    const idsFor = (search: string): string[] => visibleSessionTreeRows(model, new Set(), "all", search).map((row) => row.node.id);
+
+    expect(idsFor("capture")).toEqual(["ask", "live"]);
+    expect(idsFor("capture timing")).toEqual(["live"]);
+    expect(idsFor("keep")).toEqual(["live"]);
+    expect(idsFor("user")).toEqual(["ask", "tail"]);
+    expect(idsFor("   ")).toHaveLength(4);
+    expect(idsFor("nothing here")).toEqual([]);
+  });
+
+  it("re-parents matches so a hidden ancestor never orphans its match", () => {
+    const view = sessionTreeView(model, { foldedIds: new Set(), filter: "all", search: "thanks" });
+
+    expect(view.rows.map((row) => [row.node.id, row.depth])).toEqual([["tail", 0]]);
+    expect(view.visibleParentById.get("tail")).toBeNull();
+  });
+});
+
 describe("session tree summary validation", () => {
   it("maps the three summary modes and trims custom focus", () => {
     expect(validateSessionTreeSummaryChoice("none", "ignored")).toEqual({ ok: true, choice: { mode: "none" } });

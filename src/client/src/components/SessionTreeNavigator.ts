@@ -49,6 +49,8 @@ export class SessionTreeNavigator extends LitElement {
   @state() private selectedId: string | undefined;
   @state() private foldedIds: ReadonlySet<string> = new Set();
   @state() private filter: SessionTreeFilterMode = SESSION_TREE_DEFAULT_FILTER;
+  @state() private search = "";
+  @state() private copyNotice = "";
   @state() private step: NavigatorStep = "tree";
   @state() private operation: NavigatorOperation = "continue";
   @state() private summaryMode: SessionTreeSummaryChoice["mode"] = "none";
@@ -105,7 +107,7 @@ export class SessionTreeNavigator extends LitElement {
   }
 
   private renderTreeStep(): TemplateResult {
-    const rows = sessionTreeView(this.model, { foldedIds: this.foldedIds, filter: this.filter }).rows;
+    const rows = sessionTreeView(this.model, { foldedIds: this.foldedIds, filter: this.filter, search: this.search }).rows;
     // Carets mark true branch points only: a linear history is a single-child
     // chain, and a caret on every chain link is pure chrome. Keyboard folding
     // of chain nodes still works; the column returns when a real fork exists.
@@ -122,6 +124,14 @@ export class SessionTreeNavigator extends LitElement {
           </div>
         </div>
         <div class="tree-controls">
+          <input
+            class="search"
+            type="search"
+            placeholder="Search history…"
+            aria-label="Search history entries"
+            .value=${this.search}
+            @input=${(event: InputEvent) => { this.handleSearchInput(event); }}
+          >
           <div class="filters" role="group" aria-label="Filter history entries">
             ${SESSION_TREE_FILTER_OPTIONS.map((option) => html`
               <button
@@ -132,16 +142,25 @@ export class SessionTreeNavigator extends LitElement {
               >${option.label}</button>
             `)}
           </div>
+          <button
+            class="copy"
+            ?disabled=${this.selectedId === undefined}
+            title="Copy the selected entry's text"
+            @click=${() => { void this.copySelectedEntry(); }}
+          >Copy</button>
           ${rows.length === 0 ? null : html`
             <span class="count" title="Selected entry position in this filter">${position < 0 ? "—" : position + 1} / ${rows.length}</span>
           `}
         </div>
+        ${this.copyNotice === "" ? null : html`<div class="copy-notice" role="status">${this.copyNotice}</div>`}
         ${this.statusMessage === "" ? null : html`<div class="dialog-status" role="status">${this.statusMessage}</div>`}
         ${this.error === "" ? null : html`<div class="dialog-error" role="alert">${this.error}</div>`}
         ${rows.length === 0 ? html`
           <div class="empty" role="status">${this.model.orderedIds.length === 0
             ? "This session does not contain any selectable history entries."
-            : "No history entries match this filter."}</div>
+            : this.search.trim() === ""
+              ? "No history entries match this filter."
+              : "No history entries match this search."}</div>
         ` : html`
           <div class=${`tree${branching ? "" : " no-branches"}`} role="tree" aria-label="Complete session history">
             ${rows.map((row) => this.renderTreeRow(row, now))}
@@ -325,6 +344,8 @@ export class SessionTreeNavigator extends LitElement {
     this.operationGeneration += 1;
     this.model = buildSessionTreeModel(this.tree);
     this.filter = SESSION_TREE_DEFAULT_FILTER;
+    this.search = "";
+    this.copyNotice = "";
     this.selectionAnchorId = initialSessionTreeSelection(this.model);
     this.selectedId = this.visibleSelection(SESSION_TREE_DEFAULT_FILTER, this.selectionAnchorId);
     this.foldedIds = new Set();
@@ -357,18 +378,43 @@ export class SessionTreeNavigator extends LitElement {
     this.selectedId = this.visibleSelection(filter, this.selectionAnchorId);
     this.error = "";
     this.statusMessage = "";
+    this.copyNotice = "";
     this.pendingFocus = "tree";
   }
 
-  private visibleSelection(filter: SessionTreeFilterMode, selectedId: string | undefined): string | undefined {
-    const visibleIds = sessionTreeView(this.model, { foldedIds: new Set(), filter }).rows.map((row) => row.node.id);
+  private visibleSelection(filter: SessionTreeFilterMode, selectedId: string | undefined, search = this.search): string | undefined {
+    const visibleIds = sessionTreeView(this.model, { foldedIds: new Set(), filter, search }).rows.map((row) => row.node.id);
     return nearestVisibleSessionTreeId(this.model, visibleIds, selectedId);
+  }
+
+  private handleSearchInput(event: InputEvent): void {
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
+    this.search = event.currentTarget.value;
+    this.foldedIds = new Set();
+    this.selectedId = this.visibleSelection(this.filter, this.selectionAnchorId, this.search);
+    this.error = "";
+    this.statusMessage = "";
+    this.copyNotice = "";
+  }
+
+  // Copy acts on the selection from the control row, like the TUI's keybinding.
+  // A button per row would put back the repeated chrome the rows just shed.
+  private async copySelectedEntry(): Promise<void> {
+    const node = this.selectedId === undefined ? undefined : this.model.nodesById.get(this.selectedId);
+    if (node === undefined) return;
+    const text = node.label === undefined ? node.summary : `[${node.label}] ${node.summary}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.copyNotice = "Entry text copied.";
+    } catch {
+      this.copyNotice = "Could not copy: this browser blocked clipboard access.";
+    }
   }
 
   private toggleNode(id: string, event: MouseEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    const next = toggleSessionTreeFold(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds, filter: this.filter }, id);
+    const next = toggleSessionTreeFold(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds, filter: this.filter, search: this.search }, id);
     this.selectionAnchorId = next.selectedId;
     this.selectedId = next.selectedId;
     this.foldedIds = next.foldedIds;
@@ -381,7 +427,7 @@ export class SessionTreeNavigator extends LitElement {
     // The modal surface owns Escape everywhere; the pure model still maps it for
     // consumers that drive a tree without the surface.
     if (event.key === "Escape") return;
-    const next = transitionSessionTreeKey(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds, filter: this.filter }, event.key);
+    const next = transitionSessionTreeKey(this.model, { selectedId: this.selectedId, foldedIds: this.foldedIds, filter: this.filter, search: this.search }, event.key);
     if (!next.handled) return;
     event.preventDefault();
     event.stopPropagation();
@@ -587,11 +633,17 @@ export class SessionTreeNavigator extends LitElement {
     .tree-step { display: flex; flex-direction: column; gap: var(--pi-space-md); padding: 14px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left)); overflow: hidden; }
     .tree-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: var(--pi-text-sm); }
-    .tree-controls { display: flex; align-items: center; gap: var(--pi-space-sm); }
+    .tree-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pi-space-sm); }
+    .search { flex: 1 1 11rem; min-width: 0; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 6px 9px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
+    .search::placeholder { color: var(--pi-dim, var(--pi-muted)); }
+    .search:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
+    .copy { flex: none; border-color: transparent; background: transparent; color: var(--pi-muted); padding: 4px 9px; font-size: var(--pi-text-xs); font-weight: 600; }
+    .copy:not(:disabled):hover { background: var(--pi-surface); color: var(--pi-text); }
+    .copy-notice { color: var(--pi-muted); font-size: var(--pi-text-sm); }
     /* Lens chips are wayfinding, so they stay ghost; selection is the one fill.
        They scroll rather than wrap: a second chip row would cost more height
        than the tree can spare in a folded posture. */
-    .filters { display: flex; align-items: center; gap: var(--pi-space-xs); min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    .filters { flex: 1 1 auto; display: flex; align-items: center; gap: var(--pi-space-xs); min-width: 0; overflow-x: auto; scrollbar-width: none; }
     .filters::-webkit-scrollbar { display: none; }
     .filters button { flex: none; border-color: transparent; background: transparent; color: var(--pi-muted); padding: 4px 9px; font-size: var(--pi-text-xs); font-weight: 600; }
     .filters button:not(:disabled):hover { background: var(--pi-surface); color: var(--pi-text); }

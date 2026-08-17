@@ -63,6 +63,37 @@ describe("session-tree-navigator reading lenses", () => {
     expect(countText(navigator)).toBe("1 / 1");
   });
 
+  it("filters as you search and says so when nothing matches", async () => {
+    const navigator = await mountNavigator();
+
+    await typeSearch(navigator, "side");
+    expect(visibleRowIds(navigator)).toEqual(["side"]);
+    expect(componentProperty(navigator, "selectedId")).toBe("side");
+
+    await typeSearch(navigator, "nothing here");
+    expect(renderedTree(navigator)).toBeNull();
+    expect(shadowText(navigator)).toContain("No history entries match this search");
+
+    await typeSearch(navigator, "");
+    expect(visibleRowIds(navigator)).toEqual(["root", "active", "side"]);
+  });
+
+  it("copies the selected entry text and reports clipboard refusal", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText }, configurable: true });
+    const navigator = await mountNavigator();
+
+    copyButton(navigator).click();
+    await settleRenderedDialog(navigator);
+    expect(writeText).toHaveBeenCalledWith("Active answer");
+    expect(shadowText(navigator)).toContain("Entry text copied");
+
+    writeText.mockRejectedValueOnce(new Error("denied"));
+    copyButton(navigator).click();
+    await settleRenderedDialog(navigator);
+    expect(shadowText(navigator)).toContain("blocked clipboard access");
+  });
+
   it("explains an empty lens differently from an empty session", async () => {
     const navigator = await mountNavigator();
 
@@ -714,6 +745,20 @@ function renderedTree(navigator: SessionTreeNavigator): Element | null {
 function visibleRowIds(navigator: SessionTreeNavigator): string[] {
   return [...navigator.renderRoot.querySelectorAll("[data-tree-node-id]")]
     .map((row) => (row instanceof HTMLElement ? row.dataset["treeNodeId"] ?? "" : ""));
+}
+
+async function typeSearch(navigator: SessionTreeNavigator, value: string): Promise<void> {
+  const input = navigator.renderRoot.querySelector(".search");
+  if (!(input instanceof HTMLInputElement)) throw new Error("Search input was unavailable");
+  input.value = value;
+  input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  await settleRenderedDialog(navigator);
+}
+
+function copyButton(navigator: SessionTreeNavigator): HTMLButtonElement {
+  const button = navigator.renderRoot.querySelector(".copy");
+  if (!(button instanceof HTMLButtonElement)) throw new Error("Copy button was unavailable");
+  return button;
 }
 
 function countText(navigator: SessionTreeNavigator): string {
