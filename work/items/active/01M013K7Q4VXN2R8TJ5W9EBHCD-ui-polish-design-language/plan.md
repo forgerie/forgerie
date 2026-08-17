@@ -23,16 +23,16 @@ code reading. Others are anticipated; audits may resize them.
   breakpoints (475–932px range is sacred), static values only for things
   that must not scale (radii).
 
-## Slice 0 — Land the direction (in progress)
+## Slice 0 — Land the direction (done 2026-08-16, d5959c8)
 
 - [x] Calm graphite dark + paper light token sets (`plugins/themes/index.ts`)
 - [x] Tabular numerals globally (`index.html`)
 - [x] Composer ghost chrome + filled send + archive fix (`shared.ts`)
-- [ ] Ghost the guidance-trigger (star) border holdout ◆
-- [ ] Favicon `#00f0d8` neon, apple-touch-icon, manifest colors, meta
+- [x] Ghost the guidance-trigger (star) border holdout ◆
+- [x] Favicon `#00f0d8` neon, apple-touch-icon, manifest colors, meta
       theme-color `#0d1117` → new palette ◆
-- [ ] `index.html` `:root` fallback palette → match new dark (pre-theme flash) ◆
-- [ ] `npm run verify`; atomic commit; deploy
+- [x] `index.html` `:root` fallback palette → match new dark (pre-theme flash) ◆
+- [x] `npm run verify` (only the parked defaults-test flake); commit; deployed
 
 ## Slice 1 — Elevation sweep (borders → surfaces)
 
