@@ -2,9 +2,9 @@
   <title id="title">Forgerie mark</title>
   <desc id="desc">A horizontal brand bar.</desc>
   <style>
-    .bar { fill: #00f0d8; }
+    .bar { fill: #6699e0; }
     @media (prefers-color-scheme: light) {
-      .bar { fill: #008c82; }
+      .bar { fill: #3563c4; }
     }
   </style>
   <rect class="bar" x="128" y="448" width="768" height="128"/>

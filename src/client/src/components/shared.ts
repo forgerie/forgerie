@@ -922,7 +922,8 @@ export const promptEditorStyles = css`
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: 12px; flex: 1 1 0; }
   .compact-status > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .compact-status > .guidance-trigger { position: relative; flex: 0 0 auto; overflow: visible; border-color: var(--pi-border-muted); color: var(--pi-text-secondary); }
+  .compact-status > .guidance-trigger { position: relative; flex: 0 0 auto; overflow: visible; border-color: transparent; background: transparent; color: var(--pi-text-secondary); }
+  .compact-status > .guidance-trigger:hover:not(:disabled), .compact-status > .guidance-trigger:focus-visible { background: var(--pi-surface-hover); }
   .guidance-count { position: absolute; top: -4px; inset-inline-end: -4px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 999px; background: var(--pi-accent); color: var(--pi-bg); font: 600 10px/15px system-ui, sans-serif; text-align: center; }
   .guidance-trigger[aria-expanded="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-text); }
   .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; overflow: hidden; }
@@ -949,7 +950,13 @@ export const promptEditorStyles = css`
     .session-identity { display: inline; }
     .composer-context-chip { display: inline-flex; }
   }
-  .icon-button { flex: 0 0 auto; display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; }
+  /*
+   * The rail carries one filled control: the primary action. Everything else
+   * on it is a quiet ghost -- no border, no fill -- so the row reads as one
+   * instrument with a single obvious trigger instead of eight equal chips.
+   */
+  .icon-button { flex: 0 0 auto; display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; border-color: transparent; background: transparent; color: var(--pi-muted); }
+  .icon-button:hover:not(:disabled), .icon-button:focus-visible { background: var(--pi-surface-hover); color: var(--pi-text); }
   .dictation-button { touch-action: none; user-select: none; -webkit-user-select: none; }
   .dictation-button[aria-pressed="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-accent); }
   .dictation-held[aria-pressed="true"], .dictation-manual-only[aria-pressed="true"] { border-color: var(--pi-warning-border, var(--pi-accent)); color: var(--pi-warning); }
@@ -959,10 +966,10 @@ export const promptEditorStyles = css`
   .dictation-retry-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; }
   .dictation-retry-actions button { min-height: 28px; padding: 4px 7px; font-size: 12px; }
   .dictation-acquiring[aria-pressed="true"], .dictation-auto[aria-pressed="true"], .dictation-checking[aria-pressed="true"] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--pi-accent) 18%, transparent); }
-  .composer-archive { border-color: var(--pi-border-muted); color: var(--pi-muted); }
+  .composer-archive { color: var(--pi-muted); }
   @container (min-width: 700px) {
   }
-  .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
+  .composer-archive:hover, .composer-archive:focus-visible { color: var(--pi-text-bright); background: var(--pi-surface-hover); }
   .primary-action { flex: 0 0 auto; display: inline-flex; align-items: center; }
   .queue-button { position: relative; touch-action: manipulation; -webkit-touch-callout: none; }
   .queue-steer-cue { position: absolute; inset-block-start: 2px; inset-inline-end: 4px; font: 700 10px/1 system-ui, sans-serif; color: currentColor; opacity: .72; pointer-events: none; }
@@ -971,8 +978,10 @@ export const promptEditorStyles = css`
   .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; clip-path: inset(50%) !important; white-space: nowrap !important; border: 0 !important; }
   .icon-button .prompt-action-icon, .icon-button .prompt-thinking-gauge, .icon-button .new-session-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .icon-button .prompt-action-icon-filled { fill: currentColor; stroke: none; }
-  .send-button:not(:disabled) { color: var(--pi-accent, var(--pi-text)); }
+  .send-button:not(:disabled) { border-color: var(--pi-accent-border, var(--pi-accent)); background: var(--pi-accent); color: var(--pi-bg); }
+  .send-button:hover:not(:disabled), .send-button:focus-visible:not(:disabled) { background: var(--pi-accent); color: var(--pi-bg); }
   .stop-button:not(:disabled) { color: var(--pi-danger); }
+  .stop-button:hover:not(:disabled), .stop-button:focus-visible:not(:disabled) { background: color-mix(in srgb, var(--pi-danger) 12%, transparent); color: var(--pi-danger); }
   .select-thinking .prompt-thinking-gauge .gauge-bar { fill: currentColor; stroke: none; opacity: .28; }
   .select-thinking .prompt-thinking-gauge .gauge-bar-active { opacity: 1; }
   /* At rest the draft stands down so the transcript keeps the space. */
