@@ -97,11 +97,16 @@ code reading. Others are anticipated; audits may resize them.
 - [ ] User on-device acceptance: Z Fold 8 full posture matrix, both modes
       (open — the one remaining gate for slices 0–5)
 
-## Slice 6 — Inbox refinement
+## Slice 6 — Inbox refinement (done 2026-08-16, 6590e02)
 
-- [ ] Row anatomy: drop per-row clock glyphs, aligned time column, clean
-      unread-preview truncation ◆
-- [ ] Group-header hierarchy under the single-accent rule
+- [x] Row anatomy: working-row clock glyph removed (pulsing marker carries
+      the state); time column tabular and baseline-aligned; unread preview
+      already clean 2-line clamp — the mid-word fade was the retired
+      pre-slice-0 styling ◆
+- [x] Group headers reviewed under color semantics: state tones stay
+      (working/unread/blocked are statuses); project grouping stays neutral
+- [x] Slice-2 residual: inbox local type clamps harmonized onto the ramp;
+      stale fallback hexes updated; scrollbar inherits the root style
 
 ## Slice 7 — Remaining surfaces
 
