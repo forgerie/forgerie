@@ -1,7 +1,7 @@
 ---
 title: "refactor: Remove Workspace Tasks end to end"
 type: refactor
-status: active
+status: completed
 date: 2026-08-17
 verify_command: "npm run verify"
 ---
