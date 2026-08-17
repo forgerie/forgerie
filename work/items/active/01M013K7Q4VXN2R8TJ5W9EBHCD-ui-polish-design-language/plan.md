@@ -110,6 +110,25 @@ code reading. Others are anticipated; audits may resize them.
 
 ## Slice 7 — Remaining surfaces
 
+### 7a — Panel/dialog/card chrome (done 2026-08-16, 1e76fe2 + 428e703)
+
+- [x] Workspace tool strip, terminal shell tabs, mobile main tabs → ghost
+      chrome; selection is the one filled state (judged in true-viewport
+      captures, both modes)
+- [x] Panel header actions (Upload/Refresh/List/Tree/Select/Keys) → ghosts
+- [x] Dialog framing (Machine/Project/Auth/Cleanup) → hairlines; controls
+      keep borders; status cards keep semantic borders
+- [x] Filled primaries unified on accent-on-bg text; undefined
+      --pi-accent-contrast removed (white fallback failed AA on dark accent)
+- [x] WorkspaceManagementDialog, AppPanelOpener, AppRadialMenu: last
+      off-ramp clamps and retired-palette hexes swept
+- [x] Palette/pickers/cards audited: already on-language (accent =
+      focus/selection/primary only)
+- [x] Tooling: capture script walks click paths (route params cannot reach
+      tool panels once a session resolves)
+- Residual for 7b: faint stray vertical hairline at the left edge of the
+  empty viewer region in Files/Git panels (pre-existing; visible both modes)
+
 - [ ] Files, Git, Terminal panels; Project/Machine/Cleanup/Auth dialogs;
       command palette/picker; ask-user + extension cards; process cards
 - [ ] Empty state: useful first screen (projects/recent sessions + brand) ◆
