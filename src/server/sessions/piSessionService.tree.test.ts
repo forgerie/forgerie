@@ -230,7 +230,7 @@ describe("PiSessionService session-tree behavior", () => {
     const replacement = deferred<{ cancelled: boolean; selectedText?: string }>();
     const rebound = deferred<undefined>();
     const navigateTree = vi.fn<NavigateTree>(() => Promise.resolve({ cancelled: false }));
-    const { service, fake } = treeHarness({}, { navigateTree });
+    const { service, fake, hub } = treeHarness({}, { navigateTree });
     const replacementSessionId = "tree-session-replacement";
     const replacementFake = fakeRuntime(replacementSessionId, {
       sessionManager: fakeSessionManager("/workspace", {
@@ -257,8 +257,54 @@ describe("PiSessionService session-tree behavior", () => {
 
     replacement.resolve({ cancelled: false });
     await expect(cloning).resolves.toMatchObject({ type: "done", message: "Session cloned" });
+    expect(hub.globalEvents.some((event) => event.type === "session.created"
+      && event.session.id === replacementSessionId
+      && event.session.cwd === "/workspace")).toBe(true);
     await expect(service.navigateTree(sessionRef(replacementSessionId), navigationRequest({ mode: "none" }, "replacement-leaf"))).resolves.toEqual({ cancelled: false });
     expect(fork).toHaveBeenCalledOnce();
+    await service.dispose();
+  });
+
+  it("broadcasts sessions created from the interactive fork command", async () => {
+    const { service, fake, hub } = treeHarness({}, {
+      getUserMessagesForForking: () => [{ entryId: "entry-1", text: "Fork here" }],
+    });
+    const replacementSessionId = "interactive-fork-replacement";
+    const replacement = fakeRuntime(replacementSessionId, {
+      sessionManager: fakeSessionManager("/workspace", { getSessionId: () => replacementSessionId }),
+    });
+    let rebindSession: ((session: PiAgentSession) => Promise<void>) | undefined;
+    fake.runtime.setRebindSession = (callback) => { rebindSession = callback; };
+    fake.runtime.fork = vi.fn(async () => {
+      if (!Reflect.set(fake.runtime, "session", replacement.session)) throw new Error("Could not replace fake runtime session");
+      await rebindSession?.(replacement.session);
+      return { cancelled: false, selectedText: "Fork here" };
+    });
+
+    const selection = await service.runCommand(sessionRef(SESSION_ID), "/fork");
+    if (selection.type !== "select") throw new Error("Expected fork selection");
+    await expect(service.respondToCommand(sessionRef(SESSION_ID), selection.requestId, "entry-1")).resolves.toMatchObject({
+      type: "done",
+      message: "Session forked",
+      session: { id: replacementSessionId },
+    });
+
+    expect(hub.globalEvents.some((event) => event.type === "session.created"
+      && event.session.id === replacementSessionId
+      && event.session.cwd === "/workspace")).toBe(true);
+    await service.dispose();
+  });
+
+  it("does not broadcast metadata-only command results as new sessions", async () => {
+    const { service, hub } = treeHarness();
+
+    await expect(service.runCommand(sessionRef(SESSION_ID), "/name Renamed session")).resolves.toMatchObject({
+      type: "done",
+      message: "Session named: Renamed session",
+      session: { id: SESSION_ID },
+    });
+
+    expect(hub.globalEvents.some((event) => event.type === "session.created")).toBe(false);
     await service.dispose();
   });
 
@@ -476,6 +522,9 @@ describe("PiSessionService session-tree fork-from-entry", () => {
         cancelled: false,
         session: { id: replacementSessionId },
       });
+      expect(harness.hub.globalEvents.some((event) => event.type === "session.created"
+        && event.session.id === replacementSessionId
+        && event.session.cwd === "/workspace")).toBe(true);
 
       expect(originalGlobalActivities().at(-1)).toMatchObject({
         activity: { sessionId: SESSION_ID, phase: "idle", label: "idle" },

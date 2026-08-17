@@ -2493,13 +2493,24 @@ export class PiSessionService implements SessionRouteService {
   async runCommand(ref: PiSessionRef, text: string): Promise<ClientCommandResult> {
     await this.assertWritable(ref);
     const active = await this.getActive(ref);
-    return this.commandService.run(active.runtime.session.sessionId, text);
+    const sourceSessionId = active.runtime.session.sessionId;
+    const result = await this.commandService.run(sourceSessionId, text);
+    this.publishCreatedCommandSession(sourceSessionId, result);
+    return result;
   }
 
   async respondToCommand(ref: PiSessionRef, requestId: string, value: string): Promise<ClientCommandResult> {
     await this.assertWritable(ref);
     const active = await this.getActive(ref);
-    return this.commandService.respond(active.runtime.session.sessionId, requestId, value);
+    const sourceSessionId = active.runtime.session.sessionId;
+    const result = await this.commandService.respond(sourceSessionId, requestId, value);
+    this.publishCreatedCommandSession(sourceSessionId, result);
+    return result;
+  }
+
+  private publishCreatedCommandSession(sourceSessionId: string, result: ClientCommandResult): void {
+    if (result.type !== "done" || result.session === undefined || result.session.id === sourceSessionId) return;
+    this.events.publishGlobal({ type: "session.created", session: result.session });
   }
 
   async navigateTree(ref: PiSessionRef, request: ClientSessionTreeNavigateRequest): Promise<ClientSessionTreeNavigateResult> {
@@ -2603,6 +2614,7 @@ export class PiSessionService implements SessionRouteService {
         this.publishStatus(forkedSession);
       }
       if (result.session.id !== session.sessionId) this.clearSupersededSessionActivity(session);
+      this.publishCreatedCommandSession(session.sessionId, result);
       return {
         cancelled: false,
         session: result.session,
