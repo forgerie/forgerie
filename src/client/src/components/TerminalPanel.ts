@@ -828,10 +828,10 @@ function terminalOptions(element: HTMLElement): ITerminalOptions {
 function terminalTheme(element: HTMLElement): ITheme {
   return {
     ...DEFAULT_TERMINAL_ANSI_THEME,
-    background: themeColor(element, "--pi-terminal-bg", "#05070a"),
-    foreground: themeColor(element, "--pi-terminal-text", "#e6edf3"),
-    cursor: themeColor(element, "--pi-accent", "#58a6ff"),
-    selectionBackground: themeColor(element, "--pi-terminal-selection", "#264f78"),
+    background: themeColor(element, "--pi-terminal-bg", "#0c0d0f"),
+    foreground: themeColor(element, "--pi-terminal-text", "#e6e7e9"),
+    cursor: themeColor(element, "--pi-accent", "#6699e0"),
+    selectionBackground: themeColor(element, "--pi-terminal-selection", "#2b3d5c"),
   };
 }
 

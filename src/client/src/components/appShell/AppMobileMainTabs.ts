@@ -165,7 +165,9 @@ export class AppMobileMainTabs extends LitElement {
     .tab-custom-icon svg { width: 18px; height: 18px; pointer-events: none; }
     .tab-fallback { display: none; font-weight: 650; letter-spacing: .01em; pointer-events: none; }
     .tab-label { min-width: 0; }
-    .tab-badge { flex: 0 0 auto; display: inline-block; min-width: 14px; margin-left: 0; border: 1px solid var(--pi-success-border); border-radius: var(--pi-radius-pill); background: var(--pi-success-surface); color: var(--pi-success); padding: 0 5px; font-size: var(--pi-text-xs); line-height: 16px; text-align: center; }
+    /* A count is information, not a success state: neutral chrome. The
+       unread variant below keeps the accent because it asks for attention. */
+    .tab-badge { flex: 0 0 auto; display: inline-block; min-width: 14px; margin-left: 0; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-text-secondary); padding: 0 5px; font-size: var(--pi-text-xs); line-height: 16px; text-align: center; }
     .tab-badge.unread { border-color: var(--pi-accent-border); background: var(--pi-selection-bg); color: var(--pi-accent); }
     button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
     @container (max-width: 760px) {
