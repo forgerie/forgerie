@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { doesNotFillViewport, isNearTop, shouldRequestEarlierMessages } from "./chatHistoryLoading";
+import { canScrollHistory, isNearTop, shouldRequestEarlierMessages } from "./chatHistoryLoading";
 
 describe("chat history loading decisions", () => {
   const base = {
@@ -15,8 +15,8 @@ describe("chat history loading decisions", () => {
     expect(shouldRequestEarlierMessages({ ...base, scrollTop: 20 })).toBe(true);
   });
 
-  it("requests earlier messages when loaded content does not fill the viewport", () => {
-    expect(shouldRequestEarlierMessages({ ...base, scrollHeight: 500, clientHeight: 500 })).toBe(true);
+  it("leaves underfilled history behind the explicit load button", () => {
+    expect(shouldRequestEarlierMessages({ ...base, scrollTop: 0, scrollHeight: 500, clientHeight: 500 })).toBe(false);
   });
 
   it("does not request while loading", () => {
@@ -35,9 +35,9 @@ describe("chat history loading decisions", () => {
     expect(shouldRequestEarlierMessages({ ...base, scrollTop: 0, scrollHeight: 0, clientHeight: 0 })).toBe(false);
   });
 
-  it("uses a small tolerance for underfilled viewports", () => {
-    expect(doesNotFillViewport({ scrollHeight: 501, clientHeight: 500 })).toBe(true);
-    expect(doesNotFillViewport({ scrollHeight: 502, clientHeight: 500 })).toBe(false);
+  it("uses a small tolerance before history becomes scrollable", () => {
+    expect(canScrollHistory({ scrollHeight: 501, clientHeight: 500 })).toBe(false);
+    expect(canScrollHistory({ scrollHeight: 502, clientHeight: 500 })).toBe(true);
   });
 
   it("uses the larger of the default threshold and viewport height", () => {

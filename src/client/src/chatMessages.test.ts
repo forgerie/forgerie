@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AD_PROCESS_NOTIFICATION_CUSTOM_TYPE, ASK_USER_ANSWERS_CUSTOM_TYPE, type AskUserOutcome } from "../../shared/apiTypes";
 import { groupChatMessages } from "./chatGroups";
-import { appendText, appendThinking, normalizeMessage, normalizeMessages, textMessage } from "./chatMessages";
+import { appendText, appendThinking, normalizeMessage, normalizeMessages, normalizeMessagesCooperatively, textMessage } from "./chatMessages";
+import { ControllableChatNormalizationScheduler } from "./chatMessages.testSupport";
 
 const askUserOutcome: AskUserOutcome = {
   askId: "ask-1",
@@ -51,6 +52,38 @@ describe("chat message normalization", () => {
 
     expect(normalizeMessage(line)).toEqual([line]);
     expect(normalizeMessages([{ role: "user", content: "raw" }, line])).toEqual([textMessage("user", "raw"), line]);
+  });
+
+  it("yields during large normalization while preserving the synchronous result", async () => {
+    const scheduler = new ControllableChatNormalizationScheduler();
+    const messages = [
+      { role: "user", content: "run the tool" },
+      { role: "assistant", content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "src/app.ts" } }] },
+      { role: "toolResult", toolCallId: "read-1", toolName: "read", content: [{ type: "text", text: "file" }] },
+      { role: "assistant", content: "done" },
+    ];
+
+    const normalized = await normalizeMessagesCooperatively(messages, { budgetMs: 5, scheduler });
+
+    expect(normalized).toEqual({ kind: "normalized", messages: normalizeMessages(messages) });
+    expect(scheduler.yieldCount).toBeGreaterThan(0);
+  });
+
+  it("stops cooperative normalization after its work is superseded", async () => {
+    const scheduler = new ControllableChatNormalizationScheduler({ pauseFirstYield: true });
+    let current = true;
+    const normalizing = normalizeMessagesCooperatively([
+      { role: "user", content: "one" },
+      { role: "assistant", content: "two" },
+      { role: "assistant", content: "three" },
+    ], { budgetMs: 5, scheduler, shouldContinue: () => current });
+    await vi.waitFor(() => { expect(scheduler.yieldCount).toBe(1); });
+
+    current = false;
+    scheduler.release();
+
+    await expect(normalizing).resolves.toEqual({ kind: "superseded" });
+    expect(scheduler.yieldCount).toBe(1);
   });
 
   it("projects ask_user answer messages into visible read-only record parts", () => {

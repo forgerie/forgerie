@@ -974,13 +974,16 @@ export class ChatView extends LitElement {
   private renderHistoryBoundary() {
     const range = this.historyRangeLabel();
     if (this.loadingMore) return html`<div class="history-boundary"><span>Loading earlier messages…</span>${range}</div>`;
-    if (this.hasMore) return html`
-      <div class="history-boundary">
-        <button type="button" class="history-load-button" ?disabled=${this.loadMoreRequested} @click=${() => { this.requestLoadMore(); }}>Load earlier messages</button>
-        <span>Scroll up to load earlier messages</span>
-        ${range}
-      </div>
-    `;
+    if (this.hasMore) {
+      const sessionLive = this.isSessionLive();
+      return html`
+        <div class="history-boundary">
+          <button type="button" class="history-load-button" ?disabled=${this.loadMoreRequested || sessionLive} @click=${() => { this.requestLoadMore(); }}>Load earlier messages</button>
+          <span>${sessionLive ? "Earlier messages are available when current work finishes" : "Scroll up to load earlier messages"}</span>
+          ${range}
+        </div>
+      `;
+    }
     if (this.messages.length) return html`<div class="history-boundary"><span>Beginning of session</span>${range}</div>`;
     return null;
   }
@@ -1239,7 +1242,7 @@ export class ChatView extends LitElement {
     if (this.loadMoreCheckFrame !== undefined) return;
     this.loadMoreCheckFrame = requestAnimationFrame(() => {
       this.loadMoreCheckFrame = undefined;
-      if (!this.scrolling.canLoadMore) return;
+      if (!this.scrolling.canLoadMore || this.isSessionLive()) return;
       const chat = this.chat;
       if (!chat) return;
       if (shouldRequestEarlierMessages({
@@ -1255,7 +1258,7 @@ export class ChatView extends LitElement {
 
   private requestLoadMore(): void {
     if (this.loadMoreRequested) return;
-    if (!this.hasMore || this.loadingMore || this.onLoadMore === undefined) return;
+    if (this.isSessionLive() || !this.hasMore || this.loadingMore || this.onLoadMore === undefined) return;
     this.loadMoreRequested = true;
     this.onLoadMore();
   }

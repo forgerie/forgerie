@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../appState";
 import { SessionController } from "./sessionController";
 import { defaultApi, deferred, EmitSocket, oldSession, runPendingAnimationFrames, status, workspace, type AppState, type MessagePage, type SessionInfo, type SessionStatus, type SessionStreamSnapshot } from "./sessionController.testSupport";
@@ -128,10 +128,7 @@ describe("SessionController stream seed + watermark reconciliation", () => {
 
     const selecting = controller.selectSession(oldSession, { updateUrl: false });
     page.resolve({ messages: [{ role: "user", content: "question" }], start: 0, total: 1 });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(state.selectedChatLoad).toMatchObject({ kind: "fresh-readable" });
+    await vi.waitFor(() => { expect(state.selectedChatLoad).toMatchObject({ kind: "fresh-readable" }); });
     socket.emit({ type: "assistant.delta", text: "STALE", seq: 2 });
     socket.emit({ type: "assistant.delta", text: " live", seq: 6 });
     expect(state.messages).toEqual([{ role: "user", parts: [{ type: "text", text: "question" }] }]);

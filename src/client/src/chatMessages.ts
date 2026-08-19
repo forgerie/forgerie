@@ -9,8 +9,66 @@ import {
 import { parseAskUserOutcome } from "./api/parsers";
 import type { ChatLine, ChatPart, ToolExecutionPart, ToolPreview } from "./components/shared";
 
+export interface ChatNormalizationScheduler {
+  now(): number;
+  yield(): Promise<void>;
+}
+
+export interface ChatNormalizationOptions {
+  budgetMs?: number | undefined;
+  scheduler?: ChatNormalizationScheduler | undefined;
+  shouldContinue?: (() => boolean) | undefined;
+}
+
+export type ChatNormalizationResult =
+  | { readonly kind: "normalized"; readonly messages: ChatLine[] }
+  | { readonly kind: "superseded" };
+
+const DEFAULT_CHAT_NORMALIZATION_BUDGET_MS = 8;
+
+const browserNormalizationScheduler: ChatNormalizationScheduler = {
+  now(): number {
+    return performance.now();
+  },
+  async yield(): Promise<void> {
+    const browserScheduler: unknown = Reflect.get(globalThis, "scheduler");
+    if (browserScheduler !== null && typeof browserScheduler === "object") {
+      const yieldMethod: unknown = Reflect.get(browserScheduler, "yield");
+      if (typeof yieldMethod === "function") {
+        await Reflect.apply(yieldMethod, browserScheduler, []);
+        return;
+      }
+    }
+    await new Promise<void>((resolve) => { globalThis.setTimeout(resolve, 0); });
+  },
+};
+
 export function normalizeMessages(messages: unknown[]): ChatLine[] {
-  return coalesceToolExecutions(messages.flatMap(normalizeMessage)).filter((message) => message.parts.length > 0);
+  return visibleNormalizedMessages(messages.flatMap(normalizeMessage));
+}
+
+export async function normalizeMessagesCooperatively(messages: unknown[], options: ChatNormalizationOptions = {}): Promise<ChatNormalizationResult> {
+  const scheduler = options.scheduler ?? browserNormalizationScheduler;
+  const budgetMs = Math.max(1, options.budgetMs ?? DEFAULT_CHAT_NORMALIZATION_BUDGET_MS);
+  const shouldContinue = options.shouldContinue ?? (() => true);
+  const lines: ChatLine[] = [];
+  let sliceStartedAt = scheduler.now();
+
+  for (let index = 0; index < messages.length; index += 1) {
+    if (!shouldContinue()) return { kind: "superseded" };
+    lines.push(...normalizeMessage(messages[index]));
+    if (index === messages.length - 1 || scheduler.now() - sliceStartedAt < budgetMs) continue;
+    await scheduler.yield();
+    if (!shouldContinue()) return { kind: "superseded" };
+    sliceStartedAt = scheduler.now();
+  }
+
+  if (!shouldContinue()) return { kind: "superseded" };
+  return { kind: "normalized", messages: visibleNormalizedMessages(lines) };
+}
+
+function visibleNormalizedMessages(lines: ChatLine[]): ChatLine[] {
+  return coalesceToolExecutions(lines).filter((message) => message.parts.length > 0);
 }
 
 export function textMessage(role: ChatLine["role"], text: string): ChatLine {

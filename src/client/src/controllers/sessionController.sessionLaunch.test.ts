@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../appState";
+import { textMessage } from "../chatMessages";
+import { ControllableChatNormalizationScheduler } from "../chatMessages.testSupport";
+import { ChatTranscriptStore } from "../chatTranscriptStore";
 import { SessionController, type PromptEditorTextReplacement } from "./sessionController";
 import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { defaultApi, deferred, emptyPage, FakeSocket, MemoryStorage, oldSession, sessionLookupId, status, workspace, type AppState, type PromptAttachment, type SessionInfo } from "./sessionController.testSupport";
@@ -297,6 +300,47 @@ describe("SessionController session launch", () => {
 
     expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+  });
+
+  it("does not apply launch-recovery history after selection changes during normalization", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const normalizationScheduler = new ControllableChatNormalizationScheduler();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      messages: () => Promise.resolve({
+        messages: [{ role: "user", content: "Review src" }, { role: "assistant", content: "working" }],
+        start: 0,
+        total: 2,
+      }),
+      status: (session) => Promise.resolve({ ...status(sessionLookupId(session)), isStreaming: true }),
+      runPromptResourceCommand: () => Promise.reject(new Error("delivery timed out")),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      {
+        api,
+        socket: new FakeSocket(),
+        transcripts: new ChatTranscriptStore(undefined, { normalization: { budgetMs: 5, scheduler: normalizationScheduler } }),
+      },
+    );
+
+    await controller.launchSession({ text: "/review src", delivery: "inline", promptResourceCommandIdentity: identity });
+    const priorYieldCount = normalizationScheduler.yieldCount;
+    normalizationScheduler.pauseNextYield();
+    const refreshing = controller.refreshSessionLaunchRecovery(started.id);
+    await vi.waitFor(() => { expect(normalizationScheduler.yieldCount).toBeGreaterThan(priorYieldCount); });
+    state = { ...state, selectedSession: { ...oldSession, id: "another-session" }, messages: [textMessage("assistant", "other transcript")] };
+    normalizationScheduler.release();
+    await refreshing;
+
+    expect(state.messages).toEqual([textMessage("assistant", "other transcript")]);
+    expect(controller.getSessionLaunchRecovery(started.id)?.stage).toBe("promptDeliveryAmbiguous");
   });
 
   it("keeps prompt-resource ambiguous recovery when transcript text does not match the delivery receipt", async () => {

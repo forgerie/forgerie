@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { coldWarmComparisonFailures, gateScenario, historyCacheKey, measuresForAttempt, newestIntentAttemptId, performanceEntriesForInteraction } from "./probe-chat-open.mjs";
+import { coldWarmComparisonFailures, gateScenario, historyCacheKey, measuresForAttempt, newestIntentAttemptId, parseArgs, performanceEntriesForInteraction } from "./probe-chat-open.mjs";
 
 describe("probe-chat-open attempt helpers", () => {
+  it("accepts an explicit browser color scheme for visual probes", () => {
+    expect(parseArgs(["--color-scheme", "dark"]).colorScheme).toBe("dark");
+    expect(parseArgs(["--color-scheme", "light"]).colorScheme).toBe("light");
+  });
+
   it("uses the same machine-scoped history cache key as the app", () => {
-    expect(historyCacheKey({ id: "same", sessionId: "same", cwd: "/repo", machineId: "local" })).toBe("pi-web:chat-history:v2:local:same");
-    expect(historyCacheKey({ id: "same", sessionId: "same", cwd: "/repo", machineId: "remote-a" })).toBe("pi-web:chat-history:v2:remote-a:same");
-    expect(historyCacheKey({ id: "row-id", sessionId: "session-id", cwd: "/repo", machineId: "local" })).toBe("pi-web:chat-history:v2:local:session-id");
+    expect(historyCacheKey({ id: "same", sessionId: "same", cwd: "/repo", machineId: "local" })).toBe("pi-web:chat-history:v3:local:same");
+    expect(historyCacheKey({ id: "same", sessionId: "same", cwd: "/repo", machineId: "remote-a" })).toBe("pi-web:chat-history:v3:remote-a:same");
+    expect(historyCacheKey({ id: "row-id", sessionId: "session-id", cwd: "/repo", machineId: "local" })).toBe("pi-web:chat-history:v3:local:session-id");
   });
 
   it("selects the newest intent attempt for the requested target only", () => {

@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { textMessage } from "./chatMessages";
 import { ChatTranscriptStore, type ChatHistoryCacheAdapter } from "./chatTranscriptStore";
 import type { RawMessagePage } from "./chatHistoryCache";
+import { ControllableChatNormalizationScheduler } from "./chatMessages.testSupport";
 import { ManualPersistScheduler } from "./chatTranscriptStore.testSupport";
 
 class MemoryChatHistoryCache implements ChatHistoryCacheAdapter {
@@ -57,6 +59,89 @@ describe("ChatTranscriptStore", () => {
     expect(cached.messages).toBe(merged.messages);
     expect(unchanged).toBe(merged);
     expect(unchanged.messages).toBe(merged.messages);
+  });
+
+  it("cooperatively normalizes a merged history page before publishing its hot view", async () => {
+    const normalizationScheduler = new ControllableChatNormalizationScheduler();
+    const store = new ChatTranscriptStore(new MemoryChatHistoryCache(), {
+      normalization: { budgetMs: 5, scheduler: normalizationScheduler },
+    });
+    const raw = page(0, 4, [
+      { role: "user", content: "run" },
+      { role: "assistant", content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "src/app.ts" } }] },
+      { role: "toolResult", toolCallId: "read-1", toolName: "read", content: [{ type: "text", text: "file" }] },
+      { role: "assistant", content: "done" },
+    ]);
+
+    const merged = await store.mergeHistoryCooperatively("s1", raw);
+    const expected = new ChatTranscriptStore(new MemoryChatHistoryCache()).mergeHistory("s1", raw);
+
+    expect(merged).toEqual({ kind: "merged", view: expected });
+    if (merged.kind !== "merged") throw new Error("Expected merged transcript");
+    expect(store.cachedView("s1")).toBe(merged.view);
+    expect(normalizationScheduler.yieldCount).toBeGreaterThan(0);
+  });
+
+  it("does not let a superseded cooperative merge overwrite newer history", async () => {
+    const normalizationScheduler = new ControllableChatNormalizationScheduler({ pauseFirstYield: true });
+    const store = new ChatTranscriptStore(new MemoryChatHistoryCache(), {
+      normalization: { budgetMs: 5, scheduler: normalizationScheduler },
+    });
+    const staleMerge = store.mergeHistoryCooperatively("s1", page(0, 2, [
+      { role: "user", content: "stale question" },
+      { role: "assistant", content: "stale answer" },
+    ]));
+    await vi.waitFor(() => { expect(normalizationScheduler.yieldCount).toBe(1); });
+
+    const current = store.mergeHistory("s1", page(0, 1, [{ role: "assistant", content: "newer replacement" }]));
+    normalizationScheduler.release();
+
+    expect(await staleMerge).toEqual({ kind: "superseded" });
+    expect(store.cachedView("s1")).toBe(current);
+  });
+
+  it("serializes cooperative merges so concurrent pages are both retained", async () => {
+    const store = new ChatTranscriptStore(new MemoryChatHistoryCache(), {
+      normalization: { budgetMs: 5, scheduler: new ControllableChatNormalizationScheduler() },
+    });
+
+    const [newer, older] = await Promise.all([
+      store.mergeHistoryCooperatively("s1", page(2, 4, [
+        { role: "user", content: "question" },
+        { role: "assistant", content: "answer" },
+      ])),
+      store.mergeHistoryCooperatively("s1", page(0, 4, [
+        { role: "user", content: "older question" },
+        { role: "assistant", content: "older answer" },
+      ])),
+    ]);
+
+    expect(newer.kind).toBe("merged");
+    expect(older.kind).toBe("merged");
+    expect(store.rawHistoryPage("s1")).toEqual(page(0, 4, [
+      { role: "user", content: "older question" },
+      { role: "assistant", content: "older answer" },
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]));
+  });
+
+  it("does not publish a cooperative merge after disposal", async () => {
+    const normalizationScheduler = new ControllableChatNormalizationScheduler({ pauseFirstYield: true });
+    const store = new ChatTranscriptStore(new MemoryChatHistoryCache(), {
+      normalization: { budgetMs: 5, scheduler: normalizationScheduler },
+    });
+    const pending = store.mergeHistoryCooperatively("s1", page(0, 2, [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]));
+    await Promise.resolve();
+
+    store.dispose();
+    normalizationScheduler.release();
+
+    expect(await pending).toEqual({ kind: "superseded" });
+    expect(store.rawHistoryPage("s1")).toBeUndefined();
   });
 
   it("evicts the least-recently-used hot transcript without corrupting retained views", () => {
@@ -136,6 +221,22 @@ describe("ChatTranscriptStore", () => {
     scheduler.flush();
 
     expect(cache.writes).toEqual([{ sessionId: "s1", page: raw }]);
+  });
+
+  it("persists a bounded preview without replacing the canonical hot view", () => {
+    const cache = new MemoryChatHistoryCache();
+    const scheduler = new ManualPersistScheduler();
+    const store = new ChatTranscriptStore(cache, { scheduler });
+    const canonical = page(0, 2, [{ role: "user", content: "full question" }, { role: "assistant", content: "full answer" }]);
+    const preview = page(1, 2, [{ role: "assistant", content: "bounded answer" }]);
+
+    const canonicalView = store.mergeHistory("s1", canonical);
+    store.schedulePersistedPage("s1", preview);
+    scheduler.flush();
+
+    expect(cache.writes).toEqual([{ sessionId: "s1", page: preview }]);
+    expect(store.rawHistoryPage("s1")).toEqual(canonical);
+    expect(store.cachedView("s1")).toBe(canonicalView);
   });
 
   it("runs deferred persistence from a timer after an animation frame", () => {
@@ -241,6 +342,39 @@ describe("ChatTranscriptStore", () => {
     expect(expandedA.messagePageEnd).toBe(4);
     expect(store.cachedView("b")).toBe(viewB);
     expect(store.cachedView("b").messages).toBe(viewB.messages);
+  });
+
+  it("drops an expanded hot entry before a bounded warm open", () => {
+    const store = new ChatTranscriptStore(new MemoryChatHistoryCache());
+    store.mergeHistory("s1", page(0, 30, Array.from({ length: 30 }, (_, index) => ({ role: "assistant", content: `expanded ${String(index)}` }))));
+
+    expect(store.boundedCachedView("s1", 25)).toBeUndefined();
+    expect(store.rawHistoryPage("s1")).toBeUndefined();
+  });
+
+  it("falls back to a bounded persisted preview after dropping expanded hot history", () => {
+    const cache = new MemoryChatHistoryCache();
+    const preview = page(29, 30, [{ role: "assistant", content: "bounded preview" }]);
+    cache.pages.set("s1", preview);
+    const store = new ChatTranscriptStore(cache);
+    store.mergeHistory("s1", page(0, 30, Array.from({ length: 30 }, (_, index) => ({ role: "assistant", content: `expanded ${String(index)}` }))));
+
+    expect(store.boundedCachedView("s1", 25)).toEqual({
+      messages: [textMessage("assistant", "bounded preview")],
+      messagePageStart: 29,
+      messagePageEnd: 30,
+      messagePageTotal: 30,
+    });
+    expect(cache.removals).toEqual([]);
+  });
+
+  it("rejects and removes an oversized persisted cache before normalization", () => {
+    const cache = new MemoryChatHistoryCache();
+    cache.pages.set("s1", page(0, 30, Array.from({ length: 30 }, (_, index) => ({ role: "assistant", content: `legacy ${String(index)}` }))));
+    const store = new ChatTranscriptStore(cache);
+
+    expect(store.boundedCachedView("s1", 25)).toBeUndefined();
+    expect(cache.removals).toEqual(["s1"]);
   });
 
   it("hydrates a visible transcript from cached raw history", () => {

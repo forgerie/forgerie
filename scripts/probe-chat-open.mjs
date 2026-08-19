@@ -22,7 +22,7 @@ const LONG_TASK_WARNING_MS = 50;
 const SHELL_BUDGET_MS = 100;
 
 function usage() {
-  return `Usage: scripts/probe-chat-open.mjs [options]\n\nDrives real inbox row activation in Chromium, reads Forgerie's User Timing measures,\nobserves browser long tasks, checks for old-transcript flash, and captures Fold 8\nposture screenshots. Shell, editable composer, accepted Send, or first-readable\ntranscript over 100 ms fail. Long tasks over 50 ms are diagnostic warnings only.\n\nOptions:\n  --url URL                    Forgerie URL (default: http://127.0.0.1:8504/)\n  --shots DIR                  Screenshot output dir (default: /tmp/forgerie-chat-open-probe)\n  --chrome-bin PATH            Chromium binary override\n  --shell-budget-ms N          Failing usable-chat milestone budget (default: 100)\n  --long-task-warning-ms N     Diagnostic long-task threshold (default: 50)\n  --settle-ms N                Page-load settle time (default: 2500)\n  --timeout-ms N               Milestone wait timeout (default: 20000)\n  --hydration-delay-ms N       Fetch delay used for visible opening/cached states (default: 250)\n  --same-session-id ID         Same-workspace target session id\n  --same-cwd CWD               Same-workspace target cwd\n  --previous-session-id ID     Source session id used before same/cross activations\n  --previous-cwd CWD           Source session cwd\n  --cross-session-id ID        Cross-workspace target session id\n  --cross-cwd CWD              Cross-workspace target cwd\n  --large-session-id ID        Large-transcript target session id\n  --large-cwd CWD              Large-transcript target cwd\n  --skip-shots                 Do not write screenshots\n  --help                       Show this help\n`;
+  return `Usage: scripts/probe-chat-open.mjs [options]\n\nDrives real inbox row activation in Chromium, reads Forgerie's User Timing measures,\nobserves browser long tasks, checks for old-transcript flash, and captures Fold 8\nposture screenshots. Shell, editable composer, accepted Send, or first-readable\ntranscript over 100 ms fail. Long tasks over 50 ms are diagnostic warnings only.\n\nOptions:\n  --url URL                    Forgerie URL (default: http://127.0.0.1:8504/)\n  --shots DIR                  Screenshot output dir (default: /tmp/forgerie-chat-open-probe)\n  --chrome-bin PATH            Chromium binary override\n  --shell-budget-ms N          Failing usable-chat milestone budget (default: 100)\n  --long-task-warning-ms N     Diagnostic long-task threshold (default: 50)\n  --settle-ms N                Page-load settle time (default: 2500)\n  --timeout-ms N               Milestone wait timeout (default: 20000)\n  --hydration-delay-ms N       Fetch delay used for visible opening/cached states (default: 250)\n  --color-scheme MODE          Emulate light or dark browser color scheme\n  --same-session-id ID         Same-workspace target session id\n  --same-cwd CWD               Same-workspace target cwd\n  --previous-session-id ID     Source session id used before same/cross activations\n  --previous-cwd CWD           Source session cwd\n  --cross-session-id ID        Cross-workspace target session id\n  --cross-cwd CWD              Cross-workspace target cwd\n  --large-session-id ID        Large-transcript target session id\n  --large-cwd CWD              Large-transcript target cwd\n  --skip-shots                 Do not write screenshots\n  --help                       Show this help\n`;
 }
 
 async function main() {
@@ -89,6 +89,11 @@ async function probePosture({ args, debugPort, posture, representatives }) {
       deviceScaleFactor: 1,
       mobile: true,
     });
+    if (args.colorScheme !== undefined) {
+      await cdp.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-color-scheme", value: args.colorScheme }],
+      });
+    }
     const loaded = cdp.waitForEvent("Page.loadEventFired", args.timeoutMs).catch(() => undefined);
     await cdp.send("Page.navigate", { url: args.url });
     await loaded;
@@ -735,7 +740,7 @@ async function ensureHistoryCache(cdp, ref, args) {
 }
 
 export function historyCacheKey(ref) {
-  return `pi-web:chat-history:v2:${ref.machineId ?? "local"}:${ref.sessionId ?? ref.id}`;
+  return `pi-web:chat-history:v3:${ref.machineId ?? "local"}:${ref.sessionId ?? ref.id}`;
 }
 
 async function representativeSessions(args) {
@@ -802,7 +807,7 @@ async function fetchJson(url) {
   return await response.json();
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const parsed = {
     url: "http://127.0.0.1:8504/",
     shots: "/tmp/forgerie-chat-open-probe",
@@ -825,6 +830,7 @@ function parseArgs(argv) {
     else if (arg === "--settle-ms") parsed.settleMs = numberArg(argv, ++i, arg);
     else if (arg === "--timeout-ms") parsed.timeoutMs = numberArg(argv, ++i, arg);
     else if (arg === "--hydration-delay-ms") parsed.hydrationDelayMs = numberArg(argv, ++i, arg);
+    else if (arg === "--color-scheme") parsed.colorScheme = colorSchemeArg(argv, ++i, arg);
     else if (arg === "--same-session-id") parsed.sameSessionId = requireArg(argv, ++i, arg);
     else if (arg === "--same-cwd") parsed.sameCwd = requireArg(argv, ++i, arg);
     else if (arg === "--previous-session-id") parsed.previousSessionId = requireArg(argv, ++i, arg);
@@ -848,6 +854,12 @@ function requireArg(argv, index, name) {
 function numberArg(argv, index, name) {
   const value = Number(requireArg(argv, index, name));
   if (!Number.isFinite(value) || value < 0) fail(`${name} requires a non-negative number.`);
+  return value;
+}
+
+function colorSchemeArg(argv, index, name) {
+  const value = requireArg(argv, index, name);
+  if (value !== "light" && value !== "dark") fail(`${name} requires light or dark.`);
   return value;
 }
 

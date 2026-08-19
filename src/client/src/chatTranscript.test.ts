@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, type AskUserOutcome } from "../../shared/apiTypes";
 import { groupChatMessages } from "./chatGroups";
 import { normalizeMessages, textMessage } from "./chatMessages";
-import { applyTranscriptEvent, seedStreamingPartial } from "./chatTranscript";
+import { applyTranscriptEvent, reconcileStreamingPartial, seedStreamingPartial } from "./chatTranscript";
 import type { ChatLine } from "./components/shared";
 
 const askUserOutcome: AskUserOutcome = {
@@ -559,6 +559,49 @@ describe("applyTranscriptEvent", () => {
     const messages = [textMessage("user", "question")];
     expect(seedStreamingPartial(messages, null)).toBe(messages);
     expect(seedStreamingPartial(messages, undefined)).toBe(messages);
+  });
+
+  it("replaces the current turn with an authoritative streaming partial", () => {
+    const completedTool: ChatLine = {
+      role: "tool",
+      parts: [{ type: "toolExecution", toolCallId: "tool-1", toolName: "read", summary: "src/app.ts", status: "success", resultText: "file" }],
+    };
+    expect(reconcileStreamingPartial([
+      textMessage("system", "history"),
+      textMessage("user", "question"),
+      textMessage("assistant", "earlier answer"),
+      completedTool,
+      textMessage("assistant", "partial"),
+    ], { role: "assistant", content: [{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "src/app.ts" } }, { type: "text", text: "partial newer" }] })).toEqual([
+      textMessage("system", "history"),
+      textMessage("user", "question"),
+      textMessage("assistant", "earlier answer"),
+      completedTool,
+      textMessage("assistant", "partial newer"),
+    ]);
+  });
+
+  it("does not duplicate an in-progress skill read when reconciling its partial", () => {
+    expect(reconcileStreamingPartial([
+      textMessage("user", "question"),
+      textMessage("assistant", "partial"),
+      { role: "skill", parts: [{ type: "skillRead", name: "testing", path: "/skills/testing/SKILL.md", toolCallId: "read-1" }] },
+    ], {
+      role: "assistant",
+      content: [
+        { type: "text", text: "partial newer" },
+        { type: "toolCall", id: "read-1", name: "read", arguments: { path: "/skills/testing/SKILL.md" } },
+      ],
+    })).toEqual([
+      textMessage("user", "question"),
+      {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "partial newer" },
+          { type: "skillRead", name: "testing", path: "/skills/testing/SKILL.md", toolCallId: "read-1" },
+        ],
+      },
+    ]);
   });
 
   it("seeds an in-flight assistant partial with text and thinking so live deltas append onto it", () => {

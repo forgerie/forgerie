@@ -40,6 +40,59 @@ export function seedStreamingPartial(messages: ChatLine[], partial: unknown): Ch
   return lines.length === 0 ? messages : [...messages, ...lines];
 }
 
+export function reconcileStreamingPartial(messages: ChatLine[], partial: unknown): ChatLine[] {
+  if (partial === null || partial === undefined) return messages;
+  const partialLines = normalizeMessages([partial]);
+  if (partialLines.length === 0) return messages;
+  let turnStart = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const role = messages[index]?.role;
+    if (role === "user" || role === "bash") {
+      turnStart = index;
+      break;
+    }
+  }
+  const turnLines = messages.slice(turnStart + 1);
+  const partialToolCallIds = new Set(partialLines.flatMap(toolCallIds));
+  let partialStart = matchingPartialStart(turnLines, partialToolCallIds);
+  if (partialStart === turnLines.length) {
+    while (partialStart > 0 && isInProgressPartialLine(turnLines[partialStart - 1])) partialStart -= 1;
+  } else {
+    while (partialStart > 0 && turnLines[partialStart - 1]?.role === "assistant") partialStart -= 1;
+  }
+  const completedLines = turnLines.slice(0, partialStart);
+  const completedToolCallIds = new Set(completedLines.flatMap(toolCallIds));
+  const reconciledPartial = partialLines.flatMap((line) => withoutToolCallIds(line, completedToolCallIds));
+  return [...messages.slice(0, turnStart + 1), ...completedLines, ...reconciledPartial];
+}
+
+function matchingPartialStart(lines: ChatLine[], partialToolCallIds: ReadonlySet<string>): number {
+  let start = lines.length;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const canBelongToPartial = line?.role === "skill" || isInProgressPartialLine(line);
+    if (canBelongToPartial && line !== undefined && toolCallIds(line).some((id) => partialToolCallIds.has(id))) start = Math.min(start, index);
+  }
+  return start;
+}
+
+function isInProgressPartialLine(line: ChatLine | undefined): boolean {
+  if (line?.role === "assistant") return true;
+  return line?.role === "tool" && line.parts.some((part) => part.type === "toolExecution" && (part.status === "pending" || part.status === "running"));
+}
+
+function toolCallIds(line: ChatLine): string[] {
+  return line.parts.flatMap((part) => {
+    if ((part.type === "toolExecution" || part.type === "skillRead") && part.toolCallId !== undefined) return [part.toolCallId];
+    return [];
+  });
+}
+
+function withoutToolCallIds(line: ChatLine, excluded: ReadonlySet<string>): ChatLine[] {
+  const parts = line.parts.filter((part) => !((part.type === "toolExecution" || part.type === "skillRead") && part.toolCallId !== undefined && excluded.has(part.toolCallId)));
+  return parts.length === 0 ? [] : [{ ...line, parts }];
+}
+
 export function applyTranscriptEvent(messages: ChatLine[], event: SessionUiEvent): ChatLine[] | undefined {
   if (event.type === "message.append") return appendNewMessage(messages, event.message);
   if (event.type === "assistant.delta") return appendText(messages, "assistant", event.text);

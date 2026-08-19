@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PendingExtensionDialog } from "../api";
+import type { PendingExtensionDialog, SessionStatus } from "../api";
 import { textMessage } from "../chatMessages";
 import { ChatScrollCoordinator } from "../chatScrollCoordinator";
 import { selectedChatFreshReadable, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget } from "../selectedChatLoad";
@@ -156,6 +156,31 @@ describe("ChatView session opening position", () => {
     expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
   });
 
+  it("keeps earlier-history loading disabled until current work finishes", async () => {
+    const view = await mountView();
+    const onLoadMore = vi.fn();
+    view.messages = [textMessage("assistant", "current")];
+    view.messageStart = 1;
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.hasMore = true;
+    view.onLoadMore = onLoadMore;
+    view.status = sessionStatus(true);
+    await view.updateComplete;
+
+    const button = requiredElement(view.shadowRoot?.querySelector<HTMLButtonElement>(".history-load-button"), "history load button");
+    expect(button.disabled).toBe(true);
+    expect(view.shadowRoot?.textContent).toContain("Earlier messages are available when current work finishes");
+    button.click();
+    expect(onLoadMore).not.toHaveBeenCalled();
+
+    view.status = sessionStatus(false);
+    await view.updateComplete;
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
   it("resets to the bottom when machine and cwd change under the same session id", async () => {
     const frames = installFrames();
     const localTarget = selectedChatTarget("local", session);
@@ -204,6 +229,29 @@ describe("ChatView session opening position", () => {
     expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
   });
 });
+
+async function mountView(): Promise<ChatView> {
+  const view = new ChatView();
+  view.sessionId = session.id;
+  view.selectedMachineId = "local";
+  view.sessionCwd = session.cwd;
+  document.body.append(view);
+  await view.updateComplete;
+  return view;
+}
+
+function sessionStatus(isStreaming: boolean): SessionStatus {
+  return {
+    sessionId: session.id,
+    isStreaming,
+    isCompacting: false,
+    isBashRunning: false,
+    pendingMessageCount: 0,
+    queuedMessages: [],
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
+  };
+}
 
 const session = { id: "session-unread", cwd: "/repo" };
 

@@ -38,7 +38,7 @@ import type { SessionInboxBridge } from "./sessionInboxController";
 import { sessionPathsEqual } from "../sessionPaths";
 import { TrailingRefreshCoordinator } from "./trailingRefreshCoordinator";
 
-const MESSAGE_PAGE_SIZE = 100;
+const MESSAGE_PAGE_SIZE = 25;
 
 export interface SessionEventSocket {
   connect(
@@ -212,6 +212,8 @@ export class SessionController {
   // in the committed history + seeded partial and must be dropped, so every event
   // applies exactly once. Reset whenever the selection changes.
   private streamWatermark: { sessionId: string; seq: number } | undefined;
+  private latestTranscriptSeq: { sessionId: string; seq: number } | undefined;
+  private transcriptRevision = 0;
   private pendingTranscriptEvents: SessionUiEvent[] = [];
   private pendingStatusBySession = new Map<string, SessionStatus>();
   private pendingActivityBySession = new Map<string, SessionActivity>();
@@ -259,6 +261,7 @@ export class SessionController {
     this.disposed = true;
     this.selectionSeq += 1;
     this.socket.close();
+    this.latestTranscriptSeq = undefined;
     this.clearPendingUpdates();
     for (const queue of this.readinessQueuedSends.values()) this.restoreReadinessQueueDraft(queue);
     this.readinessQueuedSends.clear();
@@ -272,6 +275,7 @@ export class SessionController {
     this.socket.close();
     this.notifications?.clearSelectedSession();
     this.streamWatermark = undefined;
+    this.latestTranscriptSeq = undefined;
     this.clearPendingUpdates();
     // Note: sendingPrompts is intentionally NOT cleared here. Deselecting a
     // session must not cancel the in-flight upload indicator of the session
@@ -471,14 +475,16 @@ export class SessionController {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     if (record?.recovery.stage !== "promptDeliveryAmbiguous" || record.session === undefined) return;
     const { machineId } = record.recovery.destination;
+    const transcriptRevision = this.transcriptRevision;
     try {
       const [page, status] = await Promise.all([
         this.api.messages(record.session, { limit: MESSAGE_PAGE_SIZE }, machineId),
         this.api.status(record.session, machineId),
       ]);
       if (this.sessionLaunchRecoveries.get(sessionId) !== record || !this.isSelectedSessionIdentity(sessionId, machineId)) return;
-      const history = this.transcripts.mergeHistory(machineSessionKey(machineId, sessionId), page);
-      this.setState(history);
+      const merge = await this.transcripts.mergeHistoryCooperatively(machineSessionKey(machineId, sessionId), page);
+      if (merge.kind === "superseded" || this.sessionLaunchRecoveries.get(sessionId) !== record || !this.isSelectedSessionIdentity(sessionId, machineId)) return;
+      if (transcriptRevision === this.transcriptRevision) this.setState(merge.view);
       this.applyStatus(status);
       if (await initialPromptRecoveryAccepted(page, record.queuedSends[0])) {
         const retainedQueuedSends = record.queuedSends.slice(1);
@@ -573,18 +579,18 @@ export class SessionController {
     }
     this.sessionSelection.rememberSession({ ...session, cwd: this.workspaceSelectionKey(session.cwd) });
     const seq = ++this.selectionSeq;
+    this.transcripts.cancelCooperativeMerges();
     this.socket.close();
     this.streamWatermark = undefined;
+    this.latestTranscriptSeq = undefined;
     this.clearPendingUpdates();
     const machineId = selectedMachineId(this.getState());
     this.notifications?.prepareSelectedSession(session, machineId);
     const transcriptKey = this.sessionCacheKey(session.id);
     const target = selectedChatTarget(machineId, session);
-    const cached = this.transcripts.cachedView(transcriptKey);
-    const hasCachedHistory = this.transcripts.rawHistoryPage(transcriptKey) !== undefined;
-    const previewPending = this.transcriptPreviewRequests.has(transcriptKey);
-    const showCachedImmediately = hasCachedHistory && !previewPending;
-    const openingView = showCachedImmediately ? cached : transcriptViewFromHistory(undefined);
+    const cached = this.transcripts.boundedCachedView(transcriptKey, MESSAGE_PAGE_SIZE);
+    const showCachedImmediately = cached !== undefined;
+    const openingView = cached ?? transcriptViewFromHistory(undefined);
     this.setState({
       selectedSession: session,
       selectedChatLoad: showCachedImmediately ? selectedChatCachedReadable(target) : selectedChatLoading(target),
@@ -603,8 +609,9 @@ export class SessionController {
       if (session.archived === true) {
         const page = await this.api.messages(session, { limit: MESSAGE_PAGE_SIZE }, selectedMachineId(this.getState()));
         if (seq !== this.selectionSeq || this.getState().selectedSession?.id !== session.id) return;
-        const history = this.transcripts.mergeHistory(transcriptKey, page);
-        this.setState({ ...history, selectedChatLoad: selectedChatReadOnly(target, "fresh"), isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] });
+        const merge = await this.transcripts.mergeHistoryCooperatively(transcriptKey, page);
+        if (merge.kind === "superseded" || seq !== this.selectionSeq || this.getState().selectedSession?.id !== session.id) return;
+        this.setState({ ...merge.view, selectedChatLoad: selectedChatReadOnly(target, "fresh"), isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] });
         this.transcripts.schedulePersist(transcriptKey);
         this.transcriptPreviewRequests.delete(transcriptKey);
         this.onSelectedSessionReady?.({ machineId, session });
@@ -664,21 +671,33 @@ export class SessionController {
   }
 
   async loadEarlierMessages() {
-    const state = this.getState();
+    let state = this.getState();
     const session = state.selectedSession;
     if (!session || state.isLoadingEarlierMessages || state.messagePageStart <= 0) return;
+    const machineId = selectedMachineId(state);
+    const key = machineSessionKey(machineId, session.id);
     this.setState({ isLoadingEarlierMessages: true });
     try {
-      const page = await this.api.messages(session, { before: state.messagePageStart, limit: MESSAGE_PAGE_SIZE }, selectedMachineId(this.getState()));
-      if (this.getState().selectedSession?.id !== session.id) return;
-      const key = this.sessionCacheKey(session.id);
-      const history = this.transcripts.mergeHistory(key, page);
-      this.setState(history);
-      this.transcripts.schedulePersist(key);
+      if (this.transcripts.rawHistoryPage(key) === undefined || this.transcripts.cachedView(key).messages !== state.messages) {
+        await this.refreshSelectedSession();
+        state = this.getState();
+        if (!this.isSelectedSessionReference(session, machineId)
+          || state.messagePageStart <= 0
+          || this.transcripts.rawHistoryPage(key) === undefined
+          || this.transcripts.cachedView(key).messages !== state.messages) return;
+        if (!state.isLoadingEarlierMessages) this.setState({ isLoadingEarlierMessages: true });
+      }
+      const transcriptRevision = this.transcriptRevision;
+      const page = await this.api.messages(session, { before: state.messagePageStart, limit: MESSAGE_PAGE_SIZE }, machineId);
+      if (!this.isSelectedSessionReference(session, machineId)) return;
+      const merge = await this.transcripts.mergeHistoryCooperatively(key, page);
+      if (merge.kind === "superseded" || !this.isSelectedSessionReference(session, machineId)) return;
+      if (transcriptRevision !== this.transcriptRevision) return;
+      this.setState(merge.view);
     } catch (error) {
-      this.setState({ error: String(error) });
+      if (this.isSelectedSessionReference(session, machineId)) this.setState({ error: String(error) });
     } finally {
-      if (this.getState().selectedSession?.id === session.id) this.setState({ isLoadingEarlierMessages: false });
+      if (this.isSelectedSessionReference(session, machineId)) this.setState({ isLoadingEarlierMessages: false });
     }
   }
 
@@ -1691,8 +1710,9 @@ export class SessionController {
       if (!this.isCurrentRefreshTarget(target)) return;
       this.flushPendingUpdates();
       const selectedTarget = selectedChatTarget(target.machineId, target.session);
+      const transcriptRevision = this.transcriptRevision;
+      this.transcripts.cancelCooperativeMerges();
       this.markSelectedChatRefreshing(selectedTarget);
-      const historyPromise = this.api.messages(target.session, { limit: MESSAGE_PAGE_SIZE }, target.machineId);
       const statusPromise = this.api.status(target.session, target.machineId);
       const streamSnapshotPromise = this.api.streamSnapshot(target.session, target.machineId);
       const previewRequest = this.transcriptPreviewRequests.get(key);
@@ -1703,14 +1723,19 @@ export class SessionController {
           this.setState({ ...preview, selectedChatLoad: selectedChatPreviewReadable(selectedTarget), isLoadingEarlierMessages: false });
         }).catch(() => undefined);
       }
+      const historyPromise = previewRequest === undefined
+        ? this.api.messages(target.session, { limit: MESSAGE_PAGE_SIZE }, target.machineId)
+        : Promise.race([previewRequest.catch(() => undefined), nextTask()]).then(() => this.api.messages(target.session, { limit: MESSAGE_PAGE_SIZE }, target.machineId));
       void this.notifications?.refreshSelectedSession(target.session, target.machineId).catch(() => undefined);
 
-      const historyViewPromise = historyPromise.then((page) => {
+      const historyViewPromise = historyPromise.then(async (page) => {
         if (!this.isCurrentRefreshTarget(target)) return undefined;
-        const history = this.transcripts.mergeHistory(key, page);
-        this.setState({ ...history, selectedChatLoad: selectedChatFreshReadable(selectedTarget), isLoadingEarlierMessages: false });
-        this.transcripts.schedulePersist(key);
-        return history;
+        const merge = await this.transcripts.mergeHistoryCooperatively(key, page);
+        if (merge.kind === "superseded" || !this.isCurrentRefreshTarget(target)) return undefined;
+        this.flushPendingUpdates();
+        const history = transcriptRevision === this.transcriptRevision ? merge.view : this.currentTranscriptView();
+        this.setState({ ...(history === merge.view ? merge.view : {}), selectedChatLoad: selectedChatFreshReadable(selectedTarget), isLoadingEarlierMessages: false });
+        return { history, transcriptRevision, canonicalPage: page };
       });
       const statusResultPromise = statusPromise.then(
         (status) => ({ ok: true, status }) as const,
@@ -1721,9 +1746,10 @@ export class SessionController {
         (error: unknown) => ({ ok: false, error }) as const,
       );
 
-      const history = await historyViewPromise;
-      if (history === undefined || !this.isCurrentRefreshTarget(target)) return;
+      const historyResult = await historyViewPromise;
+      if (historyResult === undefined || !this.isCurrentRefreshTarget(target)) return;
       const [statusResult, streamSnapshotResult] = await Promise.all([statusResultPromise, streamSnapshotResultPromise]);
+      this.flushPendingUpdates();
       if (!streamSnapshotResult.ok) throw streamSnapshotResult.error;
       const { streamSnapshot } = streamSnapshotResult;
       // Seed the in-flight partial assistant message on top of committed history
@@ -1732,8 +1758,18 @@ export class SessionController {
       // `applyEvent`; later events (`seq > watermark`) stream in on top. The
       // partial is seeded into the in-memory transcript only, never the raw
       // history cache, so it never persists.
-      const messages = this.transcripts.seedStreamingPartial(history.messages, streamSnapshot.partial);
-      this.streamWatermark = { sessionId: target.session.id, seq: streamSnapshot.seq };
+      const transcriptStayedCurrent = historyResult.transcriptRevision === this.transcriptRevision;
+      const history = transcriptStayedCurrent ? historyResult.history : this.currentTranscriptView();
+      const latestTranscriptSeq = this.latestTranscriptSeq?.sessionId === target.session.id ? this.latestTranscriptSeq.seq : 0;
+      const snapshotCoversLatestEvent = streamSnapshot.seq >= latestTranscriptSeq;
+      const messages = transcriptStayedCurrent
+        ? this.transcripts.seedStreamingPartial(history.messages, streamSnapshot.partial)
+        : snapshotCoversLatestEvent
+          ? this.transcripts.reconcileStreamingPartial(history.messages, streamSnapshot.partial)
+          : history.messages;
+      const watermarkSeq = Math.max(streamSnapshot.seq, latestTranscriptSeq);
+      this.streamWatermark = { sessionId: target.session.id, seq: watermarkSeq };
+      this.latestTranscriptSeq = { sessionId: target.session.id, seq: watermarkSeq };
       if (!statusResult.ok) {
         if (messages !== history.messages) this.setState({ ...history, messages });
         throw statusResult.error;
@@ -1747,8 +1783,24 @@ export class SessionController {
         activity: this.getState().sessionActivities[target.session.id],
       });
       this.applyStatus(status);
+      if (previewRequest === undefined) {
+        const rawHistory = this.transcripts.rawHistoryPage(key);
+        if (transcriptStayedCurrent && rawHistory !== undefined && rawHistory.messages.length <= MESSAGE_PAGE_SIZE) this.transcripts.schedulePersist(key);
+        this.transcriptPreviewRequests.delete(key);
+      } else {
+        const persistenceRevision = this.transcriptRevision;
+        void previewRequest.then((previewPage) => {
+          if (this.transcriptPreviewRequests.get(key) !== previewRequest) return;
+          this.transcriptPreviewRequests.delete(key);
+          const previewMatchesCanonical = previewPage.start === historyResult.canonicalPage.start && previewPage.total === historyResult.canonicalPage.total;
+          if (previewMatchesCanonical && transcriptStayedCurrent && persistenceRevision === this.transcriptRevision && this.isCurrentRefreshTarget(target)) this.transcripts.schedulePersistedPage(key, previewPage);
+        }).catch(() => {
+          if (this.transcriptPreviewRequests.get(key) !== previewRequest) return;
+          this.transcriptPreviewRequests.delete(key);
+          if (transcriptStayedCurrent && persistenceRevision === this.transcriptRevision && this.isCurrentRefreshTarget(target)) this.transcripts.schedulePersist(key);
+        });
+      }
       await this.flushReadinessSends(target.session, target.machineId);
-      this.transcriptPreviewRequests.delete(key);
     });
   }
 
@@ -1780,12 +1832,29 @@ export class SessionController {
     return selectionSeq === this.selectionSeq && this.isSelectedSessionIdentity(sessionId, machineId);
   }
 
-  private isSelectedSessionIdentity(sessionId: string, machineId: string): boolean {
+  private currentTranscriptView(): ChatTranscriptView {
+    const state = this.getState();
+    return {
+      messages: state.messages,
+      messagePageStart: state.messagePageStart,
+      messagePageEnd: state.messagePageEnd,
+      messagePageTotal: state.messagePageTotal,
+    };
+  }
+
+  private isSelectedSessionReference(session: Pick<SessionInfo, "id" | "cwd">, machineId: string): boolean {
     if (this.disposed) return false;
     const state = this.getState();
-    const selected = state.selectedSession;
     return selectedMachineId(state) === machineId
-      && selected?.id === sessionId
+      && state.selectedSession?.id === session.id
+      && state.selectedSession.cwd === session.cwd;
+  }
+
+  private isSelectedSessionIdentity(sessionId: string, machineId: string): boolean {
+    const selected = this.getState().selectedSession;
+    return selected !== undefined
+      && this.isSelectedSessionReference(selected, machineId)
+      && selected.id === sessionId
       && selected.archived !== true
       && !isClientPendingStartSessionInfo(selected);
   }
@@ -1928,6 +1997,7 @@ export class SessionController {
     this.socket.close();
     this.notifications?.clearSelectedSession();
     this.streamWatermark = undefined;
+    this.latestTranscriptSeq = undefined;
     this.clearPendingUpdates();
     const state = this.getState();
     const pendingStart = this.pendingSessionStarts.get(session.id);
@@ -2288,6 +2358,7 @@ export class SessionController {
     // history + partial). Everything past the watermark applies exactly once,
     // so live content streams directly on top of the seeded partial.
     if (!ignoreStreamWatermark && this.isStreamEventBelowWatermark(event)) return;
+    this.recordTranscriptSequence(event);
 
     // Status and activity arrive once per token (the server republishes them on
     // every transcript event). Buffer them alongside high-frequency transcript
@@ -2329,6 +2400,7 @@ export class SessionController {
     }
     const transcript = this.transcripts.applyLiveEvent(this.getState().messages, event);
     if (transcript) {
+      this.transcriptRevision += 1;
       this.setState({ messages: transcript });
     } else if (event.type === "session.name") {
       this.applySessionName(event.sessionId, event.name);
@@ -2486,7 +2558,10 @@ export class SessionController {
       this.pendingTranscriptEvents = [];
       let messages = this.getState().messages;
       for (const event of events) messages = this.transcripts.applyLiveEvent(messages, event) ?? messages;
-      if (messages !== this.getState().messages) this.setState({ messages });
+      if (messages !== this.getState().messages) {
+        this.transcriptRevision += 1;
+        this.setState({ messages });
+      }
     }
     if (this.pendingActivityBySession.size > 0) {
       const activities = Array.from(this.pendingActivityBySession.values());
@@ -2516,6 +2591,15 @@ export class SessionController {
   // (`seq <= watermark.seq`); such events are already reflected in the committed
   // history + seeded partial and must be dropped. Events with no `seq` (which
   // should not occur on the per-session socket) are never dropped.
+  private recordTranscriptSequence(event: SessionUiEvent): void {
+    if (!isTranscriptContentEvent(event) || event.seq === undefined) return;
+    const sessionId = this.getState().selectedSession?.id;
+    if (sessionId === undefined) return;
+    const current = this.latestTranscriptSeq;
+    if (current?.sessionId === sessionId && current.seq >= event.seq) return;
+    this.latestTranscriptSeq = { sessionId, seq: event.seq };
+  }
+
   private isStreamEventBelowWatermark(event: SessionUiEvent): boolean {
     const watermark = this.streamWatermark;
     if (watermark === undefined || watermark.sessionId !== this.getState().selectedSession?.id) return false;
@@ -2920,6 +3004,10 @@ function isTranscriptContentEvent(event: SessionUiEvent): boolean {
 
 function isHighFrequencyTranscriptEvent(event: SessionUiEvent): boolean {
   return event.type === "assistant.delta" || event.type === "assistant.thinking.delta" || event.type === "shell.chunk";
+}
+
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => { globalThis.setTimeout(resolve, 0); });
 }
 
 function isSessionNotFoundError(error: unknown): boolean {

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { initialAppState } from "../appState";
-import { ChatTranscriptStore } from "../chatTranscriptStore";
+import { ChatTranscriptStore, type ChatHistoryCacheAdapter } from "../chatTranscriptStore";
+import { ManualPersistScheduler } from "../chatTranscriptStore.testSupport";
 import { textMessage } from "../chatMessages";
+import { ControllableChatNormalizationScheduler } from "../chatMessages.testSupport";
 import { SessionController } from "./sessionController";
-import { defaultApi, deferred, EmitSocket, FakeSocket, oldSession, replacementSession, sessionLookupId, status, workspace, type AppState, type MessagePage, type SessionStatus, type SessionStreamSnapshot } from "./sessionController.testSupport";
+import { defaultApi, deferred, EmitSocket, FakeSocket, oldSession, replacementSession, runPendingAnimationFrames, sessionLookupId, status, workspace, type AppState, type MessagePage, type SessionStatus, type SessionStreamSnapshot } from "./sessionController.testSupport";
 
 function page(text: string, total: number): MessagePage {
   return { messages: [{ role: "assistant", content: text }], start: 0, total };
@@ -36,10 +38,9 @@ describe("SessionController selected-session refresh", () => {
     expect(state.selectedChatLoad).toMatchObject({ kind: "loading-without-content", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
 
     messages.resolve(page("history first", 1));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "history first" }] }]);
+    await vi.waitFor(() => {
+      expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "history first" }] }]);
+    });
     expect(state.selectedChatLoad).toMatchObject({ kind: "fresh-readable", target: { machineId: "local", sessionId: oldSession.id, cwd: oldSession.cwd } });
     expect(ready).toEqual([]);
 
@@ -56,12 +57,21 @@ describe("SessionController selected-session refresh", () => {
     const canonical = deferred<MessagePage>();
     const selectedStatus = deferred<SessionStatus>();
     const snapshot = deferred<SessionStreamSnapshot>();
-    const requests: { preview?: boolean }[] = [];
+    const requests: { preview?: boolean; limit?: number }[] = [];
+    const persisted: MessagePage[] = [];
+    const persistScheduler = new ManualPersistScheduler();
+    const cache: ChatHistoryCacheAdapter = {
+      read: () => undefined,
+      write: (_sessionId, page) => { persisted.push(page); },
+    };
     let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
     const api: typeof defaultApi = {
       ...defaultApi,
       messages: (_session, options) => {
-        requests.push({ ...(options?.preview === undefined ? {} : { preview: options.preview }) });
+        requests.push({
+          ...(options?.preview === undefined ? {} : { preview: options.preview }),
+          ...(options?.limit === undefined ? {} : { limit: options.limit }),
+        });
         return options?.preview === true ? preview.promise : canonical.promise;
       },
       status: () => selectedStatus.promise,
@@ -73,26 +83,227 @@ describe("SessionController selected-session refresh", () => {
       (patch) => { state = { ...state, ...patch }; },
       () => undefined,
       undefined,
-      { api, socket: new FakeSocket() },
+      { api, socket: new FakeSocket(), transcripts: new ChatTranscriptStore(cache, { scheduler: persistScheduler }) },
     );
 
     const prefetched = controller.previewSession(oldSession, "local");
     const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    await Promise.resolve();
+    expect(requests).toEqual([{ preview: true, limit: 25 }]);
+
     preview.resolve(page("readable preview", 1));
     await prefetched;
     await Promise.resolve();
 
     expect(state.messages).toEqual([textMessage("assistant", "readable preview")]);
     expect(state.selectedChatLoad.kind).toBe("preview-readable");
-    expect(requests).toEqual([{ preview: true }, {}]);
+    await vi.waitFor(() => { expect(requests).toEqual([{ preview: true, limit: 25 }, { limit: 25 }]); });
 
     canonical.resolve(page("canonical history", 1));
     selectedStatus.resolve(status(oldSession.id));
     snapshot.resolve({ seq: 0, partial: null });
     await selecting;
+    persistScheduler.flush();
 
     expect(state.messages).toEqual([textMessage("assistant", "canonical history")]);
     expect(state.selectedChatLoad.kind).toBe("live-ready");
+    expect(persisted).toEqual([page("readable preview", 1)]);
+  });
+
+  it("does not persist a delayed preview from an older canonical range", async () => {
+    const preview = deferred<MessagePage>();
+    const persisted: MessagePage[] = [];
+    const persistScheduler = new ManualPersistScheduler();
+    const cache: ChatHistoryCacheAdapter = {
+      read: () => undefined,
+      write: (_sessionId, page) => { persisted.push(page); },
+    };
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, options) => options?.preview === true
+        ? preview.promise
+        : Promise.resolve({ messages: [{ role: "assistant", content: "new canonical" }], start: 1, total: 2 }),
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), transcripts: new ChatTranscriptStore(cache, { scheduler: persistScheduler }) },
+    );
+
+    const previewing = controller.previewSession(oldSession, "local");
+    await controller.selectSession(oldSession, { updateUrl: false });
+    preview.resolve({ messages: [{ role: "assistant", content: "old preview" }], start: 0, total: 1 });
+    await previewing;
+    await Promise.resolve();
+    persistScheduler.flush();
+
+    expect(persisted).toEqual([]);
+  });
+
+  it("keeps the bounded preview readable while canonical history normalization yields", async () => {
+    const preview = deferred<MessagePage>();
+    const canonical = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    const normalizationScheduler = new ControllableChatNormalizationScheduler({ pauseFirstYield: true });
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, options) => options?.preview === true ? preview.promise : canonical.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      {
+        api,
+        socket: new FakeSocket(),
+        transcripts: new ChatTranscriptStore(undefined, { normalization: { budgetMs: 5, scheduler: normalizationScheduler } }),
+      },
+    );
+
+    const prefetched = controller.previewSession(oldSession, "local");
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+    preview.resolve(page("readable preview", 4));
+    await prefetched;
+    await Promise.resolve();
+
+    canonical.resolve({
+      messages: Array.from({ length: 4 }, (_, index) => ({ role: "assistant", content: `canonical ${String(index)}` })),
+      start: 0,
+      total: 4,
+    });
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.resolve({ seq: 0, partial: null });
+    await vi.waitFor(() => { expect(normalizationScheduler.yieldCount).toBe(1); });
+    expect(state.messages).toEqual([textMessage("assistant", "readable preview")]);
+    expect(state.selectedChatLoad.kind).toBe("preview-readable");
+
+    normalizationScheduler.release();
+    await selecting;
+
+    expect(state.messages).toEqual(Array.from({ length: 4 }, (_, index) => textMessage("assistant", `canonical ${String(index)}`)));
+    expect(state.selectedChatLoad.kind).toBe("live-ready");
+  });
+
+  it("does not overwrite live transcript events when a refresh normalization yields", async () => {
+    const refreshPage = deferred<MessagePage>();
+    const normalizationScheduler = new ControllableChatNormalizationScheduler();
+    const socket = new EmitSocket();
+    let messageRequestCount = 0;
+    let snapshotRequestCount = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => {
+        messageRequestCount += 1;
+        return messageRequestCount === 1 ? Promise.resolve(page("base", 1)) : refreshPage.promise;
+      },
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => {
+        snapshotRequestCount += 1;
+        return Promise.resolve(snapshotRequestCount === 1
+          ? { seq: 0, partial: null }
+          : { seq: 2, partial: { role: "assistant", content: "base live newer" } });
+      },
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      {
+        api,
+        socket,
+        transcripts: new ChatTranscriptStore(undefined, { normalization: { budgetMs: 5, scheduler: normalizationScheduler } }),
+      },
+    );
+    await controller.selectSession(oldSession, { updateUrl: false });
+
+    const priorYieldCount = normalizationScheduler.yieldCount;
+    normalizationScheduler.pauseNextYield();
+    const refreshing = controller.refreshSelectedSession();
+    refreshPage.resolve({
+      messages: [{ role: "assistant", content: "base" }, { role: "assistant", content: "fresh history" }],
+      start: 0,
+      total: 2,
+    });
+    await vi.waitFor(() => { expect(normalizationScheduler.yieldCount).toBeGreaterThan(priorYieldCount); });
+
+    socket.emit({ type: "assistant.delta", text: " live", seq: 1 });
+    runPendingAnimationFrames();
+    expect(state.messages).toEqual([textMessage("assistant", "base live")]);
+
+    normalizationScheduler.release();
+    await refreshing;
+
+    expect(state.messages).toEqual([textMessage("assistant", "base live newer")]);
+    socket.emit({ type: "assistant.delta", text: " newer", seq: 2 });
+    runPendingAnimationFrames();
+    expect(state.messages).toEqual([textMessage("assistant", "base live newer")]);
+  });
+
+  it("does not replace a newer live event with an older stream snapshot", async () => {
+    const refreshPage = deferred<MessagePage>();
+    const normalizationScheduler = new ControllableChatNormalizationScheduler();
+    const socket = new EmitSocket();
+    let messageRequestCount = 0;
+    let snapshotRequestCount = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: () => {
+        messageRequestCount += 1;
+        return messageRequestCount === 1 ? Promise.resolve(page("base", 1)) : refreshPage.promise;
+      },
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => {
+        snapshotRequestCount += 1;
+        return Promise.resolve(snapshotRequestCount === 1
+          ? { seq: 0, partial: null }
+          : { seq: 2, partial: { role: "assistant", content: "base older" } });
+      },
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      {
+        api,
+        socket,
+        transcripts: new ChatTranscriptStore(undefined, { normalization: { budgetMs: 5, scheduler: normalizationScheduler } }),
+      },
+    );
+    await controller.selectSession(oldSession, { updateUrl: false });
+
+    const priorYieldCount = normalizationScheduler.yieldCount;
+    normalizationScheduler.pauseNextYield();
+    const refreshing = controller.refreshSelectedSession();
+    refreshPage.resolve({ messages: [{ role: "assistant", content: "base" }, { role: "assistant", content: "fresh" }], start: 0, total: 2 });
+    await vi.waitFor(() => { expect(normalizationScheduler.yieldCount).toBeGreaterThan(priorYieldCount); });
+
+    socket.emit({ type: "assistant.delta", text: " newest", seq: 3 });
+    runPendingAnimationFrames();
+    normalizationScheduler.release();
+    await refreshing;
+
+    expect(state.messages).toEqual([textMessage("assistant", "base newest")]);
+    socket.emit({ type: "assistant.delta", text: " older", seq: 2 });
+    runPendingAnimationFrames();
+    expect(state.messages).toEqual([textMessage("assistant", "base newest")]);
   });
 
   it("does not let a stalled preview block canonical readiness or queued delivery", async () => {
@@ -124,7 +335,7 @@ describe("SessionController selected-session refresh", () => {
     expect(delivered).toEqual(["deliver without preview"]);
   });
 
-  it("does not synchronously render an oversized warm cache ahead of its bounded preview", async () => {
+  it("shows a bounded warm cache immediately while its preview refresh runs", async () => {
     const preview = deferred<MessagePage>();
     const canonical = deferred<MessagePage>();
     const selectedStatus = deferred<SessionStatus>();
@@ -139,7 +350,51 @@ describe("SessionController selected-session refresh", () => {
     };
     const transcripts = new ChatTranscriptStore();
     transcripts.mergeHistory("local:old-session", {
-      messages: Array.from({ length: 30 }, (_, index) => ({ role: "assistant", content: `cached ${String(index)}` })),
+      messages: Array.from({ length: 4 }, (_, index) => ({ role: "assistant", content: `cached ${String(index)}` })),
+      start: 26,
+      total: 30,
+    });
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), transcripts },
+    );
+
+    const prefetched = controller.previewSession(oldSession, "local");
+    const selecting = controller.selectSession(oldSession, { updateUrl: false });
+
+    expect(state.messages).toEqual(Array.from({ length: 4 }, (_, index) => textMessage("assistant", `cached ${String(index)}`)));
+    expect(state.selectedChatLoad.kind).toBe("cached-readable");
+
+    preview.resolve(page("bounded preview", 30));
+    await prefetched;
+    await Promise.resolve();
+    expect(state.messages).toEqual(Array.from({ length: 4 }, (_, index) => textMessage("assistant", `cached ${String(index)}`)));
+
+    canonical.resolve(page("canonical", 30));
+    selectedStatus.resolve(status(oldSession.id));
+    snapshot.resolve({ seq: 0, partial: null });
+    await selecting;
+  });
+
+  it("does not render an expanded hot transcript before its bounded preview", async () => {
+    const preview = deferred<MessagePage>();
+    const canonical = deferred<MessagePage>();
+    const selectedStatus = deferred<SessionStatus>();
+    const snapshot = deferred<SessionStreamSnapshot>();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, options) => options?.preview === true ? preview.promise : canonical.promise,
+      status: () => selectedStatus.promise,
+      streamSnapshot: () => snapshot.promise,
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const transcripts = new ChatTranscriptStore();
+    transcripts.mergeHistory("local:old-session", {
+      messages: Array.from({ length: 30 }, (_, index) => ({ role: "assistant", content: `expanded ${String(index)}` })),
       start: 0,
       total: 30,
     });
@@ -159,13 +414,96 @@ describe("SessionController selected-session refresh", () => {
 
     preview.resolve(page("bounded preview", 30));
     await prefetched;
-    await Promise.resolve();
-    expect(state.messages).toEqual([textMessage("assistant", "bounded preview")]);
-
     canonical.resolve(page("canonical", 30));
     selectedStatus.resolve(status(oldSession.id));
     snapshot.resolve({ seq: 0, partial: null });
     await selecting;
+  });
+
+  it("does not apply an earlier page after the selected machine changes", async () => {
+    const earlier = deferred<MessagePage>();
+    const remoteA = { id: "remote-a", name: "Remote A", kind: "remote" as const, createdAt: "now", updatedAt: "now" };
+    const remoteB = { id: "remote-b", name: "Remote B", kind: "remote" as const, createdAt: "now", updatedAt: "now" };
+    const calls: string[] = [];
+    const transcripts = new ChatTranscriptStore();
+    const transcript = transcripts.mergeHistory("remote-a:old-session", {
+      messages: [{ role: "assistant", content: "current machine transcript" }],
+      start: 2,
+      total: 3,
+    });
+    let state: AppState = {
+      ...initialAppState(),
+      machines: [remoteA, remoteB],
+      selectedMachine: remoteA,
+      selectedWorkspace: workspace,
+      selectedSession: oldSession,
+      ...transcript,
+    };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, _options, machineId) => {
+        calls.push(machineId ?? "local");
+        return earlier.promise;
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), transcripts },
+    );
+
+    const loading = controller.loadEarlierMessages();
+    state = { ...state, selectedMachine: remoteB, isLoadingEarlierMessages: false };
+    earlier.resolve({ messages: [{ role: "assistant", content: "remote A history" }], start: 1, total: 3 });
+    await loading;
+
+    expect(calls).toEqual(["remote-a"]);
+    expect(state.messages).toEqual([textMessage("assistant", "current machine transcript")]);
+  });
+
+  it("refreshes diverged live state before loading earlier history", async () => {
+    const transcripts = new ChatTranscriptStore();
+    transcripts.mergeHistory("local:old-session", {
+      messages: [{ role: "assistant", content: "base" }],
+      start: 2,
+      total: 3,
+    });
+    const requests: { before?: number }[] = [];
+    let state: AppState = {
+      ...initialAppState(),
+      selectedWorkspace: workspace,
+      selectedSession: oldSession,
+      messages: [textMessage("assistant", "base live")],
+      messagePageStart: 2,
+      messagePageEnd: 3,
+      messagePageTotal: 3,
+    };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      messages: (_session, options) => {
+        requests.push({ ...(options?.before === undefined ? {} : { before: options.before }) });
+        return Promise.resolve(options?.before === undefined
+          ? { messages: [{ role: "assistant", content: "base live" }], start: 2, total: 3 }
+          : { messages: [{ role: "assistant", content: "older" }], start: 1, total: 3 });
+      },
+      status: () => Promise.resolve(status(oldSession.id)),
+      streamSnapshot: () => Promise.resolve({ seq: 0, partial: null }),
+      thinkingLevels: () => Promise.resolve({ levels: [] }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket(), transcripts },
+    );
+
+    await controller.loadEarlierMessages();
+
+    expect(requests).toEqual([{}, { before: 2 }]);
+    expect(state.messages).toEqual([textMessage("assistant", "older"), textMessage("assistant", "base live")]);
   });
 
   it("keeps an opening send owned by its non-selected target until that target is live", async () => {
