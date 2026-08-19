@@ -10,9 +10,8 @@ import "./ModalSurface";
 
 const EMPTY_TREE: SessionTreeSnapshot = { nodes: [], activeLeafId: null, activePathIds: [] };
 const MAX_SESSION_TREE_VISUAL_DEPTH = 8;
-type NavigatorStep = "tree" | "action";
 type NavigatorOperation = "continue" | "fork";
-type PendingFocus = "tree" | "primary" | "custom";
+type PendingFocus = "tree" | "custom";
 
 export type SessionTreeKindTone = "user" | "assistant" | "tool" | "shell" | "context" | "metadata";
 
@@ -51,7 +50,6 @@ export class SessionTreeNavigator extends LitElement {
   @state() private filter: SessionTreeFilterMode = SESSION_TREE_DEFAULT_FILTER;
   @state() private search = "";
   @state() private copyNotice = "";
-  @state() private step: NavigatorStep = "tree";
   @state() private summarize = false;
   @state() private customInstructions = "";
   @state() private inFlightOperation: NavigatorOperation | undefined;
@@ -80,8 +78,7 @@ export class SessionTreeNavigator extends LitElement {
     if (pendingFocus === undefined) return;
     this.pendingFocus = undefined;
     if (pendingFocus === "tree") this.focusSelectedTreeItem();
-    else if (pendingFocus === "custom") this.renderRoot.querySelector<HTMLTextAreaElement>("#session-tree-custom-focus")?.focus();
-    else this.renderRoot.querySelector<HTMLButtonElement>("footer button.primary")?.focus();
+    else this.renderRoot.querySelector<HTMLInputElement>("#session-tree-custom-focus")?.focus();
   }
 
   override render(): TemplateResult {
@@ -100,7 +97,7 @@ export class SessionTreeNavigator extends LitElement {
           </div>
           <button class="close-button" ?disabled=${this.busy} title="Close session tree" aria-label="Close session tree" @click=${() => { this.onCancel?.(); }}>×</button>
         </header>
-        ${this.step === "tree" ? this.renderTreeStep() : this.renderActionStep()}
+        ${this.renderTreeStep()}
         ${this.renderFooter()}
       </modal-surface>
     `;
@@ -114,6 +111,9 @@ export class SessionTreeNavigator extends LitElement {
     const branching = rows.some((row) => row.childIds.length > 1);
     const now = Date.now();
     const position = this.selectedId === undefined ? -1 : rows.findIndex((row) => row.node.id === this.selectedId);
+    // The tree is the preview: rows that would leave the active path grey out
+    // as the selection moves, so the consequence is drawn before it is chosen.
+    const abandonedIds = sessionTreeAbandonedPreviewIds(this.tree, this.selectedId);
     return html`
       <div class="body tree-step">
         <div class="tree-intro">
@@ -163,14 +163,29 @@ export class SessionTreeNavigator extends LitElement {
               : "No history entries match this search."}</div>
         ` : html`
           <div class=${`tree${branching ? "" : " no-branches"}`} role="tree" aria-label="Complete session history">
-            ${rows.map((row) => this.renderTreeRow(row, now))}
+            ${rows.map((row) => this.renderTreeRow(row, now, abandonedIds))}
           </div>
         `}
+        ${this.summarize ? html`
+          <label class="summary-focus">
+            <span class="glyph" aria-hidden="true">&#8803;</span>
+            <input
+              id="session-tree-custom-focus"
+              type="text"
+              placeholder="Summary focus (optional)"
+              aria-label="Summary focus (optional)"
+              maxlength=${String(SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH)}
+              .value=${this.customInstructions}
+              ?disabled=${this.busy}
+              @input=${(event: InputEvent) => { this.handleCustomInstructionsInput(event); }}
+            >
+          </label>
+        ` : null}
       </div>
     `;
   }
 
-  private renderTreeRow(row: SessionTreeRow, now: number): TemplateResult {
+  private renderTreeRow(row: SessionTreeRow, now: number, abandonedIds: ReadonlySet<string>): TemplateResult {
     const selected = row.node.id === this.selectedId;
     const folded = this.foldedIds.has(row.node.id);
     const expanded = row.childIds.length > 0 && !folded;
@@ -184,6 +199,7 @@ export class SessionTreeNavigator extends LitElement {
       row.activePath ? "active-path" : "",
       row.activeLeaf ? "active-leaf" : "",
       kindPresentation.bookkeeping ? "bookkeeping" : "",
+      abandonedIds.has(row.node.id) ? "leaving" : "",
     ].filter((value) => value !== "").join(" ");
     const visualDepth = sessionTreeVisualDepth(row.branchDepth);
     return html`
@@ -214,6 +230,7 @@ export class SessionTreeNavigator extends LitElement {
           <span class="summary" dir="auto">${row.node.summary}</span>
           ${row.node.label === undefined ? null : html`<span class="label" title=${row.node.label}>${row.node.label}</span>`}
           ${row.activePath && !row.activeLeaf ? html`<span class="sr-only">Active path</span>` : null}
+          ${selected && abandonedIds.size > 0 ? html`<span class="leaf-hint" aria-hidden="true">&#8629;</span><span class="sr-only">Becomes the active leaf</span>` : null}
         </span>
         ${row.node.timestamp === undefined ? html`<span class="time-spacer"></span>` : html`<time datetime=${row.node.timestamp} title=${row.node.timestamp}>${relativeTime(row.node.timestamp, now)}</time>`}
       </div>
@@ -240,61 +257,6 @@ export class SessionTreeNavigator extends LitElement {
     return html`<span class=${`kind kind-tone-${presentation.tone}`}>${presentation.label}</span>`;
   }
 
-  // The action step is a confirmation, not a form: the footer buttons are the
-  // decision, the summary is an opt-in modifier, and the fork alternative plus
-  // side effects are reference fine print. Nothing here asks a question the
-  // defaults already answer.
-  private renderActionStep(): TemplateResult {
-    const selectedNode = this.selectedId === undefined ? undefined : this.model.nodesById.get(this.selectedId);
-    return html`
-      <div class="body confirmation-step">
-        <div class="confirmation-card">
-          <div>
-            <span class="eyebrow">Selected entry</span>
-            <h2>Continue from this entry</h2>
-          </div>
-          ${selectedNode === undefined ? html`<div class="empty">The selected history entry is no longer available.</div>` : html`
-            <div class="selected-entry">
-              ${this.renderKindBadge(sessionTreeKindPresentation(selectedNode.kind))}
-              <strong dir="auto">${selectedNode.summary}</strong>
-              <p>${this.selectedEntryDescription(selectedNode.kind)}</p>
-            </div>
-          `}
-          <fieldset class="summary-section" ?disabled=${this.busy}>
-            <label class="summary-toggle">
-              <input
-                type="checkbox"
-                name="session-tree-summarize"
-                .checked=${this.summarize}
-                @change=${(event: Event) => { this.handleSummarizeToggle(event); }}
-              >
-              <span><strong>Summarize the branch you leave behind</strong><small>Pi writes a summary entry for the context being left. Applies when continuing in this session.</small></span>
-            </label>
-            ${this.summarize ? html`
-              <label class="custom-focus" for="session-tree-custom-focus">
-                <span>Summary focus (optional)</span>
-                <textarea
-                  id="session-tree-custom-focus"
-                  rows="4"
-                  maxlength=${String(SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH)}
-                  .value=${this.customInstructions}
-                  @input=${(event: InputEvent) => { this.handleCustomInstructionsInput(event); }}
-                ></textarea>
-                <span class="character-count">${this.customInstructions.length} / ${SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH}</span>
-              </label>
-            ` : null}
-          </fieldset>
-          <div class="fine-print" role="note">
-            ${selectedNode === undefined ? null : html`<p>${this.forkDescription(selectedNode.kind)}</p>`}
-            <p>Neither action undoes filesystem changes, shell commands, tool calls, or other side effects.</p>
-          </div>
-          ${this.statusMessage === "" ? null : html`<div class="dialog-status" role="status">${this.statusMessage}</div>`}
-          ${this.error === "" ? null : html`<div class="dialog-error" role="alert">${this.error}</div>`}
-        </div>
-      </div>
-    `;
-  }
-
   private selectedEntryDescription(kind: SessionTreeNodeKind): string {
     return sessionTreeEntryReturnsToEditor(kind)
       ? "This message’s text will return to the prompt editor for optional editing and resubmission in this session."
@@ -303,32 +265,42 @@ export class SessionTreeNavigator extends LitElement {
 
   private forkDescription(kind: SessionTreeNodeKind): string {
     return kind === "user"
-      ? "“Fork into new session” starts a separate session file that branches before this message and returns its text as the draft for the new session. This session stays unchanged."
-      : "“Fork into new session” starts a separate session file with this entry and all history leading to it. This session stays unchanged.";
+      ? "Starts a separate session file that branches before this message and returns its text as the draft for the new session. This session stays unchanged."
+      : "Starts a separate session file with this entry and all history leading to it. This session stays unchanged.";
   }
 
+  // One footer, no steps: the buttons are the decision, and their glyphs are
+  // one-line pictures of the resulting topology in the tree's own rail
+  // vocabulary. Enter in the tree presses the primary button.
   private renderFooter(): TemplateResult {
-    if (this.step === "tree") {
-      return html`
-        <footer>
-          <button @click=${() => { this.onCancel?.(); }}>Cancel</button>
-          <span class="footer-spacer"></span>
-          <button class="primary" ?disabled=${this.selectedId === undefined} @click=${() => { this.continueToAction(); }}>Next</button>
-        </footer>
-      `;
-    }
-
+    const selectedNode = this.selectedId === undefined ? undefined : this.model.nodesById.get(this.selectedId);
+    const actionsDisabled = this.busy || selectedNode === undefined;
     return html`
       <footer>
-        <button ?disabled=${this.busy} @click=${() => { this.returnToTree(); }}>Back</button>
+        <button class="cancel-action" ?disabled=${this.busy} @click=${() => { this.onCancel?.(); }}>Cancel</button>
         <span class="footer-spacer"></span>
         ${this.busy && this.summarizingInFlight ? html`
           <button class="danger" ?disabled=${this.aborting} @click=${() => { void this.abortNavigation(); }}>${this.aborting ? "Cancelling…" : "Cancel summarization"}</button>
         ` : null}
-        <button ?disabled=${this.busy || this.selectedId === undefined} @click=${() => { void this.submitFork(); }}>${this.forkActionLabel()}</button>
-        <button class="primary" ?disabled=${this.busy || this.selectedId === undefined} @click=${() => { void this.submitNavigation(); }}>
-          ${this.primaryActionLabel()}
-        </button>
+        <button
+          class=${`summarize-toggle${this.summarize ? " on" : ""}`}
+          ?disabled=${actionsDisabled}
+          aria-pressed=${this.summarize ? "true" : "false"}
+          title="Write a summary entry on the branch being left behind (when continuing here)"
+          @click=${() => { this.toggleSummarize(); }}
+        ><span class="glyph" aria-hidden="true">&#9482;&#8803;</span>Summarize</button>
+        <button
+          class="fork-action"
+          ?disabled=${actionsDisabled}
+          title=${selectedNode === undefined ? nothing : this.forkDescription(selectedNode.kind)}
+          @click=${() => { void this.submitFork(); }}
+        ><span class="glyph" aria-hidden="true">&#9634;&#8594;&#9679;</span>${this.forkActionLabel()}</button>
+        <button
+          class="primary continue-action"
+          ?disabled=${actionsDisabled}
+          title=${selectedNode === undefined ? nothing : this.selectedEntryDescription(selectedNode.kind)}
+          @click=${() => { void this.submitNavigation(); }}
+        ><span class="glyph" aria-hidden="true">&#9500;&#9472;&#9679;</span>${this.primaryActionLabel()}</button>
       </footer>
     `;
   }
@@ -342,7 +314,6 @@ export class SessionTreeNavigator extends LitElement {
     this.selectionAnchorId = initialSessionTreeSelection(this.model);
     this.selectedId = this.visibleSelection(SESSION_TREE_DEFAULT_FILTER, this.selectionAnchorId);
     this.foldedIds = new Set();
-    this.step = "tree";
     this.summarize = false;
     this.customInstructions = "";
     this.inFlightOperation = undefined;
@@ -426,7 +397,7 @@ export class SessionTreeNavigator extends LitElement {
     event.preventDefault();
     event.stopPropagation();
     if (next.action === "confirm") {
-      this.continueToAction();
+      void this.submitNavigation();
       return;
     }
     this.selectionAnchorId = next.selectedId;
@@ -435,29 +406,14 @@ export class SessionTreeNavigator extends LitElement {
     this.pendingFocus = "tree";
   }
 
-  private continueToAction(): void {
-    if (this.busy || this.selectedId === undefined || !this.model.nodesById.has(this.selectedId)) return;
-    this.step = "action";
-    this.error = "";
-    this.statusMessage = "";
-    // Land on the primary button: Enter in the tree, Enter again, and the
-    // common path is done without reading a form.
-    this.pendingFocus = "primary";
-  }
-
-  private returnToTree(): void {
+  private toggleSummarize(): void {
     if (this.busy) return;
-    this.step = "tree";
+    this.summarize = !this.summarize;
     this.error = "";
     this.statusMessage = "";
-    this.pendingFocus = "tree";
-  }
-
-  private handleSummarizeToggle(event: Event): void {
-    if (this.busy || !(event.currentTarget instanceof HTMLInputElement)) return;
-    this.summarize = event.currentTarget.checked;
-    this.error = "";
-    this.statusMessage = "";
+    // Turning the chip on reveals the optional focus field; put the caret there
+    // so the opt-in and its refinement are one motion.
+    if (this.summarize) this.pendingFocus = "custom";
   }
 
   // The summary mode is derived, never asked: the toggle opts in, and focus
@@ -468,7 +424,7 @@ export class SessionTreeNavigator extends LitElement {
   }
 
   private handleCustomInstructionsInput(event: InputEvent): void {
-    if (!(event.currentTarget instanceof HTMLTextAreaElement)) return;
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
     this.customInstructions = event.currentTarget.value;
     this.error = "";
     this.statusMessage = "";
@@ -480,14 +436,14 @@ export class SessionTreeNavigator extends LitElement {
   }
 
   private forkActionLabel(): string {
-    return this.busy && this.inFlightOperation === "fork" ? "Forking…" : "Fork into new session";
+    return this.busy && this.inFlightOperation === "fork" ? "Forking…" : "Fork";
   }
 
   private async submitNavigation(): Promise<void> {
     if (this.busy || this.selectedId === undefined) return;
     const validation = validateSessionTreeSummaryChoice(this.effectiveSummaryMode(), this.customInstructions);
     // The derived mode is never custom-with-empty-focus, so this only trips on
-    // focus text past the model's length cap (the textarea maxlength already
+    // focus text past the model's length cap (the input maxlength already
     // blocks typing there).
     if (!validation.ok) {
       this.error = validation.error;
@@ -515,7 +471,6 @@ export class SessionTreeNavigator extends LitElement {
       this.busy = false;
       this.aborting = false;
       if (!result.cancelled) return;
-      this.step = "tree";
       this.statusMessage = result.aborted === true
         ? "Summarization cancelled. Your selected history entry is unchanged."
         : "Navigation cancelled. Your selected history entry is unchanged.";
@@ -582,10 +537,9 @@ export class SessionTreeNavigator extends LitElement {
   }
 
   // Escape and backdrop presses share one dismissal route through the surface:
-  // the action step steps back to the tree, the tree step cancels.
+  // with a single step, both simply cancel.
   private requestDismissal(): void {
-    if (this.step === "action") this.returnToTree();
-    else this.onCancel?.();
+    this.onCancel?.();
   }
 
   // Busy Escape contract: only an in-flight summarization can be aborted; a
@@ -687,27 +641,22 @@ export class SessionTreeNavigator extends LitElement {
     .label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; border-radius: var(--pi-radius-inline); padding: 1px 5px; background: var(--pi-bg-overlay); color: var(--pi-muted); font-size: var(--pi-text-xs); white-space: nowrap; }
     time { color: var(--pi-dim, var(--pi-muted)); font-size: var(--pi-text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: end; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    .confirmation-step { padding: 24px max(18px, env(safe-area-inset-right)) 24px max(18px, env(safe-area-inset-left)); }
-    .confirmation-card { width: min(760px, 100%); margin: 0 auto; display: grid; gap: 16px; }
-    .selected-entry, .dialog-error, .dialog-status, .empty { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); padding: 12px 14px; }
-    .selected-entry { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px 10px; background: var(--pi-surface); }
-    .selected-entry p { grid-column: 2; color: var(--pi-muted); font-size: var(--pi-text-sm); }
-    /* Raw payloads can be arbitrarily long; the card previews, it does not dump. */
-    .selected-entry strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; font-weight: 600; }
-    fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 9px; }
-    /* The opt-in is a quiet row, not a bordered card: it must read as an
-       available modifier, never as a question blocking the footer. */
-    .summary-toggle { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; cursor: pointer; }
-    .summary-toggle input { margin-top: 3px; accent-color: var(--pi-accent); }
-    .summary-toggle span { display: grid; gap: 3px; }
-    .summary-toggle strong { font-weight: 600; }
-    .summary-toggle small { color: var(--pi-muted); }
-    .custom-focus { display: grid; gap: 6px; margin: 2px 0 0 30px; font-weight: 600; }
-    textarea { width: 100%; resize: vertical; min-height: 94px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 9px 10px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
-    textarea:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
-    .character-count { justify-self: end; color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 400; }
-    .fine-print { display: grid; gap: 4px; color: var(--pi-dim, var(--pi-muted)); font-size: var(--pi-text-sm); }
-    .fine-print p { margin: 0; }
+    /* The consequence is drawn, not described: rows that would leave the active
+       path fade while they keep their geometry, so the shape of the abandoned
+       branch stays readable under the fade. */
+    .tree-row.leaving { opacity: .55; }
+    .tree-row.leaving:hover { opacity: .8; }
+    .leaf-hint { flex: none; color: var(--pi-accent); font-weight: 700; }
+    /* Topology glyphs: one-line pictures of the outcome in the tree's own rail
+       vocabulary. Mono metrics keep the rails aligned across buttons. */
+    .glyph { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--pi-text-xs); letter-spacing: .08em; margin-inline-end: 7px; }
+    .summarize-toggle.on { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
+    .summary-focus { flex: none; display: flex; align-items: center; gap: 8px; }
+    .summary-focus .glyph { margin-inline-end: 0; color: var(--pi-muted); }
+    .summary-focus input { flex: 1; min-width: 0; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 6px 9px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
+    .summary-focus input::placeholder { color: var(--pi-dim, var(--pi-muted)); }
+    .summary-focus input:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 1px; }
+    .dialog-error, .dialog-status, .empty { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); padding: 12px 14px; }
     .dialog-error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-bg)); color: var(--pi-danger); }
     .dialog-status { border-color: var(--pi-success-border); background: var(--pi-success-bg); }
     .empty { color: var(--pi-muted); background: var(--pi-surface); }
@@ -738,8 +687,6 @@ export class SessionTreeNavigator extends LitElement {
       .no-branches .tree-row > time, .no-branches .tree-row > .time-spacer { grid-column: 4; }
       .no-branches .tree-row > .entry { grid-column: 3 / -1; }
       .tree-row .summary { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-      .confirmation-step { padding: 18px 12px; }
-      .custom-focus { margin-inline-start: 0; }
       footer { flex-wrap: wrap; }
     }
   `;
@@ -755,6 +702,29 @@ export function sessionTreeEntryReturnsToEditor(kind: SessionTreeNodeKind): bool
 
 export function sessionTreeKindPresentation(kind: SessionTreeNodeKind): SessionTreeKindPresentation {
   return SESSION_TREE_KIND_PRESENTATION[kind];
+}
+
+/**
+ * The rows that would leave the active path if the selection became the active
+ * leaf: everything on today's active path that is not an ancestor of (or) the
+ * selection. Pure, so the live preview is directly testable.
+ */
+export function sessionTreeAbandonedPreviewIds(tree: SessionTreeSnapshot, selectedId: string | undefined): ReadonlySet<string> {
+  if (selectedId === undefined) return new Set();
+  const parentById = new Map<string, string | null>();
+  for (const node of tree.nodes) parentById.set(node.id, node.parentId);
+  if (!parentById.has(selectedId)) return new Set();
+  const kept = new Set<string>();
+  let cursor: string | null = selectedId;
+  while (cursor !== null && !kept.has(cursor)) {
+    kept.add(cursor);
+    cursor = parentById.get(cursor) ?? null;
+  }
+  const abandoned = new Set<string>();
+  for (const id of tree.activePathIds) {
+    if (!kept.has(id)) abandoned.add(id);
+  }
+  return abandoned;
 }
 
 function errorMessage(error: unknown): string {
