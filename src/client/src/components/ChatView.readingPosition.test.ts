@@ -368,6 +368,50 @@ describe("ChatView session opening position", () => {
     expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
   });
 
+  it("keeps the tail when a prompt arrives as session opening finishes", async () => {
+    const frames = installFrames();
+    const target = selectedChatTarget("local", session);
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.selectedLoad = selectedChatPreviewReadable(target);
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    frames.releaseAll();
+
+    scrollTop = 0;
+    chat.dispatchEvent(new Event("scroll"));
+    const pendingDialog: PendingExtensionDialog = {
+      dialogId: "opening-dialog",
+      kind: "confirm",
+      title: "Continue?",
+      askedAt: "2026-08-19T12:00:00.000Z",
+      runScoped: false,
+    };
+    view.pendingDialogs = [pendingDialog];
+    view.selectedLoad = selectedChatLiveReady(target);
+    await view.updateComplete;
+    chat.getBoundingClientRect = () => rect(100, 500);
+    const dialog = requiredElement(view.shadowRoot?.querySelector<HTMLElement>("extension-dialog-card.open-dialog-card"), "open dialog");
+    dialog.getBoundingClientRect = () => rect(200, 260);
+    frames.releaseAll();
+
+    expect(scrollTop).toBe(1_200);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+  });
+
   it("pages earlier history after the reader scrolls near the top", async () => {
     const frames = installFrames();
     const loadEarlier = vi.fn();

@@ -318,6 +318,7 @@ export class ChatView extends LitElement {
   private loadingScrollReaderOwned = false;
   private readerHistoryPagingEnabled = false;
   private sessionOpeningStartedThisUpdate = false;
+  private sessionOpeningHistoryThisUpdate = false;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
@@ -407,6 +408,7 @@ export class ChatView extends LitElement {
     if (changed.has("selectedLoad") && selectedChatIsOpening(this.currentSelectedLoad())) this.readerHistoryPagingEnabled = false;
     const openingHistory = selectedChatIsOpening(this.selectedLoad)
       || (previousSelectedLoad !== undefined && selectedChatIsOpening(previousSelectedLoad));
+    this.sessionOpeningHistoryThisUpdate = openingHistory;
     this.trackOpenedTurn(!openingHistory);
   }
 
@@ -459,9 +461,11 @@ export class ChatView extends LitElement {
     const contentChanged = changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs");
     // The form uses the transcript scroller. Start a new long form at question
     // one rather than applying the usual live-tail scroll and landing at its end.
-    if (!identityChanged && openedAsk && followingLiveTail) {
+    // During session opening, however, every arriving fragment keeps the tail:
+    // an opening prompt must not turn a layout race into a saved reading place.
+    if (!identityChanged && !this.sessionOpeningHistoryThisUpdate && openedAsk && followingLiveTail) {
       this.scrollToOpenAsk();
-    } else if (!identityChanged && openedDialog && followingLiveTail) {
+    } else if (!identityChanged && !this.sessionOpeningHistoryThisUpdate && openedDialog && followingLiveTail) {
       this.scrollToOpenDialog();
     } else if (!identityChanged && contentChanged) {
       this.scheduleCurrentFollowTarget();
@@ -1273,8 +1277,8 @@ export class ChatView extends LitElement {
 
   private requestLoadMoreIfNeeded(): void {
     // Earlier history follows a meaningful wheel or touch gesture. Layout,
-    // keyboard, and scrollbar movement still take reading control, but cannot
-    // turn an opening-time reflow into an automatic history request.
+    // keyboard, and scrollbar movement do not take reading control or turn an
+    // opening-time reflow into an automatic history request.
     if (!this.readerHistoryPagingEnabled || this.scrolling.mode.kind !== "free") return;
     if (this.loadMoreCheckFrame !== undefined) return;
     this.loadMoreCheckFrame = requestAnimationFrame(() => {
