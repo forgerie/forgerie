@@ -133,6 +133,15 @@ describe("ChatScrollCoordinator", () => {
     expect(coordinator.mode).toEqual({ kind: "tail" });
   });
 
+  it("returns reader-owned scrolling to the tail at the bottom", () => {
+    const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
+    const chat = viewport(800);
+    coordinator.follow(FOLLOW_FREE);
+
+    expect(coordinator.recordScroll(chat, false).driver).toBe("none");
+    expect(coordinator.mode).toEqual({ kind: "tail" });
+  });
+
   it("contains repeated layout settlement and releases its suppression", () => {
     const frames = new ManualFrameScheduler();
     const coordinator = new ChatScrollCoordinator(frames);

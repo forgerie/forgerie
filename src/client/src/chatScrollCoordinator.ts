@@ -124,6 +124,7 @@ export class ChatScrollCoordinator {
 
     const programmatic = this.writtenScrollTop !== undefined && Math.abs(scroller.scrollTop - this.writtenScrollTop) < 1;
     const moved = Math.abs(scroller.scrollTop - this.lastScrollTop) >= 1;
+    if (!programmatic && this.currentMode.kind !== "tail" && distanceFromScrollBottom(scroller) < CHAT_SCROLL_BOTTOM_THRESHOLD) this.currentMode = FOLLOW_TAIL;
     if (!programmatic && !moved) {
       this.writtenScrollTop = undefined;
       this.lastClientHeight = scroller.clientHeight;

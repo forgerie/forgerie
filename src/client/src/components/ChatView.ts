@@ -317,6 +317,7 @@ export class ChatView extends LitElement {
   private sentFromHere = false;
   private loadingScrollReaderOwned = false;
   private readerHistoryPagingEnabled = false;
+  private sessionOpeningStartedThisUpdate = false;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
@@ -370,20 +371,25 @@ export class ChatView extends LitElement {
 
   private prepareSessionUiState(): void {
     this.disclosures.syncSession(this.sessionId);
+    this.prepareSessionOpeningScrollState();
+    this.retryFocusPending = false;
+    this.cancelSelectedLoadPaintReport();
+  }
+
+  private prepareSessionOpeningScrollState(): void {
     this.scrolling.reset();
     this.loadingScrollReaderOwned = false;
     this.readerHistoryPagingEnabled = false;
-    this.retryFocusPending = false;
     this.turnTrackingReady = false;
     this.lastSeenTurnCount = 0;
     this.sentFromHere = false;
     this.reservedTurnKey = undefined;
-    this.cancelSelectedLoadPaintReport();
   }
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     this.trackActiveSince();
-    if (this.sessionIdentityChanged(changed)) {
+    const identityChanged = this.sessionIdentityChanged(changed);
+    if (identityChanged) {
       this.activeSince = undefined;
       this.activePhase = undefined;
       this.prepareSessionUiState();
@@ -391,12 +397,16 @@ export class ChatView extends LitElement {
     }
     if (changed.has("isSendingPrompt") && this.isSendingPrompt) this.sentFromHere = true;
     const previousSelectedLoad = changed.get("selectedLoad");
+    const currentSelectedLoad = this.currentSelectedLoad();
+    const beginsOpeningAttempt = currentSelectedLoad.kind === "loading-without-content" || currentSelectedLoad.kind === "cached-readable";
+    const openingStarted = changed.has("selectedLoad")
+      && selectedChatIsOpening(currentSelectedLoad)
+      && (beginsOpeningAttempt || previousSelectedLoad === undefined || !selectedChatIsOpening(previousSelectedLoad));
+    this.sessionOpeningStartedThisUpdate = openingStarted;
+    if (openingStarted && !identityChanged) this.prepareSessionOpeningScrollState();
     if (changed.has("selectedLoad") && selectedChatIsOpening(this.currentSelectedLoad())) this.readerHistoryPagingEnabled = false;
     const openingHistory = selectedChatIsOpening(this.selectedLoad)
       || (previousSelectedLoad !== undefined && selectedChatIsOpening(previousSelectedLoad));
-    if (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) {
-      if (!openingHistory && this.scrolling.mode.kind === "tail" && !this.scrolling.viewportSizeChanged(this.chat) && !this.isNearBottom()) this.scrolling.follow(FOLLOW_FREE);
-    }
     this.trackOpenedTurn(!openingHistory);
   }
 
@@ -439,7 +449,7 @@ export class ChatView extends LitElement {
     if (changed.has("loadingMore") && !this.loadingMore) this.loadMoreRequested = false;
     if (changed.has("hasMore") && !this.hasMore) this.loadMoreRequested = false;
     const identityChanged = this.sessionIdentityChanged(changed);
-    if (identityChanged) {
+    if (identityChanged || this.sessionOpeningStartedThisUpdate) {
       this.cancelSelectedLoadPaintReport();
       this.openAtBottom();
     }
@@ -1208,7 +1218,7 @@ export class ChatView extends LitElement {
     this.requestLoadMoreIfNeeded();
     const chat = this.chat;
     if (chat !== undefined) {
-      const update = this.scrolling.recordScroll(chat, !this.shouldForceReaderScrollTakeover());
+      const update = this.scrolling.recordScroll(chat, false);
       if (this.scrolling.mode.kind !== "free") this.readerHistoryPagingEnabled = false;
       if (update.viewportChanged) this.scheduleCurrentFollowTarget();
     }
