@@ -821,24 +821,39 @@ export const chatStyles = css`
   .summary { color: var(--pi-muted); margin-left: 6px; }
   .part:is(details) { border-top: 1px solid var(--pi-border); padding-top: 8px; }
   .part > formatted-text { display: block; max-width: 100%; min-width: 0; overflow: visible; }
-  .skill-invocation, .skill-read { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); padding: 8px 10px; }
+  .skill-invocation { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); padding: 8px 10px; }
   /* An expandable disclosure is interactive, not a status: accent, not purple. */
-  .skill-invocation > summary, .skill-read > strong { color: var(--pi-accent); }
-  .skill-invocation > small, .skill-read > small { display: block; margin: 6px 0 0; color: var(--pi-muted); }
+  .skill-invocation > summary { color: var(--pi-accent); }
+  .skill-invocation > small { display: block; margin: 6px 0 0; color: var(--pi-muted); }
+  /* A skill read sits inside the fold with the other steps, so it takes the
+     fold's voice: one dim line naming the skill, with the path underneath in
+     the same tone. No card -- the fold must not reintroduce the texture the
+     transcript drops. */
+  .skill-read { padding: 0; border: 0; border-radius: 0; background: none; }
+  .skill-read > strong { color: var(--calm-ink-muted); font-weight: 500; }
+  .skill-read > small { display: block; margin: 2px 0 0; color: var(--calm-ink-dim); overflow-wrap: anywhere; }
   summary { cursor: pointer; color: var(--pi-muted); }
   pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; direction: ltr; text-align: left; unicode-bidi: isolate; }
   /* Shell output keeps monospace because it carries meaning, and a hairline
      instead of the success-coloured card it used to sit in. */
   .shell-output { padding-left: 12px; border-left: 1px solid var(--calm-rule); color: var(--calm-ink-dim); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.45; direction: ltr; text-align: left; unicode-bidi: isolate; }
-  .process-notification { padding: 8px 10px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); background: var(--pi-surface); }
-  .process-notification.success { border-color: var(--pi-success-border); background: var(--pi-success-bg); }
-  .process-notification.error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-surface)); }
+  /* A process notification is one of the turn's steps, so it reads like the
+     others: a quiet name line, then what happened. The card it used to carry
+     spent a border, a fill, and a role label on every event, which buried a run
+     of five under one process in a screenful of chrome.
+
+     Colour survives only on the failure's name, because a process that died is
+     the one thing here that needs attention. */
+  .process-notification { padding: 0; border: 0; border-radius: 0; background: none; }
   .process-notification-header { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; line-height: 1.4; }
-  .process-notification-header .status-affordance { flex: 0 0 auto; font-size: var(--pi-text-md); }
-  .process-notification-header strong { flex: 0 0 auto; font-weight: 600; }
-  .process-notification-header .summary { flex: 1 1 auto; min-width: 0; color: var(--pi-text); font-weight: normal; overflow-wrap: anywhere; }
-  .process-notification-header .exit-code { flex: 0 0 auto; margin-left: auto; color: var(--pi-muted); font-size: var(--pi-text-sm); font-family: var(--pi-mono, ui-monospace, monospace); }
-  .process-notification .raw-disclosure { margin-top: 8px; border-top: 1px solid var(--pi-border-muted); padding-top: 6px; }
+  .process-notification-header .status-affordance { flex: 0 0 auto; font-size: var(--pi-text-sm); }
+  .process-notification-header strong { flex: 0 0 auto; color: var(--calm-ink-muted); font-weight: 500; }
+  .process-notification.error .process-notification-header strong,
+  .process-notification.error .process-notification-header .status-affordance { color: var(--calm-danger); }
+  .process-notification.success .process-notification-header .status-affordance { color: var(--pi-success); }
+  .process-notification-header .summary { flex: 1 1 100%; min-width: 0; color: var(--calm-ink-dim); font-weight: normal; overflow-wrap: anywhere; }
+  .process-notification-header .exit-code { flex: 0 0 auto; color: var(--calm-ink-dim); font-size: var(--pi-text-sm); font-family: var(--pi-mono, ui-monospace, monospace); }
+  .process-notification .raw-disclosure { margin-top: 4px; }
   .process-notification .raw-disclosure summary { cursor: pointer; color: var(--pi-muted); font-size: var(--pi-text-sm); }
   .process-notification .raw-content { margin: 6px 0 0; padding: 8px; max-height: 180px; overflow: auto; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); font: var(--pi-text-xs) var(--pi-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
   @keyframes pulse { 0%, 100% { transform: scale(.75); opacity: .55; } 50% { transform: scale(1.2); opacity: 1; } }

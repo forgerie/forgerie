@@ -84,14 +84,31 @@ describe("groupChatMessages", () => {
     ]);
   });
 
-  it("keeps skill reads out of event groups", () => {
+  // A skill read is machinery the turn ran through, not something the turn
+  // said, so it pools into the fold with the rest of the steps instead of
+  // standing in the transcript under its own role label.
+  it("pools skill reads into the event group", () => {
     const messages: ChatLine[] = [
       { role: "assistant", parts: [{ type: "thinking", text: "plan" }, { type: "skillRead", name: "playwright", path: "/skills/playwright/SKILL.md" }] },
     ];
 
     expect(groupChatMessages(messages)).toEqual([
-      { kind: "message", index: 0, message: { role: "skill", parts: [{ type: "skillRead", name: "playwright", path: "/skills/playwright/SKILL.md" }] } },
-      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "plan" }] }] },
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "plan" }, { type: "skillRead", name: "playwright", path: "/skills/playwright/SKILL.md" }] } ] },
+    ]);
+  });
+
+  // Same reasoning for background-process notifications: they are events the
+  // turn ran through, and a card per event buried the transcript.
+  it("pools process notifications into the event group", () => {
+    const notification = { type: "processNotification" as const, kind: "failure" as const, processName: "worker", summary: "Process \"worker\" failed.", exitCode: 1, rawContent: "raw" };
+    const messages: ChatLine[] = [
+      { role: "assistant", parts: [{ type: "text", text: "on it" }] },
+      { role: "system", parts: [notification] },
+    ];
+
+    expect(groupChatMessages(messages)).toEqual([
+      { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "on it" }] } },
+      { kind: "group", startIndex: 1, endIndex: 1, messages: [{ role: "system", parts: [notification] }] },
     ]);
   });
 

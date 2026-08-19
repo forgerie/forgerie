@@ -69,8 +69,7 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
     if (readableParts.length && isTurnBoundary(message)) flushEvents();
     if (technicalParts.length) pushEvent({ role: message.role, parts: technicalParts, ...metadata }, absoluteIndex);
     if (readableParts.length) {
-      const role = readableParts.every((part) => part.type === "skillRead") ? "skill" : message.role;
-      const readableMessage = { role, parts: readableParts, ...metadata };
+      const readableMessage = { role: message.role, parts: readableParts, ...metadata };
       if (isToolImageMessage(readableMessage)) {
         const toolName = toolNameFromParts(technicalParts);
         groups.push({ kind: "tool-image", message: readableMessage, index: absoluteIndex, ...(toolName === undefined ? {} : { toolName }) });
@@ -194,8 +193,23 @@ function toolNameFromParts(parts: ChatPart[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether a part is something the turn said, or machinery it ran through.
+ *
+ * Readable parts stand in the transcript under their own role. Everything else
+ * pools into the fold that closes the turn.
+ *
+ * Skill reads and background-process notifications are machinery. They used to
+ * be readable, which gave each one a role label and a bordered card: five
+ * consecutive notices about one process cost a screenful and repeated the
+ * process name, the exit code, and the word SYSTEM on every one. They belong
+ * with the steps, where one line names the whole run.
+ *
+ * `askUserRecord` and `image` stay readable because they are content the reader
+ * came for, and `skillInvocation` carries the skill's own text.
+ */
 function isReadablePart(message: ChatLine, part: ChatPart): boolean {
   if (message.source === "compaction" || message.source === "branch_summary") return false;
-  if (part.type === "skillInvocation" || part.type === "skillRead" || part.type === "image" || part.type === "askUserRecord" || part.type === "processNotification") return true;
+  if (part.type === "skillInvocation" || part.type === "image" || part.type === "askUserRecord") return true;
   return part.type === "text" && (message.role === "user" || message.role === "assistant" || message.role === "system" || message.role === "bash");
 }

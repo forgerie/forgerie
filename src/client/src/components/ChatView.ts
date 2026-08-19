@@ -1030,6 +1030,19 @@ export class ChatView extends LitElement {
   }
 
   /**
+   * Whether the message's parts already say who they are.
+   *
+   * A process notification leads with its process name and a skill read leads
+   * with the skill's, so the role label above them contributed only the word
+   * SYSTEM or ASSISTANT -- a heading that names nothing the reader cannot
+   * already see one line below it.
+   */
+  private isSelfLabellingMessage(message: ChatLine): boolean {
+    return message.parts.length > 0
+      && message.parts.every((part) => part.type === "processNotification" || part.type === "skillRead");
+  }
+
+  /**
    * `live` marks the tail group of a running turn. It selects the group's label
    * and its stable disclosure key, but no longer forces the group open: tool
    * activity streaming into view is the transcript's main source of noise, and
@@ -1052,9 +1065,10 @@ export class ChatView extends LitElement {
       <div class="group-body">
         ${messages.map((message, offset) => {
           const toolOnly = this.isToolExecutionOnlyMessage(message);
+          const selfLabelling = this.isSelfLabellingMessage(message);
           return html`
             <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventAnchorKey(startIndex + offset)}>
-              ${toolOnly ? null : this.renderMessageHeader(message)}
+              ${toolOnly || selfLabelling ? null : this.renderMessageHeader(message)}
               ${message.parts.map((part) => this.renderPart(part, message))}
             </section>
           `;

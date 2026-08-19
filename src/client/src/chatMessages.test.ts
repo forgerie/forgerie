@@ -203,7 +203,7 @@ describe("process notification projection", () => {
     attention: "turn",
   };
 
-  it("projects a process notification into a readable transcript part", () => {
+  it("projects a process notification into a step pooled with the turn's fold", () => {
     const rawContent = '<process_notification kind="crash">verbose XML</process_notification>';
     const normalized = normalizeMessage({
       role: "custom",
@@ -225,7 +225,7 @@ describe("process notification projection", () => {
     };
 
     expect(normalized).toEqual([recordLine]);
-    expect(groupChatMessages(normalized)).toEqual([{ kind: "message", index: 0, message: recordLine }]);
+    expect(groupChatMessages(normalized)).toEqual([{ kind: "group", startIndex: 0, endIndex: 0, messages: [recordLine] }]);
   });
 
   it("accepts a log-match notification without lifecycle fields", () => {

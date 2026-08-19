@@ -9,7 +9,40 @@ afterEach(() => {
 });
 
 describe("ChatView process notification records", () => {
-  it("renders a failed process as a compact card with raw content collapsed", async () => {
+  // A notification is one of the turn's steps, so it lives in the fold that
+  // closes the turn rather than standing in the transcript behind its own role
+  // label and border.
+  it("stays inside the turn's fold until the reader opens it", async () => {
+    const view = await renderNotification({
+      type: "processNotification",
+      kind: "failure",
+      processName: "worker",
+      summary: "Process failed",
+      rawContent: "raw",
+    }, { openFold: false });
+
+    expect(view.shadowRoot?.querySelector(".process-notification")).toBeNull();
+    const fold = requiredElement(view.shadowRoot?.querySelector("details.event-group"), "turn fold");
+    expect(fold.textContent).toContain("1 step");
+  });
+
+  // The event names its own process, so the role label above it said only
+  // "SYSTEM" -- a word that identifies nothing the reader could not already see.
+  it("drops the role label from an event that names itself", async () => {
+    const view = await renderNotification({
+      type: "processNotification",
+      kind: "log_match",
+      processName: "dev-server",
+      summary: "Server listening on port 3000",
+      rawContent: "raw",
+    });
+
+    const section = requiredElement(view.shadowRoot?.querySelector(".group-msg"), "grouped event");
+    expect(section.querySelector(".msg-header")).toBeNull();
+    expect(section.textContent).toContain("dev-server");
+  });
+
+  it("renders a failed process without card chrome and with raw content collapsed", async () => {
     const view = await renderNotification({
       type: "processNotification",
       kind: "crash",
@@ -77,7 +110,7 @@ describe("ChatView process notification records", () => {
       rawContent: "raw",
     });
 
-    const affordance = requiredElement(view.shadowRoot?.querySelector(".status-affordance"), "stopped status affordance");
+    const affordance = requiredElement(view.shadowRoot?.querySelector(".process-notification .status-affordance"), "stopped status affordance");
     expect(affordance.textContent).toBe("⏹");
     expect(affordance.getAttribute("aria-label")).toBe("Process stopped");
   });
@@ -91,7 +124,7 @@ describe("ChatView process notification records", () => {
       rawContent: "Raw content here",
     });
 
-    const disclosure = requiredElement(view.shadowRoot?.querySelector("details"), "raw-content disclosure");
+    const disclosure = requiredElement(view.shadowRoot?.querySelector(".process-notification details"), "raw-content disclosure");
     expect(disclosure.hasAttribute("open")).toBe(false);
     disclosure.setAttribute("open", "");
     expect(disclosure.hasAttribute("open")).toBe(true);
@@ -113,13 +146,31 @@ describe("ChatView process notification records", () => {
   });
 });
 
-async function renderNotification(part: Extract<ChatPart, { type: "processNotification" }>): Promise<ChatView> {
+async function renderNotification(
+  part: Extract<ChatPart, { type: "processNotification" }>,
+  options: { openFold?: boolean } = {},
+): Promise<ChatView> {
   const view = new ChatView();
   view.sessionId = "test-session";
   view.messages = [{ role: "system", parts: [part] }];
   document.body.append(view);
   await view.updateComplete;
+  if (options.openFold !== false) await openTurnFold(view);
   return view;
+}
+
+/**
+ * Open the turn's fold, the way a reader would.
+ *
+ * The fold renders its body only while open, so a notification is absent from
+ * the DOM until this runs. Driving the real `toggle` event keeps the component
+ * deciding what open means rather than the test asserting it.
+ */
+async function openTurnFold(view: ChatView): Promise<void> {
+  const fold = requiredElement(view.shadowRoot?.querySelector("details.event-group"), "turn fold");
+  fold.setAttribute("open", "");
+  fold.dispatchEvent(new Event("toggle"));
+  await view.updateComplete;
 }
 
 function requiredElement<T>(value: T | null | undefined, label: string): T {
