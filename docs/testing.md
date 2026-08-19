@@ -4,9 +4,16 @@ Forgerie uses Vitest for unit, component, route, and integration tests.
 
 ## Commands
 
+- `npm run test:watch` keeps Vitest open and reruns tests related to saved files.
+- `npm run test:related -- src/path/to/module.ts` runs tests that import the given file.
+- `npm run test:changed` tests branch and worktree changes since the merge base with `main`.
+- `npm run test:changed -- other-base` uses a different base branch or commit.
 - `npm test` runs the complete test suite without coverage instrumentation.
 - `npm run test:coverage` runs the complete suite and enforces the coverage thresholds in `vitest.config.ts`.
-- `npm run verify` runs type checking, linting, unused-code checks, and the normal test suite.
+- `npm run verify:static` runs type checking, linting, and unused-code checks.
+- `npm run verify` runs all static checks and the complete test suite.
+
+Use watch mode for the shortest edit loop. Use the changed command before pushing a focused change. Run `npm run verify` before merging when CI is unavailable.
 
 The coverage command writes these reports under `coverage/`:
 
@@ -15,7 +22,27 @@ The coverage command writes these reports under `coverage/`:
 - `coverage/lcov.info` for editor and reporting tools;
 - JSON reports for automated analysis.
 
-CI runs coverage on Linux and uploads the report as a short-lived workflow artifact. The normal suite still runs on Linux and Windows.
+CI runs the complete suite once on each operating system. Linux runs it with coverage. Windows runs it without coverage. Static checks run once on Linux. This removes duplicate test and static-check work.
+
+## Affected-test selection
+
+Vitest finds related tests through static imports. It cannot find every dependency that tests read through the filesystem or a subprocess.
+
+The repository selection policy is in `scripts/test-selection.mjs`. It adds tests for known runtime dependencies. These dependencies include Docker assets, documentation assets, client build inputs, installer files, plugin files, and speech worker files.
+
+The selection policy runs the complete suite for broad changes. Broad changes include package manifests, TypeScript configurations, Vitest configuration, bundled dependencies, and deleted source files. A deleted source file removes import-graph evidence, so a related run cannot be trusted.
+
+The changed command selects committed, staged, unstaged, and untracked paths. It tests the current worktree content. Use CI to validate the committed branch without local edits.
+
+The pre-commit hook uses the same selection policy for staged files. A clean worktree runs in place. A dirty worktree uses a temporary Git-index snapshot. The snapshot reuses the installed `node_modules` directory. Selective runs are a fast feedback tool. The complete CI suite remains the merge gate.
+
+## Runner performance policy
+
+The normal suite uses Vitest's default child processes and worker count. A 16-core benchmark found no faster stable fixed worker limit. Worker threads were slightly faster, but they share process state and broke isolation-sensitive tests.
+
+Coverage stays at four workers. This limit is slower than the normal suite, but it avoids coverage teardown failures.
+
+Do not disable test-file isolation for speed. Many tests change globals, environment variables, browser state, or process state.
 
 ## Measured scope
 

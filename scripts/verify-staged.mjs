@@ -1,16 +1,21 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  createTestPlan,
+  normalizeRepoPaths,
+  parseNameStatusChanges,
+  parseNullDelimitedPaths,
+  vitestArgsForTestPlan,
+} from "./test-selection.mjs";
+
+export { parseNameStatusChanges, parseNullDelimitedPaths } from "./test-selection.mjs";
 
 const FULL_LINT_TRIGGERS = new Set([
   "eslint.config.js",
   "tsconfig.json",
-]);
-
-const FULL_TEST_TRIGGERS = new Set([
-  "tsconfig.json",
-  "vitest.config.ts",
 ]);
 
 const LINTABLE_ROOT_FILES = new Set([
@@ -24,42 +29,59 @@ const LINTABLE_DIRECTORIES = [
   "src/",
 ];
 
-const RELATED_SOURCE_DIRECTORIES = [
-  "extensions/",
-  "pi-web-plugins/",
-  "plugin-api/",
-  "scripts/",
-  "src/",
-];
-
-// `vitest related` follows imports, but these suites inspect repository assets at runtime.
-const DOCKER_TESTS = [
-  "src/docker/piWebDockerDocs.test.ts",
-  "src/docker/piWebDockerEntrypoint.test.ts",
-  "src/server/dockerControlAssets.test.ts",
-];
-
-const DOCKER_DOCS_TEST = "src/docker/piWebDockerDocs.test.ts";
-const PLUGIN_PUBLIC_API_TEST = "pi-web-plugins/pluginPublicApi.test.ts";
-
-export function parseNullDelimitedPaths(output) {
-  const value = Buffer.isBuffer(output) ? output.toString("utf8") : output;
-  return value.split("\0").filter((path) => path.length > 0);
-}
-
 export function createValidationPlan(stagedPaths, options = {}) {
   const pathExists = options.pathExists ?? existsSync;
-  const paths = [...new Set(stagedPaths.map(normalizeRepoPath).filter((path) => path.length > 0))].sort();
+  const paths = normalizeRepoPaths(stagedPaths);
 
   const lint = paths.some((path) => FULL_LINT_TRIGGERS.has(path))
     ? { mode: "full", files: [] }
     : scopedValidation(paths.filter((path) => isLintablePath(path) && pathExists(path)), "scoped");
 
-  const tests = paths.some((path) => FULL_TEST_TRIGGERS.has(path))
-    ? { mode: "full", files: [] }
-    : scopedValidation(relatedTestInputs(paths), "related");
+  return { paths, lint, tests: createTestPlan(paths, { pathExists }) };
+}
 
-  return { paths, lint, tests };
+export function createValidationPlanForChanges(changes) {
+  const existingPaths = new Set(normalizeRepoPaths(
+    changes.filter((change) => change.status !== "D").map((change) => change.path),
+  ));
+  return createValidationPlan(changes.map((change) => change.path), {
+    pathExists: (path) => existingPaths.has(path),
+  });
+}
+
+export function hasUnstagedWork(options = {}) {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const tracked = execFileSync("git", ["diff", "--name-only", "-z"], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  return tracked.length > 0 || untracked.length > 0;
+}
+
+export function createStagedSnapshot(options = {}) {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const snapshotRoot = mkdtempSync(join(tmpdir(), "forgerie-staged-"));
+  const prefix = `${snapshotRoot.replaceAll("\\", "/")}/`;
+  try {
+    execFileSync("git", ["checkout-index", "--all", `--prefix=${prefix}`], {
+      cwd,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+    const nodeModulesPath = join(cwd, "node_modules");
+    if (existsSync(nodeModulesPath)) {
+      symlinkSync(nodeModulesPath, join(snapshotRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+    }
+    return snapshotRoot;
+  } catch (error) {
+    rmSync(snapshotRoot, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export function createValidationSteps(plan) {
@@ -84,52 +106,24 @@ export function createValidationSteps(plan) {
   }
 
   if (plan.tests.mode === "full") {
-    steps.push({ label: "full Vitest validation (configuration changed)", npmArgs: ["test"] });
+    steps.push({ label: "full Vitest validation (broad dependency changed)", npmArgs: ["test"] });
   } else if (plan.tests.mode === "related") {
     steps.push({
       label: `Vitest validation related to ${String(plan.tests.files.length)} staged input(s)`,
-      npmArgs: [
-        "exec",
-        "--",
-        "vitest",
-        "related",
-        "--run",
-        "--config",
-        "vitest.config.ts",
-        "--passWithNoTests",
-        ...plan.tests.files,
-      ],
+      npmArgs: ["exec", "--", "vitest", ...vitestArgsForTestPlan(plan.tests)],
     });
   }
 
   return steps;
 }
 
-function readStagedPaths() {
+function readStagedChanges() {
   const output = execFileSync(
     "git",
-    ["diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z"],
+    ["diff", "--cached", "--name-status", "--no-renames", "--diff-filter=ACMRDT", "-z"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
   );
-  return parseNullDelimitedPaths(output);
-}
-
-function relatedTestInputs(paths) {
-  const inputs = new Set();
-
-  for (const path of paths) {
-    if (isRelatedSourcePath(path)) inputs.add(path);
-
-    if (path.startsWith("docker/")) {
-      for (const test of DOCKER_TESTS) inputs.add(test);
-    } else if (path === "README.md" || path.startsWith("docs/")) {
-      inputs.add(DOCKER_DOCS_TEST);
-    }
-
-    if (path.startsWith("pi-web-plugins/")) inputs.add(PLUGIN_PUBLIC_API_TEST);
-  }
-
-  return [...inputs].sort();
+  return parseNameStatusChanges(output);
 }
 
 function isLintablePath(path) {
@@ -137,24 +131,14 @@ function isLintablePath(path) {
   return path.endsWith(".ts") && LINTABLE_DIRECTORIES.some((directory) => path.startsWith(directory));
 }
 
-function isRelatedSourcePath(path) {
-  if (path === "plugin-api.d.ts") return true;
-  if (!/\.(?:[cm]?[jt]s|[jt]sx|json)$/u.test(path)) return false;
-  return RELATED_SOURCE_DIRECTORIES.some((directory) => path.startsWith(directory));
-}
-
-function normalizeRepoPath(path) {
-  return path.replaceAll("\\", "/").replace(/^\.\//u, "");
-}
-
 function scopedValidation(files, mode) {
   return files.length > 0 ? { mode, files } : { mode: "skip", files: [] };
 }
 
-function runNpmStep(step) {
+function runNpmStep(step, cwd) {
   console.log(`\n[pre-commit] ${step.label}`);
   const invocation = npmInvocation(step.npmArgs);
-  const result = spawnSync(invocation.command, invocation.args, { stdio: "inherit" });
+  const result = spawnSync(invocation.command, invocation.args, { cwd, stdio: "inherit" });
   if (result.error !== undefined) throw result.error;
   return result.status ?? 1;
 }
@@ -171,17 +155,24 @@ function npmInvocation(npmArgs) {
 }
 
 function main() {
-  const plan = createValidationPlan(readStagedPaths());
+  const changes = readStagedChanges();
+  const plan = createValidationPlanForChanges(changes);
   console.log(`[pre-commit] Planning validation for ${String(plan.paths.length)} staged file(s).`);
 
-  for (const step of createValidationSteps(plan)) {
-    const status = runNpmStep(step);
-    if (status !== 0) return status;
-  }
+  const useSnapshot = hasUnstagedWork();
+  const validationRoot = useSnapshot ? createStagedSnapshot() : process.cwd();
+  try {
+    for (const step of createValidationSteps(plan)) {
+      const status = runNpmStep(step, validationRoot);
+      if (status !== 0) return status;
+    }
 
-  if (plan.lint.mode === "skip") console.log("\n[pre-commit] No staged files require ESLint.");
-  if (plan.tests.mode === "skip") console.log("[pre-commit] No staged files have related Vitest coverage.");
-  return 0;
+    if (plan.lint.mode === "skip") console.log("\n[pre-commit] No staged files require ESLint.");
+    if (plan.tests.mode === "skip") console.log("[pre-commit] No staged files have related Vitest coverage.");
+    return 0;
+  } finally {
+    if (useSnapshot) rmSync(validationRoot, { recursive: true, force: true });
+  }
 }
 
 function isDirectExecution() {

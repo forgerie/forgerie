@@ -32,10 +32,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify
-        run: npm run verify
+      - name: Verify static checks
+        if: runner.os == 'Linux'
+        run: npm run verify:static
 
-      - name: Measure test coverage
+      - name: Run tests
+        if: runner.os == 'Windows'
+        run: npm test
+
+      - name: Run tests and measure coverage
         if: runner.os == 'Linux'
         run: npm run test:coverage
 
