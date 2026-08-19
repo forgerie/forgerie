@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import type { AppState } from "../appState";
 import { initialAppState } from "../appState";
 import type { Machine, Project, SessionInfo, Workspace } from "../api";
 import { chatSessionLaunchRecoveryPresentation } from "../components/ChatView";
 import { SessionController } from "./sessionController";
 import { defaultApi, deferred, FakeSocket } from "./sessionController.testSupport";
-import { WorkspaceController } from "./workspaceController";
+import type { UpdateUrl } from "./types";
+import { canDeleteWorkspace, WorkspaceController } from "./workspaceController";
 
 function machine(id: string): Machine {
   return { id, name: id, kind: id === "local" ? "local" : "remote", createdAt: "now", updatedAt: "now" };
@@ -25,11 +26,15 @@ function session(cwd: string, id = "s1"): SessionInfo {
 
 type LoadWorkspaces = (projectId: string, machineId?: string) => Promise<Workspace[]>;
 
+type WorkspaceSessionPort = Pick<SessionController, "clearActiveSession" | "mergeCreationFailedSessionStarts" | "preferredSession" | "selectSession">;
+
 interface Harness {
   controller: WorkspaceController;
   state: () => AppState;
-  clearActiveSession: ReturnType<typeof vi.fn>;
-  updateUrl: ReturnType<typeof vi.fn>;
+  clearActiveSession: Mock<WorkspaceSessionPort["clearActiveSession"]>;
+  preferredSession: Mock<WorkspaceSessionPort["preferredSession"]>;
+  selectSession: Mock<WorkspaceSessionPort["selectSession"]>;
+  updateUrl: Mock<UpdateUrl>;
   backgroundErrors: { message: string; error: unknown }[];
   setState: (patch: Partial<AppState>) => void;
 }
@@ -37,14 +42,16 @@ interface Harness {
 function harness(initial: Partial<AppState>, loadWorkspaces: LoadWorkspaces): Harness {
   let state: AppState = { ...initialAppState(), ...initial };
   const setState = (patch: Partial<AppState>) => { state = { ...state, ...patch }; };
-  const clearActiveSession = vi.fn();
-  const sessions: Pick<SessionController, "clearActiveSession" | "mergeCreationFailedSessionStarts" | "preferredSession" | "selectSession"> = {
+  const clearActiveSession = vi.fn<WorkspaceSessionPort["clearActiveSession"]>();
+  const preferredSession = vi.fn<WorkspaceSessionPort["preferredSession"]>();
+  const selectSession = vi.fn<WorkspaceSessionPort["selectSession"]>().mockResolvedValue();
+  const sessions: WorkspaceSessionPort = {
     clearActiveSession,
     mergeCreationFailedSessionStarts: (_cwd, listedSessions) => listedSessions,
-    preferredSession: vi.fn(),
-    selectSession: vi.fn(),
+    preferredSession,
+    selectSession,
   };
-  const updateUrl = vi.fn();
+  const updateUrl = vi.fn<UpdateUrl>();
   const backgroundErrors: { message: string; error: unknown }[] = [];
   const controller = new WorkspaceController(
     () => state,
@@ -57,7 +64,7 @@ function harness(initial: Partial<AppState>, loadWorkspaces: LoadWorkspaces): Ha
       onBackgroundError: (message, error) => { backgroundErrors.push({ message, error }); },
     },
   );
-  return { controller, state: () => state, clearActiveSession, updateUrl, backgroundErrors, setState };
+  return { controller, state: () => state, clearActiveSession, preferredSession, selectSession, updateUrl, backgroundErrors, setState };
 }
 
 describe("WorkspaceController.selectWorkspace", () => {
@@ -414,5 +421,120 @@ describe("WorkspaceController.refreshSelectedProjectTopology", () => {
     await test.controller.refreshSelectedProjectTopology();
 
     expect(loadWorkspaces).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkspaceController selection contracts", () => {
+  it("clears selection, scoped state, and routing on request", () => {
+    const repo = project("p1", "/repo");
+    const selected = workspace(repo.id, repo.path);
+    const test = harness({ selectedProject: repo, selectedWorkspace: selected, workspaces: [selected], selectedFilePath: "file.ts" }, vi.fn());
+
+    test.controller.clearSelection();
+
+    expect(test.clearActiveSession).toHaveBeenCalledOnce();
+    expect(test.state().selectedProject).toBeUndefined();
+    expect(test.state().selectedWorkspace).toBeUndefined();
+    expect(test.state().selectedFilePath).toBeUndefined();
+    expect(test.updateUrl).toHaveBeenCalledOnce();
+
+    test.controller.clearSelection({ updateUrl: false });
+    expect(test.updateUrl).toHaveBeenCalledOnce();
+  });
+
+  it("forgets one project's cached workspaces", () => {
+    const test = harness({ workspacesByProjectId: { p1: [workspace("p1", "/one")], p2: [workspace("p2", "/two")] } }, vi.fn());
+
+    test.controller.forgetProject("p1");
+
+    expect(test.state().workspacesByProjectId).toEqual({ p2: [workspace("p2", "/two")] });
+  });
+
+  it("loads a project, selects its preferred workspace, and selects its session", async () => {
+    const repo = project("p1", "/repo");
+    const main = workspace(repo.id, repo.path, { isMain: true });
+    const test = harness({ selectedMachine: machine("local"), projects: [repo] }, vi.fn().mockResolvedValue([main]));
+    const selectedSession = session(main.path);
+    test.preferredSession.mockReturnValue(selectedSession);
+
+    await test.controller.selectProject(repo, { workspaceId: main.id, sessionId: selectedSession.id });
+
+    expect(test.state().selectedProject).toBe(repo);
+    expect(test.state().selectedWorkspace).toBe(main);
+    expect(test.state().workspacesByProjectId[repo.id]).toEqual([main]);
+    expect(test.selectSession).toHaveBeenCalledWith(selectedSession, { updateUrl: undefined });
+  });
+
+  it("updates the route when a project has no workspaces", async () => {
+    const repo = project("p1", "/repo");
+    const test = harness({ selectedMachine: machine("local"), projects: [repo] }, vi.fn().mockResolvedValue([]));
+
+    await test.controller.selectProject(repo);
+
+    expect(test.state().isLoadingWorkspaces).toBe(false);
+    expect(test.updateUrl).toHaveBeenCalledOnce();
+  });
+
+  it("reports selected project and workspace loading failures", async () => {
+    const repo = project("p1", "/repo");
+    const selected = workspace(repo.id, repo.path);
+    const projectFailure = harness({ selectedMachine: machine("local"), projects: [repo] }, vi.fn().mockRejectedValue(new Error("workspace list failed")));
+
+    await projectFailure.controller.selectProject(repo);
+    expect(projectFailure.state().error).toContain("workspace list failed");
+    expect(projectFailure.state().isLoadingWorkspaces).toBe(false);
+
+    const workspaceFailure = harness({ selectedMachine: machine("local"), projects: [repo], selectedProject: repo }, vi.fn());
+    const failingSessions = vi.fn<typeof defaultApi.sessions>().mockRejectedValue(new Error("session list failed"));
+    const controller = new WorkspaceController(
+      workspaceFailure.state,
+      workspaceFailure.setState,
+      (options) => { workspaceFailure.updateUrl(options); },
+      {
+        clearActiveSession: workspaceFailure.clearActiveSession,
+        mergeCreationFailedSessionStarts: (_cwd, listed) => listed,
+        preferredSession: workspaceFailure.preferredSession,
+        selectSession: workspaceFailure.selectSession,
+      },
+      undefined,
+      { api: { workspaces: vi.fn<typeof defaultApi.workspaces>(), sessions: failingSessions } },
+    );
+
+    await controller.selectWorkspace(selected);
+    expect(workspaceFailure.state().error).toContain("session list failed");
+  });
+
+  it("refreshes after deletion using main, first, or no fallback workspace", async () => {
+    const repo = project("p1", "/repo");
+    const removed = workspace(repo.id, "/removed");
+    const main = workspace(repo.id, repo.path, { isMain: true });
+    const test = harness({ selectedMachine: machine("local"), projects: [repo], selectedProject: repo, selectedWorkspace: removed }, vi.fn().mockResolvedValue([main]));
+    const select = vi.spyOn(test.controller, "selectWorkspace").mockResolvedValue();
+
+    await test.controller.refreshAfterWorkspaceDeleted(repo.id, removed.id);
+    expect(select).toHaveBeenCalledWith(main);
+
+    select.mockClear();
+    test.setState({ selectedWorkspace: removed });
+    const first = workspace(repo.id, "/first");
+    const load = vi.fn().mockResolvedValue([first]);
+    const firstFallback = harness({ selectedMachine: machine("local"), projects: [repo], selectedProject: repo, selectedWorkspace: removed }, load);
+    const selectFirst = vi.spyOn(firstFallback.controller, "selectWorkspace").mockResolvedValue();
+    await firstFallback.controller.refreshAfterWorkspaceDeleted(repo.id, removed.id);
+    expect(selectFirst).toHaveBeenCalledWith(first);
+
+    const none = harness({ selectedMachine: machine("local"), projects: [repo], selectedProject: repo, selectedWorkspace: removed }, vi.fn().mockResolvedValue([]));
+    const clear = vi.spyOn(none.controller, "clearSelection");
+    await none.controller.refreshAfterWorkspaceDeleted(repo.id, removed.id);
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it("rejects missing projects and identifies deletable worktrees", async () => {
+    const test = harness({ projects: [] }, vi.fn());
+
+    await expect(test.controller.refreshProjectWorkspaces("missing")).rejects.toThrow("Project not found");
+    expect(canDeleteWorkspace(undefined)).toBe(false);
+    expect(canDeleteWorkspace(workspace("p1", "/main", { isMain: true }))).toBe(false);
+    expect(canDeleteWorkspace(workspace("p1", "/feature"))).toBe(true);
   });
 });

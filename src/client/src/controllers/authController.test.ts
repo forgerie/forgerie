@@ -578,6 +578,105 @@ describe("AuthController", () => {
     expect(cancelCalls).toEqual([{ flowId: "flow-1", machineId: "local" }]);
     expect(getState().authDialog).toBeUndefined();
   });
+
+  it("opens the login method chooser and loads providers by auth type", async () => {
+    const providers = [authProvider("anthropic", "oauth")];
+    const authProviders = vi.fn(() => Promise.resolve({ providers }));
+    const { controller, getState } = createController({}, { authProviders });
+
+    await controller.openLogin();
+    expect(getState().authDialog).toEqual({ step: "method" });
+
+    await controller.chooseLoginMethod("oauth");
+    expect(authProviders).toHaveBeenCalledWith({ mode: "login", authType: "oauth", machineId: "local" });
+    expect(getState().authDialog).toEqual({ step: "providers", mode: "login", authType: "oauth", providers });
+  });
+
+  it("reports provider loading failures", async () => {
+    const { controller, getState } = createController({}, { authProviders: () => Promise.reject(new Error("provider scan failed")) });
+
+    await controller.chooseLoginMethod("api_key");
+
+    expect(getState().error).toContain("provider scan failed");
+  });
+
+  it("handles missing and ambiguous direct login providers", async () => {
+    const duplicate = [authProvider("anthropic", "oauth"), { ...authProvider("anthropic", "api_key"), loginFlow: "interactive" as const }];
+    const { controller, getState } = createController({}, {
+      authProviders: (options) => Promise.resolve({ providers: options?.mode === "login" ? duplicate : [] }),
+    });
+
+    await controller.openLogin("missing");
+    expect(getState().error).toBe("Auth provider not found: missing");
+
+    await controller.openLogin("anthropic");
+    expect(getState().authDialog).toEqual({ step: "providers", mode: "login", providers: duplicate });
+  });
+
+  it("opens logout choices and logs out a stored provider directly", async () => {
+    const provider = authProvider("openai", "api_key");
+    const logoutProvider = vi.fn(() => Promise.resolve({ accepted: true as const }));
+    const { controller, getState } = createController({}, {
+      authProviders: () => Promise.resolve({ providers: [provider] }),
+      logoutProvider,
+    });
+
+    await controller.openLogout();
+    expect(getState().authDialog).toEqual({ step: "logout", providers: [provider] });
+
+    await controller.openLogout("openai");
+    expect(logoutProvider).toHaveBeenCalledWith("openai", "local");
+    expect(getState().authDialog).toBeUndefined();
+
+    await controller.openLogout("missing");
+    expect(getState().error).toBe("No stored credentials for missing");
+  });
+
+  it("rejects remote OAuth logout and reports logout failures", async () => {
+    const oauth = authProvider("anthropic", "oauth");
+    const apiKey = authProvider("openai", "api_key");
+    const logoutProvider = vi.fn(() => Promise.reject(new Error("logout failed")));
+    const { controller, getState, setState } = createController(
+      { selectedMachine: remoteMachine("remote-1") },
+      { authProviders: () => Promise.resolve({ providers: [oauth, apiKey] }), logoutProvider },
+    );
+
+    await controller.openLogout("anthropic");
+    expect(getState().error).toContain("configured directly on https://remote.example");
+    expect(logoutProvider).not.toHaveBeenCalled();
+
+    setState({ authDialog: { step: "logout", providers: [apiKey] } });
+    await controller.logoutProvider("openai");
+    expect(getState().error).toContain("logout failed");
+  });
+
+  it("updates OAuth input, clears its error, and ignores other dialog steps", () => {
+    const flow = oauthFlow({ prompt: { requestId: "request-1", message: "Paste callback", promptType: "manual_code" } });
+    const { controller, getState, setState } = createController({ authDialog: { step: "method" } });
+
+    controller.updateOAuthInput("ignored");
+    expect(getState().authDialog).toEqual({ step: "method" });
+
+    setState({ authDialog: { step: "oauth", flow, machineId: "local", inputValue: "old", error: "bad" } });
+    controller.updateOAuthInput("new");
+    expect(getState().authDialog).toEqual({ step: "oauth", flow, machineId: "local", inputValue: "new" });
+  });
+
+  it("routes slash commands and closes non-OAuth cancellation locally", async () => {
+    const authProviders = vi.fn(() => Promise.resolve({ providers: [] }));
+    const { controller, getState } = createController({}, { authProviders });
+
+    expect(controller.handleSlashCommand("/login")).toBe(true);
+    await flushMicrotasks();
+    expect(getState().authDialog).toEqual({ step: "method" });
+    expect(controller.handleSlashCommand("/logout openai")).toBe(true);
+    await flushMicrotasks();
+    expect(authProviders).toHaveBeenCalledWith({ mode: "logout", machineId: "local" });
+    expect(controller.handleSlashCommand("/model")).toBe(false);
+
+    await controller.cancelOAuth();
+    expect(getState().authDialog).toBeUndefined();
+  });
 });
 
 function createController(

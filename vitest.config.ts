@@ -23,10 +23,10 @@ export default defineConfig({
       reportsDirectory: "coverage",
       reportOnFailure: true,
       thresholds: {
-        statements: 84,
-        branches: 75.8,
-        functions: 86.1,
-        lines: 88.2,
+        statements: 84.9,
+        branches: 76.5,
+        functions: 87.2,
+        lines: 89.2,
         "src/shared/**/*.ts": {
           statements: 91.5,
           branches: 86.6,
@@ -40,10 +40,10 @@ export default defineConfig({
           lines: 91.2,
         },
         "src/client/src/components/**/*.ts": {
-          statements: 76.7,
-          branches: 70.7,
-          functions: 73.7,
-          lines: 79.8,
+          statements: 78.8,
+          branches: 72.5,
+          functions: 76.5,
+          lines: 82.1,
         },
         "src/nativeServices/**/*.ts": {
           statements: 85.3,

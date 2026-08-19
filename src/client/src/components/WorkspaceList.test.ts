@@ -12,6 +12,101 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+describe("workspace list behavior", () => {
+  it("selects workspaces and deletes eligible worktrees", async () => {
+    const value = { ...workspace("ws-a"), isMain: false, isGitWorktree: true };
+    const onSelect = vi.fn();
+    const onDelete = vi.fn();
+    const list = await mountWorkspaceList([value], new Set());
+    list.onSelect = onSelect;
+    list.onDelete = onDelete;
+    await list.updateComplete;
+    const row = rowFor(list, value.label);
+
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    expect(onSelect).toHaveBeenCalledWith(value);
+    openMenu(list, value.label);
+    await list.updateComplete;
+    list.shadowRoot?.querySelector<HTMLButtonElement>(".workspace-menu-actions .danger")?.click();
+    await list.updateComplete;
+
+    expect(onDelete).toHaveBeenCalledWith(value);
+    expect(list.shadowRoot?.querySelector(".workspace-menu-panel")).toBeNull();
+  });
+
+  it("does not offer deletion for main workspaces", async () => {
+    const list = await mountWorkspaceList([workspace("main")], new Set());
+    openMenu(list, "main");
+    await list.updateComplete;
+
+    expect(list.shadowRoot?.querySelector(".workspace-menu-actions")).toBeNull();
+  });
+
+  it("routes keyboard navigation and closes an open menu on Escape", async () => {
+    const value = workspace("ws-a");
+    const previous = vi.fn();
+    const next = vi.fn();
+    const cancel = vi.fn();
+    const list = await mountWorkspaceList([value], new Set());
+    Object.assign(list, { onFocusPreviousSection: previous, onFocusNextSection: next, onCancelKeyboardNavigation: cancel });
+    await list.updateComplete;
+    const row = rowFor(list, value.label);
+
+    row.dispatchEvent(key("ArrowLeft"));
+    row.dispatchEvent(key("ArrowRight"));
+    row.dispatchEvent(key("Escape"));
+    expect(previous).toHaveBeenCalledOnce();
+    expect(next).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+
+    openMenu(list, value.label);
+    await list.updateComplete;
+    row.dispatchEvent(key("Escape"));
+    await list.updateComplete;
+    expect(list.shadowRoot?.querySelector(".workspace-menu-panel")).toBeNull();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("renders collapsed summaries and focuses the selected row", async () => {
+    const value = workspace("ws-a");
+    const toggle = vi.fn();
+    const list = await mountWorkspaceList([value], new Set());
+    list.selected = value;
+    await list.updateComplete;
+    const row = rowFor(list, value.label);
+    const focus = vi.fn();
+    row.focus = focus;
+    row.scrollIntoView = vi.fn();
+    expect(await list.focusSelectedOrFirst()).toBe(true);
+    expect(focus).toHaveBeenCalledOnce();
+
+    list.collapsible = true;
+    list.collapsed = true;
+    list.onToggleCollapsed = toggle;
+    await list.updateComplete;
+    expect(list.shadowRoot?.querySelector(".list-body")).toBeNull();
+    expect(list.shadowRoot?.textContent).toContain(value.label);
+    list.shadowRoot?.querySelector<HTMLButtonElement>(".section-toggle")?.click();
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it("blocks duplicate deletion while a workspace is already deleting", async () => {
+    const value = { ...workspace("ws-a"), isMain: false, isGitWorktree: true };
+    const onDelete = vi.fn();
+    const list = await mountWorkspaceList([value], new Set());
+    list.onDelete = onDelete;
+    list.deletingWorkspaceIds = [value.id];
+    await list.updateComplete;
+    openMenu(list, value.label);
+    await list.updateComplete;
+    const remove = list.shadowRoot?.querySelector<HTMLButtonElement>(".workspace-menu-actions .danger");
+
+    expect(remove?.disabled).toBe(true);
+    remove?.click();
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+});
+
 describe("workspace unread indicator", () => {
   it("shows an unread dot only on workspaces tracked as unread", async () => {
     const list = await mountWorkspaceList([workspace("ws-a"), workspace("ws-b")], new Set(["ws-b"]));
@@ -138,15 +233,19 @@ async function mountWorkspaceList(workspaces: Workspace[], unreadWorkspaceIds: R
   return list;
 }
 
-function rowFor(list: WorkspaceList, workspaceLabel: string): Element {
+function rowFor(list: WorkspaceList, workspaceLabel: string): HTMLElement {
   const rows = [...(list.shadowRoot?.querySelectorAll(".workspace-row") ?? [])];
   const row = rows.find((candidate) => candidate.textContent.includes(workspaceLabel));
-  if (row === undefined) throw new Error(`Expected a workspace row for ${workspaceLabel}`);
+  if (!(row instanceof HTMLElement)) throw new Error(`Expected a workspace row for ${workspaceLabel}`);
   return row;
 }
 
 function unreadDot(row: Element): Element | null {
   return row.querySelector(".activity-indicator.unread");
+}
+
+function key(value: string): KeyboardEvent {
+  return new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, composed: true });
 }
 
 function workspaceActivity(cwd: string, hasSessionActivity: boolean, hasTerminalActivity: boolean): WorkspaceActivity {

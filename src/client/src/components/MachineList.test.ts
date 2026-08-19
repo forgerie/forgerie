@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Machine, MachineHealth, MachineStatus, WorkspaceActivity } from "../api";
 import { canRemoveMachine, MachineList } from "./MachineList";
 
@@ -12,6 +12,98 @@ describe("canRemoveMachine", () => {
   it("only allows remote machines to be removed from the machine list", () => {
     expect(canRemoveMachine(machine("local", "local"))).toBe(false);
     expect(canRemoveMachine(machine("remote-a", "remote"))).toBe(true);
+  });
+});
+
+describe("machine list behavior", () => {
+  it("selects rows and removes remote machines from the actions menu", async () => {
+    const local = machine("local", "local");
+    const remote = machine("remote-a", "remote");
+    const onSelect = vi.fn();
+    const onRemove = vi.fn();
+    const list = await mountMachineList([local, remote], new Set());
+    list.onSelect = onSelect;
+    list.onRemove = onRemove;
+    await list.updateComplete;
+
+    rowFor(list, "local").dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    expect(onSelect).toHaveBeenCalledWith(local);
+
+    const toggle = rowFor(list, "remote-a").querySelector<HTMLButtonElement>(".action-menu-toggle");
+    toggle?.click();
+    await list.updateComplete;
+    expect(list.shadowRoot?.querySelector(".machine-menu-panel")).not.toBeNull();
+    list.shadowRoot?.querySelector<HTMLButtonElement>(".machine-menu-panel .danger")?.click();
+    await list.updateComplete;
+
+    expect(onRemove).toHaveBeenCalledWith(remote);
+    expect(list.shadowRoot?.querySelector(".machine-menu-panel")).toBeNull();
+  });
+
+  it("renders collapsible summaries and toggles the section", async () => {
+    const onToggleCollapsed = vi.fn();
+    const local = machine("local", "local");
+    const list = await mountMachineList([local], new Set());
+    list.collapsible = true;
+    list.collapsed = true;
+    list.selected = local;
+    list.onToggleCollapsed = onToggleCollapsed;
+    await list.updateComplete;
+
+    expect(list.shadowRoot?.textContent).toContain("local");
+    expect(list.shadowRoot?.querySelector(".list-body")).toBeNull();
+    list.shadowRoot?.querySelector<HTMLButtonElement>(".section-toggle")?.click();
+    expect(onToggleCollapsed).toHaveBeenCalledOnce();
+  });
+
+  it("routes keyboard selection, section movement, cancellation, and menu escape", async () => {
+    const remote = machine("remote-a", "remote");
+    const onSelect = vi.fn();
+    const onFocusNextSection = vi.fn();
+    const onCancelKeyboardNavigation = vi.fn();
+    const list = await mountMachineList([remote], new Set());
+    list.onSelect = onSelect;
+    list.onRemove = vi.fn();
+    list.onFocusNextSection = onFocusNextSection;
+    list.onCancelKeyboardNavigation = onCancelKeyboardNavigation;
+    await list.updateComplete;
+    const row = rowFor(list, "remote-a");
+
+    row.dispatchEvent(key("Enter"));
+    row.dispatchEvent(key("ArrowRight"));
+    row.dispatchEvent(key("Escape"));
+    expect(onSelect).toHaveBeenCalledWith(remote);
+    expect(onFocusNextSection).toHaveBeenCalledOnce();
+    expect(onCancelKeyboardNavigation).toHaveBeenCalledOnce();
+
+    row.querySelector<HTMLButtonElement>(".action-menu-toggle")?.click();
+    await list.updateComplete;
+    row.dispatchEvent(key("Escape"));
+    await list.updateComplete;
+    expect(list.shadowRoot?.querySelector(".machine-menu-panel")).toBeNull();
+    expect(onCancelKeyboardNavigation).toHaveBeenCalledOnce();
+  });
+
+  it("focuses the selected row and clears stale menus", async () => {
+    const local = machine("local", "local");
+    const remote = machine("remote-a", "remote");
+    const list = await mountMachineList([local, remote], new Set());
+    list.selected = remote;
+    list.onRemove = vi.fn();
+    await list.updateComplete;
+    const selected = rowFor(list, "remote-a");
+    const focus = vi.fn();
+    selected.focus = focus;
+    selected.scrollIntoView = vi.fn();
+
+    expect(await list.focusSelectedOrFirst()).toBe(true);
+    expect(focus).toHaveBeenCalledOnce();
+
+    selected.querySelector<HTMLButtonElement>(".action-menu-toggle")?.click();
+    await list.updateComplete;
+    list.machines = [local];
+    await list.updateComplete;
+    expect(list.shadowRoot?.querySelector(".machine-menu-panel")).toBeNull();
   });
 });
 
@@ -81,15 +173,19 @@ async function mountMachineList(
   return list;
 }
 
-function rowFor(list: MachineList, machineName: string): Element {
+function rowFor(list: MachineList, machineName: string): HTMLElement {
   const rows = [...(list.shadowRoot?.querySelectorAll(".machine-row") ?? [])];
   const row = rows.find((candidate) => candidate.textContent.includes(machineName));
-  if (row === undefined) throw new Error(`Expected a machine row for ${machineName}`);
+  if (!(row instanceof HTMLElement)) throw new Error(`Expected a machine row for ${machineName}`);
   return row;
 }
 
 function unreadDot(row: Element): Element | null {
   return row.querySelector(".activity-indicator.unread");
+}
+
+function key(value: string): KeyboardEvent {
+  return new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, composed: true });
 }
 
 function workspaceActivity(cwd: string, hasSessionActivity: boolean, hasTerminalActivity: boolean): WorkspaceActivity {
