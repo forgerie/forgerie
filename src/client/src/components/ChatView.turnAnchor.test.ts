@@ -213,7 +213,12 @@ describe("ChatView turn anchoring", () => {
     expect(reservedTurnKeys(view)).toEqual(["turn:m:1"]);
 
     const chat = scroller(view);
-    chat.scrollTop = 0;
+    Reflect.set(view, "defaultScrollRestoreState", "idle");
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, writable: true, value: 600 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 400 },
+    });
     chat.dispatchEvent(new Event("scroll"));
     await view.updateComplete;
 

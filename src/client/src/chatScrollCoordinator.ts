@@ -1,4 +1,4 @@
-import { followModeAfterReaderPullback, followModeAfterScroll, followModeAfterTurnOpened, FOLLOW_TAIL, type ChatFollowMode, type ChatScrollDriver } from "./chatFollowMode";
+import { followModeAfterReaderPullback, followModeAfterScroll, followModeAfterTurnOpened, FOLLOW_FREE, FOLLOW_TAIL, type ChatFollowMode, type ChatScrollDriver } from "./chatFollowMode";
 import { CHAT_SCROLL_BOTTOM_THRESHOLD, CHAT_SCROLL_NEAR_BOTTOM_THRESHOLD, distanceFromScrollBottom, type ChatScrollViewport } from "./chatScrollPosition";
 
 export interface ChatScrollFrameScheduler {
@@ -7,7 +7,7 @@ export interface ChatScrollFrameScheduler {
 }
 
 export interface ChatScrollUpdate {
-  readonly driver: ChatScrollDriver;
+  readonly driver: ChatScrollDriver | "none";
   readonly viewportChanged: boolean;
 }
 
@@ -18,6 +18,9 @@ export interface ChatScrollSettlement {
   readonly suppressLoadMore?: boolean;
   readonly suppressSave?: boolean;
 }
+
+const WHEEL_TAKEOVER_DELTA = 1;
+const TOUCH_TAKEOVER_DELTA = 6;
 
 const browserFrameScheduler: ChatScrollFrameScheduler = {
   request(callback: FrameRequestCallback): number {
@@ -47,6 +50,7 @@ export class ChatScrollCoordinator {
   private saveSuppressed = false;
   private loadMoreSuppressed = false;
   private settlementSuppressesSave = false;
+  private wheelIntentDelta = 0;
   private touchStartY: number | undefined;
 
   constructor(private readonly frames: ChatScrollFrameScheduler = browserFrameScheduler) {}
@@ -69,6 +73,7 @@ export class ChatScrollCoordinator {
     this.lastScrollTop = 0;
     this.lastClientHeight = 0;
     this.writtenScrollTop = undefined;
+    this.wheelIntentDelta = 0;
     this.touchStartY = undefined;
     this.saveSuppressionGeneration += 1;
     this.saveSuppressed = false;
@@ -91,31 +96,50 @@ export class ChatScrollCoordinator {
     return next.kind === "turn";
   }
 
-  readerWheel(deltaY: number, canScrollUp: boolean): void {
+  readerWheel(deltaY: number, canScrollUp: boolean, forceTakeover = false): boolean {
+    this.wheelIntentDelta += deltaY;
+    if (Math.abs(this.wheelIntentDelta) < WHEEL_TAKEOVER_DELTA) return false;
+    const intentDelta = this.wheelIntentDelta;
+    this.wheelIntentDelta = 0;
     this.readerTookControl();
-    if (deltaY < 0) this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
+    if (forceTakeover) this.currentMode = FOLLOW_FREE;
+    else if (intentDelta < 0) this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
+    return this.currentMode.kind === "free";
   }
 
   readerTouchStart(y: number | undefined): void {
     this.touchStartY = y;
   }
 
-  readerTouchMove(y: number | undefined, canScrollUp: boolean): void {
-    if (this.touchStartY === undefined || y === undefined || y === this.touchStartY) return;
+  readerTouchMove(y: number | undefined, canScrollUp: boolean, forceTakeover = false): boolean {
+    if (this.touchStartY === undefined || y === undefined || Math.abs(y - this.touchStartY) < TOUCH_TAKEOVER_DELTA) return false;
     this.readerTookControl();
-    if (y > this.touchStartY) this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
+    if (forceTakeover) this.currentMode = FOLLOW_FREE;
+    else if (y > this.touchStartY) this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
+    return this.currentMode.kind === "free";
   }
 
-  recordScroll(scroller: ChatScrollViewport): ChatScrollUpdate {
+  recordScroll(scroller: ChatScrollViewport, allowReaderControl = true): ChatScrollUpdate {
     const viewportChanged = this.lastClientHeight !== 0 && scroller.clientHeight !== this.lastClientHeight;
     if (viewportChanged) {
       this.lastClientHeight = scroller.clientHeight;
       return { driver: "component", viewportChanged: true };
     }
 
-    const driver: ChatScrollDriver = this.writtenScrollTop !== undefined && Math.abs(scroller.scrollTop - this.writtenScrollTop) < 1
-      ? "component"
-      : "reader";
+    const programmatic = this.writtenScrollTop !== undefined && Math.abs(scroller.scrollTop - this.writtenScrollTop) < 1;
+    const moved = Math.abs(scroller.scrollTop - this.lastScrollTop) >= 1;
+    if (!programmatic && !moved) {
+      this.writtenScrollTop = undefined;
+      this.lastClientHeight = scroller.clientHeight;
+      return { driver: "none", viewportChanged: false };
+    }
+    if (!programmatic && !allowReaderControl) {
+      this.writtenScrollTop = undefined;
+      this.lastScrollTop = scroller.scrollTop;
+      this.lastClientHeight = scroller.clientHeight;
+      return { driver: "none", viewportChanged: false };
+    }
+    const driver: ChatScrollDriver = programmatic ? "component" : "reader";
     if (driver === "reader") this.readerTookControl();
     this.currentMode = followModeAfterScroll(this.currentMode, {
       atBottom: distanceFromScrollBottom(scroller) < CHAT_SCROLL_BOTTOM_THRESHOLD,

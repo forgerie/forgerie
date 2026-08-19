@@ -14,6 +14,58 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ChatView loading-time reader takeover", () => {
+  it("keeps reader ownership when scrolling starts before history is ready", async () => {
+    const frames = installFrames();
+    const selectedTarget = selectedChatTarget("local", session);
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.selectedLoad = selectedChatLoading(selectedTarget);
+    view.initialReadingTarget = { kind: "latest-turn", id: "loading-reader-takeover" };
+    const onApplied = vi.fn();
+    view.onInitialReadingTargetApplied = onApplied;
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    let scrollHeight = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 400 },
+    });
+
+    scrollTop = 10;
+    chat.dispatchEvent(new Event("scroll"));
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+    scrollTop = 0;
+
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
+    frames.releaseAll();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+    expect(onApplied).toHaveBeenCalledWith({ kind: "latest-turn", id: "loading-reader-takeover" });
+
+    scrollHeight = 1_200;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.selectedLoad = selectedChatLoading(selectedTarget, "fresh");
+    await view.updateComplete;
+    frames.releaseAll();
+
+    expect(scrollTop).toBe(0);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+
+    scrollTop = 800;
+    chat.dispatchEvent(new Event("scroll"));
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+  });
+});
+
 describe("ChatView unread reading position", () => {
   it("places the newest user message at the viewport top and consumes the one-shot target", async () => {
     const frames = installFrames();

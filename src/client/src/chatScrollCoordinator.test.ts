@@ -60,6 +60,31 @@ describe("ChatScrollCoordinator", () => {
     expect(placements).toEqual([]);
   });
 
+  it("lets a loading-time gesture claim control before scrolling is possible", () => {
+    const frames = new ManualFrameScheduler();
+    const coordinator = new ChatScrollCoordinator(frames);
+    let placements = 0;
+    coordinator.schedulePlacement(() => { placements += 1; });
+
+    expect(coordinator.readerWheel(-0.6, false, true)).toBe(false);
+    const readerOwned = coordinator.readerWheel(-0.6, false, true);
+    frames.releaseAll();
+
+    expect(readerOwned).toBe(true);
+    expect(placements).toBe(0);
+    expect(coordinator.mode).toEqual(FOLLOW_FREE);
+  });
+
+  it("ignores touch jitter before accepting a loading-time takeover", () => {
+    const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
+    coordinator.readerTouchStart(100);
+
+    expect(coordinator.readerTouchMove(96, false, true)).toBe(false);
+    expect(coordinator.mode).not.toEqual(FOLLOW_FREE);
+    expect(coordinator.readerTouchMove(94, false, true)).toBe(true);
+    expect(coordinator.mode).toEqual(FOLLOW_FREE);
+  });
+
   it("cancels queued movement as soon as the reader pulls back", () => {
     const frames = new ManualFrameScheduler();
     const coordinator = new ChatScrollCoordinator(frames);
@@ -76,6 +101,20 @@ describe("ChatScrollCoordinator", () => {
     expect(placements).toBe(0);
     expect(coordinator.canSave).toBe(true);
     expect(coordinator.mode).toEqual(FOLLOW_FREE);
+  });
+
+  it("does not treat an unlatched layout scroll as reader intent", () => {
+    const frames = new ManualFrameScheduler();
+    const coordinator = new ChatScrollCoordinator(frames);
+    const chat = viewport(20);
+    let placements = 0;
+    coordinator.schedulePlacement(() => { placements += 1; });
+
+    expect(coordinator.recordScroll(chat, false).driver).toBe("none");
+    frames.releaseAll();
+
+    expect(placements).toBe(1);
+    expect(coordinator.mode).toEqual({ kind: "tail" });
   });
 
   it("uses one anchored mode for restored passages and turn alignment", () => {

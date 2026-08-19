@@ -323,6 +323,7 @@ export class ChatView extends LitElement {
   private pendingScrollRestoreSessionId: string | undefined;
   private pendingScrollRestorePosition: ChatAnchorScrollPosition | undefined;
   private defaultScrollRestoreState: DefaultScrollRestoreState = "idle";
+  private loadingScrollReaderOwned = false;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
@@ -333,7 +334,7 @@ export class ChatView extends LitElement {
       });
       return;
     }
-    if (this.scrolling.mode.kind === "tail" && this.initialReadingTarget === undefined && this.defaultScrollRestoreState === "idle") this.scrollToBottom();
+    if (this.scrolling.mode.kind === "tail" && !this.hasPendingInitialReadingTarget() && this.defaultScrollRestoreState === "idle") this.scrollToBottom();
     else if (this.scrolling.mode.kind === "turn") this.alignAnchoredTurn();
     else if (this.chat !== undefined) this.scrolling.syncViewportSize(this.chat);
   };
@@ -397,6 +398,7 @@ export class ChatView extends LitElement {
     this.pendingScrollRestoreSessionId = undefined;
     this.pendingScrollRestorePosition = undefined;
     this.defaultScrollRestoreState = "idle";
+    this.loadingScrollReaderOwned = false;
     this.retryFocusPending = false;
     this.turnTrackingReady = false;
     this.lastSeenTurnCount = 0;
@@ -492,7 +494,7 @@ export class ChatView extends LitElement {
       this.scheduleSelectedLoadPaintReport();
     }
     if (changed.has("initialReadingTarget") || changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("selectedLoad")) {
-      if (this.initialReadingTarget === undefined && this.defaultScrollRestoreState === "deferred" && selectedChatHasReadableHistory(this.currentSelectedLoad())) this.restoreScrollPosition();
+      if (!this.hasPendingInitialReadingTarget() && this.defaultScrollRestoreState === "deferred" && selectedChatHasReadableHistory(this.currentSelectedLoad())) this.restoreScrollPosition();
       else this.scheduleInitialReadingTarget();
     }
   }
@@ -561,8 +563,12 @@ export class ChatView extends LitElement {
     }
   }
 
+  private hasPendingInitialReadingTarget(): boolean {
+    return this.initialReadingTarget !== undefined && this.initialReadingTarget.id !== this.appliedInitialReadingTargetId;
+  }
+
   private isCurrentInitialReadingTarget(target: ChatInitialReadingTarget): boolean {
-    return this.initialReadingTarget?.id === target.id;
+    return this.initialReadingTarget?.id === target.id && this.hasPendingInitialReadingTarget();
   }
 
   private finishInitialReadingTarget(target: ChatInitialReadingTarget): void {
@@ -1268,12 +1274,16 @@ export class ChatView extends LitElement {
   private onScroll() {
     this.requestLoadMoreIfNeeded();
     const chat = this.chat;
-    if (chat !== undefined && this.scrolling.recordScroll(chat).viewportChanged) this.scheduleCurrentFollowTarget();
+    if (chat !== undefined) {
+      const update = this.scrolling.recordScroll(chat, !this.shouldForceReaderScrollTakeover());
+      if (update.viewportChanged) this.scheduleCurrentFollowTarget();
+    }
     if (this.scrolling.canSave) this.scheduleScrollPositionSave();
   }
 
   private onWheel(event: WheelEvent) {
-    this.scrolling.readerWheel(event.deltaY, this.canScrollUp());
+    const forceTakeover = this.shouldForceReaderScrollTakeover();
+    if (this.scrolling.readerWheel(event.deltaY, this.canScrollUp(), forceTakeover) && forceTakeover) this.acceptReaderScrollTakeover();
   }
 
   private onTouchStart(event: TouchEvent) {
@@ -1281,7 +1291,29 @@ export class ChatView extends LitElement {
   }
 
   private onTouchMove(event: TouchEvent) {
-    this.scrolling.readerTouchMove(event.touches[0]?.clientY, this.canScrollUp());
+    const forceTakeover = this.shouldForceReaderScrollTakeover();
+    if (this.scrolling.readerTouchMove(event.touches[0]?.clientY, this.canScrollUp(), forceTakeover) && forceTakeover) this.acceptReaderScrollTakeover();
+  }
+
+  private shouldForceReaderScrollTakeover(): boolean {
+    if (this.loadingScrollReaderOwned) return false;
+    const load = this.currentSelectedLoad();
+    return this.defaultScrollRestoreState !== "idle"
+      || this.hasPendingInitialReadingTarget()
+      || load.kind === "loading-without-content"
+      || load.kind === "loading-with-readable-history";
+  }
+
+  private acceptReaderScrollTakeover(): void {
+    this.loadingScrollReaderOwned = true;
+    this.defaultScrollRestoreState = "idle";
+    this.pendingScrollRestoreSessionId = undefined;
+    this.pendingScrollRestorePosition = undefined;
+    const target = this.initialReadingTarget;
+    if (target === undefined || target.id === this.appliedInitialReadingTargetId) return;
+    this.reservedTurnKey = undefined;
+    this.appliedInitialReadingTargetId = target.id;
+    this.onInitialReadingTargetApplied?.(target);
   }
 
   private isPrependingMessages(changed: Map<string, unknown>): boolean {
@@ -1328,7 +1360,7 @@ export class ChatView extends LitElement {
   private scheduleCurrentFollowTarget(): void {
     const mode = this.scrolling.mode;
     if (mode.kind === "free" || (mode.kind === "anchor" && mode.resume === "free")) return;
-    if ((mode.kind === "tail" || mode.kind === "anchor") && (this.initialReadingTarget !== undefined || this.defaultScrollRestoreState !== "idle")) return;
+    if ((mode.kind === "tail" || mode.kind === "anchor") && (this.hasPendingInitialReadingTarget() || this.defaultScrollRestoreState !== "idle")) return;
     if (mode.kind === "anchor") this.scrolling.follow(FOLLOW_TAIL);
     this.scrolling.schedulePlacement(() => { this.alignCurrentFollowTargetNow(); });
   }
@@ -1419,7 +1451,7 @@ export class ChatView extends LitElement {
   }
 
   restoreScrollPosition() {
-    if (this.initialReadingTarget !== undefined) {
+    if (this.hasPendingInitialReadingTarget()) {
       this.defaultScrollRestoreState = "deferred";
       this.scheduleInitialReadingTarget();
       return;
