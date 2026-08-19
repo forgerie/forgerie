@@ -19,6 +19,31 @@ afterEach(() => {
 });
 
 describe("ComposerDraft", () => {
+  it("uses Enter to send and Shift+Enter to insert a new line on mobile-like screens", async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = matchMedia(query);
+      Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
+    const enterSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const enterDraft = await mountDraft({ onSubmit: enterSubmit });
+    enterDraft.replaceText("send me");
+
+    press(enterDraft, "Enter");
+
+    expect(enterSubmit).toHaveBeenCalledWith({ text: "send me" }, undefined);
+
+    const shiftEnterSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const shiftEnterDraft = await mountDraft({ onSubmit: shiftEnterSubmit });
+    shiftEnterDraft.replaceText("first line");
+    press(shiftEnterDraft, "Shift");
+    shiftEnterDraft.view?.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+
+    expect(shiftEnterSubmit).not.toHaveBeenCalled();
+    expect(shiftEnterDraft.view?.state.doc.toString()).toBe("first line\n");
+  });
+
   it("mounts in chat and modal hosts with the same runtime contract", async () => {
     const runtime = runtimeWith(({ kind, from, to }) => kind === "command" ? [{ kind: "command", replaceFrom: from, replaceTo: to, insertText: "/skill:review", detail: "skill" }] : []);
     const chatSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");

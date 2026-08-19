@@ -13,7 +13,7 @@ import { inputModeForDraft, inputModesEqual, type InputMode } from "../inputMode
 import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePromptAttachment, promptAttachmentsCanUseInlineDelivery, type CapturedAttachment } from "../promptAttachmentCapture";
 import { detectPromptCompletionTrigger, type PromptCompletionTrigger } from "../promptCompletions";
 import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
-import { createMobilePromptEnterMedia, readPromptEnterPreference, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
+import { createMobilePromptEnterMedia, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
 import { abortComposerDraftDictation, beginComposerDraftDictation, commitComposerDraftDictationTranscript, composerDraftDictation, finishComposerDraftDictation, isComposerDraftDictationActive } from "./composerDraftDictation";
@@ -841,7 +841,7 @@ export class ComposerDraft extends LitElement {
       if (completion !== undefined) this.pick(completion);
       return true;
     }
-    if (!shouldSendPromptOnEnterShortcut(shiftKey, this.mobilePromptEnterMedia, readPromptEnterPreference())) {
+    if (!shouldSendPromptOnEnterShortcut(shiftKey)) {
       return insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
     }
     this.submit(this.working ? "followUp" : undefined);
