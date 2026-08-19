@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coldWarmComparisonFailures, gateScenario, historyCacheKey, measuresForAttempt, newestIntentAttemptId } from "./probe-chat-open.mjs";
+import { coldWarmComparisonFailures, gateScenario, historyCacheKey, measuresForAttempt, newestIntentAttemptId, performanceEntriesForInteraction } from "./probe-chat-open.mjs";
 
 describe("probe-chat-open attempt helpers", () => {
   it("uses the same machine-scoped history cache key as the app", () => {
@@ -64,6 +64,24 @@ describe("probe-chat-open attempt helpers", () => {
     ]);
     expect(coldWarmComparisonFailures(cold, warmFresh)).toEqual([]);
     expect(coldWarmComparisonFailures(cold, warmCached)).toEqual([]);
+  });
+
+  it("includes browser work that overlaps the shell-to-fresh interval", () => {
+    const measures = [
+      measure("shell-painted", 14, "same", "/repo", 0, 10),
+      measure("fresh-transcript-painted", 14, "same", "/repo", 0, 100),
+    ];
+    const entries = [
+      { startTime: 5, duration: 4, name: "before" },
+      { startTime: 15, duration: 10, name: "overlap-start" },
+      { startTime: 80, duration: 30, name: "overlap-end" },
+      { startTime: 101, duration: 5, name: "after" },
+    ];
+
+    expect(performanceEntriesForInteraction(entries, measures).map((entry) => entry.name)).toEqual([
+      "overlap-start",
+      "overlap-end",
+    ]);
   });
 });
 

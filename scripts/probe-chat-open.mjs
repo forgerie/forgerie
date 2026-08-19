@@ -115,7 +115,7 @@ async function probePosture({ args, debugPort, posture, representatives }) {
     });
     reportScenario(sameCold);
     failures.push(...gateScenario(sameCold, args));
-    warnings.push(...longTaskWarnings(sameCold, args));
+    warnings.push(...responsivenessWarnings(sameCold, args));
     await ensureHistoryCache(cdp, representatives.same, args);
 
     const sameWarm = await activateMeasuredScenario(cdp, {
@@ -132,7 +132,7 @@ async function probePosture({ args, debugPort, posture, representatives }) {
     reportColdWarmComparison(sameCold, sameWarm);
     failures.push(...gateScenario(sameWarm, args));
     failures.push(...coldWarmComparisonFailures(sameCold.measures, sameWarm.measures));
-    warnings.push(...longTaskWarnings(sameWarm, args));
+    warnings.push(...responsivenessWarnings(sameWarm, args));
 
     const cross = await activateMeasuredScenario(cdp, {
       args,
@@ -146,7 +146,7 @@ async function probePosture({ args, debugPort, posture, representatives }) {
     });
     reportScenario(cross);
     failures.push(...gateScenario(cross, args));
-    warnings.push(...longTaskWarnings(cross, args));
+    warnings.push(...responsivenessWarnings(cross, args));
 
     const largeSource = sourceForTarget(largeTarget, [representatives.previous, representatives.same, representatives.cross]);
     const large = await activateMeasuredScenario(cdp, {
@@ -161,7 +161,7 @@ async function probePosture({ args, debugPort, posture, representatives }) {
     });
     reportScenario(large);
     failures.push(...gateScenario(large, args));
-    warnings.push(...longTaskWarnings(large, args));
+    warnings.push(...responsivenessWarnings(large, args));
 
     await captureFailedRetryState(cdp, args, posture, representatives.same);
   } finally {
@@ -194,8 +194,9 @@ async function activateMeasuredScenario(cdp, options) {
     await screenshot(cdp, args, `${posture.name}-${label}-ready`);
     await setFetchBehavior(cdp, { delayMs: 0 });
     const measures = await timingMeasures(cdp, attemptId);
-    const longTasks = await longTasksForAttempt(cdp, measures);
-    return { label, target, attemptId, measures, longTasks, oldFlash, interaction };
+    const longTasks = await performanceEntriesForAttempt(cdp, "longTasks", measures);
+    const longAnimationFrames = await performanceEntriesForAttempt(cdp, "longAnimationFrames", measures);
+    return { label, target, attemptId, measures, longTasks, longAnimationFrames, oldFlash, interaction };
   } finally {
     await restoreProbeSendStub(cdp);
     await setFetchBehavior(cdp, { delayMs: 0 });
@@ -230,7 +231,7 @@ function reportScenario(result) {
   const failed = durationFor(result.measures, "failed");
   const terminal = live ?? readOnly ?? failed;
   process.stdout.write(
-    `  ${result.label.padEnd(21)} attempt=${String(result.attemptId).padStart(3)} shell=${formatMs(shell)} composer=${formatMs(composer)} send=${formatMs(acceptedSend)} readable=${formatMs(firstReadable)} terminal=${formatMs(terminal)} oldFlash=${String(result.oldFlash)} longTasks=${String(result.longTasks.length)}\n`,
+    `  ${result.label.padEnd(21)} attempt=${String(result.attemptId).padStart(3)} shell=${formatMs(shell)} composer=${formatMs(composer)} send=${formatMs(acceptedSend)} readable=${formatMs(firstReadable)} terminal=${formatMs(terminal)} oldFlash=${String(result.oldFlash)} longTasks=${String(result.longTasks.length)} longFrames=${String(result.longAnimationFrames.length)}\n`,
   );
 }
 
@@ -274,10 +275,26 @@ function firstReadableDuration(measures) {
     ?? durationFor(measures, "fresh-transcript-painted");
 }
 
-function longTaskWarnings(result, args) {
+function responsivenessWarnings(result, args) {
+  const longFrames = result.longAnimationFrames
+    .filter((entry) => entry.duration > args.longTaskWarningMs)
+    .map((entry) => `${result.label} long animation frame ${formatMs(entry.duration)} (${formatMs(entry.blockingDuration)} blocking) between shell and fresh transcript at ${formatMs(entry.startTime)}; ${longFrameAttribution(entry)} for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
+  if (longFrames.length > 0) return longFrames;
   return result.longTasks
     .filter((entry) => entry.duration > args.longTaskWarningMs)
     .map((entry) => `${result.label} long task ${formatMs(entry.duration)} between shell and fresh transcript at ${formatMs(entry.startTime)} for attempt ${String(result.attemptId)} ${describeRef(result.target)}`);
+}
+
+function longFrameAttribution(entry) {
+  const scripts = [...entry.scripts ?? []]
+    .sort((left, right) => right.duration - left.duration)
+    .slice(0, 3)
+    .map((script) => {
+      const functionName = script.sourceFunctionName === "" ? "anonymous" : script.sourceFunctionName;
+      const source = script.sourceURL === "" ? "inline" : script.sourceURL.split("/").at(-1);
+      return `${functionName} ${formatMs(script.duration)} in ${source}`;
+    });
+  return scripts.length === 0 ? "no script attribution" : `top scripts: ${scripts.join(", ")}`;
 }
 
 async function installProbeHooks(cdp) {
@@ -299,6 +316,7 @@ async function installProbeHooks(cdp) {
         fetchDelayMs: 0,
         fetchTarget: undefined,
         longTasks: [],
+        longAnimationFrames: [],
         oldFlash: false,
         oldFlashWatch: undefined,
         walk,
@@ -318,16 +336,37 @@ async function installProbeHooks(cdp) {
       };
       if (typeof PerformanceObserver !== "undefined") {
         try {
-          const probePushLongTasks = (entries) => {
-            for (const entry of entries) window.__chatOpenProbe.longTasks.push({ startTime: entry.startTime, duration: entry.duration, name: entry.name });
-          };
           const observer = new PerformanceObserver((list) => {
-            probePushLongTasks(list.getEntries());
+            for (const entry of list.getEntries()) window.__chatOpenProbe.longTasks.push({ startTime: entry.startTime, duration: entry.duration, name: entry.name });
           });
           observer.observe({ type: "longtask", buffered: true });
           window.__chatOpenProbe.longTaskObserver = observer;
         } catch {
           window.__chatOpenProbe.longTaskObserver = undefined;
+        }
+        try {
+          const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              window.__chatOpenProbe.longAnimationFrames.push({
+                startTime: entry.startTime,
+                duration: entry.duration,
+                blockingDuration: entry.blockingDuration,
+                name: entry.name,
+                scripts: entry.scripts.map((script) => ({
+                  duration: script.duration,
+                  invoker: script.invoker,
+                  invokerType: script.invokerType,
+                  sourceURL: script.sourceURL,
+                  sourceFunctionName: script.sourceFunctionName,
+                  sourceCharPosition: script.sourceCharPosition,
+                })),
+              });
+            }
+          });
+          observer.observe({ type: "long-animation-frame", buffered: true });
+          window.__chatOpenProbe.longAnimationFrameObserver = observer;
+        } catch {
+          window.__chatOpenProbe.longAnimationFrameObserver = undefined;
         }
       }
       return true;
@@ -351,6 +390,7 @@ async function clearTimingAndLongTasks(cdp) {
       for (const entry of performance.getEntriesByType("mark")) if (entry.name.startsWith(${JSON.stringify(TIMING_NAMESPACE)})) performance.clearMarks(entry.name);
       for (const entry of performance.getEntriesByType("measure")) if (entry.name.startsWith(${JSON.stringify(TIMING_NAMESPACE)})) performance.clearMeasures(entry.name);
       window.__chatOpenProbe.longTasks = [];
+      window.__chatOpenProbe.longAnimationFrames = [];
       return true;
     })()
   `);
@@ -657,15 +697,9 @@ async function timingMeasures(cdp, attemptId) {
   `);
 }
 
-async function longTasksForAttempt(cdp, measures) {
-  const shell = measureFor(measures, "shell-painted");
-  const fresh = measureFor(measures, "fresh-transcript-painted");
-  if (shell === undefined || fresh === undefined) return [];
-  const shellAt = shell.startTime + shell.duration;
-  const freshAt = fresh.startTime + fresh.duration;
-  return await evaluate(cdp, `
-    window.__chatOpenProbe.longTasks.filter((entry) => entry.startTime >= ${JSON.stringify(shellAt)} && entry.startTime <= ${JSON.stringify(freshAt)})
-  `);
+async function performanceEntriesForAttempt(cdp, collection, measures) {
+  const entries = await evaluate(cdp, `window.__chatOpenProbe[${JSON.stringify(collection)}]`);
+  return performanceEntriesForInteraction(entries, measures);
 }
 
 async function screenshot(cdp, args, name) {
@@ -862,6 +896,15 @@ export function measuresForAttempt(entries, attemptId) {
   return entries
     .filter((entry) => entry.name.startsWith("forgerie.chat-open") && entry.detail?.attemptId === attemptId)
     .sort((left, right) => left.startTime - right.startTime || left.duration - right.duration);
+}
+
+export function performanceEntriesForInteraction(entries, measures) {
+  const shell = measureFor(measures, "shell-painted");
+  const fresh = measureFor(measures, "fresh-transcript-painted");
+  if (shell === undefined || fresh === undefined) return [];
+  const intervalStart = shell.startTime + shell.duration;
+  const intervalEnd = fresh.startTime + fresh.duration;
+  return entries.filter((entry) => entry.startTime < intervalEnd && entry.startTime + entry.duration > intervalStart);
 }
 
 function formatMs(value) {
