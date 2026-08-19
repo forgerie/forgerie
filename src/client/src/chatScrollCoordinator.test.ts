@@ -133,6 +133,17 @@ describe("ChatScrollCoordinator", () => {
     expect(coordinator.mode).toEqual({ kind: "tail" });
   });
 
+  it("keeps tail ownership when content grows after a component placement", () => {
+    const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
+    const chat = viewport(800);
+    coordinator.withProgrammaticScroll(chat, () => { chat.scrollTop = 800; });
+
+    chat.scrollHeight = 2_000;
+
+    expect(coordinator.recordScroll(chat, false).driver).toBe("component");
+    expect(coordinator.mode).toEqual({ kind: "tail" });
+  });
+
   it("returns reader-owned scrolling to the tail at the bottom", () => {
     const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
     const chat = viewport(800);

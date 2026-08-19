@@ -130,11 +130,11 @@ export class ChatScrollCoordinator {
       this.lastClientHeight = scroller.clientHeight;
       return { driver: "none", viewportChanged: false };
     }
-    if (!programmatic && !allowReaderControl) {
+    if (!allowReaderControl) {
       this.writtenScrollTop = undefined;
       this.lastScrollTop = scroller.scrollTop;
       this.lastClientHeight = scroller.clientHeight;
-      return { driver: "none", viewportChanged: false };
+      return { driver: programmatic ? "component" : "none", viewportChanged: false };
     }
     const driver: ChatScrollDriver = programmatic ? "component" : "reader";
     if (driver === "reader") this.readerTookControl();
