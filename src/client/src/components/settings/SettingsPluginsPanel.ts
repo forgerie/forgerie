@@ -38,13 +38,13 @@ export class SettingsPluginsPanel extends LitElement {
     const notices: SettingsNotice[] = [];
     if (this.error !== "") notices.push({ type: "error", content: this.error });
     if (this.shouldShowConfigUnavailableNotice(showTrustedCodeWarning)) {
-      notices.push({ type: "availability", content: "Configuration is unavailable. Reload to try again before changing plugin enablement." });
+      notices.push({ type: "availability", content: "Configuration unavailable. Reload before toggling plugins." });
     }
-    if (this.savedMessage !== "") notices.push({ type: "success", content: `${this.savedMessage} Reload the browser tab to apply plugin changes.` });
+    if (this.savedMessage !== "") notices.push({ type: "success", content: `${this.savedMessage} Reload the tab to apply.` });
     if (showTrustedCodeWarning) {
       notices.push({
         type: "security",
-        content: html`<strong>Trusted code warning:</strong> Forgerie plugins and Pi packages can run with your user permissions. Enable plugins only from sources you trust.`,
+        content: html`Plugins and packages run with your user permissions. Enable only plugins you trust.`,
       });
     }
     return notices;
@@ -56,13 +56,13 @@ export class SettingsPluginsPanel extends LitElement {
 
   private renderPanelContent(plugins: PiWebPluginInfo[], hasPluginResponse: boolean): TemplateResult {
     if (!hasPluginResponse) {
-      return html`<div class="loading-card">${this.loading ? "Loading Forgerie plugins…" : `Forgerie plugin list unavailable for ${this.targetLabel}. Use Reload to try again.`}</div>`;
+      return html`<div class="loading-card">${this.loading ? "Loading plugins…" : "Plugin list unavailable. Reload to try again."}</div>`;
     }
     if (plugins.length === 0) {
-      return html`<div class="loading-card">No Forgerie browser plugins discovered on ${this.targetLabel}.</div>`;
+      return html`<div class="loading-card">No plugins found on ${this.targetLabel}.</div>`;
     }
     return html`
-      <div class="plugin-note">Config key on ${this.targetLabel}: <code>plugins</code>. Plugins are enabled unless their entry sets <code>enabled</code> to <code>false</code>.</div>
+      <div class="plugin-note">Saved under <code>plugins</code>. Enabled unless set to <code>false</code>.</div>
       <div class="plugin-list">
         ${plugins.map((plugin) => this.renderPlugin(plugin))}
       </div>
@@ -116,5 +116,5 @@ export class SettingsPluginsPanel extends LitElement {
 }
 
 function pluginsDescription(targetLabel: string): TemplateResult {
-  return html`Enable or disable discovered Forgerie browser plugins on <strong>${targetLabel}</strong>. This is separate from installing Pi packages. Reload the browser tab to apply plugin runtime changes.`;
+  return html`Browser plugins on <strong>${targetLabel}</strong>. Plugins come from Pi packages.`;
 }

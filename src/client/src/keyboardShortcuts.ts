@@ -249,7 +249,7 @@ function parseShortcut(shortcut: string, options: { requireFirstChordActivator: 
     const parsed = parseShortcutChord(chordInput);
     if (!parsed.ok) return parsed;
     if (index === 0 && options.requireFirstChordActivator && !isShortcutSequenceStarter(parsed.token)) {
-      return { ok: false, message: "Shortcuts must start with Ctrl/⌘ or Alt so normal typing is not captured." };
+      return { ok: false, message: "Shortcuts must start with Ctrl/⌘ or Alt." };
     }
     tokens.push(parsed.token);
   }

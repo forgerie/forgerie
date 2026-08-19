@@ -23,7 +23,7 @@ describe("settings-shortcuts-panel layout", () => {
     expect(frameNotices(template).map((notice) => notice.type)).toEqual(["error", "success"]);
     expectTextOrder(rendered, [
       "Keyboard shortcuts",
-      "Edit app shortcuts by action.",
+      "Type a shortcut such as ",
       "<code>mod+k</code>",
       "Reload",
       "Failed to load shortcut settings.",

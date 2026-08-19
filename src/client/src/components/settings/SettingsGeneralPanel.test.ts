@@ -16,10 +16,9 @@ describe("settings-general-panel copy", () => {
     const values = collectTemplateValues(template);
 
     expect(strings).toContain("<settings-panel-frame");
-    expect(strings).toContain("Gateway server fields edit this local gateway. File access and upload defaults edit ");
-    expect(strings).toContain("Host, port, and allowed hosts are saved in the gateway config.");
-    expect(strings).toContain("External filesystem roots and upload defaults are saved on ");
-    expect(values.filter((value) => value === "Lab Mac (remote machine)")).toHaveLength(4);
+    expect(strings).toContain("Address changes apply after the web service restarts.");
+    expect(strings).toContain("Saved on ");
+    expect(values.filter((value) => value === "Lab Mac (remote machine)")).toHaveLength(1);
   });
 
   it("shows reload copy when selected-machine access config is unavailable", () => {
@@ -31,9 +30,9 @@ describe("settings-general-panel copy", () => {
     const template = panel.render();
     const values = collectTemplateValues(template);
 
-    expect(values).toContain("Save gateway server config");
-    expect(values).not.toContain("Save file/upload config");
-    expect(values).toContain("Selected-machine file access config is unavailable. Reload before saving file/upload settings.");
+    expect(values).toContain("Save gateway config");
+    expect(values).not.toContain("Save machine config");
+    expect(values).toContain("File access config unavailable. Reload to try again.");
     expect(values).toContain("Failed to load file access/upload config from Lab Mac (remote machine): unsupported");
   });
 

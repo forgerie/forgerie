@@ -9,7 +9,7 @@ import type { SettingsNotice } from "./SettingsPanelFrame";
 const RECORD_SHORTCUT_LISTENER_OPTIONS = { capture: true } as const;
 
 function renderShortcutsDescription(): TemplateResult {
-  return html`Edit app shortcuts by action. Type a shortcut such as <code>mod+k</code> or <code>mod+g p</code>, record one from the keyboard, disable it with None, or reset it to the default. When shortcuts conflict, custom shortcuts win before defaults; ties are resolved by action id, and shorter shortcuts shadow longer sequences with the same prefix.`;
+  return html`Type a shortcut such as <code>mod+k</code> or <code>mod+g p</code>, or record one. Custom shortcuts win over defaults.`;
 }
 
 @customElement("settings-shortcuts-panel")
@@ -41,11 +41,11 @@ export class SettingsShortcutsPanel extends LitElement {
 
     const token = shortcutTokenFromEvent(event);
     if (token === undefined) {
-      this.localError = "Press a letter, number, punctuation, function, or navigation key. Press Esc to cancel recording.";
+      this.localError = "Press a letter, number, punctuation, function, or navigation key. Esc cancels.";
       return;
     }
     if (recording.tokens.length === 0 && !isShortcutSequenceStarter(token)) {
-      this.localError = "Start shortcuts with Ctrl/⌘ or Alt so normal typing is not captured.";
+      this.localError = "Start with Ctrl/⌘ or Alt.";
       return;
     }
 
@@ -85,7 +85,7 @@ export class SettingsShortcutsPanel extends LitElement {
           <div class="config-path-card">
             <span>Config file</span>
             <code>${this.configResponse?.path ?? "Unknown"}</code>
-            <small>Shortcut overrides are saved under <code>shortcuts</code>. A value of <code>null</code> disables the action shortcut.</small>
+            <small>Overrides are saved under <code>shortcuts</code>. <code>null</code> disables a shortcut.</small>
           </div>
           ${groups.length === 0 ? html`<div class="loading-card">No actions registered.</div>` : groups.map((group) => html`
             <section class="shortcut-group">

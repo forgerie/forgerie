@@ -49,7 +49,7 @@ export class SettingsPackagesPanel extends LitElement {
     if (showTrustedCodeWarning) {
       notices.push({
         type: "security",
-        content: html`<strong>Trusted code warning:</strong> Pi packages and Forgerie plugins can run with your user permissions. Install packages and enable plugins only from sources you trust.`,
+        content: html`Packages and plugins run with your user permissions. Install only from sources you trust.`,
       });
     }
     return notices;
@@ -57,7 +57,7 @@ export class SettingsPackagesPanel extends LitElement {
 
   private renderPanelContent(packages: PiPackageInfo[], target: PiPackageTargetContext, targetLabel: string): TemplateResult | null {
     if (this.packagesResponse === undefined) {
-      return html`<div class="loading-card">${this.loading ? `Loading Pi packages from ${targetLabel}…` : `Pi package list unavailable for ${targetLabel}. Use Reload to try again.`}</div>`;
+      return html`<div class="loading-card">${this.loading ? "Loading Pi packages…" : "Package list unavailable. Reload to try again."}</div>`;
     }
     return html`
       ${this.renderInstallForm(targetLabel)}
@@ -68,13 +68,13 @@ export class SettingsPackagesPanel extends LitElement {
   private renderInstallForm(targetLabel: string): TemplateResult {
     return html`
       <form class="install-card" @submit=${(event: Event) => { void this.installPackage(event); }}>
-        <label for="package-source">Pi package source</label>
+        <label for="package-source">Package source</label>
         <div class="install-row">
           <input id="package-source" .value=${this.installSource} ?disabled=${this.isOperating} placeholder="npm:@scope/package, git URL, or local path" @input=${(event: Event) => { this.updateInstallSource(event); }}>
           <button type="submit" title="Install this Pi package" ?disabled=${this.isOperating}>${isPiPackageOperationPending(this.operation, "install") ? "Installing…" : "Install"}</button>
         </div>
         ${this.validationMessage === "" ? null : html`<div class="field-error">${this.validationMessage}</div>`}
-        <small>Installs run on ${targetLabel} and use Pi's default package location, equivalent to <code>pi install &lt;source&gt;</code>. Forgerie does not ask you to choose an install location.</small>
+        <small>Runs <code>pi install</code> on ${targetLabel}.</small>
       </form>
     `;
   }
@@ -85,26 +85,26 @@ export class SettingsPackagesPanel extends LitElement {
     const showUpdateAllReason = updateAllReason !== undefined && packages.length > 0;
     const updateAllTitle = updateAllReason ?? "Update all user-scope Pi packages";
     return html`
-      <section class="package-section" aria-label="Configured Pi packages">
+      <section class="package-section" aria-label="Configured packages">
         <div class="package-toolbar">
           <div>
-            <h3>Configured Pi packages</h3>
-            <p>This list comes from Pi's package manager settings on ${targetLabel}.</p>
+            <h3>Configured packages</h3>
+            <p>From Pi's settings on ${targetLabel}.</p>
           </div>
           <button class="secondary" title=${updateAllTitle} ?disabled=${this.isOperating || updateAllReason !== undefined} @click=${() => { void this.updatePackage(); }}>
             ${isPiPackageOperationPending(this.operation, "update-all") ? "Updating…" : "Update all"}
           </button>
         </div>
         ${showUpdateAllReason ? html`<div class="action-note">${updateAllReason}</div>` : null}
-        ${this.loading && packages.length > 0 ? html`<div class="action-note">Refreshing Pi packages from ${targetLabel}…</div>` : null}
+        ${this.loading && packages.length > 0 ? html`<div class="action-note">Refreshing…</div>` : null}
         ${this.renderPackageListContent(packages, targetLabel)}
       </section>
     `;
   }
 
   private renderPackageListContent(packages: PiPackageInfo[], targetLabel: string): TemplateResult {
-    if (this.loading && packages.length === 0) return html`<div class="loading-card">Loading Pi packages from ${targetLabel}…</div>`;
-    if (packages.length === 0) return html`<div class="loading-card">No Pi packages configured in Pi settings on ${targetLabel} yet.</div>`;
+    if (this.loading && packages.length === 0) return html`<div class="loading-card">Loading Pi packages…</div>`;
+    if (packages.length === 0) return html`<div class="loading-card">No packages configured on ${targetLabel} yet.</div>`;
     return html`
       <div class="package-list">
         ${packages.map((packageInfo) => this.renderPackage(packageInfo))}
@@ -218,5 +218,5 @@ export class SettingsPackagesPanel extends LitElement {
 }
 
 function packagesDescription(targetLabel: string): TemplateResult {
-  return html`Managing Pi packages on <strong>${targetLabel}</strong>. Install, remove, and update packages managed by Pi on the selected machine. Pi packages can provide extensions, skills, prompt templates, themes, context/system prompt files, and Forgerie browser plugins.`;
+  return html`Pi packages on <strong>${targetLabel}</strong>. Packages can provide extensions, skills, prompts, themes, and Forgerie plugins.`;
 }

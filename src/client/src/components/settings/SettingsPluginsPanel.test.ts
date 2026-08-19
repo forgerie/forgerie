@@ -17,12 +17,12 @@ describe("settings-plugins-panel layout", () => {
 
     expectTextOrder(rendered, [
       "Forgerie plugins",
-      "Enable or disable discovered Forgerie browser plugins on ",
+      "Browser plugins on ",
       "Lab Mac (remote machine)",
       "Failed to load Forgerie plugin settings from Lab Mac: Forgerie plugins: timed out.",
-      "Config saved. Reload the browser tab to apply plugin changes.",
-      "Trusted code warning:",
-      "Config key on Lab Mac (remote machine):",
+      "Config saved. Reload the tab to apply.",
+      "run with your user permissions",
+      "Saved under ",
       "remote-enabled",
     ]);
   });
@@ -33,9 +33,9 @@ describe("settings-plugins-panel layout", () => {
 
     const rendered = flattenTemplateContent(panel.render());
 
-    expect(rendered).toContain("Forgerie plugin list unavailable for Lab Mac (remote machine). Use Reload to try again.");
-    expect(rendered).not.toContain("No Forgerie browser plugins discovered");
-    expect(rendered).not.toContain("Trusted code warning");
+    expect(rendered).toContain("Plugin list unavailable. Reload to try again.");
+    expect(rendered).not.toContain("No plugins found");
+    expect(rendered).not.toContain("run with your user permissions");
   });
 
   it("shows the empty plugin state only after a plugin response has loaded", () => {
@@ -45,9 +45,9 @@ describe("settings-plugins-panel layout", () => {
 
     const rendered = flattenTemplateContent(panel.render());
 
-    expect(rendered).toContain("No Forgerie browser plugins discovered on Lab Mac (remote machine).");
-    expect(rendered).not.toContain("Forgerie plugin list unavailable");
-    expect(rendered).not.toContain("Trusted code warning");
+    expect(rendered).toContain("No plugins found on Lab Mac (remote machine).");
+    expect(rendered).not.toContain("Plugin list unavailable");
+    expect(rendered).not.toContain("run with your user permissions");
   });
 
   it("keeps loaded plugins visible but disabled when selected-machine config is unavailable", () => {
@@ -58,11 +58,11 @@ describe("settings-plugins-panel layout", () => {
     const rendered = flattenTemplateContent(panel.render());
 
     expectTextOrder(rendered, [
-      "Configuration is unavailable. Reload to try again before changing plugin enablement.",
-      "Trusted code warning:",
+      "Configuration unavailable. Reload before toggling plugins.",
+      "run with your user permissions",
       "remote-disabled",
     ]);
-    expect(countOccurrences(rendered, "Configuration is unavailable. Reload to try again before changing plugin enablement.")).toBe(1);
+    expect(countOccurrences(rendered, "Configuration unavailable. Reload before toggling plugins.")).toBe(1);
     expect(templateValues(renderPluginTemplate(panel, pluginInfo("remote-disabled", false))).filter(isBoolean)).toEqual([false, true]);
   });
 });

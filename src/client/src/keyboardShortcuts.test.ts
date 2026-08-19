@@ -186,8 +186,8 @@ describe("shortcut input parsing", () => {
   });
 
   it("rejects shortcuts that would capture normal typing", () => {
-    expect(parseShortcutInput("r")).toEqual({ ok: false, message: "Shortcuts must start with Ctrl/⌘ or Alt so normal typing is not captured." });
-    expect(parseShortcutInput("shift+r")).toEqual({ ok: false, message: "Shortcuts must start with Ctrl/⌘ or Alt so normal typing is not captured." });
+    expect(parseShortcutInput("r")).toEqual({ ok: false, message: "Shortcuts must start with Ctrl/⌘ or Alt." });
+    expect(parseShortcutInput("shift+r")).toEqual({ ok: false, message: "Shortcuts must start with Ctrl/⌘ or Alt." });
   });
 
   it("builds canonical tokens from recorded key events", () => {

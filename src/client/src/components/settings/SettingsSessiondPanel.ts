@@ -83,7 +83,7 @@ export class SettingsSessiondPanel extends LitElement {
                 ?disabled=${this.loading || this.saving || agentCommandOverridden}
                 @input=${(event: Event) => { this.updateAgentDraft({ command: inputValue(event) }); }}
               >
-              <small>Set the Pi-compatible companion CLI used for doctor and update checks. The embedded session runtime remains Forgerie's bundled Pi SDK.</small>
+              <small>CLI for doctor and update checks. Sessions run on the bundled Pi SDK.</small>
             </label>
             <label class="field">
               <span class="field-heading">
@@ -100,7 +100,7 @@ export class SettingsSessiondPanel extends LitElement {
                 ?disabled=${this.loading || this.saving || agentDirLocked}
                 @input=${(event: Event) => { this.updateAgentDraft({ dir: inputValue(event) }); }}
               >
-              <small>Choose the Pi-compatible auth, models, settings, and sessions Forgerie reads. An alternate command and its required state directory are saved together.</small>
+              <small>Where Forgerie reads auth, models, settings, and sessions.</small>
             </label>
             <footer class="form-actions">
               <button class="primary" type="submit" ?disabled=${this.loading || this.saving || (agentCommandOverridden && agentDirLocked)}>${this.saving ? "Saving…" : "Save agent profile"}</button>
@@ -120,7 +120,7 @@ export class SettingsSessiondPanel extends LitElement {
               >
               <span>Enable the <code>spawn_session</code> tool</span>
             </label>
-            <small>When enabled, LLMs can start new sessions, constrained to a workspace (any worktree) of the same registered project so every spawned session stays visible here. On by default.</small>
+            <small>Agents can start sessions in the same project's workspaces. On by default.</small>
           </div>
           <div class="field">
             <span class="field-heading">
@@ -137,7 +137,7 @@ export class SettingsSessiondPanel extends LitElement {
               >
               <span>Enable the <code>spawn_subsession</code> tools</span>
             </label>
-            <small>Beta: agents can start child sessions they stay attached to (<code>spawn_subsession</code>, <code>list_subsessions</code>, <code>check_subsession</code>, <code>read_subsession</code>) and are notified when a child finishes. Requires "Allow agents to start sessions". Off by default.</small>
+            <small>Agents can start child sessions and get notified when one finishes. Requires the setting above. Off by default.</small>
           </div>
           <div class="field">
             <span class="field-heading">
@@ -154,10 +154,10 @@ export class SettingsSessiondPanel extends LitElement {
               >
               <span>Enable the <code>ask_user</code> tool</span>
             </label>
-            <small>Agents can post a structured question form and pause until the user responds. On by default.</small>
+            <small>Agents can ask a question and wait for the answer. On by default.</small>
           </div>
           <section class="effective-card" aria-label="Desired and active session daemon configuration summary">
-            <h3>Desired after environment overrides</h3>
+            <h3>Summary</h3>
             <dl>
               <div><dt>Desired command</dt><dd>${effectiveAgent?.command ?? html`<span class="muted">Unavailable</span>`}</dd></div>
               <div><dt>Desired state</dt><dd>${effectiveAgent?.dir ?? html`<span class="muted">Unavailable</span>`}</dd></div>
@@ -184,7 +184,7 @@ export class SettingsSessiondPanel extends LitElement {
   }
 
   private renderUnavailableConfigState(): TemplateResult {
-    return html`<div class="loading-card">${this.loading ? "Loading configuration…" : "Configuration is unavailable. Reload to try again."}</div>`;
+    return html`<div class="loading-card">${this.loading ? "Loading configuration…" : "Configuration unavailable. Reload to try again."}</div>`;
   }
 
   private async saveAgentProfile(event: Event): Promise<void> {
@@ -281,7 +281,7 @@ function errorMessage(error: unknown): string {
 }
 
 export function sessiondDescription(targetLabel: string): string {
-  return `Select the Pi-compatible agent profile and companion CLI for ${targetLabel}. Changes are saved immediately but only take effect after the session daemon on that machine restarts.`;
+  return `Pi-compatible agent profile for ${targetLabel}. Changes apply after its session daemon restarts.`;
 }
 
 export interface SessiondPanelNoticeContext {
@@ -308,14 +308,14 @@ export function sessiondPanelNotices(
   if (activation === "restart-required") {
     notices.push({
       type: "warning",
-      title: `Pi-compatible agent profile restart required on ${context.targetLabel}`,
-      content: html`The desired profile differs from the active session-daemon profile. Run <code>forgerie restart</code> on that machine (or restart its session daemon service) to apply the command and state directory together.`,
+      title: `Restart required on ${context.targetLabel}`,
+      content: html`The active daemon still runs the old profile. Run <code>forgerie restart</code> or restart the daemon service on that machine.`,
     });
   } else if (config !== undefined && activation === "unavailable") {
     notices.push({
       type: "info",
-      title: `Active Pi-compatible agent profile unavailable on ${context.targetLabel}`,
-      content: "Forgerie cannot compare the desired profile with the running session daemon. Reload after the daemon is available.",
+      title: `Active profile unknown on ${context.targetLabel}`,
+      content: "Forgerie cannot read the running profile. Reload once the daemon is reachable.",
     });
   }
   return notices;

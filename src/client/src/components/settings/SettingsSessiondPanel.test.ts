@@ -29,7 +29,7 @@ describe("session daemon panel notices", () => {
 
     expect(notices).toHaveLength(1);
     expect(notices[0]?.type).toBe("warning");
-    expect(notices[0]?.title).toBe("Pi-compatible agent profile restart required on Lab Mac (remote machine)");
+    expect(notices[0]?.title).toBe("Restart required on Lab Mac (remote machine)");
     expect(notices[0]?.content).not.toBe("");
   });
 
@@ -45,7 +45,7 @@ describe("session daemon panel notices", () => {
     expect(notices.map((notice) => notice.type)).toEqual(["error", "success", "warning"]);
     expect(notices[0]?.content).toBe("Failed to save session-daemon config.");
     expect(notices[1]?.content).toBe("Session daemon settings saved.");
-    expect(notices[2]?.title).toBe("Pi-compatible agent profile restart required on local (local gateway)");
+    expect(notices[2]?.title).toBe("Restart required on local (local gateway)");
   });
 
   it("adds no restart or activation guidance when the desired and active profiles match", () => {

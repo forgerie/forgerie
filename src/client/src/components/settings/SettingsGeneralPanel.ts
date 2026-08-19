@@ -14,10 +14,6 @@ import {
   type MachineAccessConfigDraft,
 } from "./settingsConfigDraft";
 
-function generalDescription(targetLabel: string): TemplateResult {
-  return html`Gateway server fields edit this local gateway. File access and upload defaults edit ${targetLabel}.`;
-}
-
 @customElement("settings-general-panel")
 export class SettingsGeneralPanel extends LitElement {
   @property({ attribute: false }) configResponse: PiWebConfigResponse | undefined;
@@ -52,8 +48,7 @@ export class SettingsGeneralPanel extends LitElement {
   override render(): TemplateResult {
     return html`
       <settings-panel-frame
-        heading="General configuration"
-        .description=${generalDescription(this.targetLabel)}
+        heading="General"
         actionLabel="Reload"
         .actionDisabled=${this.loading || this.machineLoading}
         .notices=${this.panelNotices()}
@@ -73,13 +68,13 @@ export class SettingsGeneralPanel extends LitElement {
       <section class="settings-card" aria-label="Gateway server settings">
         <div class="card-heading">
           <h3>Gateway server</h3>
-          <p>Host, port, and allowed hosts are saved in the gateway config. Address changes require the web service to restart before the running server binds to the new address.</p>
+          <p>Address changes apply after the web service restarts.</p>
         </div>
-        ${config === undefined && this.loading ? html`<div class="loading-card">Loading gateway configuration…</div>` : html`
+        ${config === undefined && this.loading ? html`<div class="loading-card">Loading gateway config…</div>` : html`
           <div class="config-path-card">
             <span>Gateway config file</span>
             <code>${config?.path ?? "Unknown"}</code>
-            <small>${config?.exists === true ? "Existing file" : "This file will be created on save"}</small>
+            <small>${config?.exists === true ? "Existing file" : "Created on save"}</small>
           </div>
           <form class="config-form" @submit=${(event: Event) => { void this.saveGatewayConfig(event); }}>
             <label class="field">
@@ -88,7 +83,7 @@ export class SettingsGeneralPanel extends LitElement {
                 ${this.renderOverrideBadge("host")}
               </span>
               <input .value=${this.gatewayDraft.host} placeholder="127.0.0.1" autocomplete="off" spellcheck="false" @input=${(event: Event) => { this.updateGatewayDraft({ host: inputValue(event) }); }}>
-              <small>Address the web server should bind to. Leave empty to use Forgerie's default.</small>
+              <small>Bind address. Empty uses 127.0.0.1.</small>
             </label>
 
             <label class="field">
@@ -97,7 +92,7 @@ export class SettingsGeneralPanel extends LitElement {
                 ${this.renderOverrideBadge("port")}
               </span>
               <input .value=${this.gatewayDraft.port} inputmode="numeric" pattern="[0-9]*" placeholder="8504" autocomplete="off" @input=${(event: Event) => { this.updateGatewayDraft({ port: inputValue(event) }); }}>
-              <small>TCP port from 1 to 65535. Leave empty to use Forgerie's default.</small>
+              <small>Port from 1 to 65535. Empty uses 8504.</small>
             </label>
 
             <div class="field">
@@ -110,13 +105,13 @@ export class SettingsGeneralPanel extends LitElement {
                 <option value="all">Allow every host</option>
               </select>
               <textarea .value=${this.gatewayDraft.allowedHostsText} ?disabled=${this.gatewayDraft.allowedHostsMode === "all"} rows="4" placeholder="example.local&#10;192.168.1.20" spellcheck="false" @input=${(event: Event) => { this.updateGatewayDraft({ allowedHostsText: textAreaValue(event) }); }}></textarea>
-              <small>Enter one host per line, or choose “Allow every host” to write <code>true</code>.</small>
+              <small>One host per line.</small>
             </div>
 
             ${this.renderGatewayEffectiveConfig()}
 
             <footer class="form-actions">
-              <button class="primary" ?disabled=${this.loading || this.saving}>${this.saving ? "Saving…" : "Save gateway server config"}</button>
+              <button class="primary" ?disabled=${this.loading || this.saving}>${this.saving ? "Saving…" : "Save gateway config"}</button>
             </footer>
           </form>
         `}
@@ -129,15 +124,15 @@ export class SettingsGeneralPanel extends LitElement {
     return html`
       <section class="settings-card" aria-label="Selected machine file access and upload settings">
         <div class="card-heading">
-          <h3>Selected machine file access and uploads</h3>
-          <p>External filesystem roots and upload defaults are saved on ${this.targetLabel}.</p>
+          <h3>File access and uploads</h3>
+          <p>Saved on ${this.targetLabel}.</p>
         </div>
         ${this.renderMachineMessages()}
-        ${config === undefined ? html`<div class="loading-card">${this.machineLoading ? "Loading selected-machine file access config…" : "Selected-machine file access config is unavailable. Reload before saving file/upload settings."}</div>` : html`
+        ${config === undefined ? html`<div class="loading-card">${this.machineLoading ? "Loading file access config…" : "File access config unavailable. Reload to try again."}</div>` : html`
           <div class="config-path-card">
-            <span>Selected machine config file</span>
+            <span>Machine config file</span>
             <code>${config.path}</code>
-            <small>${config.exists ? "Existing file" : "This file will be created on save"}</small>
+            <small>${config.exists ? "Existing file" : "Created on save"}</small>
           </div>
           <form class="config-form" @submit=${(event: Event) => { void this.saveMachineAccessConfig(event); }}>
             <label class="field">
@@ -145,7 +140,7 @@ export class SettingsGeneralPanel extends LitElement {
                 <span>External filesystem roots</span>
               </span>
               <textarea .value=${this.machineDraft.allowedPathsText} rows="4" placeholder="~/SDKs&#10;/opt/reference" spellcheck="false" @input=${(event: Event) => { this.updateMachineDraft({ allowedPathsText: textAreaValue(event) }); }}></textarea>
-              <small>Allowlist for absolute <code>@</code> completions and file explorer reads outside a workspace on ${this.targetLabel}. Enter one absolute path, Windows absolute path, or <code>~</code>-prefixed path per line. Leave empty to deny external paths by default.</small>
+              <small>Paths readable outside a workspace, for <code>@</code> completions and the file explorer. One path per line. Empty denies all.</small>
             </label>
 
             <label class="field">
@@ -153,13 +148,13 @@ export class SettingsGeneralPanel extends LitElement {
                 <span>Default upload folder</span>
               </span>
               <input .value=${this.machineDraft.uploadDefaultFolder} placeholder=${DEFAULT_WORKSPACE_UPLOADS_FOLDER} autocomplete="off" spellcheck="false" @input=${(event: Event) => { this.updateMachineDraft({ uploadDefaultFolder: inputValue(event) }); }}>
-              <small>Workspace-relative folder for manual file uploads on ${this.targetLabel}. Leave empty to use Forgerie's default <code>${DEFAULT_WORKSPACE_UPLOADS_FOLDER}</code>.</small>
+              <small>Workspace-relative folder for uploads. Empty uses <code>${DEFAULT_WORKSPACE_UPLOADS_FOLDER}</code>.</small>
             </label>
 
             ${this.renderMachineEffectiveConfig()}
 
             <footer class="form-actions">
-              <button class="primary" ?disabled=${this.machineLoading || this.saving}>${this.saving ? "Saving…" : "Save file/upload config"}</button>
+              <button class="primary" ?disabled=${this.machineLoading || this.saving}>${this.saving ? "Saving…" : "Save machine config"}</button>
             </footer>
           </form>
         `}
@@ -190,7 +185,7 @@ export class SettingsGeneralPanel extends LitElement {
     const effective = this.configResponse?.effectiveConfig ?? {};
     return html`
       <section class="effective-card" aria-label="Effective gateway configuration summary">
-        <h3>Effective gateway settings after environment overrides</h3>
+        <h3>Effective settings</h3>
         <dl>
           <div><dt>Host</dt><dd>${effective.host ?? html`<span class="muted">127.0.0.1 default</span>`}</dd></div>
           <div><dt>Port</dt><dd>${effective.port ?? html`<span class="muted">8504 default</span>`}</dd></div>
@@ -204,7 +199,7 @@ export class SettingsGeneralPanel extends LitElement {
     const effective = this.machineConfigResponse?.effectiveConfig ?? {};
     return html`
       <section class="effective-card" aria-label="Effective selected machine file access and upload summary">
-        <h3>Effective selected-machine settings</h3>
+        <h3>Effective settings</h3>
         <dl>
           <div><dt>External roots</dt><dd>${formatAllowedPaths(effective.pathAccess?.allowedPaths)}</dd></div>
           <div><dt>Upload folder</dt><dd>${effective.uploads?.defaultFolder ?? html`<span class="muted">${DEFAULT_WORKSPACE_UPLOADS_FOLDER} default</span>`}</dd></div>

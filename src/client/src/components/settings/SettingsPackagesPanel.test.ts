@@ -17,12 +17,12 @@ describe("settings-packages-panel layout", () => {
 
     expectTextOrder(rendered, [
       "Failed to load Pi packages from Lab Mac (remote machine): Could not reach Lab Mac.",
-      "Pi package list unavailable for Lab Mac (remote machine). Use Reload to try again.",
+      "Package list unavailable. Reload to try again.",
     ]);
-    expect(rendered).not.toContain("No Pi packages configured");
-    expect(rendered).not.toContain("Trusted code warning");
-    expect(rendered).not.toContain("Pi package source");
-    expect(rendered).not.toContain("Configured Pi packages");
+    expect(rendered).not.toContain("No packages configured");
+    expect(rendered).not.toContain("run with your user permissions");
+    expect(rendered).not.toContain("Package source");
+    expect(rendered).not.toContain("Configured packages");
   });
 
   it("shows trust guidance, install controls, and empty state only after a package response loaded", () => {
@@ -33,14 +33,14 @@ describe("settings-packages-panel layout", () => {
 
     expectTextOrder(rendered, [
       "Pi packages",
-      "Managing Pi packages on ",
+      "Pi packages on ",
       "local (local gateway)",
-      "Trusted code warning:",
-      "Pi package source",
-      "Configured Pi packages",
-      "No Pi packages configured in Pi settings on local (local gateway) yet.",
+      "run with your user permissions",
+      "Package source",
+      "Configured packages",
+      "No packages configured on local (local gateway) yet.",
     ]);
-    expect(rendered).not.toContain("Pi package list unavailable");
+    expect(rendered).not.toContain("Package list unavailable");
   });
 
   it("orders package errors before the trusted-code warning while preserving loaded data", () => {
@@ -53,9 +53,9 @@ describe("settings-packages-panel layout", () => {
 
     expectTextOrder(rendered, [
       "Failed to refresh gateway Forgerie plugins after updating packages.",
-      "Trusted code warning:",
-      "Pi package source",
-      "Configured Pi packages",
+      "run with your user permissions",
+      "Package source",
+      "Configured packages",
       "npm:@acme/tools",
     ]);
   });
