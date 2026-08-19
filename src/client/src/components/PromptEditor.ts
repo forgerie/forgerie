@@ -1,8 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { html, LitElement, nothing, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
-import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery, SessionStatus } from "../../../shared/apiTypes";
-import { sessionGuidanceSummary } from "../../../shared/sessionGuidance";
+import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import { createSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import { PromptDictationController, type PromptDictationCapability, type PromptDictationState } from "../controllers/promptDictationController";
@@ -12,7 +11,7 @@ import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointer
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderGuidanceIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerDictationCapability, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
@@ -22,7 +21,6 @@ import type { ComposerDraft, ComposerDraftCompletionError, ComposerDraftDisplayS
 import type { SpeechServiceStatusResponse } from "../../../shared/speechContracts";
 import "./ComposerDraft";
 import "./ContextUsageMeter";
-import "./GuidancePicker";
 import "./ComposerPopover";
 
 type QueuePressOutcome = "pending" | "consumed";
@@ -95,7 +93,7 @@ export class PromptEditor extends LitElement {
   @property() workspaceId?: string;
   @property({ type: Boolean }) canSteer = false;
   @property({ type: Boolean }) isCompacting = false;
-  @property({ attribute: false }) status?: SessionStatus;
+  @property({ attribute: false }) doubleEscapeAction?: DoubleEscapeAction;
   @property({ type: Boolean }) sending = false;
   @property({ attribute: false, hasChanged: promptHistoryChanged }) promptHistory: readonly string[] = [];
   @property({ attribute: false }) onSend?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => void | Promise<void>;
@@ -104,7 +102,6 @@ export class PromptEditor extends LitElement {
   @property({ type: Boolean }) chromeSummoned = false;
 
   @query("composer-draft") private draftElement?: ComposerDraft | null;
-  @query(".guidance-trigger") private guidanceTrigger?: HTMLButtonElement;
   @query(".select-model") private modelTrigger?: HTMLButtonElement;
   @query(".select-thinking") private thinkingTrigger?: HTMLButtonElement;
   @query(".queue-button") private queueTrigger?: HTMLButtonElement;
@@ -115,14 +112,11 @@ export class PromptEditor extends LitElement {
   @state() private draftEmpty = true;
   @state() private attachmentCount = 0;
   @state() private attachmentCapturePending = false;
-  @state() private guidanceOpen = false;
   /** Which choice is open; only ever one, because there is one layer. */
   @state() private openChoice: "model" | "thinking" | undefined = undefined;
   @state() private choiceModels: readonly ComposerSelectableModel[] = [];
   @state() private choiceError: string | undefined = undefined;
   @state() private choiceLoading = false;
-  @state() private guidancePending = false;
-  @state() private guidanceError: string | undefined = undefined;
   @state() private steerOpen = false;
   @state() private dictationState: PromptDictationState = { tag: "idle" };
   @state() private dictationCapability: PromptDictationCapability = "warming";
@@ -134,7 +128,6 @@ export class PromptEditor extends LitElement {
   private pendingDictationStatus: PendingDictationStatus | undefined;
   private dictationGesture = this.createDictationGesture();
   private dictationGestureSource: DictationGestureSource | undefined;
-  private guidanceRequestVersion = 0;
   private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
   private pendingReplacement: { kind: "text"; text: string } | { kind: "snapshot"; snapshot: ComposerDraftSubmitSnapshot } | undefined;
@@ -169,7 +162,6 @@ export class PromptEditor extends LitElement {
     const sessionChanged = changed.has("sessionId") || changed.has("machineId") || changed.has("cwd");
     if (sessionChanged) {
       this.lastEscapeTime = 0;
-      this.resetGuidanceDisclosure();
       this.resetSteerDisclosure();
       this.resetDictationGesture();
       this.dictationController?.ownerChanged();
@@ -179,7 +171,6 @@ export class PromptEditor extends LitElement {
       this.dictationController?.surfaceDisabled();
     }
     if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) {
-      this.resetGuidanceDisclosure();
       this.resetSteerDisclosure();
       this.resetDictationGesture();
       this.dictationController?.surfaceDisabled();
@@ -189,17 +180,6 @@ export class PromptEditor extends LitElement {
       if (!rail.canSteer || !rail.canInvokeQueue) this.resetSteerDisclosure();
     }
     if (changed.has("capabilities") && changed.get("capabilities")?.dictation !== this.capabilities.dictation) this.resetDictationCapability();
-  }
-
-  protected override shouldUpdate(changed: PropertyValues<this>): boolean {
-    // Status updates churn once per token during streaming and hand us a fresh
-    // object reference each time. When nothing else changed, only re-render if a
-    // status field the template actually displays differs, so streaming does not
-    // disturb the editor DOM (and any in-progress touch gesture survives).
-    if (changed.has("status") && changed.size === 1) {
-      return !sessionStatusRenderEqual(changed.get("status"), this.status);
-    }
-    return true;
   }
 
   protected override updated(): void {
@@ -212,7 +192,6 @@ export class PromptEditor extends LitElement {
     document.removeEventListener("pointerup", this.handleQueuePointerUpDocument, { capture: true });
     document.removeEventListener("pointercancel", this.handleQueuePointerCancelDocument, { capture: true });
     document.removeEventListener("keyup", this.handleQueueKeyUpDocument, { capture: true });
-    this.resetGuidanceDisclosure();
     this.cancelQueuePress({ clearSuppression: true });
     this.steerOpen = false;
     this.disposeDictation();
@@ -231,30 +210,11 @@ export class PromptEditor extends LitElement {
     const dictationBlocksComposer = this.dictationBlocksComposer();
     // Attachment capture blocks send/queue through rail(), but it must not set
     // ComposerDraft.submissionDisabled or the draft will reject its own result.
-    const busy = this.sending || this.guidancePending || dictationBlocksComposer;
+    const busy = this.sending || dictationBlocksComposer;
     const resting = this.isResting();
     return html`
       ${this.openChoice === undefined || this.capabilities.model === undefined ? nothing : this.renderChoicePopover(this.capabilities.model)}
       ${this.steerOpen && rail.canSteer ? this.renderSteerPopover() : nothing}
-      ${this.guidanceOpen ? html`
-        <composer-popover
-          label="Session guidance"
-          .anchor=${this.guidanceTrigger}
-          .onClose=${(restoreFocus: boolean) => { this.closeGuidance(restoreFocus); }}
-        >
-          <guidance-picker
-            id="session-guidance-picker"
-            .activeIds=${this.status?.activeGuidanceIds ?? []}
-            .pending=${this.guidancePending}
-            .working=${this.canSteer || this.isCompacting}
-            .readOnly=${this.disabled || !this.runtimeControlsAvailable}
-            .error=${this.guidanceError}
-            .trigger=${this.guidanceTrigger}
-            .onToggle=${(entryId: string, enabled: boolean) => { void this.setGuidance(entryId, enabled); }}
-            .onClose=${(restoreFocus: boolean) => { this.closeGuidance(restoreFocus); }}
-          ></guidance-picker>
-        </composer-popover>
-      ` : null}
       <footer
         class=${this.footerClass(shellMode, resting)}
         @focusin=${() => { this.composerFocused = true; }}
@@ -288,7 +248,7 @@ export class PromptEditor extends LitElement {
               data-action="new-session"
               title=${NEW_SESSION_LABEL}
               aria-label=${NEW_SESSION_LABEL}
-              @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.capabilities.newSession?.onNewSession(); }}
+              @click=${() => { this.closeSteer(false); this.capabilities.newSession?.onNewSession(); }}
             >${renderNewSessionIcon()}</button>
           `}
           ${this.renderDismissAction()}
@@ -389,7 +349,7 @@ export class PromptEditor extends LitElement {
    * sending, must not be able to start an attachment.
    */
   private openAttachmentPicker(): void {
-    if (this.disabled || this.sending || this.guidancePending) return;
+    if (this.disabled || this.sending) return;
     this.draftElement?.openAttachmentPicker();
   }
 
@@ -439,7 +399,7 @@ export class PromptEditor extends LitElement {
       disabled: this.disabled,
       submissionAvailable: this.submissionAvailable,
       sendAvailable: this.sendAvailable,
-      sending: this.sending || this.guidancePending || this.attachmentCapturePending || this.dictationBlocksComposer(),
+      sending: this.sending || this.attachmentCapturePending || this.dictationBlocksComposer(),
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
       stoppable: this.capabilities.stop?.stoppable === true,
@@ -494,7 +454,6 @@ export class PromptEditor extends LitElement {
         aria-label=${label}
         @click=${() => {
           this.closeSteer(false);
-          this.closeGuidance(false, true);
           this.closeChoice(false);
           this.cancelDictationBeforeSurfaceExit();
           dismiss.onDismiss();
@@ -575,24 +534,11 @@ export class PromptEditor extends LitElement {
   private renderCompactStatus() {
     const context = this.capabilities.context ?? [];
     const model = this.capabilities.model;
-    const guidance = this.capabilities.guidance;
-    if (context.length === 0 && model === undefined && guidance === undefined) return null;
+    if (context.length === 0 && model === undefined) return null;
     return html`
       <div class=${`compact-status${this.chromeSummoned ? " summoned" : ""}`} aria-label="Composer status">
         ${context.map((chip) => this.renderContextChip(chip))}
         ${model === undefined ? nothing : this.renderModelCapsule(model)}
-        ${guidance === undefined ? nothing : html`
-          <button
-            id="guidance-trigger"
-            class="icon-button guidance-trigger"
-            aria-controls="session-guidance-picker"
-            aria-expanded=${this.guidanceOpen ? "true" : "false"}
-            ?disabled=${this.disabled || this.dictationBlocksComposer()}
-            title=${sessionGuidanceSummary(guidance.activeIds)}
-            aria-label=${sessionGuidanceSummary(guidance.activeIds)}
-            @click=${() => { this.toggleGuidance(); }}
-          >${renderGuidanceIcon()}${guidance.activeIds.length === 0 ? nothing : html`<span class="guidance-count" aria-hidden="true">${guidance.activeIds.length}</span>`}</button>
-        `}
       </div>
     `;
   }
@@ -702,7 +648,6 @@ export class PromptEditor extends LitElement {
     const model = this.capabilities.model;
     if (this.disabled || this.dictationBlocksComposer() || model === undefined || model.changeable === false) return;
     this.closeSteer(false);
-    this.closeGuidance(false, true);
     if (this.openChoice === "model") {
       this.closeChoice(true);
       return;
@@ -715,7 +660,6 @@ export class PromptEditor extends LitElement {
     const model = this.capabilities.model;
     if (this.disabled || this.dictationBlocksComposer() || model === undefined || model.changeable === false) return;
     this.closeSteer(false);
-    this.closeGuidance(false, true);
     this.openChoice = this.openChoice === "thinking" ? undefined : "thinking";
   }
 
@@ -774,57 +718,6 @@ export class PromptEditor extends LitElement {
     return this.choiceModels.find((candidate) => candidate.provider === current.provider && candidate.id === current.id);
   }
 
-  private toggleGuidance(): void {
-    if (this.disabled || this.dictationBlocksComposer()) return;
-    if (this.guidanceOpen) {
-      this.closeGuidance(true);
-      return;
-    }
-    this.closeSteer(false);
-    this.draftElement?.closeCompletionMenu();
-    this.guidanceError = undefined;
-    this.guidanceOpen = true;
-  }
-
-  private closeGuidance(restoreFocus: boolean, force = false): void {
-    if (!this.guidanceOpen || (this.guidancePending && !force)) return;
-    this.guidanceOpen = false;
-    this.guidanceError = undefined;
-    if (!restoreFocus) return;
-    const requestVersion = this.guidanceRequestVersion;
-    const trigger = this.guidanceTrigger;
-    void this.updateComplete.then(() => {
-      if (this.isConnected && requestVersion === this.guidanceRequestVersion && trigger === this.guidanceTrigger) trigger?.focus();
-    });
-  }
-
-  private resetGuidanceDisclosure(): void {
-    this.guidanceRequestVersion += 1;
-    this.guidanceOpen = false;
-    this.guidancePending = false;
-    this.guidanceError = undefined;
-  }
-
-  private async setGuidance(entryId: string, enabled: boolean): Promise<void> {
-    if (this.guidancePending || this.disabled || this.dictationBlocksComposer() || !this.runtimeControlsAvailable) return;
-    const requestVersion = ++this.guidanceRequestVersion;
-    this.guidancePending = true;
-    this.guidanceError = undefined;
-    let success: boolean;
-    try {
-      success = await this.capabilities.guidance?.onSet(entryId, enabled) ?? false;
-    } catch {
-      success = false;
-    }
-    if (requestVersion !== this.guidanceRequestVersion) return;
-    this.guidancePending = false;
-    if (success) {
-      this.closeGuidance(true, true);
-      return;
-    }
-    this.guidanceError = "Could not update guidance. Try again.";
-  }
-
   private renderArchiveAction() {
     if (this.capabilities.archive === undefined) return null;
     return html`
@@ -833,7 +726,7 @@ export class PromptEditor extends LitElement {
         ?disabled=${this.dictationBlocksComposer()}
         title="Archive this session and open the next one waiting for you"
         aria-label="Archive &amp; next"
-        @click=${() => { if (this.dictationBlocksComposer()) return; this.closeSteer(false); this.closeGuidance(false, true); this.capabilities.archive?.onArchiveAndNext(); }}
+        @click=${() => { if (this.dictationBlocksComposer()) return; this.closeSteer(false); this.capabilities.archive?.onArchiveAndNext(); }}
       >${renderArchiveIcon()}</button>
     `;
   }
@@ -845,7 +738,7 @@ export class PromptEditor extends LitElement {
         ?disabled=${this.disabled || busy}
         title="Attach files"
         aria-label="Attach files"
-        @click=${() => { this.closeSteer(false); this.closeGuidance(false, true); this.openAttachmentPicker(); }}
+        @click=${() => { this.closeSteer(false); this.openAttachmentPicker(); }}
       >${renderAttachIcon()}</button>
     `;
   }
@@ -953,7 +846,6 @@ export class PromptEditor extends LitElement {
       this.resetSteerDisclosure();
       return;
     }
-    this.closeGuidance(false, true);
     this.closeChoice(false);
     this.draftElement?.closeCompletionMenu();
     this.steerOpen = true;
@@ -1088,11 +980,10 @@ export class PromptEditor extends LitElement {
       this.stop();
       return true;
     }
-    const status = this.status;
     if (context.inputMode.kind === "shell") return false;
     if (context.draft.trim() !== "") return false;
 
-    const action = status?.doubleEscapeAction ?? "tree";
+    const action = this.doubleEscapeAction ?? "tree";
     if (action === "none") return true;
     const now = Date.now();
     if (now - this.lastEscapeTime < 500) {
@@ -1144,7 +1035,6 @@ export class PromptEditor extends LitElement {
         if (this.dictationBlocksComposer()) {
           this.closeChoice(false);
           this.resetSteerDisclosure();
-          this.closeGuidance(false, true);
         }
         this.applyPendingDictationStatusIfSettled();
       },
@@ -1429,24 +1319,6 @@ function promptHistoryChanged(value: readonly string[], previous: readonly strin
   if (value === previous) return false;
   if (previous?.length !== value.length) return true;
   return value.some((entry, index) => entry !== previous[index]);
-}
-
-// The only `status` fields the template reads directly are the model identity,
-// thinking level, and guidance summary (shown in renderCompactStatus). Everything else the editor
-// cares about (canSteer/isCompacting/sending) is passed as a separate
-// property or capability that Lit already diffs by value. Comparing just these fields lets us
-// ignore the per-token status churn that does not change anything on screen.
-function sessionStatusRenderEqual(a: SessionStatus | undefined, b: SessionStatus | undefined): boolean {
-  if (a === b) return true;
-  if (a === undefined || b === undefined) return false;
-  return a.model?.id === b.model?.id
-    && a.model?.provider === b.model?.provider
-    && a.thinkingLevel === b.thinkingLevel
-    && stringArraysEqual(a.activeGuidanceIds ?? [], b.activeGuidanceIds ?? []);
-}
-
-function stringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function dictationOwnerKey(machineId: unknown, sessionId: unknown, cwd: unknown): string {

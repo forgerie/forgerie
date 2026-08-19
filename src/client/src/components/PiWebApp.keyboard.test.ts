@@ -90,17 +90,7 @@ describe("PiWebApp global shortcut modality boundary", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     const { app, editor } = await renderChatEditor({});
-    editor.status = {
-      sessionId: "session-shortcut",
-      isStreaming: false,
-      isCompacting: false,
-      isBashRunning: false,
-      pendingMessageCount: 0,
-      queuedMessages: [],
-      doubleEscapeAction: "fork",
-      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      cost: 0,
-    };
+    editor.doubleEscapeAction = "fork";
     const runCommand = vi.spyOn(appSessionController(app), "runCommand").mockResolvedValue(undefined);
 
     dispatchEditorKeyThroughApp(app, editor, "Escape", {});

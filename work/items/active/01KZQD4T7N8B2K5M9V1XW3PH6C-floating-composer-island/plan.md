@@ -82,7 +82,7 @@ None. The repository contains direct patterns for the state derivation, held int
 - **Model idle, stop-only, and queue-capable cases explicitly:** The first slot is Send or Stop. Queue visibility and Steer disclosure availability are separate fields. Streaming and compaction are queue-capable; shell-only and pending-only work are stop-only.
 - **Derive stoppability once at the chat composition boundary:** Streaming, running shell work, compaction, or pending queued messages make work stoppable when the runtime is available. The Stop capability carries that value; the dead `canStop` binding is removed. Queue capability remains derived from streaming or compaction so the client matches server delivery semantics.
 - **Keep hold interpretation composer-specific:** A small pure module names the Queue press outcomes and uses the established 500 ms threshold and 10 px movement tolerance. It does not turn the session-row contract into a generic gesture framework.
-- **Reuse the composer’s one anchored disclosure layer:** Holding Queue opens a single-action Steer confirmation through the existing popover. Model, thinking, guidance, and Steer disclosures remain mutually exclusive.
+- **Reuse the composer’s one anchored disclosure layer:** Holding Queue opens a single-action Steer confirmation through the existing popover. Model, thinking, and Steer disclosures remain mutually exclusive.
 - **Disclose the secondary action before activation:** While `canSteer` is true, Queue carries a subtle secondary-action indicator. Its tooltip and accessible description state that holding Queue reveals Steer. Compaction Queue omits the cue and all Steer disclosure paths.
 - **Support each input path deliberately:** Pointer hold serves touch and mouse. Holding Space or Enter on the focused Queue control follows the same threshold. Right-click or the platform context-menu action opens the same disclosure as a non-timed alternative. Untracked synthetic activation continues to Queue for assistive technology.
 - **Keep submission and emergency control independent:** Queue is disabled during its own in-flight submission, but Stop remains available. Opening or closing Steer never mutates the draft.
@@ -237,7 +237,7 @@ The persistent draft remains outside this state machine. Only the action slot, Q
 - Accessibility path: before activation, streaming Queue's accessible description identifies the held-Steer path; untracked button activation queues, context-menu activation reveals Steer, and Queue reports its expanded state and controlled disclosure.
 - Compaction path: Queue has no Steer cue or description; long pointer or key activation and context-menu activation do not disclose Steer, while ordinary activation queues exactly once.
 - State transition: streaming ending during a pending hold or open Steer disclosure closes it without stale focus restoration.
-- Layer ordering: opening Steer closes model, thinking, or guidance disclosure; opening another composer disclosure closes Steer.
+- Layer ordering: opening Steer closes model or thinking disclosure; opening another composer disclosure closes Steer.
 - Emergency path: Stop remains invocable while the Queue hold is pending and while Steer is open.
 - Disabled path: a disabled Queue cannot arm a hold, open Steer, or submit.
 
@@ -287,7 +287,7 @@ The persistent draft remains outside this state machine. Only the action slot, Q
 - **State lifecycle risks:** Timers, pointer capture, synthetic-click suppression, focus, and the disclosure must reset on session and runtime transitions. The draft owner must never disconnect.
 - **API surface parity:** Wire payloads and streaming behavior values remain unchanged. Only the browser interaction that selects follow-up or Steer changes.
 - **Integration coverage:** Pure rail tests cannot prove the host capability mapping. A real `PiWebApp` component test must cover idle and active selected-session states.
-- **Unchanged invariants:** Stop restores queued text according to its current contract. Queue ordering, draft persistence, attachments, completions, model choice, guidance, and Escape-to-stop behavior stay unchanged.
+- **Unchanged invariants:** Stop restores queued text according to its current contract. Queue ordering, draft persistence, attachments, completions, model choice, and Escape-to-stop behavior stay unchanged.
 
 ---
 

@@ -8,13 +8,10 @@ status: active
 
 ## Why
 
-Four defects, all observed and all drawn:
+Three defects, all observed and all drawn:
 
 - Choosing a model or thinking level opens a **second modal over the first**,
   with its own scrim and its own focus trap.
-- Session guidance **cannot be seen at all** in the new-session modal. The panel
-  is `position:absolute; bottom:calc(100% + 8px)`, so it paints above the
-  composer — outside `section[role="dialog"]`, which is `overflow:hidden`.
 - **Cancel is stranded** below the rail, at the far edge from Send.
 - The rail spends its width on words while the **model name — the only
   unpredictable value — is capped hardest** at `min(42cqi, 320px)`.
@@ -25,19 +22,19 @@ Wireframes: `/tmp/sheet/composer.png`, `choices.png`, `rail.png`,
 ## Slices
 
 1. **One anchored popover layer.** A single popover component replaces the
-   `command-picker` modals for model and thinking, and carries guidance.
-   Anchored to the control that opened it, left edges aligned, 8 px above the
-   rail, width `min(348px, island − 16px)`, flips below when there is no room,
-   may cover the prompt but never the rail. No scrim, no second focus trap;
-   Escape returns to the draft. Content sized per choice: model is grouped by
-   provider and searchable, thinking is 7 fixed rows, guidance is one switch.
-   States drawn: catalogue error with Retry, filtered-to-nothing, unchosen.
+   `command-picker` modals for model and thinking. It anchors to the control
+   that opened it, with left edges aligned, 8 px above the rail, and width
+   `min(348px, island − 16px)`. It flips below when there is no room. It may
+   cover the prompt but never the rail. It has no scrim or second focus trap.
+   Escape returns to the draft. The model list is grouped by provider and
+   searchable. Thinking has 7 fixed rows. States drawn: catalogue error with
+   Retry, filtered-to-nothing, unchosen.
 2. **Cancel joins Send.** In the new-session rail, `✕` sits beside `➤`, same
    size, same row. The separate footer button goes.
 3. **Reduce the rail.** Archive becomes an icon. Thinking loses its word and
-   keeps its gauge. Guidance becomes an icon with a count badge that vanishes
-   at zero. The new-chat button is removed. The ~336 px recovered goes to the
-   model name, which then shows `anthropic/claude-sonnet-4-5-20250929` whole.
+   keeps its gauge. The new-chat button is removed. The recovered width goes
+   to the model name, which then shows
+   `anthropic/claude-sonnet-4-5-20250929` whole.
 4. **State place only when it is unusual.** Nothing on the main worktree. Off
    it, a 12 × 12 inline-SVG branch mark, the `feat/`-style prefix dropped, and
    the label capped at `min(26cqi, 168px)`; the full ref stays in `title`.

@@ -5,7 +5,6 @@ import type { DoubleEscapeAction, ManagedProcessEndReason, ManagedProcessInfo, M
 import type { MachineSessionListingSnapshot, SessionAskCatalogEntry, SessionAskCatalogSnapshot } from "../../../shared/apiTypes";
 import { parseActiveAgentProfileDescriptor } from "../../../shared/activeAgentProfile";
 import { parseKnownPiWebCapabilities } from "../../../shared/capabilities";
-import { normalizeSessionGuidanceIds } from "../../../shared/sessionGuidance";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -464,9 +463,6 @@ export function parseSessionStatus(value: unknown): SessionStatus {
     pendingMessageCount: requireNumber(record, "pendingMessageCount"),
     queuedMessages: record["queuedMessages"] === undefined ? [] : arrayOf(parseQueuedSessionMessage)(record["queuedMessages"]),
     ...optionalField("doubleEscapeAction", parseOptionalDoubleEscapeAction(record["doubleEscapeAction"])),
-    activeGuidanceIds: record["activeGuidanceIds"] === undefined
-      ? []
-      : normalizeSessionGuidanceIds(arrayOfString(record["activeGuidanceIds"], "activeGuidanceIds")),
     ...optionalField("messageCount", optionalNumber(record, "messageCount")),
     tokens: parseTokens(record["tokens"]),
     cost: requireNumber(record, "cost"),

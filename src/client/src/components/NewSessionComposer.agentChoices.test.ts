@@ -15,18 +15,16 @@ afterEach(() => {
 });
 
 /**
- * Model, thinking level, and guidance are chosen the same way on both
- * surfaces. Before a session exists the choice is held by the composer and
- * carried into creation, rather than applied to a session that is not there.
+ * Model and thinking level are chosen the same way on both surfaces. Before a
+ * session exists, the composer holds the choice and carries it into creation.
  */
 describe("new-session composer agent choices", () => {
-  it("carries the chosen model, thinking level, and guidance into the launch", async () => {
+  it("carries the chosen model and thinking level into the launch", async () => {
     const submitted: NewSessionLaunchIntent[] = [];
     const composer = await mount((intent) => { submitted.push(intent); return Promise.resolve({ kind: "accepted" as const }); });
 
     await pickModel(composer, { provider: "anthropic", id: "claude-opus-5" });
     await pickThinking(composer, "high");
-    await setGuidance(composer, "technical-english", false);
     setText(composer, "start the review");
     sendButton(composer).click();
     await settleRenderedDialog(composer);
@@ -35,7 +33,6 @@ describe("new-session composer agent choices", () => {
     expect(submitted[0]?.agentChoices).toEqual({
       modelSpec: "anthropic/claude-opus-5",
       thinkingLevel: "high",
-      guidanceIds: ["concise-responses", "honest-claims"],
     });
   });
 
@@ -62,7 +59,6 @@ describe("new-session composer agent choices", () => {
     expect(submitted[0]?.agentChoices).toEqual({
       modelSpec: "anthropic/claude-opus-5",
       thinkingLevel: "high",
-      guidanceIds: ["technical-english", "concise-responses", "honest-claims"],
     });
   });
 
@@ -115,11 +111,6 @@ async function pickModel(composer: NewSessionComposer, model: SessionModel): Pro
 
 async function pickThinking(composer: NewSessionComposer, level: string): Promise<void> {
   editor(composer).capabilities.model?.onChooseThinkingLevel(level);
-  await settleRenderedDialog(composer);
-}
-
-async function setGuidance(composer: NewSessionComposer, entryId: string, enabled: boolean): Promise<void> {
-  await editor(composer).capabilities.guidance?.onSet(entryId, enabled);
   await settleRenderedDialog(composer);
 }
 

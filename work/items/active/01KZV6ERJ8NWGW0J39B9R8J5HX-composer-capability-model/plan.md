@@ -17,8 +17,8 @@ absent rather than because a host declared it.
 
 That produced two defects:
 
-- The modal cannot offer model, thinking level, or guidance, because those read
-  a live session's `status`. They vanished silently.
+- The modal cannot offer model or thinking level because those read a live
+  session's `status`. They vanished silently.
 - The modal wraps the composer in form chrome, so it does not look like the
   composer at all.
 
@@ -30,7 +30,6 @@ needs.** The composer renders exactly the declared controls.
 ```ts
 interface ComposerCapabilities {
   model?: ComposerModelCapability;        // choose model + thinking level
-  guidance?: ComposerGuidanceCapability;  // toggle guidance entries
   attachments?: boolean;
   stop?: ComposerStopCapability;          // only where work can run
   archive?: ComposerArchiveCapability;
@@ -59,10 +58,8 @@ to be set. `surface`, `canArchive`, and `sessionLabel` are deleted.
    destination chip. Escape and the backdrop close it.
 4. **Pre-session model and thinking.** The modal selects a model and thinking
    level before a session exists, and holds them as its own state.
-5. **Creation carries the choice.** `startSession` accepts model, thinking
-   level, and guidance ids; the server applies them when opening the session.
-6. **Pre-session guidance.** The modal offers guidance entries and passes the
-   chosen ids into creation.
+5. **Creation carries the choice.** `startSession` accepts the model and
+   thinking level. The server applies them when opening the session.
 
 ## Progress
 
@@ -71,8 +68,8 @@ Slice 1 is written on `feat/composer-capability-model`, not yet committed:
 - `src/client/src/composerCapabilities.ts` declares the model.
 - `PromptEditor` renders every control from `capabilities`. `surface`,
   `canArchive`, `sessionLabel`, `contextUsage`, `availableThinkingLevels`,
-  `onStop`, `onSelectModel`, `onSelectThinking`, `onSetGuidance`,
-  `onArchiveAndNext`, and `onNewSession` are deleted.
+  `onStop`, `onSelectModel`, `onSelectThinking`, `onArchiveAndNext`, and
+  `onNewSession` are deleted.
 - `PiWebApp` builds `sessionComposerCapabilities` and
   `openingComposerCapabilities`, replacing two 25-property call sites.
 - `NewSessionComposer` builds `composerCapabilities`, stating the destination
@@ -82,10 +79,10 @@ Slice 1 is written on `feat/composer-capability-model`, not yet committed:
 All non-test code typechecks. 22 typecheck errors remain, all in tests that
 still set the deleted properties:
 
-`PromptEditor.runtimeControls`, `PromptEditor.guidance`,
-`PromptEditor.modelThinking`, `PromptEditor.summonedChrome`,
+`PromptEditor.runtimeControls`, `PromptEditor.modelThinking`,
+`PromptEditor.summonedChrome`,
 `PromptEditor.actions`, `PromptEditor.reveal`, `PromptEditor.preSession`,
-`PromptEditor.escape`, `PiWebApp.guidance`, `PiWebApp.chatOpening`.
+`PromptEditor.escape`, `PiWebApp.chatOpening`.
 
 Next: migrate those tests, then run the whole suite and commit slice 1.
 

@@ -223,7 +223,6 @@ export const sessionsApi = {
       ...(startupToken === undefined ? {} : { startupToken }),
       ...(agentChoices?.modelSpec === undefined ? {} : { modelSpec: agentChoices.modelSpec }),
       ...(agentChoices?.thinkingLevel === undefined ? {} : { thinkingLevel: agentChoices.thinkingLevel }),
-      ...(agentChoices?.guidanceIds === undefined ? {} : { guidanceIds: agentChoices.guidanceIds }),
     }),
   }),
   /** Models a composer may choose from before any session exists. */
@@ -244,11 +243,6 @@ export const sessionsApi = {
   killProcess: (session: SessionRef, processId: string, machineId = "local") => request(sessionPath(session, `processes/${encodeURIComponent(processId)}/kill`, machineId), parseManagedProcessKillResult, { method: "POST", body: sessionBody(session) }),
   writeProcess: (session: SessionRef, processId: string, input: string, machineId = "local") => request(sessionPath(session, `processes/${encodeURIComponent(processId)}/write`, machineId), parseManagedProcessWriteResult, { method: "POST", body: sessionBody(session, { input }) }),
   clearQueue: (session: SessionRef, machineId = "local") => request(sessionPath(session, "queue/clear", machineId), parseSessionStatus, { method: "POST", body: sessionBody(session) }),
-  setGuidance: (session: SessionRef, entryId: string, enabled: boolean, machineId = "local") => request(
-    sessionPath(session, "guidance", machineId),
-    parseSessionStatus,
-    { method: "POST", body: sessionBody(session, { entryId, enabled }), signal: AbortSignal.timeout(10_000) },
-  ),
   dismissWarning: (session: SessionRef, dismissId: string, machineId = "local") => request(sessionPath(session, "warnings/dismiss", machineId), parseSessionStatus, { method: "POST", body: sessionBody(session, { dismissId }) }),
   submitAsk: (session: SessionRef, askId: string, submission: AskUserSubmission, machineId = "local") => request(sessionPath(session, "ask/submit", machineId), parseAskUserCloseResponse, { method: "POST", body: sessionBody(session, { askId, answers: submission.answers }) }),
   cancelAsk: (session: SessionRef, askId: string, machineId = "local") => request(sessionPath(session, "ask/cancel", machineId), parseAskUserCloseResponse, { method: "POST", body: sessionBody(session, { askId }) }),

@@ -143,7 +143,6 @@ flowchart TB
 
 ## Scope Boundaries
 
-- No response guidance, session instruction presets, or prompt injection work; that follows separately.
 - No new dictation behavior. The island must leave room for the separate live-dictation work, but does not implement it.
 - No transcript typography, message card, or reading-column changes.
 - No changes to navigation or the session inbox. The summoned control sheet may gain an actions section and a session-readings section, but its existing navigation content and behavior stay as they are.

@@ -28,7 +28,6 @@ code reading. Others are anticipated; audits may resize them.
 - [x] Calm graphite dark + paper light token sets (`plugins/themes/index.ts`)
 - [x] Tabular numerals globally (`index.html`)
 - [x] Composer ghost chrome + filled send + archive fix (`shared.ts`)
-- [x] Ghost the guidance-trigger (star) border holdout ◆
 - [x] Favicon `#00f0d8` neon, apple-touch-icon, manifest colors, meta
       theme-color `#0d1117` → new palette ◆
 - [x] `index.html` `:root` fallback palette → match new dark (pre-theme flash) ◆

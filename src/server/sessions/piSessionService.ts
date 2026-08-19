@@ -45,7 +45,6 @@ import { parsePromptAttachments } from "../../shared/promptAttachments.js";
 import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
-import { SESSION_GUIDANCE_ENTRIES, setSessionGuidance } from "../../shared/sessionGuidance.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
 import type {
   AskUserCloseResponse,
@@ -79,8 +78,6 @@ import type {
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
 import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
-import { SESSION_GUIDANCE_CUSTOM_TYPE, persistedSessionGuidance, restoreSessionGuidance } from "./sessionGuidance.js";
-import { createSessionGuidanceBridgeExtension, createSessionGuidanceSlot, type SessionGuidanceSlot } from "./sessionGuidanceBridge.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 
 import { type AuthChange } from "./authService.js";
@@ -269,11 +266,6 @@ interface StartSessionOptions {
    * and pi defaults. Pi clamps it to the initial model's capabilities.
    */
   initialThinkingLevel?: ClientThinkingLevel;
-  /**
-   * Guidance chosen before the session existed. Applied once the runtime is up,
-   * so the first prompt is answered under the guidance the author picked.
-   */
-  initialGuidanceIds?: readonly string[];
   /**
    * Opaque label, echoed on this construction's startup progress so a browser
    * row with no session id yet can recognise its own.
@@ -501,7 +493,6 @@ type RuntimeResourceWarnings = NonNullable<RuntimeWarningSources["services"]>;
 type PiWebRuntimeServices = RuntimeResourceWarnings & {
   processBridgeSlot?: ProcessBridgeSlot;
   sessionTitleBridgeSlot?: SessionTitleBridgeSlot;
-  sessionGuidanceSlot?: SessionGuidanceSlot;
 };
 type PiWebAgentSessionServices = AgentSessionServices & PiWebRuntimeServices;
 
@@ -781,7 +772,6 @@ function createDefaultRuntimeFactory(
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
-    const sessionGuidanceSlot = createSessionGuidanceSlot();
     const baseServices = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -791,11 +781,10 @@ function createDefaultRuntimeFactory(
         extensionFactories: [
           createProcessBridgeExtension(processBridgeSlot),
           createSessionTitleBridgeExtension(sessionTitleBridgeSlot),
-          createSessionGuidanceBridgeExtension(sessionGuidanceSlot),
         ],
       },
     });
-    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot, sessionGuidanceSlot });
+    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser);
@@ -1239,7 +1228,6 @@ export class PiSessionService implements SessionRouteService {
       try {
         await this.abortSessionOperations(active.runtime.session);
       } finally {
-        active.runtime.services?.sessionGuidanceSlot?.dispose();
         await active.runtime.dispose();
       }
     }));
@@ -1450,9 +1438,6 @@ export class PiSessionService implements SessionRouteService {
       },
     );
     const { session } = active.runtime;
-    if (options.initialGuidanceIds !== undefined && options.initialGuidanceIds.length > 0) {
-      await this.inheritSessionGuidance(session, options.initialGuidanceIds);
-    }
     const created: ClientSession = {
       id: session.sessionId,
       path: session.sessionFile ?? "",
@@ -2167,31 +2152,6 @@ export class PiSessionService implements SessionRouteService {
     return this.statusFromSession(await this.sessionForStatusOrDialogClose(ref));
   }
 
-  async setGuidance(ref: PiSessionRef, entryId: string, enabled: unknown): Promise<ClientSessionStatus> {
-    if (!SESSION_GUIDANCE_ENTRIES.some((entry) => entry.id === entryId)) throw new Error(`Unknown guidance entry: ${entryId}`);
-    if (typeof enabled !== "boolean") throw new Error("Guidance state must be Boolean");
-    await this.assertWritable(ref);
-    const session = await this.getOrOpen(ref);
-    const slot = this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot;
-    if (slot === undefined) throw new Error("Session guidance is unavailable");
-    this.assertTreeNavigationInactive(session, "change session guidance");
-    const change = setSessionGuidance(slot.snapshot(), entryId, enabled);
-    if (!change.changed) return this.statusFromSession(session);
-    const sessionManager = session.sessionManager;
-    const appendCustomEntry = sessionManager.appendCustomEntry?.bind(sessionManager);
-    if (appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
-    await this.runSessionEntryMutation(session, "change session guidance", () => {
-      appendCustomEntry(
-        SESSION_GUIDANCE_CUSTOM_TYPE,
-        persistedSessionGuidance(change.activeIds),
-      );
-      slot.replace(change.activeIds);
-      return Promise.resolve();
-    });
-    this.publishStatus(session);
-    return this.statusFromSession(session);
-  }
-
   async processes(ref: PiSessionRef): Promise<ManagedProcessesSnapshot> {
     const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
     return bridge?.snapshot() ?? { available: false, writeSupported: false, processes: [] };
@@ -2597,7 +2557,6 @@ export class PiSessionService implements SessionRouteService {
     if (session.sessionManager.getLeafId() !== request.expectedLeafId) {
       throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
     }
-    const inheritedGuidanceIds = this.sessionGuidanceForSession(session);
 
     this.publishActivity(session, "forking session from entry", "active");
     this.publishStatus(session);
@@ -2617,17 +2576,7 @@ export class PiSessionService implements SessionRouteService {
 
       const forkedSession = this.active.get(result.session.id)?.runtime.session;
       if (forkedSession !== undefined && this.isCurrentActiveSession(forkedSession)) {
-        let guidanceInheritanceError: unknown;
-        try {
-          await this.inheritSessionGuidance(forkedSession, inheritedGuidanceIds);
-        } catch (error: unknown) {
-          guidanceInheritanceError = error;
-        }
-        if (guidanceInheritanceError === undefined) {
-          this.publishActivity(forkedSession, "session forked", "idle");
-        } else {
-          this.publishActivity(forkedSession, "session forked without guidance", "error", errorMessage(guidanceInheritanceError));
-        }
+        this.publishActivity(forkedSession, "session forked", "idle");
         this.publishStatus(forkedSession);
       }
       if (result.session.id !== session.sessionId) this.clearSupersededSessionActivity(session);
@@ -2646,22 +2595,6 @@ export class PiSessionService implements SessionRouteService {
       }
       throw error;
     }
-  }
-
-  private async inheritSessionGuidance(session: PiAgentSession, inheritedIds: readonly string[]): Promise<void> {
-    const slot = this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot;
-    if (slot === undefined || arraysEqual(slot.snapshot(), inheritedIds)) return;
-    const sessionManager = session.sessionManager;
-    const appendCustomEntry = sessionManager.appendCustomEntry?.bind(sessionManager);
-    if (appendCustomEntry === undefined) throw new Error("Session guidance persistence is unavailable");
-    await this.runSessionEntryMutation(session, "inherit session guidance", () => {
-      appendCustomEntry(
-        SESSION_GUIDANCE_CUSTOM_TYPE,
-        persistedSessionGuidance(inheritedIds),
-      );
-      slot.replace(inheritedIds);
-      return Promise.resolve();
-    });
   }
 
   /**
@@ -2691,8 +2624,6 @@ export class PiSessionService implements SessionRouteService {
       async () => {
         this.publishActivity(session, "reloading resources", "active");
         const priorGeneration = this.notificationGenerationBySession.get(session);
-        const guidanceSlot = this.active.get(session.sessionId)?.runtime.services?.sessionGuidanceSlot;
-        const previousGuidance = guidanceSlot?.snapshot() ?? [];
         let candidateGeneration: SessionNotificationGeneration | undefined;
         try {
           await session.reload(priorGeneration === undefined ? undefined : {
@@ -2708,7 +2639,6 @@ export class PiSessionService implements SessionRouteService {
           this.publishActivity(session, "resources reloaded", "idle");
           this.publishStatus(session);
         } catch (error: unknown) {
-          guidanceSlot?.replace(previousGuidance);
           if (candidateGeneration !== undefined) {
             this.publishNotificationMutations(this.notificationStore.abortReplacement(candidateGeneration, "candidate"));
             this.notificationGenerationBySession.set(session, candidateGeneration);
@@ -3363,7 +3293,6 @@ export class PiSessionService implements SessionRouteService {
       await this.abortSessionOperations(active.runtime.session);
     } finally {
       this.cancelSessionTitleGeneration(active.runtime.session);
-      active.runtime.services?.sessionGuidanceSlot?.dispose();
       active.runtime.services?.sessionTitleBridgeSlot?.dispose();
       active.runtime.services?.processBridgeSlot?.dispose();
       await active.runtime.dispose();
@@ -3603,12 +3532,7 @@ export class PiSessionService implements SessionRouteService {
       runtime.setRebindSession(async (session) => {
         const priorGeneration = notificationGeneration;
         let candidateGeneration: SessionNotificationGeneration | undefined;
-        const guidanceSlot = runtime.services?.sessionGuidanceSlot;
-        const previousGuidance = guidanceSlot?.snapshot() ?? [];
-        const replacementGuidance = restoreSessionGuidance(session.sessionManager.getEntries?.() ?? []);
-        let replacementApplied = false;
         try {
-          guidanceSlot?.replace(replacementGuidance);
           await this.prepareUnreadRuntimeRebind(boundSession, session);
           await this.recoverSubsessionTrackingForOpenedSession(session);
           if (priorGeneration !== undefined) {
@@ -3619,7 +3543,6 @@ export class PiSessionService implements SessionRouteService {
           this.bindProcessBridge(runtime, session);
           this.bindSessionTitleBridge(runtime, session);
           this.bindRuntime(active, session);
-          replacementApplied = true;
           // The runtime being replaced parked every dialog the store still
           // holds for this session; settle those waits before the new
           // runtime's extensions can open fresh dialogs under the same id.
@@ -3631,7 +3554,6 @@ export class PiSessionService implements SessionRouteService {
             notificationGeneration = candidateGeneration;
           }
         } catch (error: unknown) {
-          guidanceSlot?.replace(replacementApplied ? replacementGuidance : previousGuidance);
           if (candidateGeneration !== undefined) {
             this.publishNotificationMutations(this.notificationStore.abortReplacement(candidateGeneration, "candidate"));
             notificationGeneration = candidateGeneration;
@@ -3676,7 +3598,6 @@ export class PiSessionService implements SessionRouteService {
         await runtime.session.abort();
       } finally {
         this.cancelSessionTitleGeneration(runtime.session);
-        runtime.services?.sessionGuidanceSlot?.dispose();
         runtime.services?.sessionTitleBridgeSlot?.dispose();
         runtime.services?.processBridgeSlot?.dispose();
         await runtime.dispose();
@@ -4405,7 +4326,6 @@ export class PiSessionService implements SessionRouteService {
       pendingMessageCount: this.pendingMessageCount(session),
       queuedMessages: queuedMessagesFromSession(session, this.compactionQueuedMessages(session.sessionId)),
       doubleEscapeAction: session.settingsManager.getDoubleEscapeAction?.() ?? "tree",
-      activeGuidanceIds: this.sessionGuidanceForSession(session),
       messageCount: session.messages.length,
       tokens: stats.tokens,
       cost: stats.cost,
@@ -4414,11 +4334,6 @@ export class PiSessionService implements SessionRouteService {
       ...(pendingAsk === undefined ? {} : { pendingAsk }),
       ...(pendingDialogs.length === 0 ? {} : { pendingDialogs }),
     };
-  }
-
-  private sessionGuidanceForSession(session: PiAgentSession): string[] {
-    return this.activeRuntimeForSession(session)?.services?.sessionGuidanceSlot?.snapshot()
-      ?? restoreSessionGuidance(session.sessionManager.getEntries?.() ?? []);
   }
 
   /**
@@ -4488,10 +4403,6 @@ function findSessionByIdOrPrefix(sessions: readonly PiSessionListEntry[], sessio
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)];
-}
-
-function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function errorMessage(error: unknown): string {

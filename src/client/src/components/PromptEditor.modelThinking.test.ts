@@ -44,7 +44,6 @@ describe("PromptEditor model capsule", () => {
 
 function editor(options: { listModels?: () => Promise<never[]> } = {}): PromptEditor {
   const composer = new PromptEditor();
-  composer.status = status();
   composer.capabilities = sessionCapabilities({
     ...options,
     status: status(),

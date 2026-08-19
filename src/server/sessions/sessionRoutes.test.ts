@@ -978,7 +978,7 @@ describe("session routes", () => {
     }
   });
 
-  it("changes session guidance with workspace context and validates the desired state", async () => {
+  it("does not expose the removed guidance route", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
     const eventHub = new SessionEventHub();
@@ -986,19 +986,13 @@ describe("session routes", () => {
     registerSessionRoutes(routeApp, routeService, eventHub);
 
     try {
-      const requestCwd = resolve("/repo");
-      const enabled = await routeApp.inject({ method: "POST", url: "/sessions/session-1/guidance", payload: { cwd: requestCwd, entryId: "technical-english", enabled: true } });
-      const invalid = await routeApp.inject({ method: "POST", url: "/sessions/session-1/guidance", payload: { cwd: requestCwd, entryId: "technical-english", enabled: "yes" } });
+      const response = await routeApp.inject({
+        method: "POST",
+        url: "/sessions/session-1/guidance",
+        payload: { cwd: resolve("/repo"), entryId: "technical-english", enabled: true },
+      });
 
-      expect(enabled.statusCode).toBe(200);
-      expect(enabled.json()).toMatchObject({ sessionId: "session-1", activeGuidanceIds: ["technical-english"] });
-      expect(invalid.statusCode).toBe(400);
-      expect(invalid.json()).toEqual({ error: "enabled field must be Boolean" });
-      expect(routeService.guidanceCalls).toEqual([{
-        lookup: { id: "session-1", cwd: requestCwd },
-        entryId: "technical-english",
-        enabled: true,
-      }]);
+      expect(response.statusCode).toBe(404);
     } finally {
       await routeService.dispose();
       await routeApp.close();
@@ -1183,7 +1177,7 @@ describe("session routes", () => {
     }
   });
 
-  it("carries the agent choices made before the session existed, and refuses unknown ones", async () => {
+  it("carries the model choices made before the session existed and refuses unknown levels", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
     const eventHub = new SessionEventHub();
@@ -1195,26 +1189,19 @@ describe("session routes", () => {
       const chosen = await routeApp.inject({
         method: "POST",
         url: "/sessions",
-        payload: { cwd: requestCwd, modelSpec: "anthropic/claude-opus-5", thinkingLevel: "high", guidanceIds: ["technical-english"] },
+        payload: { cwd: requestCwd, modelSpec: "anthropic/claude-opus-5", thinkingLevel: "high" },
       });
       // An unknown level must not reach the service as a level it would apply.
       const unknownLevel = await routeApp.inject({ method: "POST", url: "/sessions", payload: { cwd: requestCwd, thinkingLevel: "ludicrous" } });
-      // Unknown guidance is dropped rather than refused: the set is advisory.
-      const unknownGuidance = await routeApp.inject({ method: "POST", url: "/sessions", payload: { cwd: requestCwd, guidanceIds: ["not-a-guidance"] } });
 
       expect(chosen.statusCode).toBe(200);
       expect(unknownLevel.statusCode).toBe(400);
-      expect(unknownGuidance.statusCode).toBe(200);
-      expect(routeService.startCalls).toEqual([
-        {
-          cwd: requestCwd,
-          startupToken: undefined,
-          initialModelSpec: "anthropic/claude-opus-5",
-          initialThinkingLevel: "high",
-          initialGuidanceIds: ["technical-english"],
-        },
-        { cwd: requestCwd, startupToken: undefined, initialGuidanceIds: [] },
-      ]);
+      expect(routeService.startCalls).toEqual([{
+        cwd: requestCwd,
+        startupToken: undefined,
+        initialModelSpec: "anthropic/claude-opus-5",
+        initialThinkingLevel: "high",
+      }]);
     } finally {
       await routeService.dispose();
       await routeApp.close();
@@ -1251,7 +1238,6 @@ class CapturingRouteSessionService implements SessionRouteService {
     restoredMessages: [{ kind: "followUp", text: "continue after review" }],
   };
   readonly dismissWarningCalls: { lookup: SessionRouteRef; dismissId: string }[] = [];
-  readonly guidanceCalls: { lookup: SessionRouteRef; entryId: string; enabled: boolean }[] = [];
   readonly notificationInboxCalls: SessionRef[] = [];
   readonly acknowledgeUnreadCalls: { sessionId: string; request: SessionUnreadAcknowledgeRequest }[] = [];
   readonly unreadCatalogResponse: SessionUnreadCatalogSnapshot = { catalogId: "catalog-test", catalogRevision: 1, sessions: [] };
@@ -1278,7 +1264,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly cancelAskCalls: { lookup: SessionRouteRef; askId: string }[] = [];
   readonly answerDialogCalls: { lookup: SessionRouteRef; dialogId: string; value: ExtensionDialogAnswer }[] = [];
   readonly cancelDialogCalls: { lookup: SessionRouteRef; dialogId: string }[] = [];
-  readonly startCalls: { cwd: string; startupToken: string | undefined; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel; initialGuidanceIds?: readonly string[] }[] = [];
+  readonly startCalls: { cwd: string; startupToken: string | undefined; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel }[] = [];
   readonly newSessionModelCwds: string[] = [];
   readonly promptResourceCommandCalls: { lookup: SessionRouteRef; text: string; identity: unknown; streamingBehavior?: unknown; attachments?: unknown }[] = [];
   askError: Error | undefined;
@@ -1385,21 +1371,14 @@ class CapturingRouteSessionService implements SessionRouteService {
 
   list(): never { throw unusedRouteMethod("list"); }
 
-  start(cwd: string, options?: { startupToken?: string; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel; initialGuidanceIds?: readonly string[] }): Promise<ClientSession> {
+  start(cwd: string, options?: { startupToken?: string; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel }): Promise<ClientSession> {
     this.startCalls.push({
       cwd,
       startupToken: options?.startupToken,
       ...(options?.initialModelSpec === undefined ? {} : { initialModelSpec: options.initialModelSpec }),
       ...(options?.initialThinkingLevel === undefined ? {} : { initialThinkingLevel: options.initialThinkingLevel }),
-      ...(options?.initialGuidanceIds === undefined ? {} : { initialGuidanceIds: options.initialGuidanceIds }),
     });
     return Promise.resolve({ id: "session-1", path: "/tmp/session-1.jsonl", cwd, created: "2026-06-25T00:00:00.000Z", modified: "2026-06-25T00:00:00.000Z", messageCount: 0, firstMessage: "" });
-  }
-
-  setGuidance(lookup: SessionRouteRef, entryId: string, enabled: unknown): Promise<SessionStatus> {
-    if (typeof enabled !== "boolean") return Promise.reject(new Error("Guidance state must be Boolean"));
-    this.guidanceCalls.push({ lookup, entryId, enabled });
-    return Promise.resolve({ ...idleStatus(lookup), activeGuidanceIds: enabled ? [entryId] : [] });
   }
 
   dismissWarning(lookup: SessionRouteRef, dismissId: string): Promise<SessionStatus> {

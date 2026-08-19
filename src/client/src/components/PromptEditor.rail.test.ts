@@ -2,7 +2,6 @@
 
 import type { TemplateResult } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionStatus } from "../api";
 import { isTemplateResult, templateText } from "../templateInspection.testSupport";
 import { deepActiveElement, pressKey } from "./modalSurfaceTestSupport";
 import { PromptEditor } from "./PromptEditor";
@@ -597,16 +596,12 @@ describe("PromptEditor control rail", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("keeps Steer mutually exclusive with guidance and model choices", async () => {
+  it("keeps Steer mutually exclusive with model choices", async () => {
     vi.useFakeTimers();
     const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }) });
 
-    button(composer, ".guidance-trigger").click();
-    await composer.updateComplete;
-    expect(composer.shadowRoot?.querySelector("guidance-picker")).not.toBeNull();
     await openSteerByPointerHold(composer, button(composer, ".queue-button"));
-    expect(composer.shadowRoot?.querySelector("guidance-picker")).toBeNull();
-
+    expect(composer.shadowRoot?.querySelector(".steer-confirm-button")).not.toBeNull();
     button(composer, ".select-model").click();
     await composer.updateComplete;
     expect(composer.shadowRoot?.querySelector("composer-choice-list")).not.toBeNull();
@@ -835,7 +830,6 @@ describe("PromptEditor control rail", () => {
 
 function editor(overrides: Partial<PromptEditor> = {}): PromptEditor {
   const composer = new PromptEditor();
-  composer.status = status();
   Object.assign(composer, overrides);
   return composer;
 }
@@ -921,18 +915,4 @@ function render(composer: PromptEditor): TemplateResult {
   const rendered: unknown = composer.render();
   if (!isTemplateResult(rendered)) throw new Error("expected the composer template");
   return rendered;
-}
-
-function status(): SessionStatus {
-  return {
-    sessionId: "session-1",
-    isStreaming: false,
-    isCompacting: false,
-    isBashRunning: false,
-    pendingMessageCount: 0,
-    queuedMessages: [],
-    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    cost: 0,
-    model: { id: "gpt-5.6-sol", provider: "openai-codex" },
-  };
 }

@@ -62,7 +62,6 @@ export interface SessionRouteService {
     /** Strict `provider/model-id` chosen before the session existed. */
     initialModelSpec?: string;
     initialThinkingLevel?: ClientThinkingLevel;
-    initialGuidanceIds?: readonly string[];
   }): Promise<ClientSession>;
   messages(ref: SessionRouteRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage>;
   status(ref: SessionRouteRef): Promise<ClientSessionStatus>;
@@ -83,7 +82,6 @@ export interface SessionRouteService {
   /** Models and effective Pi defaults for a destination before a session exists. */
   availableModelsForNewSession(cwd: string): Promise<ClientNewSessionModelSelection>;
   setModel(ref: SessionRouteRef, provider: string, modelId: string): Promise<ClientSessionStatus>;
-  setGuidance(ref: SessionRouteRef, entryId: string, enabled: unknown): Promise<ClientSessionStatus>;
   cycleModel(ref: SessionRouteRef, direction: "forward" | "backward"): Promise<ClientSessionStatus>;
   availableThinkingLevels(ref: SessionRouteRef): Promise<ClientThinkingLevel[]>;
   setThinkingLevel(ref: SessionRouteRef, level: string): Promise<ClientSessionStatus>;

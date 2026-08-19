@@ -550,7 +550,6 @@ describe("PromptEditor local dictation", () => {
       onSend,
       capabilities: {
         model: { listModels: () => Promise.resolve([]), onChooseModel: vi.fn(), onChooseThinkingLevel: vi.fn() },
-        guidance: { activeIds: [], onSet: vi.fn() },
         stop: { stoppable: true, onStop },
       },
     });
@@ -577,7 +576,6 @@ describe("PromptEditor local dictation", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(attachButton(editor).disabled).toBe(true);
     expect(button(editor, ".select-model").disabled).toBe(true);
-    expect(button(editor, ".guidance-trigger").disabled).toBe(true);
     expect(editor.insertTextAtSelection(" plugin")).toBe(false);
     expect(editor.replaceText("external replacement")).toBe(false);
     expect(editor.getText()).toBe("locked");

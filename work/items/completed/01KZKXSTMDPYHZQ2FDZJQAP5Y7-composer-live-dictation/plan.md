@@ -657,7 +657,7 @@ stateDiagram-v2
 - Use pointerdown/up/cancel with pointer capture and `touch-action`/selection rules suitable for a hold gesture. Do not bind behavior to `click`. Add the U10 keyboard contract through keydown/keyup with repeat suppression and Escape abort.
 - Make the gateway privacy boundary discoverable before capture through the control's accessible description/help: audio goes to this Forgerie gateway for endpointing/transcription, not the selected machine, and raw audio is not stored as application data. Do not add a second consent click that breaks first-use hold semantics.
 - Give each state truthful labels, pressed state, visible status, reduced-motion-safe treatment, and polite announcements. Capture feedback begins immediately on pointerdown; hold feedback changes when the threshold is crossed; incomplete returns to a clear listening state.
-- While active, block composer mutation and send/queue/steer/attachment/model/guidance actions that could invalidate the draft anchor. Route the existing plugin prompt editor through lock-aware high-level operations so it cannot dispatch directly into CodeMirror. Keep the unrelated emergency agent-stop control available.
+- While active, block composer mutation and send/queue/steer/attachment/model actions that could invalidate the draft anchor. Route the existing plugin prompt editor through lock-aware high-level operations so it cannot dispatch directly into CodeMirror. Keep the unrelated emergency agent-stop control available.
 - Abort when the session owner changes, the session becomes archived, the composer leaves the active surface, the component disconnects, or the page genuinely backgrounds. Preserve active state through ordinary foreground fold/rotation.
 - Remove every browser Web Speech import, unsupported-browser message, interim text widget/live region, provider disclosure, restart-segment policy, and obsolete changeset from the replacement branch if any were brought forward.
 - Write the changeset for local tap/hold composer dictation and its local-runtime requirement.
@@ -677,10 +677,10 @@ stateDiagram-v2
 - State UX: component-level warming/unavailable, acquiring, auto, held, manual-only, checking, transcribing, retained-retry, empty, and retryable failure each expose the correct label, `aria-pressed`, live status, and available action; ready Whisper plus failed Smart Turn still offers manual-only dictation.
 - Accessibility: keyboard hold/release, auto/manual completion, repeat suppression, Escape, and focus behavior produce the same state transitions and announcements as pointer input.
 - Privacy: the gateway/audio-retention description is available before permission/capture and names the gateway rather than implying phone-local or selected-machine inference.
-- Mutation lock: send/queue/steer, attachment, model, guidance, public/plugin focus/replace/insert, keyboard, paste, and drop cannot race active dictation; emergency stop remains available.
+- Mutation lock: send/queue/steer, attachment, model, public/plugin focus/replace/insert, keyboard, paste, and drop cannot race active dictation; emergency stop remains available.
 - Covers AE6. Session navigation and component replacement abort capture; late callbacks cannot mutate the newly rendered composer.
 - Covers AE8. Render-level checks prove one non-wrapping action rail and no layout mode branch keyed to the four viewport widths; physical evidence remains U8.
-- Regression: ordinary composer capabilities, draft persistence, attachments, completion menus, history, model/guidance controls, and submission suites remain green.
+- Regression: ordinary composer capabilities, draft persistence, attachments, completion menus, history, model controls, and submission suites remain green.
 
 **Verification:**
 - Active/opening and new-session composers expose one understandable microphone interaction without changing non-speech draft behavior.
@@ -744,7 +744,7 @@ stateDiagram-v2
 - **State lifecycle risks:** The main risks are release during permission acquisition, late request completion, double finalization, stuck pointer/hold timers, model crash, unbounded queued bodies, cancellation that outlives its caller, locked drafts, plugin mutation bypass, retained retry audio, producer-side Worklet buildup, and live tracks after navigation. Generation/token/owner checks, idempotent settlement, one-active/one-queued admission, real-compute deadlines, producer bounds, AbortSignal, and bounded close address them.
 - **API surface parity:** Speech is a human input modality for the existing draft. It needs no session-daemon, plugin, agent-tool, machine-proxy, or prompt-send equivalent.
 - **Integration coverage:** Unit tests cannot prove microphone permission UI, AudioWorklet scheduling, physical pointer feel, Smart Turn quality, whisper accuracy/latency, browser microphone cleanup, or fold lifecycle events. U8 supplies those gates.
-- **Unchanged invariants:** Session prompt APIs, websocket protocol, durable draft storage, prompt submission, new-session submission, attachments, model/guidance controls, and agent runtime lifecycle do not change.
+- **Unchanged invariants:** Session prompt APIs, websocket protocol, durable draft storage, prompt submission, new-session submission, attachments, model controls, and agent runtime lifecycle do not change.
 
 ---
 

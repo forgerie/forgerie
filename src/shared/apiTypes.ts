@@ -954,8 +954,6 @@ export interface SessionStatus {
   queuedMessages: QueuedSessionMessage[];
   /** Pi's configured action for two Escape presses with an empty idle editor. */
   doubleEscapeAction?: DoubleEscapeAction;
-  /** Ordered IDs for the session guidance that applies at the next agent start. */
-  activeGuidanceIds?: string[];
   messageCount?: number;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
   cost: number;
@@ -1463,5 +1461,4 @@ export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | WorkspaceActi
 export interface NewSessionAgentChoices {
   readonly modelSpec?: string;
   readonly thinkingLevel?: string;
-  readonly guidanceIds?: readonly string[];
 }

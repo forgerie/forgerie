@@ -15,7 +15,6 @@ import type { SpeechCaptureSession } from "./speechCapture";
  */
 export interface ComposerCapabilities {
   readonly model?: ComposerModelCapability;
-  readonly guidance?: ComposerGuidanceCapability;
   readonly stop?: ComposerStopCapability;
   readonly archive?: ComposerArchiveCapability;
   readonly newSession?: ComposerNewSessionCapability;
@@ -56,12 +55,6 @@ export interface ComposerSelectableModel {
    * False clamps the thinking level to `off`.
    */
   readonly reasoning?: unknown;
-}
-
-export interface ComposerGuidanceCapability {
-  readonly activeIds: readonly string[];
-  readonly changeable?: boolean;
-  readonly onSet: (entryId: string, enabled: boolean) => Promise<boolean>;
 }
 
 export interface ComposerStopCapability {

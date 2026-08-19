@@ -3060,10 +3060,6 @@ export class PiWebApp extends LitElement {
     void this.openThinkingDialog();
   };
 
-  private readonly handleSetGuidance = (entryId: string, enabled: boolean): Promise<boolean> => {
-    return this.sessions.setGuidance(entryId, enabled);
-  };
-
   /**
    * Where the user is, in the one row that survives every size.
    *
@@ -3088,11 +3084,6 @@ export class PiWebApp extends LitElement {
         listModels: () => this.sessions.listModels(),
         onChooseModel: (model) => { void this.applySelectedModel(model); },
         onChooseThinkingLevel: (level) => { void this.sessions.setThinkingLevel(level); },
-      },
-      guidance: {
-        activeIds: state.status?.activeGuidanceIds ?? [],
-        changeable: runtimeAvailable,
-        onSet: this.handleSetGuidance,
       },
       dictation: this.sessionDictationCapability(),
       stop: { stoppable: runtimeAvailable && isActive(state), onStop: this.handleStopActiveWork },
@@ -3229,7 +3220,7 @@ export class PiWebApp extends LitElement {
       .runtimeControlsAvailable=${false}
       .canSteer=${false}
       .isCompacting=${false}
-      .status=${undefined}
+      .doubleEscapeAction=${undefined}
       .sending=${this.state.sendingPrompts[intent.session.id] === true}
       .chromeSummoned=${this.appShell.isChromeSummoned}
       .capabilities=${this.openingComposerCapabilities(workspace)}
@@ -3251,7 +3242,7 @@ export class PiWebApp extends LitElement {
       .runtimeControlsAvailable=${runtimeAvailable}
       .canSteer=${runtimeAvailable && state.status?.isStreaming === true}
       .isCompacting=${runtimeAvailable && state.status?.isCompacting === true}
-      .status=${state.status}
+      .doubleEscapeAction=${state.status?.doubleEscapeAction}
       .sending=${state.sendingPrompts[session.id] === true}
       .chromeSummoned=${this.appShell.isChromeSummoned}
       .capabilities=${this.sessionComposerCapabilities(state, runtimeAvailable)}

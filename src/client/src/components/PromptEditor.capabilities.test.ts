@@ -25,8 +25,8 @@ describe("PromptEditor capabilities", () => {
 
     expect(query(editor, ".select-model")).toBeNull();
     expect(query(editor, ".select-thinking")).toBeNull();
-    expect(query(editor, ".guidance-trigger")).toBeNull();
     expect(query(editor, ".stop-button")).toBeNull();
+    expect(query(editor, 'button[aria-label="Guidance"], button[title="Guidance"]')).toBeNull();
     expect(query(editor, ".composer-archive")).toBeNull();
     expect(query(editor, ".new-session-button")).toBeNull();
     expect(query(editor, "context-usage-meter")).toBeNull();
@@ -112,18 +112,16 @@ describe("PromptEditor capabilities", () => {
     ]);
   });
 
-  it("offers guidance, stop, archive, and new session only when declared", async () => {
+  it("offers stop, archive, and new session only when declared", async () => {
     const onStop = vi.fn();
     const onArchiveAndNext = vi.fn();
     const onNewSession = vi.fn();
     const editor = await mount({
-      guidance: { activeIds: ["technical-english"], onSet: () => Promise.resolve(true) },
       stop: { stoppable: true, onStop },
       archive: { onArchiveAndNext },
       newSession: { onNewSession },
     });
 
-    expect(query(editor, ".guidance-trigger")).not.toBeNull();
     button(editor, ".stop-button").click();
     button(editor, ".composer-archive").click();
     button(editor, ".new-session-button").click();

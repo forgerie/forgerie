@@ -11,7 +11,6 @@ export interface SessionCapabilityOptions {
   listModels?: () => Promise<readonly ComposerSelectableModel[]>;
   onChooseModel?: (model: ComposerSelectableModel) => void;
   onChooseThinkingLevel?: (level: string) => void;
-  onSetGuidance?: (entryId: string, enabled: boolean) => Promise<boolean>;
   onStop?: () => void;
   onArchiveAndNext?: () => void;
   onNewSession?: () => void;
@@ -38,11 +37,6 @@ export function sessionCapabilities(options: SessionCapabilityOptions = {}): Com
       listModels: options.listModels ?? (() => Promise.resolve([])),
       onChooseModel: options.onChooseModel ?? (() => undefined),
       onChooseThinkingLevel: options.onChooseThinkingLevel ?? (() => undefined),
-    },
-    guidance: {
-      activeIds: status?.activeGuidanceIds ?? [],
-      changeable: runtimeAvailable,
-      onSet: options.onSetGuidance ?? (() => Promise.resolve(true)),
     },
     stop: { stoppable: stoppable && runtimeAvailable, onStop: options.onStop ?? (() => undefined) },
     newSession: { onNewSession: options.onNewSession ?? (() => undefined) },

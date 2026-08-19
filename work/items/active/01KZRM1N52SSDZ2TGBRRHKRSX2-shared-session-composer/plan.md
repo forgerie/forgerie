@@ -19,7 +19,7 @@ Extract the editable draft, completion, attachment, and keyboard behavior into o
 
 The main chat composer and new-session modal currently implement prompt entry twice. `PromptEditor` owns CodeMirror, completions, attachments, history, keyboard behavior, and request-race handling, while `NewSessionComposer` owns a plain textarea. Adding selected features to the textarea would make the modal a second source of truth and require every future composer change to be maintained twice.
 
-The new-session surface also has a different runtime boundary. It has a machine, project, and workspace before Send, but no session identity. Skills, prompt templates, file references, and attachments can form a first prompt; session-tree, clone, shell, model-selection, guidance, and running-session controls cannot.
+The new-session surface also has a different runtime boundary. It has a machine, project, and workspace before Send, but no session identity. Skills, prompt templates, file references, and attachments can form a first prompt; session-tree, clone, shell, model-selection, and running-session controls cannot.
 
 ---
 
@@ -30,7 +30,7 @@ The new-session surface also has a different runtime boundary. It has a machine,
 - R3. With a valid new-session destination, slash completion must list the destination's currently permitted skills and prompt templates without creating or opening a session.
 - R4. With a valid destination, tracked-file and all-file completion must use that destination's machine, project, and workspace. A destination change must invalidate results from the previous destination.
 - R5. The new-session modal must support file picker, paste, and drag-and-drop attachments; attachment removal; delivery choice; attachment errors; and attachment-only first prompts through the shared implementation.
-- R6. Session-dependent commands and modes, including `/tree`, `/clone`, shell execution, model selection/completion, guidance, prompt history, and running-session controls, must not appear in the pre-session runtime.
+- R6. Session-dependent commands and modes, including `/tree`, `/clone`, shell execution, model selection/completion, prompt history, and running-session controls, must not appear in the pre-session runtime.
 - R7. A manually entered leading slash command must be validated against the authoritative first-prompt command catalog before creation. Commands absent from that positive catalog must not create a session or become literal first prompts. If a previously valid command becomes removed or source-ambiguous after startup, it must not execute and must enter confirmed-unsent recovery.
 - R8. The first-prompt command catalog and the active-session command catalog must share one server-side policy for command grammar, normalization, collision precedence, sorting, source identity, content fingerprint, and first-prompt eligibility. Pre-session validation and post-start execution must bind to the same identity. The client must not classify command names or command sources with a separate hardcoded list.
 - R9. Opening the modal or loading its resources must not create a session, mutate navigation, or execute project extensions. Resource discovery must use the active agent profile and the runtime's current SettingsManager/resource-path policy, with all extension paths and factories explicitly absent from the catalog loader.
@@ -47,7 +47,7 @@ The new-session surface also has a different runtime boundary. It has a machine,
 
 ## Scope Boundaries
 
-- Do not make `/tree`, `/clone`, `/fork`, shell commands, model selection, guidance, or other running-session operations work before a session exists.
+- Do not make `/tree`, `/clone`, `/fork`, shell commands, model selection, or other running-session operations work before a session exists.
 - Do not expose extension commands pre-session unless a future Pi contract supplies authoritative first-prompt execution metadata. Current extension commands remain session-only.
 - Do not add a separate new-session prompt-history store. The shared component supports history, but the pre-session runtime supplies no entries.
 - Do not redesign destination selection, the floating composer island, chat session controls, or modal visuals beyond the changes needed to host the shared draft and keep its menus and attachments usable.
@@ -95,7 +95,7 @@ The new-session surface also has a different runtime boundary. It has a machine,
 
 | Decision | Chosen approach | Rationale | Cost / residual risk |
 |---|---|---|---|
-| Shared UI boundary | Extract a `ComposerDraft`-level component: editor, completion interaction, attachments, and draft keyboard behavior. Keep `PromptEditor` as the chat organism that adds session rail/status/guidance; keep `NewSessionComposer` as the modal organism that adds destination and Cancel/Send. | Reusing `PromptEditor` wholesale would leak session controls into the modal. Extracting only CodeMirror would leave attachments and completion behavior duplicated. This boundary is the largest honest shared part. | `PromptEditor` becomes composition rather than one file, so existing focused tests must be redistributed without weakening coverage. |
+| Shared UI boundary | Extract a `ComposerDraft`-level component: editor, completion interaction, attachments, and draft keyboard behavior. Keep `PromptEditor` as the chat organism that adds session rail and status; keep `NewSessionComposer` as the modal organism that adds destination and Cancel/Send. | Reusing `PromptEditor` wholesale would leak session controls into the modal. Extracting only CodeMirror would leave attachments and completion behavior duplicated. This boundary is the largest honest shared part. | `PromptEditor` becomes composition rather than one file, so existing focused tests must be redistributed without weakening coverage. |
 | Capability model | Expose one deep composer-runtime port per host. `promptCompletions.ts` alone detects triggers; the runtime declares supported trigger kinds, resolves an already-detected trigger, and supplies host-valid draft behavior. Session/file/model resolver composition remains private to runtime factories. | One public port gives the shared component a stable contract without exporting provider arrays, API-shaped wrappers, modal flags, or duplicate trigger classifiers. | The runtime interface must stay small. Adding one-method classes per API call would be shallow ceremony and fails this decision. |
 | Draft ownership | `ComposerDraft` is the only mutable owner of live text, attachments, delivery choice, completion state, and editor lifecycle. Hosts receive validity/submit signals and immutable submission snapshots; they do not mirror draft changes per keystroke. | CodeMirror already acts as the keystroke source of truth. A second copy in `NewSessionComposerState` would recreate the maintenance and synchronization problem at the state layer. | Recovery reopening needs a one-time seed/transfer contract. The draft remains intact until launch acceptance; controller recovery owns the accepted snapshot afterward. |
 | First-prompt command identity | Model skills and prompt templates as prompt-resource commands under one canonical command-catalog policy. A shared parser defines slash name/argument boundaries. The opaque identity fingerprints source kind, exact case-sensitive name, canonical origin, expansion content, and skill base-directory semantics. Both catalogs and the identity-bound first-prompt dispatcher consume that policy. | Formatting or a locator alone is not enough: duplicate names can change source resolution, and a file can change at the same path between selection and startup. | A second post-start gate must verify the same source and content identity before delivery. If removal, content change, or collision appears after creation, the session may exist but no command executes and the submission remains recoverable. |
@@ -135,7 +135,7 @@ The new-session surface also has a different runtime boundary. It has a machine,
 - File completion uses the destination's existing workspace endpoint.
 - Unsupported slash commands are blocked by positive validation against the current prompt-resource catalog, not by a client blacklist. A slash at offset zero is command intent; blocked commands stay editable with inline feedback and no modal-only literal-text escape.
 - The modal uses the same Enter preference and keyboard editing behavior as chat, but all send gestures pass through modal validation.
-- Model completion, shell mode, prompt history, guidance, extension commands, and running-session controls are absent because no valid pre-session provider exists.
+- Model completion, shell mode, prompt history, extension commands, and running-session controls are absent because no valid pre-session provider exists.
 - Existing reconnect and short-menu defects are prerequisites inside this plan, not deferred cleanup.
 
 ### Deferred to Implementation
@@ -204,7 +204,7 @@ The runtime is capability composition rather than context detection:
 | Shell mode | Session provider | No provider |
 | Prompt history and durable draft | Session-owned adapters | No provider; in-memory only |
 | Attachment capture and delivery choice | Shared | Shared |
-| Send/steer/stop/guidance/model controls | `PromptEditor` outer composition | Not part of `ComposerDraft` |
+| Send/steer/stop/model controls | `PromptEditor` outer composition | Not part of `ComposerDraft` |
 | Destination and Cancel/Send footer | Not present | `NewSessionComposer` outer composition |
 
 ---
@@ -335,9 +335,9 @@ flowchart TB
 - Move the CodeMirror instance, trigger detection, asynchronous completion reconciliation, selection/pick behavior, keyboard precedence, input-assistance attributes, attachment capture, chips, delivery choice, and attachment errors into `ComposerDraft`. A supported provider that returns zero matches clears stale items and closes the existing menu, matching `AutocompleteMenu`; provider failure uses the visible recoverable error state instead of masquerading as an empty result.
 - Let `ComposerDraft` own its live in-memory text and attachments so CodeMirror remains the keystroke source of truth. Expose validity/submit signals and immutable submission snapshots plus a one-time seed/restore boundary; do not mirror the full draft through Lit on every keystroke.
 - Define the keyboard boundary: `ComposerDraft` owns completion, history, newline, submit, and local completion-Escape precedence. Unhandled Escape and session stop/double-Escape behavior remain with the outer host.
-- Keep prompt history and draft persistence behind optional adapters supplied by the chat host. The new-session host will omit them. Keep Send/Steer/Stop, model/thinking controls, guidance, context usage, session status, and the floating rail in `PromptEditor`.
+- Keep prompt history and draft persistence behind optional adapters supplied by the chat host. The new-session host will omit them. Keep Send/Steer/Stop, model/thinking controls, context usage, double-Escape handling, and the floating rail in `PromptEditor`.
 - Make CodeMirror creation idempotent across connect/disconnect so the same component instance regains a usable editor after reconnection.
-- Preserve `PromptEditor`'s high-frequency render guard and public focus, replacement, attachment-picker, and plugin prompt APIs by delegating to the shared component.
+- Preserve `PromptEditor`'s public focus, replacement, attachment-picker, and plugin prompt APIs by delegating to the shared component.
 - Redistribute tests by ownership. Draft content, completions, attachment state, keyboard behavior, and lifecycle scenarios move to `ComposerDraft.test.ts`; `PromptEditor.*.test.ts` keeps only chat composition and stable public delegation behavior. Do not reach through two shadow roots to seed shared-component private fields.
 - Delete migrated implementation from `PromptEditor`; do not leave forwarding copies of completion or attachment logic behind.
 
@@ -567,7 +567,7 @@ flowchart TB
 | Approach | Decision | Reason |
 |---|---|---|
 | Add CodeMirror and selected handlers directly to `NewSessionComposer` | Rejected | This creates the exact second source of truth the work exists to remove. Every completion, shortcut, accessibility, and attachment fix would need two implementations. |
-| Render the existing `PromptEditor` wholesale inside the modal and hide controls | Rejected | `PromptEditor` is a session-aware organism. Hiding its rail with flags would create a boolean prop forest and leave session storage, guidance, shell, model, and running-state assumptions inside the modal. |
+| Render the existing `PromptEditor` wholesale inside the modal and hide controls | Rejected | `PromptEditor` is a session-aware organism. Hiding its rail with flags would create a boolean prop forest and leave session storage, shell, model, and running-state assumptions inside the modal. |
 | Keep separate views but share only utility functions | Rejected | Pure trigger helpers already exist and did not prevent the textarea divergence. The maintained unit must include the behavior-bearing editor and attachment surface, not only helpers. |
 | Create a temporary hidden session to query commands | Rejected | It violates the Send-as-creation boundary, can trigger trust/extensions/dialogs, creates cleanup and failure states, and still does not define which commands are valid first prompts. |
 | Fetch all session commands and blacklist `/tree`, `/clone`, and peers in the client | Rejected | Command names and lifecycle semantics would become a duplicated client policy that drifts whenever Pi or Forgerie adds a command. |

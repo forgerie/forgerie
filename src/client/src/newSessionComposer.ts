@@ -28,7 +28,7 @@ export type NewSessionComposerSnapshot = NewSessionFirstPromptSubmission;
 export interface NewSessionLaunchIntent {
   destination: NewSessionCompleteDestination;
   firstPrompt: NewSessionFirstPromptSubmission;
-  /** Model, thinking level, and guidance chosen before the session existed. */
+  /** Model and thinking level chosen before the session existed. */
   agentChoices?: NewSessionAgentChoices;
 }
 

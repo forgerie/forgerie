@@ -5,7 +5,6 @@ import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { normalizeSessionCleanupRequest } from "./sessionCleanup.js";
-import { normalizeSessionGuidanceIds } from "../../shared/sessionGuidance.js";
 import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 
 interface SessionQuery {
@@ -61,7 +60,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
-  app.post<{ Body: { cwd?: unknown; startupToken?: unknown; modelSpec?: unknown; thinkingLevel?: unknown; guidanceIds?: unknown } | undefined }>(`${prefix}/sessions`, async (request, reply) => {
+  app.post<{ Body: { cwd?: unknown; startupToken?: unknown; modelSpec?: unknown; thinkingLevel?: unknown } | undefined }>(`${prefix}/sessions`, async (request, reply) => {
     try {
       const body = requireRecord(request.body);
       // An opaque label the caller uses to recognise its own construction's
@@ -72,12 +71,10 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
       // omitted one leaves the server's own default in place.
       const modelSpec = body["modelSpec"] === undefined ? undefined : requireNonEmptyString(body, "modelSpec");
       const thinkingLevel = body["thinkingLevel"] === undefined ? undefined : requireKnownThinkingLevel(body);
-      const guidanceIds = body["guidanceIds"] === undefined ? undefined : normalizeSessionGuidanceIds(body["guidanceIds"]);
       return await sessions.start(normalizeRequestCwd(requireString(body, "cwd")), {
         ...optionalField("startupToken", startupToken),
         ...optionalField("initialModelSpec", modelSpec),
         ...optionalField("initialThinkingLevel", thinkingLevel),
-        ...optionalField("initialGuidanceIds", guidanceIds),
       });
     } catch (error) {
       return reply.code(400).send({ error: errorMessage(error) });
@@ -254,21 +251,6 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     try {
       const body = optionalRecord(request.body);
       return await sessions.setModel(sessionRefFromBody(request.params.sessionId, body), requireString(body, "provider"), requireString(body, "modelId"));
-    } catch (error) {
-      return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
-    }
-  });
-
-  app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown; entryId?: unknown; enabled?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/guidance`, async (request, reply) => {
-    try {
-      const body = optionalRecord(request.body);
-      const enabled = body["enabled"];
-      if (typeof enabled !== "boolean") throw new Error("enabled field must be Boolean");
-      return await sessions.setGuidance(
-        sessionRefFromBody(request.params.sessionId, body),
-        requireString(body, "entryId"),
-        enabled,
-      );
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
     }

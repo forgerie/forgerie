@@ -94,7 +94,7 @@ describe("PromptEditor Escape behavior", () => {
     pressEscape(editor);
     vi.advanceTimersByTime(100);
     pressEscape(editor);
-    editor.status = status({ doubleEscapeAction: "tree" });
+    editor.doubleEscapeAction = "tree";
     editor.replaceText("draft");
     pressEscape(editor);
     editor.replaceText("");
@@ -119,7 +119,7 @@ async function mountEditor(options: {
   const editor = new PromptEditor();
   editor.sessionId = "session-1";
   editor.cwd = "/repo";
-  editor.status = options.status;
+  if (options.status.doubleEscapeAction !== undefined) editor.doubleEscapeAction = options.status.doubleEscapeAction;
   editor.capabilities = sessionCapabilities({
     status: options.status,
     stoppable: options.canStop ?? false,

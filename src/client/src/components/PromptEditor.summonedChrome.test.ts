@@ -57,7 +57,6 @@ describe("PromptEditor summoned chrome", () => {
 
 function summonedEditor(): PromptEditor {
   const editor = new PromptEditor();
-  editor.status = modelStatus();
   editor.capabilities = sessionCapabilities({ status: modelStatus() });
   editor.chromeSummoned = true;
   return editor;

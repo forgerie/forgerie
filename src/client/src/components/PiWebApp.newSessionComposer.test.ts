@@ -230,9 +230,7 @@ describe("PiWebApp New session composer root", () => {
       expect(isClientPendingSession(appState(app).selectedSession)).toBe(true);
     });
     const pending = required(appState(app).selectedSession, "pending session");
-    expect(startSession).toHaveBeenCalledWith(mainWorkspace.path, localMachine.id, pending.id, {
-      guidanceIds: ["technical-english", "concise-responses", "honest-claims"],
-    });
+    expect(startSession).toHaveBeenCalledWith(mainWorkspace.path, localMachine.id, pending.id, undefined);
     expect(appState(app).sessions.map((candidate) => candidate.id)).toEqual([pending.id, selectedSession.id]);
     expect(appState(app).clientQueuedSessionMessages[pending.id]).toEqual([
       { kind: "followUp", text: "[First prompt queued]" },

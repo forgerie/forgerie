@@ -82,7 +82,6 @@ async function renderPromptEditor(options: SessionCapabilityOptions & {
   const runtimeAvailable = options.runtimeControlsAvailable ?? true;
   editor.sessionId = "session-1";
   editor.machineId = "local";
-  editor.status = status();
   editor.disabled = options.disabled ?? false;
   editor.runtimeControlsAvailable = runtimeAvailable;
   editor.chromeSummoned = options.chromeSummoned ?? false;

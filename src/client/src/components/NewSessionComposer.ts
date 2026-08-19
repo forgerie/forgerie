@@ -7,7 +7,6 @@ import { createPreSessionComposerRuntime, type ComposerRuntime } from "../compos
 import type { ComposerCapabilities, ComposerDictationCapability } from "../composerCapabilities";
 import type { NewSessionAgentChoices, NewSessionModelSelectionResponse, SessionModel as ClientSessionModel } from "../../../shared/apiTypes";
 import { KNOWN_THINKING_LEVELS } from "../../../shared/thinkingLevels";
-import { DEFAULT_SESSION_GUIDANCE_IDS, setSessionGuidance } from "../../../shared/sessionGuidance";
 import {
   backToMachineChoice,
   backToProjectChoice,
@@ -73,7 +72,6 @@ export class NewSessionComposer extends LitElement {
   /** Effective Pi defaults, then any author overrides, before the session exists. */
   @state() private chosenModel: ClientSessionModel | undefined;
   @state() private chosenThinkingLevel: string | undefined;
-  @state() private chosenGuidanceIds: readonly string[] = [...DEFAULT_SESSION_GUIDANCE_IDS];
   private modelChosenByAuthor = false;
   private thinkingChosenByAuthor = false;
   private defaultsRequestGeneration = 0;
@@ -359,14 +357,6 @@ export class NewSessionComposer extends LitElement {
           this.chosenThinkingLevel = level;
         },
       },
-      guidance: {
-        activeIds: this.chosenGuidanceIds,
-        changeable: state.kind !== "submitting",
-        onSet: (entryId: string, enabled: boolean) => {
-          this.chosenGuidanceIds = setSessionGuidance(this.chosenGuidanceIds, entryId, enabled).activeIds;
-          return Promise.resolve(true);
-        },
-      },
       ...(this.dictation === undefined ? {} : { dictation: this.dictation }),
     };
   }
@@ -418,10 +408,6 @@ export class NewSessionComposer extends LitElement {
     const choices: NewSessionAgentChoices = {
       ...(modelSpec === undefined ? {} : { modelSpec }),
       ...(this.chosenThinkingLevel === undefined ? {} : { thinkingLevel: this.chosenThinkingLevel }),
-      // Always stated, even when empty. Omitting an empty list reads on the
-      // server as "never chose", which now turns every guidance back on and
-      // silently undoes an author who cleared them all.
-      guidanceIds: this.chosenGuidanceIds,
     };
     return Object.keys(choices).length === 0 ? undefined : choices;
   }

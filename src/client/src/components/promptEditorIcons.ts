@@ -74,15 +74,6 @@ export function renderBranchIcon(): TemplateResult {
   `;
 }
 
-/** Guidance the session is answering under; the count rides on top. */
-export function renderGuidanceIcon(): TemplateResult {
-  return svg`
-    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M12 4l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 9.3l5-.7z"></path>
-    </svg>
-  `;
-}
-
 /** The way out of a composer that has one — drawn beside the way in. */
 export function renderDismissIcon(): TemplateResult {
   return svg`

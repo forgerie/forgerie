@@ -152,7 +152,7 @@ interface PendingSessionStart {
   cwd: string;
   machineId: string;
   session: ClientPendingStartSessionInfo;
-  /** Model, thinking, and guidance chosen before this session existed. */
+  /** Model and thinking level chosen before this session existed. */
   agentChoices?: NewSessionAgentChoices;
   queuedSends: QueuedPendingSessionSend[];
   discarded: boolean;
@@ -205,7 +205,6 @@ export class SessionController {
   private readonly onSelectedSessionReady: SessionControllerDependencies["onSelectedSessionReady"];
   private readonly onManagedProcessesEvent: SessionControllerDependencies["onManagedProcessesEvent"];
   private selectionSeq = 0;
-  private guidanceMutationSeq = 0;
   private disposed = false;
   // Join-time stream watermark for the selected session. `seq` is the
   // `SessionEventHub` sequence captured together with the seeded partial by the
@@ -1517,34 +1516,6 @@ export class SessionController {
       this.applyStatus(await this.api.cycleThinkingLevel(session, selectedMachineId(this.getState())));
     } catch (error) {
       this.setState({ error: String(error) });
-    }
-  }
-
-  async setGuidance(entryId: string, enabled: boolean): Promise<boolean> {
-    const state = this.getState();
-    const session = state.selectedSession;
-    if (session === undefined || session.archived === true || isClientPendingStartSessionInfo(session)) return false;
-    const machineId = selectedMachineId(state);
-    const selectionSeq = this.selectionSeq;
-    const mutationSeq = ++this.guidanceMutationSeq;
-    try {
-      const status = await this.api.setGuidance(session, entryId, enabled, machineId);
-      if (!this.isCurrentSessionSelection(session.id, machineId, selectionSeq) || mutationSeq !== this.guidanceMutationSeq) return false;
-      const confirmedGuidanceIds = status.activeGuidanceIds ?? [];
-      const pendingStatus = this.pendingStatusBySession.get(status.sessionId);
-      if (pendingStatus !== undefined) {
-        this.pendingStatusBySession.set(status.sessionId, { ...pendingStatus, activeGuidanceIds: confirmedGuidanceIds });
-      }
-      const currentStatus = this.getState().status;
-      this.applyStatus(currentStatus?.sessionId === status.sessionId
-        ? { ...currentStatus, activeGuidanceIds: confirmedGuidanceIds }
-        : status);
-      return true;
-    } catch (error) {
-      if (this.isCurrentSessionSelection(session.id, machineId, selectionSeq) && mutationSeq === this.guidanceMutationSeq) {
-        this.setState({ error: String(error) });
-      }
-      return false;
     }
   }
 
