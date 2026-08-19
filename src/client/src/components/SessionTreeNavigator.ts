@@ -639,9 +639,12 @@ export class SessionTreeNavigator extends LitElement {
   static override styles = css`
     :host { position: fixed; inset: 0; z-index: 40; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; container-type: inline-size; }
     * { box-sizing: border-box; }
-    /* Full-viewport shell: the surface's centered-card defaults are overridden
-       so the dialog keeps covering the whole viewport. */
-    modal-surface { --modal-surface-width: 100%; --modal-surface-height: 100dvh; --modal-surface-max-height: 100dvh; --modal-surface-border: 0; --modal-surface-radius: 0; --modal-surface-shadow: none; }
+    /* Centered card on the transcript's reading column: the composer's measure
+       plus its gutters, so the dialog reads as part of the column instead of
+       taking over a desktop viewport. The fixed height keeps the card steady
+       while search and filters change the row count. Below the 760px container
+       query -- the same seam where the rows stack -- it goes full-bleed. */
+    modal-surface { --modal-surface-backdrop-padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); --modal-surface-width: min(calc(var(--calm-measure) + 2 * var(--calm-gutter)), 100%); --modal-surface-height: min(46rem, 100%); }
     header, footer { display: flex; align-items: center; gap: 12px; padding: max(14px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 14px max(18px, env(safe-area-inset-left)); border-bottom: 1px solid var(--pi-border-muted); }
     footer { min-height: 64px; justify-content: end; padding: 12px max(18px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); border-top: 1px solid var(--pi-border-muted); border-bottom: 0; }
     header > div { min-width: 0; }
@@ -744,6 +747,7 @@ export class SessionTreeNavigator extends LitElement {
     .footer-spacer { flex: 1; }
 
     @container (max-width: 760px) {
+      modal-surface { --modal-surface-backdrop-padding: 0; --modal-surface-width: 100%; --modal-surface-height: 100dvh; --modal-surface-max-height: 100dvh; --modal-surface-border: 0; --modal-surface-radius: 0; --modal-surface-shadow: none; }
       header { padding-top: max(12px, env(safe-area-inset-top)); }
       .tree-step { padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)); }
       .tree-intro, .tree-controls { padding-inline: 4px; }
