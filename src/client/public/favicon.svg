@@ -1,11 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">Forgerie mark</title>
-  <desc id="desc">A horizontal brand bar.</desc>
+  <desc id="desc">A geometric anvil silhouette.</desc>
   <style>
-    .bar { fill: #6699e0; }
+    .mark { fill: #6699e0; }
     @media (prefers-color-scheme: light) {
-      .bar { fill: #3563c4; }
+      .mark { fill: #3563c4; }
     }
   </style>
-  <rect class="bar" x="128" y="448" width="768" height="128"/>
+  <!-- Scaled to sit inside the maskable safe zone (inner 80% circle),
+       so the same source renders the PWA maskable PNGs. -->
+  <g class="mark" transform="translate(512 512) scale(0.92) translate(-512 -512)">
+    <!-- face (top block) -->
+    <path d="M 150 330 L 620 330 L 620 445 L 175 445 Q 150 445 150 420 Z"/>
+    <!-- horn, tapering to a point on the right (overlaps face to hide the seam) -->
+    <path d="M 610 330 C 760 330 850 355 905 390 C 840 430 730 445 610 445 Z"/>
+    <!-- waist (overlaps face and flare) -->
+    <path d="M 430 435 L 610 435 L 587 585 L 453 585 Z"/>
+    <!-- base flare (overlaps foot) -->
+    <path d="M 395 575 L 645 575 L 690 665 L 350 665 Z"/>
+    <!-- foot -->
+    <path d="M 330 655 L 710 655 L 710 715 L 330 715 Z"/>
+  </g>
 </svg>
