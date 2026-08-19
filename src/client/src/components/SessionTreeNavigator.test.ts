@@ -16,7 +16,6 @@ type NavigateCallback = (targetId: string, summaryChoice: SessionTreeSummaryChoi
 type ForkCallback = (entryId: string) => Promise<SessionTreeForkResult>;
 type VoidMethod = (this: SessionTreeNavigator) => void;
 type PromiseMethod = (this: SessionTreeNavigator) => Promise<void>;
-type SummaryModeMethod = (this: SessionTreeNavigator, mode: SessionTreeSummaryChoice["mode"]) => void;
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -164,7 +163,7 @@ describe("session-tree-navigator modal surface", () => {
     const onCancel = vi.fn<() => void>();
     const navigator = await mountNavigator({ onNavigate, onAbort, onCancel });
     await advanceToAction(navigator);
-    summaryRadio(navigator, "default").click();
+    summarizeToggle(navigator).click();
     await settleRenderedDialog(navigator);
     footerButton(navigator, "Continue from here").click();
     await settleRenderedDialog(navigator);
@@ -207,8 +206,6 @@ describe("session-tree-navigator modal surface", () => {
     const onCancel = vi.fn<() => void>();
     const navigator = await mountNavigator({ onFork, onAbort, onCancel });
     await advanceToAction(navigator);
-    operationRadio(navigator, "fork").click();
-    await settleRenderedDialog(navigator);
     footerButton(navigator, "Fork into new session").click();
     await settleRenderedDialog(navigator);
 
@@ -221,7 +218,7 @@ describe("session-tree-navigator modal surface", () => {
 
     fork.resolve({ cancelled: true });
     await settleRenderedDialog(navigator);
-    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Choose how to continue");
+    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Continue from this entry");
     expect(shadowText(navigator)).toContain("Fork cancelled. No new session was created");
   });
 });
@@ -236,7 +233,7 @@ describe("session-tree-navigator location step", () => {
 
     expect(footerLabels(navigator)).toEqual(["Cancel", "Next"]);
     expect(shadowText(navigator)).toContain("Select the history entry where you would like to continue.");
-    expect(navigator.renderRoot.querySelector("input[name='session-tree-operation']")).toBeNull();
+    expect(navigator.renderRoot.querySelector("input[name='session-tree-summarize']")).toBeNull();
     expect(footerButton(navigator, "Next").classList.contains("primary")).toBe(true);
     expect(footerButton(navigator, "Next").disabled).toBe(false);
   });
@@ -283,8 +280,8 @@ describe("session-tree-navigator location step", () => {
     selected.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await settleRenderedDialog(navigator);
 
-    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Choose how to continue");
-    expect(footerLabels(navigator)).toEqual(["Back", "Continue from here"]);
+    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Continue from this entry");
+    expect(footerLabels(navigator)).toEqual(["Back", "Fork into new session", "Continue from here"]);
   });
 
   it("moves focus across steps and traps Tab in the dialog", async () => {
@@ -302,7 +299,7 @@ describe("session-tree-navigator location step", () => {
 
     next.click();
     await settleRenderedDialog(navigator);
-    expect(navigator.shadowRoot?.activeElement).toBe(operationRadio(navigator, "continue"));
+    expect(navigator.shadowRoot?.activeElement).toBe(footerButton(navigator, "Continue from here"));
 
     footerButton(navigator, "Back").click();
     await settleRenderedDialog(navigator);
@@ -334,50 +331,41 @@ describe("session-tree-navigator action step", () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it("defaults to Continue, keeps operation and summary choices distinct, and hides summaries for Fork", async () => {
+  it("offers continue and fork as footer actions with the summary off by default", async () => {
     const navigator = await mountNavigator();
     await advanceToAction(navigator);
 
-    expect(fieldsetByLegend(navigator, "How would you like to continue?")).toBeTruthy();
-    expect(operationRadio(navigator, "continue").checked).toBe(true);
-    expect(operationRadio(navigator, "fork").checked).toBe(false);
-    expect(operationRadio(navigator, "continue").parentElement?.textContent).toContain("Continue in this session");
-    expect(operationRadio(navigator, "fork").parentElement?.textContent).toContain("Fork into a new session");
-    expect(fieldsetByLegend(navigator, "Abandoned branch summary")).toBeTruthy();
-    expect(summaryRadio(navigator, "none").checked).toBe(true);
-    expect(footerButton(navigator, "Continue from here")).toBeTruthy();
+    expect(navigator.renderRoot.querySelector("input[type='radio']")).toBeNull();
+    expect(footerLabels(navigator)).toEqual(["Back", "Fork into new session", "Continue from here"]);
+    expect(footerButton(navigator, "Continue from here").classList.contains("primary")).toBe(true);
+    expect(footerButton(navigator, "Fork into new session").classList.contains("primary")).toBe(false);
+    expect(summarizeToggle(navigator).checked).toBe(false);
+    expect(navigator.renderRoot.querySelector("#session-tree-custom-focus")).toBeNull();
     expect(selectedEntryText(navigator)).toContain("prompt editor will be empty");
+    expect(shadowText(navigator)).toContain("starts a separate session file with this entry and all history leading to it");
+    expect(shadowText(navigator)).toContain("Neither action undoes filesystem changes");
 
-    operationRadio(navigator, "fork").click();
+    summarizeToggle(navigator).click();
     await settleRenderedDialog(navigator);
+    expect(customFocus(navigator)).toBeTruthy();
 
-    expect(fieldsetByLegend(navigator, "Abandoned branch summary")).toBeNull();
-    expect(navigator.renderRoot.querySelector("input[name='session-tree-summary']")).toBeNull();
-    expect(selectedEntryText(navigator)).toContain("include this entry and all history leading to it");
-    expect(shadowText(navigator)).toContain("separate session file while leaving the original unchanged");
-    expect(footerButton(navigator, "Fork into new session")).toBeTruthy();
-
-    operationRadio(navigator, "continue").click();
+    summarizeToggle(navigator).click();
     await settleRenderedDialog(navigator);
-    expect(fieldsetByLegend(navigator, "Abandoned branch summary")).toBeTruthy();
-    expect(footerButton(navigator, "Continue from here")).toBeTruthy();
+    expect(navigator.renderRoot.querySelector("#session-tree-custom-focus")).toBeNull();
   });
 
-  it("explains user-message restoration for same-session continuation and forks", async () => {
+  it("explains user-message restoration and the fork draft for user entries", async () => {
     const navigator = await mountNavigator();
     treeItem(navigator, "root").click();
     await settleRenderedDialog(navigator);
     await advanceToAction(navigator);
 
     expect(selectedEntryText(navigator)).toContain("text will return to the prompt editor for optional editing and resubmission in this session");
-
-    operationRadio(navigator, "fork").click();
-    await settleRenderedDialog(navigator);
-    expect(selectedEntryText(navigator)).toContain("branch before this user message");
-    expect(selectedEntryText(navigator)).toContain("new session draft");
+    expect(shadowText(navigator)).toContain("branches before this message");
+    expect(shadowText(navigator)).toContain("draft for the new session");
   });
 
-  it("dispatches the final action to the selected callback and retains location after cancellation", async () => {
+  it("dispatches footer actions to their callbacks and retains location after cancellation", async () => {
     const onNavigate = vi.fn<NavigateCallback>().mockResolvedValue({ cancelled: true });
     const onFork = vi.fn<ForkCallback>().mockResolvedValue({ cancelled: true });
     const navigator = await mountNavigator({ onNavigate, onFork });
@@ -394,32 +382,31 @@ describe("session-tree-navigator action step", () => {
     expect(shadowText(navigator)).toContain("selected history entry is unchanged");
 
     await advanceToAction(navigator);
-    operationRadio(navigator, "fork").click();
-    await settleRenderedDialog(navigator);
     footerButton(navigator, "Fork into new session").click();
     await settleRenderedDialog(navigator);
 
     expect(onFork).toHaveBeenCalledWith("side");
     expect(onNavigate).toHaveBeenCalledOnce();
-    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Choose how to continue");
-    expect(operationRadio(navigator, "fork").checked).toBe(true);
+    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Continue from this entry");
     expect(selectedEntryText(navigator)).toContain("Side branch");
     expect(navigator.renderRoot.querySelector(".dialog-status[role='status']")?.textContent).toContain("Fork cancelled. No new session was created");
   });
 
-  it("validates custom summary focus without submitting", async () => {
+  it("treats blank summary focus as the default summary", async () => {
     const onNavigate = vi.fn<NavigateCallback>().mockResolvedValue({ cancelled: false });
     const navigator = await mountNavigator({ onNavigate });
     await advanceToAction(navigator);
 
-    summaryRadio(navigator, "custom").click();
+    summarizeToggle(navigator).click();
+    await settleRenderedDialog(navigator);
+    const textarea = customFocus(navigator);
+    textarea.value = "   ";
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
     await settleRenderedDialog(navigator);
     footerButton(navigator, "Continue from here").click();
     await settleRenderedDialog(navigator);
 
-    expect(onNavigate).not.toHaveBeenCalled();
-    expect(navigator.renderRoot.querySelector(".validation-error[role='alert']")?.textContent).toContain("Enter custom summary focus instructions");
-    expect(navigator.shadowRoot?.activeElement).toBe(customFocus(navigator));
+    expect(onNavigate).toHaveBeenCalledWith("active", { mode: "default" });
   });
 
   it("submits trimmed custom focus and exposes disabled busy controls and cancellation", async () => {
@@ -429,7 +416,7 @@ describe("session-tree-navigator action step", () => {
     const navigator = await mountNavigator({ onNavigate, onAbort });
     await advanceToAction(navigator);
 
-    summaryRadio(navigator, "custom").click();
+    summarizeToggle(navigator).click();
     await settleRenderedDialog(navigator);
     const textarea = customFocus(navigator);
     textarea.value = "  focus on failed tests  ";
@@ -439,10 +426,10 @@ describe("session-tree-navigator action step", () => {
     await settleRenderedDialog(navigator);
 
     expect(onNavigate).toHaveBeenCalledWith("active", { mode: "custom", instructions: "focus on failed tests" });
-    expect(fieldsetByLegend(navigator, "How would you like to continue?")?.disabled).toBe(true);
-    expect(fieldsetByLegend(navigator, "Abandoned branch summary")?.disabled).toBe(true);
+    expect(summaryFieldset(navigator)?.disabled).toBe(true);
     expect(closeButton(navigator).disabled).toBe(true);
     expect(footerButton(navigator, "Back").disabled).toBe(true);
+    expect(footerButton(navigator, "Fork into new session").disabled).toBe(true);
     expect(footerButton(navigator, "Summarizing…").disabled).toBe(true);
     expect(footerButton(navigator, "Cancel summarization").disabled).toBe(false);
 
@@ -465,43 +452,38 @@ describe("session-tree-navigator action step", () => {
     footerButton(navigator, "Continue from here").click();
     await settleRenderedDialog(navigator);
 
-    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Choose how to continue");
+    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Continue from this entry");
     expect(navigator.renderRoot.querySelector(".dialog-error[role='alert']")?.textContent).toContain("Could not navigate session history: The session changed since /tree was opened.");
     expect(footerButton(navigator, "Continue from here").disabled).toBe(false);
   });
 
-  it("keeps fork failures visible in step 2 without showing summary controls", async () => {
+  it("keeps fork failures visible and actionable in step 2", async () => {
     const navigator = await mountNavigator();
     navigator.onFork = () => Promise.reject(new Error("Restart the session daemon to enable tree forks."));
     await advanceToAction(navigator);
-    operationRadio(navigator, "fork").click();
-    await settleRenderedDialog(navigator);
 
     footerButton(navigator, "Fork into new session").click();
     await settleRenderedDialog(navigator);
 
-    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Choose how to continue");
+    expect(navigator.renderRoot.querySelector("h2")?.textContent).toBe("Continue from this entry");
     expect(navigator.renderRoot.querySelector(".dialog-error[role='alert']")?.textContent).toContain("Restart the session daemon to enable tree forks.");
-    expect(fieldsetByLegend(navigator, "Abandoned branch summary")).toBeNull();
     expect(footerButton(navigator, "Fork into new session").disabled).toBe(false);
   });
 
-  it("disables the unified step while a fork is in flight", async () => {
+  it("disables the whole step while a fork is in flight", async () => {
     const forkResult = deferred<SessionTreeForkResult>();
     const navigator = await mountNavigator();
     navigator.onFork = () => forkResult.promise;
     await advanceToAction(navigator);
-    operationRadio(navigator, "fork").click();
-    await settleRenderedDialog(navigator);
 
     footerButton(navigator, "Fork into new session").click();
     await settleRenderedDialog(navigator);
 
-    expect(fieldsetByLegend(navigator, "How would you like to continue?")?.disabled).toBe(true);
-    expect(fieldsetByLegend(navigator, "Abandoned branch summary")).toBeNull();
+    expect(summaryFieldset(navigator)?.disabled).toBe(true);
     expect(closeButton(navigator).disabled).toBe(true);
     expect(footerButton(navigator, "Back").disabled).toBe(true);
     expect(footerButton(navigator, "Forking…").disabled).toBe(true);
+    expect(footerButton(navigator, "Continue from here").disabled).toBe(true);
     expect(footerLabels(navigator)).not.toContain("Cancel summarization");
 
     forkResult.resolve({ cancelled: true });
@@ -530,22 +512,17 @@ describe("session-tree-navigator interactions", () => {
     expect(onNavigate).toHaveBeenNthCalledWith(2, "side", { mode: "none" });
   });
 
-  it("restores the valid no-summary default after leaving an incomplete custom choice", async () => {
+  it("submits a default summary when the focus text is blank", async () => {
     const navigator = initializedNavigator();
     const onNavigate = vi.fn<NavigateCallback>().mockResolvedValue({ cancelled: false });
     navigator.onNavigate = onNavigate;
 
     clickTreeNext(navigator);
-    callSummaryModeMethod(navigator, "custom");
+    setComponentProperty(navigator, "summarize", true);
+    setComponentProperty(navigator, "customInstructions", "   ");
     await callPromiseMethod(navigator, "submitNavigation");
-    expect(onNavigate).not.toHaveBeenCalled();
 
-    callVoidMethod(navigator, "returnToTree");
-    clickTreeNext(navigator);
-
-    expect(componentProperty(navigator, "summaryMode")).toBe("none");
-    await callPromiseMethod(navigator, "submitNavigation");
-    expect(onNavigate).toHaveBeenCalledWith("active", { mode: "none" });
+    expect(onNavigate).toHaveBeenCalledWith("active", { mode: "default" });
   });
 
   it("submits trimmed custom focus, exposes busy cancellation, and returns to the same node", async () => {
@@ -557,7 +534,7 @@ describe("session-tree-navigator interactions", () => {
     navigator.onAbort = onAbort;
 
     clickTreeNext(navigator);
-    callSummaryModeMethod(navigator, "custom");
+    setComponentProperty(navigator, "summarize", true);
     setComponentProperty(navigator, "customInstructions", "  focus on failed tests  ");
 
     const submission = callPromiseMethod(navigator, "submitNavigation");
@@ -582,7 +559,7 @@ describe("session-tree-navigator interactions", () => {
     navigator.onAbort = () => Promise.resolve();
 
     clickTreeNext(navigator);
-    callSummaryModeMethod(navigator, "default");
+    setComponentProperty(navigator, "summarize", true);
     const submission = callPromiseMethod(navigator, "submitNavigation");
     await callPromiseMethod(navigator, "abortNavigation");
     expect(componentProperty(navigator, "statusMessage")).toBe("Cancelling summarization…");
@@ -814,27 +791,15 @@ function footerLabels(navigator: SessionTreeNavigator): string[] {
   return [...navigator.renderRoot.querySelectorAll("footer button")].map((button) => button.textContent.trim());
 }
 
-function operationRadio(navigator: SessionTreeNavigator, value: "continue" | "fork"): HTMLInputElement {
-  return radio(navigator, "session-tree-operation", value);
-}
-
-function summaryRadio(navigator: SessionTreeNavigator, value: SessionTreeSummaryChoice["mode"]): HTMLInputElement {
-  return radio(navigator, "session-tree-summary", value);
-}
-
-function radio(navigator: SessionTreeNavigator, name: string, value: string): HTMLInputElement {
-  const input = navigator.renderRoot.querySelector(`input[name='${name}'][value='${value}']`);
-  if (!(input instanceof HTMLInputElement)) throw new Error(`Radio ${name}:${value} was unavailable`);
+function summarizeToggle(navigator: SessionTreeNavigator): HTMLInputElement {
+  const input = navigator.renderRoot.querySelector("input[name='session-tree-summarize']");
+  if (!(input instanceof HTMLInputElement)) throw new Error("Summarize toggle was unavailable");
   return input;
 }
 
-function fieldsetByLegend(navigator: SessionTreeNavigator, legend: string): HTMLFieldSetElement | null {
-  for (const fieldset of navigator.renderRoot.querySelectorAll("fieldset")) {
-    if (fieldset.querySelector("legend")?.textContent !== legend) continue;
-    if (!(fieldset instanceof HTMLFieldSetElement)) throw new Error(`Fieldset "${legend}" was not a fieldset element`);
-    return fieldset;
-  }
-  return null;
+function summaryFieldset(navigator: SessionTreeNavigator): HTMLFieldSetElement | null {
+  const fieldset = navigator.renderRoot.querySelector("fieldset.summary-section");
+  return fieldset instanceof HTMLFieldSetElement ? fieldset : null;
 }
 
 function customFocus(navigator: SessionTreeNavigator): HTMLTextAreaElement {
@@ -901,21 +866,11 @@ async function callPromiseMethod(navigator: SessionTreeNavigator, methodName: st
   await method.call(navigator);
 }
 
-function callSummaryModeMethod(navigator: SessionTreeNavigator, mode: SessionTreeSummaryChoice["mode"]): void {
-  const method: unknown = Reflect.get(navigator, "selectSummaryMode");
-  if (!isSummaryModeMethod(method)) throw new Error("SessionTreeNavigator.selectSummaryMode is not callable");
-  method.call(navigator, mode);
-}
-
 function isVoidMethod(value: unknown): value is VoidMethod {
   return typeof value === "function";
 }
 
 function isPromiseMethod(value: unknown): value is PromiseMethod {
-  return typeof value === "function";
-}
-
-function isSummaryModeMethod(value: unknown): value is SummaryModeMethod {
   return typeof value === "function";
 }
 
