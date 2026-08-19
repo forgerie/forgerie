@@ -15,6 +15,19 @@ describe("Info plugin copy-diagnostics action", () => {
     expect(context.openNewSessionComposer).toBeUndefined();
   });
 
+  it("contributes workspace labels and a renderable panel", () => {
+    const contributions = plugin.activate({ apiVersion: 1, pluginId: "info", html, svg }).contributions;
+    const label = contributions.workspaceLabels?.[0];
+    const panel = contributions.workspacePanels?.[0];
+    if (label === undefined || panel === undefined) throw new Error("Expected info workspace contributions");
+    const gitContext = { ...panelContext(), workspace: workspace(true), state: {} };
+    const folderContext = { ...panelContext(), workspace: workspace(false), state: {} };
+
+    expect(label.items(gitContext)).toEqual([{ type: "text", text: "git", title: "/repo" }]);
+    expect(label.items(folderContext)).toEqual([{ type: "text", text: "folder", title: "/repo" }]);
+    expect(panel.render(panelContext())).toBeDefined();
+  });
+
   it("copies a diagnostics summary to the clipboard", async () => {
     const writeText = vi.fn((text: string) => { void text; return Promise.resolve(); });
     vi.stubGlobal("navigator", { clipboard: { writeText } });
@@ -50,6 +63,30 @@ function findCopyDiagnosticsAction() {
   const action = plugin.activate({ apiVersion: 1, pluginId: "info", html, svg }).contributions.actions?.find((candidate) => candidate.id === "copy-diagnostics");
   if (action === undefined) throw new Error("Expected copy-diagnostics action");
   return action;
+}
+
+function workspace(isGitRepo: boolean) {
+  return {
+    id: "workspace-1",
+    projectId: "project-1",
+    path: "/repo",
+    label: "repo",
+    isMain: true,
+    isGitRepo,
+    isGitWorktree: false,
+  };
+}
+
+function panelContext() {
+  const unavailable = () => Promise.reject(new Error("unused test capability"));
+  return {
+    machine: { id: "local", name: "Local", kind: "local" as const },
+    workspace: workspace(true),
+    files: { readFile: unavailable, listFiles: unavailable, writeFile: unavailable, deleteFile: unavailable, moveFile: unavailable },
+    host: { requestRender: () => undefined },
+    prompt: { insertText: () => true, getText: () => "", getSelection: () => null },
+    terminal: { open: () => undefined, runCommand: unavailable },
+  };
 }
 
 function runtimeContext(patch: Partial<PluginRuntimeContext> = {}): PluginRuntimeContext {

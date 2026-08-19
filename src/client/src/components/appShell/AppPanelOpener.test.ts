@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppPanelOpener } from "./AppPanelOpener";
 
 afterEach(() => {
@@ -35,5 +35,25 @@ describe("AppPanelOpener attention", () => {
 
     expect(opener.shadowRoot?.querySelector("[data-attention]")).toBeNull();
     expect(opener.shadowRoot?.querySelector("button")?.getAttribute("aria-label")).toBe("Show sessions");
+  });
+
+  it("reports panel state and invokes the press callback", async () => {
+    const onPress = vi.fn();
+    const opener = new AppPanelOpener();
+    opener.side = "workspace";
+    opener.label = "Show workspace";
+    opener.controls = "workspace-panel";
+    opener.open = true;
+    opener.onPress = onPress;
+    document.body.append(opener);
+    await opener.updateComplete;
+
+    const button = opener.shadowRoot?.querySelector<HTMLButtonElement>("button");
+    expect(button?.getAttribute("aria-controls")).toBe("workspace-panel");
+    expect(button?.getAttribute("aria-expanded")).toBe("true");
+    expect(opener.shadowRoot?.querySelector("rect")).not.toBeNull();
+
+    button?.click();
+    expect(onPress).toHaveBeenCalledOnce();
   });
 });

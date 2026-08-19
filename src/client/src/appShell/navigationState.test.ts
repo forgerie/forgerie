@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { defaultNavigationSection, expandedNavigationSection, isNavigationSectionCollapsed, toggleCollapsedNavigationSection, toggleNavigationSection } from "./navigationState";
+import type { ReactiveControllerHost } from "lit";
+import { describe, expect, it, vi } from "vitest";
+import { defaultNavigationSection, expandNavigationSection, expandedNavigationSection, isNavigationSectionCollapsed, NavigationSectionsController, nextNavigationSection, toggleCollapsedNavigationSection, toggleNavigationSection } from "./navigationState";
 
 describe("navigationState", () => {
   it("defaults to the first incomplete selection section", () => {
@@ -51,4 +52,67 @@ describe("navigationState", () => {
     expect(toggleCollapsedNavigationSection(["sessions"], "machines")).toEqual(["machines", "sessions"]);
   });
 
+  it("expands and advances through the fixed section order", () => {
+    expect(expandNavigationSection("projects", "sessions", true)).toBe("sessions");
+    expect(expandNavigationSection("projects", "sessions", false)).toBe("projects");
+    expect(nextNavigationSection("machines")).toBe("projects");
+    expect(nextNavigationSection("sessions")).toBeUndefined();
+  });
+
+  it("coordinates mobile expansion and navigation opening", () => {
+    const { host, requestUpdate } = reactiveHost();
+    const openNavigationView = vi.fn();
+    const controller = new NavigationSectionsController(
+      host,
+      () => ({ selectedProject: {}, selectedWorkspace: undefined }),
+      () => true,
+    );
+
+    expect(controller.expandedSection()).toBe("workspaces");
+    expect(controller.isCollapsed("projects")).toBe(true);
+
+    controller.toggle("workspaces");
+    expect(controller.expandedSection()).toBeUndefined();
+    controller.advanceAfterSelection("projects");
+    expect(controller.expandedSection()).toBe("workspaces");
+    controller.open("sessions", openNavigationView);
+    controller.open("sessions", openNavigationView);
+
+    expect(controller.expandedSection()).toBe("sessions");
+    expect(openNavigationView).toHaveBeenCalledTimes(2);
+    expect(requestUpdate).toHaveBeenCalledTimes(3);
+  });
+
+  it("coordinates independent desktop sections without duplicate updates", () => {
+    const { host, requestUpdate } = reactiveHost();
+    const controller = new NavigationSectionsController(
+      host,
+      () => ({ selectedProject: {}, selectedWorkspace: {} }),
+      () => false,
+    );
+
+    controller.toggle("projects");
+    expect(controller.isCollapsed("projects")).toBe(true);
+    controller.expand("sessions");
+    controller.toggle("projects");
+    expect(controller.isCollapsed("projects")).toBe(false);
+    controller.expand("projects");
+    controller.advanceAfterSelection("projects");
+    controller.open("sessions", vi.fn());
+
+    expect(requestUpdate).toHaveBeenCalledTimes(2);
+  });
 });
+
+function reactiveHost(): { host: ReactiveControllerHost; requestUpdate: ReturnType<typeof vi.fn<() => void>> } {
+  const requestUpdate = vi.fn<() => void>();
+  return {
+    host: {
+      addController: vi.fn(),
+      removeController: vi.fn(),
+      requestUpdate,
+      updateComplete: Promise.resolve(true),
+    },
+    requestUpdate,
+  };
+}

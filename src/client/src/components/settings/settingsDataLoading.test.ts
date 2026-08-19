@@ -36,6 +36,18 @@ describe("settings data loading helpers", () => {
     expect(result.error).toBe("Failed to load settings: Forgerie plugins: plugin scan failed");
   });
 
+  it("combines config and plugin failures, including non-Error reasons", async () => {
+    const nonErrorReason: unknown = "offline";
+    const result = await loadGatewaySettingsData({
+      // The runtime boundary can receive rejected values from untyped plugins.
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      loadConfig: () => Promise.reject(nonErrorReason),
+      loadPlugins: () => Promise.reject(new Error("plugin scan failed")),
+    });
+
+    expect(result).toEqual({ error: "Failed to load settings: config: offline; Forgerie plugins: plugin scan failed" });
+  });
+
   it("loads Pi packages for the selected target with package-scoped errors", async () => {
     const requestedTargets: string[] = [];
     const success = await loadPiPackagesData(remoteTarget, (targetId) => {

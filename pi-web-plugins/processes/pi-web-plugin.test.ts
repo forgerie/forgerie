@@ -23,12 +23,14 @@ describe("managed processes plugin", () => {
     expect(selectWorkspaceTool).toHaveBeenCalledWith("processes:workspace.processes");
   });
 
-  it("registers a renderable workspace panel", () => {
+  it("registers a renderable workspace panel with a missing-session badge", () => {
     const panel = plugin.activate({ apiVersion: 1, pluginId: "processes", html, svg }).contributions.workspacePanels?.[0];
     if (panel === undefined) throw new Error("Expected the managed processes panel");
+    const context = panelContext();
 
     expect(panel.title).toBe("Processes");
-    expect(panel.render(panelContext())).toBeDefined();
+    expect(panel.badge?.(context)).toBe("!");
+    expect(panel.render(context)).toBeDefined();
   });
 });
 

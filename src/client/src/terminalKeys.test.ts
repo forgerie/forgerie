@@ -10,6 +10,8 @@ describe("terminalSoftKeySequence", () => {
     expect(terminalSoftKeySequence("ctrl-z")).toBe("\x1a");
     expect(terminalSoftKeySequence("ctrl-l")).toBe("\x0c");
     expect(terminalSoftKeySequence("ctrl-r")).toBe("\x12");
+    expect(terminalSoftKeySequence("ctrl-u")).toBe("\x15");
+    expect(terminalSoftKeySequence("ctrl-w")).toBe("\x17");
   });
 
   it("maps navigation keys to xterm-compatible sequences", () => {

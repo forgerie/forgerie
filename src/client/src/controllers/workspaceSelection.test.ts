@@ -27,6 +27,14 @@ describe("selectPreferredWorkspace", () => {
 
     expect(selectPreferredWorkspace(workspaces, { targetWorkspaceId: "old", latestWorkspaceId: "feature" })).toBeUndefined();
   });
+
+  it("uses the first workspace when no non-empty preference exists", () => {
+    const workspaces = [testWorkspace("main"), testWorkspace("feature")];
+
+    expect(selectPreferredWorkspace(workspaces)?.id).toBe("main");
+    expect(selectPreferredWorkspace(workspaces, { targetWorkspaceId: "", latestWorkspaceId: "" })?.id).toBe("main");
+    expect(selectPreferredWorkspace([])).toBeUndefined();
+  });
 });
 
 describe("InMemoryWorkspaceSelectionMemory", () => {

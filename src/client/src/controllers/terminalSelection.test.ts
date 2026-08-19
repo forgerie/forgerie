@@ -22,7 +22,9 @@ describe("terminal selection", () => {
 
   it("falls back to an active terminal and then any terminal", () => {
     expect(selectPreferredTerminal([terminal("exited", true), terminal("active")])?.id).toBe("active");
+    expect(selectPreferredTerminal([terminal("exited", true), terminal("active")], { latestTerminalId: "missing" })?.id).toBe("active");
     expect(selectFallbackTerminal([terminal("exited", true)])?.id).toBe("exited");
+    expect(selectPreferredTerminal([])).toBeUndefined();
   });
 
   it("remembers terminal ids per workspace cwd", () => {
@@ -34,6 +36,8 @@ describe("terminal selection", () => {
     memory.forgetTerminal("t1");
     expect(memory.latestTerminalId("/repo")).toBeUndefined();
     expect(memory.latestTerminalId("/other")).toBe("t2");
+    memory.forgetWorkspace("/other");
+    expect(memory.latestTerminalId("/other")).toBeUndefined();
   });
 
   it("persists terminal ids per workspace cwd", () => {
@@ -48,6 +52,8 @@ describe("terminal selection", () => {
     restored.forgetTerminal("t1");
     expect(new SessionStorageTerminalSelectionMemory(storage).latestTerminalId("local:/repo")).toBeUndefined();
     expect(new SessionStorageTerminalSelectionMemory(storage).latestTerminalId("remote:/repo")).toBe("t2");
+    restored.forgetWorkspace("remote:/repo");
+    expect(new SessionStorageTerminalSelectionMemory(storage).latestTerminalId("remote:/repo")).toBeUndefined();
   });
 });
 

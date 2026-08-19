@@ -55,6 +55,21 @@ describe("core workspace panels", () => {
       expect(agentsVisible(open)).toBe(true);
     });
   });
+
+  it("renders every panel and applies Git and terminal visibility state", () => {
+    const panelContext = context({ messages: [] });
+    const panels = new Map(createCoreWorkspacePanels().map((panel) => [panel.id, panel]));
+
+    expect(panels.get("workspace.files")?.render(panelContext)).toBeDefined();
+    expect(panels.get("workspace.git")?.visible?.(panelContext)).toBe(true);
+    expect(panels.get("workspace.git")?.visible?.({ ...panelContext, workspace: { ...panelContext.workspace, isGitRepo: false } })).toBe(false);
+    expect(panels.get("workspace.git")?.render(panelContext)).toBeDefined();
+    expect(panels.get("workspace.terminal")?.badge?.(panelContext)).toBeUndefined();
+    expect(panels.get("workspace.terminal")?.badge?.({ ...panelContext, activeTerminalCount: 2 })).toBe(2);
+    expect(panels.get("workspace.terminal")?.render(panelContext)).toBeDefined();
+    expect(panels.get("workspace.notifications")?.render(panelContext)).toBeDefined();
+    expect(panels.get("workspace.agents")?.render(panelContext)).toBeDefined();
+  });
 });
 
 function notificationsPanel() {

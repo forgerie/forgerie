@@ -51,7 +51,7 @@
     "knip": "knip",
     "lint": "eslint \"src/**/*.ts\" \"extensions/**/*.ts\" \"pi-web-plugins/**/*.ts\" vite.config.ts vitest.config.ts",
     "test": "vitest run --config vitest.config.ts",
-    "test:coverage": "vitest run --config vitest.config.ts --coverage --maxWorkers=8",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage --maxWorkers=4",
     "verify": "npm run typecheck && npm run lint && npm run knip && npm test",
     "verify:staged": "node scripts/verify-staged.mjs",
     "start": "tsx src/server/index.ts",
