@@ -40,8 +40,8 @@ export type ChatScrollRestoreResult =
 
 const SCROLL_STORAGE_PREFIX = "pi-web:chat-scroll:";
 const DEFAULT_SAVE_DELAY_MS = 180;
-const DEFAULT_NEAR_BOTTOM_THRESHOLD = 48;
-const DEFAULT_BOTTOM_SAVE_THRESHOLD = 2;
+export const CHAT_SCROLL_NEAR_BOTTOM_THRESHOLD = 48;
+export const CHAT_SCROLL_BOTTOM_THRESHOLD = 2;
 
 const browserScrollStorage: ChatScrollStorage = {
   getItem(key: string): string | null {
@@ -93,7 +93,7 @@ export class ChatScrollController {
     }, delayMs);
   }
 
-  savePosition(sessionId: string, scroller: ChatScrollViewport | undefined, anchors: ChatScrollElement[], bottomThreshold = DEFAULT_BOTTOM_SAVE_THRESHOLD): ChatScrollSaveResult {
+  savePosition(sessionId: string, scroller: ChatScrollViewport | undefined, anchors: ChatScrollElement[], bottomThreshold = CHAT_SCROLL_BOTTOM_THRESHOLD): ChatScrollSaveResult {
     if (sessionId === "" || scroller === undefined || !hasUsableScrollViewport(scroller)) return "skipped";
     try {
       if (isNearScrollBottom(scroller, bottomThreshold)) {
@@ -175,7 +175,7 @@ export function distanceFromScrollBottom(scroller: Pick<ChatScrollViewport, "scr
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
 }
 
-export function isNearScrollBottom(scroller: Pick<ChatScrollViewport, "scrollHeight" | "scrollTop" | "clientHeight">, threshold = DEFAULT_NEAR_BOTTOM_THRESHOLD): boolean {
+export function isNearScrollBottom(scroller: Pick<ChatScrollViewport, "scrollHeight" | "scrollTop" | "clientHeight">, threshold = CHAT_SCROLL_NEAR_BOTTOM_THRESHOLD): boolean {
   return distanceFromScrollBottom(scroller) < threshold;
 }
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  anchoredScrollPosition,
   anchoredTurnKey,
+  followAnchor,
   followModeAfterReaderPullback,
   followModeAfterScroll,
   followModeAfterTurnOpened,
@@ -30,10 +32,12 @@ describe("followModeAfterScroll", () => {
     expect(followModeAfterScroll(FOLLOW_TAIL, scroll({ nearBottom: true }), "reader")).toEqual(FOLLOW_TAIL);
   });
 
-  it("keeps an anchored turn when the transcript scrolled itself to the bottom", () => {
-    const anchored = followTurn("turn:m:12");
+  it("keeps an anchored target when the transcript moves itself", () => {
+    const turn = followTurn("turn:m:12");
+    const passage = followAnchor({ mode: "anchor", anchorId: "m:8", offset: 24 }, "free");
 
-    expect(followModeAfterScroll(anchored, scroll({ atBottom: true, nearBottom: true }), "component")).toEqual(anchored);
+    expect(followModeAfterScroll(turn, scroll({ atBottom: true, nearBottom: true }), "component")).toEqual(turn);
+    expect(followModeAfterScroll(passage, scroll({ atBottom: true, nearBottom: true }), "component")).toEqual(passage);
   });
 
   it("hands an anchored turn back to the tail when the reader scrolls to the bottom", () => {
@@ -66,18 +70,27 @@ describe("followModeAfterTurnOpened", () => {
   });
 
   it("leaves a reader who scrolled away where they are", () => {
+    const passage = followAnchor({ mode: "anchor", anchorId: "m:3", offset: 20 }, "free");
+
     expect(followModeAfterTurnOpened(FOLLOW_FREE, "turn:m:8", false)).toEqual(FOLLOW_FREE);
+    expect(followModeAfterTurnOpened(passage, "turn:m:8", false)).toEqual(passage);
   });
 
-  it("anchors even a scrolled-away reader to the turn they sent themselves", () => {
-    expect(followModeAfterTurnOpened(FOLLOW_FREE, "turn:m:8", true)).toEqual(followTurn("turn:m:8"));
+  it("anchors a live-tail passage or a turn sent from a free passage", () => {
+    const position = { mode: "anchor" as const, anchorId: "m:3", offset: 20 };
+
+    expect(followModeAfterTurnOpened(followAnchor(position, "tail"), "turn:m:8", false)).toEqual(followTurn("turn:m:8"));
+    expect(followModeAfterTurnOpened(followAnchor(position, "free"), "turn:m:8", true)).toEqual(followTurn("turn:m:8"));
   });
 });
 
-describe("anchoredTurnKey", () => {
-  it("names the turn only while one is anchored", () => {
+describe("anchored targets", () => {
+  it("selects only the target carried by the current mode", () => {
+    const position = { mode: "anchor" as const, anchorId: "m:8", offset: 24 };
+
     expect(anchoredTurnKey(followTurn("turn:m:8"))).toBe("turn:m:8");
+    expect(anchoredScrollPosition(followAnchor(position, "free"))).toEqual(position);
     expect(anchoredTurnKey(FOLLOW_TAIL)).toBeUndefined();
-    expect(anchoredTurnKey(FOLLOW_FREE)).toBeUndefined();
+    expect(anchoredScrollPosition(FOLLOW_FREE)).toBeUndefined();
   });
 });

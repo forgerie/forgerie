@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { textMessage } from "../chatMessages";
+import { ChatScrollCoordinator } from "../chatScrollCoordinator";
 import { chatScrollStorageKey } from "../chatScrollPosition";
 import { selectedChatFreshReadable, selectedChatLoading, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
@@ -39,8 +40,9 @@ describe("ChatView unread reading position", () => {
     defineScrollGeometry(chat, { scrollTop: 500, scrollHeight: 1_400, clientHeight: 400, top: 100, bottom: 500 });
     question.getBoundingClientRect = () => rect(180, 240);
     answer.getBoundingClientRect = () => rect(260, 340);
-    Reflect.set(view, "followMode", { kind: "tail" });
-    Reflect.set(view, "lastClientHeight", 200);
+    const scrolling = requiredScrollCoordinator(view);
+    scrolling.follow({ kind: "tail" });
+    Reflect.set(scrolling, "lastClientHeight", 200);
     invokeViewHandler(view, "onImageLoad");
     invokeViewHandler(view, "onScroll");
 
@@ -291,6 +293,63 @@ describe("ChatView unread reading position", () => {
     expect(chat.scrollTop).not.toBe(chat.scrollHeight);
   });
 
+  it("resumes live-tail following after restoring within the bottom threshold", async () => {
+    const frames = installFrames();
+    localStorage.setItem(chatScrollStorageKey(session.id), JSON.stringify({ mode: "anchor", anchorId: "m:0", offset: 20 }));
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    const anchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:0"]'), "saved anchor");
+    let scrollTop = 560;
+    let scrollHeight = 1_000;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    chat.getBoundingClientRect = () => rect(100, 500);
+    const anchorContentTop = 600;
+    anchor.getBoundingClientRect = () => rect(100 + anchorContentTop - chat.scrollTop, 180 + anchorContentTop - chat.scrollTop);
+
+    invokeViewHandler(view, "onViewportResize");
+    frames.releaseAll();
+    expect(scrollTop).toBe(580);
+
+    scrollHeight = 1_300;
+    view.messages = [...view.messages, textMessage("assistant", "new streamed content")];
+    view.messageEnd = 3;
+    view.messageTotal = 3;
+    await view.updateComplete;
+    frames.releaseAll();
+
+    expect(scrollTop).toBe(1_300);
+  });
+
+  it("releases a restored passage when its anchor disappears", async () => {
+    const frames = installFrames();
+    const view = await mountView();
+    const scrolling = requiredScrollCoordinator(view);
+    scrolling.follow({
+      kind: "anchor",
+      position: { mode: "anchor", anchorId: "removed-anchor", offset: 20 },
+      resume: "free",
+    });
+
+    invokeViewHandler(view, "alignCurrentFollowTargetNow");
+    frames.releaseAll();
+
+    expect(scrolling.mode).toEqual({ kind: "free" });
+  });
+
   it("keeps a restored passage fixed while earlier images settle until the reader scrolls", async () => {
     const frames = installFrames();
     localStorage.setItem(chatScrollStorageKey(session.id), JSON.stringify({ mode: "anchor", anchorId: "m:1", offset: 24 }));
@@ -475,5 +534,11 @@ function rect(top: number, bottom: number): DOMRect {
 
 function requiredElement<T>(value: T | null | undefined, label: string): T {
   if (value === null || value === undefined) throw new Error(`Expected ${label}`);
+  return value;
+}
+
+function requiredScrollCoordinator(view: ChatView): ChatScrollCoordinator {
+  const value: unknown = Reflect.get(view, "scrolling");
+  if (!(value instanceof ChatScrollCoordinator)) throw new Error("Expected chat scroll coordinator");
   return value;
 }

@@ -1,16 +1,10 @@
-/**
- * What the transcript holds still while its content changes.
- *
- * A single "pinned to bottom" boolean could only say *follow the foot* or
- * *leave it alone*, and the reading position a conversation actually wants is a
- * third thing: when a turn opens, its opening message goes to the top of the
- * viewport and stays there while the reply streams in underneath. Naming the
- * three cases keeps the choice in one place instead of spread across the scroll
- * handlers as an ever-growing pair of booleans.
- */
+import type { ChatAnchorScrollPosition } from "./chatScrollPosition";
+
+/** What the transcript holds still while its content changes. */
 export type ChatFollowMode =
   | { readonly kind: "tail" }
   | { readonly kind: "turn"; readonly turnKey: string }
+  | { readonly kind: "anchor"; readonly position: ChatAnchorScrollPosition; readonly resume: "tail" | "free" }
   | { readonly kind: "free" };
 
 /** Follow the foot of the transcript: new content scrolls into view. */
@@ -22,6 +16,11 @@ export const FOLLOW_FREE: ChatFollowMode = { kind: "free" };
 /** Hold the head of one turn at the top of the viewport. */
 export function followTurn(turnKey: string): ChatFollowMode {
   return { kind: "turn", turnKey };
+}
+
+/** Hold a saved passage at its recorded viewport offset. */
+export function followAnchor(position: ChatAnchorScrollPosition, resume: "tail" | "free"): ChatFollowMode {
+  return { kind: "anchor", position, resume };
 }
 
 /** Where the scroller is, as the follow decision needs to see it. */
@@ -43,7 +42,7 @@ export type ChatScrollDriver = "reader" | "component";
  * and the tail would then chase the reply the anchor exists to hold still.
  */
 export function followModeAfterScroll(mode: ChatFollowMode, scroll: ChatScrollSnapshot, driver: ChatScrollDriver): ChatFollowMode {
-  if (mode.kind === "turn" && driver === "component") return mode;
+  if ((mode.kind === "turn" || mode.kind === "anchor") && driver === "component") return mode;
   if (scroll.atBottom) return FOLLOW_TAIL;
   if (scroll.scrollingUp) return FOLLOW_FREE;
   return scroll.nearBottom ? FOLLOW_TAIL : FOLLOW_FREE;
@@ -62,11 +61,16 @@ export function followModeAfterReaderPullback(mode: ChatFollowMode, canScrollUp:
  * `sentFromHere` reports.
  */
 export function followModeAfterTurnOpened(mode: ChatFollowMode, turnKey: string, sentFromHere: boolean): ChatFollowMode {
-  if (mode.kind === "free" && !sentFromHere) return mode;
+  if ((mode.kind === "free" || (mode.kind === "anchor" && mode.resume === "free")) && !sentFromHere) return mode;
   return followTurn(turnKey);
 }
 
 /** Whether the transcript should keep the given turn's head at the top of the viewport. */
 export function anchoredTurnKey(mode: ChatFollowMode): string | undefined {
   return mode.kind === "turn" ? mode.turnKey : undefined;
+}
+
+/** The saved passage the transcript should keep at its recorded viewport offset. */
+export function anchoredScrollPosition(mode: ChatFollowMode): ChatAnchorScrollPosition | undefined {
+  return mode.kind === "anchor" ? mode.position : undefined;
 }

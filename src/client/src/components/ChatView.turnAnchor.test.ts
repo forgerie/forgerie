@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AskUserOutcome } from "../../../shared/apiTypes";
 import type { PendingExtensionDialog } from "../api";
 import { ChatView } from "./ChatView";
@@ -8,6 +8,7 @@ import type { ChatLine } from "./shared";
 
 afterEach(() => {
   document.body.replaceChildren();
+  vi.unstubAllGlobals();
 });
 
 const said = (role: ChatLine["role"], text: string): ChatLine => ({ role, parts: [{ type: "text", text }] });
@@ -34,7 +35,8 @@ function reservedTurnKeys(view: ChatView): (string | null)[] {
 }
 
 function followMode(view: ChatView): unknown {
-  return Reflect.get(view, "followMode");
+  const scrolling: unknown = Reflect.get(view, "scrolling");
+  return typeof scrolling === "object" && scrolling !== null ? Reflect.get(scrolling, "mode") : undefined;
 }
 
 /** Run one of the transcript's own alignment routines and report whether it found its target. */
@@ -217,5 +219,32 @@ describe("ChatView turn anchoring", () => {
 
     expect(followMode(view)).toEqual({ kind: "tail" });
     expect(reservedTurnKeys(view)).toEqual(["turn:m:1"]);
+  });
+
+  it("cancels a queued automatic placement when the reader pulls back", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const view = await loadedTranscript([said("user", "question"), said("assistant", "answer")]);
+    frames.length = 0;
+    const chat = scroller(view);
+    let scrollTop = 400;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+
+    const scrollToBottom: unknown = Reflect.get(view, "scrollToBottom");
+    if (typeof scrollToBottom !== "function") throw new Error("ChatView has no scrollToBottom");
+    Reflect.apply(scrollToBottom, view, []);
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    frames.splice(0).forEach((callback) => { callback(performance.now()); });
+
+    expect(scrollTop).toBe(400);
+    expect(followMode(view)).toEqual({ kind: "free" });
   });
 });

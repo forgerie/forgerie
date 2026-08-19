@@ -1,0 +1,116 @@
+import { describe, expect, it } from "vitest";
+import { ChatScrollCoordinator, type ChatScrollFrameScheduler } from "./chatScrollCoordinator";
+import { followAnchor, followTurn, FOLLOW_FREE } from "./chatFollowMode";
+import type { ChatScrollViewport } from "./chatScrollPosition";
+
+class ManualFrameScheduler implements ChatScrollFrameScheduler {
+  private nextId = 1;
+  private readonly callbacks = new Map<number, FrameRequestCallback>();
+
+  request(callback: FrameRequestCallback): number {
+    const id = this.nextId;
+    this.nextId += 1;
+    this.callbacks.set(id, callback);
+    return id;
+  }
+
+  cancel(id: number): void {
+    this.callbacks.delete(id);
+  }
+
+  releaseAll(): void {
+    while (this.callbacks.size > 0) {
+      const next = this.callbacks.entries().next();
+      if (next.done === true) return;
+      const [id, callback] = next.value;
+      this.callbacks.delete(id);
+      callback(0);
+    }
+  }
+}
+
+const viewport = (scrollTop = 400): ChatScrollViewport => ({
+  scrollTop,
+  scrollHeight: 1_200,
+  clientHeight: 400,
+  getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+});
+
+describe("ChatScrollCoordinator", () => {
+  it("lets the latest automatic placement replace older movement", () => {
+    const frames = new ManualFrameScheduler();
+    const coordinator = new ChatScrollCoordinator(frames);
+    const placements: string[] = [];
+    let settlementApplications = 0;
+    coordinator.settle({ frames: 3, immediate: true, apply: () => { settlementApplications += 1; } });
+
+    coordinator.schedulePlacement(() => { placements.push("old"); });
+    coordinator.schedulePlacement(() => { placements.push("latest"); });
+    frames.releaseAll();
+
+    expect(settlementApplications).toBe(1);
+    expect(placements).toEqual(["latest"]);
+
+    placements.length = 0;
+    coordinator.schedulePlacement(() => { placements.push("superseded"); });
+    coordinator.settle({ frames: 1, immediate: true, apply: () => { settlementApplications += 1; } });
+    frames.releaseAll();
+
+    expect(settlementApplications).toBe(2);
+    expect(placements).toEqual([]);
+  });
+
+  it("cancels queued movement as soon as the reader pulls back", () => {
+    const frames = new ManualFrameScheduler();
+    const coordinator = new ChatScrollCoordinator(frames);
+    const chat = viewport();
+    let placements = 0;
+    coordinator.follow(followTurn("turn:m:4"));
+    coordinator.schedulePlacement(() => { placements += 1; });
+    coordinator.withProgrammaticScroll(chat, () => { chat.scrollTop = 500; });
+    expect(coordinator.canSave).toBe(false);
+
+    coordinator.readerWheel(-120, true);
+    frames.releaseAll();
+
+    expect(placements).toBe(0);
+    expect(coordinator.canSave).toBe(true);
+    expect(coordinator.mode).toEqual(FOLLOW_FREE);
+  });
+
+  it("uses one anchored mode for restored passages and turn alignment", () => {
+    const frames = new ManualFrameScheduler();
+    const coordinator = new ChatScrollCoordinator(frames);
+    const chat = viewport();
+    const position = { mode: "anchor" as const, anchorId: "m:8", offset: 24 };
+    coordinator.follow(followAnchor(position, "free"));
+
+    coordinator.withProgrammaticScroll(chat, () => { chat.scrollTop = 576; });
+    expect(coordinator.recordScroll(chat).driver).toBe("component");
+    expect(coordinator.mode).toEqual(followAnchor(position, "free"));
+
+    chat.scrollTop = 500;
+    expect(coordinator.recordScroll(chat).driver).toBe("reader");
+    expect(coordinator.mode).toEqual(FOLLOW_FREE);
+  });
+
+  it("contains repeated layout settlement and releases its suppression", () => {
+    const frames = new ManualFrameScheduler();
+    const coordinator = new ChatScrollCoordinator(frames);
+    let applications = 0;
+
+    coordinator.settle({
+      frames: 3,
+      immediate: true,
+      suppressLoadMore: true,
+      suppressSave: true,
+      apply: () => { applications += 1; },
+    });
+    expect({ canLoadMore: coordinator.canLoadMore, canSave: coordinator.canSave }).toEqual({ canLoadMore: false, canSave: false });
+
+    frames.releaseAll();
+
+    expect(applications).toBe(3);
+    expect({ canLoadMore: coordinator.canLoadMore, canSave: coordinator.canSave }).toEqual({ canLoadMore: true, canSave: true });
+  });
+});
