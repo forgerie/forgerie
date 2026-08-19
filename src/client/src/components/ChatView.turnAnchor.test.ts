@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AskUserOutcome } from "../../../shared/apiTypes";
 import type { PendingExtensionDialog } from "../api";
+import { selectedChatLiveReady, selectedChatLoading, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
 import type { ChatLine } from "./shared";
 
@@ -180,6 +181,32 @@ describe("ChatView turn anchoring", () => {
     expect(followMode(view)).toEqual({ kind: "turn", turnKey: "turn:m:2" });
   });
 
+  it("anchors a locally sent turn while history is still opening", async () => {
+    const target = selectedChatTarget("local", { id: "session-1", cwd: "/repo" });
+    const view = new ChatView();
+    view.sessionId = "session-1";
+    view.sessionCwd = "/repo";
+    view.messages = [said("user", "earlier question"), said("assistant", "earlier answer")];
+    view.selectedLoad = selectedChatLoading(target, "fresh");
+    document.body.append(view);
+    await view.updateComplete;
+
+    view.isSendingPrompt = true;
+    await view.updateComplete;
+    view.messages = [...view.messages, said("user", "my opening prompt")];
+    await view.updateComplete;
+
+    expect(followMode(view)).toEqual({ kind: "turn", turnKey: "turn:m:2" });
+
+    view.selectedLoad = selectedChatLiveReady(target);
+    await view.updateComplete;
+    await readerScrollsUp(view);
+    view.messages = [...view.messages, said("user", "remote next turn")];
+    await view.updateComplete;
+
+    expect(followMode(view)).toEqual({ kind: "free" });
+  });
+
   it("does not anchor the turn a session opens on", async () => {
     const view = await loadedTranscript([said("user", "question"), said("assistant", "answer")]);
 
@@ -213,7 +240,6 @@ describe("ChatView turn anchoring", () => {
     expect(reservedTurnKeys(view)).toEqual(["turn:m:1"]);
 
     const chat = scroller(view);
-    Reflect.set(view, "defaultScrollRestoreState", "idle");
     Object.defineProperties(chat, {
       scrollTop: { configurable: true, writable: true, value: 600 },
       scrollHeight: { configurable: true, value: 1_000 },

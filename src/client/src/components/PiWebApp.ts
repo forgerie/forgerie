@@ -78,7 +78,7 @@ import { unreadSessionCount } from "./SessionList";
 import "./SessionCleanupDialog";
 import "./SessionTreeNavigator";
 import "./ChatView";
-import type { ChatInitialReadingTarget, ChatSessionLaunchRecoveryActionKind, ChatView } from "./ChatView";
+import type { ChatSessionLaunchRecoveryActionKind, ChatView } from "./ChatView";
 import "./ContextUsageMeter";
 import "./PromptEditor";
 import type { PromptEditor } from "./PromptEditor";
@@ -141,17 +141,6 @@ type ChatNavigationIntent =
   | { readonly kind: "none" }
   | { readonly kind: "opening"; readonly seq: number; readonly machineId: string; readonly session: SessionInfo };
 
-interface PendingChatReadingTarget {
-  readonly seq: number;
-  readonly machineId: string;
-  readonly sessionId: string;
-  readonly cwd: string;
-  readonly identity: string;
-  readonly catalogId: string;
-  readonly completionOrder: number;
-  readonly target: ChatInitialReadingTarget;
-}
-
 interface AppContextBarLocation {
   readonly machine: Machine | undefined;
   readonly project: Project | undefined;
@@ -182,7 +171,6 @@ export class PiWebApp extends LitElement {
   private readonly sessionUnread = new SessionUnreadController({
     onChange: (machineId) => {
       this.syncUnreadPresence();
-      this.refreshPendingChatReadingTarget(machineId);
       if (selectedMachineId(this.state) !== machineId) return;
       this.syncUnreadSessionIds();
       this.syncSelectedSessionReadState();
@@ -197,7 +185,6 @@ export class PiWebApp extends LitElement {
   @state() private chatNavigationIntent: ChatNavigationIntent = { kind: "none" };
   @state() private openingChatPreview: { readonly identity: string; readonly view: SessionTranscriptPreview } | undefined;
   @state() private cachedUnreadCompletedAt: Readonly<Record<string, string>> = {};
-  private pendingChatReadingTarget: PendingChatReadingTarget | undefined;
   private unreadConnected = false;
   private committedChatIdentity: string | undefined;
   private readyChatIdentity: string | undefined;
@@ -586,7 +573,6 @@ export class PiWebApp extends LitElement {
   private isSessionSeen(machineId: string, session: SessionInfo): boolean {
     if (!this.unreadConnected) return false;
     const identity = unreadChatIdentity(machineId, session);
-    if (this.pendingChatReadingTarget?.identity === identity) return false;
     if (selectedChatIdentity(this.state) !== identity
       || this.committedChatIdentity !== identity
       || this.readyChatIdentity !== identity) return false;
@@ -659,7 +645,6 @@ export class PiWebApp extends LitElement {
     this.workspaceDeletionPollTimer = undefined;
     this.clearPendingRemoteRouteRestore();
     this.chatNavigationIntent = { kind: "none" };
-    this.pendingChatReadingTarget = undefined;
     this.chatOpenTiming.supersedeActive();
     super.disconnectedCallback();
   }
@@ -1006,16 +991,11 @@ export class PiWebApp extends LitElement {
   }
 
   private async withChatScrollTransition(action: () => Promise<void>, shouldComplete: () => boolean = () => true) {
-    this.chatView?.saveScrollPosition();
     await action();
     if (!shouldComplete()) return;
     await this.updateComplete;
     if (!shouldComplete()) return;
     await this.chatView?.updateComplete;
-    if (!shouldComplete()) return;
-    await nextFrame();
-    if (!shouldComplete()) return;
-    this.chatView?.restoreScrollPosition();
   }
 
   private async withChatPrependTransition(action: () => Promise<void>) {
@@ -1632,7 +1612,6 @@ export class PiWebApp extends LitElement {
 
     const timingTarget = selectedChatTarget(machineId, session);
     this.chatOpenTiming.begin(timingTarget);
-    this.pendingChatReadingTarget = this.createPendingChatReadingTarget(seq, machineId, session);
     this.chatNavigationIntent = { kind: "opening", seq, machineId, session };
     this.openingChatPreview = undefined;
     void this.sessions.previewSession(session, machineId).then((view) => {
@@ -1846,7 +1825,6 @@ export class PiWebApp extends LitElement {
     const seq = ++this.navigationSelectionSeq;
     if (this.chatNavigationIntent.kind === "opening") this.chatOpenTiming.supersedeActive();
     this.chatNavigationIntent = { kind: "none" };
-    this.pendingChatReadingTarget = undefined;
     const isCurrentSelection = () => seq === this.navigationSelectionSeq;
 
     await this.withChatScrollTransition(async () => {
@@ -3144,44 +3122,6 @@ export class PiWebApp extends LitElement {
     this.chatOpenTiming.markSelectedLoadPainted(load);
   };
 
-  private createPendingChatReadingTarget(seq: number, machineId: string, session: Pick<SessionInfo, "id" | "cwd">): PendingChatReadingTarget | undefined {
-    const projection = this.sessionUnread.projection(machineId);
-    const summary = projection?.sessions.find((candidate) => candidate.sessionId === session.id && candidate.cwd === session.cwd);
-    if (projection === undefined || summary === undefined) return undefined;
-    const identity = unreadChatIdentity(machineId, session);
-    return {
-      seq,
-      machineId,
-      sessionId: session.id,
-      cwd: session.cwd,
-      identity,
-      catalogId: projection.catalogId,
-      completionOrder: summary.completionOrder,
-      target: { kind: "latest-turn", id: JSON.stringify([seq, projection.catalogId, summary.completionOrder, identity]) },
-    };
-  }
-
-  private refreshPendingChatReadingTarget(machineId: string): void {
-    const pending = this.pendingChatReadingTarget;
-    if (pending?.machineId !== machineId) return;
-    const next = this.createPendingChatReadingTarget(pending.seq, machineId, { id: pending.sessionId, cwd: pending.cwd });
-    if (next === undefined) {
-      this.pendingChatReadingTarget = undefined;
-      this.requestUpdate();
-      return;
-    }
-    if (next.target.id === pending.target.id) return;
-    this.pendingChatReadingTarget = next;
-    this.requestUpdate();
-  }
-
-  private readonly handleInitialReadingTargetApplied = (target: ChatInitialReadingTarget): void => {
-    if (this.pendingChatReadingTarget?.target.id !== target.id) return;
-    this.pendingChatReadingTarget = undefined;
-    this.requestUpdate();
-    this.syncSelectedSessionReadState();
-  };
-
   private selectedChatRuntimeAvailable(): boolean {
     const load = this.state.selectedChatLoad;
     const session = this.state.selectedSession;
@@ -3193,7 +3133,7 @@ export class PiWebApp extends LitElement {
     const machineId = selectedMachineId(state);
     const retry = isClientPendingStartSession(session) ? undefined : this.handleRetrySelectedChat;
     return html`
-      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .sessionTitle=${sessionDisplayLabel(session)} .selectedMachineId=${machineId} .sessionCwd=${session.cwd} .selectedLoad=${state.selectedChatLoad} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .sessionLaunchRecovery=${this.sessions.getSessionLaunchRecovery(session.id)} .onSessionLaunchRecoveryAction=${this.handleSessionLaunchRecoveryAction} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(machineId, session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())} .onRetry=${retry} .onSelectedLoadPaint=${this.handleSelectedLoadPaint} .initialReadingTarget=${this.initialReadingTargetFor(machineId, session)} .onInitialReadingTargetApplied=${this.handleInitialReadingTargetApplied}></chat-view>
+      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .sessionTitle=${sessionDisplayLabel(session)} .selectedMachineId=${machineId} .sessionCwd=${session.cwd} .selectedLoad=${state.selectedChatLoad} .messages=${state.messages} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .sessionLaunchRecovery=${this.sessions.getSessionLaunchRecovery(session.id)} .onSessionLaunchRecoveryAction=${this.handleSessionLaunchRecoveryAction} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(machineId, session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())} .onRetry=${retry} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>
     `;
   }
 
@@ -3203,7 +3143,7 @@ export class PiWebApp extends LitElement {
       ? this.openingChatPreview.view
       : undefined;
     const load = preview === undefined ? selectedChatLoading(target) : selectedChatPreviewReadable(target);
-    return html`<chat-view .sessionId=${intent.session.id} .sessionTitle=${sessionDisplayLabel(intent.session)} .selectedMachineId=${intent.machineId} .sessionCwd=${intent.session.cwd} .selectedLoad=${load} .messages=${preview?.messages ?? []} .messageStart=${preview?.messagePageStart ?? 0} .messageEnd=${preview?.messagePageEnd ?? 0} .messageTotal=${preview?.messagePageTotal ?? 0} .clientQueuedMessages=${this.state.clientQueuedSessionMessages[intent.session.id] ?? []} .initialReadingTarget=${this.initialReadingTargetFor(intent.machineId, intent.session)} .onInitialReadingTargetApplied=${this.handleInitialReadingTargetApplied} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>`;
+    return html`<chat-view .sessionId=${intent.session.id} .sessionTitle=${sessionDisplayLabel(intent.session)} .selectedMachineId=${intent.machineId} .sessionCwd=${intent.session.cwd} .selectedLoad=${load} .messages=${preview?.messages ?? []} .messageStart=${preview?.messagePageStart ?? 0} .messageEnd=${preview?.messagePageEnd ?? 0} .messageTotal=${preview?.messagePageTotal ?? 0} .clientQueuedMessages=${this.state.clientQueuedSessionMessages[intent.session.id] ?? []} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>`;
   }
 
   private renderOpeningComposer(intent: Extract<ChatNavigationIntent, { kind: "opening" }>) {
@@ -3252,13 +3192,7 @@ export class PiWebApp extends LitElement {
   }
 
 
-  private initialReadingTargetFor(machineId: string, session: Pick<SessionInfo, "id" | "cwd">): ChatInitialReadingTarget | undefined {
-    const pending = this.pendingChatReadingTarget;
-    return pending?.identity === unreadChatIdentity(machineId, session) ? pending.target : undefined;
-  }
-
   private clearChatNavigationIntentForToken(seq: number): void {
-    if (this.pendingChatReadingTarget?.seq === seq) this.pendingChatReadingTarget = undefined;
     if (this.chatNavigationIntent.kind !== "opening" || this.chatNavigationIntent.seq !== seq) return;
     this.chatNavigationIntent = { kind: "none" };
     this.chatOpenTiming.supersedeActive();

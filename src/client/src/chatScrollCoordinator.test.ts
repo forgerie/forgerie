@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChatScrollCoordinator, type ChatScrollFrameScheduler } from "./chatScrollCoordinator";
-import { followAnchor, followTurn, FOLLOW_FREE } from "./chatFollowMode";
+import { followTurn, FOLLOW_FREE } from "./chatFollowMode";
 import type { ChatScrollViewport } from "./chatScrollPosition";
 
 class ManualFrameScheduler implements ChatScrollFrameScheduler {
@@ -33,7 +33,6 @@ const viewport = (scrollTop = 400): ChatScrollViewport => ({
   scrollTop,
   scrollHeight: 1_200,
   clientHeight: 400,
-  getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
 });
 
 describe("ChatScrollCoordinator", () => {
@@ -93,13 +92,11 @@ describe("ChatScrollCoordinator", () => {
     coordinator.follow(followTurn("turn:m:4"));
     coordinator.schedulePlacement(() => { placements += 1; });
     coordinator.withProgrammaticScroll(chat, () => { chat.scrollTop = 500; });
-    expect(coordinator.canSave).toBe(false);
 
     coordinator.readerWheel(-120, true);
     frames.releaseAll();
 
     expect(placements).toBe(0);
-    expect(coordinator.canSave).toBe(true);
     expect(coordinator.mode).toEqual(FOLLOW_FREE);
   });
 
@@ -117,22 +114,6 @@ describe("ChatScrollCoordinator", () => {
     expect(coordinator.mode).toEqual({ kind: "tail" });
   });
 
-  it("uses one anchored mode for restored passages and turn alignment", () => {
-    const frames = new ManualFrameScheduler();
-    const coordinator = new ChatScrollCoordinator(frames);
-    const chat = viewport();
-    const position = { mode: "anchor" as const, anchorId: "m:8", offset: 24 };
-    coordinator.follow(followAnchor(position, "free"));
-
-    coordinator.withProgrammaticScroll(chat, () => { chat.scrollTop = 576; });
-    expect(coordinator.recordScroll(chat).driver).toBe("component");
-    expect(coordinator.mode).toEqual(followAnchor(position, "free"));
-
-    chat.scrollTop = 500;
-    expect(coordinator.recordScroll(chat).driver).toBe("reader");
-    expect(coordinator.mode).toEqual(FOLLOW_FREE);
-  });
-
   it("contains repeated layout settlement and releases its suppression", () => {
     const frames = new ManualFrameScheduler();
     const coordinator = new ChatScrollCoordinator(frames);
@@ -142,14 +123,13 @@ describe("ChatScrollCoordinator", () => {
       frames: 3,
       immediate: true,
       suppressLoadMore: true,
-      suppressSave: true,
       apply: () => { applications += 1; },
     });
-    expect({ canLoadMore: coordinator.canLoadMore, canSave: coordinator.canSave }).toEqual({ canLoadMore: false, canSave: false });
+    expect(coordinator.canLoadMore).toBe(false);
 
     frames.releaseAll();
 
     expect(applications).toBe(3);
-    expect({ canLoadMore: coordinator.canLoadMore, canSave: coordinator.canSave }).toEqual({ canLoadMore: true, canSave: true });
+    expect(coordinator.canLoadMore).toBe(true);
   });
 });

@@ -2,4 +2,4 @@
 "forgerie": patch
 ---
 
-Prevent queued automatic chat scrolling from overriding reader input, while keeping restored passages, live tails, and streaming turns stable.
+Open every chat at its newest content instead of saved or latest-user positions, while yielding immediately to reader input.

@@ -6,6 +6,7 @@ import {
   selectedChatFailed,
   selectedChatFreshReadable,
   selectedChatHasReadableHistory,
+  selectedChatIsOpening,
   selectedChatLiveReady,
   selectedChatLoading,
   selectedChatNoTarget,
@@ -90,6 +91,12 @@ describe("SelectedChatLoad", () => {
     expect(selectedChatReadability(selectedChatFailed(selected, "cached", "failed"))).toBe("cached");
     expect(selectedChatHasReadableHistory(selectedChatLoading(selected))).toBe(false);
     expect(selectedChatHasReadableHistory(selectedChatLoading(selected, "fresh"))).toBe(true);
+    expect(selectedChatIsOpening(selectedChatLoading(selected))).toBe(true);
+    expect(selectedChatIsOpening(selectedChatLoading(selected, "fresh"))).toBe(true);
+    expect(selectedChatIsOpening(selectedChatCachedReadable(selected))).toBe(true);
+    expect(selectedChatIsOpening(selectedChatPreviewReadable(selected))).toBe(true);
+    expect(selectedChatIsOpening(selectedChatFreshReadable(selected))).toBe(true);
+    expect(selectedChatIsOpening(selectedChatLiveReady(selected))).toBe(false);
     expect(selectedChatCanUseRuntime(selectedChatFreshReadable(selected))).toBe(false);
     expect(selectedChatCanUseRuntime(selectedChatLiveReady(selected))).toBe(true);
   });

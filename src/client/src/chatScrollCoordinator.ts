@@ -16,7 +16,6 @@ export interface ChatScrollSettlement {
   readonly apply: () => void;
   readonly immediate?: boolean;
   readonly suppressLoadMore?: boolean;
-  readonly suppressSave?: boolean;
 }
 
 const WHEEL_TAKEOVER_DELTA = 1;
@@ -46,10 +45,7 @@ export class ChatScrollCoordinator {
   private placementFrame: number | undefined;
   private settlementFrame: number | undefined;
   private settlementGeneration = 0;
-  private saveSuppressionGeneration = 0;
-  private saveSuppressed = false;
   private loadMoreSuppressed = false;
-  private settlementSuppressesSave = false;
   private wheelIntentDelta = 0;
   private touchStartY: number | undefined;
 
@@ -57,10 +53,6 @@ export class ChatScrollCoordinator {
 
   get mode(): ChatFollowMode {
     return this.currentMode;
-  }
-
-  get canSave(): boolean {
-    return !this.saveSuppressed;
   }
 
   get canLoadMore(): boolean {
@@ -75,15 +67,11 @@ export class ChatScrollCoordinator {
     this.writtenScrollTop = undefined;
     this.wheelIntentDelta = 0;
     this.touchStartY = undefined;
-    this.saveSuppressionGeneration += 1;
-    this.saveSuppressed = false;
     this.loadMoreSuppressed = false;
-    this.settlementSuppressesSave = false;
   }
 
   dispose(): void {
     this.cancelAutomaticMotion();
-    this.saveSuppressionGeneration += 1;
   }
 
   follow(mode: ChatFollowMode): void {
@@ -186,11 +174,6 @@ export class ChatScrollCoordinator {
     const generation = this.settlementGeneration + 1;
     this.settlementGeneration = generation;
     this.loadMoreSuppressed = settlement.suppressLoadMore === true;
-    this.settlementSuppressesSave = settlement.suppressSave === true;
-    if (this.settlementSuppressesSave) {
-      this.saveSuppressionGeneration += 1;
-      this.saveSuppressed = true;
-    }
     let appliedFrames = 0;
     const apply = () => {
       if (generation !== this.settlementGeneration) return;
@@ -212,26 +195,16 @@ export class ChatScrollCoordinator {
   }
 
   withProgrammaticScroll<Result>(scroller: ChatScrollViewport, change: () => Result): Result {
-    const generation = this.saveSuppressionGeneration + 1;
-    this.saveSuppressionGeneration = generation;
-    this.saveSuppressed = true;
     try {
       return change();
     } finally {
       this.sync(scroller);
-      this.frames.request(() => {
-        this.frames.request(() => {
-          if (generation === this.saveSuppressionGeneration) this.saveSuppressed = false;
-        });
-      });
     }
   }
 
   private readerTookControl(): void {
     this.cancelAutomaticMotion();
     this.writtenScrollTop = undefined;
-    this.saveSuppressionGeneration += 1;
-    this.saveSuppressed = false;
   }
 
   private cancelSettlement(): void {
@@ -241,15 +214,11 @@ export class ChatScrollCoordinator {
       this.settlementFrame = undefined;
     }
     this.loadMoreSuppressed = false;
-    if (this.settlementSuppressesSave) this.saveSuppressed = false;
-    this.settlementSuppressesSave = false;
   }
 
   private finishSettlement(generation: number): void {
     if (generation !== this.settlementGeneration) return;
     this.settlementFrame = undefined;
     this.loadMoreSuppressed = false;
-    if (this.settlementSuppressesSave) this.saveSuppressed = false;
-    this.settlementSuppressesSave = false;
   }
 }

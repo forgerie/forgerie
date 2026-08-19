@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { PendingExtensionDialog } from "../api";
 import { textMessage } from "../chatMessages";
 import { ChatScrollCoordinator } from "../chatScrollCoordinator";
-import { chatScrollStorageKey } from "../chatScrollPosition";
-import { selectedChatFreshReadable, selectedChatLoading, selectedChatTarget } from "../selectedChatLoad";
+import { selectedChatFreshReadable, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
 
 afterEach(() => {
@@ -23,9 +23,6 @@ describe("ChatView loading-time reader takeover", () => {
     view.selectedMachineId = "local";
     view.sessionCwd = session.cwd;
     view.selectedLoad = selectedChatLoading(selectedTarget);
-    view.initialReadingTarget = { kind: "latest-turn", id: "loading-reader-takeover" };
-    const onApplied = vi.fn();
-    view.onInitialReadingTargetApplied = onApplied;
     document.body.append(view);
     await view.updateComplete;
 
@@ -40,14 +37,12 @@ describe("ChatView loading-time reader takeover", () => {
 
     scrollTop = 10;
     chat.dispatchEvent(new Event("scroll"));
-    expect(onApplied).not.toHaveBeenCalled();
     expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
     scrollTop = 0;
 
     chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
     frames.releaseAll();
     expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
-    expect(onApplied).toHaveBeenCalledWith({ kind: "latest-turn", id: "loading-reader-takeover" });
 
     scrollHeight = 1_200;
     view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
@@ -64,290 +59,50 @@ describe("ChatView loading-time reader takeover", () => {
     chat.dispatchEvent(new Event("scroll"));
     expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
   });
-});
 
-describe("ChatView unread reading position", () => {
-  it("places the newest user message at the viewport top and consumes the one-shot target", async () => {
+  it("lets a gesture take control while preview history is opening", async () => {
     const frames = installFrames();
-    localStorage.setItem(chatScrollStorageKey(session.id), JSON.stringify({ mode: "anchor", anchorId: "m:1", offset: 0 }));
-    const view = await mountView();
-    const onApplied = vi.fn();
-    view.messages = [
-      textMessage("user", "older question"),
-      textMessage("assistant", "older answer"),
-      textMessage("user", "new question"),
-      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "inspect" }] },
-      textMessage("assistant", "new answer"),
-    ];
-    view.messageEnd = 5;
-    view.messageTotal = 5;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
-    view.initialReadingTarget = { kind: "latest-turn", id: "unread-1" };
-    view.onInitialReadingTargetApplied = onApplied;
-    await view.updateComplete;
-
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="2"]'), "latest user message");
-    const answer = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="4"]'), "latest answer");
-    defineScrollGeometry(chat, { scrollTop: 500, scrollHeight: 1_400, clientHeight: 400, top: 100, bottom: 500 });
-    question.getBoundingClientRect = () => rect(180, 240);
-    answer.getBoundingClientRect = () => rect(260, 340);
-    const scrolling = requiredScrollCoordinator(view);
-    scrolling.follow({ kind: "tail" });
-    Reflect.set(scrolling, "lastClientHeight", 200);
-    invokeViewHandler(view, "onImageLoad");
-    invokeViewHandler(view, "onScroll");
-
-    frames.releaseAll();
-    await view.updateComplete;
-    await Promise.resolve();
-
-    expect(chat.scrollTop).toBe(580);
-    expect(onApplied).toHaveBeenCalledOnce();
-    expect(view.shadowRoot?.querySelectorAll(".turn-body.reserved")).toHaveLength(1);
-  });
-
-  it("keeps the latest user message fixed while an older image settles", async () => {
-    const frames = installFrames();
-    const onApplied = vi.fn();
+    const selectedTarget = selectedChatTarget("local", session);
     const view = new ChatView();
     view.sessionId = session.id;
     view.selectedMachineId = "local";
     view.sessionCwd = session.cwd;
-    view.messages = [
-      textMessage("user", "older question"),
-      { role: "tool", parts: [{ type: "image", mimeType: "image/png", data: "QUJD" }] },
-      textMessage("assistant", "older answer"),
-      textMessage("user", "new question"),
-      textMessage("assistant", "new answer"),
-    ];
-    view.messageEnd = 5;
-    view.messageTotal = 5;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
-    view.initialReadingTarget = { kind: "latest-turn", id: "unread-with-image" };
-    view.onInitialReadingTargetApplied = onApplied;
+    view.messages = [textMessage("user", "preview question"), textMessage("assistant", "preview answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.selectedLoad = selectedChatPreviewReadable(selectedTarget);
     document.body.append(view);
     await view.updateComplete;
 
     const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const image = requiredElement(view.shadowRoot?.querySelector<HTMLImageElement>("img.chat-image"), "older image");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:3"]'), "latest user message");
-    defineScrollGeometry(chat, { scrollTop: 500, scrollHeight: 2_000, clientHeight: 400, top: 100, bottom: 500 });
-    let questionContentTop = 800;
-    const questionRect = vi.fn(() => rect(100 + questionContentTop - chat.scrollTop, 180 + questionContentTop - chat.scrollTop));
-    question.getBoundingClientRect = questionRect;
-
-    frames.releaseAll();
-    await view.updateComplete;
-    await Promise.resolve();
-    expect(onApplied).toHaveBeenCalledOnce();
-    expect(question.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(0);
-    const alignedScrollTop = chat.scrollTop;
-
-    questionRect.mockClear();
-    invokeViewHandler(view, "onViewportResize");
-    frames.releaseOne();
-    questionContentTop += 120;
-    frames.releaseAll();
-    expect(chat.scrollTop).toBe(alignedScrollTop + 120);
-    expect(questionRect).toHaveBeenCalledTimes(3);
-    expect(question.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(0);
-    const resizedScrollTop = chat.scrollTop;
-
-    view.messages = [...view.messages, textMessage("user", "later question from elsewhere")];
-    view.messageEnd = 6;
-    view.messageTotal = 6;
-    await view.updateComplete;
-
-    questionContentTop += 304;
-    image.dispatchEvent(new Event("load"));
-
-    expect(chat.scrollTop).toBe(resizedScrollTop + 304);
-    expect(question.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(0);
-  });
-
-  it("keeps a clamped latest-user-message offset when an image below it settles", async () => {
-    const frames = installFrames();
-    const view = new ChatView();
-    view.sessionId = session.id;
-    view.selectedMachineId = "local";
-    view.sessionCwd = session.cwd;
-    view.messages = [
-      textMessage("user", "older question"),
-      textMessage("assistant", "older answer"),
-      textMessage("user", "new question"),
-      textMessage("assistant", "new answer"),
-      { role: "tool", parts: [{ type: "image", mimeType: "image/png", data: "QUJD" }] },
-    ];
-    view.messageEnd = 5;
-    view.messageTotal = 5;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
-    view.initialReadingTarget = { kind: "latest-turn", id: "unread-clamped" };
-    document.body.append(view);
-    await view.updateComplete;
-
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const image = requiredElement(view.shadowRoot?.querySelector<HTMLImageElement>("img.chat-image"), "later image");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:2"]'), "latest user message");
-    let scrollTop = 500;
-    let scrollHeight = 1_160;
-    let maxScrollTop = 760;
+    let scrollTop = 0;
     Object.defineProperties(chat, {
-      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = Math.min(value, maxScrollTop); } },
-      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
       clientHeight: { configurable: true, value: 400 },
     });
-    chat.getBoundingClientRect = () => rect(100, 500);
-    const questionContentTop = 800;
-    question.getBoundingClientRect = () => rect(100 + questionContentTop - chat.scrollTop, 180 + questionContentTop - chat.scrollTop);
 
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
     frames.releaseAll();
-    await view.updateComplete;
-    await Promise.resolve();
-    expect(question.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(40);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+    expect(scrollTop).toBe(0);
 
-    scrollHeight += 304;
-    maxScrollTop += 304;
-    image.dispatchEvent(new Event("load"));
-
-    expect(chat.scrollTop).toBe(760);
-    expect(question.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(40);
-  });
-
-  it("waits for fresh history before applying a target from the opening shell", async () => {
-    const frames = installFrames();
-    const view = await mountView();
-    const onApplied = vi.fn();
-    const selectedTarget = selectedChatTarget("local", session);
-    view.selectedLoad = selectedChatLoading(selectedTarget);
-    view.initialReadingTarget = { kind: "latest-turn", id: "unread-loading" };
-    view.onInitialReadingTargetApplied = onApplied;
-    await view.updateComplete;
-
-    frames.releaseAll();
-    expect(onApplied).not.toHaveBeenCalled();
-
-    view.messages = [textMessage("user", "question"), textMessage("assistant", "fresh answer")];
-    view.messageEnd = 2;
-    view.messageTotal = 2;
+    view.messages = [...view.messages, textMessage("assistant", "fresh answer")];
+    view.messageEnd = 3;
+    view.messageTotal = 3;
     view.selectedLoad = selectedChatFreshReadable(selectedTarget);
     await view.updateComplete;
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="0"]'), "fresh user message");
-    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 800, clientHeight: 400, top: 100, bottom: 500 });
-    const questionRect = vi.fn(() => rect(220, 300));
-    question.getBoundingClientRect = questionRect;
-
     frames.releaseAll();
-    await view.updateComplete;
-    await Promise.resolve();
 
-    expect(questionRect).toHaveBeenCalled();
-    expect(onApplied).toHaveBeenCalledOnce();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+    expect(scrollTop).toBe(0);
   });
+});
 
-  it("replaces a queued frame when a newer reading target arrives", async () => {
+describe("ChatView session opening position", () => {
+  it("opens at the bottom instead of restoring a saved passage", async () => {
     const frames = installFrames();
-    const view = await mountView();
-    const onApplied = vi.fn();
-    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
-    view.messageEnd = 2;
-    view.messageTotal = 2;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
-    view.initialReadingTarget = { kind: "latest-turn", id: "target-a" };
-    view.onInitialReadingTargetApplied = onApplied;
-    await view.updateComplete;
-
-    view.initialReadingTarget = { kind: "latest-turn", id: "target-b" };
-    await view.updateComplete;
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="0"]'), "user message");
-    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 800, clientHeight: 400, top: 100, bottom: 500 });
-    question.getBoundingClientRect = () => rect(220, 300);
-
-    frames.releaseAll();
-    await view.updateComplete;
-    await Promise.resolve();
-
-    expect(onApplied).toHaveBeenCalledOnce();
-    expect(onApplied).toHaveBeenCalledWith({ kind: "latest-turn", id: "target-b" });
-  });
-
-  it("recomputes the newest turn when messages change during the reserved render", async () => {
-    const frames = installFrames();
-    const view = await mountView();
-    const target = { kind: "latest-turn" as const, id: "unread-changing" };
-    const onApplied = vi.fn();
-    view.messages = [textMessage("user", "first question"), textMessage("assistant", "first answer")];
-    view.messageEnd = 2;
-    view.messageTotal = 2;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
-    view.initialReadingTarget = target;
-    view.onInitialReadingTargetApplied = onApplied;
-    await view.updateComplete;
-
-    const applying = invokeAsyncViewHandler(view, "applyInitialReadingTarget", target);
-    view.messages = [
-      textMessage("user", "first question"),
-      textMessage("assistant", "first answer"),
-      textMessage("user", "new question"),
-      textMessage("assistant", "new answer"),
-    ];
-    view.messageEnd = 4;
-    view.messageTotal = 4;
-    await view.updateComplete;
-    await applying;
-    await view.updateComplete;
-
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="2"]'), "new user message");
-    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 900, clientHeight: 400, top: 100, bottom: 500 });
-    question.getBoundingClientRect = () => rect(220, 300);
-    frames.releaseAll();
-    await view.updateComplete;
-    await Promise.resolve();
-
-    const reserved = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".turn-body.reserved"), "reserved latest turn");
-    expect(reserved.parentElement?.dataset["turnKey"]).toBe("turn:m:2");
-    expect(onApplied).toHaveBeenCalledOnce();
-  });
-
-  it("restores the saved position when a pending unread target is cleared", async () => {
-    const frames = installFrames();
-    localStorage.setItem(chatScrollStorageKey(session.id), JSON.stringify({ mode: "anchor", anchorId: "m:0", offset: 20 }));
-    const selectedTarget = selectedChatTarget("local", session);
-    const view = new ChatView();
-    view.sessionId = session.id;
-    view.selectedMachineId = "local";
-    view.sessionCwd = session.cwd;
-    view.selectedLoad = selectedChatLoading(selectedTarget);
-    view.initialReadingTarget = { kind: "latest-turn", id: "unread-cleared" };
-    document.body.append(view);
-    await view.updateComplete;
-
-    view.initialReadingTarget = undefined;
-    await view.updateComplete;
-    view.messages = [textMessage("user", "saved question"), textMessage("assistant", "answer")];
-    view.messageEnd = 2;
-    view.messageTotal = 2;
-    view.selectedLoad = selectedChatFreshReadable(selectedTarget);
-    await view.updateComplete;
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const savedAnchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="0"]'), "saved anchor");
-    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 900, clientHeight: 400, top: 100, bottom: 500 });
-    const savedAnchorRect = vi.fn(() => rect(300, 380));
-    savedAnchor.getBoundingClientRect = savedAnchorRect;
-
-    frames.releaseAll();
-    await Promise.resolve();
-
-    expect(savedAnchorRect).toHaveBeenCalled();
-    expect(chat.scrollTop).not.toBe(chat.scrollHeight);
-  });
-
-  it("resumes live-tail following after restoring within the bottom threshold", async () => {
-    const frames = installFrames();
-    localStorage.setItem(chatScrollStorageKey(session.id), JSON.stringify({ mode: "anchor", anchorId: "m:0", offset: 20 }));
+    localStorage.setItem(`pi-web:chat-scroll:${session.id}`, JSON.stringify({ mode: "anchor", anchorId: "m:0", offset: 20 }));
     const view = new ChatView();
     view.sessionId = session.id;
     view.selectedMachineId = "local";
@@ -360,176 +115,99 @@ describe("ChatView unread reading position", () => {
     await view.updateComplete;
 
     const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const anchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:0"]'), "saved anchor");
-    let scrollTop = 560;
-    let scrollHeight = 1_000;
+    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 1_400, clientHeight: 400 });
+
+    frames.releaseAll();
+
+    expect(chat.scrollTop).toBe(1_400);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+  });
+
+  it("follows fresh history to the bottom as soon as it arrives", async () => {
+    const frames = installFrames();
+    const selectedTarget = selectedChatTarget("local", session);
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.selectedLoad = selectedChatLoading(selectedTarget);
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    let scrollHeight = 0;
     Object.defineProperties(chat, {
       scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
       scrollHeight: { configurable: true, get: () => scrollHeight },
       clientHeight: { configurable: true, value: 400 },
     });
-    chat.getBoundingClientRect = () => rect(100, 500);
-    const anchorContentTop = 600;
-    anchor.getBoundingClientRect = () => rect(100 + anchorContentTop - chat.scrollTop, 180 + anchorContentTop - chat.scrollTop);
-
-    invokeViewHandler(view, "onViewportResize");
     frames.releaseAll();
-    expect(scrollTop).toBe(580);
 
-    scrollHeight = 1_300;
-    view.messages = [...view.messages, textMessage("assistant", "new streamed content")];
-    view.messageEnd = 3;
-    view.messageTotal = 3;
+    scrollHeight = 1_200;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.selectedLoad = selectedChatFreshReadable(selectedTarget);
     await view.updateComplete;
     frames.releaseAll();
 
-    expect(scrollTop).toBe(1_300);
+    expect(scrollTop).toBe(1_200);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
   });
 
-  it("releases a restored passage when its anchor disappears", async () => {
+  it("resets to the bottom when machine and cwd change under the same session id", async () => {
     const frames = installFrames();
-    const view = await mountView();
-    const scrolling = requiredScrollCoordinator(view);
-    scrolling.follow({
-      kind: "anchor",
-      position: { mode: "anchor", anchorId: "removed-anchor", offset: 20 },
-      resume: "free",
-    });
-
-    invokeViewHandler(view, "alignCurrentFollowTargetNow");
-    frames.releaseAll();
-
-    expect(scrolling.mode).toEqual({ kind: "free" });
-  });
-
-  it("keeps a restored passage fixed while earlier images settle until the reader scrolls", async () => {
-    const frames = installFrames();
-    localStorage.setItem(chatScrollStorageKey(session.id), JSON.stringify({ mode: "anchor", anchorId: "m:1", offset: 24 }));
+    const localTarget = selectedChatTarget("local", session);
     const view = new ChatView();
     view.sessionId = session.id;
     view.selectedMachineId = "local";
     view.sessionCwd = session.cwd;
-    view.messages = [
-      { role: "tool", parts: [{ type: "image", mimeType: "image/png", data: "QUJD" }] },
-      textMessage("assistant", "saved passage"),
-    ];
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
     view.messageEnd = 2;
     view.messageTotal = 2;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    view.selectedLoad = selectedChatFreshReadable(localTarget);
     document.body.append(view);
     await view.updateComplete;
 
     const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const image = requiredElement(view.shadowRoot?.querySelector<HTMLImageElement>("img.chat-image"), "history image");
-    const savedPassage = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('[data-scroll-anchor-id="m:1"]'), "saved passage");
-    defineScrollGeometry(chat, { scrollTop: 500, scrollHeight: 1_100, clientHeight: 400, top: 100, bottom: 500 });
-    let scrollHeight = 1_100;
-    Object.defineProperty(chat, "scrollHeight", { configurable: true, get: () => scrollHeight });
-    let passageContentTop = 700;
-    savedPassage.getBoundingClientRect = () => rect(100 + passageContentTop - chat.scrollTop, 180 + passageContentTop - chat.scrollTop);
-
-    frames.releaseAll();
-    expect(chat.scrollTop).toBe(676);
-
-    passageContentTop += 304;
-    scrollHeight += 304;
-    image.dispatchEvent(new Event("load"));
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
     frames.releaseAll();
 
-    expect(chat.scrollTop).toBe(980);
-    expect(savedPassage.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(24);
+    scrollTop = 400;
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
 
-    chat.scrollTop = 900;
-    chat.dispatchEvent(new Event("scroll"));
-    passageContentTop += 304;
-    image.dispatchEvent(new Event("load"));
-
-    expect(chat.scrollTop).toBe(900);
-  });
-
-  it("aligns the latest user message before the agent has answered", async () => {
-    const frames = installFrames();
-    const view = await mountView();
-    const onApplied = vi.fn();
-    view.messages = [textMessage("user", "question without an answer")];
-    view.messageEnd = 1;
-    view.messageTotal = 1;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
-    view.initialReadingTarget = { kind: "latest-turn", id: "unread-no-answer" };
-    view.onInitialReadingTargetApplied = onApplied;
+    const pendingDialog: PendingExtensionDialog = {
+      dialogId: "opening-dialog",
+      kind: "confirm",
+      title: "Continue?",
+      askedAt: "2026-08-19T12:00:00.000Z",
+      runScoped: false,
+    };
+    view.selectedMachineId = "remote";
+    view.sessionCwd = "/other";
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("remote", { id: session.id, cwd: "/other" }));
+    view.pendingDialogs = [pendingDialog];
     await view.updateComplete;
-    Reflect.set(view, "reservedTurnKey", "turn:m:0");
-    await view.updateComplete;
-
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="0"]'), "latest user message");
-    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 900, clientHeight: 400, top: 100, bottom: 500 });
-    const questionContentTop = 160;
-    question.getBoundingClientRect = () => rect(100 + questionContentTop - chat.scrollTop, 180 + questionContentTop - chat.scrollTop);
+    chat.getBoundingClientRect = () => rect(100, 500);
+    const dialog = requiredElement(view.shadowRoot?.querySelector<HTMLElement>("extension-dialog-card.open-dialog-card"), "open dialog");
+    dialog.getBoundingClientRect = () => rect(200, 260);
     frames.releaseAll();
-    await Promise.resolve();
 
-    expect(question.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(0);
-    expect(onApplied).toHaveBeenCalledOnce();
-  });
-
-  it("loads earlier history instead of guessing when the newest turn opener is not loaded", async () => {
-    const frames = installFrames();
-    const view = await mountView();
-    const onLoadMore = vi.fn();
-    const onApplied = vi.fn();
-    view.messages = [textMessage("assistant", "tail of a long answer")];
-    view.messageStart = 100;
-    view.messageEnd = 101;
-    view.messageTotal = 101;
-    view.hasMore = true;
-    view.onLoadMore = onLoadMore;
-    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
-    view.initialReadingTarget = { kind: "latest-turn", id: "unread-2" };
-    view.onInitialReadingTargetApplied = onApplied;
-    await view.updateComplete;
-
-    frames.releaseAll();
-    await Promise.resolve();
-
-    expect(onLoadMore).toHaveBeenCalledOnce();
-    expect(onApplied).not.toHaveBeenCalled();
-
-    view.loadingMore = true;
-    await view.updateComplete;
-    view.messages = [textMessage("user", "question"), textMessage("assistant", "tail of a long answer")];
-    view.messageStart = 99;
-    view.hasMore = false;
-    view.loadingMore = false;
-    await view.updateComplete;
-    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    const question = requiredElement(view.shadowRoot?.querySelector<HTMLElement>('article[data-index="99"]'), "loaded user message");
-    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 900, clientHeight: 400, top: 100, bottom: 500 });
-    const questionRect = vi.fn(() => rect(240, 320));
-    question.getBoundingClientRect = questionRect;
-
-    frames.releaseAll();
-    await view.updateComplete;
-    await Promise.resolve();
-
-    expect(questionRect).toHaveBeenCalled();
-    expect(onApplied).toHaveBeenCalledOnce();
+    expect(scrollTop).toBe(1_200);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
   });
 });
 
 const session = { id: "session-unread", cwd: "/repo" };
 
-async function mountView(): Promise<ChatView> {
-  const view = new ChatView();
-  view.sessionId = session.id;
-  view.selectedMachineId = "local";
-  view.sessionCwd = session.cwd;
-  document.body.append(view);
-  await view.updateComplete;
-  return view;
-}
-
-function installFrames(): { releaseOne: () => void; releaseAll: () => void } {
+function installFrames(): { releaseAll: () => void } {
   let nextId = 1;
   const callbacks = new Map<number, FrameRequestCallback>();
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -547,37 +225,21 @@ function installFrames(): { releaseOne: () => void; releaseAll: () => void } {
     callback(performance.now());
   };
   return {
-    releaseOne,
     releaseAll: () => {
       while (callbacks.size > 0) releaseOne();
     },
   };
 }
 
-function invokeViewHandler(view: ChatView, name: string): void {
-  const handler: unknown = Reflect.get(view, name);
-  if (typeof handler !== "function") throw new Error(`${name} is unavailable`);
-  Reflect.apply(handler, view, []);
-}
-
-function invokeAsyncViewHandler(view: ChatView, name: string, ...args: unknown[]): Promise<void> {
-  const handler: unknown = Reflect.get(view, name);
-  if (typeof handler !== "function") throw new Error(`${name} is unavailable`);
-  const result: unknown = Reflect.apply(handler, view, args);
-  if (!(result instanceof Promise)) throw new Error(`${name} did not return a promise`);
-  return result;
-}
-
 function defineScrollGeometry(
   element: HTMLElement,
-  geometry: { scrollTop: number; scrollHeight: number; clientHeight: number; top: number; bottom: number },
+  geometry: { scrollTop: number; scrollHeight: number; clientHeight: number },
 ): void {
   Object.defineProperties(element, {
     scrollTop: { configurable: true, writable: true, value: geometry.scrollTop },
     scrollHeight: { configurable: true, value: geometry.scrollHeight },
     clientHeight: { configurable: true, value: geometry.clientHeight },
   });
-  element.getBoundingClientRect = () => rect(geometry.top, geometry.bottom);
 }
 
 function rect(top: number, bottom: number): DOMRect {

@@ -1,21 +1,21 @@
-import { LitElement, html } from "lit";
+import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
-import { chatTurns, foldMetaSources, groupChatMessages, latestChatTurnStart, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
+import { chatTurns, foldMetaSources, groupChatMessages, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
 import { livenessPhase, livenessStep, type LivenessPhase } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import "./TranscriptLivenessView";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { ChatScrollCoordinator } from "../chatScrollCoordinator";
-import { anchoredTurnKey, followAnchor, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
+import { anchoredTurnKey, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
-import { ChatScrollController, isNearScrollBottom, type ChatAnchorScrollPosition, type ChatScrollRestoreResult } from "../chatScrollPosition";
+import { isNearScrollBottom } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
-import { selectedChatHasReadableHistory, selectedChatNoTarget, selectedChatReadability, type SelectedChatLoad } from "../selectedChatLoad";
+import { selectedChatHasReadableHistory, selectedChatIsOpening, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
 import type { SessionLaunchRecovery } from "../controllers/sessionController";
 import type { ChatLine, ChatPart } from "./shared";
@@ -36,15 +36,6 @@ export interface QueuedMessageSection {
   detail: string;
   messages: QueuedSessionMessage[];
 }
-
-export interface ChatInitialReadingTarget {
-  readonly kind: "latest-turn";
-  readonly id: string;
-}
-
-// Container reflow can finish after the resize event's first animation frame.
-const VIEWPORT_RESIZE_RESTORE_SETTLE_FRAMES = 3;
-type DefaultScrollRestoreState = "idle" | "deferred" | "scheduled";
 
 /**
  * Queued sends that still need explaining: the ones held before the session
@@ -291,8 +282,6 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) onLoadMore?: () => void;
   @property({ attribute: false }) onRetry?: () => void;
   @property({ attribute: false }) onSelectedLoadPaint?: (load: SelectedChatLoad) => void;
-  @property({ attribute: false }) initialReadingTarget: ChatInitialReadingTarget | undefined;
-  @property({ attribute: false }) onInitialReadingTargetApplied?: (target: ChatInitialReadingTarget) => void;
   @query(".chat") private chat?: HTMLDivElement;
   @query(".chat-load-retry") private retryButton?: HTMLButtonElement;
   @query("dialog.image-zoom") private imageZoomDialog?: HTMLDialogElement;
@@ -311,11 +300,8 @@ export class ChatView extends LitElement {
   private activePhase: LivenessPhase | undefined;
   private imageZoomModalRegistration: RenderedModalRegistration | undefined;
   private readonly disclosures = new ChatDisclosureController();
-  private readonly scrollPositions = new ChatScrollController();
   private readonly scrolling = new ChatScrollCoordinator();
   private loadMoreCheckFrame: number | undefined;
-  private applyingInitialReadingTargetId: string | undefined;
-  private appliedInitialReadingTargetId: string | undefined;
   private groupedMessagesInput?: ChatLine[];
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
@@ -329,27 +315,16 @@ export class ChatView extends LitElement {
   private lastSeenTurnCount = 0;
   private turnTrackingReady = false;
   private sentFromHere = false;
-  private pendingScrollRestoreSessionId: string | undefined;
-  private pendingScrollRestorePosition: ChatAnchorScrollPosition | undefined;
-  private defaultScrollRestoreState: DefaultScrollRestoreState = "idle";
   private loadingScrollReaderOwned = false;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
-    if (this.scrolling.mode.kind === "anchor") {
-      this.scrolling.settle({
-        frames: VIEWPORT_RESIZE_RESTORE_SETTLE_FRAMES,
-        apply: () => { this.alignCurrentFollowTargetNow(); },
-      });
-      return;
-    }
-    if (this.scrolling.mode.kind === "tail" && !this.hasPendingInitialReadingTarget() && this.defaultScrollRestoreState === "idle") this.scrollToBottom();
+    if (this.scrolling.mode.kind === "tail") this.scrollToBottom();
     else if (this.scrolling.mode.kind === "turn") this.alignAnchoredTurn();
     else if (this.chat !== undefined) this.scrolling.syncViewportSize(this.chat);
   };
   private readonly onImageLoad = (): void => {
-    if (this.scrolling.mode.kind === "anchor") this.alignCurrentFollowTargetNow();
-    else this.scheduleCurrentFollowTarget();
+    this.scheduleCurrentFollowTarget();
   };
   private readonly openImageZoom = (src: string, alt: string): void => {
     this.zoomedImage = { src, alt };
@@ -359,9 +334,6 @@ export class ChatView extends LitElement {
   };
   private readonly onImageZoomDialogClick = (event: MouseEvent): void => {
     if (event.target === this.imageZoomDialog) this.closeImageZoom();
-  };
-  private readonly onPageHide = () => {
-    this.saveScrollPosition();
   };
   private readonly handleClearServerQueue = (): void => {
     this.onClearServerQueue?.();
@@ -373,7 +345,6 @@ export class ChatView extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener("resize", this.onViewportResize);
-    window.addEventListener("pagehide", this.onPageHide);
     window.visualViewport?.addEventListener("resize", this.onViewportResize);
   }
 
@@ -383,66 +354,57 @@ export class ChatView extends LitElement {
   }
 
   override disconnectedCallback(): void {
-    this.saveScrollPosition();
-    this.scrollPositions.dispose();
     this.scrolling.dispose();
     this.releaseImageZoomModal();
     if (this.loadMoreCheckFrame !== undefined) cancelAnimationFrame(this.loadMoreCheckFrame);
     this.cancelSelectedLoadPaintReport();
     window.removeEventListener("resize", this.onViewportResize);
-    window.removeEventListener("pagehide", this.onPageHide);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
     super.disconnectedCallback();
   }
 
-  private savePreviousSessionScrollPosition(previousSessionId: unknown): void {
-    if (typeof previousSessionId !== "string" || previousSessionId === "" || previousSessionId === this.sessionId) return;
-    this.saveScrollPosition(previousSessionId);
+  private sessionIdentityChanged(changed: { has(key: string): boolean }): boolean {
+    return changed.has("sessionId") || changed.has("selectedMachineId") || changed.has("sessionCwd");
   }
 
   private prepareSessionUiState(): void {
     this.disclosures.syncSession(this.sessionId);
-    this.scrollPositions.clearScheduledSave();
     this.scrolling.reset();
-    this.pendingScrollRestoreSessionId = undefined;
-    this.pendingScrollRestorePosition = undefined;
-    this.defaultScrollRestoreState = "idle";
     this.loadingScrollReaderOwned = false;
     this.retryFocusPending = false;
     this.turnTrackingReady = false;
     this.lastSeenTurnCount = 0;
     this.sentFromHere = false;
     this.reservedTurnKey = undefined;
-    this.applyingInitialReadingTargetId = undefined;
-    this.appliedInitialReadingTargetId = undefined;
     this.cancelSelectedLoadPaintReport();
   }
 
-  protected override willUpdate(changed: Map<string, unknown>): void {
+  protected override willUpdate(changed: PropertyValues<this>): void {
     this.trackActiveSince();
-    if (changed.has("sessionId")) {
+    if (this.sessionIdentityChanged(changed)) {
       this.activeSince = undefined;
       this.activePhase = undefined;
-      this.savePreviousSessionScrollPosition(changed.get("sessionId"));
       this.prepareSessionUiState();
       this.trackActiveSince();
     }
     if (changed.has("isSendingPrompt") && this.isSendingPrompt) this.sentFromHere = true;
+    const previousSelectedLoad = changed.get("selectedLoad");
+    const openingHistory = selectedChatIsOpening(this.selectedLoad)
+      || (previousSelectedLoad !== undefined && selectedChatIsOpening(previousSelectedLoad));
     if (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) {
-      if (this.scrolling.mode.kind === "tail" && !this.scrolling.viewportSizeChanged(this.chat) && !this.isNearBottom()) this.scrolling.follow(FOLLOW_FREE);
+      if (!openingHistory && this.scrolling.mode.kind === "tail" && !this.scrolling.viewportSizeChanged(this.chat) && !this.isNearBottom()) this.scrolling.follow(FOLLOW_FREE);
     }
-    this.trackOpenedTurn();
+    this.trackOpenedTurn(!openingHistory);
   }
 
   /**
    * A turn opening at the foot of the transcript takes the reading position.
    *
-   * A transcript arriving all at once is not a turn opening: a session restores
-   * to where its reader left it, which is the whole point of saving that
-   * position. Only growth from a transcript that was already on screen counts --
-   * or the first turn of a session that had none.
+   * A transcript arriving all at once is not a turn opening. Only growth from
+   * a transcript that was already on screen counts, or the first turn of a
+   * session that had none.
    */
-  private trackOpenedTurn(): void {
+  private trackOpenedTurn(allowAnchor = true): void {
     const turns = this.turns();
     const last = turns[turns.length - 1];
     const key = last === undefined ? undefined : this.turnRenderKey(last);
@@ -456,10 +418,10 @@ export class ChatView extends LitElement {
     if (key === undefined || key === this.lastSeenTurnKey) return;
     this.lastSeenTurnKey = key;
     this.lastSeenTurnCount = turns.length;
-    if (seen === 0 && turns.length > 1) return;
     if (last?.openedByIndex === undefined) return;
     const sentFromHere = this.sentFromHere;
     this.sentFromHere = false;
+    if (!sentFromHere && (!allowAnchor || (seen === 0 && turns.length > 1))) return;
     if (!this.scrolling.followOpenedTurn(key, sentFromHere)) return;
     this.reservedTurnKey = key;
   }
@@ -473,26 +435,24 @@ export class ChatView extends LitElement {
   protected override updated(changed: Map<string, unknown>): void {
     if (changed.has("loadingMore") && !this.loadingMore) this.loadMoreRequested = false;
     if (changed.has("hasMore") && !this.hasMore) this.loadMoreRequested = false;
-    if (changed.has("sessionId")) {
+    const identityChanged = this.sessionIdentityChanged(changed);
+    if (identityChanged) {
       this.cancelSelectedLoadPaintReport();
-      this.restoreScrollPosition();
+      this.openAtBottom();
     }
     const openedAsk = changed.has("pendingAsk") && this.isNewPendingAsk(changed.get("pendingAsk"));
     const openedDialog = changed.has("pendingDialogs") && this.isNewOpenDialog(changed.get("pendingDialogs"));
-    const followingLiveTail = this.scrolling.mode.kind === "tail"
-      || this.scrolling.mode.kind === "turn"
-      || (this.scrolling.mode.kind === "anchor" && this.scrolling.mode.resume === "tail");
+    const followingLiveTail = this.scrolling.mode.kind === "tail" || this.scrolling.mode.kind === "turn";
     const contentChanged = changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs");
     // The form uses the transcript scroller. Start a new long form at question
     // one rather than applying the usual live-tail scroll and landing at its end.
-    if (!changed.has("sessionId") && openedAsk && followingLiveTail) {
+    if (!identityChanged && openedAsk && followingLiveTail) {
       this.scrollToOpenAsk();
-    } else if (!changed.has("sessionId") && openedDialog && followingLiveTail) {
+    } else if (!identityChanged && openedDialog && followingLiveTail) {
       this.scrollToOpenDialog();
-    } else if (!changed.has("sessionId") && contentChanged) {
+    } else if (!identityChanged && contentChanged) {
       this.scheduleCurrentFollowTarget();
     }
-    if (changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) this.continuePendingScrollRestore();
     if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
     if (changed.has("zoomedImage")) this.syncImageZoomDialog();
     if (changed.has("selectedMachineId") || changed.has("sessionCwd")) {
@@ -503,88 +463,6 @@ export class ChatView extends LitElement {
       this.restoreRetryFocusAfterRetry();
       this.scheduleSelectedLoadPaintReport();
     }
-    if (changed.has("initialReadingTarget") || changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("selectedLoad")) {
-      if (!this.hasPendingInitialReadingTarget() && this.defaultScrollRestoreState === "deferred" && selectedChatHasReadableHistory(this.currentSelectedLoad())) this.restoreScrollPosition();
-      else this.scheduleInitialReadingTarget();
-    }
-  }
-
-  private scheduleInitialReadingTarget(): void {
-    const target = this.initialReadingTarget;
-    if (target === undefined
-      || target.id === this.appliedInitialReadingTargetId
-      || target.id === this.applyingInitialReadingTargetId
-      || selectedChatReadability(this.currentSelectedLoad()) !== "fresh"
-      || this.loadingMore) return;
-
-    this.scrolling.schedulePlacement(() => { void this.applyInitialReadingTarget(target); });
-  }
-
-  private async applyInitialReadingTarget(target: ChatInitialReadingTarget): Promise<void> {
-    if (this.initialReadingTarget?.id !== target.id || target.id === this.appliedInitialReadingTargetId) return;
-    this.applyingInitialReadingTargetId = target.id;
-    let restartAfterRender = false;
-    try {
-      let turnStart = latestChatTurnStart(this.groupedMessages());
-      if (turnStart === undefined) {
-        const latestTurn = this.turns().at(-1);
-        if (latestTurn?.openedByIndex === undefined && this.hasMore) {
-          this.requestLoadMore();
-          return;
-        }
-        this.restoreDefaultScrollPosition(this.sessionId);
-        this.finishInitialReadingTarget(target);
-        return;
-      }
-
-      const turnKey = this.turnRenderKey(turnStart.turn);
-      if (this.reservedTurnKey !== turnKey) {
-        this.reservedTurnKey = turnKey;
-        await this.updateComplete;
-      } else {
-        // A turn can change in the same task that applies an already-reserved
-        // unread target. Yield once so the target is chosen from the latest data.
-        await Promise.resolve();
-      }
-      if (!this.isCurrentInitialReadingTarget(target)) return;
-      const currentTurnStart = latestChatTurnStart(this.groupedMessages());
-      if (currentTurnStart === undefined || this.turnRenderKey(currentTurnStart.turn) !== turnKey) {
-        if (currentTurnStart !== undefined) this.reservedTurnKey = this.turnRenderKey(currentTurnStart.turn);
-        restartAfterRender = true;
-        return;
-      }
-      turnStart = currentTurnStart;
-
-      const anchorId = this.groupRenderKeyFor(turnStart.group);
-      const anchor = this.scrollAnchorElements().find((element) => element.dataset["scrollAnchorId"] === anchorId);
-      const chat = this.chat;
-      if (chat === undefined || anchor === undefined) return;
-      this.scrolling.cancelAutomaticMotion();
-      this.scrolling.withProgrammaticScroll(chat, () => { this.alignElementToTopNow(anchor); });
-      this.scrolling.follow(followAnchor({
-        mode: "anchor",
-        anchorId,
-        offset: anchor.getBoundingClientRect().top - chat.getBoundingClientRect().top,
-      }, this.isNearBottom() ? "tail" : "free"));
-      this.finishInitialReadingTarget(target);
-    } finally {
-      if (this.applyingInitialReadingTargetId === target.id) this.applyingInitialReadingTargetId = undefined;
-      if (restartAfterRender) this.scheduleInitialReadingTarget();
-    }
-  }
-
-  private hasPendingInitialReadingTarget(): boolean {
-    return this.initialReadingTarget !== undefined && this.initialReadingTarget.id !== this.appliedInitialReadingTargetId;
-  }
-
-  private isCurrentInitialReadingTarget(target: ChatInitialReadingTarget): boolean {
-    return this.initialReadingTarget?.id === target.id && this.hasPendingInitialReadingTarget();
-  }
-
-  private finishInitialReadingTarget(target: ChatInitialReadingTarget): void {
-    this.defaultScrollRestoreState = "idle";
-    this.appliedInitialReadingTargetId = target.id;
-    this.onInitialReadingTargetApplied?.(target);
   }
 
   private scheduleSelectedLoadPaintReport(): void {
@@ -1313,7 +1191,6 @@ export class ChatView extends LitElement {
       const update = this.scrolling.recordScroll(chat, !this.shouldForceReaderScrollTakeover());
       if (update.viewportChanged) this.scheduleCurrentFollowTarget();
     }
-    if (this.scrolling.canSave) this.scheduleScrollPositionSave();
   }
 
   private onWheel(event: WheelEvent) {
@@ -1332,23 +1209,11 @@ export class ChatView extends LitElement {
 
   private shouldForceReaderScrollTakeover(): boolean {
     if (this.loadingScrollReaderOwned) return false;
-    const load = this.currentSelectedLoad();
-    return this.defaultScrollRestoreState !== "idle"
-      || this.hasPendingInitialReadingTarget()
-      || load.kind === "loading-without-content"
-      || load.kind === "loading-with-readable-history";
+    return selectedChatIsOpening(this.currentSelectedLoad());
   }
 
   private acceptReaderScrollTakeover(): void {
     this.loadingScrollReaderOwned = true;
-    this.defaultScrollRestoreState = "idle";
-    this.pendingScrollRestoreSessionId = undefined;
-    this.pendingScrollRestorePosition = undefined;
-    const target = this.initialReadingTarget;
-    if (target === undefined || target.id === this.appliedInitialReadingTargetId) return;
-    this.reservedTurnKey = undefined;
-    this.appliedInitialReadingTargetId = target.id;
-    this.onInitialReadingTargetApplied?.(target);
   }
 
   private isPrependingMessages(changed: Map<string, unknown>): boolean {
@@ -1393,10 +1258,7 @@ export class ChatView extends LitElement {
   }
 
   private scheduleCurrentFollowTarget(): void {
-    const mode = this.scrolling.mode;
-    if (mode.kind === "free" || (mode.kind === "anchor" && mode.resume === "free")) return;
-    if ((mode.kind === "tail" || mode.kind === "anchor") && (this.hasPendingInitialReadingTarget() || this.defaultScrollRestoreState !== "idle")) return;
-    if (mode.kind === "anchor") this.scrolling.follow(FOLLOW_TAIL);
+    if (this.scrolling.mode.kind === "free") return;
     this.scrolling.schedulePlacement(() => { this.alignCurrentFollowTargetNow(); });
   }
 
@@ -1426,11 +1288,6 @@ export class ChatView extends LitElement {
       if (turn === undefined) return false;
       this.scrolling.withProgrammaticScroll(chat, () => { this.alignElementToTopNow(turn); });
       return true;
-    }
-    if (mode.kind === "anchor") {
-      const restored = this.scrolling.withProgrammaticScroll(chat, () => this.scrollPositions.restoreExplicitPosition(mode.position, chat, this.scrollAnchorElements(), { fallbackToBottom: false }));
-      if (restored.status !== "restored") this.scrolling.follow(mode.resume === "tail" ? FOLLOW_TAIL : FOLLOW_FREE);
-      return restored.status === "restored";
     }
     return false;
   }
@@ -1485,69 +1342,13 @@ export class ChatView extends LitElement {
     return true;
   }
 
-  restoreScrollPosition() {
-    if (this.hasPendingInitialReadingTarget()) {
-      this.defaultScrollRestoreState = "deferred";
-      this.scheduleInitialReadingTarget();
-      return;
-    }
-    this.defaultScrollRestoreState = "scheduled";
-    const sessionId = this.sessionId;
-    this.scrolling.schedulePlacement(() => {
-      if (this.sessionId !== sessionId) return;
-      this.defaultScrollRestoreState = "idle";
-      this.restoreDefaultScrollPosition(sessionId);
-    });
-  }
-
-  private restoreDefaultScrollPosition(sessionId: string): void {
-    this.defaultScrollRestoreState = "idle";
-    const storedPosition = this.scrollPositions.readPosition(sessionId);
-    if (storedPosition === undefined && this.pendingAsk !== undefined && this.alignOpenAskToTop()) return;
-    if (storedPosition === undefined && this.pendingDialogs.length > 0 && this.alignOpenDialogToTop()) return;
-    const chat = this.chat;
-    if (chat === undefined) return;
-    const restoredAnchor = storedPosition?.mode === "anchor" ? storedPosition : undefined;
-    const result = this.scrolling.withProgrammaticScroll(chat, () => this.scrollPositions.restorePosition(sessionId, chat, this.scrollAnchorElements(), { fallbackToBottom: this.shouldFallbackToBottomForMissingAnchor() }));
-    this.handleScrollRestoreResult(sessionId, result, restoredAnchor);
-  }
-
-  private continuePendingScrollRestore(): void {
-    const sessionId = this.pendingScrollRestoreSessionId;
-    const position = this.pendingScrollRestorePosition;
-    if (sessionId === undefined || position === undefined || sessionId !== this.sessionId) return;
-    this.scrolling.schedulePlacement(() => {
-      const chat = this.chat;
-      if (this.sessionId !== sessionId || chat === undefined) return;
-      const result = this.scrolling.withProgrammaticScroll(chat, () => this.scrollPositions.restoreExplicitPosition(position, chat, this.scrollAnchorElements(), { fallbackToBottom: this.shouldFallbackToBottomForMissingAnchor() }));
-      this.handleScrollRestoreResult(sessionId, result, position);
-    });
-  }
-
-  private handleScrollRestoreResult(sessionId: string, result: ChatScrollRestoreResult, restoredAnchor?: ChatAnchorScrollPosition): void {
-    if (result.status !== "missing") {
-      this.scrolling.cancelAutomaticMotion();
-      if (result.status === "bottom") this.scrolling.follow(FOLLOW_TAIL);
-      else if (result.status === "restored" && restoredAnchor !== undefined) this.scrolling.follow(followAnchor(restoredAnchor, this.isNearBottom() ? "tail" : "free"));
-      this.pendingScrollRestoreSessionId = undefined;
-      this.pendingScrollRestorePosition = undefined;
-      return;
-    }
-
-    this.scrolling.follow(FOLLOW_FREE);
-    this.pendingScrollRestoreSessionId = sessionId;
-    this.pendingScrollRestorePosition = result.position;
-    const chat = this.chat;
-    if (chat === undefined || !this.hasMore || this.loadingMore) return;
-    this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop = 0; });
-    this.requestLoadMore();
-  }
-
-  private shouldFallbackToBottomForMissingAnchor(): boolean {
-    // Only fall back to the bottom once the full history is loaded; while earlier
-    // pages can still load, a missing scroll anchor should keep retrying rather
-    // than jump the user to the bottom.
-    return !this.hasMore;
+  private openAtBottom(): void {
+    this.scrolling.cancelAutomaticMotion();
+    this.scrolling.follow(FOLLOW_TAIL);
+    // Preview content is already rendered here. Move before paint, then repeat
+    // next frame for content whose layout finishes after this update.
+    this.alignCurrentFollowTargetNow();
+    this.scrollToBottom();
   }
 
   capturePrependScrollAnchor(): PrependScrollAnchor | undefined {
@@ -1562,7 +1363,6 @@ export class ChatView extends LitElement {
       frames: PREPEND_RESTORE_SETTLE_FRAMES,
       immediate: true,
       suppressLoadMore: true,
-      suppressSave: true,
       apply: () => {
         const chat = this.chat;
         if (chat === undefined) return;
@@ -1572,37 +1372,12 @@ export class ChatView extends LitElement {
     });
   }
 
-  saveScrollPosition(sessionId = this.sessionId) {
-    if (!sessionId) return;
-    // The shell can ask for a position while a route restore is still in flight,
-    // before this view has rendered. A view that has not rendered has no reading
-    // position to keep, and it has no render root either, so asking it for its
-    // anchors throws inside a promise nobody is waiting on.
-    if (!this.hasUpdated) return;
-    this.scrollPositions.savePosition(sessionId, this.chat, this.scrollAnchorElements());
-  }
-
-  private scheduleScrollPositionSave() {
-    const sessionId = this.sessionId;
-    this.scrollPositions.scheduleSave(sessionId, (scheduledSessionId) => {
-      if (this.sessionId === scheduledSessionId) this.saveScrollPosition(scheduledSessionId);
-    });
-  }
-
   private scrollMarkers(): HTMLElement[] {
     return Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".scroll-marker"));
   }
 
   private scrollMarkerAt(markerId: string): HTMLElement | undefined {
     return this.scrollMarkers().find((marker) => marker.dataset["markerId"] === markerId);
-  }
-
-  private articles(): HTMLElement[] {
-    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>("article.msg, details.msg"));
-  }
-
-  private scrollAnchorElements(): HTMLElement[] {
-    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>("[data-scroll-anchor-id]"));
   }
 
   /** The live tail keys on its start, which is stable while events stream in. */

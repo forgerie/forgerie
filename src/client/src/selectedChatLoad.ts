@@ -85,6 +85,22 @@ export function selectedChatHasReadableHistory(load: SelectedChatLoad): boolean 
   return selectedChatReadability(load) !== "absent";
 }
 
+export function selectedChatIsOpening(load: SelectedChatLoad): boolean {
+  switch (load.kind) {
+    case "loading-without-content":
+    case "loading-with-readable-history":
+    case "cached-readable":
+    case "preview-readable":
+    case "fresh-readable":
+      return true;
+    case "no-target":
+    case "live-ready":
+    case "read-only":
+    case "failed":
+      return false;
+  }
+}
+
 export function selectedChatCanUseRuntime(load: SelectedChatLoad): load is Extract<SelectedChatLoad, { readonly kind: "live-ready" }> {
   return load.kind === "live-ready";
 }
