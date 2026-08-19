@@ -65,11 +65,11 @@ describe("ChatScrollCoordinator", () => {
     let placements = 0;
     coordinator.schedulePlacement(() => { placements += 1; });
 
-    expect(coordinator.readerWheel(-0.6, false, true)).toBe(false);
-    const readerOwned = coordinator.readerWheel(-0.6, false, true);
+    expect(coordinator.readerWheel(-0.6, false, true)).toBeUndefined();
+    const gesture = coordinator.readerWheel(-0.6, false, true);
     frames.releaseAll();
 
-    expect(readerOwned).toBe(true);
+    expect(gesture).toEqual({ direction: "older", readerOwned: true });
     expect(placements).toBe(0);
     expect(coordinator.mode).toEqual(FOLLOW_FREE);
   });
@@ -78,10 +78,29 @@ describe("ChatScrollCoordinator", () => {
     const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
     coordinator.readerTouchStart(100);
 
-    expect(coordinator.readerTouchMove(96, false, true)).toBe(false);
+    expect(coordinator.readerTouchMove(96, false, true)).toBeUndefined();
     expect(coordinator.mode).not.toEqual(FOLLOW_FREE);
-    expect(coordinator.readerTouchMove(94, false, true)).toBe(true);
+    expect(coordinator.readerTouchMove(94, false, true)).toEqual({ direction: "newer", readerOwned: true });
     expect(coordinator.mode).toEqual(FOLLOW_FREE);
+  });
+
+  it("reports older intent when the transcript cannot scroll yet", () => {
+    const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
+
+    expect(coordinator.readerWheel(-1, false)).toEqual({ direction: "older", readerOwned: false });
+    expect(coordinator.mode).toEqual({ kind: "tail" });
+
+    coordinator.readerTouchStart(100);
+    expect(coordinator.readerTouchMove(106, false)).toEqual({ direction: "older", readerOwned: false });
+    expect(coordinator.mode).toEqual({ kind: "tail" });
+  });
+
+  it("reports touch reversal from the latest meaningful position", () => {
+    const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
+    coordinator.readerTouchStart(100);
+
+    expect(coordinator.readerTouchMove(106, true)).toEqual({ direction: "older", readerOwned: true });
+    expect(coordinator.readerTouchMove(100, true)).toEqual({ direction: "newer", readerOwned: true });
   });
 
   it("cancels queued movement as soon as the reader pulls back", () => {

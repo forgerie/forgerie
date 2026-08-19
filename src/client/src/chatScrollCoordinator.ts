@@ -11,6 +11,11 @@ export interface ChatScrollUpdate {
   readonly viewportChanged: boolean;
 }
 
+export interface ChatReaderGesture {
+  readonly direction: "older" | "newer";
+  readonly readerOwned: boolean;
+}
+
 export interface ChatScrollSettlement {
   readonly frames: number;
   readonly apply: () => void;
@@ -84,27 +89,30 @@ export class ChatScrollCoordinator {
     return next.kind === "turn";
   }
 
-  readerWheel(deltaY: number, canScrollUp: boolean, forceTakeover = false): boolean {
+  readerWheel(deltaY: number, canScrollUp: boolean, forceTakeover = false): ChatReaderGesture | undefined {
     this.wheelIntentDelta += deltaY;
-    if (Math.abs(this.wheelIntentDelta) < WHEEL_TAKEOVER_DELTA) return false;
+    if (Math.abs(this.wheelIntentDelta) < WHEEL_TAKEOVER_DELTA) return undefined;
     const intentDelta = this.wheelIntentDelta;
     this.wheelIntentDelta = 0;
+    const direction = intentDelta < 0 ? "older" : "newer";
     this.readerTookControl();
     if (forceTakeover) this.currentMode = FOLLOW_FREE;
-    else if (intentDelta < 0) this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
-    return this.currentMode.kind === "free";
+    else if (direction === "older") this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
+    return { direction, readerOwned: this.currentMode.kind === "free" };
   }
 
   readerTouchStart(y: number | undefined): void {
     this.touchStartY = y;
   }
 
-  readerTouchMove(y: number | undefined, canScrollUp: boolean, forceTakeover = false): boolean {
-    if (this.touchStartY === undefined || y === undefined || Math.abs(y - this.touchStartY) < TOUCH_TAKEOVER_DELTA) return false;
+  readerTouchMove(y: number | undefined, canScrollUp: boolean, forceTakeover = false): ChatReaderGesture | undefined {
+    if (this.touchStartY === undefined || y === undefined || Math.abs(y - this.touchStartY) < TOUCH_TAKEOVER_DELTA) return undefined;
+    const direction = y > this.touchStartY ? "older" : "newer";
+    this.touchStartY = y;
     this.readerTookControl();
     if (forceTakeover) this.currentMode = FOLLOW_FREE;
-    else if (y > this.touchStartY) this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
-    return this.currentMode.kind === "free";
+    else if (direction === "older") this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
+    return { direction, readerOwned: this.currentMode.kind === "free" };
   }
 
   recordScroll(scroller: ChatScrollViewport, allowReaderControl = true): ChatScrollUpdate {

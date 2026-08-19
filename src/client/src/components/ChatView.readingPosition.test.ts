@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PendingExtensionDialog, SessionStatus } from "../api";
 import { textMessage } from "../chatMessages";
 import { ChatScrollCoordinator } from "../chatScrollCoordinator";
-import { selectedChatFreshReadable, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget } from "../selectedChatLoad";
+import { selectedChatFreshReadable, selectedChatLiveReady, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
 
 afterEach(() => {
@@ -227,6 +227,212 @@ describe("ChatView session opening position", () => {
 
     expect(scrollTop).toBe(1_200);
     expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+  });
+
+  it("does not page earlier history when opening layout moves the tail", async () => {
+    const frames = installFrames();
+    const loadEarlier = vi.fn();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 200;
+    view.hasMore = true;
+    view.onLoadMore = loadEarlier;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    frames.releaseAll();
+    expect(scrollTop).toBe(1_200);
+
+    scrollTop = 0;
+    chat.dispatchEvent(new Event("scroll"));
+    frames.releaseAll();
+
+    expect(loadEarlier).not.toHaveBeenCalled();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+  });
+
+  it("does not page earlier history from an unlatch live-ready scroll", async () => {
+    const frames = installFrames();
+    const loadEarlier = vi.fn();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 200;
+    view.hasMore = true;
+    view.onLoadMore = loadEarlier;
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    frames.releaseAll();
+
+    scrollTop = 20;
+    chat.dispatchEvent(new Event("scroll"));
+    frames.releaseAll();
+
+    expect(loadEarlier).not.toHaveBeenCalled();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+  });
+
+  it("pages earlier history after the reader scrolls near the top", async () => {
+    const frames = installFrames();
+    const loadEarlier = vi.fn();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 200;
+    view.hasMore = true;
+    view.onLoadMore = loadEarlier;
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    frames.releaseAll();
+
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    scrollTop = 20;
+    chat.dispatchEvent(new Event("scroll"));
+    frames.releaseAll();
+
+    expect(loadEarlier).toHaveBeenCalledOnce();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+  });
+
+  it("does not page earlier history when the reader moves toward newer content", async () => {
+    const frames = installFrames();
+    const loadEarlier = vi.fn();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 200;
+    view.hasMore = true;
+    view.onLoadMore = loadEarlier;
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    frames.releaseAll();
+
+    scrollTop = 20;
+    chat.dispatchEvent(new Event("scroll"));
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true }));
+    chat.dispatchEvent(new Event("scroll"));
+    frames.releaseAll();
+
+    expect(loadEarlier).not.toHaveBeenCalled();
+  });
+
+  it("keeps following the tail when older history cannot scroll yet", async () => {
+    const frames = installFrames();
+    const loadEarlier = vi.fn();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 200;
+    view.hasMore = true;
+    view.onLoadMore = loadEarlier;
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => 0, set: () => undefined },
+      scrollHeight: { configurable: true, value: 400 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    frames.releaseAll();
+
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    frames.releaseAll();
+
+    expect(loadEarlier).not.toHaveBeenCalled();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+  });
+
+  it("clears earlier-history intent when the same session reopens", async () => {
+    const frames = installFrames();
+    const loadEarlier = vi.fn();
+    const target = selectedChatTarget("local", session);
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 200;
+    view.hasMore = true;
+    view.onLoadMore = loadEarlier;
+    view.selectedLoad = selectedChatLiveReady(target);
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    frames.releaseAll();
+
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    frames.releaseAll();
+    expect(loadEarlier).not.toHaveBeenCalled();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+
+    scrollTop = 0;
+    view.messages = [...view.messages, textMessage("assistant", "fresh answer")];
+    view.selectedLoad = selectedChatLoading(target, "fresh");
+    await view.updateComplete;
+    frames.releaseAll();
+
+    expect(loadEarlier).not.toHaveBeenCalled();
   });
 });
 

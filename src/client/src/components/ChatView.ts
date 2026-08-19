@@ -8,7 +8,7 @@ import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import "./TranscriptLivenessView";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
-import { ChatScrollCoordinator } from "../chatScrollCoordinator";
+import { ChatScrollCoordinator, type ChatReaderGesture } from "../chatScrollCoordinator";
 import { anchoredTurnKey, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
@@ -316,6 +316,7 @@ export class ChatView extends LitElement {
   private turnTrackingReady = false;
   private sentFromHere = false;
   private loadingScrollReaderOwned = false;
+  private readerHistoryPagingEnabled = false;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
@@ -371,6 +372,7 @@ export class ChatView extends LitElement {
     this.disclosures.syncSession(this.sessionId);
     this.scrolling.reset();
     this.loadingScrollReaderOwned = false;
+    this.readerHistoryPagingEnabled = false;
     this.retryFocusPending = false;
     this.turnTrackingReady = false;
     this.lastSeenTurnCount = 0;
@@ -389,6 +391,7 @@ export class ChatView extends LitElement {
     }
     if (changed.has("isSendingPrompt") && this.isSendingPrompt) this.sentFromHere = true;
     const previousSelectedLoad = changed.get("selectedLoad");
+    if (changed.has("selectedLoad") && selectedChatIsOpening(this.currentSelectedLoad())) this.readerHistoryPagingEnabled = false;
     const openingHistory = selectedChatIsOpening(this.selectedLoad)
       || (previousSelectedLoad !== undefined && selectedChatIsOpening(previousSelectedLoad));
     if (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) {
@@ -1206,13 +1209,21 @@ export class ChatView extends LitElement {
     const chat = this.chat;
     if (chat !== undefined) {
       const update = this.scrolling.recordScroll(chat, !this.shouldForceReaderScrollTakeover());
+      if (this.scrolling.mode.kind !== "free") this.readerHistoryPagingEnabled = false;
       if (update.viewportChanged) this.scheduleCurrentFollowTarget();
     }
   }
 
   private onWheel(event: WheelEvent) {
     const forceTakeover = this.shouldForceReaderScrollTakeover();
-    if (this.scrolling.readerWheel(event.deltaY, this.canScrollUp(), forceTakeover) && forceTakeover) this.acceptReaderScrollTakeover();
+    const gesture = this.scrolling.readerWheel(event.deltaY, this.canScrollUp(), forceTakeover);
+    if (gesture === undefined) return;
+    if (forceTakeover) {
+      this.readerHistoryPagingEnabled = false;
+      if (gesture.readerOwned) this.acceptReaderScrollTakeover();
+      return;
+    }
+    this.applyReaderHistoryPagingGesture(gesture);
   }
 
   private onTouchStart(event: TouchEvent) {
@@ -1221,7 +1232,19 @@ export class ChatView extends LitElement {
 
   private onTouchMove(event: TouchEvent) {
     const forceTakeover = this.shouldForceReaderScrollTakeover();
-    if (this.scrolling.readerTouchMove(event.touches[0]?.clientY, this.canScrollUp(), forceTakeover) && forceTakeover) this.acceptReaderScrollTakeover();
+    const gesture = this.scrolling.readerTouchMove(event.touches[0]?.clientY, this.canScrollUp(), forceTakeover);
+    if (gesture === undefined) return;
+    if (forceTakeover) {
+      this.readerHistoryPagingEnabled = false;
+      if (gesture.readerOwned) this.acceptReaderScrollTakeover();
+      return;
+    }
+    this.applyReaderHistoryPagingGesture(gesture);
+  }
+
+  private applyReaderHistoryPagingGesture(gesture: ChatReaderGesture): void {
+    this.readerHistoryPagingEnabled = gesture.direction === "older" && gesture.readerOwned;
+    if (this.readerHistoryPagingEnabled) this.requestLoadMoreIfNeeded();
   }
 
   private shouldForceReaderScrollTakeover(): boolean {
@@ -1239,10 +1262,14 @@ export class ChatView extends LitElement {
   }
 
   private requestLoadMoreIfNeeded(): void {
+    // Earlier history follows a meaningful wheel or touch gesture. Layout,
+    // keyboard, and scrollbar movement still take reading control, but cannot
+    // turn an opening-time reflow into an automatic history request.
+    if (!this.readerHistoryPagingEnabled || this.scrolling.mode.kind !== "free") return;
     if (this.loadMoreCheckFrame !== undefined) return;
     this.loadMoreCheckFrame = requestAnimationFrame(() => {
       this.loadMoreCheckFrame = undefined;
-      if (!this.scrolling.canLoadMore || this.isSessionLive()) return;
+      if (!this.readerHistoryPagingEnabled || this.scrolling.mode.kind !== "free" || !this.scrolling.canLoadMore || this.isSessionLive()) return;
       const chat = this.chat;
       if (!chat) return;
       if (shouldRequestEarlierMessages({
