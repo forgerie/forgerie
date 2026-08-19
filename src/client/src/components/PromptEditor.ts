@@ -265,7 +265,6 @@ export class PromptEditor extends LitElement {
           .disabled=${this.disabled}
           .submissionDisabled=${busy || !this.submissionAvailable}
           .working=${rail.kind === "queueCapable"}
-          .compacting=${this.isCompacting}
           .resting=${resting}
           .runtime=${this.runtime()}
           .promptHistory=${this.promptHistory}

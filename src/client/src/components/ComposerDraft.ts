@@ -65,7 +65,6 @@ export class ComposerDraft extends LitElement {
   @property({ type: Boolean }) disabled = false;
   @property({ type: Boolean }) submissionDisabled = false;
   @property({ type: Boolean }) working = false;
-  @property({ type: Boolean }) compacting = false;
   @property({ type: Boolean }) resting = false;
   @property() placeholderText = DEFAULT_COMPOSER_PLACEHOLDER;
   @property() editorLabel = DEFAULT_COMPOSER_EDITOR_LABEL;
@@ -206,7 +205,6 @@ export class ComposerDraft extends LitElement {
         <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label=${this.editorLabel} aria-disabled=${this.disabled ? "true" : "false"}></div>
         <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
         ${shellMode ? html`<div class="mode-hint">Shell command${shellInputMode.excludeFromContext ? " · excluded from context" : ""}</div>` : null}
-        ${this.compacting && !shellMode ? html`<div class="mode-hint">Compacting history · message will be queued</div>` : null}
         <div class="composer-live-region" aria-live="polite" aria-atomic="true" data-live="attachments">${this.politeAnnouncement}</div>
         <div class="composer-live-region" aria-live="assertive" aria-atomic="true" data-live="attachment-errors">${this.assertiveAnnouncement}</div>
         ${this.renderAttachments()}

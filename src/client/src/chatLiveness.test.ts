@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatElapsed, latestToolStep, livenessStep } from "./chatLiveness";
+import { formatElapsed, latestToolStep, livenessPhase, livenessStep } from "./chatLiveness";
 import { elapsedSince } from "./sessionWorkingRuntime";
 import type { SessionActivity } from "./api";
 import type { ChatLine, ChatPart } from "./components/shared";
@@ -88,6 +88,24 @@ describe("livenessStep", () => {
 
   it("falls back to the status text when no activity is published", () => {
     expect(livenessStep([], undefined, "  Sending your message…  ")).toBe("Sending your message…");
+  });
+});
+
+describe("livenessPhase", () => {
+  it("names compaction as its own stretch of work", () => {
+    expect(livenessPhase({ isCompacting: true, indicatorActive: true })).toBe("compacting");
+  });
+
+  it("names a running turn as work", () => {
+    expect(livenessPhase({ isCompacting: false, indicatorActive: true })).toBe("working");
+  });
+
+  it("reports compaction even when the activity feed has gone quiet", () => {
+    expect(livenessPhase({ isCompacting: true, indicatorActive: false })).toBe("compacting");
+  });
+
+  it("reports no phase when the session is idle", () => {
+    expect(livenessPhase({ isCompacting: false, indicatorActive: false })).toBeUndefined();
   });
 });
 

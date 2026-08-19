@@ -744,12 +744,32 @@ export const chatStyles = css`
   .system-notice { margin: 0; color: var(--calm-ink-muted); }
   .system-notice-lead { color: var(--calm-danger); font-weight: 500; }
   .queued-messages { max-width: 100%; min-width: 0; box-sizing: border-box; display: grid; gap: 8px; margin: 0 0 var(--calm-turn-gap); padding: 0; border: 0; border-radius: 0; background: none; color: var(--calm-ink-dim); overflow: hidden; }
-  .queued-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
-  .queued-heading { min-width: 0; flex: 1 1 180px; display: grid; gap: 2px; }
+  .queued-heading { min-width: 0; display: grid; gap: 2px; }
   .queued-heading strong { color: var(--calm-ink-muted); font-weight: 500; }
   .queued-heading small { color: var(--calm-ink-dim); }
-  .queued-clear-button { flex: 0 0 auto; border: 1px solid var(--pi-warning-border); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-warning); padding: 5px 10px; font: var(--pi-text-sm) system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
-  .queued-clear-button:hover, .queued-clear-button:focus { border-color: var(--pi-warning); color: var(--pi-text-bright); }
+  /* A queued message is the bubble it is about to become, not yet sent: the
+     same shape on the same side of the column, dimmed, with a dashed edge for
+     "not committed". It needs no heading, count, or badge, because the reader
+     is looking at the message itself sitting where it will land. */
+  .queued-ghosts { max-width: 100%; min-width: 0; box-sizing: border-box; display: grid; gap: 8px; margin: 0 0 var(--calm-turn-gap); color: var(--calm-ink-muted); }
+  .queued-ghost {
+    --calm-bleed: 0px;
+    width: fit-content;
+    max-width: min(100%, 30rem);
+    min-width: 0;
+    box-sizing: border-box;
+    margin-inline-start: auto;
+    border: 1px dashed var(--pi-border);
+    border-radius: var(--pi-radius-surface);
+    background: color-mix(in srgb, var(--calm-canvas-soft) 55%, transparent);
+    padding: 12px 16px;
+    font-size: var(--pi-text-md);
+  }
+  /* State and action ride in the slot a sent message uses for its timestamp,
+     so neither interrupts the message's own line. */
+  .queued-ghost-meta { display: flex; justify-content: flex-end; align-items: baseline; gap: 10px; margin: 0; color: var(--calm-ink-dim); font-size: var(--pi-text-xs); }
+  .queued-ghost-clear { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .queued-ghost-clear:hover, .queued-ghost-clear:focus-visible { color: var(--pi-text-bright); }
   .queued-message { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--pi-border); }
   .queued-message:first-of-type { padding-top: 0; border-top: 0; }
   .queued-kind { color: var(--pi-muted); font-size: var(--pi-text-sm); text-transform: uppercase; }
@@ -761,9 +781,6 @@ export const chatStyles = css`
   .session-launch-recovery-actions button:hover, .session-launch-recovery-actions button:focus { border-color: var(--pi-warning); color: var(--pi-text-bright); }
   .session-launch-recovery-actions button:disabled { border-color: var(--pi-border); color: var(--pi-muted); cursor: default; opacity: .7; }
   .queued-dialogs { margin: -8px 0 14px; padding: 0 4px; color: var(--pi-muted); font-size: var(--pi-text-sm); text-align: center; }
-  .session-activity { max-width: 100%; min-width: 0; box-sizing: border-box; display: grid; gap: 4px; margin: 0 0 var(--calm-turn-gap); padding: 0; border: 0; border-radius: 0; background: none; color: var(--calm-ink-dim); overflow: hidden; }
-  .session-activity strong { color: var(--calm-ink-muted); font-weight: 500; }
-  .session-activity span, .session-activity small { color: var(--calm-ink-dim); }
   .history-boundary small { color: var(--pi-dim); }
   /* The liveness line is the running turn's footer, so it sits with the pooled
      activity above it rather than floating between them. */

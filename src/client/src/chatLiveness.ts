@@ -10,6 +10,21 @@ import type { ChatLine } from "./components/shared";
  * follow the output itself.
  */
 
+/**
+ * What stretch of work the transcript is timing.
+ *
+ * Compaction is a phase of its own rather than a continuation of the turn that
+ * triggered it. The elapsed clock restarts when the phase changes, so
+ * "compacting history" never inherits the finished turn's minutes and claim a
+ * duration that never happened.
+ */
+export type LivenessPhase = "working" | "compacting";
+
+export function livenessPhase(input: { isCompacting: boolean; indicatorActive: boolean }): LivenessPhase | undefined {
+  if (input.isCompacting) return "compacting";
+  return input.indicatorActive ? "working" : undefined;
+}
+
 /** Elapsed time, coarse on purpose: this is reassurance, not a stopwatch. */
 export function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));

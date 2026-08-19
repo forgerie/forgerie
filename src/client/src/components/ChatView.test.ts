@@ -9,37 +9,31 @@ import {
   chatGroupScrollMarkerId,
   chatMessageGroupClassName,
   chatMessageMetadataLabel,
+  chatQueuedGhostActionLabel,
   chatQueuedMessageSections,
-  chatQueuedSectionShowsClearAction,
   chatSessionWarningRows,
 } from "./ChatView";
 import { templateEventHandlerAfterMarker, templateEventHandlerNearMarker, templateText } from "../templateInspection.testSupport";
 
 describe("chatQueuedMessageSections", () => {
-  it("labels client-side pending-start sends separately from server queued messages", () => {
-    const sections = chatQueuedMessageSections(
-      [{ kind: "followUp", text: "queued before start" }],
-      [{ kind: "steer", text: "server queued" }],
-    );
+  it("labels client-side pending-start sends as waiting on the session", () => {
+    const sections = chatQueuedMessageSections([{ kind: "followUp", text: "queued before start" }]);
 
-    expect(sections).toEqual([
-      {
-        source: "client",
-        heading: "Queued until session starts",
-        detail: "Will send once the backend session is ready",
-        messages: [{ kind: "followUp", text: "queued before start" }],
-      },
-      {
-        source: "server",
-        heading: "Queued messages",
-        detail: "1 pending",
-        messages: [{ kind: "steer", text: "server queued" }],
-      },
-    ]);
+    expect(sections).toEqual([{
+      heading: "Queued until session starts",
+      detail: "Will send once the backend session is ready",
+      messages: [{ kind: "followUp", text: "queued before start" }],
+    }]);
+  });
+
+  // The server queue renders as ghosts of the messages it will become, so it
+  // is deliberately absent from the chrome-bearing section model.
+  it("leaves the server queue out of the labelled sections", () => {
+    expect(chatQueuedMessageSections([])).toEqual([]);
   });
 
   it("synthesizes the recoverable first prompt when the machine-scoped client queue is unavailable", () => {
-    const sections = chatQueuedMessageSections([], [], {
+    const sections = chatQueuedMessageSections([], {
       stage: "promptDeliveryAmbiguous",
       sessionId: "session-1",
       destination: { machineId: "remote", workspaceId: "workspace-1", cwd: "/repo" },
@@ -47,7 +41,6 @@ describe("chatQueuedMessageSections", () => {
     });
 
     expect(sections).toEqual([{
-      source: "client",
       heading: "First prompt needs attention",
       detail: "Resolve it before later queued messages can continue",
       messages: [{ kind: "followUp", text: "[First prompt retained privately]" }],
@@ -55,40 +48,39 @@ describe("chatQueuedMessageSections", () => {
   });
 });
 
-describe("chatQueuedSectionShowsClearAction", () => {
-  // The show/hide decision for the server clear-queue button is content/layout,
-  // so it lives in a pure exported seam instead of scraping rendered markup.
-  const serverSection = requireSection(chatQueuedMessageSections([], [{ kind: "steer", text: "server queued" }])[0]);
-  const clientSection = requireSection(chatQueuedMessageSections([{ kind: "followUp", text: "waiting" }], [])[0]);
-
-  it("shows the action for the server queue when a clear handler is wired", () => {
-    expect(chatQueuedSectionShowsClearAction(serverSection, true)).toBe(true);
+describe("chatQueuedGhostActionLabel", () => {
+  // The action always clears the whole server queue, so the label only promises
+  // to remove one message when one message is all there is to lose.
+  it("offers to remove the only queued message", () => {
+    expect(chatQueuedGhostActionLabel(1)).toBe("remove");
   });
 
-  it("hides the action when no clear handler is wired", () => {
-    expect(chatQueuedSectionShowsClearAction(serverSection, false)).toBe(false);
-  });
-
-  it("never shows the server action for the separate client pending-start queue", () => {
-    expect(chatQueuedSectionShowsClearAction(clientSection, true)).toBe(false);
+  it("says the action clears every queued message once more than one would go", () => {
+    expect(chatQueuedGhostActionLabel(3)).toBe("clear all");
   });
 });
 
-describe("ChatView queued-message clear wiring", () => {
-  // Escape hatch: this case verifies the Clear queue button's Lit event wiring,
-  // whose only observable effect is invoking the injected callback. Vitest runs
-  // with no DOM environment here, so a shadow-DOM click harness would add
-  // disproportionate setup; handler extraction anchored to the user-facing
-  // "Clear queue" button text is proportionate.
-  it("invokes onClearServerQueue when the server-queue action is activated", () => {
+describe("ChatView queued-ghost clear wiring", () => {
+  // Escape hatch: this case verifies the clear action's Lit event wiring, whose
+  // only observable effect is invoking the injected callback. Vitest runs with
+  // no DOM environment here, so a shadow-DOM click harness would add
+  // disproportionate setup; handler extraction anchored to the stable
+  // `queued-ghost-clear` class marker is proportionate.
+  it("invokes onClearServerQueue when the ghost stack's clear action is activated", () => {
     const view = new ChatView();
     const onClearServerQueue = vi.fn();
     view.status = queuedStatus([{ kind: "steer", text: "server queued" }]);
     view.onClearServerQueue = onClearServerQueue;
 
-    templateEventHandlerNearMarker(renderQueuedMessages(view), "Clear queue")(new Event("click"));
+    const rendered = renderQueuedGhosts(view);
+    if (rendered === null) throw new Error("expected a queued-ghost stack");
+    templateEventHandlerNearMarker(rendered, "queued-ghost-clear")(new Event("click"));
 
     expect(onClearServerQueue).toHaveBeenCalledOnce();
+  });
+
+  it("stays out of the transcript when nothing is queued", () => {
+    expect(renderQueuedGhosts(withStatus(new ChatView(), queuedStatus([])))).toBeNull();
   });
 });
 
@@ -148,11 +140,26 @@ describe("ChatView transcript liveness", () => {
     expect(renderTranscriptLiveness(withStatus(new ChatView(), idleStatus()))).toBeNull();
   });
 
-  it("leaves compaction to its own notice rather than doubling it", () => {
+  // Compaction used to get its own explanatory notice. It is a stretch of work
+  // like any other, so it names itself on the one liveness line instead.
+  it("names compaction as the running step", () => {
     const view = withStatus(new ChatView(), { ...queuedStatus([]), isCompacting: true });
     view.isCompacting = true;
 
-    expect(renderTranscriptLiveness(view)).toBeNull();
+    const rendered = renderTranscriptLiveness(view);
+    if (rendered === null) throw new Error("expected a liveness line while compacting");
+    expect(templateText(rendered)).toContain("compacting history");
+  });
+
+  // The latest tool call would otherwise leak in from the turn that just ended.
+  it("does not name the finished turn's last tool call while compacting", () => {
+    const view = withStatus(new ChatView(), { ...queuedStatus([]), isCompacting: true });
+    view.isCompacting = true;
+    view.messages = [toolCallLine("read", "archive.ts")];
+
+    const rendered = renderTranscriptLiveness(view);
+    if (rendered === null) throw new Error("expected a liveness line while compacting");
+    expect(templateText(rendered)).not.toContain("archive.ts");
   });
 });
 
@@ -327,15 +334,15 @@ interface GroupBodyRenderCall {
   startIndex: number;
 }
 
-type RenderQueuedMessages = (this: ChatView) => TemplateResult;
+type RenderQueuedGhosts = (this: ChatView) => TemplateResult | null;
 type RenderMessageGroup = (this: ChatView, messages: ChatLine[], startIndex: number, endIndex: number, defaultOpen: boolean) => TemplateResult;
 type RenderMessageGroupBody = (this: ChatView, messages: ChatLine[], startIndex: number) => TemplateResult;
 type RenderWarnings = (this: ChatView) => TemplateResult | null;
 type TemplateEventHandler = (event: Event) => void;
 
-function renderQueuedMessages(view: ChatView): TemplateResult {
-  const method: unknown = Reflect.get(view, "renderQueuedMessages");
-  if (!isRenderQueuedMessages(method)) throw new Error("ChatView.renderQueuedMessages is not callable");
+function renderQueuedGhosts(view: ChatView): TemplateResult | null {
+  const method: unknown = Reflect.get(view, "renderQueuedGhosts");
+  if (!isRenderQueuedGhosts(method)) throw new Error("ChatView.renderQueuedGhosts is not callable");
   return method.call(view);
 }
 
@@ -363,7 +370,7 @@ function observeGroupBodyRenders(view: ChatView): GroupBodyRenderCall[] {
   return calls;
 }
 
-function isRenderQueuedMessages(value: unknown): value is RenderQueuedMessages {
+function isRenderQueuedGhosts(value: unknown): value is RenderQueuedGhosts {
   return typeof value === "function";
 }
 
@@ -398,9 +405,8 @@ function dispatchDetailsToggle(handler: TemplateEventHandler, open: boolean): vo
   }
 }
 
-function requireSection(section: ReturnType<typeof chatQueuedMessageSections>[number] | undefined): ReturnType<typeof chatQueuedMessageSections>[number] {
-  if (section === undefined) throw new Error("expected a queued-message section");
-  return section;
+function toolCallLine(toolName: string, summary: string): ChatLine {
+  return { role: "assistant", parts: [{ type: "toolCall", toolName, summary }] };
 }
 
 function withStatus(view: ChatView, status: SessionStatus): ChatView {

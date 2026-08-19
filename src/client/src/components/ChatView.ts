@@ -3,7 +3,7 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
 import { chatTurns, foldMetaSources, groupChatMessages, latestChatTurnStart, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
-import { livenessStep } from "../chatLiveness";
+import { livenessPhase, livenessStep, type LivenessPhase } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import "./TranscriptLivenessView";
@@ -32,7 +32,6 @@ const messageDayFormatter = new Intl.DateTimeFormat(undefined, { month: "short",
 const messageDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 export interface QueuedMessageSection {
-  source: "client" | "server";
   heading: string;
   detail: string;
   messages: QueuedSessionMessage[];
@@ -47,21 +46,36 @@ export interface ChatInitialReadingTarget {
 const VIEWPORT_RESIZE_RESTORE_SETTLE_FRAMES = 3;
 type DefaultScrollRestoreState = "idle" | "deferred" | "scheduled";
 
+/**
+ * Queued sends that still need explaining: the ones held before the session
+ * exists, and the first prompt that needs recovering. Both carry controls or a
+ * condition the reader cannot infer from the message itself.
+ *
+ * The live server queue is deliberately absent. Those messages render as ghosts
+ * of the bubbles they are about to become, which says "waiting" without a
+ * heading, a counter, and a badge all repeating it.
+ */
 export function chatQueuedMessageSections(
   clientQueued: QueuedSessionMessage[],
-  serverQueued: QueuedSessionMessage[],
   sessionLaunchRecovery?: SessionLaunchRecovery,
 ): QueuedMessageSection[] {
   const recoveryClientQueued = sessionLaunchRecovery !== undefined && clientQueued.length === 0
     ? [{ kind: "followUp" as const, text: sessionLaunchRecoveryPreviewText(sessionLaunchRecovery) }]
     : clientQueued;
-  const clientSection = sessionLaunchRecovery === undefined
-    ? { source: "client" as const, heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: recoveryClientQueued }
-    : { source: "client" as const, heading: "First prompt needs attention", detail: "Resolve it before later queued messages can continue", messages: recoveryClientQueued };
-  return [
-    recoveryClientQueued.length === 0 ? undefined : clientSection,
-    serverQueued.length === 0 ? undefined : { source: "server", heading: "Queued messages", detail: `${String(serverQueued.length)} pending`, messages: serverQueued },
-  ].filter((section): section is QueuedMessageSection => section !== undefined);
+  if (recoveryClientQueued.length === 0) return [];
+  return [sessionLaunchRecovery === undefined
+    ? { heading: "Queued until session starts", detail: "Will send once the backend session is ready", messages: recoveryClientQueued }
+    : { heading: "First prompt needs attention", detail: "Resolve it before later queued messages can continue", messages: recoveryClientQueued }];
+}
+
+/**
+ * The label on the ghost stack's only action.
+ *
+ * The action clears the entire server queue, so it promises to remove "the"
+ * message only when one message is all there is to lose.
+ */
+export function chatQueuedGhostActionLabel(queuedCount: number): string {
+  return queuedCount === 1 ? "remove" : "clear all";
 }
 
 function sessionLaunchRecoveryPreviewText(recovery: SessionLaunchRecovery): string {
@@ -170,11 +184,6 @@ export function chatMessageGroupClassName(live: boolean): string {
   return live ? "msg event-group live" : "msg event-group";
 }
 
-/** Whether a queued-message section shows the server clear-queue action. */
-export function chatQueuedSectionShowsClearAction(section: QueuedMessageSection, hasClearHandler: boolean): boolean {
-  return section.source === "server" && hasClearHandler;
-}
-
 /** A rendered session-warning row derived from live status warnings. */
 export interface ChatSessionWarningRow {
   severity: SessionWarningSeverity;
@@ -261,7 +270,6 @@ export class ChatView extends LitElement {
   @property({ type: Boolean }) loadingMore = false;
   @property({ type: Boolean }) isSendingPrompt = false;
   @property({ type: Boolean }) isCompacting = false;
-  @property({ type: Number }) pendingMessageCount = 0;
   @property({ attribute: false }) clientQueuedMessages: QueuedSessionMessage[] = [];
   @property({ attribute: false }) sessionLaunchRecovery?: SessionLaunchRecovery;
   @property({ attribute: false }) onSessionLaunchRecoveryAction?: (sessionId: string, action: ChatSessionLaunchRecoveryActionKind) => void;
@@ -300,6 +308,7 @@ export class ChatView extends LitElement {
   @state() private expandedMetaKey: string | undefined;
   /** ISO time the current stretch of work began; undefined while idle. */
   @state() private activeSince: string | undefined;
+  private activePhase: LivenessPhase | undefined;
   private imageZoomModalRegistration: RenderedModalRegistration | undefined;
   private readonly disclosures = new ChatDisclosureController();
   private readonly scrollPositions = new ChatScrollController();
@@ -413,6 +422,7 @@ export class ChatView extends LitElement {
     this.trackActiveSince();
     if (changed.has("sessionId")) {
       this.activeSince = undefined;
+      this.activePhase = undefined;
       this.savePreviousSessionScrollPosition(changed.get("sessionId"));
       this.prepareSessionUiState();
       this.trackActiveSince();
@@ -882,8 +892,8 @@ export class ChatView extends LitElement {
   private renderRunningTurnTail() {
     return html`
       ${this.renderQueuedMessages()}
-      ${this.renderSessionActivity()}
       ${this.renderTranscriptLiveness()}
+      ${this.renderQueuedGhosts()}
       ${this.renderOpenAsk()}
       ${this.renderExtensionDialogs()}
     `;
@@ -904,24 +914,17 @@ export class ChatView extends LitElement {
   }
 
   private renderQueuedMessages() {
-    const serverQueued = this.status?.queuedMessages ?? [];
-    return html`${chatQueuedMessageSections(this.clientQueuedMessages, serverQueued, this.sessionLaunchRecovery)
+    return html`${chatQueuedMessageSections(this.clientQueuedMessages, this.sessionLaunchRecovery)
       .map((section) => this.renderQueuedMessageList(section))}`;
   }
 
   private renderQueuedMessageList(section: QueuedMessageSection) {
-    const canClear = chatQueuedSectionShowsClearAction(section, this.onClearServerQueue !== undefined);
-    const hasFirstPromptRecovery = section.source === "client" && this.sessionLaunchRecovery !== undefined;
+    const hasFirstPromptRecovery = this.sessionLaunchRecovery !== undefined;
     return html`
       <aside class="queued-messages" aria-live="polite">
-        <div class="queued-header">
-          <div class="queued-heading">
-            <strong>${section.heading}</strong>
-            <small>${section.detail}</small>
-          </div>
-          ${canClear ? html`
-            <button type="button" class="queued-clear-button" title="Clear queued messages without stopping active work" @click=${this.handleClearServerQueue}>Clear queue</button>
-          ` : null}
+        <div class="queued-heading">
+          <strong>${section.heading}</strong>
+          <small>${section.detail}</small>
         </div>
         ${section.messages.map((message, index) => html`
           <div class=${hasFirstPromptRecovery && index === 0 ? "queued-message first-prompt-recovery" : "queued-message"}>
@@ -932,6 +935,32 @@ export class ChatView extends LitElement {
             ${hasFirstPromptRecovery && index === 0 ? this.renderSessionLaunchRecovery() : null}
           </div>
         `)}
+      </aside>
+    `;
+  }
+
+  /**
+   * The server queue, drawn as ghosts of the messages it will become.
+   *
+   * A queued message is the same message, in the same place, not yet sent. It
+   * shows itself in the bubble it is about to occupy, so nothing has to count
+   * it, head it, or badge it. The one word of state and the one action sit in
+   * the slot a sent message uses for its timestamp, out of the reading line.
+   */
+  private renderQueuedGhosts() {
+    const queued = this.status?.queuedMessages ?? [];
+    if (queued.length === 0) return null;
+    return html`
+      <aside class="queued-ghosts" aria-live="polite" aria-label="Queued messages">
+        ${queued.map((message) => html`
+          <div class="queued-ghost"><formatted-text .text=${message.text}></formatted-text></div>
+        `)}
+        <p class="queued-ghost-meta">
+          <span>queued</span>
+          ${this.onClearServerQueue === undefined ? null : html`
+            <button type="button" class="queued-ghost-clear" title="Clear queued messages without stopping active work" @click=${this.handleClearServerQueue}>${chatQueuedGhostActionLabel(queued.length)}</button>
+          `}
+        </p>
       </aside>
     `;
   }
@@ -1016,17 +1045,31 @@ export class ChatView extends LitElement {
    * It reuses `sessionActivityIndicator` rather than deriving state a second
    * time, so it can never disagree with the status bar where both are visible.
    *
-   * Compaction is excluded: `renderSessionActivity` already narrates it in
-   * more detail, and two notices for one condition reads as a stutter.
+   * Compaction reports here too. It is a stretch of work like any other, and a
+   * second notice explaining it in prose only said twice what this line says
+   * once.
    */
   private renderTranscriptLiveness() {
-    if (this.isCompacting) return null;
-    const indicator = this.livenessIndicator();
-    if (indicator?.active !== true) return null;
+    const step = this.livenessStepText();
+    if (step === undefined) return null;
     return html`<transcript-liveness
       .startedAt=${this.activeSince ?? ""}
-      .step=${livenessStep(this.messages, this.activity, indicator.text)}
+      .step=${step}
     ></transcript-liveness>`;
+  }
+
+  /**
+   * What the liveness line names as the current step.
+   *
+   * Compaction names itself instead of deferring to `livenessStep`, whose
+   * newest-tool-call preference would otherwise show the finished turn's last
+   * tool while the agent is summarizing.
+   */
+  private livenessStepText(): string | undefined {
+    if (this.isCompacting) return "compacting history";
+    const indicator = this.livenessIndicator();
+    if (indicator?.active !== true) return undefined;
+    return livenessStep(this.messages, this.activity, indicator.text);
   }
 
   private livenessIndicator(): SessionActivityIndicator | undefined {
@@ -1039,23 +1082,15 @@ export class ChatView extends LitElement {
    * Not `activity.at`: the activity feed republishes on every tool event, so its
    * timestamp is the last thing that happened, and elapsed time computed from it
    * sits at zero for as long as the agent keeps reporting. This latches the
-   * first moment the session went active and holds it until it goes idle.
+   * first moment the session entered its current phase and holds it until the
+   * phase changes, so compaction times itself rather than inheriting the
+   * minutes of the turn that triggered it.
    */
   private trackActiveSince(): void {
-    const active = this.livenessIndicator()?.active === true && !this.isCompacting;
-    if (active === (this.activeSince !== undefined)) return;
-    this.activeSince = active ? new Date().toISOString() : undefined;
-  }
-
-  private renderSessionActivity() {
-    if (!this.isCompacting) return null;
-    return html`
-      <aside class="session-activity compacting" aria-live="polite">
-        <strong>Compacting history…</strong>
-        <span>The agent is summarizing earlier context. New prompts will be queued until compaction finishes.</span>
-        ${this.pendingMessageCount > 0 ? html`<small>${this.pendingMessageCount} queued ${this.pendingMessageCount === 1 ? "message" : "messages"}</small>` : null}
-      </aside>
-    `;
+    const phase = livenessPhase({ isCompacting: this.isCompacting, indicatorActive: this.livenessIndicator()?.active === true });
+    if (phase === this.activePhase) return;
+    this.activePhase = phase;
+    this.activeSince = phase === undefined ? undefined : new Date().toISOString();
   }
 
   private renderHistoryBoundary() {
