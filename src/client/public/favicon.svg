@@ -1,24 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">Forgerie mark</title>
-  <desc id="desc">A geometric anvil silhouette.</desc>
-  <style>
-    .mark { fill: #6699e0; }
-    @media (prefers-color-scheme: light) {
-      .mark { fill: #3563c4; }
-    }
-  </style>
-  <!-- Scaled to sit inside the maskable safe zone (inner 80% circle),
-       so the same source renders the PWA maskable PNGs. -->
-  <g class="mark" transform="translate(512 512) scale(0.92) translate(-512 -512)">
-    <!-- face (top block) -->
-    <path d="M 150 330 L 620 330 L 620 445 L 175 445 Q 150 445 150 420 Z"/>
-    <!-- horn, tapering to a point on the right (overlaps face to hide the seam) -->
-    <path d="M 610 330 C 760 330 850 355 905 390 C 840 430 730 445 610 445 Z"/>
-    <!-- waist (overlaps face and flare) -->
-    <path d="M 430 435 L 610 435 L 587 585 L 453 585 Z"/>
-    <!-- base flare (overlaps foot) -->
-    <path d="M 395 575 L 645 575 L 690 665 L 350 665 Z"/>
-    <!-- foot -->
-    <path d="M 330 655 L 710 655 L 710 715 L 330 715 Z"/>
+  <desc id="desc">An ink anvil with a single red spark on warm paper.</desc>
+  <!-- Paper-ink style: the paper field is part of the mark, so the same
+       source renders the tab favicon and the full-bleed PWA PNGs. -->
+  <rect width="1024" height="1024" fill="#faf7f0"/>
+  <!-- Scaled to sit inside the maskable safe zone (inner 80% circle). -->
+  <g transform="translate(512 512) scale(0.92) translate(-512 -512)">
+    <g fill="#232323">
+      <!-- face (top block) -->
+      <path d="M 150 330 L 620 330 L 620 445 L 175 445 Q 150 445 150 420 Z"/>
+      <!-- horn, tapering to a point on the right (overlaps face to hide the seam) -->
+      <path d="M 610 330 C 760 330 850 355 905 390 C 840 430 730 445 610 445 Z"/>
+      <!-- waist (overlaps face and flare) -->
+      <path d="M 430 435 L 610 435 L 587 585 L 453 585 Z"/>
+      <!-- base flare (overlaps foot) -->
+      <path d="M 395 575 L 645 575 L 690 665 L 350 665 Z"/>
+      <!-- foot -->
+      <path d="M 330 655 L 710 655 L 710 715 L 330 715 Z"/>
+    </g>
+    <!-- single spark accent -->
+    <rect x="690" y="235" width="42" height="42" fill="#e0532f" transform="rotate(45 711 256)"/>
   </g>
 </svg>
