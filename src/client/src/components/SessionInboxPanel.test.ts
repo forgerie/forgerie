@@ -1429,6 +1429,8 @@ async function mountRowForPress(options: {
   onSelectSession?: (session: SessionInfo) => void;
   onDeleteSession?: (session: SessionInfo) => void;
   onRestoreSession?: (session: SessionInfo) => void;
+  onPinSession?: (session: SessionInfo) => void;
+  onUnpinSession?: (session: SessionInfo) => void;
   session?: SessionInfo;
 } = {}): Promise<{ panel: SessionInboxPanel; row: HTMLElement }> {
   const session = options.session ?? mkSession("open-one");
@@ -1439,6 +1441,8 @@ async function mountRowForPress(options: {
     onSelectSession: options.onSelectSession ?? noop,
     onDeleteSession: options.onDeleteSession ?? noop,
     onRestoreSession: options.onRestoreSession ?? noop,
+    onPinSession: options.onPinSession ?? noop,
+    onUnpinSession: options.onUnpinSession ?? noop,
   });
   const root = shadowRoot(panel);
   if (group === "archived") await revealArchived(panel);
@@ -1560,6 +1564,52 @@ describe("row commands", () => {
     expect(rowMenuItem(panel, "menu-restore")).not.toBeNull();
     expect(rowMenuItem(panel, "menu-delete")).not.toBeNull();
     expect(rowMenuItem(panel, "menu-archive")).toBeNull();
+    expect(rowMenuItem(panel, "menu-pin")).toBeNull();
+  });
+
+  it("pins an open row from its commands", async () => {
+    const pinned: string[] = [];
+    const { panel, row } = await mountRowForPress({ onPinSession: (s) => { pinned.push(s.id); } });
+
+    await holdRow(panel, row);
+    expect(rowMenuItem(panel, "menu-unpin")).toBeNull();
+    rowMenuItem(panel, "menu-pin")?.click();
+
+    expect(pinned).toEqual(["open-one"]);
+  });
+
+  it("a pinned row offers unpin and withholds every archive affordance", async () => {
+    const unpinned: string[] = [];
+    const { panel, row } = await mountRowForPress({
+      session: mkSession("pinned-one", { pinned: true }),
+      onUnpinSession: (s) => { unpinned.push(s.id); },
+    });
+
+    expect(row.querySelector("[data-pinned-marker]")).not.toBeNull();
+    expect(row.querySelector("[data-action='archive']")).toBeNull();
+    const unpinAction = row.querySelector("[data-action='unpin']");
+    expect(unpinAction).not.toBeNull();
+
+    await holdRow(panel, row);
+    expect(rowMenuItem(panel, "menu-archive")).toBeNull();
+    expect(rowMenuItem(panel, "menu-pin")).toBeNull();
+    rowMenuItem(panel, "menu-unpin")?.click();
+
+    expect(unpinned).toEqual(["pinned-one"]);
+  });
+
+  it("unpins from the row's inline action", async () => {
+    const unpinned: string[] = [];
+    const { row } = await mountRowForPress({
+      session: mkSession("pinned-one", { pinned: true }),
+      onUnpinSession: (s) => { unpinned.push(s.id); },
+    });
+
+    const unpinAction = row.querySelector("[data-action='unpin']");
+    if (!(unpinAction instanceof HTMLElement)) throw new Error("No unpin action");
+    unpinAction.click();
+
+    expect(unpinned).toEqual(["pinned-one"]);
   });
 
   it("asks twice before deleting, because deleting has no undo", async () => {

@@ -40,6 +40,8 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) onRemoveMachine?: (machine: Machine) => void | Promise<void>;
   @property({ attribute: false }) onSelectSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onArchiveSession?: (session: SessionInfo) => void | Promise<void>;
+  @property({ attribute: false }) onPinSession?: (session: SessionInfo) => void | Promise<void>;
+  @property({ attribute: false }) onUnpinSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onRestoreSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onDeleteSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) undoToast?: { readonly session: SessionInfo; readonly machineId?: string };
@@ -119,6 +121,8 @@ export class AppNavigationPanel extends LitElement {
         .workspacesByProjectId=${this.workspacesByProjectId}
         .onSelectSession=${this.onSelectSession}
         .onArchiveSession=${this.onArchiveSession}
+        .onPinSession=${this.onPinSession}
+        .onUnpinSession=${this.onUnpinSession}
         .onRestoreSession=${this.onRestoreSession}
         .onDeleteSession=${this.onDeleteSession}
         .onNewSession=${this.onNewSession}

@@ -377,6 +377,8 @@ export class SessionInboxController implements SessionInboxBridge {
       this.applyCreatedSession(current, event.session);
     } else if (event.type === "session.name") {
       this.applySessionName(current, event.sessionId, event.name);
+    } else if (event.type === "session.pinned") {
+      this.applySessionPinned(current, event.sessionId, event.pinned);
     } else if (event.type === "status.update") {
       this.pendingStatusBySession.set(event.status.sessionId, event.status);
     } else if (event.type === "activity.update") {
@@ -734,6 +736,21 @@ export class SessionInboxController implements SessionInboxBridge {
       const next = { ...s };
       if (name === undefined || name === "") delete next.name;
       else next.name = name;
+      return next;
+    });
+    this.setState({ globalSessions: { ...current, sessions } });
+  }
+
+  private applySessionPinned(
+    current: GlobalSessionsState,
+    sessionId: string,
+    pinned: boolean,
+  ): void {
+    const sessions = current.sessions.map((s) => {
+      if (s.id !== sessionId) return s;
+      const next = { ...s };
+      if (pinned) next.pinned = true;
+      else delete next.pinned;
       return next;
     });
     this.setState({ globalSessions: { ...current, sessions } });

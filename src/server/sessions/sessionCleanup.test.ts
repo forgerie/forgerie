@@ -61,6 +61,22 @@ describe("session cleanup planning", () => {
     }]);
   });
 
+  it("never plans an auto-archive for a pinned session", () => {
+    const plan = planSessionCleanup({
+      now: new Date("2026-06-25T00:00:00.000Z"),
+      thresholds: { archiveIdleDays: 30 },
+      pinnedSessionIds: new Set(["pinned-idle"]),
+      sessions: [
+        sessionEntry("pinned-idle", "/repo", "2026-01-01T00:00:00.000Z"),
+        sessionEntry("plain-idle", "/repo", "2026-01-01T00:00:00.000Z"),
+      ],
+      archivedRecords: [],
+    });
+
+    expect(plan.archiveInputs.map((input) => input.sessionId)).toEqual(["plain-idle"]);
+    expect(plan.totals).toEqual({ archiveCount: 1, deleteCount: 0 });
+  });
+
   it("filters cleanup candidates to selected project cwd paths", () => {
     const plan = planSessionCleanup({
       now: new Date("2026-06-25T00:00:00.000Z"),

@@ -43,6 +43,7 @@ import {
   parseProject,
   parsePromptResourceCatalogResponse,
   parsePromptResourceCommandRunResponse,
+  parsePinState,
   parsePromoted,
   parseReloaded,
   parseRestored,
@@ -271,6 +272,8 @@ export const sessionsApi = {
   archive: (session: SessionRef, machineId = "local") => request(sessionPath(session, "archive", machineId), parseArchived, { method: "POST", body: sessionBody(session) }),
   archiveWithDescendants: (session: SessionRef, machineId = "local") => request(sessionPath(session, "archive-tree", machineId), parseArchived, { method: "POST", body: sessionBody(session) }),
   restore: (session: SessionRef, machineId = "local") => request(sessionPath(session, "restore", machineId), parseRestored, { method: "POST", body: sessionBody(session) }),
+  pin: (session: SessionRef, machineId = "local") => request(sessionPath(session, "pin", machineId), parsePinState, { method: "POST", body: sessionBody(session) }),
+  unpin: (session: SessionRef, machineId = "local") => request(sessionPath(session, "unpin", machineId), parsePinState, { method: "POST", body: sessionBody(session) }),
   detachParent: (session: SessionRef, machineId = "local") => request(sessionPath(session, "detach-parent", machineId), parseDetached, { method: "POST", body: sessionBody(session) }),
   /**
    * Return a delegated child to the inbox. Keyed by file, because the child is

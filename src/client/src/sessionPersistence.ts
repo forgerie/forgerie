@@ -18,7 +18,8 @@ export function sessionPersistenceState(session: SessionInfo | undefined, status
 }
 
 export function isArchivableSessionInfo(session: SessionInfo | undefined, status?: SessionStatus): boolean {
-  return session !== undefined && session.archived !== true && sessionPersistenceState(session, status) === "persisted";
+  // A pinned session is never archivable; the server refuses it too.
+  return session !== undefined && session.archived !== true && session.pinned !== true && sessionPersistenceState(session, status) === "persisted";
 }
 
 export function isTransientNewSessionInfo(session: SessionInfo | undefined, status?: SessionStatus): boolean {

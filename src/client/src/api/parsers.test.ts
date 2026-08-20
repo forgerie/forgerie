@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH } from "../../../shared/apiTypes";
 import { parseAborted, parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseManagedProcessKillResult, parseManagedProcessOutputResult, parseManagedProcessesSnapshot, parseManagedProcessWriteResult, parseMessagePage, parseNewSessionModelSelectionResponse, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parsePromptResourceCatalogResponse, parsePromptResourceCommandRunResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
-import { parseMachineSessionListingSnapshot, parseSessionAskCatalogSnapshot } from "./parsers";
+import { parseMachineSessionListingSnapshot, parsePinState, parseSessionAskCatalogSnapshot } from "./parsers";
 
 describe("API parsers", () => {
   it("parses destination-aware new-session model defaults", () => {
@@ -452,6 +452,28 @@ describe("API parsers", () => {
       firstMessage: "",
     });
     expect(() => parseSessionInfo({ id: "s1", path: "", cwd: "/repo", persisted: "yes", created: "now", modified: "now", messageCount: 0, firstMessage: "" })).toThrow("Expected optional boolean field: persisted");
+  });
+
+  it("passes the pinned flag through session info and drops non-true values", () => {
+    const wire = {
+      id: "s1",
+      path: "/sessions/s1.jsonl",
+      cwd: "/repo",
+      created: "2026-01-01T00:00:00.000Z",
+      modified: "2026-01-01T00:01:00.000Z",
+      messageCount: 0,
+      firstMessage: "",
+    };
+    expect(parseSessionInfo({ ...wire, pinned: true }).pinned).toBe(true);
+    expect(parseSessionInfo(wire).pinned).toBeUndefined();
+    expect(parseSessionInfo({ ...wire, pinned: "yes" }).pinned).toBeUndefined();
+  });
+
+  it("parses pin state responses and rejects malformed ones", () => {
+    expect(parsePinState({ pinned: true })).toEqual({ pinned: true });
+    expect(parsePinState({ pinned: false })).toEqual({ pinned: false });
+    expect(() => parsePinState({ pinned: "yes" })).toThrow("Expected pin state response");
+    expect(() => parsePinState({})).toThrow("Expected pin state response");
   });
 
   it("parses machine session listings through the existing session and status contracts", () => {

@@ -36,6 +36,7 @@ import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
 import { SessionCommandService } from "./sessionCommandService.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
 import { SessionArchiveStore, type ArchivedSessionRecord, type ArchiveSessionInput } from "./sessionArchiveStore.js";
+import { SessionPinStore, type PinnedSessionRecord, type PinSessionInput } from "./sessionPinStore.js";
 import { findArchiveCandidateByIdOrPrefix, planSessionArchiveTree, type SessionArchiveTreeCandidate } from "./sessionArchiveTree.js";
 import type { ActiveSession } from "./sessionRuntimeStore.js";
 import { deterministicSessionName, fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
@@ -293,6 +294,8 @@ type SessionArchiveRepository = Pick<SessionArchiveStore, "list" | "get" | "arch
   deleteArchived?: (sessionId: string) => Promise<void>;
   deleteArchivedMany?: (sessionIds: readonly string[]) => Promise<string[]>;
 };
+
+export type SessionPinRepository = Pick<SessionPinStore, "list" | "get" | "pin" | "unpin" | "reconcileCwd">;
 
 export type PiSessionRef = SessionRouteRef;
 
@@ -829,6 +832,8 @@ export interface PiSessionServiceDependencies {
   agentDir: string;
   sessionManager: PiSessionManagerGateway;
   archiveStore?: SessionArchiveRepository;
+  /** Pinned-session catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
+  pinStore?: SessionPinRepository;
   createRuntime?: PiWebCreateAgentSessionRuntimeFactory;
   createAgentRuntime?: CreateAgentRuntime;
   modelRuntime: ModelRuntime;
@@ -964,6 +969,7 @@ export class PiSessionService implements SessionRouteService {
    */
   private readonly subsessionNotifyArmed = new Map<string, boolean>();
   private readonly archiveStore: SessionArchiveRepository;
+  private readonly pinStore: SessionPinRepository;
   private readonly agentDir: string;
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
@@ -995,6 +1001,7 @@ export class PiSessionService implements SessionRouteService {
 
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies) {
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
+    this.pinStore = deps.pinStore ?? new SessionPinStore();
     this.agentDir = deps.agentDir;
     this.sessionManager = deps.sessionManager;
     this.modelRuntime = deps.modelRuntime;
@@ -1236,9 +1243,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async machineListing(): Promise<MachineSessionListingSnapshot> {
-    const [catalogSessions, archivedRecords] = await Promise.all([
+    const [catalogSessions, archivedRecords, pinnedRecords] = await Promise.all([
       this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(),
       this.archiveStore.list(),
+      this.pinStore.list(),
     ]);
     const activeSessions = [...new Set(this.active.values())];
     const activeNamesByPath = new Map(activeSessions.flatMap((active) => {
@@ -1262,9 +1270,12 @@ export class PiSessionService implements SessionRouteService {
       this.publishNotificationMutations(this.notificationStore.clearSession(record.sessionId, "archive-reconcile"));
     }
 
-    const unarchivedSessions = listedSessions
-      .filter((session) => !archivedById.has(session.id))
-      .map(clientSessionFromListEntry);
+    const unarchivedSessions = withPinnedFlags(
+      listedSessions
+        .filter((session) => !archivedById.has(session.id))
+        .map(clientSessionFromListEntry),
+      pinnedSessionIdSet(pinnedRecords),
+    );
     const archivedSessions = [...archivedRecords]
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, listedById.get(record.sessionId)))
@@ -1302,17 +1313,21 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async list(cwd: string): Promise<ClientSession[]> {
-    const [sessions, archivedRecords] = await Promise.all([this.sessionManager.list(cwd), this.archiveStore.list()]);
+    const [sessions, archivedRecords, pinnedRecords] = await Promise.all([this.sessionManager.list(cwd), this.archiveStore.list(), this.pinStore.list()]);
     const sessionsById = new Map(sessions.map((session) => [session.id, session]));
     const archivedForCwd = archivedRecords.filter((record) => record.cwd === cwd);
     const archivedById = new Map(archivedForCwd.map((record) => [record.sessionId, record]));
     for (const record of archivedForCwd) {
       this.publishNotificationMutations(this.notificationStore.clearSession(record.sessionId, "archive-reconcile"));
     }
-    const unarchivedSessions = sessions.filter((session) => !archivedById.has(session.id)).map(clientSessionFromListEntry);
+    const unarchivedSessions = withPinnedFlags(
+      sessions.filter((session) => !archivedById.has(session.id)).map(clientSessionFromListEntry),
+      pinnedSessionIdSet(pinnedRecords),
+    );
     const reconcilableSessionIds = this.reconcilableSessionIds(cwd, unarchivedSessions.map((session) => session.id), archivedById);
     this.workspaceActivity?.reconcileSessionActivity(cwd, reconcilableSessionIds);
     await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
+    await this.pinStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds);
     const archivedSessions = archivedForCwd
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, sessionsById.get(record.sessionId)))
@@ -2655,6 +2670,7 @@ export class PiSessionService implements SessionRouteService {
 
   async archive(ref: PiSessionRef): Promise<void> {
     const session = await this.getOrOpen(ref);
+    if (await this.isPinned(session.sessionId)) throw new Error("Unpin session before archiving");
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before archiving");
     await this.runTreeExclusiveOperation(
       [{ sessionId: session.sessionId, session }],
@@ -2670,10 +2686,12 @@ export class PiSessionService implements SessionRouteService {
 
   async archiveMany(refs: readonly SessionBulkMutationRef[]): Promise<SessionBulkArchiveResponse> {
     const uniqueRefs = uniqueBulkSessionRefs(refs);
-    const [archivedRecords, sessionContext] = await Promise.all([
+    const [archivedRecords, pinnedRecords, sessionContext] = await Promise.all([
       this.archiveStore.list(),
+      this.pinStore.list(),
       this.bulkSessionRefContext(uniqueRefs),
     ]);
+    const pinnedSessionIds = pinnedSessionIdSet(pinnedRecords);
     const failures: SessionBulkFailure[] = [];
     const alreadyArchivedSessionIds: string[] = [];
     const unreadArchivedIdentities: { sessionId: string; cwd: string }[] = [];
@@ -2711,6 +2729,10 @@ export class PiSessionService implements SessionRouteService {
 
     const readyPlanItems: { input: ArchiveSessionInput; active?: ActiveSession<PiSessionRuntime> }[] = [];
     for (const item of planItems) {
+      if (pinnedSessionIds.has(item.input.sessionId)) {
+        failures.push({ sessionId: item.input.sessionId, error: "Unpin session before archiving" });
+        continue;
+      }
       const active = this.activeForRef({ id: item.input.sessionId, cwd: item.input.cwd });
       if (active !== undefined && this.hasActiveWork(active.runtime.session)) {
         failures.push({ sessionId: item.input.sessionId, error: "Stop current session activity before archiving" });
@@ -2760,13 +2782,18 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     const catalog = await this.workspaceArchiveCandidates(session.sessionManager.getCwd());
     const root = findArchiveCandidateByIdOrPrefix(catalog, session.sessionId) ?? archiveCandidateFromActiveSession(session, false);
+    const pinnedSessionIds = pinnedSessionIdSet(await this.pinStore.list());
+    if (pinnedSessionIds.has(root.id)) throw new Error("Unpin session before archiving");
     const plan = planSessionArchiveTree(root, catalog);
     const busy = plan.targets.map((target) => target.activeSession).find((target) => target !== undefined && this.hasActiveWork(target));
     if (busy !== undefined) throw new Error(`Stop current session activity before archiving ${sessionDisplayName(busy)}`);
 
-    const archiveInputs = plan.unarchivedTargets.map((target) => archiveInputFromCandidate(target));
+    // Pinned descendants stay live: the pin invariant beats tree completeness.
+    const archiveTargets = plan.unarchivedTargets.filter((target) => !pinnedSessionIds.has(target.id));
+    const skippedPinnedCount = plan.unarchivedTargets.length - archiveTargets.length;
+    const archiveInputs = archiveTargets.map((target) => archiveInputFromCandidate(target));
     await this.runTreeExclusiveOperation(
-      plan.unarchivedTargets.map((target) => ({
+      archiveTargets.map((target) => ({
         sessionId: target.id,
         ...(target.activeSession === undefined ? {} : { session: target.activeSession }),
       })),
@@ -2779,13 +2806,18 @@ export class PiSessionService implements SessionRouteService {
         await this.archiveStoreArchiveMany(archiveInputs);
       },
     );
-    await this.forgetUnreadSessions(plan.targets.map((target) => ({ sessionId: target.id, cwd: target.cwd })));
+    await this.forgetUnreadSessions(
+      plan.targets
+        .filter((target) => !pinnedSessionIds.has(target.id))
+        .map((target) => ({ sessionId: target.id, cwd: target.cwd })),
+    );
 
     return {
       archived: true,
       sessionIds: archiveInputs.map((input) => input.sessionId),
       archivedCount: archiveInputs.length,
       skippedAlreadyArchivedCount: plan.skippedAlreadyArchivedCount,
+      ...(skippedPinnedCount === 0 ? {} : { skippedPinnedCount }),
     };
   }
 
@@ -2795,6 +2827,42 @@ export class PiSessionService implements SessionRouteService {
     await this.closeActive(archived.sessionId, { kind: "clear", reason: "restore" });
     await this.archiveStore.restore(archived.sessionId);
     await this.forgetUnreadSessions([archived]);
+  }
+
+  /**
+   * Pin a session: it sorts to the top of its grouped list and every archive
+   * path refuses it until unpinned. Archived sessions cannot be pinned — the
+   * two flags would contradict each other — so restore comes first.
+   */
+  async pin(ref: PiSessionRef): Promise<void> {
+    if (await this.getArchived(ref) !== undefined) throw new Error("Restore session before pinning");
+    const target = await this.resolvePinTarget(ref);
+    if (target === undefined) throw new Error("Session not found");
+    await this.pinStore.pin(target);
+    this.events.publishGlobal({ type: "session.pinned", sessionId: target.sessionId, cwd: target.cwd, pinned: true });
+  }
+
+  /** Remove a pin. A no-op when the session is not pinned. */
+  async unpin(ref: PiSessionRef): Promise<void> {
+    const record = await this.pinStore.get(ref.id);
+    if (record === undefined) return;
+    await this.pinStore.unpin(record.sessionId);
+    this.events.publishGlobal({ type: "session.pinned", sessionId: record.sessionId, cwd: record.cwd, pinned: false });
+  }
+
+  private async isPinned(sessionId: string): Promise<boolean> {
+    const record = await this.pinStore.get(sessionId);
+    return record?.sessionId === sessionId;
+  }
+
+  private async resolvePinTarget(ref: PiSessionRef): Promise<PinSessionInput | undefined> {
+    const active = this.activeForRef(ref);
+    if (active !== undefined) {
+      return { sessionId: active.runtime.session.sessionId, cwd: active.runtime.session.sessionManager.getCwd() };
+    }
+    const sessions = await this.sessionManager.list(ref.cwd);
+    const listed = sessions.find((session) => session.id === ref.id) ?? sessions.find((session) => session.id.startsWith(ref.id));
+    return listed === undefined ? undefined : { sessionId: listed.id, cwd: listed.cwd };
   }
 
   async deleteArchivedMany(refs: readonly SessionBulkMutationRef[]): Promise<SessionBulkDeleteArchivedResponse> {
@@ -3165,9 +3233,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async cleanupPlan(request: NormalizedSessionCleanupRequest) {
-    const [sessions, archivedRecords] = await Promise.all([this.sessionManager.listAll(), this.archiveStore.list()]);
+    const [sessions, archivedRecords, pinnedRecords] = await Promise.all([this.sessionManager.listAll(), this.archiveStore.list(), this.pinStore.list()]);
     return planSessionCleanup({
       sessions,
+      pinnedSessionIds: pinnedSessionIdSet(pinnedRecords),
       archivedRecords,
       activeSessions: this.cleanupActiveSessionStatuses(),
       thresholds: request.thresholds,
@@ -4476,6 +4545,15 @@ function notificationIdentityForSession(session: PiAgentSession): { sessionId: s
     sessionId: session.sessionId,
     cwd: canonicalizeStoredCwd(session.sessionManager.getCwd()),
   };
+}
+
+function pinnedSessionIdSet(records: readonly PinnedSessionRecord[]): ReadonlySet<string> {
+  return new Set(records.map((record) => record.sessionId));
+}
+
+function withPinnedFlags(sessions: ClientSession[], pinnedSessionIds: ReadonlySet<string>): ClientSession[] {
+  if (pinnedSessionIds.size === 0) return sessions;
+  return sessions.map((session) => (pinnedSessionIds.has(session.id) ? { ...session, pinned: true } : session));
 }
 
 function sessionCatalogIdentity(session: PiAgentSession): string {

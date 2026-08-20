@@ -182,6 +182,7 @@ export function parseSessionInfo(value: unknown): SessionInfo {
     ...(childSessionsElsewhere === undefined ? {} : { childSessionsElsewhere }),
     ...(record["archived"] === true ? { archived: true } : {}),
     ...(archivedAt === undefined ? {} : { archivedAt }),
+    ...(record["pinned"] === true ? { pinned: true } : {}),
   };
 }
 
@@ -653,6 +654,8 @@ export function parseSessionStreamEvent(value: unknown): SessionUiEvent {
       return { type: "session.error", message: requireString(record, "message") };
     case "session.name":
       return parseSessionNameEvent(record);
+    case "session.pinned":
+      return parseSessionPinnedEvent(record);
     case "session.created":
       return { type: "session.created", session: parseSessionInfo(record["session"]) };
     case "pi.event":
@@ -667,7 +670,7 @@ export function parseSessionStreamEvent(value: unknown): SessionUiEvent {
 }
 
 type RealtimeStreamEvent =
-  | Extract<GlobalSessionEvent, { type: "status.update" | "activity.update" | "session.name" | "session.created" }>
+  | Extract<GlobalSessionEvent, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.created" }>
   | TerminalUiEvent
   | WorkspaceActivityUiEvent;
 
@@ -680,6 +683,8 @@ export function parseRealtimeStreamEvent(value: unknown): RealtimeStreamEvent {
       return { type: "activity.update", activity: parseSessionActivity(record["activity"]) };
     case "session.name":
       return parseSessionNameEvent(record);
+    case "session.pinned":
+      return parseSessionPinnedEvent(record);
     case "session.created":
       return { type: "session.created", session: parseSessionInfo(record["session"]) };
     case "terminal.created":
@@ -847,6 +852,15 @@ function parseSessionNameEvent(record: Record<string, unknown>): Extract<Session
     type: "session.name",
     sessionId: requireNonEmptyString(record, "sessionId"),
     ...optionalField("name", optionalString(record, "name")),
+  };
+}
+
+function parseSessionPinnedEvent(record: Record<string, unknown>): Extract<SessionUiEvent, { type: "session.pinned" }> {
+  return {
+    type: "session.pinned",
+    sessionId: requireNonEmptyString(record, "sessionId"),
+    cwd: requireNonEmptyString(record, "cwd"),
+    pinned: requireBoolean(record, "pinned"),
   };
 }
 
@@ -2029,12 +2043,21 @@ export function parseArchived(value: unknown): ArchiveSessionsResponse {
   const sessionIds = record["sessionIds"] === undefined ? undefined : arrayOfString(record["sessionIds"], "sessionIds");
   const archivedCount = optionalNumber(record, "archivedCount");
   const skippedAlreadyArchivedCount = optionalNumber(record, "skippedAlreadyArchivedCount");
+  const skippedPinnedCount = optionalNumber(record, "skippedPinnedCount");
   return {
     archived: true,
     ...(sessionIds === undefined ? {} : { sessionIds }),
     ...(archivedCount === undefined ? {} : { archivedCount }),
     ...(skippedAlreadyArchivedCount === undefined ? {} : { skippedAlreadyArchivedCount }),
+    ...(skippedPinnedCount === undefined ? {} : { skippedPinnedCount }),
   };
+}
+
+export function parsePinState(value: unknown): { pinned: boolean } {
+  const record = requireRecord(value);
+  const pinned = record["pinned"];
+  if (typeof pinned !== "boolean") throw new Error("Expected pin state response");
+  return { pinned };
 }
 
 export function parseRestored(value: unknown): { restored: true } {

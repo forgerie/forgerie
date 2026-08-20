@@ -349,6 +349,35 @@ describe("deriveSessionBoard", () => {
     expect(openGroup?.rows.map((r) => r.session.id)).toEqual(["newer", "middle", "older"]);
   });
 
+  it("sorts pinned rows to the top of their group, then by recency", () => {
+    const sessions = [
+      mkSession("plain-newest", { modified: "2026-08-07T10:00:00.000Z" }),
+      mkSession("pinned-old", { modified: "2026-08-01T10:00:00.000Z", pinned: true }),
+      mkSession("pinned-newer", { modified: "2026-08-03T10:00:00.000Z", pinned: true }),
+      mkSession("plain-old", { modified: "2026-08-02T10:00:00.000Z" }),
+    ];
+    const board = mkBoard(sessions);
+    const openGroup = board.groups.find((g) => g.kind === "open");
+    expect(openGroup?.rows.map((r) => r.session.id)).toEqual([
+      "pinned-newer",
+      "pinned-old",
+      "plain-newest",
+      "plain-old",
+    ]);
+  });
+
+  it("keeps a pinned row inside its own state group; pinning does not move it across groups", () => {
+    const sessions = [
+      mkSession("pinned-open", { pinned: true }),
+      mkSession("blocked", { modified: "2026-08-07T10:00:00.000Z" }),
+    ];
+    const board = mkBoard(sessions, {
+      statuses: { blocked: mkStatus({ pendingAsk: { questions: [{ question: "?" }] } }) },
+    });
+    expect(board.groups.find((g) => g.kind === "blocked")?.rows.map((r) => r.session.id)).toEqual(["blocked"]);
+    expect(board.groups.find((g) => g.kind === "open")?.rows.map((r) => r.session.id)).toEqual(["pinned-open"]);
+  });
+
   it("each row carries the location returned by locationOf", () => {
     const sessions = [
       mkSession("s1", { projectId: "proj-x", projectName: "X", projectPath: "/x" }),
@@ -457,6 +486,17 @@ describe("groupSessionsByProject", () => {
     const byProject = groupSessionsByProject(board, { includeArchived: true });
     const group = byProject.groups.find((g) => g.kind === "proj-1");
     expect(group?.rows.map((r) => r.session.id).sort()).toEqual(["done", "live"]);
+  });
+
+  it("sorts pinned rows to the top of their project group", () => {
+    const sessions = [
+      mkSession("plain-new", { modified: "2026-08-07T10:00:00.000Z" }),
+      mkSession("pinned-old", { modified: "2026-08-01T10:00:00.000Z", pinned: true }),
+    ];
+    const board = mkBoard(sessions);
+    const byProject = groupSessionsByProject(board);
+    const group = byProject.groups.find((g) => g.kind === "proj-1");
+    expect(group?.rows.map((r) => r.session.id)).toEqual(["pinned-old", "plain-new"]);
   });
 
   it("orders project groups by attention and their rows by recency", () => {

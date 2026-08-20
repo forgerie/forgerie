@@ -1555,6 +1555,8 @@ export class PiWebApp extends LitElement {
         .onRemoveMachine=${(machine: Machine) => { void this.removeMachine(machine); }}
         .onSelectSession=${(session: SessionInfo) => { void this.selectInboxSession(session); }}
         .onArchiveSession=${(session: SessionInfo) => { void this.archiveInboxSession(session); }}
+        .onPinSession=${(session: SessionInfo) => { void this.sessions.setSessionPinned(session, true); }}
+        .onUnpinSession=${(session: SessionInfo) => { void this.sessions.setSessionPinned(session, false); }}
         .onRestoreSession=${(session: SessionInfo) => { void this.restoreInboxSession(session); }}
         .onDeleteSession=${(session: SessionInfo) => { void this.sessions.deleteArchivedSessions([session]); }}
         .undoToast=${this.state.inboxUndoToast}

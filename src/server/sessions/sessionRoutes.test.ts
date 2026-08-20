@@ -1122,6 +1122,30 @@ describe("session routes", () => {
     }
   });
 
+  it("routes pin and unpin requests with normalized session refs", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const requestCwd = resolve("/repo");
+      const pinResponse = await routeApp.inject({ method: "POST", url: "/sessions/s1/pin", payload: { cwd: requestCwd } });
+      const unpinResponse = await routeApp.inject({ method: "POST", url: "/sessions/s1/unpin", payload: { cwd: requestCwd } });
+
+      expect(pinResponse.statusCode).toBe(200);
+      expect(pinResponse.json()).toEqual({ pinned: true });
+      expect(unpinResponse.statusCode).toBe(200);
+      expect(unpinResponse.json()).toEqual({ pinned: false });
+      expect(routeService.pinCalls).toEqual([{ id: "s1", cwd: requestCwd }]);
+      expect(routeService.unpinCalls).toEqual([{ id: "s1", cwd: requestCwd }]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("returns destination-aware Pi defaults with the pre-session model catalog", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1497,6 +1521,18 @@ class CapturingRouteSessionService implements SessionRouteService {
   archive(): never { throw unusedRouteMethod("archive"); }
   archiveTree(): never { throw unusedRouteMethod("archiveTree"); }
   restore(): never { throw unusedRouteMethod("restore"); }
+
+  readonly pinCalls: SessionRouteRef[] = [];
+  readonly unpinCalls: SessionRouteRef[] = [];
+  pin(ref: SessionRouteRef): Promise<void> {
+    this.pinCalls.push(ref);
+    return Promise.resolve();
+  }
+
+  unpin(ref: SessionRouteRef): Promise<void> {
+    this.unpinCalls.push(ref);
+    return Promise.resolve();
+  }
 
   promoteSpawnedSession(): never { throw unusedRouteMethod("promoteSpawnedSession"); }
   detachParent(): never { throw unusedRouteMethod("detachParent"); }

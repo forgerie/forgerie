@@ -14,6 +14,8 @@ export interface PlanSessionCleanupInput {
   sessions: readonly PiSessionListEntry[];
   archivedRecords: readonly ArchivedSessionRecord[];
   activeSessions?: readonly CleanupActiveSessionStatus[];
+  /** Sessions the user pinned; never auto-archived regardless of idle age. */
+  pinnedSessionIds?: ReadonlySet<string>;
   thresholds: SessionCleanupThresholds;
   projectCwds?: readonly string[];
   now: Date;
@@ -62,6 +64,7 @@ export function planSessionCleanup(input: PlanSessionCleanupInput): SessionClean
   if (archiveCutoff !== undefined) {
     for (const session of uniqueSessionsById(input.sessions)) {
       if (archivedIds.has(session.id)) continue;
+      if (input.pinnedSessionIds?.has(session.id) === true) continue;
       if (includedCwds !== undefined && !includedCwds.has(session.cwd)) continue;
       if (!isBefore(session.modified, archiveCutoff)) continue;
       if (busySessionIds.has(session.id)) {

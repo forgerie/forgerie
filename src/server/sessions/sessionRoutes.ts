@@ -474,6 +474,24 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
+  app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/pin`, async (request, reply) => {
+    try {
+      await sessions.pin(sessionRefFromBody(request.params.sessionId, optionalRecord(request.body)));
+      return { pinned: true };
+    } catch (error) {
+      return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/unpin`, async (request, reply) => {
+    try {
+      await sessions.unpin(sessionRefFromBody(request.params.sessionId, optionalRecord(request.body)));
+      return { pinned: false };
+    } catch (error) {
+      return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
+    }
+  });
+
   app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/restore`, async (request, reply) => {
     try {
       await sessions.restore(sessionRefFromBody(request.params.sessionId, optionalRecord(request.body)));

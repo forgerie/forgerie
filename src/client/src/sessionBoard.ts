@@ -52,6 +52,8 @@ export interface SessionBoardSessionInput {
   readonly modified: string;
   readonly archived?: boolean;
   readonly archivedAt?: string;
+  /** Pinned sessions sort to the top of whichever group they land in. */
+  readonly pinned?: boolean;
   /**
    * Working directory of the session (workspace path). Present on every
    * `SessionInfo`; included here so `locationOf` callbacks can look up
@@ -310,7 +312,7 @@ export function deriveSessionBoard<S extends SessionBoardSessionInput>(
     ...descriptor,
     rows: rows
       .filter((row) => row.state.kind === descriptor.kind)
-      .sort(byRecencyDescending),
+      .sort(byPinnedThenRecency),
   }));
 
   return { groups, rows, counts: countsByKind(rows) };
@@ -375,7 +377,7 @@ export function groupSessionsByProject<S extends SessionBoardSessionInput>(
 
   const groups = [...byProject.values()];
   for (const group of groups) {
-    group.rows.sort(byRecencyDescending);
+    group.rows.sort(byPinnedThenRecency);
   }
   groups.sort(
     (a, b) =>
@@ -443,10 +445,17 @@ export function relativeTime(iso: string, now: number): string {
 // Private helpers
 // ---------------------------------------------------------------------------
 
-function byRecencyDescending<S extends SessionBoardSessionInput>(
+/**
+ * Pinned rows first, then recency. Pinning is an ordering promise ("top of
+ * its grouped list"), not a state: the row still lives in whichever group
+ * classification put it in.
+ */
+function byPinnedThenRecency<S extends SessionBoardSessionInput>(
   a: SessionBoardRow<S>,
   b: SessionBoardRow<S>,
 ): number {
+  const pinnedDelta = Number(b.session.pinned === true) - Number(a.session.pinned === true);
+  if (pinnedDelta !== 0) return pinnedDelta;
   return Date.parse(b.session.modified) - Date.parse(a.session.modified);
 }
 

@@ -216,6 +216,7 @@ describe("socket stream validation", () => {
       { type: "command.output", level: "success", message: "done" },
       { type: "session.error", message: "boom" },
       { type: "session.name", sessionId: "session-1", name: "rename" },
+      { type: "session.pinned", sessionId: "session-1", cwd: "/repo", pinned: true },
       { type: "session.created", session: sessionInfoWire() },
       { type: "pi.event", eventType: "turn_start" },
       { type: "processes.update", snapshot: { available: false, writeSupported: false, processes: [] } },
@@ -242,6 +243,8 @@ describe("socket stream validation", () => {
     expect(parseSessionSocketEvent({ type: "session.error" })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "session.name", name: "rename" })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "session.name", sessionId: "" })).toBeUndefined();
+    expect(parseSessionSocketEvent({ type: "session.pinned", sessionId: "session-1", cwd: "/repo", pinned: "yes" })).toBeUndefined();
+    expect(parseSessionSocketEvent({ type: "session.pinned", sessionId: "session-1", pinned: true })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "session.created", session: { id: "session-1" } })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "pi.event", eventType: 9 })).toBeUndefined();
     expect(parseSessionSocketEvent({ type: "processes.update", snapshot: { available: true, writeSupported: true, processes: [{ id: 123 }] } })).toBeUndefined();
@@ -271,6 +274,7 @@ describe("socket stream validation", () => {
       { type: "status.update", status: statusWire() },
       { type: "activity.update", activity: activityWire() },
       { type: "session.name", sessionId: "session-1", name: "rename" },
+      { type: "session.pinned", sessionId: "session-1", cwd: "/repo", pinned: false },
       { type: "session.created", session: sessionInfoWire() },
       { type: "terminal.created", terminal: terminalInfoWire() },
       { type: "terminal.exited", terminal: { ...terminalInfoWire(), exited: true, exitCode: 0 } },
@@ -284,6 +288,7 @@ describe("socket stream validation", () => {
     expect(parseRealtimeSocketEvent({ type: "status.update", status: { sessionId: "session-1" } })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "activity.update", activity: { ...activityWire(), phase: "waiting" } })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "session.name", name: "rename" })).toBeUndefined();
+    expect(parseRealtimeSocketEvent({ type: "session.pinned", sessionId: "session-1", cwd: "", pinned: true })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "session.created", session: {} })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "terminal.created", terminal: { id: "terminal-1" } })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "terminal.exited", terminal: null })).toBeUndefined();

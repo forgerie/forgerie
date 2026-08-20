@@ -126,6 +126,11 @@ function unknownLocationLabel(cwd: string): string {
   return segments[segments.length - 1] ?? cwd;
 }
 
+/** The same pin drawing the shell's panel controls use, so "pin" reads as one concept. */
+function pinGlyph(): TemplateResult {
+  return html`<svg class="pin-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z" /><path d="M12 15v5" /></svg>`;
+}
+
 type InboxGroup =
   | SessionBoardGroup<SessionInfo>
   | { readonly kind: string; readonly label: string; readonly tone: string; readonly rows: readonly SessionBoardRow<SessionInfo>[] };
@@ -153,6 +158,9 @@ export class SessionInboxPanel extends LitElement {
   @property({ attribute: false }) workspacesByProjectId: Record<string, Workspace[]> = {};
   @property({ attribute: false }) onSelectSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onArchiveSession?: (session: SessionInfo) => void;
+  /** Pin: the row sorts to the top of its group and archiving is refused until unpinned. */
+  @property({ attribute: false }) onPinSession?: (session: SessionInfo) => void;
+  @property({ attribute: false }) onUnpinSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onRestoreSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onDeleteSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onNewSession?: () => void;
@@ -544,7 +552,14 @@ export class SessionInboxPanel extends LitElement {
                 ? html`<button class="danger" role="menuitem" data-action="menu-delete-confirm" @click=${() => { this.runRowCommand(this.onDeleteSession); }}>Delete for good?</button>`
                 : html`<button class="danger" role="menuitem" data-action="menu-delete" @click=${() => { this.rowMenuConfirmingDelete = true; }}>Delete permanently</button>`}
             `
-          : html`<button role="menuitem" data-action="menu-archive" @click=${() => { this.runRowCommand(this.onArchiveSession); }}>Archive</button>`}
+          : html`
+              ${session.pinned === true
+                ? html`<button role="menuitem" data-action="menu-unpin" @click=${() => { this.runRowCommand(this.onUnpinSession); }}>Unpin</button>`
+                : html`
+                    <button role="menuitem" data-action="menu-pin" @click=${() => { this.runRowCommand(this.onPinSession); }}>Pin to top</button>
+                    <button role="menuitem" data-action="menu-archive" @click=${() => { this.runRowCommand(this.onArchiveSession); }}>Archive</button>
+                  `}
+            `}
         <button role="menuitem" data-action="menu-copy-path" @click=${() => { void this.copyWorkspacePath(session); }}>Copy workspace path</button>
       </div>
     `;
@@ -767,6 +782,11 @@ export class SessionInboxPanel extends LitElement {
       this.onRestoreSession?.(session);
     };
 
+    const handleUnpin = (event: Event) => {
+      event.stopPropagation();
+      this.onUnpinSession?.(session);
+    };
+
     return html`
       <div class="row-slot">
       <div
@@ -792,7 +812,7 @@ export class SessionInboxPanel extends LitElement {
         }}
       >
         <span class="row-marker" aria-hidden="true"></span>
-        <div class="row-title">${session.name ?? (session.firstMessage || session.id)}</div>
+        <div class="row-title">${session.pinned === true ? html`<span class="row-pin" title="Pinned" data-pinned-marker>${pinGlyph()}</span>` : nothing}${session.name ?? (session.firstMessage || session.id)}</div>
         <div class="row-meta">
           ${isDeleted
             ? html`<span class="chip chip-deleted" data-location-chip>workspace removed</span>`
@@ -814,7 +834,9 @@ export class SessionInboxPanel extends LitElement {
         <div class="row-actions">
           ${kind === "archived"
             ? html`<button class="row-action" data-action="restore" title="Restore" aria-label="Restore session" @click=${handleRestore}>↩</button>`
-            : html`<button class="row-action" data-action="archive" title="Archive" aria-label="Archive session" @click=${handleArchive}>✓</button>`}
+            : session.pinned === true
+              ? html`<button class="row-action" data-action="unpin" title="Unpin" aria-label="Unpin session" @click=${handleUnpin}>${pinGlyph()}</button>`
+              : html`<button class="row-action" data-action="archive" title="Archive" aria-label="Archive session" @click=${handleArchive}>✓</button>`}
         </div>
       </div>
       ${this.renderRowMenu(session)}
@@ -1422,6 +1444,26 @@ export class SessionInboxPanel extends LitElement {
       font-weight: 620;
       color: var(--pi-text-bright, #fff);
     }
+
+    .row-pin {
+      display: inline-flex;
+      vertical-align: -1px;
+      margin-inline-end: 5px;
+      color: var(--pi-accent, #4a7cc4);
+    }
+
+    .pin-glyph {
+      width: 12px;
+      height: 12px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
+
+    .row-action .pin-glyph { width: 13px; height: 13px; }
 
     .row[data-state="archived"] .row-title { color: var(--pi-muted, #85888e); }
 

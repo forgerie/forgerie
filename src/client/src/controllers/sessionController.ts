@@ -254,6 +254,7 @@ export class SessionController {
     else if (event.type === "activity.update") this.queueActivityUpdate(event.activity);
     else if (event.type === "session.created") this.applyCreatedSession(event.session);
     else if (event.type === "session.name") this.applySessionName(event.sessionId, event.name);
+    else if (event.type === "session.pinned") this.applySessionPinned(event.sessionId, event.pinned);
     else if (event.type === "session.startup") this.queueStartupProgress(event);
   }
 
@@ -1211,6 +1212,19 @@ export class SessionController {
     try {
       const archivedAt = await this.archiveSessionCore(session);
       if (archivedAt !== undefined) this.inbox?.notifyArchived(machineId, session.id, archivedAt);
+    } catch (error) {
+      this.setState({ error: String(error) });
+    }
+  }
+
+  /** Pin or unpin a session. The server broadcasts `session.pinned`, so other
+   * clients follow; this client applies the flag immediately. */
+  async setSessionPinned(session: SessionInfo, pinned: boolean): Promise<void> {
+    if (session.archived === true) return;
+    try {
+      if (pinned) await this.api.pin(session, selectedMachineId(this.getState()));
+      else await this.api.unpin(session, selectedMachineId(this.getState()));
+      this.applySessionPinned(session.id, pinned);
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -2325,6 +2339,21 @@ export class SessionController {
     // (typically the supersede half of an open), so it must not clear the card.
     if (this.getState().pendingAsk?.askId !== askId) return;
     this.setState({ pendingAsk: undefined });
+  }
+
+  private applySessionPinned(sessionId: string, pinned: boolean) {
+    const repin = (session: SessionInfo) => {
+      if (session.id !== sessionId) return session;
+      const next = { ...session };
+      if (pinned) next.pinned = true;
+      else delete next.pinned;
+      return next;
+    };
+    const selectedSession = this.getState().selectedSession;
+    this.setState({
+      sessions: this.getState().sessions.map(repin),
+      selectedSession: selectedSession === undefined ? undefined : repin(selectedSession),
+    });
   }
 
   private applySessionName(sessionId: string, name: string | undefined) {

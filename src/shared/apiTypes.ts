@@ -372,6 +372,12 @@ export interface SessionInfo extends SessionRef {
   childSessionsElsewhere?: number;
   archived?: boolean;
   archivedAt?: string;
+  /**
+   * True when the user pinned this session. Pinned sessions sort to the top
+   * of their grouped list and are refused by every archive path until
+   * unpinned. Server-owned so the flag roams across browsers.
+   */
+  pinned?: boolean;
 }
 
 export interface MachineSessionListingSnapshot {
@@ -388,6 +394,8 @@ export interface ArchiveSessionsResponse {
   sessionIds?: string[];
   archivedCount?: number;
   skippedAlreadyArchivedCount?: number;
+  /** Pinned descendants left out of an archive-tree operation. */
+  skippedPinnedCount?: number;
 }
 
 export interface SessionBulkMutationRef {
@@ -1440,13 +1448,14 @@ type SessionUiEventBody =
   | { type: "dialog.opened"; dialog: PendingExtensionDialog }
   | { type: "dialog.closed"; dialogId: string; reason: ExtensionDialogCloseReason; answer?: ExtensionDialogAnswer }
   | { type: "session.name"; sessionId: string; name?: string }
+  | { type: "session.pinned"; sessionId: string; cwd: string; pinned: boolean }
   | { type: "session.created"; session: SessionInfo }
   | { type: "pi.event"; eventType: string }
   | { type: "processes.update"; snapshot: ManagedProcessesSnapshot }
   | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
 
 export type GlobalSessionEvent =
-  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.created" }>
+  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.created" }>
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
   | SessionStartupProgressEvent;

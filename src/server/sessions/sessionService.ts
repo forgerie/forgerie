@@ -104,6 +104,9 @@ export interface SessionRouteService {
   archive(ref: SessionRouteRef): Promise<void>;
   archiveTree(ref: SessionRouteRef): Promise<ClientArchiveSessionsResponse>;
   restore(ref: SessionRouteRef): Promise<void>;
+  /** Pin: top of the grouped list, refused by every archive path until unpinned. */
+  pin(ref: SessionRouteRef): Promise<void>;
+  unpin(ref: SessionRouteRef): Promise<void>;
   reload(ref: SessionRouteRef): Promise<void>;
   promoteSpawnedSession(sessionFile: string): Promise<void>;
   detachParent(ref: SessionRouteRef): Promise<void>;

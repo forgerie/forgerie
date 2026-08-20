@@ -76,6 +76,7 @@ describe("session action eligibility", () => {
     expect(isArchivableSessionInfo(session("unknown"))).toBe(false);
     expect(isArchivableSessionInfo(session("transient", { persisted: false }))).toBe(false);
     expect(isArchivableSessionInfo({ ...session("archived", { persisted: true }), archived: true, archivedAt: "2026-06-09T00:00:00.000Z" })).toBe(false);
+    expect(isArchivableSessionInfo({ ...session("pinned", { persisted: true }), pinned: true })).toBe(false);
   });
 
   it("allows deleting transient non-archived sessions from server or browser-cached signals", () => {
