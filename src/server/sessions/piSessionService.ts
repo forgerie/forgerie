@@ -37,6 +37,7 @@ import { SessionCommandService } from "./sessionCommandService.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
 import { SessionArchiveStore, type ArchivedSessionRecord, type ArchiveSessionInput } from "./sessionArchiveStore.js";
 import { SessionPinStore, type PinnedSessionRecord, type PinSessionInput } from "./sessionPinStore.js";
+import { SessionTabsStore, type SessionTabsRecord } from "./sessionTabsStore.js";
 import { findArchiveCandidateByIdOrPrefix, planSessionArchiveTree, type SessionArchiveTreeCandidate } from "./sessionArchiveTree.js";
 import type { ActiveSession } from "./sessionRuntimeStore.js";
 import { deterministicSessionName, fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
@@ -296,6 +297,8 @@ type SessionArchiveRepository = Pick<SessionArchiveStore, "list" | "get" | "arch
 };
 
 export type SessionPinRepository = Pick<SessionPinStore, "list" | "get" | "pin" | "unpin" | "reconcileCwd">;
+
+export type SessionTabsRepository = Pick<SessionTabsStore, "list" | "get" | "set" | "reconcileCwd">;
 
 export type PiSessionRef = SessionRouteRef;
 
@@ -834,6 +837,8 @@ export interface PiSessionServiceDependencies {
   archiveStore?: SessionArchiveRepository;
   /** Pinned-session catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
   pinStore?: SessionPinRepository;
+  /** Per-session promoted-tab catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
+  tabsStore?: SessionTabsRepository;
   createRuntime?: PiWebCreateAgentSessionRuntimeFactory;
   createAgentRuntime?: CreateAgentRuntime;
   modelRuntime: ModelRuntime;
@@ -970,6 +975,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly subsessionNotifyArmed = new Map<string, boolean>();
   private readonly archiveStore: SessionArchiveRepository;
   private readonly pinStore: SessionPinRepository;
+  private readonly tabsStore: SessionTabsRepository;
   private readonly agentDir: string;
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
@@ -1002,6 +1008,7 @@ export class PiSessionService implements SessionRouteService {
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies) {
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
     this.pinStore = deps.pinStore ?? new SessionPinStore();
+    this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
     this.agentDir = deps.agentDir;
     this.sessionManager = deps.sessionManager;
     this.modelRuntime = deps.modelRuntime;
@@ -1243,10 +1250,11 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async machineListing(): Promise<MachineSessionListingSnapshot> {
-    const [catalogSessions, archivedRecords, pinnedRecords] = await Promise.all([
+    const [catalogSessions, archivedRecords, pinnedRecords, tabsRecords] = await Promise.all([
       this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(),
       this.archiveStore.list(),
       this.pinStore.list(),
+      this.tabsStore.list(),
     ]);
     const activeSessions = [...new Set(this.active.values())];
     const activeNamesByPath = new Map(activeSessions.flatMap((active) => {
@@ -1281,7 +1289,7 @@ export class PiSessionService implements SessionRouteService {
       .map((record) => clientSessionFromArchivedRecord(record, listedById.get(record.sessionId)))
       .filter(isDefined);
     const sessions = hideChildrenOfDelegatingSessions(
-      withMachineSessionRelationships([...unarchivedSessions, ...archivedSessions]),
+      withMachineSessionRelationships(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords))),
       this.delegatingSessionFiles(),
     );
 
@@ -1301,6 +1309,8 @@ export class PiSessionService implements SessionRouteService {
       const reconcilableSessionIds = this.reconcilableSessionIds(cwd, listedSessionIds, archivedForCwd);
       this.workspaceActivity?.reconcileSessionActivity(cwd, reconcilableSessionIds);
       await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
+      // Tabs survive archiving, so archived ids stay in the tabs reconcile set.
+      await this.tabsStore.reconcileCwd(canonicalizeStoredCwd(cwd), [...reconcilableSessionIds, ...archivedForCwd.keys()]);
     }
 
     const statuses = activeSessions.map((active) => this.statusFromSession(active.runtime.session));
@@ -1313,7 +1323,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async list(cwd: string): Promise<ClientSession[]> {
-    const [sessions, archivedRecords, pinnedRecords] = await Promise.all([this.sessionManager.list(cwd), this.archiveStore.list(), this.pinStore.list()]);
+    const [sessions, archivedRecords, pinnedRecords, tabsRecords] = await Promise.all([this.sessionManager.list(cwd), this.archiveStore.list(), this.pinStore.list(), this.tabsStore.list()]);
     const sessionsById = new Map(sessions.map((session) => [session.id, session]));
     const archivedForCwd = archivedRecords.filter((record) => record.cwd === cwd);
     const archivedById = new Map(archivedForCwd.map((record) => [record.sessionId, record]));
@@ -1328,11 +1338,13 @@ export class PiSessionService implements SessionRouteService {
     this.workspaceActivity?.reconcileSessionActivity(cwd, reconcilableSessionIds);
     await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
     await this.pinStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds);
+    // Tabs survive archiving, so archived ids stay in the tabs reconcile set.
+    await this.tabsStore.reconcileCwd(canonicalizeStoredCwd(cwd), [...reconcilableSessionIds, ...archivedById.keys()]);
     const archivedSessions = archivedForCwd
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, sessionsById.get(record.sessionId)))
       .filter(isDefined);
-    return await this.withRelatedSessionsElsewhere([...unarchivedSessions, ...archivedSessions], cwd);
+    return await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd);
   }
 
   /**
@@ -2848,6 +2860,24 @@ export class PiSessionService implements SessionRouteService {
     if (record === undefined) return;
     await this.pinStore.unpin(record.sessionId);
     this.events.publishGlobal({ type: "session.pinned", sessionId: record.sessionId, cwd: record.cwd, pinned: false });
+  }
+
+  /**
+   * Replace a session's promoted-tab set and broadcast the change so every
+   * connected browser converges. Unlike pins, archived sessions keep their
+   * tabs: the set is workspace state that should survive a restore.
+   */
+  async setTabs(ref: PiSessionRef, tabs: readonly string[]): Promise<{ tabs: string[] }> {
+    const archived = await this.getArchived(ref);
+    const target = archived !== undefined
+      ? { sessionId: archived.sessionId, cwd: archived.cwd }
+      : await this.resolvePinTarget(ref);
+    if (target === undefined) throw new Error("Session not found");
+    const result = await this.tabsStore.set({ sessionId: target.sessionId, cwd: target.cwd, tabs });
+    if (result.changed) {
+      this.events.publishGlobal({ type: "session.tabs", sessionId: target.sessionId, cwd: target.cwd, tabs: result.tabs });
+    }
+    return { tabs: result.tabs };
   }
 
   private async isPinned(sessionId: string): Promise<boolean> {
@@ -4554,6 +4584,18 @@ function pinnedSessionIdSet(records: readonly PinnedSessionRecord[]): ReadonlySe
 function withPinnedFlags(sessions: ClientSession[], pinnedSessionIds: ReadonlySet<string>): ClientSession[] {
   if (pinnedSessionIds.size === 0) return sessions;
   return sessions.map((session) => (pinnedSessionIds.has(session.id) ? { ...session, pinned: true } : session));
+}
+
+function tabsBySessionId(records: readonly SessionTabsRecord[]): ReadonlyMap<string, readonly string[]> {
+  return new Map(records.map((record) => [record.sessionId, record.tabs]));
+}
+
+function withSessionTabs(sessions: ClientSession[], tabs: ReadonlyMap<string, readonly string[]>): ClientSession[] {
+  if (tabs.size === 0) return sessions;
+  return sessions.map((session) => {
+    const sessionTabs = tabs.get(session.id);
+    return sessionTabs === undefined ? session : { ...session, tabs: [...sessionTabs] };
+  });
 }
 
 function sessionCatalogIdentity(session: PiAgentSession): string {

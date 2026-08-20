@@ -107,6 +107,8 @@ export interface SessionRouteService {
   /** Pin: top of the grouped list, refused by every archive path until unpinned. */
   pin(ref: SessionRouteRef): Promise<void>;
   unpin(ref: SessionRouteRef): Promise<void>;
+  /** Replace the session's promoted-tab set; an empty array clears it. */
+  setTabs(ref: SessionRouteRef, tabs: string[]): Promise<{ tabs: string[] }>;
   reload(ref: SessionRouteRef): Promise<void>;
   promoteSpawnedSession(sessionFile: string): Promise<void>;
   detachParent(ref: SessionRouteRef): Promise<void>;

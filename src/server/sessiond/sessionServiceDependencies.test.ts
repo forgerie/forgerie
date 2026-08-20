@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { SessionNotificationStore } from "../sessions/sessionNotificationStore.js";
 import { SessionPinStore } from "../sessions/sessionPinStore.js";
+import { SessionTabsStore } from "../sessions/sessionTabsStore.js";
 import { SessionUnreadStore } from "../sessions/sessionUnreadStore.js";
 import { PiSessionService, type PiSessionServiceDependencies } from "../sessions/piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore, fakeRuntime, sessionGateway, testModelRuntime } from "../sessions/piSessionService.testSupport.js";
@@ -19,6 +20,7 @@ function daemonCollaborators(patch: Partial<SessionServiceDependencyInput> = {})
     agentDir: AGENT_DIR,
     archiveStore: emptyArchiveStore(),
     pinStore: new SessionPinStore(),
+    tabsStore: new SessionTabsStore(),
     modelRuntime: testModelRuntime,
     sessionManager: sessionGateway([]),
     workspaceActivity: new WorkspaceActivityService(),

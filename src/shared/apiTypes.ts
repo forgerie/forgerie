@@ -210,6 +210,12 @@ export interface SessionRef {
   cwd: string;
 }
 
+/** Sessions that may hold tab records at once; the store evicts the stalest beyond this. */
+export const SESSION_TABS_SESSION_LIMIT = 200;
+/** Tabs one session may promote. */
+export const SESSION_TABS_PER_SESSION_LIMIT = 12;
+export const SESSION_TABS_TOOL_ID_MAX_LENGTH = 200;
+
 export const SESSION_UNREAD_LIMIT = 1_000;
 export const SESSION_UNREAD_SESSION_ID_MAX_LENGTH = 512;
 export const SESSION_UNREAD_CWD_MAX_LENGTH = 32 * 1024;
@@ -378,6 +384,12 @@ export interface SessionInfo extends SessionRef {
    * unpinned. Server-owned so the flag roams across browsers.
    */
   pinned?: boolean;
+  /**
+   * Workspace tools promoted to this session's tab band, in band order.
+   * Server-owned so the set roams across browsers; absent when the session
+   * has no promoted tabs. Bounded by `SESSION_TABS_PER_SESSION_LIMIT`.
+   */
+  tabs?: string[];
 }
 
 export interface MachineSessionListingSnapshot {
@@ -1449,13 +1461,14 @@ type SessionUiEventBody =
   | { type: "dialog.closed"; dialogId: string; reason: ExtensionDialogCloseReason; answer?: ExtensionDialogAnswer }
   | { type: "session.name"; sessionId: string; name?: string }
   | { type: "session.pinned"; sessionId: string; cwd: string; pinned: boolean }
+  | { type: "session.tabs"; sessionId: string; cwd: string; tabs: string[] }
   | { type: "session.created"; session: SessionInfo }
   | { type: "pi.event"; eventType: string }
   | { type: "processes.update"; snapshot: ManagedProcessesSnapshot }
   | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
 
 export type GlobalSessionEvent =
-  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.created" }>
+  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" }>
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
   | SessionStartupProgressEvent;

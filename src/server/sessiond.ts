@@ -19,6 +19,7 @@ import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js
 import { initializeSessionArchive } from "./sessions/sessionArchiveInitialization.js";
 import { SessionArchiveStore, defaultSessionArchiveFilePath } from "./sessions/sessionArchiveStore.js";
 import { SessionPinStore, defaultSessionPinFilePath } from "./sessions/sessionPinStore.js";
+import { SessionTabsStore, defaultSessionTabsFilePath } from "./sessions/sessionTabsStore.js";
 import { FileSessionUnreadPersistence, SessionUnreadStore, defaultSessionUnreadFilePath } from "./sessions/sessionUnreadStore.js";
 import { ProjectScopedSpawnTargetResolver } from "./sessions/spawnTargetResolver.js";
 import { RegisteredProjectWorkspaceCwds } from "./workspaces/projectWorkspaceCwds.js";
@@ -84,6 +85,7 @@ async function createSessionDaemonRuntime() {
   const archiveStore = new SessionArchiveStore(defaultSessionArchiveFilePath(daemonEnvironment));
   await initializeSessionArchive(archiveStore.initialize(), app.log);
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
+  const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
   const workspaceActivity = new WorkspaceActivityService(eventHub);
   const auth = await AuthService.create({ agentDir: activeAgentProfile.dir, logger: app.log });
   // Capture providers registered by global extensions while the runtime is
@@ -112,6 +114,7 @@ async function createSessionDaemonRuntime() {
     agentDir: activeAgentProfile.dir,
     archiveStore,
     pinStore,
+    tabsStore,
     workspaceActivity,
     logger: app.log,
     ...(spawnTargets === undefined ? {} : { spawnTargets }),

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type AskUserAnswer, type AskUserSubmission, type ExtensionDialogAnswerRequest, type ExtensionDialogCancelRequest, type PromptResourceCommandIdentity, type SessionBulkMutationRequest, type SessionBulkMutationRef, type SessionCleanupRequest, type SessionTreeForkRequest, type SessionTreeNavigateRequest, type SessionTreeSummaryChoice, type SessionUnreadAcknowledgeRequest } from "../../shared/apiTypes.js";
+import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, SESSION_TABS_PER_SESSION_LIMIT, SESSION_TABS_TOOL_ID_MAX_LENGTH, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type AskUserAnswer, type AskUserSubmission, type ExtensionDialogAnswerRequest, type ExtensionDialogCancelRequest, type PromptResourceCommandIdentity, type SessionBulkMutationRequest, type SessionBulkMutationRef, type SessionCleanupRequest, type SessionTreeForkRequest, type SessionTreeNavigateRequest, type SessionTreeSummaryChoice, type SessionUnreadAcknowledgeRequest } from "../../shared/apiTypes.js";
 import { projectBrowserMessagePreviewResponse, projectBrowserMessageResponse } from "../browserMessageProjection.js";
 import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
@@ -492,6 +492,15 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
+  app.put<{ Params: { sessionId: string }; Body: { cwd?: unknown; tabs?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/tabs`, async (request, reply) => {
+    try {
+      const body = requireRecord(request.body);
+      return await sessions.setTabs(sessionRefFromBody(request.params.sessionId, body), sessionTabsFromBody(body));
+    } catch (error) {
+      return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
+    }
+  });
+
   app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/restore`, async (request, reply) => {
     try {
       await sessions.restore(sessionRefFromBody(request.params.sessionId, optionalRecord(request.body)));
@@ -680,6 +689,14 @@ function askUserAnswerFromValue(value: unknown): AskUserAnswer {
 
 function requireBoundedId(value: unknown, field: string): string {
   return requireNonEmptyBoundedString(value, field, ASK_USER_ID_MAX_LENGTH);
+}
+
+/** Shape-check a full tab-set replacement; the store deduplicates again defensively. */
+function sessionTabsFromBody(body: Record<string, unknown>): string[] {
+  const tabs = body["tabs"];
+  if (!Array.isArray(tabs)) throw new Error("tabs field must be an array");
+  if (tabs.length > SESSION_TABS_PER_SESSION_LIMIT) throw new Error("tabs field has too many entries");
+  return tabs.map((entry) => requireNonEmptyBoundedString(entry, "tabs entry", SESSION_TABS_TOOL_ID_MAX_LENGTH));
 }
 
 /**

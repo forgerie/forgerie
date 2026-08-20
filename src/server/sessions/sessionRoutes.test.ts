@@ -1122,6 +1122,32 @@ describe("session routes", () => {
     }
   });
 
+  it("routes tab replacements with normalized refs and rejects malformed sets", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const requestCwd = resolve("/repo");
+      const putResponse = await routeApp.inject({ method: "PUT", url: "/sessions/s1/tabs", payload: { cwd: requestCwd, tabs: ["core:workspace.git"] } });
+      const notArray = await routeApp.inject({ method: "PUT", url: "/sessions/s1/tabs", payload: { cwd: requestCwd, tabs: "core:workspace.git" } });
+      const oversized = await routeApp.inject({ method: "PUT", url: "/sessions/s1/tabs", payload: { cwd: requestCwd, tabs: Array.from({ length: 13 }, (_, index) => `plugin:tool-${String(index)}`) } });
+      const emptyEntry = await routeApp.inject({ method: "PUT", url: "/sessions/s1/tabs", payload: { cwd: requestCwd, tabs: [""] } });
+
+      expect(putResponse.statusCode).toBe(200);
+      expect(putResponse.json()).toEqual({ tabs: ["core:workspace.git"] });
+      expect(routeService.setTabsCalls).toEqual([{ ref: { id: "s1", cwd: requestCwd }, tabs: ["core:workspace.git"] }]);
+      expect(notArray.statusCode).toBe(400);
+      expect(oversized.statusCode).toBe(400);
+      expect(emptyEntry.statusCode).toBe(400);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("routes pin and unpin requests with normalized session refs", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1532,6 +1558,12 @@ class CapturingRouteSessionService implements SessionRouteService {
   unpin(ref: SessionRouteRef): Promise<void> {
     this.unpinCalls.push(ref);
     return Promise.resolve();
+  }
+
+  readonly setTabsCalls: { ref: SessionRouteRef; tabs: string[] }[] = [];
+  setTabs(ref: SessionRouteRef, tabs: string[]): Promise<{ tabs: string[] }> {
+    this.setTabsCalls.push({ ref, tabs });
+    return Promise.resolve({ tabs });
   }
 
   promoteSpawnedSession(): never { throw unusedRouteMethod("promoteSpawnedSession"); }
