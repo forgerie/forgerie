@@ -230,7 +230,12 @@ export const appStyles = css`
   main.workspace-view chat-view, main.workspace-view prompt-editor, main.workspace-view .empty { display: none; }
   .shell.overlay-navigation { grid-template-columns: minmax(0, 1fr); }
   .shell.overlay-navigation .panel-surface[data-side="navigation"][data-mode="docked"], .shell.overlay-navigation .navigation-panel-edge { display: none; }
-  .shell.overlay-navigation main, .shell.overlay-navigation.workspace-view .panel-surface[data-side="workspace"] { grid-column: 1; }
+  /*
+   * Overlay shells still run the summoned three-column grid (navigation's
+   * track is just 0px), so the tabbed workspace aside keeps grid-column 3
+   * from the workspace-view rules above; only main needs pinning here.
+   */
+  .shell.overlay-navigation main { grid-column: 1; }
   .shell.overlay-navigation .context-bar { display: flex; }
   .shell.overlay-navigation main { position: relative; }
   /*
