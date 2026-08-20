@@ -1148,19 +1148,6 @@ export class SessionInboxPanel extends LitElement {
       interpolate-size: allow-keywords;
       max-height: 60vh;
       overflow: hidden auto;
-      /*
-       * Flush with the panel, not inset within the header.
-       *
-       * The header pads its contents by 6 and 12, and the drawer was one of
-       * those contents -- so it sat in the middle of that padding with air on
-       * three sides and read as a box inside a box. It steps back out of that
-       * padding so its own edges are the panel's edges, and its bottom edge is
-       * the seam the list begins at: a drawer pulled from the header's border
-       * rather than a card floating inside it.
-       */
-      margin-inline: -12px;
-      margin-block-end: -6px;
-      width: calc(100% + 24px);
       padding: 4px 12px;
       animation: drawer-open var(--pi-motion-move) ease-out;
       /*
@@ -1172,6 +1159,27 @@ export class SessionInboxPanel extends LitElement {
       border-block: 1px solid var(--pi-border-muted);
       background: var(--pi-surface-hover);
       box-shadow: inset 0 6px 8px -8px var(--pi-shadow);
+    }
+
+    /*
+     * Flush with the panel, not inset within the header.
+     *
+     * The header pads its contents by 6 and 12, and the drawer is one of
+     * those contents -- so it sat in the middle of that padding with air on
+     * three sides and read as a box inside a box. It steps back out of that
+     * padding so its own edges are the panel's edges, and its bottom edge is
+     * the seam the list begins at: a drawer pulled from the header's border
+     * rather than a card floating inside it.
+     *
+     * Only the header pads its contents. The row menu opens inside a row slot
+     * that has no padding of its own, so the same escape there pushed the
+     * drawer past the panel's left edge. The escape stays scoped to the
+     * header.
+     */
+    .board-header .menu-panel {
+      margin-inline: -12px;
+      margin-block-end: -6px;
+      width: calc(100% + 24px);
     }
 
     .menu-panel button {
