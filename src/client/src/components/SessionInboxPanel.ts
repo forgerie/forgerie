@@ -986,6 +986,14 @@ export class SessionInboxPanel extends LitElement {
       container-type: inline-size;
 
       /*
+       * The rows lead with a state marker and a column gap before the title.
+       * Named once so anything that wants to line up with the titles -- the
+       * drawer's heading and commands -- steps past the same rail.
+       */
+      --row-marker-size: 7px;
+      --row-title-gap: 10px;
+
+      /*
        * One tone per group kind, read by var(--tone-KIND) in group headers and
        * row markers. These must stay inside a selector block: a stray
        * top-level declaration is a parse error, and CSS error recovery then
@@ -1196,7 +1204,8 @@ export class SessionInboxPanel extends LitElement {
       display: block;
       width: 100%;
       min-height: 36px;
-      padding: 6px 10px;
+      /* Command text sits on the same vertical line as the row titles. */
+      padding: 6px 10px 6px calc(var(--row-marker-size) + var(--row-title-gap));
       font: inherit;
       color: var(--pi-text);
       text-align: start;
@@ -1214,7 +1223,7 @@ export class SessionInboxPanel extends LitElement {
     /* Which row the commands belong to, since a held finger covers the row. */
     .menu-heading {
       max-width: min(240px, calc(100vw - 32px));
-      padding: 4px 10px 6px;
+      padding: 4px 10px 6px calc(var(--row-marker-size) + var(--row-title-gap));
       border-bottom: 1px solid var(--pi-border-muted);
       margin-bottom: 4px;
       color: var(--pi-muted);
@@ -1376,7 +1385,7 @@ export class SessionInboxPanel extends LitElement {
       display: grid;
       grid-template-columns: auto 1fr auto;
       align-items: start;
-      gap: 2px 10px;
+      gap: 2px var(--row-title-gap);
       width: 100%;
       padding: 8px 12px;
       text-align: left;
@@ -1421,8 +1430,8 @@ export class SessionInboxPanel extends LitElement {
     .row-marker {
       grid-row: 1 / span 2;
       align-self: center;
-      width: 7px;
-      height: 7px;
+      width: var(--row-marker-size);
+      height: var(--row-marker-size);
       border-radius: 50%;
       background: var(--row-tone, transparent);
     }
