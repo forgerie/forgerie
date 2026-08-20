@@ -116,8 +116,15 @@ export class WorkspaceFilesPanel extends LitElement {
     if (file === undefined) return html`<p class="muted">Select a file.</p>`;
     if (file.mediaType === "image") return this.renderImageViewer(context, file);
     loadCodeViewer();
+    // Pages render, sources display: only documents a browser would render
+    // top-level earn the preview affordance, not their css/js subresources.
+    const previewable = /\.html?$/iu.test(file.path) && context.onOpenDocumentPreview !== undefined;
     return html`
-      <div class="viewer-header"><strong>${file.path}</strong><small>${file.language ?? "text"}${file.truncated ? " · truncated" : ""}</small></div>
+      <div class="viewer-header">
+        <strong>${file.path}</strong>
+        ${previewable ? html`<button @click=${() => { context.onOpenDocumentPreview?.(file.path); }}>Open preview</button>` : null}
+        <small>${file.language ?? "text"}${file.truncated ? " · truncated" : ""}</small>
+      </div>
       <code-viewer .content=${file.content} .language=${file.language}></code-viewer>
     `;
   }

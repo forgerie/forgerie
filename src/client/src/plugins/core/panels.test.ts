@@ -12,6 +12,7 @@ describe("core workspace panels", () => {
 
     expect(orders).toEqual([
       { id: "workspace.files", order: 10 },
+      { id: "workspace.preview", order: 15 },
       { id: "workspace.git", order: 20 },
       { id: "workspace.terminal", order: 30 },
       { id: "workspace.notifications", order: 40 },
@@ -34,6 +35,17 @@ describe("core workspace panels", () => {
       expect(notificationsVisible(open)).toBe(true);
       expect(notificationsVisible(closed)).toBe(false);
       expect(notificationsBadge(open)).toBeUndefined();
+    });
+  });
+
+  describe("preview panel", () => {
+    it("joins the strip only while a document is open", () => {
+      expect(previewVisible(context({ messages: [] }))).toBe(false);
+      expect(previewVisible(context({ messages: [], previewDocument: { path: "lessons/0001-intro.html" } }))).toBe(true);
+    });
+
+    it("does not vanish from under the user while it is the open tool", () => {
+      expect(previewVisible(context({ messages: [], workspaceTool: "core:workspace.preview" }))).toBe(true);
     });
   });
 
@@ -61,6 +73,7 @@ describe("core workspace panels", () => {
     const panels = new Map(createCoreWorkspacePanels().map((panel) => [panel.id, panel]));
 
     expect(panels.get("workspace.files")?.render(panelContext)).toBeDefined();
+    expect(panels.get("workspace.preview")?.render(panelContext)).toBeDefined();
     expect(panels.get("workspace.git")?.visible?.(panelContext)).toBe(true);
     expect(panels.get("workspace.git")?.visible?.({ ...panelContext, workspace: { ...panelContext.workspace, isGitRepo: false } })).toBe(false);
     expect(panels.get("workspace.git")?.render(panelContext)).toBeDefined();
@@ -84,6 +97,12 @@ function notificationsBadge(panelContext: WorkspacePanelContext) {
 
 function notificationsVisible(panelContext: WorkspacePanelContext) {
   return notificationsPanel().visible?.(panelContext);
+}
+
+function previewVisible(panelContext: WorkspacePanelContext) {
+  const panel = createCoreWorkspacePanels().find((entry) => entry.id === "workspace.preview");
+  if (panel === undefined) throw new Error("preview panel is not registered");
+  return panel.visible?.(panelContext);
 }
 
 function agentsPanel() {
@@ -162,12 +181,13 @@ function notificationInbox(): SelectedSessionNotificationInbox {
   };
 }
 
-function context(patch: { messages: ChatLine[]; workspaceTool?: AppState["workspaceTool"]; selectedNotificationInbox?: SelectedSessionNotificationInbox }): WorkspacePanelContext {
+function context(patch: { messages: ChatLine[]; workspaceTool?: AppState["workspaceTool"]; selectedNotificationInbox?: SelectedSessionNotificationInbox; previewDocument?: AppState["previewDocument"] }): WorkspacePanelContext {
   const state: AppState = {
     ...initialAppState(),
     messages: patch.messages,
     ...(patch.workspaceTool === undefined ? {} : { workspaceTool: patch.workspaceTool }),
     ...(patch.selectedNotificationInbox === undefined ? {} : { selectedNotificationInbox: patch.selectedNotificationInbox }),
+    ...(patch.previewDocument === undefined ? {} : { previewDocument: patch.previewDocument }),
   };
   return {
     machine: { id: "local", name: "Local", kind: "local" },

@@ -212,6 +212,8 @@ export interface WorkspacePanelContext extends WorkspaceContext {
   onOpenSessionFile?: (sessionFile: string) => void;
   /** Return a delegated child to the inbox as a session of its own. */
   onPromoteSpawnedSession?: (sessionFile: string) => void;
+  /** Open a workspace document in the rendered preview tool. */
+  onOpenDocumentPreview?: (path: string) => void;
   /** Core host actions for the selected session notification inbox. */
   onDismissNotification?: (notificationId: string) => void;
   onDismissAllNotifications?: () => void;

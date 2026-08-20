@@ -126,6 +126,8 @@ export interface AppState {
   projectDialogOpen: boolean;
   machineDialogOpen: boolean;
   workspaceTool: QualifiedContributionId;
+  /** Workspace document open in the rendered preview tool, workspace-relative. */
+  previewDocument: { path: string } | undefined;
   mainView: "navigation" | "chat" | QualifiedContributionId;
   fileTree: FileTreeEntry[];
   expandedDirs: Record<string, FileTreeEntry[]>;
@@ -269,6 +271,7 @@ export function initialAppState(): AppState {
     projectDialogOpen: false,
     machineDialogOpen: false,
     workspaceTool: "core:workspace.files",
+    previewDocument: undefined,
     mainView: "chat",
     fileTree: [],
     expandedDirs: {},

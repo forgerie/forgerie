@@ -1083,6 +1083,12 @@ export class PiWebApp extends LitElement {
     this.openWorkspaceTool("core:workspace.terminal");
   }
 
+  /** Open a workspace document in the rendered preview tool. */
+  private openDocumentPreview(path: string): void {
+    this.setState({ previewDocument: { path } });
+    this.openWorkspaceTool("core:workspace.preview");
+  }
+
   private terminalCommandRunsForOrigin(origin: string, machineId = selectedMachineId(this.state)): TerminalCommandRunsInternalRuntime {
     const key = machineScopedKey(machineId, origin);
     const existing = this.terminalCommandRunRuntimes.get(key);
@@ -2555,6 +2561,7 @@ export class PiWebApp extends LitElement {
         onSelectDiff: (path: string) => { void this.git.selectDiff(path); },
         onOpenSessionFile: (sessionFile: string) => { void this.openSessionByFile(sessionFile); },
         onPromoteSpawnedSession: (sessionFile: string) => { void this.promoteSpawnedSession(sessionFile); },
+        onOpenDocumentPreview: (path: string) => { this.openDocumentPreview(path); },
         onDismissNotification: this.handleDismissNotification,
         onDismissAllNotifications: this.handleDismissAllNotifications,
         onSelectTerminal: (terminalId: string | undefined, options?: { replace?: boolean | undefined }) => { this.selectTerminal(terminalId, options); },

@@ -26,6 +26,19 @@ export function workspaceFileWriteUrl(projectId: string, workspaceId: string, pa
   return resolveAppUrl(`${prefix}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}/file?${params.toString()}`);
 }
 
+/**
+ * Rendered-document route. The file path rides in the URL path, not a query
+ * parameter, so the page's relative references resolve through this same
+ * route. `version` only busts the iframe's navigation cache on manual reload;
+ * the server ignores it.
+ */
+export function workspaceDocumentPreviewUrl(projectId: string, workspaceId: string, path: string, options?: { machineId?: string; version?: number }): string {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const query = options?.version === undefined ? "" : `?v=${String(options.version)}`;
+  const prefix = `api/machines/${encodeURIComponent(options?.machineId ?? "local")}`;
+  return resolveAppUrl(`${prefix}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}/preview/${encodedPath}${query}`);
+}
+
 export function workspaceImagePreviewUrl(projectId: string, workspaceId: string, path: string, options?: { modifiedAt?: string; machineId?: string }): string {
   const params = new URLSearchParams();
   params.set("path", path);

@@ -5,10 +5,12 @@ import { notificationInboxTotalCount, selectedNotificationView } from "../../ses
 import "../../components/SessionNotificationsPanel";
 import "../../components/WorkspaceAgentsPanel";
 import "../../components/WorkspaceFilesPanel";
+import "../../components/WorkspacePreviewPanel";
 import "../../components/WorkspaceGitPanel";
 import type { WorkspacePanelContribution, WorkspacePanelContext } from "../types";
 
 const NOTIFICATIONS_PANEL_ID = "workspace.notifications";
+const PREVIEW_PANEL_ID = "workspace.preview";
 const AGENTS_PANEL_ID = "workspace.agents";
 
 export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
@@ -19,6 +21,18 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
       icon: renderBuiltinTabIcon("files"),
       order: 10,
       render: renderFiles,
+    },
+    {
+      id: PREVIEW_PANEL_ID,
+      title: "Preview",
+      icon: renderBuiltinTabIcon("preview"),
+      // Beside Files, where its documents come from.
+      order: 15,
+      // No document, no tab; the open-tool clause keeps the panel from
+      // vanishing from under someone reading it when the document is closed
+      // from elsewhere.
+      visible: (context) => context.state.previewDocument !== undefined || isOpenTool(context, PREVIEW_PANEL_ID),
+      render: renderPreview,
     },
     {
       id: "workspace.git",
@@ -96,6 +110,10 @@ function renderFiles(context: WorkspacePanelContext): TemplateResult {
 function renderTerminal(context: WorkspacePanelContext): TemplateResult {
   loadTerminalPanel();
   return html`<terminal-panel .workspace=${context.workspace} .machineId=${context.machine.id} .selectedTerminalId=${context.selectedTerminalId} .autoStart=${context.terminalAutoStart} .onSelectTerminal=${context.onSelectTerminal}></terminal-panel>`;
+}
+
+function renderPreview(context: WorkspacePanelContext): TemplateResult {
+  return html`<workspace-preview-panel .context=${context}></workspace-preview-panel>`;
 }
 
 function renderGit(context: WorkspacePanelContext): TemplateResult {

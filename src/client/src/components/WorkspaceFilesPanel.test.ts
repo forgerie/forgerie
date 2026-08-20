@@ -379,6 +379,42 @@ function binaryFileContent(path: string, size: number): FileContentResponse {
   };
 }
 
+describe("workspace-files-panel document preview", () => {
+  it("offers Open preview for html documents and reports the workspace path", async () => {
+    const onOpenDocumentPreview = vi.fn<NonNullable<WorkspacePanelContext["onOpenDocumentPreview"]>>();
+    const panel = new WorkspaceFilesPanel();
+    panel.context = workspacePanelContext({
+      selectedFilePath: "lessons/0001-intro.html",
+      selectedFileContent: textFile("lessons/0001-intro.html", "html"),
+      onOpenDocumentPreview,
+    });
+    document.body.append(panel);
+    await panel.updateComplete;
+
+    buttonWithText(panel.shadowRoot, "Open preview").click();
+
+    expect(onOpenDocumentPreview).toHaveBeenCalledWith("lessons/0001-intro.html");
+  });
+
+  it("keeps the affordance off non-page sources like css", async () => {
+    const panel = new WorkspaceFilesPanel();
+    panel.context = workspacePanelContext({
+      selectedFilePath: "assets/course.css",
+      selectedFileContent: textFile("assets/course.css", "css"),
+      onOpenDocumentPreview: vi.fn<NonNullable<WorkspacePanelContext["onOpenDocumentPreview"]>>(),
+    });
+    document.body.append(panel);
+    await panel.updateComplete;
+
+    const labels = [...(panel.shadowRoot?.querySelectorAll("button") ?? [])].map((button) => button.textContent);
+    expect(labels.some((label) => label.includes("Open preview"))).toBe(false);
+  });
+});
+
+function textFile(path: string, language: string): FileContentResponse {
+  return { path, language, encoding: "utf8", size: 24, modifiedAt: "2026-08-19T00:00:00.000Z", content: "<h1>content</h1>", truncated: false, binary: false };
+}
+
 function workspacePanelContext(patch: Partial<WorkspacePanelContext> = {}): WorkspacePanelContext {
   const workspace = patch.workspace ?? { id: "workspace-1", projectId: "project-1", path: "/tmp/project", label: "main", isMain: true, isGitRepo: true, isGitWorktree: false, effectiveConfig: {} };
   return {
@@ -412,6 +448,7 @@ function workspacePanelContext(patch: Partial<WorkspacePanelContext> = {}): Work
     onRefreshFiles: patch.onRefreshFiles ?? vi.fn<WorkspacePanelContext["onRefreshFiles"]>(),
     onExpandDir: patch.onExpandDir ?? vi.fn<WorkspacePanelContext["onExpandDir"]>(),
     onSelectFile: patch.onSelectFile ?? vi.fn<WorkspacePanelContext["onSelectFile"]>(),
+    ...(patch.onOpenDocumentPreview === undefined ? {} : { onOpenDocumentPreview: patch.onOpenDocumentPreview }),
     onStartWorkspaceUpload: patch.onStartWorkspaceUpload ?? vi.fn<WorkspacePanelContext["onStartWorkspaceUpload"]>(() => undefined),
     onCancelWorkspaceUpload: patch.onCancelWorkspaceUpload ?? vi.fn<WorkspacePanelContext["onCancelWorkspaceUpload"]>(),
     onClearWorkspaceUpload: patch.onClearWorkspaceUpload ?? vi.fn<WorkspacePanelContext["onClearWorkspaceUpload"]>(),

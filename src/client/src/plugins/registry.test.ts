@@ -64,7 +64,7 @@ describe("PluginRegistry", () => {
     registry.register({ id: "core", plugin: corePlugin });
 
     expect(registry.getActions(createContext().context).some((action) => action.id === "core:actions.show")).toBe(true);
-    expect(registry.getWorkspacePanels().map((panel) => panel.id)).toEqual(["core:workspace.files", "core:workspace.git", "core:workspace.terminal", "core:workspace.notifications", "core:workspace.agents"]);
+    expect(registry.getWorkspacePanels().map((panel) => panel.id)).toEqual(["core:workspace.files", "core:workspace.preview", "core:workspace.git", "core:workspace.terminal", "core:workspace.notifications", "core:workspace.agents"]);
   });
 
   it("keeps session.start globally enabled while routing its New session identity to the composer", async () => {

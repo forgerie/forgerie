@@ -1,6 +1,6 @@
 import { svg, type TemplateResult } from "lit";
 
-export type AppTabBuiltinIcon = "navigation" | "chat" | "files" | "git" | "terminal" | "notifications" | "agents";
+export type AppTabBuiltinIcon = "navigation" | "chat" | "files" | "git" | "terminal" | "notifications" | "agents" | "preview";
 
 export function renderBuiltinTabIcon(icon: AppTabBuiltinIcon): TemplateResult {
   switch (icon) {
@@ -53,6 +53,16 @@ export function renderBuiltinTabIcon(icon: AppTabBuiltinIcon): TemplateResult {
         <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"></path>
           <path d="M10 20h4"></path>
+        </svg>
+      `;
+    case "preview":
+      // A rendered page: document with a folded corner, not raw source.
+      return svg`
+        <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"></path>
+          <path d="M14 3v5h5"></path>
+          <path d="M9 13h6"></path>
+          <path d="M9 17h4"></path>
         </svg>
       `;
     case "agents":
