@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Obsidian-style session tabs — look study</title>
+<style>
+  /*
+   * Look study: Obsidian-feel tab band over the Forgerie shell.
+   * Tokens are copied verbatim from src/client/index.html (dark) and
+   * src/client/src/plugins/themes/index.ts (light) so the study is on-brand.
+   * One deliberate addition: --proto-band, the color BEHIND the tabs. It has
+   * no existing token; if the design lands, it becomes a theme token.
+   */
+  :root {
+    --pi-bg: #111214;
+    --pi-surface: #191a1d;
+    --pi-surface-hover: #202225;
+    --pi-terminal-bg: #0c0d0f;
+    --pi-terminal-text: #e6e7e9;
+    --pi-border: #2a2c30;
+    --pi-border-muted: #202225;
+    --pi-text: #e6e7e9;
+    --pi-text-secondary: #a9abb0;
+    --pi-muted: #85888e;
+    --pi-dim: #62656b;
+    --pi-accent: #6699e0;
+    --pi-selection-bg: #1d2331;
+    --pi-success: #56b380;
+    --pi-danger: #e06c75;
+    --pi-radius-control: 8px;
+    --pi-radius-surface: 12px;
+    --pi-motion-fast: 120ms;
+    /* Band sits a step below the page so the active tab reads as the page. */
+    --proto-band: #0b0c0e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --pi-bg: #fafaf8;
+      --pi-surface: #ffffff;
+      --pi-surface-hover: #f1f1ee;
+      --pi-terminal-bg: #16171a;
+      --pi-terminal-text: #e6e7e9;
+      --pi-border: #e0dfdb;
+      --pi-border-muted: #ebeae6;
+      --pi-text: #1b1c1f;
+      --pi-text-secondary: #53565c;
+      --pi-muted: #6d7076;
+      --pi-dim: #8a8d93;
+      --pi-accent: #3563c4;
+      --pi-selection-bg: #e8eefb;
+      --pi-success: #1d7a4f;
+      --pi-danger: #c13a49;
+      --proto-band: #ececea;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    background: var(--pi-bg);
+    color: var(--pi-text);
+  }
+  .shell { height: 100dvh; display: flex; flex-direction: column; }
+
+  /* ---- The tab band ---------------------------------------------------- */
+  .tab-band {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-end;
+    background: var(--proto-band);
+    padding: 6px 8px 0;
+  }
+  .tabs {
+    display: flex;
+    align-items: flex-end;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    position: relative;
+    flex: 0 1 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 16px;
+    border: 0;
+    background: transparent;
+    color: var(--pi-muted);
+    font: inherit;
+    font-size: 14px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .tab .label { overflow: hidden; text-overflow: ellipsis; max-width: 22ch; }
+  /* Hairline separators between inactive neighbours, Obsidian style:
+     never beside the active card, never before the first tab. */
+  .tab + .tab::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    translate: 0 -50%;
+    width: 1px;
+    height: 16px;
+    background: var(--pi-border);
+  }
+  .tab.active::before, .tab.active + .tab::before { display: none; }
+  .tab:hover { color: var(--pi-text-secondary); }
+  /* The active tab is the page itself: same background, fused at the seam. */
+  .tab.active {
+    background: var(--pi-bg);
+    color: var(--pi-text);
+    border-radius: var(--pi-radius-control) var(--pi-radius-control) 0 0;
+  }
+  .tab .close {
+    display: none;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--pi-muted);
+    font-size: 14px;
+    line-height: 18px;
+    cursor: pointer;
+  }
+  .tab.active .close { display: inline-grid; place-items: center; }
+  .tab.active[data-permanent] .close { display: none; }
+  .tab .close:hover { background: var(--pi-surface-hover); color: var(--pi-text); }
+
+  /* ---- Chat surface (calm transcript + composer island) ---------------- */
+  main { flex: 1 1 auto; min-height: 0; display: none; }
+  main.visible { display: flex; flex-direction: column; }
+  .transcript {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    padding: 24px 0 12px;
+  }
+  .measure {
+    width: min(36rem, 100% - 64px);
+    margin-inline: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .msg-user { color: var(--pi-muted); font-size: 15px; line-height: 1.55; }
+  .msg-agent { color: var(--pi-text); font-size: 15px; line-height: 1.55; }
+  .tool-card {
+    border: 1px solid var(--pi-border-muted);
+    border-radius: var(--pi-radius-control);
+    background: var(--pi-surface);
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--pi-text-secondary);
+  }
+  .tool-card .ok { color: var(--pi-success); }
+  .composer { flex: 0 0 auto; padding: 12px; }
+  .island {
+    width: min(36rem, 100%);
+    margin-inline: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--pi-border);
+    border-radius: var(--pi-radius-surface);
+    background: var(--pi-surface);
+    padding: 12px 14px;
+  }
+  .island .placeholder { flex: 1 1 auto; color: var(--pi-dim); font-size: 15px; }
+  .island .send {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--pi-border);
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    color: var(--pi-muted);
+    font-size: 15px;
+  }
+
+  /* ---- Terminal surface ------------------------------------------------ */
+  main.terminal-view { background: var(--pi-bg); }
+  .terminal {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 12px;
+    border-radius: var(--pi-radius-control);
+    background: var(--pi-terminal-bg);
+    color: var(--pi-terminal-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 14px 16px;
+    overflow: hidden;
+  }
+  .terminal .prompt { color: var(--pi-accent); }
+  .terminal .ok { color: var(--pi-success); }
+  .terminal .muted { color: var(--pi-muted); }
+  .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 15px;
+    translate: 0 3px;
+    background: var(--pi-terminal-text);
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="tab-band">
+    <nav class="tabs" role="tablist" aria-label="Session tabs">
+      <button class="tab" data-tab="chat" data-permanent role="tab">
+        <span class="label">Chat</span>
+        <span class="close" aria-hidden="true">×</span>
+      </button>
+      <button class="tab" data-tab="terminal" role="tab">
+        <span class="label">Terminal</span>
+        <span class="close" role="button" aria-label="Close Terminal tab">×</span>
+      </button>
+      <button class="tab" data-tab="git" role="tab">
+        <span class="label">Git</span>
+        <span class="close" role="button" aria-label="Close Git tab">×</span>
+      </button>
+      <button class="tab" data-tab="files" role="tab">
+        <span class="label">Files</span>
+        <span class="close" role="button" aria-label="Close Files tab">×</span>
+      </button>
+    </nav>
+  </header>
+
+  <main class="chat-view" data-view="chat">
+    <div class="transcript">
+      <div class="measure">
+        <p class="msg-user">Can you check why the posture captures come out clipped on the folded viewport?</p>
+        <p class="msg-agent">The capture was taken with <code>--window-size</code> instead of viewport emulation, so headless Chromium clamped the width to ~500px and cropped the right edge. The posture script drives real device metrics over CDP, so I re-captured with it.</p>
+        <div class="tool-card">node scripts/capture-postures.mjs --label baseline<br /><span class="ok">✓</span> captured 4 postures — folded-portrait now 475px wide</div>
+        <p class="msg-agent">All four postures render the full band now. The folded-landscape shot is the tight one worth a second look.</p>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="island">
+        <span class="placeholder">Message…</span>
+        <span class="send">↑</span>
+      </div>
+    </div>
+  </main>
+
+  <main class="terminal-view" data-view="terminal">
+    <div class="terminal">
+      <div><span class="prompt">~/code/sandbox/forgerie</span> <span class="muted">main</span></div>
+      <div>$ npm run verify</div>
+      <div><span class="ok">✓</span> typecheck <span class="muted">(4.2s)</span></div>
+      <div><span class="ok">✓</span> lint <span class="muted">(2.1s)</span></div>
+      <div><span class="ok">✓</span> 312 tests passed <span class="muted">(9.8s)</span></div>
+      <div>$ <span class="cursor"></span></div>
+    </div>
+  </main>
+</div>
+
+<script>
+  // ?active=chat|terminal picks the active tab and matching surface.
+  const active = new URLSearchParams(location.search).get("active") ?? "chat";
+  const known = ["chat", "terminal", "git", "files"];
+  const chosen = known.includes(active) ? active : "chat";
+  for (const tab of document.querySelectorAll(".tab")) {
+    tab.classList.toggle("active", tab.dataset.tab === chosen);
+    tab.setAttribute("aria-selected", String(tab.dataset.tab === chosen));
+  }
+  const view = chosen === "terminal" ? "terminal" : "chat";
+  for (const surface of document.querySelectorAll("main")) {
+    surface.classList.toggle("visible", surface.dataset.view === view);
+  }
+</script>
+</body>
+</html>
