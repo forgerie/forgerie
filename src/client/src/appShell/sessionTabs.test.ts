@@ -1,106 +1,77 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { SESSION_TABS_PER_SESSION_LIMIT } from "../../../shared/apiTypes";
 import {
-  NO_SESSION_TABS,
-  SESSION_TABS_STORAGE_KEY,
-  closeSessionTab,
-  promoteSessionTab,
-  readStoredSessionTabs,
+  LEGACY_SESSION_TABS_STORAGE_KEY,
+  closedSessionTabs,
+  promotedSessionTabs,
   reconciledMainView,
-  sessionTabsFor,
-  writeStoredSessionTabs,
+  removeLegacySessionTabsStorage,
+  sessionTabsOf,
 } from "./sessionTabs";
 
-const SESSION_A = "local:session-a";
-const SESSION_B = "local:session-b";
-const TERMINAL = "core:workspace.terminal" as const;
-const GIT = "core:workspace.git" as const;
+const FILES = "core:workspace.files";
+const GIT = "core:workspace.git";
+const TERMINAL = "core:workspace.terminal";
 
-describe("promoteSessionTab", () => {
-  it("adds a tool to the session's tabs in promotion order", () => {
-    const tabs = promoteSessionTab(promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL), SESSION_A, GIT);
-    expect(sessionTabsFor(tabs, SESSION_A)).toEqual([TERMINAL, GIT]);
+describe("sessionTabsOf", () => {
+  it("reads the session's tabs and drops malformed ids", () => {
+    expect(sessionTabsOf({ tabs: [GIT, "not a tool id", TERMINAL] })).toEqual([GIT, TERMINAL]);
   });
 
-  it("keeps one tab per tool: promoting again is a no-op", () => {
-    const once = promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL);
-    const twice = promoteSessionTab(once, SESSION_A, TERMINAL);
-    expect(twice).toBe(once);
-  });
-
-  it("scopes tabs to the session that promoted them", () => {
-    const tabs = promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL);
-    expect(sessionTabsFor(tabs, SESSION_B)).toEqual([]);
+  it("treats a missing session or missing field as no tabs", () => {
+    expect(sessionTabsOf(undefined)).toEqual([]);
+    expect(sessionTabsOf({})).toEqual([]);
   });
 });
 
-describe("closeSessionTab", () => {
-  it("removes the tool and keeps the session's other tabs", () => {
-    const tabs = promoteSessionTab(promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL), SESSION_A, GIT);
-    expect(sessionTabsFor(closeSessionTab(tabs, SESSION_A, TERMINAL), SESSION_A)).toEqual([GIT]);
+describe("promotedSessionTabs", () => {
+  it("appends a new tool at the end", () => {
+    expect(promotedSessionTabs([GIT], TERMINAL)).toEqual([GIT, TERMINAL]);
   });
 
-  it("drops the session entry when the last tab closes", () => {
-    const tabs = promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL);
-    expect(closeSessionTab(tabs, SESSION_A, TERMINAL)).toEqual({});
+  it("keeps an already-promoted tool in place instead of duplicating it", () => {
+    expect(promotedSessionTabs([GIT, TERMINAL], GIT)).toEqual([GIT, TERMINAL]);
   });
 
-  it("is a no-op for a tool that was never promoted", () => {
-    const tabs = promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL);
-    expect(closeSessionTab(tabs, SESSION_A, GIT)).toBe(tabs);
+  it("refuses to grow past the per-session limit", () => {
+    const full = Array.from({ length: SESSION_TABS_PER_SESSION_LIMIT }, (_, index) => `plugin:tool-${String(index)}`);
+    expect(promotedSessionTabs(full, FILES)).toEqual(full);
+  });
+});
+
+describe("closedSessionTabs", () => {
+  it("removes the tool and keeps the others in order", () => {
+    expect(closedSessionTabs([FILES, GIT, TERMINAL], GIT)).toEqual([FILES, TERMINAL]);
+  });
+
+  it("leaves an absent tool alone", () => {
+    expect(closedSessionTabs([FILES], TERMINAL)).toEqual([FILES]);
   });
 });
 
 describe("reconciledMainView", () => {
-  const tabs = promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL);
-
-  it("keeps chat and navigation untouched", () => {
-    expect(reconciledMainView(tabs, SESSION_A, "chat")).toBe("chat");
-    expect(reconciledMainView(tabs, SESSION_A, "navigation")).toBe("navigation");
+  it("keeps chat and navigation regardless of tabs", () => {
+    expect(reconciledMainView([], "chat")).toBe("chat");
+    expect(reconciledMainView([], "navigation")).toBe("navigation");
   });
 
-  it("keeps a tool that is one of the session's tabs", () => {
-    expect(reconciledMainView(tabs, SESSION_A, TERMINAL)).toBe(TERMINAL);
-  });
-
-  it("falls back to chat for a tool the session never promoted", () => {
-    expect(reconciledMainView(tabs, SESSION_B, TERMINAL)).toBe("chat");
-    expect(reconciledMainView(tabs, SESSION_A, GIT)).toBe("chat");
-  });
-
-  it("falls back to chat when no session is selected", () => {
-    expect(reconciledMainView(tabs, undefined, TERMINAL)).toBe("chat");
+  it("keeps a tool view only while it is a tab", () => {
+    expect(reconciledMainView([TERMINAL], TERMINAL)).toBe(TERMINAL);
+    expect(reconciledMainView([GIT], TERMINAL)).toBe("chat");
+    expect(reconciledMainView([], TERMINAL)).toBe("chat");
   });
 });
 
-describe("stored session tabs", () => {
-  it("round-trips through storage", () => {
-    const written = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => written.get(key) ?? null,
-      setItem: (key: string, value: string) => { written.set(key, value); },
-    };
-    const tabs = promoteSessionTab(promoteSessionTab(NO_SESSION_TABS, SESSION_A, TERMINAL), SESSION_B, GIT);
-    writeStoredSessionTabs(tabs, storage);
-    expect(readStoredSessionTabs(storage)).toEqual(tabs);
+describe("removeLegacySessionTabsStorage", () => {
+  it("deletes the retired browser-local store", () => {
+    const removeItem = vi.fn();
+    removeLegacySessionTabsStorage({ removeItem });
+    expect(removeItem).toHaveBeenCalledWith(LEGACY_SESSION_TABS_STORAGE_KEY);
   });
 
-  it("falls back to no tabs for corrupted storage", () => {
-    expect(readStoredSessionTabs({ getItem: () => "not json" })).toEqual(NO_SESSION_TABS);
-    expect(readStoredSessionTabs({ getItem: () => "[1,2]" })).toEqual(NO_SESSION_TABS);
-    expect(readStoredSessionTabs({ getItem: () => { throw new Error("denied"); } })).toEqual(NO_SESSION_TABS);
-  });
-
-  it("filters entries that are not qualified contribution ids", () => {
-    const raw = JSON.stringify({
-      [SESSION_A]: ["core:workspace.terminal", "not-qualified", 7, "core:workspace.terminal"],
-      [SESSION_B]: "not-a-list",
-    });
-    expect(readStoredSessionTabs({ getItem: () => raw })).toEqual({ [SESSION_A]: [TERMINAL] });
-  });
-
-  it("uses the shared storage key", () => {
-    let requested: string | undefined;
-    readStoredSessionTabs({ getItem: (key: string) => { requested = key; return null; } });
-    expect(requested).toBe(SESSION_TABS_STORAGE_KEY);
+  it("tolerates unavailable storage", () => {
+    expect(() => {
+      removeLegacySessionTabsStorage({ removeItem: () => { throw new Error("denied"); } });
+    }).not.toThrow();
   });
 });

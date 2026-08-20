@@ -60,7 +60,7 @@ import { NavigationSectionsController, type NavigationSection } from "../appShel
 import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
 import { mainSurfaceView, PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
 import { PanelPeekController } from "../appShell/panelPeekController";
-import { SessionTabsController } from "../appShell/sessionTabsController";
+import { closedSessionTabs, promotedSessionTabs, reconciledMainView, removeLegacySessionTabsStorage, sessionTabsOf } from "../appShell/sessionTabs";
 import { RadialMenuController } from "../appShell/radialMenuController";
 import { RADIAL_SLOT_COUNT, radialSlotsEqual, readStoredRadialSlots, reconcileRadialSlots, writeStoredRadialSlots, type RadialSlotMap } from "../appShell/radialSlots";
 import { peekSheetWidth } from "../appShell/panelPeek";
@@ -310,7 +310,6 @@ export class PiWebApp extends LitElement {
     onRefreshError: (error) => { console.warn("Failed to refresh after browser resume", error); },
   });
   private readonly panelIntent = new PanelIntentController(this);
-  private readonly sessionTabs = new SessionTabsController(this);
   private readonly mountedPanelSides = new Set<ShellPanel>();
   private readonly sessionDictationSpeechApi: ComposerDictationCapability["speechApi"] = { checkTurn: checkSpeechTurn, transcribe: transcribeSpeech };
   private readonly sessionDictationCapabilityValue: ComposerDictationCapability = {
@@ -595,6 +594,7 @@ export class PiWebApp extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    removeLegacySessionTabsStorage();
     this.unreadConnected = true;
     this.observeViewportSpace();
     window.addEventListener("popstate", this.onPopState);
@@ -2406,12 +2406,7 @@ export class PiWebApp extends LitElement {
   private workspaceToolTabbed(): boolean {
     const view = this.state.mainView;
     if (view === "chat" || view === "navigation") return false;
-    return this.sessionTabs.tabsFor(this.sessionTabsKeyOf(this.state)).includes(view);
-  }
-
-  private sessionTabsKeyOf(state: AppState): string | undefined {
-    const session = state.selectedSession;
-    return session === undefined ? undefined : machineSessionKey(selectedMachineId(state), session.id);
+    return sessionTabsOf(this.state.selectedSession).includes(view);
   }
 
   private sessionTabLabel(tool: QualifiedContributionId): string {
@@ -2423,9 +2418,9 @@ export class PiWebApp extends LitElement {
   }
 
   private promoteSelectedWorkspaceTool(): void {
-    const key = this.sessionTabsKeyOf(this.state);
-    if (key === undefined) return;
-    this.sessionTabs.promote(key, this.state.workspaceTool);
+    const session = this.state.selectedSession;
+    if (session === undefined) return;
+    void this.sessions.setSessionTabs(session, promotedSessionTabs(sessionTabsOf(session), this.state.workspaceTool));
     // The promoted tool takes the main surface; a lingering peek would
     // otherwise present the same panel as a sheet over its own tab.
     this.panelPeek.close();
@@ -2451,9 +2446,9 @@ export class PiWebApp extends LitElement {
 
   private closeSessionTab(view: AppState["mainView"]): void {
     if (view === "chat" || view === "navigation") return;
-    const key = this.sessionTabsKeyOf(this.state);
-    if (key === undefined) return;
-    this.sessionTabs.close(key, view);
+    const session = this.state.selectedSession;
+    if (session === undefined) return;
+    void this.sessions.setSessionTabs(session, closedSessionTabs(sessionTabsOf(session), view));
     if (this.state.mainView === view) {
       this.setState({ mainView: "chat" });
       this.updateUrl();
@@ -2461,10 +2456,22 @@ export class PiWebApp extends LitElement {
     }
   }
 
-  /** A session switch keeps only its own tabs' takeover; anything else lands on chat. */
+  /**
+   * A session switch keeps only its own tabs' takeover; anything else lands
+   * on chat. Within one session, a takeover whose tab vanished (closed on
+   * another device, or dropped by server reconciliation) returns to chat too,
+   * while a legacy full-width view that never had a tab is left alone.
+   */
   private handleSessionTabsTransition(previous: AppState, next: AppState): void {
-    if (previous.selectedSession?.id === next.selectedSession?.id && selectedMachineId(previous) === selectedMachineId(next)) return;
-    const reconciled = this.sessionTabs.reconciledMainView(this.sessionTabsKeyOf(next), next.mainView);
+    const sessionChanged = previous.selectedSession?.id !== next.selectedSession?.id || selectedMachineId(previous) !== selectedMachineId(next);
+    if (!sessionChanged) {
+      const view = next.mainView;
+      if (view === "chat" || view === "navigation") return;
+      const lostTab = sessionTabsOf(previous.selectedSession).includes(view) && !sessionTabsOf(next.selectedSession).includes(view);
+      if (lostTab) this.setState({ mainView: "chat" });
+      return;
+    }
+    const reconciled = reconciledMainView(sessionTabsOf(next.selectedSession), next.mainView);
     if (reconciled !== next.mainView) this.setState({ mainView: reconciled });
   }
 
@@ -3400,7 +3407,7 @@ export class PiWebApp extends LitElement {
 
   private renderPanelControls(side: ShellPanel) {
     const docked = this.panelIntent.isDocked(side);
-    const promotable = side === "workspace" && this.sessionTabsKeyOf(this.state) !== undefined && this.state.selectedWorkspace !== undefined;
+    const promotable = side === "workspace" && this.state.selectedSession !== undefined && this.state.selectedWorkspace !== undefined;
     return html`
       <app-panel-controls
         noun=${side === "navigation" ? "sessions" : "workspace"}
@@ -3542,8 +3549,7 @@ export class PiWebApp extends LitElement {
 
   /** The band exists only while this session has promoted tabs: chat alone pays no chrome. */
   private renderSessionTabs() {
-    const key = this.sessionTabsKeyOf(this.state);
-    const tools = this.sessionTabs.tabsFor(key);
+    const tools = sessionTabsOf(this.state.selectedSession);
     if (tools.length === 0) return null;
     const tabs: AppSessionTab[] = [
       { id: "chat", label: "Chat", closeable: false },
@@ -3552,7 +3558,7 @@ export class PiWebApp extends LitElement {
     return html`
       <app-session-tabs
         .tabs=${tabs}
-        .selected=${this.sessionTabs.reconciledMainView(key, this.state.mainView)}
+        .selected=${reconciledMainView(tools, this.state.mainView)}
         .onSelect=${(view: AppState["mainView"]) => { this.selectSessionTab(view); }}
         .onClose=${(view: AppState["mainView"]) => { this.closeSessionTab(view); }}
       ></app-session-tabs>

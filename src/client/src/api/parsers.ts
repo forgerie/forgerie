@@ -1,4 +1,4 @@
-import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, EXTENSION_DIALOG_OPTION_LIMIT, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_COMPLETED_AT_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_LIMIT, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type ArchiveSessionsResponse, type AskUserCloseReason, type AskUserCloseResponse, type AskUserOutcome, type AskUserQuestion, type AskUserQuestionOption, type AskUserQuestionRecord, type PendingAskUser, type PendingExtensionDialog, type AuthProviderOption, type AuthProviderStatus, type AuthProvidersResponse, type AuthStatusSource, type AuthType, type CommandOption, type CommandResult, type DeleteWorkspaceFileResponse, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogKind, type ExtensionDialogOutcome, type FileContentResponse, type FileSuggestion, type FileTreeEntry, type FileTreeResponse, type GitDiffResponse, type GitFileState, type GitStatusFile, type GitStatusResponse, type GlobalSessionEvent, type Machine, type MachineHealth, type MachineKind, type MachineRuntime, type MachineStatus, type MessagePage, type ModelSelectionResponse, type NewSessionModelSelectionResponse, type MoveWorkspaceFileResponse, type OAuthFlowState, type PiWebAgentDirEnvSource, type PiWebCapability, type PiWebComponentStatus, type PiWebConfigEnvOverrides, type PiWebConfigResponse, type PiWebConfigValues, type PiWebInstallationInfo, type PiWebPluginConfigMap, type PiWebPluginInfo, type PiWebPluginsResponse, type PiWebPluginScope, type PiWebReleaseStatus, type PiWebRuntimeComponent, type PiWebRuntimeResponse, type PiWebServiceComponent, type PiWebShortcutConfig, type PiWebStatusMessage, type PiWebStatusResponse, type PiWebStatusSeverity, type Project, type QueuedSessionMessage, type SavedPromptAttachment, type SessionBulkArchiveResponse, type SessionBulkDeleteArchivedResponse, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupProjectSummary, type SessionCleanupThresholds, type SessionCleanupTotals, type SessionInfo, type SessionModel, type SessionNotification, type SessionNotificationClearReason, type SessionNotificationDismissThrough, type SessionNotificationInboxDelta, type SessionNotificationInboxEvent, type SessionNotificationInboxSnapshot, type SessionNotificationSeverity, type SessionNotificationSummary, type SessionStatus, type SessionStreamSnapshot, type SessionUiEvent, type SessionUnreadCatalogSnapshot, type SessionUnreadEvent, type SessionUnreadSummary, type SessionWarning, type SessionWarningSeverity, type SlashCommand, type TerminalCommandRun, type TerminalCommandRunStatus, type TerminalInfo, type TerminalUiEvent, type ThinkingLevelsResponse, type WriteWorkspaceFileResponse, type Workspace, type WorkspaceEffectiveConfig, type WorkspaceActivity, type WorkspaceActivityUiEvent, type WorkspaceActivityResponse } from "../../../shared/apiTypes";
+import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, EXTENSION_DIALOG_OPTION_LIMIT, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_TABS_PER_SESSION_LIMIT, SESSION_TABS_TOOL_ID_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_COMPLETED_AT_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_LIMIT, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type ArchiveSessionsResponse, type AskUserCloseReason, type AskUserCloseResponse, type AskUserOutcome, type AskUserQuestion, type AskUserQuestionOption, type AskUserQuestionRecord, type PendingAskUser, type PendingExtensionDialog, type AuthProviderOption, type AuthProviderStatus, type AuthProvidersResponse, type AuthStatusSource, type AuthType, type CommandOption, type CommandResult, type DeleteWorkspaceFileResponse, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogKind, type ExtensionDialogOutcome, type FileContentResponse, type FileSuggestion, type FileTreeEntry, type FileTreeResponse, type GitDiffResponse, type GitFileState, type GitStatusFile, type GitStatusResponse, type GlobalSessionEvent, type Machine, type MachineHealth, type MachineKind, type MachineRuntime, type MachineStatus, type MessagePage, type ModelSelectionResponse, type NewSessionModelSelectionResponse, type MoveWorkspaceFileResponse, type OAuthFlowState, type PiWebAgentDirEnvSource, type PiWebCapability, type PiWebComponentStatus, type PiWebConfigEnvOverrides, type PiWebConfigResponse, type PiWebConfigValues, type PiWebInstallationInfo, type PiWebPluginConfigMap, type PiWebPluginInfo, type PiWebPluginsResponse, type PiWebPluginScope, type PiWebReleaseStatus, type PiWebRuntimeComponent, type PiWebRuntimeResponse, type PiWebServiceComponent, type PiWebShortcutConfig, type PiWebStatusMessage, type PiWebStatusResponse, type PiWebStatusSeverity, type Project, type QueuedSessionMessage, type SavedPromptAttachment, type SessionBulkArchiveResponse, type SessionBulkDeleteArchivedResponse, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupProjectSummary, type SessionCleanupThresholds, type SessionCleanupTotals, type SessionInfo, type SessionModel, type SessionNotification, type SessionNotificationClearReason, type SessionNotificationDismissThrough, type SessionNotificationInboxDelta, type SessionNotificationInboxEvent, type SessionNotificationInboxSnapshot, type SessionNotificationSeverity, type SessionNotificationSummary, type SessionStatus, type SessionStreamSnapshot, type SessionUiEvent, type SessionUnreadCatalogSnapshot, type SessionUnreadEvent, type SessionUnreadSummary, type SessionWarning, type SessionWarningSeverity, type SlashCommand, type TerminalCommandRun, type TerminalCommandRunStatus, type TerminalInfo, type TerminalUiEvent, type ThinkingLevelsResponse, type WriteWorkspaceFileResponse, type Workspace, type WorkspaceEffectiveConfig, type WorkspaceActivity, type WorkspaceActivityUiEvent, type WorkspaceActivityResponse } from "../../../shared/apiTypes";
 import type { PromptResourceCatalogResponse, PromptResourceCommandDescriptor, PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import type { PromptResourceCommandRunResponse } from "../../../shared/apiTypes";
 import type { DoubleEscapeAction, ManagedProcessEndReason, ManagedProcessInfo, ManagedProcessKillResult, ManagedProcessLogLine, ManagedProcessOutputResult, ManagedProcessesSnapshot, ManagedProcessSignal, ManagedProcessStatus, ManagedProcessWriteResult, PiPackageInfo, PiPackageMutationAction, PiPackageMutationResponse, PiPackageScope, PiPackagesResponse, SessionAbortResult, SessionActivity, SessionStartupProgressEvent, SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeNode, SessionTreeNodeKind, SessionTreeSnapshot } from "../../../shared/apiTypes";
@@ -183,7 +183,22 @@ export function parseSessionInfo(value: unknown): SessionInfo {
     ...(record["archived"] === true ? { archived: true } : {}),
     ...(archivedAt === undefined ? {} : { archivedAt }),
     ...(record["pinned"] === true ? { pinned: true } : {}),
+    ...(optionalSessionTabs(record["tabs"]) ?? {}),
   };
+}
+
+/**
+ * Lenient by design: a malformed tab set drops the field rather than failing
+ * the whole session listing, since tabs are a rendering preference.
+ */
+function optionalSessionTabs(value: unknown): { tabs: string[] } | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > SESSION_TABS_PER_SESSION_LIMIT) return undefined;
+  const tabs: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry === "" || entry.length > SESSION_TABS_TOOL_ID_MAX_LENGTH) return undefined;
+    if (!tabs.includes(entry)) tabs.push(entry);
+  }
+  return { tabs };
 }
 
 function parseSessionWarningSeverity(value: unknown): SessionWarningSeverity {
@@ -656,6 +671,8 @@ export function parseSessionStreamEvent(value: unknown): SessionUiEvent {
       return parseSessionNameEvent(record);
     case "session.pinned":
       return parseSessionPinnedEvent(record);
+    case "session.tabs":
+      return parseSessionTabsEvent(record);
     case "session.created":
       return { type: "session.created", session: parseSessionInfo(record["session"]) };
     case "pi.event":
@@ -670,7 +687,7 @@ export function parseSessionStreamEvent(value: unknown): SessionUiEvent {
 }
 
 type RealtimeStreamEvent =
-  | Extract<GlobalSessionEvent, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.created" }>
+  | Extract<GlobalSessionEvent, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" }>
   | TerminalUiEvent
   | WorkspaceActivityUiEvent;
 
@@ -685,6 +702,8 @@ export function parseRealtimeStreamEvent(value: unknown): RealtimeStreamEvent {
       return parseSessionNameEvent(record);
     case "session.pinned":
       return parseSessionPinnedEvent(record);
+    case "session.tabs":
+      return parseSessionTabsEvent(record);
     case "session.created":
       return { type: "session.created", session: parseSessionInfo(record["session"]) };
     case "terminal.created":
@@ -861,6 +880,20 @@ function parseSessionPinnedEvent(record: Record<string, unknown>): Extract<Sessi
     sessionId: requireNonEmptyString(record, "sessionId"),
     cwd: requireNonEmptyString(record, "cwd"),
     pinned: requireBoolean(record, "pinned"),
+  };
+}
+
+function parseSessionTabsEvent(record: Record<string, unknown>): Extract<SessionUiEvent, { type: "session.tabs" }> {
+  const tabs = record["tabs"];
+  if (!Array.isArray(tabs) || tabs.length > SESSION_TABS_PER_SESSION_LIMIT) throw new Error("Invalid session tabs event");
+  return {
+    type: "session.tabs",
+    sessionId: requireNonEmptyString(record, "sessionId"),
+    cwd: requireNonEmptyString(record, "cwd"),
+    tabs: tabs.map((entry) => {
+      if (typeof entry !== "string" || entry === "" || entry.length > SESSION_TABS_TOOL_ID_MAX_LENGTH) throw new Error("Invalid session tabs event");
+      return entry;
+    }),
   };
 }
 
@@ -2058,6 +2091,15 @@ export function parsePinState(value: unknown): { pinned: boolean } {
   const pinned = record["pinned"];
   if (typeof pinned !== "boolean") throw new Error("Expected pin state response");
   return { pinned };
+}
+
+export function parseSessionTabsState(value: unknown): { tabs: string[] } {
+  const record = requireRecord(value);
+  const tabs = record["tabs"];
+  if (!Array.isArray(tabs) || !tabs.every((entry): entry is string => typeof entry === "string" && entry !== "")) {
+    throw new Error("Expected session tabs response");
+  }
+  return { tabs };
 }
 
 export function parseRestored(value: unknown): { restored: true } {

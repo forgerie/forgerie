@@ -255,6 +255,7 @@ export class SessionController {
     else if (event.type === "session.created") this.applyCreatedSession(event.session);
     else if (event.type === "session.name") this.applySessionName(event.sessionId, event.name);
     else if (event.type === "session.pinned") this.applySessionPinned(event.sessionId, event.pinned);
+    else if (event.type === "session.tabs") this.applySessionTabs(event.sessionId, event.tabs);
     else if (event.type === "session.startup") this.queueStartupProgress(event);
   }
 
@@ -1213,6 +1214,22 @@ export class SessionController {
       const archivedAt = await this.archiveSessionCore(session);
       if (archivedAt !== undefined) this.inbox?.notifyArchived(machineId, session.id, archivedAt);
     } catch (error) {
+      this.setState({ error: String(error) });
+    }
+  }
+
+  /**
+   * Replace a session's promoted-tab set. Applied optimistically so the band
+   * responds instantly; a rejected write restores the previous set and the
+   * server broadcast keeps every other client converged.
+   */
+  async setSessionTabs(session: SessionInfo, tabs: readonly string[]): Promise<void> {
+    const previous = session.tabs ?? [];
+    this.applySessionTabs(session.id, [...tabs]);
+    try {
+      await this.api.setTabs(session, tabs, selectedMachineId(this.getState()));
+    } catch (error) {
+      this.applySessionTabs(session.id, previous);
       this.setState({ error: String(error) });
     }
   }
@@ -2353,6 +2370,21 @@ export class SessionController {
     this.setState({
       sessions: this.getState().sessions.map(repin),
       selectedSession: selectedSession === undefined ? undefined : repin(selectedSession),
+    });
+  }
+
+  private applySessionTabs(sessionId: string, tabs: readonly string[]) {
+    const retab = (session: SessionInfo) => {
+      if (session.id !== sessionId) return session;
+      const next = { ...session };
+      if (tabs.length > 0) next.tabs = [...tabs];
+      else delete next.tabs;
+      return next;
+    };
+    const selectedSession = this.getState().selectedSession;
+    this.setState({
+      sessions: this.getState().sessions.map(retab),
+      selectedSession: selectedSession === undefined ? undefined : retab(selectedSession),
     });
   }
 

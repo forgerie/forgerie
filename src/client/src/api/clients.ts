@@ -44,6 +44,7 @@ import {
   parsePromptResourceCatalogResponse,
   parsePromptResourceCommandRunResponse,
   parsePinState,
+  parseSessionTabsState,
   parsePromoted,
   parseReloaded,
   parseRestored,
@@ -274,6 +275,8 @@ export const sessionsApi = {
   restore: (session: SessionRef, machineId = "local") => request(sessionPath(session, "restore", machineId), parseRestored, { method: "POST", body: sessionBody(session) }),
   pin: (session: SessionRef, machineId = "local") => request(sessionPath(session, "pin", machineId), parsePinState, { method: "POST", body: sessionBody(session) }),
   unpin: (session: SessionRef, machineId = "local") => request(sessionPath(session, "unpin", machineId), parsePinState, { method: "POST", body: sessionBody(session) }),
+  /** Replace the session's promoted-tab set; an empty array clears it. */
+  setTabs: (session: SessionRef, tabs: readonly string[], machineId = "local") => request(sessionPath(session, "tabs", machineId), parseSessionTabsState, { method: "PUT", body: sessionBody(session, { tabs }) }),
   detachParent: (session: SessionRef, machineId = "local") => request(sessionPath(session, "detach-parent", machineId), parseDetached, { method: "POST", body: sessionBody(session) }),
   /**
    * Return a delegated child to the inbox. Keyed by file, because the child is
