@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>interim voice — prototype</title>
+<style>
+/* Tokens copied from src/client/index.html (dark theme) so the mock is judged
+   in the shipped palette, not an approximation. */
+:root {
+  --pi-text-xs: clamp(0.6875rem, 0.67rem + 0.1cqi, 0.75rem);
+  --pi-text-sm: clamp(0.75rem, 0.73rem + 0.1cqi, 0.8125rem);
+  --pi-text-md: clamp(0.875rem, 0.86rem + 0.1cqi, 0.9375rem);
+  --pi-radius-control: 8px;
+  --pi-radius-surface: 12px;
+  --pi-radius-pill: 999px;
+
+  --pi-bg: #111214;
+  --pi-surface: #191a1d;
+  --pi-border: #2a2c30;
+  --pi-border-muted: #202225;
+  --pi-text: #e6e7e9;
+  --pi-text-secondary: #a9abb0;
+  --pi-text-bright: #ffffff;
+  --pi-muted: #85888e;
+  --pi-dim: #62656b;
+  --pi-accent: #6699e0;
+  --pi-danger: #e06c75;
+
+  --calm-canvas: var(--pi-bg);
+  --calm-canvas-soft: var(--pi-surface);
+  --calm-ink: var(--pi-text);
+  --calm-ink-muted: var(--pi-muted);
+  --calm-ink-dim: var(--pi-dim);
+  --calm-rule: color-mix(in srgb, var(--pi-border) 70%, transparent);
+
+  --calm-gutter: 24px;
+  --calm-measure: min(36rem, 100vw - 2 * var(--calm-gutter));
+  --calm-turn-gap: 3.5rem;
+  --calm-para-gap: 1rem;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--calm-canvas);
+  color: var(--calm-ink);
+  font: 16px/1.65 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.app { display: flex; flex-direction: column; height: 100%; }
+.chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: minmax(0, var(--calm-measure));
+  justify-content: center;
+  padding: 26px var(--calm-gutter) 0;
+}
+.column { min-width: 0; padding-bottom: 72px; }
+
+/* ---------- turn skeleton ---------- */
+/* Flex, not flow: the promote variant reorders the fold above the answer with
+   `order`, which margin-collapsing layouts cannot do. */
+.turn { display: flex; flex-direction: column; gap: var(--calm-para-gap); margin-top: var(--calm-turn-gap); }
+.turn:first-child { margin-top: 6px; }
+.between { display: flex; flex-direction: column; gap: var(--calm-para-gap); }
+
+/* ---------- the three voices, baseline = live app today ---------- */
+.msg.user {
+  width: fit-content;
+  max-width: min(100%, 30rem);
+  margin-inline-start: auto;
+  border: 1px solid var(--calm-rule);
+  border-radius: var(--pi-radius-surface);
+  background: var(--calm-canvas-soft);
+  padding: 12px 16px;
+  font-size: var(--pi-text-md);
+}
+.msg.assistant, .interim { margin: 0; color: var(--calm-ink); font-size: var(--pi-text-md); }
+.final p { margin: 0; }
+.final p + p, .final ul + p { margin-top: .9rem; }
+.final ul { margin: .9rem 0 0; padding-left: 1.4em; }
+.final li { margin: .3rem 0; }
+.final li::marker { color: var(--calm-ink-dim); }
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--calm-canvas-soft);
+  border: 1px solid var(--pi-border-muted);
+  font: 0.85em ui-monospace, monospace;
+  color: var(--pi-text-secondary);
+}
+
+/* ---------- activity folds ---------- */
+.steps { color: var(--calm-ink-dim); }
+.steps > summary {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: var(--pi-text-sm); list-style: none; cursor: pointer;
+}
+.steps > summary::-webkit-details-marker { display: none; }
+.steps > summary::before { content: "▸"; font-size: var(--pi-text-xs); }
+.steps[open] > summary::before { content: "▾"; }
+.steps > summary:hover { color: var(--calm-ink-muted); }
+.steps .meta { margin-inline-start: auto; font-size: var(--pi-text-xs); white-space: nowrap; }
+.step-list {
+  margin: 6px 0 2px 3px; padding: 2px 0 2px 14px; list-style: none;
+  border-inline-start: 1px solid var(--calm-rule);
+  font-size: var(--pi-text-sm);
+}
+.step-list li { margin: .2rem 0; }
+.tool { font: 0.85em ui-monospace, monospace; color: var(--calm-ink-muted); }
+.note { color: var(--calm-ink-dim); }
+
+/* Variant-only elements, hidden in the baseline. */
+.inline-steps, .rail-meta, .answer-meta { display: none; }
+.rail-meta { margin: 0; font-size: var(--pi-text-xs); color: var(--calm-ink-dim); }
+.answer-meta { font-size: var(--pi-text-xs); color: var(--calm-ink-dim); margin-top: .6rem; }
+
+/* ---------- live tail ---------- */
+.cursor { display: inline-block; width: .6ch; color: var(--pi-accent); animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+
+/* =========================================================
+   Variant A — two registers.
+   Interim narration drops to the small muted voice, in place.
+   The answer keeps the full reading voice. Nothing moves.
+   ========================================================= */
+[data-variant="registers"] .interim { font-size: var(--pi-text-sm); color: var(--calm-ink-muted); }
+[data-variant="registers"] .between { gap: .7rem; }
+
+/* =========================================================
+   Variant B — process rail.
+   Everything between the question and the answer shares one
+   hairline rail: narration and step folds, in the order they
+   happened. The answer stands outside the rail. The pooled
+   foot fold dissolves into the rail.
+   ========================================================= */
+[data-variant="rail"] .between {
+  border-inline-start: 1px solid var(--calm-rule);
+  padding-inline-start: 16px;
+  gap: .7rem;
+}
+[data-variant="rail"] .interim { font-size: var(--pi-text-sm); color: var(--calm-ink-muted); }
+[data-variant="rail"] .inline-steps { display: block; }
+[data-variant="rail"] .rail-meta { display: block; }
+[data-variant="rail"] .foot-steps { display: none; }
+[data-variant="rail"] .step-list { border-inline-start: 0; padding-inline-start: 12px; }
+
+/* =========================================================
+   Variant C — promoted answer.
+   The work log stays one quiet material: narration and the
+   fold share a register, and the fold moves above the answer.
+   Only the answer is marked, with an accent hairline, and it
+   carries the turn meta.
+   ========================================================= */
+[data-variant="promote"] .interim { font-size: var(--pi-text-sm); color: var(--calm-ink-muted); }
+[data-variant="promote"] .between { gap: .7rem; }
+[data-variant="promote"] .final { order: 5; }
+[data-variant="promote"] .final {
+  border-inline-start: 2px solid color-mix(in srgb, var(--pi-accent) 55%, transparent);
+  padding-inline-start: 14px;
+}
+[data-variant="promote"] .answer-meta { display: block; }
+[data-variant="promote"] .foot-steps .meta { display: none; }
+
+/* ---------- composer (grounding only) ---------- */
+.composer { padding: 10px var(--calm-gutter) 14px; }
+.composer .box {
+  max-width: var(--calm-measure); margin-inline: auto;
+  display: flex; justify-content: space-between; gap: 12px;
+  border: 1px solid var(--calm-rule); border-radius: var(--pi-radius-control);
+  padding: 10px 14px; color: var(--calm-ink-dim); font-size: var(--pi-text-md);
+}
+.composer .hint { font-size: var(--pi-text-xs); align-self: center; }
+
+/* ---------- prototype switcher, deliberately not part of the design ---------- */
+.proto-bar {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 78px;
+  display: flex; align-items: center; gap: 4px;
+  background: #f2f3f5; color: #17181a;
+  border-radius: var(--pi-radius-pill);
+  padding: 4px 6px;
+  box-shadow: 0 4px 18px rgba(0,0,0,.55);
+  font-size: var(--pi-text-sm);
+  z-index: 10;
+}
+.proto-bar button {
+  border: 0; background: none; color: inherit; cursor: pointer;
+  font: inherit; font-size: 1.1em; line-height: 1; padding: 4px 8px; border-radius: var(--pi-radius-pill);
+}
+.proto-bar button:hover { background: #dcdee2; }
+.proto-bar .label { min-width: 13.5em; text-align: center; }
+body.bare .proto-bar { display: none; }
+body.bare .cursor { animation: none; }
+
+/* The answer capture keeps two interim blocks in frame above the reply, so
+   the register contrast is visible in one shot. */
+#final2 { scroll-margin-top: 172px; }
+</style>
+</head>
+<body data-variant="today">
+<div class="app">
+<main class="chat"><div class="column">
+
+  <!-- ================= turn 1 ================= -->
+  <section class="turn">
+    <div class="msg user">Why does the queue panel flash when I queue a prompt while the agent is busy?</div>
+
+    <div class="between">
+      <p class="interim">Let me find who owns that panel state.</p>
+      <details class="steps inline-steps"><summary><span>3 steps</span></summary>
+        <ol class="step-list">
+          <li><span class="tool">grep</span> recoveryClientQueued <span class="note">· 4 matches</span></li>
+          <li><span class="tool">read</span> ChatView.ts:57–86</li>
+          <li><span class="tool">read</span> chatFollowMode.ts</li>
+        </ol>
+      </details>
+      <p class="rail-meta">42s · Opus 4.5</p>
+    </div>
+
+    <div class="msg assistant final">
+      <p>The flash is the reserved-space swap, not a paint bug. The panel row rebuilds whenever <code>recoveryClientQueued</code> changes, so Lit replaces the whole node and the border re-animates. Key the row by queue id and the node survives the update. One small change in <code>ChatView.ts</code>, and the count updates in place.</p>
+      <span class="answer-meta">Answered after 3 steps · 42s · Opus 4.5</span>
+    </div>
+
+    <details class="steps foot-steps"><summary><span>3 steps</span><span class="meta">42s · Opus 4.5</span></summary>
+      <ol class="step-list">
+        <li><span class="tool">grep</span> recoveryClientQueued <span class="note">· 4 matches</span></li>
+        <li><span class="tool">read</span> ChatView.ts:57–86</li>
+        <li><span class="tool">read</span> chatFollowMode.ts</li>
+      </ol>
+    </details>
+  </section>
+
+  <!-- ================= turn 2, the showcase ================= -->
+  <section class="turn" id="turn2">
+    <div class="msg user">Interim replies look exactly like the final answer. There's what I say, what the agent finally says, and the space between. Make the three read as three different things, without hiding the interim messages.</div>
+
+    <div class="between">
+      <p class="interim">I'll check how the transcript separates the two today.</p>
+      <details class="steps inline-steps"><summary><span>4 steps</span></summary>
+        <ol class="step-list">
+          <li><span class="tool">read</span> shared.ts:675–708 <span class="note">· message styles</span></li>
+          <li><span class="tool">read</span> chatGroups.ts <span class="note">· grouping model</span></li>
+          <li><span class="tool">grep</span> isReadablePart <span class="note">· 3 call sites</span></li>
+          <li><span class="tool">read</span> prototypes/calm-chat/README.md</li>
+        </ol>
+      </details>
+
+      <p class="interim">Today they're the same element. Every assistant text block renders in the full prose register, and only tool work pools into the fold. Nothing marks the last block as the answer.</p>
+      <details class="steps inline-steps" open><summary><span>3 steps</span></summary>
+        <ol class="step-list">
+          <li><span class="tool">read</span> ChatView.turnAnchor.test.ts</li>
+          <li><span class="tool">grep</span> foldMetaSources <span class="note">· 2 call sites</span></li>
+          <li><span class="tool">read</span> chatGroups.ts:100–128 <span class="note">· chatTurns</span></li>
+        </ol>
+      </details>
+
+      <p class="interim">The turn model already knows the boundary. <code>chatTurns</code> closes a turn at the next human message, so the last text block is knowable the moment the turn completes. Sketching three treatments now.</p>
+      <details class="steps inline-steps"><summary><span>2 steps</span></summary>
+        <ol class="step-list">
+          <li><span class="tool">write</span> prototypes/interim-voice/index.html</li>
+          <li><span class="tool">bash</span> ./render.sh <span class="note">· 12 captures</span></li>
+        </ol>
+      </details>
+      <p class="rail-meta">2m 18s · Opus 4.5</p>
+    </div>
+
+    <div class="msg assistant final" id="final2">
+      <p>One rule covers all three voices, with no new data from the server. While the turn runs, every assistant text block is interim. When the turn closes, the last text block becomes the answer.</p>
+      <ul>
+        <li><strong>Two registers.</strong> Interim narration drops to the small muted voice, in place. The answer keeps the reading voice.</li>
+        <li><strong>Process rail.</strong> Narration and step folds share one hairline rail, in the order they happened. The answer stands outside it.</li>
+        <li><strong>Promoted answer.</strong> The work log stays quiet and unmarked. The answer alone carries an accent hairline and the turn meta.</li>
+      </ul>
+      <p>The cost is the promotion flicker. The last interim block restyles the moment the turn completes, and on the rail variant it also moves outside the rail. If that motion reads as jumpy, the promoted-answer variant hides it best, because the block only brightens in place.</p>
+      <span class="answer-meta">Answered after 9 steps · 2m 18s · Opus 4.5</span>
+    </div>
+
+    <details class="steps foot-steps"><summary><span>9 steps</span><span class="meta">2m 18s · Opus 4.5</span></summary>
+      <ol class="step-list">
+        <li><span class="tool">read</span> shared.ts:675–708 <span class="note">· message styles</span></li>
+        <li><span class="tool">read</span> chatGroups.ts <span class="note">· grouping model</span></li>
+        <li><span class="tool">grep</span> isReadablePart <span class="note">· 3 call sites</span></li>
+        <li><span class="tool">read</span> prototypes/calm-chat/README.md</li>
+        <li><span class="tool">read</span> ChatView.turnAnchor.test.ts</li>
+        <li><span class="tool">grep</span> foldMetaSources <span class="note">· 2 call sites</span></li>
+        <li><span class="tool">read</span> chatGroups.ts:100–128 <span class="note">· chatTurns</span></li>
+        <li><span class="tool">write</span> prototypes/interim-voice/index.html</li>
+        <li><span class="tool">bash</span> ./render.sh <span class="note">· 12 captures</span></li>
+      </ol>
+    </details>
+  </section>
+
+  <!-- ================= turn 3, live ================= -->
+  <section class="turn live">
+    <div class="msg user">Good. Apply the promoted-answer rule to the queue panel copy too, then re-run the captures.</div>
+
+    <div class="between">
+      <p class="interim">Renaming the panel states first. The copy calls a queued prompt a draft in two places.</p>
+      <details class="steps inline-steps"><summary><span>2 steps</span><span class="meta">running</span></summary>
+        <ol class="step-list">
+          <li><span class="tool">edit</span> ChatView.ts <span class="note">· queue panel copy</span></li>
+          <li><span class="tool">vitest</span> ChatView.queue.test.ts <span class="note">· running</span></li>
+        </ol>
+      </details>
+      <p class="interim">Tests pass. Re-rendering the posture matrix<span class="cursor">▍</span></p>
+      <p class="rail-meta">running · 38s</p>
+    </div>
+
+    <details class="steps foot-steps"><summary><span>2 steps</span><span class="meta">running</span></summary>
+      <ol class="step-list">
+        <li><span class="tool">edit</span> ChatView.ts <span class="note">· queue panel copy</span></li>
+        <li><span class="tool">vitest</span> ChatView.queue.test.ts <span class="note">· running</span></li>
+      </ol>
+    </details>
+  </section>
+
+</div></main>
+
+<footer class="composer"><div class="box"><span>Message</span><span class="hint">⏎ send</span></div></footer>
+</div>
+
+<nav class="proto-bar" aria-label="Prototype variant switcher">
+  <button class="prev" aria-label="Previous variant">‹</button>
+  <span class="label"></span>
+  <button class="next" aria-label="Next variant">›</button>
+</nav>
+
+<script>
+const VARIANTS = [
+  ["today", "Today · one voice"],
+  ["registers", "A · Two registers"],
+  ["rail", "B · Process rail"],
+  ["promote", "C · Promoted answer"],
+];
+const KEYS = VARIANTS.map(([k]) => k);
+
+function parseLocation() {
+  const hash = location.hash.replace(/^#/, "");
+  const [hashVariant, ...flags] = hash.split(".");
+  const query = new URLSearchParams(location.search);
+  const requested = hashVariant || query.get("variant") || "today";
+  return {
+    variant: KEYS.includes(requested) ? requested : "today",
+    bare: flags.includes("bare") || query.get("bare") === "1",
+    flags,
+  };
+}
+
+function apply() {
+  const { variant, bare, flags } = parseLocation();
+  document.body.dataset.variant = variant;
+  document.body.classList.toggle("bare", bare);
+  const label = VARIANTS.find(([k]) => k === variant)[1];
+  document.querySelector(".proto-bar .label").textContent = label;
+  const chat = document.querySelector(".chat");
+  requestAnimationFrame(() => {
+    if (flags.includes("tail")) chat.scrollTop = chat.scrollHeight;
+    else if (flags.includes("answer")) document.getElementById("final2").scrollIntoView({ block: "start" });
+    if (flags.includes("probe")) {
+      const rect = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().width);
+      const pre = document.createElement("pre");
+      pre.textContent = `PROBE vw=${String(innerWidth)} column=${String(rect(".column"))} final=${String(rect("#final2"))} li=${String(rect("#final2 li"))} summary=${String(rect(".foot-steps > summary"))}`;
+      document.body.prepend(pre);
+    }
+  });
+}
+
+function step(delta) {
+  const { variant, flags } = parseLocation();
+  const next = KEYS[(KEYS.indexOf(variant) + delta + KEYS.length) % KEYS.length];
+  location.hash = [next, ...flags.filter((f) => f !== "tail" && f !== "answer")].join(".");
+}
+
+document.querySelector(".proto-bar .prev").addEventListener("click", () => step(-1));
+document.querySelector(".proto-bar .next").addEventListener("click", () => step(1));
+document.addEventListener("keydown", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable)) return;
+  if (event.key === "ArrowLeft") step(-1);
+  if (event.key === "ArrowRight") step(1);
+});
+window.addEventListener("hashchange", apply);
+apply();
+</script>
+</body>
+</html>
