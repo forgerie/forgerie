@@ -19,6 +19,20 @@ afterEach(() => {
 });
 
 describe("ComposerDraft", () => {
+  it("dresses the leading command token as the command mark while leaving it editable text", async () => {
+    const draft = await mountDraft();
+
+    draft.replaceText("/tree keep the current draft");
+
+    const mark = draft.view?.dom.querySelector(".cm-command-mark");
+    expect(mark?.textContent).toBe("/tree");
+    expect(draft.view?.state.doc.toString()).toBe("/tree keep the current draft");
+
+    draft.replaceText("plain prose");
+
+    expect(draft.view?.dom.querySelector(".cm-command-mark")).toBeNull();
+  });
+
   it("uses Enter to send and Shift+Enter to insert a new line on mobile-like screens", async () => {
     const matchMedia = window.matchMedia.bind(window);
     vi.spyOn(window, "matchMedia").mockImplementation((query) => {

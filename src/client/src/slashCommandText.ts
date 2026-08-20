@@ -22,3 +22,21 @@ export function leadingSlashCommand(text: string): LeadingSlashCommand | undefin
   if (name === "") return undefined;
   return { name, rest: boundary === -1 ? "" : trimmed.slice(boundary).trimStart() };
 }
+
+/** Where the leading command token sits in the original, untrimmed text. */
+export interface LeadingSlashCommandSpan {
+  readonly from: number;
+  readonly to: number;
+}
+
+/**
+ * Offsets of the leading command token, for surfaces that decorate the text
+ * in place (the draft editor) rather than re-typesetting it. Same rules as
+ * `leadingSlashCommand`, expressed against the original string.
+ */
+export function leadingSlashCommandSpan(text: string): LeadingSlashCommandSpan | undefined {
+  const from = text.length - text.trimStart().length;
+  const command = leadingSlashCommand(text);
+  if (command === undefined) return undefined;
+  return { from, to: from + 1 + command.name.length };
+}

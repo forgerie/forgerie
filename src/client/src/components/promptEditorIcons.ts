@@ -62,11 +62,12 @@ export function renderMicrophoneIcon(): TemplateResult {
   `;
 }
 
-/** The command sigil itself — the button performs the "/" it draws. */
+/** The command mark itself, miniaturized — a slash in its chip. */
 export function renderSlashIcon(): TemplateResult {
   return svg`
     <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M15 4.5 9 19.5"></path>
+      <rect x="3.5" y="5" width="17" height="14" rx="3"></rect>
+      <path d="M13.5 8.5 10.5 15.5"></path>
     </svg>
   `;
 }

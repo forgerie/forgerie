@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leadingSlashCommand } from "./slashCommandText";
+import { leadingSlashCommand, leadingSlashCommandSpan } from "./slashCommandText";
 
 /**
  * The helper must agree with the send seam: text the controller would deliver
@@ -32,5 +32,24 @@ describe("leadingSlashCommand", () => {
 
   it("stays faithful to the seam for path-shaped text, which the product would run", () => {
     expect(leadingSlashCommand("/nix/store/abc check this")).toEqual({ name: "nix/store/abc", rest: "check this" });
+  });
+});
+
+describe("leadingSlashCommandSpan", () => {
+  it("locates a bare command token", () => {
+    expect(leadingSlashCommandSpan("/tree")).toEqual({ from: 0, to: 5 });
+  });
+
+  it("stops the span at the first whitespace", () => {
+    expect(leadingSlashCommandSpan("/fork keep going")).toEqual({ from: 0, to: 5 });
+  });
+
+  it("offsets the span past leading whitespace the send seam ignores", () => {
+    expect(leadingSlashCommandSpan("  /tree args")).toEqual({ from: 2, to: 7 });
+  });
+
+  it("marks nothing for a lone sigil or prose", () => {
+    expect(leadingSlashCommandSpan("/")).toBeUndefined();
+    expect(leadingSlashCommandSpan("hello /tree")).toBeUndefined();
   });
 });

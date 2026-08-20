@@ -16,6 +16,7 @@ import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
 import { createMobilePromptEnterMedia, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
+import { composerCommandMark } from "./composerCommandMark";
 import { abortComposerDraftDictation, beginComposerDraftDictation, commitComposerDraftDictationTranscript, composerDraftDictation, finishComposerDraftDictation, isComposerDraftDictationActive } from "./composerDraftDictation";
 import "./AutocompleteMenu";
 
@@ -640,6 +641,7 @@ export class ComposerDraft extends LitElement {
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           EditorView.lineWrapping,
           composerDraftDictation(),
+          composerCommandMark(),
           EditorView.contentAttributes.of((view) => inputAssistanceContentAttributes(this.resolveInputMode(view.state.sliceDoc(0, view.state.selection.main.head)))),
           EditorView.domEventHandlers({
             keyup: (event) => this.handleEditorKeyUp(event),

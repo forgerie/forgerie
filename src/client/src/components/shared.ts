@@ -330,6 +330,10 @@ export const composerDraftStyles = css`
   .markdown-editor .cm-content { min-height: 38px; padding: var(--composer-draft-pad, 8px); caret-color: var(--pi-text); text-align: start; unicode-bidi: plaintext; }
   .markdown-editor .cm-line { padding: 0; unicode-bidi: plaintext; }
   .markdown-editor .cm-placeholder { color: var(--pi-dim); }
+  /* The draft's leading command token wears the command mark in place: still
+     editable text, dressed as the chip the menu introduced. The editor sits on
+     --pi-bg, so the chip lifts to --pi-surface — the inverse of the menu. */
+  .markdown-editor .cm-command-mark { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); padding: 0 4px 1px; font: 500 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .markdown-editor .cm-focused { outline: none; }
   .shell-mode .markdown-editor .cm-editor { border-color: var(--pi-success); box-shadow: 0 0 0 1px var(--pi-success-ring); }
   .resting { gap: 6px; padding-block: 7px; }
