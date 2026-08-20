@@ -904,6 +904,14 @@ export class SessionInboxPanel extends LitElement {
 
   private onRowContextMenu(event: MouseEvent, session: SessionInfo): void {
     event.preventDefault();
+    // A touch browser raises contextmenu from its own long-press timer, racing
+    // ROW_PRESS. Arriving mid-press means the finger is still down: the hold
+    // asked for the commands, so its release must not also open the session.
+    // A mouse never has a press in flight, so its next click stays a click.
+    if (this.pressOrigin !== undefined) {
+      this.cancelRowPress();
+      this.pressConsumedClick = true;
+    }
     this.openRowCommands(session);
   }
 
@@ -1149,6 +1157,8 @@ export class SessionInboxPanel extends LitElement {
       max-height: 60vh;
       overflow: hidden auto;
       padding: 4px 12px;
+      /* Opens under a finger that is still down; its labels are commands, not text. */
+      user-select: none;
       animation: drawer-open var(--pi-motion-move) ease-out;
       /*
        * A rule at each end. The header's own border is below the drawer, not
@@ -1380,6 +1390,12 @@ export class SessionInboxPanel extends LitElement {
        */
       touch-action: pan-y;
       -webkit-touch-callout: none;
+      /*
+       * A hold means commands here, so the browser must not also start
+       * selecting the title under the finger. The callout line above quiets
+       * iOS; this quiets Chromium, whose own long-press starts a selection.
+       */
+      user-select: none;
     }
 
     .row:hover { background: var(--pi-surface, #191a1d); }

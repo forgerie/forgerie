@@ -1556,6 +1556,35 @@ describe("row commands", () => {
     expect(rowMenuItem(panel, "menu-archive")).not.toBeNull();
   });
 
+  it("does not open the session when the browser's own long-press raises the commands", async () => {
+    const selected: string[] = [];
+    const { panel, row } = await mountRowForPress({ onSelectSession: (s) => { selected.push(s.id); } });
+
+    // Chromium's long-press contextmenu lands while the finger is still down,
+    // racing ROW_PRESS; the release still fires a click.
+    sendPointer(row, "pointerdown", { pointerType: "touch", clientX: 300, clientY: 100 });
+    row.dispatchEvent(new Event("contextmenu", { bubbles: true, composed: true }));
+    sendPointer(row, "pointerup", { pointerType: "touch", clientX: 300, clientY: 100 });
+    row.click();
+    await panel.updateComplete;
+
+    expect(rowMenuItem(panel, "menu-archive")).not.toBeNull();
+    expect(selected).toEqual([]);
+  });
+
+  it("still selects the session on the click after a mouse context menu", async () => {
+    const selected: string[] = [];
+    const { panel, row } = await mountRowForPress({ onSelectSession: (s) => { selected.push(s.id); } });
+
+    // No press is in flight for a mouse, so the next left click stays a click.
+    row.dispatchEvent(new Event("contextmenu", { bubbles: true, composed: true }));
+    await panel.updateComplete;
+    row.click();
+    await panel.updateComplete;
+
+    expect(selected).toEqual(["open-one"]);
+  });
+
   it("offers an archived row its way back, and its way out", async () => {
     const { panel, row } = await mountRowForPress({ session: mkSession("gone-one", { archived: true }) });
 
