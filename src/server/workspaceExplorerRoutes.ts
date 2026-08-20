@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { WriteWorkspaceFileOptions } from "../shared/apiTypes.js";
 import type { PiWebConfigService } from "./configRoutes.js";
 import type { ProjectService } from "./projects/projectService.js";
+import { DOCUMENT_PREVIEW_SANDBOX } from "../shared/workspaceFiles.js";
+import { readWorkspaceDocumentPreview } from "./workspaces/documentPreviewService.js";
 import { deleteWorkspaceFile, moveWorkspaceFile, readWorkspaceFile, writeWorkspaceFile } from "./workspaces/fileContentService.js";
 import { isAbsoluteishFileSuggestionQuery, listFileSuggestions, listPathSuggestions } from "./workspaces/fileSuggestions.js";
 import { listWorkspaceTree } from "./workspaces/fileTreeService.js";
@@ -80,6 +82,28 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
         .header("Cache-Control", "private, max-age=3600")
         .header("Content-Length", String(preview.size))
         .header("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'")
+        .header("Last-Modified", new Date(preview.modifiedAt).toUTCString())
+        .header("X-Content-Type-Options", "nosniff")
+        .send(preview.stream);
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Renderable view of a workspace document. Unlike `file/preview`, the file
+  // path lives in the URL path so a page's relative references (`assets/x.css`)
+  // resolve back through this same route. The CSP sandbox keeps a directly
+  // navigated document in an opaque origin; no-cache because agents rewrite
+  // these files and relative subresources cannot carry cache-busting versions.
+  app.get<{ Params: { projectId: string; workspaceId: string; "*": string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/preview/*`, async (request, reply) => {
+    try {
+      const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
+      const preview = await readWorkspaceDocumentPreview(context.root, request.params["*"], await pathAccessForWorkspaceContext(context, options.config));
+      if (preview.mimeType === "text/html") void reply.header("Content-Security-Policy", `sandbox ${DOCUMENT_PREVIEW_SANDBOX}`);
+      return await reply
+        .type(preview.mimeType)
+        .header("Cache-Control", "private, no-cache")
+        .header("Content-Length", String(preview.size))
         .header("Last-Modified", new Date(preview.modifiedAt).toUTCString())
         .header("X-Content-Type-Options", "nosniff")
         .send(preview.stream);
