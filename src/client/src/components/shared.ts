@@ -173,21 +173,8 @@ export const appStyles = css`
   .context-chip.empty { border-style: dashed; color: var(--pi-muted); }
   .context-kind { display: none; }
   .context-value { min-width: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }
-  app-mobile-main-tabs { display: none; }
-  .mobile-tabs-frame { position: relative; display: none; flex: 0 0 auto; min-width: 0; border-bottom: 1px solid var(--pi-border); background: var(--pi-bg); }
-  .mobile-tabs-frame::before, .mobile-tabs-frame::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; width: 20px; opacity: 0; pointer-events: none; transition: opacity var(--pi-motion-fast) ease; }
-  .mobile-tabs-frame::before { left: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
-  .mobile-tabs-frame::after { right: 0; background: linear-gradient(270deg, color-mix(in srgb, var(--pi-shadow-strong) 55%, transparent) 0%, transparent 100%); }
-  .mobile-tabs-frame.can-scroll-left::before, .mobile-tabs-frame.can-scroll-right::after { opacity: 1; }
-  .mobile-tabs { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 8px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
-  /* Ghost tabs under the same rule as the workspace tool strip: selection
-     is the one filled state, and no box competes with the content above. */
-  .mobile-tabs button { flex: 0 0 auto; white-space: nowrap; border-color: transparent; background: transparent; color: var(--pi-muted); }
-  .mobile-tabs button:hover { background: var(--pi-surface); color: var(--pi-text); }
-  .mobile-navigation-tab, .mobile-navigation-panel { display: none; }
-  .mobile-tabs button.selected { border-color: transparent; background: var(--pi-selection-bg); color: var(--pi-text); }
-  /* A count is information, not a success state: neutral chrome. */
-  .tab-badge { display: inline-block; min-width: 14px; margin-left: 4px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-text-secondary); padding: 0 5px; font-size: var(--pi-text-xs); line-height: 16px; text-align: center; }
+  app-session-tabs { flex: 0 0 auto; min-width: 0; }
+  .mobile-navigation-panel { display: none; }
   .navigation-panel-edge, .workspace-panel-edge { min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: visible; background: var(--pi-border-muted); z-index: 2; }
   .navigation-panel-edge { grid-column: 2; }
   .workspace-panel-edge { grid-column: 4; }
@@ -228,19 +215,23 @@ export const appStyles = css`
   .shell.chrome-summoned.workspace-panel-collapsed .navigation-panel-edge { grid-row: 1 / 3; }
   .shell.chrome-summoned.workspace-panel-collapsed main { grid-column: 3; grid-row: 1 / 3; }
   .shell.chrome-summoned.workspace-panel-collapsed .workspace-panel-edge { display: none; }
-  .shell.chrome-summoned.workspace-panel-collapsed.workspace-view main { grid-row: 1; min-height: auto; }
-  .shell.chrome-summoned.workspace-panel-collapsed.workspace-view .panel-surface[data-side="workspace"] { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
-  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view chat-view,
-  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view prompt-editor,
-  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view .empty { display: none; }
-  .shell.chrome-summoned.workspace-panel-collapsed main.workspace-view { overflow: hidden; }
-  .shell.chrome-summoned app-mobile-main-tabs { display: block; flex: 0 0 auto; min-width: 0; }
-  .shell.chrome-summoned .mobile-tabs-frame { display: flex; }
+  /*
+   * A promoted tool owns the main surface, whatever the disclosure band: the
+   * session tab band keeps main's row and the workspace surface fills the row
+   * beneath it. The workspace column collapses because its panel has moved
+   * into the main column; navigation keeps its own column and spans both rows.
+   */
+  .shell.workspace-view { grid-template-rows: auto minmax(0, 1fr); --workspace-panel-width: 0px; }
+  .shell.workspace-view .panel-surface[data-side="navigation"] { grid-row: 1 / 3; }
+  .shell.workspace-view .navigation-panel-edge { grid-row: 1 / 3; }
+  .shell.workspace-view .workspace-panel-edge { display: none; }
+  .shell.workspace-view main.workspace-view { grid-row: 1; min-height: auto; overflow: hidden; }
+  .shell.workspace-view .panel-surface[data-side="workspace"]:not([data-mode="sheet"]) { grid-column: 3; grid-row: 2; display: flex; border-left: 0; }
+  main.workspace-view chat-view, main.workspace-view prompt-editor, main.workspace-view .empty { display: none; }
   .shell.overlay-navigation { grid-template-columns: minmax(0, 1fr); }
   .shell.overlay-navigation .panel-surface[data-side="navigation"][data-mode="docked"], .shell.overlay-navigation .navigation-panel-edge { display: none; }
   .shell.overlay-navigation main, .shell.overlay-navigation.workspace-view .panel-surface[data-side="workspace"] { grid-column: 1; }
   .shell.overlay-navigation .context-bar { display: flex; }
-  .shell.overlay-navigation .mobile-navigation-tab { display: block; }
   .shell.overlay-navigation main { position: relative; }
   /*
    * The session stays mounted underneath: navigation slides over it so scroll

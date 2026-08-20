@@ -60,6 +60,7 @@ import { NavigationSectionsController, type NavigationSection } from "../appShel
 import { OnScreenKeyboardController } from "../appShell/onScreenKeyboardController";
 import { mainSurfaceView, PanelIntentController, mainViewClass } from "../appShell/panelIntentController";
 import { PanelPeekController } from "../appShell/panelPeekController";
+import { SessionTabsController } from "../appShell/sessionTabsController";
 import { RadialMenuController } from "../appShell/radialMenuController";
 import { RADIAL_SLOT_COUNT, radialSlotsEqual, readStoredRadialSlots, reconcileRadialSlots, writeStoredRadialSlots, type RadialSlotMap } from "../appShell/radialSlots";
 import { peekSheetWidth } from "../appShell/panelPeek";
@@ -74,7 +75,6 @@ import { isWorkspaceDeletionPending, isWorkspaceDeletionRunPending, latestWorksp
 import "./MachineList";
 import "./ProjectList";
 import "./WorkspaceList";
-import { unreadSessionCount } from "./SessionList";
 import "./SessionCleanupDialog";
 import "./SessionTreeNavigator";
 import "./ChatView";
@@ -95,8 +95,8 @@ import "./SettingsDialog";
 import "./WorkspacePanel";
 import type { WorkspacePanelEmptyState } from "./WorkspacePanel";
 import "./appShell/AppContextBar";
-import "./appShell/AppMobileMainTabs";
-import type { AppMobileMainTab, AppMobileMainTabIcon } from "./appShell/AppMobileMainTabs";
+import "./appShell/AppSessionTabs";
+import type { AppSessionTab } from "./appShell/AppSessionTabs";
 import { shouldShowMachinesSection, type AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import "./SessionInboxPanel";
 import "./WorkspaceManagementDialog";
@@ -310,6 +310,7 @@ export class PiWebApp extends LitElement {
     onRefreshError: (error) => { console.warn("Failed to refresh after browser resume", error); },
   });
   private readonly panelIntent = new PanelIntentController(this);
+  private readonly sessionTabs = new SessionTabsController(this);
   private readonly mountedPanelSides = new Set<ShellPanel>();
   private readonly sessionDictationSpeechApi: ComposerDictationCapability["speechApi"] = { checkTurn: checkSpeechTurn, transcribe: transcribeSpeech };
   private readonly sessionDictationCapabilityValue: ComposerDictationCapability = {
@@ -663,6 +664,7 @@ export class PiWebApp extends LitElement {
     this.handleActivityTransition(previous, this.state);
     this.handleWorkspaceChange(previous, this.state);
     this.handleMachineChange(previous, this.state);
+    this.handleSessionTabsTransition(previous, this.state);
     this.clearChatNavigationIntentForSelectedSession();
     if (machineActivitySubscriptionInputsChanged(previous, this.state)) this.syncMachineActivitySubscriptions();
     this.notifications.syncEnvironment(previous, this.state);
@@ -1366,12 +1368,14 @@ export class PiWebApp extends LitElement {
    */
   private renderWorkspacePanel(panelControls?: unknown) {
     // The panel shows its own tool strip unless something else already shows
-    // one. Stacked under the session on a summoned shell, the control sheet
+    // one. As a tabbed main view, the session tab band carries the selection.
+    // Stacked under the session on a summoned shell, the control sheet
     // carries the tools. Standing on its own -- docked beside the session or
     // overlaid as a sheet -- nothing else does, so it carries them itself.
-    const hideToolTabs = this.appShell.isChromeSummoned
-      && !this.panelIntent.isDocked("workspace")
-      && this.panelPeek.panel !== "workspace";
+    const hideToolTabs = this.workspaceToolTabbed()
+      || (this.appShell.isChromeSummoned
+        && !this.panelIntent.isDocked("workspace")
+        && this.panelPeek.panel !== "workspace");
     const workspace = this.state.selectedWorkspace;
     const panelContext = workspace === undefined ? undefined : this.createWorkspacePanelContext(workspace);
     const emptyState = workspace === undefined ? this.workspacePanelEmptyState() : undefined;
@@ -2392,19 +2396,76 @@ export class PiWebApp extends LitElement {
     `;
   }
 
-  private mobilePanelBadge(panel: QualifiedWorkspacePanelContribution): unknown {
-    const workspace = this.state.selectedWorkspace;
-    if (workspace === undefined) return undefined;
-    return panel.badge?.(this.createWorkspacePanelContext(workspace));
+  /**
+   * Whether a promoted tool currently owns the main surface.
+   *
+   * Deliberately false for a legacy full-width tool view that has no session
+   * tab: that surface keeps the panel's own close control and tool strip,
+   * because there is no tab to close it with.
+   */
+  private workspaceToolTabbed(): boolean {
+    const view = this.state.mainView;
+    if (view === "chat" || view === "navigation") return false;
+    return this.sessionTabs.tabsFor(this.sessionTabsKeyOf(this.state)).includes(view);
   }
 
-  private mobilePanelIcon(panel: QualifiedWorkspacePanelContribution): AppMobileMainTabIcon | undefined {
-    switch (panel.id) {
-      case "core:workspace.files": return "files";
-      case "core:workspace.git": return "git";
-      case "core:workspace.terminal": return "terminal";
-      default: return undefined;
+  private sessionTabsKeyOf(state: AppState): string | undefined {
+    const session = state.selectedSession;
+    return session === undefined ? undefined : machineSessionKey(selectedMachineId(state), session.id);
+  }
+
+  private sessionTabLabel(tool: QualifiedContributionId): string {
+    const panel = this.plugins.getWorkspacePanels().find((candidate) => candidate.id === tool);
+    if (panel !== undefined) return panel.title;
+    const local = tool.slice(tool.indexOf(":") + 1);
+    const leaf = local.split(".").at(-1) ?? local;
+    return leaf === "" ? tool : (leaf[0] ?? "").toUpperCase() + leaf.slice(1);
+  }
+
+  private promoteSelectedWorkspaceTool(): void {
+    const key = this.sessionTabsKeyOf(this.state);
+    if (key === undefined) return;
+    this.sessionTabs.promote(key, this.state.workspaceTool);
+    // The promoted tool takes the main surface; a lingering peek would
+    // otherwise present the same panel as a sheet over its own tab.
+    this.panelPeek.close();
+    this.selectSessionTab(this.state.workspaceTool);
+  }
+
+  private selectSessionTab(view: AppState["mainView"]): void {
+    if (view === "navigation") return;
+    if (view === "chat") {
+      this.setState({ mainView: "chat" });
+      this.updateUrl();
+      this.git.updatePolling();
+      return;
     }
+    // Unlike openWorkspaceTool, a tab is the user's explicit request for the
+    // tool to own the main surface; chat stays one tab away.
+    if (view === "core:workspace.terminal") this.terminalAutoStartWorkspaceId = this.state.selectedWorkspace?.id;
+    this.setState({ workspaceTool: view, mainView: view });
+    this.updateUrl();
+    this.refreshSelectedWorkspaceTool(view);
+    this.git.updatePolling();
+  }
+
+  private closeSessionTab(view: AppState["mainView"]): void {
+    if (view === "chat" || view === "navigation") return;
+    const key = this.sessionTabsKeyOf(this.state);
+    if (key === undefined) return;
+    this.sessionTabs.close(key, view);
+    if (this.state.mainView === view) {
+      this.setState({ mainView: "chat" });
+      this.updateUrl();
+      this.git.updatePolling();
+    }
+  }
+
+  /** A session switch keeps only its own tabs' takeover; anything else lands on chat. */
+  private handleSessionTabsTransition(previous: AppState, next: AppState): void {
+    if (previous.selectedSession?.id === next.selectedSession?.id && selectedMachineId(previous) === selectedMachineId(next)) return;
+    const reconciled = this.sessionTabs.reconciledMainView(this.sessionTabsKeyOf(next), next.mainView);
+    if (reconciled !== next.mainView) this.setState({ mainView: reconciled });
   }
 
   private inboxShelves(): unknown[] {
@@ -3293,7 +3354,7 @@ export class PiWebApp extends LitElement {
       >
         ${side === "navigation"
           ? this.renderNavigationPanel(this.renderPanelControls(side))
-          : this.renderWorkspacePanel(this.renderPanelControls(side))}
+          : this.renderWorkspacePanel(this.workspaceToolTabbed() ? undefined : this.renderPanelControls(side))}
       </aside>
     `;
   }
@@ -3339,12 +3400,15 @@ export class PiWebApp extends LitElement {
 
   private renderPanelControls(side: ShellPanel) {
     const docked = this.panelIntent.isDocked(side);
+    const promotable = side === "workspace" && this.sessionTabsKeyOf(this.state) !== undefined && this.state.selectedWorkspace !== undefined;
     return html`
       <app-panel-controls
         noun=${side === "navigation" ? "sessions" : "workspace"}
         controls=${`${side}-panel`}
         .pinned=${docked}
         .pinnable=${docked || canDockAt(this.clientWidth, side)}
+        .promoteTitle=${promotable ? `Open ${this.sessionTabLabel(this.state.workspaceTool)} as tab` : undefined}
+        .onPromote=${promotable ? () => { this.promoteSelectedWorkspaceTool(); } : undefined}
         .onPin=${() => { this.togglePanelPin(side); }}
         .onClose=${() => { this.closePanelSurface(side); }}
       ></app-panel-controls>
@@ -3476,38 +3540,23 @@ export class PiWebApp extends LitElement {
     };
   }
 
-  private renderMobileMainTabs() {
-    if (this.appShell.isChromeSummoned) return null;
-    return html`
-      <app-mobile-main-tabs
-        .tabs=${this.mobileMainTabs()}
-        .selectedView=${this.state.mainView}
-        .onSelect=${(view: AppState["mainView"]) => { this.selectMainView(view); }}
-      ></app-mobile-main-tabs>
-    `;
-  }
-
-  private mobileMainTabs(): AppMobileMainTab[] {
-    const unreadCount = unreadSessionCount(this.state.sessions, this.unreadSessionIds);
-    return [
-      {
-        id: "navigation",
-        label: "Sessions",
-        icon: "navigation",
-        className: "navigation-tab",
-        ...(unreadCount === 0 ? {} : { badge: unreadCount, badgeLabel: `${String(unreadCount)} unread`, badgeTone: "unread" }),
-      },
-      { id: "chat", label: "Chat", icon: "chat" },
-      ...this.visibleWorkspacePanels().map((panel): AppMobileMainTab => {
-        const icon = panel.icon ?? this.mobilePanelIcon(panel);
-        return {
-          id: panel.id,
-          label: panel.title,
-          ...(icon === undefined ? {} : { icon }),
-          badge: this.mobilePanelBadge(panel),
-        };
-      }),
+  /** The band exists only while this session has promoted tabs: chat alone pays no chrome. */
+  private renderSessionTabs() {
+    const key = this.sessionTabsKeyOf(this.state);
+    const tools = this.sessionTabs.tabsFor(key);
+    if (tools.length === 0) return null;
+    const tabs: AppSessionTab[] = [
+      { id: "chat", label: "Chat", closeable: false },
+      ...tools.map((tool): AppSessionTab => ({ id: tool, label: this.sessionTabLabel(tool), closeable: true })),
     ];
+    return html`
+      <app-session-tabs
+        .tabs=${tabs}
+        .selected=${this.sessionTabs.reconciledMainView(key, this.state.mainView)}
+        .onSelect=${(view: AppState["mainView"]) => { this.selectSessionTab(view); }}
+        .onClose=${(view: AppState["mainView"]) => { this.closeSessionTab(view); }}
+      ></app-session-tabs>
+    `;
   }
 
   private renderAppRefresh() {
@@ -3537,7 +3586,7 @@ export class PiWebApp extends LitElement {
           ${this.renderPanelOpener("navigation")}
           ${this.renderPanelOpener("workspace")}
           ${this.renderContextBar()}
-          ${this.renderMobileMainTabs()}
+          ${this.renderSessionTabs()}
           ${this.renderGlobalError(state)}
           ${this.renderNavigationScrim(state)}
           <div class="mobile-navigation-panel">${this.appShell.isMobileNavigationLayout

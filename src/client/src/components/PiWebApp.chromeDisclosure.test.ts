@@ -19,17 +19,17 @@ describe("PiWebApp chrome disclosure", () => {
     const root = shadowRoot(app);
 
     expect(root.querySelector("app-context-bar")).toBeNull();
-    expect(root.querySelector("app-mobile-main-tabs")).toBeNull();
+    expect(root.querySelector("app-session-tabs")).toBeNull();
     expect(root.querySelector("[data-thread-header]")).toBeNull();
     expect(root.querySelector("chat-view")).not.toBeNull();
     expect(root.querySelector("prompt-editor")).not.toBeNull();
   });
 
-  it("keeps the bands where the shell can afford them", async () => {
-    const app = await mountApp(1440);
-    const root = shadowRoot(app);
-
-    expect(root.querySelector("app-mobile-main-tabs")).not.toBeNull();
+  it("pays no tab band at any width while the session has no promoted tabs", async () => {
+    for (const width of [499, 1440]) {
+      const root = shadowRoot(await mountApp(width));
+      expect(root.querySelector("app-session-tabs")).toBeNull();
+    }
   });
 
   it("names its band on the shell so layout reads the measured box, not the viewport", async () => {

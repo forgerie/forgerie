@@ -19,11 +19,28 @@ export class AppPanelControls extends LitElement {
   @property({ type: String }) controls = "";
   @property({ type: Boolean }) pinned = false;
   @property({ type: Boolean }) pinnable = false;
+  @property({ type: String }) promoteTitle?: string;
   @property({ attribute: false }) onPin?: () => void;
   @property({ attribute: false }) onClose?: () => void;
+  @property({ attribute: false }) onPromote?: () => void;
 
   override render() {
     return html`
+      ${this.onPromote === undefined ? null : html`
+        <button
+          type="button"
+          class="control"
+          data-action="promote"
+          title=${this.promoteTitle ?? `Open ${this.noun} as tab`}
+          aria-label=${this.promoteTitle ?? `Open ${this.noun} as tab`}
+          aria-controls=${this.controls}
+          @click=${() => { this.onPromote?.(); }}
+        >
+          <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect x="4" y="5" width="16" height="14" rx="2" /><path d="M4 10h16" />
+          </svg>
+        </button>
+      `}
       ${this.pinnable ? html`
         <button
           type="button"

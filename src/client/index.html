@@ -82,6 +82,12 @@
         --pi-success-bg-overlay: #14201aee;
         --pi-terminal-selection: #2b3d5c;
 
+        /* The color behind the session tabs: one step below the page in
+           every theme, so the active tab -- which shares the page
+           background -- reads as the page itself. Derived rather than
+           contributed so plugin themes resolve it without declaring it. */
+        --tab-band: color-mix(in srgb, var(--pi-bg) 91%, black);
+
         /* Calm transcript vocabulary.
            Derived from the palette above rather than contributed per theme, so
            every theme -- including plugin-contributed ones -- resolves these

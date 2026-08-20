@@ -4,7 +4,6 @@ import type { Machine, Project, SessionInfo, SessionUnreadEvent, SessionUnreadSu
 import { initialAppState, type AppState } from "../appState";
 import type { BrowserRealtimeEvent } from "../sessionSocket";
 import type { UnreadPresence } from "../unreadPresence";
-import type { AppMobileMainTab } from "./appShell/AppMobileMainTabs";
 // Template inspection is proportionate here because this node-environment test
 // verifies only PiWebApp's unread-state property wiring into navigation.
 import { templateValueAfterMarker } from "../templateInspection.testSupport";
@@ -27,7 +26,6 @@ describe("PiWebApp session unread wiring", () => {
 
     handleRealtimeEvent(app, unreadEvent(1, unreadSummary(background, 1)));
     expect([...navigationUnreadSessionIds(app)]).toEqual([background.id]);
-    expect(mobileNavigationTab(app)).toMatchObject({ badge: 1, badgeLabel: "1 unread", badgeTone: "unread" });
 
     setState(app, { selectedSession: background });
     // Selection alone cannot clear unread before the new transcript is ready
@@ -36,7 +34,6 @@ describe("PiWebApp session unread wiring", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     exposeSelectedChat(app);
     await vi.waitFor(() => { expect(navigationUnreadSessionIds(app).size).toBe(0); });
-    expect(mobileNavigationTab(app)).not.toHaveProperty("badge");
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://pi.example.test/api/machines/local/sessions/background/unread/acknowledge");
@@ -336,7 +333,6 @@ type RenderNavigationPanel = (this: PiWebApp) => TemplateResult;
 type SetAppState = (this: PiWebApp, patch: Partial<AppState>) => void;
 type HandleRealtimeEvent = (this: PiWebApp, machineId: string, event: BrowserRealtimeEvent) => void;
 type HandleMachineActivityEvent = (this: PiWebApp, machineId: string, event: BrowserRealtimeEvent) => void;
-type MobileMainTabs = (this: PiWebApp) => AppMobileMainTab[];
 type UpdatedHook = (this: PiWebApp) => void;
 type DisconnectedHook = (this: PiWebApp) => void;
 type RefreshUnread = (machineId: string) => Promise<void>;
@@ -440,14 +436,6 @@ function refreshUnread(app: PiWebApp, machineId: string): Promise<void> {
   const refresh: unknown = Reflect.get(controller, "refresh");
   if (!isRefreshUnread(refresh)) throw new Error("PiWebApp unread refresh is not callable");
   return refresh.call(controller, machineId);
-}
-
-function mobileNavigationTab(app: PiWebApp): AppMobileMainTab {
-  const method: unknown = Reflect.get(app, "mobileMainTabs");
-  if (!isMobileMainTabs(method)) throw new Error("PiWebApp.mobileMainTabs is not callable");
-  const tab = method.call(app).find((candidate) => candidate.id === "navigation");
-  if (tab === undefined) throw new Error("Expected the mobile Sessions tab");
-  return tab;
 }
 
 function navigationUnreadSessionIds(app: PiWebApp): ReadonlySet<string> {
@@ -573,10 +561,6 @@ function isHandleRealtimeEvent(value: unknown): value is HandleRealtimeEvent {
 }
 
 function isHandleMachineActivityEvent(value: unknown): value is HandleMachineActivityEvent {
-  return typeof value === "function";
-}
-
-function isMobileMainTabs(value: unknown): value is MobileMainTabs {
   return typeof value === "function";
 }
 
