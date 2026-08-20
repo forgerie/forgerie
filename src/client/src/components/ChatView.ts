@@ -2,7 +2,7 @@ import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
-import { chatTurns, foldMetaSources, groupChatMessages, summarizeChatGroup, type ChatGroup, type ChatTurn } from "../chatGroups";
+import { chatTurnFlow, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, type ChatGroup, type ChatTurn } from "../chatGroups";
 import { livenessPhase, livenessStep, type LivenessPhase } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
@@ -307,7 +307,6 @@ export class ChatView extends LitElement {
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
   private turnsCache: ChatTurn[] = [];
-  private foldMetaCache = new Map<number, ChatLine>();
   private readonly messageMetaCache = new WeakMap<ChatLine, string>();
   private selectedLoadPaintToken = 0;
   private selectedLoadPaintFrame: number | undefined;
@@ -755,7 +754,6 @@ export class ChatView extends LitElement {
     this.groupedMessagesStart = this.messageStart;
     this.groupedMessagesCache = groupChatMessages(this.messages, this.messageStart);
     this.turnsCache = chatTurns(this.groupedMessagesCache);
-    this.foldMetaCache = foldMetaSources(this.groupedMessagesCache);
     return this.groupedMessagesCache;
   }
 
@@ -771,10 +769,19 @@ export class ChatView extends LitElement {
    */
   private renderTurn(turn: ChatTurn, liveTailGroup: ChatGroup | undefined, last: boolean) {
     const key = this.turnRenderKey(turn);
+    const closed = !(last && this.isSessionLive());
+    const flow = chatTurnFlow(turn, closed);
     return html`
       <section class="turn" data-turn-key=${key}>
         <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
-          ${repeat(turn.groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup))}
+          ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup)}
+          ${flow.work.length === 0 ? null : html`
+            <div class="turn-rail">
+              ${repeat(flow.work, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
+              ${closed ? this.renderRailMeta(turn, key) : null}
+            </div>
+          `}
+          ${flow.answer === undefined ? null : this.renderGroup(flow.answer, flow.answer === liveTailGroup)}
           ${last ? this.renderRunningTurnTail() : null}
         </div>
       </section>
@@ -800,10 +807,10 @@ export class ChatView extends LitElement {
     `;
   }
 
-  private renderGroup(group: ChatGroup, live: boolean) {
+  private renderGroup(group: ChatGroup, live: boolean, interim = false) {
     if (group.kind === "group") return this.renderMessageGroup(group.messages, group.startIndex, group.endIndex, live);
     if (group.kind === "tool-image") return this.renderToolImageOutput(group.message, group.index, group.toolName);
-    return this.renderMessage(group.message, group.index);
+    return this.renderMessage(group.message, group.index, interim);
   }
 
   private isSessionLive(): boolean {
@@ -1039,13 +1046,17 @@ export class ChatView extends LitElement {
     return Math.max(this.messageEnd, this.messageStart + this.messages.length);
   }
 
-  private renderMessage(message: ChatLine, index: number) {
+  private renderMessage(message: ChatLine, index: number, interim = false) {
     const toolOnly = this.isToolExecutionOnlyMessage(message);
     const askUserRecordOnly = this.isAskUserRecordOnlyMessage(message);
     const shellClass = toolOnly ? "msg tool-execution-shell" : "msg ask-user-record-shell";
+    // Only assistant prose takes the interim register: narration on the rail
+    // reads as the working voice, while cards and shell output keep their own
+    // dress inside it.
+    const roleClass = interim && message.role === "assistant" ? "msg assistant interim" : `msg ${message.role}`;
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      <article class=${toolOnly || askUserRecordOnly ? shellClass : `msg ${message.role}`} data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
+      <article class=${toolOnly || askUserRecordOnly ? shellClass : roleClass} data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
         ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message)}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
@@ -1096,7 +1107,7 @@ export class ChatView extends LitElement {
     return html`
       ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
       <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
-        <summary><span>${summarizeChatGroup(messages)}</span>${this.renderFoldMeta(startIndex)}</summary>
+        <summary><span>${summarizeChatGroup(messages)}</span></summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
       </details>
     `;
@@ -1144,14 +1155,14 @@ export class ChatView extends LitElement {
     `;
   }
 
-  /** The turn's time and model, sitting opposite its step count. */
-  private renderFoldMeta(startIndex: number) {
-    const source = this.foldMetaCache.get(startIndex);
+  /** The turn's time and model, closing the rail below the work it describes. */
+  private renderRailMeta(turn: ChatTurn, turnKey: string) {
+    const source = turnMetaSource(turn);
     if (source === undefined) return null;
     const meta = this.messageMetaLabel(source);
-    const key = `fold:${String(startIndex)}`;
+    const key = `rail:${turnKey}`;
     const expanded = this.expandedMetaKey === key;
-    return html`<span
+    return html`<p class="rail-meta"><span
       class=${expanded ? "msg-meta expanded" : "msg-meta"}
       role="button"
       tabindex="0"
@@ -1160,7 +1171,7 @@ export class ChatView extends LitElement {
       aria-expanded=${String(expanded)}
       @click=${(event: Event) => { event.preventDefault(); event.stopPropagation(); this.expandedMetaKey = expanded ? undefined : key; }}
       @keydown=${(event: KeyboardEvent) => { event.stopPropagation(); this.onMetaKeydown(event, key, expanded); }}
-    >${meta}</span>`;
+    >${meta}</span></p>`;
   }
 
   private onMetaKeydown(event: KeyboardEvent, key: string, expanded: boolean) {

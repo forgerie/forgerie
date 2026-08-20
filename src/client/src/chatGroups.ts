@@ -8,22 +8,21 @@ export type ChatGroup =
 /**
  * Splits a flat message list into what the transcript renders.
  *
- * All the tool work in one turn pools into a single group at the foot of that
- * turn, below the prose. Flushing on every readable part instead shredded a
- * turn into an alternating ladder -- prose, activity, prose, activity -- which
- * spaced a sentence and the work it introduced as far apart as two unrelated
- * turns, and made the page read as twice as many items as it held.
- *
- * Pooling gives up strict chronology inside a turn: a sentence no longer sits
- * beside its own steps. Order is preserved inside the fold, and the turn is
- * the unit a reader actually scans.
+ * Step work flushes into a fold the moment prose appears, so a turn reads as
+ * a chronological ladder: a sentence, then the steps it introduced, then the
+ * next sentence. An earlier revision pooled all of a turn's steps into one
+ * fold at the turn's foot because the bare ladder read as twice as many
+ * items as it held. The process rail re-adopts the ladder deliberately: the
+ * transcript wraps everything between the opener and the answer in one rail
+ * (see `chatTurnFlow`), which contains the alternation instead of letting it
+ * shred the page.
  */
 export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGroup[] {
   const groups: ChatGroup[] = [];
   let eventMessages: ChatLine[] = [];
   let eventStartIndex = 0;
-  // Tracked, not derived from the length: a pooled turn skips over the prose
-  // messages interleaved with its steps, so its indices are not contiguous.
+  // Tracked, not derived from the length: a cluster can skip indices when a
+  // message contributes readable and technical parts at once.
   let eventEndIndex = 0;
   let historyMessages: ChatLine[] = [];
   let historyStartIndex = 0;
@@ -64,14 +63,23 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
     flushHistory();
 
     const readableParts = message.parts.filter((part) => isReadablePart(message, part));
-    const technicalParts = message.parts.filter((part) => !isReadablePart(message, part));
+    const firstReadable = message.parts.findIndex((part) => isReadablePart(message, part));
+    // The ladder flushes pending steps the moment readable content appears,
+    // but a message's own technical parts split on part order: thinking that
+    // preceded a sentence folds above it, tool calls the sentence introduced
+    // fold below it. Part order is the only chronology the wire preserves,
+    // and honouring it keeps live projection and hydrated history grouping
+    // identically.
+    const leadingParts = message.parts.filter((part, index) => !isReadablePart(message, part) && (firstReadable === -1 || index < firstReadable));
+    const trailingParts = message.parts.filter((part, index) => !isReadablePart(message, part) && firstReadable !== -1 && index > firstReadable);
 
-    if (readableParts.length && isTurnBoundary(message)) flushEvents();
-    if (technicalParts.length) pushEvent({ role: message.role, parts: technicalParts, ...metadata }, absoluteIndex);
+    if (leadingParts.length) pushEvent({ role: message.role, parts: leadingParts, ...metadata }, absoluteIndex);
+    if (readableParts.length) flushEvents();
+    if (trailingParts.length) pushEvent({ role: message.role, parts: trailingParts, ...metadata }, absoluteIndex);
     if (readableParts.length) {
       const readableMessage = { role: message.role, parts: readableParts, ...metadata };
       if (isToolImageMessage(readableMessage)) {
-        const toolName = toolNameFromParts(technicalParts);
+        const toolName = toolNameFromParts([...leadingParts, ...trailingParts]);
         groups.push({ kind: "tool-image", message: readableMessage, index: absoluteIndex, ...(toolName === undefined ? {} : { toolName }) });
       } else {
         groups.push({ kind: "message", message: readableMessage, index: absoluteIndex });
@@ -129,31 +137,62 @@ export function latestChatTurnStart(groups: ChatGroup[]): ChatTurnStart | undefi
 }
 
 /**
- * Which reply's metadata each activity fold should carry, keyed by the fold's
- * start index.
+ * How a turn reads on the process rail.
  *
- * The fold closes a turn, and the turn's time and model are a property of the
- * turn rather than of any one paragraph inside it. Reading them off the reply
- * that ended the turn keeps them describing the answer, not the last tool call.
- *
- * History folds are left out: a compaction summary is not the product of a
- * reply, so stamping one with a reply's model would be a lie.
+ * The opener is the human message that started the turn. The answer is the
+ * assistant text that closed it -- and it exists only for closed turns,
+ * because while a turn runs every text block is still work in progress.
+ * Everything between the two is the work: narration and step folds, in the
+ * order they happened, which the transcript wraps in one rail.
  */
-export function foldMetaSources(groups: ChatGroup[]): Map<number, ChatLine> {
-  const sources = new Map<number, ChatLine>();
-  let lastReply: ChatLine | undefined;
+export interface ChatTurnFlow {
+  /** The human message that opened the turn, when it is loaded. */
+  readonly opener?: ChatGroup;
+  /** Narration, step folds, and other content between opener and answer. */
+  readonly work: readonly ChatGroup[];
+  /** The assistant text that closed the turn; absent while the turn runs. */
+  readonly answer?: ChatGroup;
+}
 
-  for (const group of groups) {
-    if (group.kind === "message") {
-      if (group.message.role === "user" || group.message.role === "bash") lastReply = undefined;
-      else if (group.message.role === "assistant") lastReply = group.message;
-      continue;
-    }
-    if (group.kind !== "group") continue;
-    if (group.messages.every(isHistoryMessage)) continue;
-    if (lastReply !== undefined) sources.set(group.startIndex, lastReply);
+/**
+ * Splits a turn into opener, work, and answer.
+ *
+ * Promotion is an end-of-turn fact: the same trailing text block is work
+ * while the turn is open and becomes the answer when it closes. Only
+ * assistant prose is promotable -- a turn that ends in tool work was
+ * interrupted, and a turn that ends in a question card is still asking.
+ */
+export function chatTurnFlow(turn: ChatTurn, closed: boolean): ChatTurnFlow {
+  const first = turn.groups[0];
+  const opener = first !== undefined && turn.openedByIndex !== undefined && first.kind === "message" && first.index === turn.openedByIndex
+    ? first
+    : undefined;
+  const body = opener === undefined ? turn.groups : turn.groups.slice(1);
+  const last = body.at(-1);
+  const answer = closed && last !== undefined && isPromotableReply(last) ? last : undefined;
+  const work = answer === undefined ? body : body.slice(0, -1);
+  return { ...(opener === undefined ? {} : { opener }), work, ...(answer === undefined ? {} : { answer }) };
+}
+
+function isPromotableReply(group: ChatGroup): boolean {
+  return group.kind === "message"
+    && group.message.role === "assistant"
+    && group.message.parts.some((part) => part.type === "text");
+}
+
+/**
+ * The reply whose metadata describes the turn: its time and model close the
+ * rail, describing the answer rather than the last tool call. History
+ * summaries never qualify -- a compaction is not the product of a reply.
+ */
+export function turnMetaSource(turn: ChatTurn): ChatLine | undefined {
+  for (let index = turn.groups.length - 1; index >= 0; index -= 1) {
+    const group = turn.groups[index];
+    // History summaries never appear as message groups, so any assistant
+    // message found here is a real reply.
+    if (group?.kind === "message" && group.message.role === "assistant") return group.message;
   }
-  return sources;
+  return undefined;
 }
 
 /**

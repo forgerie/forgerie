@@ -716,17 +716,30 @@ export const chatStyles = css`
   .msg.event-group[open] > summary::before { content: "▾"; }
   .msg.event-group > summary:hover, .msg.event-group > summary:focus-visible { color: var(--calm-ink-muted); }
   .msg.event-group > summary .label { margin: 0; }
-  /* The turn's time and model sit opposite its step count: one quiet line
-     closing the turn, rather than a row repeated above every paragraph.
+  /* The process rail. Everything between the opener and the answer shares one
+     hairline: narration in the working voice, step folds in the order they
+     happened, and the turn's meta closing the rail. The answer stands outside
+     it, back at full voice. */
+  .turn-rail { min-width: 0; display: flex; flex-direction: column; gap: 12px; margin: 0 0 var(--calm-para-gap); padding-inline-start: clamp(12px, 2.5cqi, 18px); border-inline-start: 1px solid var(--calm-rule); }
+  .turn-rail .msg { margin: 0; }
+  /* Interim narration is the agent working, not the agent answering. It keeps
+     reading order but drops to the interface's small muted voice, so the
+     promoted answer is the only assistant prose at full size. */
+  .msg.assistant.interim { font-size: var(--pi-text-sm); color: var(--calm-ink-muted); }
+  /* One rail is enough: step blocks inside an open fold keep their indent but
+     drop their own rule when the rail already draws one. */
+  .turn-rail .group-msg { border-left: 0; }
+  /* The turn's time and model close the rail: one quiet line per turn rather
+     than a row above every paragraph.
 
      Stays readable text on touch. Elsewhere a metadata row collapses to an
      information glyph on a device that cannot hover, because it would otherwise
-     sit visible above every message forever -- but this row appears once per
+     sit visible above every message forever -- but this line appears once per
      turn and is meant to be read without asking for it. */
-  .msg.event-group > summary .msg-meta { margin-inline-start: auto; opacity: 1; color: var(--calm-ink-dim); }
-  .msg.event-group > summary .msg-meta:not(.expanded) { display: inline; width: auto; max-width: none; height: auto; font-size: var(--pi-text-xs); text-overflow: ellipsis; }
-  .msg.event-group > summary .msg-meta::before { content: none; }
-  .msg.event-group > summary .msg-meta.expanded { flex: 0 1 auto; }
+  .rail-meta { margin: 0; font-size: var(--pi-text-xs); }
+  .rail-meta .msg-meta { opacity: 1; color: var(--calm-ink-dim); text-align: left; }
+  .rail-meta .msg-meta:not(.expanded) { display: inline; width: auto; max-width: none; height: auto; font-size: var(--pi-text-xs); text-overflow: ellipsis; }
+  .rail-meta .msg-meta::before { content: none; }
   .group-body { display: grid; gap: 18px; margin-top: 14px; padding: 0; }
   .chat-image { display: block; max-width: 100%; max-height: 320px; margin: 8px 0 0; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); object-fit: contain; cursor: zoom-in; }
   .chat-image:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }

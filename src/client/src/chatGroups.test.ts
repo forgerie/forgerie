@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { chatTurns, foldMetaSources, groupChatMessages, latestChatTurnStart, summarizeChatGroup } from "./chatGroups";
+import { chatTurnFlow, chatTurns, groupChatMessages, latestChatTurnStart, summarizeChatGroup, turnMetaSource } from "./chatGroups";
 import type { ChatLine } from "./components/shared";
 
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
 
 describe("groupChatMessages", () => {
-  it("pools a turn's technical parts into one group below its prose", () => {
+  it("closes the pending step cluster the moment prose appears", () => {
     const messages: ChatLine[] = [
       { role: "assistant", parts: [{ type: "thinking", text: "plan" }, { type: "toolCall", toolName: "read", summary: "file" }] },
       text("assistant", "visible answer"),
@@ -13,12 +13,13 @@ describe("groupChatMessages", () => {
     ];
 
     expect(groupChatMessages(messages, 10)).toEqual([
+      { kind: "group", startIndex: 10, endIndex: 10, messages: [messages[0]] },
       { kind: "message", index: 11, message: text("assistant", "visible answer") },
-      { kind: "group", startIndex: 10, endIndex: 12, messages: [messages[0], messages[2]] },
+      { kind: "group", startIndex: 12, endIndex: 12, messages: [messages[2]] },
     ]);
   });
 
-  it("starts a new pool at each human turn", () => {
+  it("interleaves step clusters with prose in the order they happened", () => {
     const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
     const messages: ChatLine[] = [
       text("user", "first question"),
@@ -33,12 +34,13 @@ describe("groupChatMessages", () => {
 
     expect(groupChatMessages(messages)).toEqual([
       { kind: "message", index: 0, message: text("user", "first question") },
+      { kind: "group", startIndex: 1, endIndex: 1, messages: [messages[1]] },
       { kind: "message", index: 2, message: text("assistant", "partway") },
+      { kind: "group", startIndex: 3, endIndex: 3, messages: [messages[3]] },
       { kind: "message", index: 4, message: text("assistant", "answer") },
-      { kind: "group", startIndex: 1, endIndex: 3, messages: [messages[1], messages[3]] },
       { kind: "message", index: 5, message: text("user", "second question") },
-      { kind: "message", index: 7, message: text("assistant", "second answer") },
       { kind: "group", startIndex: 6, endIndex: 6, messages: [messages[6]] },
+      { kind: "message", index: 7, message: text("assistant", "second answer") },
     ]);
   });
 
@@ -73,14 +75,26 @@ describe("groupChatMessages", () => {
     expect(summarizeChatGroup(history.messages)).toBe("1 history compaction summary");
   });
 
-  it("splits mixed readable and technical parts from a single message", () => {
+  it("splits mixed readable and technical parts on part order", () => {
     const messages: ChatLine[] = [
       { role: "assistant", parts: [{ type: "thinking", text: "hidden" }, { type: "text", text: "shown" }] },
     ];
 
+    // The thinking preceded the sentence, so its fold sits above the prose.
     expect(groupChatMessages(messages)).toEqual([
-      { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "shown" }] } },
       { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "hidden" }] }] },
+      { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "shown" }] } },
+    ]);
+  });
+
+  it("folds a sentence's own tool calls below it", () => {
+    const messages: ChatLine[] = [
+      { role: "assistant", parts: [{ type: "text", text: "let me look" }, { type: "toolCall", toolName: "read", summary: "file" }] },
+    ];
+
+    expect(groupChatMessages(messages)).toEqual([
+      { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "let me look" }] } },
+      { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "file" }] }] },
     ]);
   });
 
@@ -119,13 +133,13 @@ describe("groupChatMessages", () => {
     ];
 
     expect(groupChatMessages(messages)).toEqual([
-      { kind: "tool-image", index: 0, message: { role: "tool", parts: [image] }, toolName: "read" },
       {
         kind: "group",
         startIndex: 0,
         endIndex: 0,
         messages: [{ role: "tool", parts: [{ type: "toolResult", toolName: "read", text: "Read image file [image/png]", isError: false }] }],
       },
+      { kind: "tool-image", index: 0, message: { role: "tool", parts: [image] }, toolName: "read" },
     ]);
   });
 
@@ -135,8 +149,8 @@ describe("groupChatMessages", () => {
     const message: ChatLine = { role: "tool", parts: [{ type: "toolResult", toolName: "read", text: "ok", isError: false }, image], meta };
 
     expect(groupChatMessages([message])).toEqual([
-      { kind: "tool-image", index: 0, message: { role: "tool", parts: [image], meta }, toolName: "read" },
       { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "tool", parts: [message.parts[0]], meta }] },
+      { kind: "tool-image", index: 0, message: { role: "tool", parts: [image], meta }, toolName: "read" },
     ]);
   });
 
@@ -153,8 +167,8 @@ describe("groupChatMessages", () => {
     const message: ChatLine = { role: "assistant", parts: [{ type: "thinking", text: "hidden" }, { type: "text", text: "shown" }], meta: { timestamp: "2026-05-09T12:00:00.000Z", model: { provider: "test", id: "model" } } };
 
     expect(groupChatMessages([message])).toEqual([
-      { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "shown" }], meta: message.meta } },
       { kind: "group", startIndex: 0, endIndex: 0, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "hidden" }], meta: message.meta }] },
+      { kind: "message", index: 0, message: { role: "assistant", parts: [{ type: "text", text: "shown" }], meta: message.meta } },
     ]);
   });
 
@@ -175,57 +189,7 @@ describe("groupChatMessages", () => {
       { role: "tool", parts: [{ type: "toolResult", toolName: "read", text: "older", isError: false }] },
       { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "newer" }] },
       text("assistant", "answer"),
-    ], 8).at(-1)).toMatchObject({ kind: "group", startIndex: 8, endIndex: 9 });
-  });
-});
-
-describe("foldMetaSources", () => {
-  const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
-
-  it("gives a fold the reply that ended its turn", () => {
-    const closing = text("assistant", "answer");
-    const groups = groupChatMessages([
-      text("user", "question"),
-      call("a"),
-      text("assistant", "partway"),
-      call("b"),
-      closing,
-    ]);
-
-    const sources = foldMetaSources(groups);
-
-    expect(sources.size).toBe(1);
-    expect([...sources.values()][0]).toEqual(closing);
-  });
-
-  it("keeps each turn's fold on its own reply", () => {
-    const groups = groupChatMessages([
-      text("user", "first"),
-      call("a"),
-      text("assistant", "first answer"),
-      text("user", "second"),
-      call("b"),
-      text("assistant", "second answer"),
-    ]);
-
-    expect([...foldMetaSources(groups).values()]).toEqual([
-      text("assistant", "first answer"),
-      text("assistant", "second answer"),
-    ]);
-  });
-
-  it("leaves a fold unstamped when the turn produced no reply", () => {
-    expect(foldMetaSources(groupChatMessages([text("user", "question"), call("a")])).size).toBe(0);
-  });
-
-  it("does not stamp a history fold with a reply's model", () => {
-    const groups = groupChatMessages([
-      text("user", "question"),
-      text("assistant", "answer"),
-      { ...text("assistant", "summary"), source: "compaction" },
-    ]);
-
-    expect(foldMetaSources(groups).size).toBe(0);
+    ], 8).at(0)).toMatchObject({ kind: "group", startIndex: 8, endIndex: 9 });
   });
 });
 
@@ -246,8 +210,8 @@ describe("chatTurns", () => {
         openedByIndex: 0,
         groups: [
           { kind: "message", index: 0, message: text("user", "first question") },
-          { kind: "message", index: 2, message: text("assistant", "first answer") },
           { kind: "group", startIndex: 1, endIndex: 1, messages: [call("a")] },
+          { kind: "message", index: 2, message: text("assistant", "first answer") },
         ],
       },
       {
@@ -281,6 +245,94 @@ describe("chatTurns", () => {
 
   it("returns no turns for an empty transcript", () => {
     expect(chatTurns([])).toEqual([]);
+  });
+});
+
+describe("chatTurnFlow", () => {
+  const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
+
+  const turnOf = (messages: ChatLine[]) => {
+    const turn = chatTurns(groupChatMessages(messages)).at(-1);
+    if (turn === undefined) throw new Error("expected a turn");
+    return turn;
+  };
+
+  it("splits a closed turn into opener, work, and answer", () => {
+    const turn = turnOf([
+      text("user", "question"),
+      call("a"),
+      text("assistant", "partway"),
+      call("b"),
+      text("assistant", "answer"),
+    ]);
+
+    const flow = chatTurnFlow(turn, true);
+
+    expect(flow.opener).toMatchObject({ kind: "message", index: 0 });
+    expect(flow.work).toEqual([
+      expect.objectContaining({ kind: "group", startIndex: 1 }),
+      expect.objectContaining({ kind: "message", index: 2 }),
+      expect.objectContaining({ kind: "group", startIndex: 3 }),
+    ]);
+    expect(flow.answer).toMatchObject({ kind: "message", index: 4 });
+  });
+
+  it("keeps the trailing prose in the work while the turn is open", () => {
+    const turn = turnOf([text("user", "question"), call("a"), text("assistant", "so far")]);
+
+    const flow = chatTurnFlow(turn, false);
+
+    expect(flow.answer).toBeUndefined();
+    expect(flow.work.at(-1)).toMatchObject({ kind: "message", index: 2 });
+  });
+
+  it("promotes no answer when the turn ends in tool work", () => {
+    const turn = turnOf([text("user", "question"), text("assistant", "working"), call("a")]);
+
+    const flow = chatTurnFlow(turn, true);
+
+    expect(flow.answer).toBeUndefined();
+    expect(flow.work).toHaveLength(2);
+  });
+
+  it("promotes no answer when the turn ends in a question card", () => {
+    const record = { askId: "ask-1", reason: "submitted" as const, askedAt: "t", closedAt: "t", questions: [], answeredCount: 0, unansweredIds: [], summary: "s" };
+    const turn = turnOf([
+      text("user", "question"),
+      { role: "assistant", parts: [{ type: "askUserRecord", outcome: record }] },
+    ]);
+
+    expect(chatTurnFlow(turn, true).answer).toBeUndefined();
+  });
+
+  it("reads a windowed turn with no loaded opener as all work", () => {
+    const turn = chatTurns(groupChatMessages([text("assistant", "tail of an older reply")], 40)).at(-1);
+    if (turn === undefined) throw new Error("expected a turn");
+
+    const flow = chatTurnFlow(turn, true);
+
+    expect(flow.opener).toBeUndefined();
+    expect(flow.answer).toMatchObject({ kind: "message", index: 40 });
+    expect(flow.work).toEqual([]);
+  });
+});
+
+describe("turnMetaSource", () => {
+  const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
+
+  it("returns the reply that closed the turn", () => {
+    const closing: ChatLine = { ...text("assistant", "answer"), meta: { timestamp: "2026-08-20T10:00:00.000Z" } };
+    const turn = chatTurns(groupChatMessages([text("user", "question"), call("a"), text("assistant", "partway"), closing])).at(-1);
+    if (turn === undefined) throw new Error("expected a turn");
+
+    expect(turnMetaSource(turn)).toEqual(closing);
+  });
+
+  it("returns nothing for a turn without a reply", () => {
+    const turn = chatTurns(groupChatMessages([text("user", "question"), call("a")])).at(-1);
+    if (turn === undefined) throw new Error("expected a turn");
+
+    expect(turnMetaSource(turn)).toBeUndefined();
   });
 });
 

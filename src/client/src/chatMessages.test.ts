@@ -122,7 +122,7 @@ describe("chat message normalization", () => {
     ]);
 
     expect(normalized[1]).toEqual({ role: "tool", parts: [{ type: "askUserRecord", outcome: supersededAskUserOutcome }] });
-    expect(groupChatMessages(normalized).map((group) => group.kind)).toEqual(["message", "group"]);
+    expect(groupChatMessages(normalized).map((group) => group.kind)).toEqual(["group", "message"]);
   });
 
   it("normalizes tool calls and tool results", () => {
