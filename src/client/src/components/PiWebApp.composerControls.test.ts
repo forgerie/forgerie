@@ -4,7 +4,7 @@ import { render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
-import { selectedChatLiveReady, selectedChatTarget } from "../selectedChatLoad";
+import { selectedChatFreshReadable, selectedChatLiveReady, selectedChatTarget, type SelectedChatLoad, type SelectedChatTarget } from "../selectedChatLoad";
 import { PiWebApp } from "./PiWebApp";
 import type { PromptEditor } from "./PromptEditor";
 
@@ -49,6 +49,16 @@ describe("PiWebApp composer controls", () => {
     expect(editor.shadowRoot?.querySelector(".queue-button")).toBeNull();
   });
 
+  it("offers the session tree only while the runtime is available", async () => {
+    const live = await renderSelectedEditor(status());
+    expect(live.capabilities.tree).toBeDefined();
+    expect(live.shadowRoot?.querySelector(".composer-tree")).not.toBeNull();
+
+    const readable = await renderSelectedEditor(status(), undefined, selectedChatFreshReadable);
+    expect(readable.capabilities.tree).toBeUndefined();
+    expect(readable.shadowRoot?.querySelector(".composer-tree")).toBeNull();
+  });
+
   it("does not expose Stop for startup activity", async () => {
     const editor = await renderSelectedEditor(status(), activity({ phase: "active", label: "Opening session", startup: true }));
 
@@ -72,7 +82,7 @@ describe("PiWebApp composer controls", () => {
   });
 });
 
-async function renderSelectedEditor(sessionStatus: SessionStatus, sessionActivity?: SessionActivity): Promise<PromptEditor> {
+async function renderSelectedEditor(sessionStatus: SessionStatus, sessionActivity?: SessionActivity, makeLoad: (target: SelectedChatTarget) => SelectedChatLoad = selectedChatLiveReady): Promise<PromptEditor> {
   const app = new PiWebApp();
   const selected = session("selected", "/repo", "Selected session");
   setAppState(app, {
@@ -80,7 +90,7 @@ async function renderSelectedEditor(sessionStatus: SessionStatus, sessionActivit
     mainView: "chat",
     status: sessionStatus,
     activity: sessionActivity,
-    selectedChatLoad: selectedChatLiveReady(selectedChatTarget("local", selected)),
+    selectedChatLoad: makeLoad(selectedChatTarget("local", selected)),
   });
   const container = document.createElement("div");
   document.body.append(container);

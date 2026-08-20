@@ -62,6 +62,19 @@ export function renderMicrophoneIcon(): TemplateResult {
   `;
 }
 
+/** The session tree — a root line with children hanging off one rail. */
+export function renderTreeIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M9 5h12"></path>
+      <path d="M14 12h7"></path>
+      <path d="M14 19h7"></path>
+      <path d="M4 5v5a2 2 0 0 0 2 2h4"></path>
+      <path d="M4 10v7a2 2 0 0 0 2 2h4"></path>
+    </svg>
+  `;
+}
+
 /** Marks a place that is not the project's main worktree. */
 export function renderBranchIcon(): TemplateResult {
   return svg`

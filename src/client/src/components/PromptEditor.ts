@@ -11,7 +11,7 @@ import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointer
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge, renderTreeIcon } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerDictationCapability, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
@@ -240,6 +240,7 @@ export class PromptEditor extends LitElement {
         <div class="actions">
           ${this.renderAttachmentAction(busy)}
           ${this.renderDictationAction()}
+          ${this.renderTreeAction()}
           ${this.renderArchiveAction()}
           ${this.renderCompactStatus()}
           ${this.capabilities.newSession === undefined ? nothing : html`
@@ -716,6 +717,19 @@ export class PromptEditor extends LitElement {
     const current = this.capabilities.model?.model;
     if (current === undefined) return undefined;
     return this.choiceModels.find((candidate) => candidate.provider === current.provider && candidate.id === current.id);
+  }
+
+  private renderTreeAction() {
+    if (this.capabilities.tree === undefined) return null;
+    return html`
+      <button
+        class="composer-tree icon-button"
+        ?disabled=${this.dictationBlocksComposer()}
+        title="Navigate the session tree"
+        aria-label="Session tree"
+        @click=${() => { if (this.dictationBlocksComposer()) return; this.closeSteer(false); this.capabilities.tree?.onOpenTree(); }}
+      >${renderTreeIcon()}</button>
+    `;
   }
 
   private renderArchiveAction() {

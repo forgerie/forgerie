@@ -16,6 +16,7 @@ import type { SpeechCaptureSession } from "./speechCapture";
 export interface ComposerCapabilities {
   readonly model?: ComposerModelCapability;
   readonly stop?: ComposerStopCapability;
+  readonly tree?: ComposerTreeCapability;
   readonly archive?: ComposerArchiveCapability;
   readonly newSession?: ComposerNewSessionCapability;
   readonly dismiss?: ComposerDismissCapability;
@@ -64,6 +65,18 @@ export interface ComposerStopCapability {
 
 export interface ComposerArchiveCapability {
   readonly onArchiveAndNext: () => void;
+}
+
+/**
+ * Opens the session tree navigator.
+ *
+ * Only a host with a live runtime can walk the tree, so the capability
+ * arrives with the runtime instead of rendering a dead control. It is the
+ * button form of double-Escape and `/tree`, for surfaces where neither a
+ * hardware Escape nor a slash command is at hand.
+ */
+export interface ComposerTreeCapability {
+  readonly onOpenTree: () => void;
 }
 
 export interface ComposerNewSessionCapability {

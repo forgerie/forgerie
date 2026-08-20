@@ -28,6 +28,7 @@ describe("PromptEditor capabilities", () => {
     expect(query(editor, ".stop-button")).toBeNull();
     expect(query(editor, 'button[aria-label="Guidance"], button[title="Guidance"]')).toBeNull();
     expect(query(editor, ".composer-archive")).toBeNull();
+    expect(query(editor, ".composer-tree")).toBeNull();
     expect(query(editor, ".new-session-button")).toBeNull();
     expect(query(editor, "context-usage-meter")).toBeNull();
     expect(query(editor, ".composer-context-chip")).toBeNull();
@@ -112,21 +113,25 @@ describe("PromptEditor capabilities", () => {
     ]);
   });
 
-  it("offers stop, archive, and new session only when declared", async () => {
+  it("offers stop, tree, archive, and new session only when declared", async () => {
     const onStop = vi.fn();
+    const onOpenTree = vi.fn();
     const onArchiveAndNext = vi.fn();
     const onNewSession = vi.fn();
     const editor = await mount({
       stop: { stoppable: true, onStop },
+      tree: { onOpenTree },
       archive: { onArchiveAndNext },
       newSession: { onNewSession },
     });
 
     button(editor, ".stop-button").click();
+    button(editor, ".composer-tree").click();
     button(editor, ".composer-archive").click();
     button(editor, ".new-session-button").click();
 
     expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onOpenTree).toHaveBeenCalledTimes(1);
     expect(onArchiveAndNext).toHaveBeenCalledTimes(1);
     expect(onNewSession).toHaveBeenCalledTimes(1);
   });

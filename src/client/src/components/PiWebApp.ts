@@ -2986,6 +2986,11 @@ export class PiWebApp extends LitElement {
     void this.sessions.runCommand(`/${action}`);
   };
 
+  /** The composer's tree button and double-Escape share one guarded path to `/tree`. */
+  private readonly handleOpenSessionTree = (): void => {
+    this.handleDoubleEscapeAction("tree");
+  };
+
   private readonly handleClearServerQueue = (): void => {
     void this.sessions.clearServerQueue();
   };
@@ -3067,6 +3072,7 @@ export class PiWebApp extends LitElement {
       },
       dictation: this.sessionDictationCapability(),
       stop: { stoppable: runtimeAvailable && isActive(state), onStop: this.handleStopActiveWork },
+      ...(runtimeAvailable ? { tree: { onOpenTree: this.handleOpenSessionTree } } : {}),
       ...(this.canArchiveSelectedSession(state) ? { archive: { onArchiveAndNext: this.handleArchiveAndNext } } : {}),
       ...(state.status?.contextUsage === undefined ? {} : { contextUsage: state.status.contextUsage }),
     };
