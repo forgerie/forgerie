@@ -47,6 +47,23 @@ describe("AutocompleteMenu", () => {
     expect(onPick).toHaveBeenCalledExactlyOnceWith(items[0]);
   });
 
+  it("typesets command completions as a two-tone command mark, leaving other kinds plain", async () => {
+    const menu = new AutocompleteMenu();
+    menu.items = [
+      { kind: "command", replaceFrom: 0, replaceTo: 3, insertText: "/tree", detail: "builtin" },
+      { kind: "model", replaceFrom: 0, replaceTo: 3, insertText: "#anthropic/claude", detail: "anthropic" },
+    ];
+    document.body.append(menu);
+    await menu.updateComplete;
+
+    const options = Array.from(menu.shadowRoot?.querySelectorAll("[role='option']") ?? []);
+    const mark = options[0]?.querySelector(".command-mark");
+    expect(mark?.querySelector(".command-sigil")?.textContent).toBe("/");
+    expect(mark?.querySelector(".command-name")?.textContent).toBe("tree");
+    expect(options[1]?.querySelector(".command-mark")).toBeNull();
+    expect(options[1]?.querySelector("strong")?.textContent).toBe("#anthropic/claude");
+  });
+
   it("uses an internally scrolling bounded menu block", () => {
     const styles = autocompleteStyles.cssText.replaceAll(/\s+/g, " ");
 

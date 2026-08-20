@@ -62,6 +62,15 @@ export function renderMicrophoneIcon(): TemplateResult {
   `;
 }
 
+/** The command sigil itself — the button performs the "/" it draws. */
+export function renderSlashIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M15 4.5 9 19.5"></path>
+    </svg>
+  `;
+}
+
 /** The session tree — a root line with children hanging off one rail. */
 export function renderTreeIcon(): TemplateResult {
   return svg`

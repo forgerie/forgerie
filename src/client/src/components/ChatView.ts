@@ -6,6 +6,7 @@ import { chatTurns, foldMetaSources, groupChatMessages, summarizeChatGroup, type
 import { livenessPhase, livenessStep, type LivenessPhase } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
+import { leadingSlashCommand } from "../slashCommandText";
 import "./TranscriptLivenessView";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { ChatScrollCoordinator, type ChatReaderGesture } from "../chatScrollCoordinator";
@@ -322,6 +323,11 @@ export class ChatView extends LitElement {
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly onViewportResize = () => {
+    // A resize reshapes the canvas, and the reservation tracks the viewport
+    // height, so an idle turn's leftover space would grow with it instead of
+    // handing the new area to content. Reclaim it; a turn whose reply is still
+    // arriving keeps its space, because the reply is streaming into it.
+    if (!this.isSessionLive()) this.reservedTurnKey = undefined;
     if (this.scrolling.mode.kind === "tail") this.scrollToBottom();
     else if (this.scrolling.mode.kind === "turn") this.alignAnchoredTurn();
     else if (this.chat !== undefined) this.scrolling.syncViewportSize(this.chat);
@@ -826,11 +832,27 @@ export class ChatView extends LitElement {
             <span class="queued-kind">${hasFirstPromptRecovery && index === 0
               ? "First prompt"
               : `${message.kind === "steer" ? "Steer" : "Follow-up"} ${String(index + 1)}`}</span>
-            <formatted-text .text=${message.text}></formatted-text>
+            ${this.renderQueuedMessageBody(message.text)}
             ${hasFirstPromptRecovery && index === 0 ? this.renderSessionLaunchRecovery() : null}
           </div>
         `)}
       </aside>
+    `;
+  }
+
+  /**
+   * A queued command is going to run, not read as prose — so its ghost wears
+   * the command mark the completion menu introduced, and only argument text
+   * stays ordinary.
+   */
+  private renderQueuedMessageBody(text: string) {
+    const command = leadingSlashCommand(text);
+    if (command === undefined) return html`<formatted-text .text=${text}></formatted-text>`;
+    return html`
+      <div class="queued-command">
+        <span class="command-mark"><span class="command-sigil">/</span><span class="command-name">${command.name}</span></span>
+        ${command.rest === "" ? null : html`<span class="queued-command-rest">${command.rest}</span>`}
+      </div>
     `;
   }
 
@@ -848,7 +870,7 @@ export class ChatView extends LitElement {
     return html`
       <aside class="queued-ghosts" aria-live="polite" aria-label="Queued messages">
         ${queued.map((message) => html`
-          <div class="queued-ghost"><formatted-text .text=${message.text}></formatted-text></div>
+          <div class="queued-ghost">${this.renderQueuedMessageBody(message.text)}</div>
         `)}
         <p class="queued-ghost-meta">
           <span>queued</span>

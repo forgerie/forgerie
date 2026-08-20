@@ -559,7 +559,20 @@ export const listStyles = css`
   @keyframes pulse { 0%, 100% { transform: scale(.75); opacity: .55; } 50% { transform: scale(1.2); opacity: 1; } }
 `;
 
+/*
+ * A slash command, typeset as an instrument reading rather than a badge:
+ * the same hairline-and-mono family as inline code, with the sigil dimmed so
+ * the name carries the weight. One definition; the completion menu and the
+ * queued ghosts both interpolate it, so the mark cannot drift between them.
+ */
+const commandMarkStyles = css`
+  .command-mark { display: inline-flex; align-items: baseline; max-width: 100%; padding: 1px 6px 1px 4px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-bg); color: var(--pi-text); font: 500 var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.4; white-space: nowrap; }
+  .command-mark .command-sigil { flex: 0 0 auto; margin-inline-end: 1px; color: var(--pi-muted); font-weight: 400; }
+  .command-mark .command-name { overflow: hidden; text-overflow: ellipsis; }
+`;
+
 export const chatStyles = css`
+  ${commandMarkStyles}
   :host { position: relative; z-index: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; }
   /* Size container for the transcript. Lives on the wrapper rather than the
      scroller so containment cannot interact with sticky headers or scroll
@@ -773,6 +786,8 @@ export const chatStyles = css`
   .queued-message { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--pi-border); }
   .queued-message:first-of-type { padding-top: 0; border-top: 0; }
   .queued-kind { color: var(--pi-muted); font-size: var(--pi-text-sm); text-transform: uppercase; }
+  .queued-command { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .queued-command-rest { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .session-launch-recovery { display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid var(--pi-warning-border); }
   .session-launch-recovery strong { color: var(--pi-warning); font-weight: 600; }
   .session-launch-recovery p { margin: 0; color: var(--calm-ink-dim); }
@@ -917,6 +932,7 @@ export const formattedTextStyles = css`
 `;
 
 export const autocompleteStyles = css`
+  ${commandMarkStyles}
   :host { display: block; }
   .menu {
     position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
@@ -931,6 +947,8 @@ export const autocompleteStyles = css`
   button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -2px; }
   span { color: var(--pi-muted); font-size: var(--pi-text-sm); }
   small { grid-column: 1 / -1; color: var(--pi-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The mark hugs its text; the grid cell must not stretch it into a bar. */
+  button .command-mark { justify-self: start; }
 `;
 
 export const promptEditorStyles = css`

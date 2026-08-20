@@ -11,7 +11,7 @@ import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointer
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderStopIcon, renderThinkingGauge, renderTreeIcon } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderSlashIcon, renderStopIcon, renderThinkingGauge, renderTreeIcon } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerDictationCapability, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
@@ -238,6 +238,7 @@ export class PromptEditor extends LitElement {
           .onCompletionError=${this.onCompletionError}
         ></composer-draft>
         <div class="actions">
+          ${this.renderCommandsAction()}
           ${this.renderAttachmentAction(busy)}
           ${this.renderDictationAction()}
           ${this.renderTreeAction()}
@@ -742,6 +743,28 @@ export class PromptEditor extends LitElement {
         aria-label="Archive &amp; next"
         @click=${() => { if (this.dictationBlocksComposer()) return; this.closeSteer(false); this.capabilities.archive?.onArchiveAndNext(); }}
       >${renderArchiveIcon()}</button>
+    `;
+  }
+
+  /**
+   * The button form of the "/" sigil, for hands without a convenient key.
+   *
+   * It self-selects from the runtime rather than a capability: any host whose
+   * runtime resolves command completions has commands worth listing. It goes
+   * quiet while prose occupies the draft, because opening the menu would mean
+   * rewriting what the user already wrote.
+   */
+  private renderCommandsAction() {
+    if (!this.runtime().supportedCompletionKinds.has("command")) return null;
+    const commandMode = this.currentInputMode.kind === "command";
+    return html`
+      <button
+        class="composer-commands icon-button"
+        ?disabled=${this.disabled || this.dictationBlocksComposer() || (!this.draftEmpty && !commandMode)}
+        title="Choose a command"
+        aria-label="Commands"
+        @click=${() => { if (this.dictationBlocksComposer()) return; this.closeSteer(false); this.draftElement?.beginCommandEntry(); }}
+      >${renderSlashIcon()}</button>
     `;
   }
 

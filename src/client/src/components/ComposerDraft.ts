@@ -232,6 +232,23 @@ export class ComposerDraft extends LitElement {
     this.attachmentInput?.click();
   }
 
+  /**
+   * Enter command mode on behalf of a rail control: a "/" draft, the caret
+   * after it, and the command menu open. Refuses while prose occupies the
+   * draft — a button must never turn a written prompt into a command.
+   */
+  beginCommandEntry(): boolean {
+    if (this.disabled || this.isDictationActive()) return false;
+    if (this.draft !== "" && !this.draft.startsWith("/")) return false;
+    if (this.draft === "") this.replaceText("/");
+    // A restored draft mounts with its caret at 0, where no command trigger
+    // exists. The menu keys off the caret, so entry always ends at the end.
+    else this.editor?.dispatch({ selection: EditorSelection.cursor(this.editor.state.doc.length) });
+    this.focusInput();
+    void this.refreshCompletions();
+    return true;
+  }
+
   replaceText(text: string): void {
     this.abortDictationEdit();
     this.promptHistoryState = leavePromptHistory(this.promptHistoryState);

@@ -36,7 +36,9 @@ export class AutocompleteMenu extends LitElement {
               ${scrollWhenSelected(selected, item)}
               @mousedown=${(event: MouseEvent) => { event.preventDefault(); this.onPick?.(item); }}
             >
-              <strong>${item.insertText}</strong>
+              ${item.kind === "command"
+                ? html`<strong class="command-mark"><span class="command-sigil">/</span><span class="command-name">${item.insertText.slice(1)}</span></strong>`
+                : html`<strong>${item.insertText}</strong>`}
               <span>${item.detail}</span>
               ${item.description !== undefined && item.description !== "" ? html`<small>${item.description}</small>` : null}
             </button>

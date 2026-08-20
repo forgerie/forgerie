@@ -12,6 +12,7 @@ export interface SessionCapabilityOptions {
   onChooseModel?: (model: ComposerSelectableModel) => void;
   onChooseThinkingLevel?: (level: string) => void;
   onStop?: () => void;
+  onOpenTree?: () => void;
   onArchiveAndNext?: () => void;
   onNewSession?: () => void;
 }
@@ -39,6 +40,7 @@ export function sessionCapabilities(options: SessionCapabilityOptions = {}): Com
       onChooseThinkingLevel: options.onChooseThinkingLevel ?? (() => undefined),
     },
     stop: { stoppable: stoppable && runtimeAvailable, onStop: options.onStop ?? (() => undefined) },
+    ...(runtimeAvailable ? { tree: { onOpenTree: options.onOpenTree ?? (() => undefined) } } : {}),
     newSession: { onNewSession: options.onNewSession ?? (() => undefined) },
     ...(options.onArchiveAndNext === undefined ? {} : { archive: { onArchiveAndNext: options.onArchiveAndNext } }),
     ...(status?.contextUsage === undefined ? {} : { contextUsage: status.contextUsage }),
