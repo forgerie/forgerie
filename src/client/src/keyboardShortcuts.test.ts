@@ -9,6 +9,7 @@ function keyEvent(key: string, modifiers: Partial<ShortcutKeyEvent> = {}): Short
     ctrlKey: false,
     altKey: false,
     shiftKey: false,
+    repeat: false,
     isComposing: false,
     target: null,
     ...modifiers,
@@ -39,6 +40,16 @@ describe("KeyboardShortcutDispatcher", () => {
     const handled = dispatcher.handle(keyEvent("k", { metaKey: true }), [value]);
 
     expect(handled).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("consumes key repeat without rerunning a non-repeatable action", () => {
+    const dispatcher = new KeyboardShortcutDispatcher();
+    const { value, run } = action("mod+space");
+    const nonRepeatable = { ...value, repeatable: false };
+
+    expect(dispatcher.handle(keyEvent(" ", { ctrlKey: true }), [nonRepeatable])).toBe(true);
+    expect(dispatcher.handle(keyEvent(" ", { ctrlKey: true, repeat: true }), [nonRepeatable])).toBe(true);
     expect(run).toHaveBeenCalledTimes(1);
   });
 

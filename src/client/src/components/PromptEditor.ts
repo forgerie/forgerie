@@ -379,6 +379,25 @@ export class PromptEditor extends LitElement {
     return true;
   }
 
+  /** Whether the current composer can start, finish, or cancel speech dictation. */
+  canToggleDictation(): boolean {
+    if (this.capabilities.dictation === undefined || this.disabled || this.dictationView().disabled) return false;
+    if (this.dictationState.tag === "acquiring" || this.dictationState.tag === "pressed" || this.dictationCanCompleteFromKey()) return true;
+    return this.submissionAvailable && !this.sending && !this.attachmentCapturePending;
+  }
+
+  /** Toggle the same speech-dictation lifecycle as the microphone control. */
+  toggleDictation(): boolean {
+    if (!this.canToggleDictation()) return false;
+    if (this.dictationState.tag === "acquiring" || this.dictationState.tag === "pressed") {
+      this.resetDictationGesture();
+      this.dictationController?.cancel();
+      return true;
+    }
+    if (this.dictationCanCompleteFromKey()) return this.dictationController?.press() === true;
+    return this.activateDictationShortTap();
+  }
+
   /** Abort any active dictation before the host changes composer ownership. */
   cancelDictation(): void {
     this.cancelDictationBeforeSurfaceExit();
@@ -1265,9 +1284,10 @@ export class PromptEditor extends LitElement {
     this.dictationGesture.release();
   }
 
-  private activateDictationShortTap(): void {
-    if (!this.dictationGesture.press()) return;
+  private activateDictationShortTap(): boolean {
+    if (!this.dictationGesture.press()) return false;
     this.dictationGesture.release();
+    return true;
   }
 
   private createDictationGesture(): PromptDictationGesture {

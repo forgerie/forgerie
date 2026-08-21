@@ -14,6 +14,7 @@ export interface ShortcutKeyEvent {
   ctrlKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
+  repeat: boolean;
   isComposing: boolean;
   target: EventTarget | null;
 }
@@ -56,24 +57,24 @@ export class KeyboardShortcutDispatcher {
       .map((binding) => ({ action: binding.action, tokens: binding.tokens }));
 
     if (this.pendingTokens.length > 0) {
-      const handledPending = this.handleSequence([...this.pendingTokens, token], shortcuts);
+      const handledPending = this.handleSequence([...this.pendingTokens, token], shortcuts, event.repeat);
       if (handledPending) return true;
       this.clearPending();
       if (!isShortcutSequenceStarter(token)) return false;
     } else if (!isShortcutSequenceStarter(token)) return false;
 
-    return this.handleSequence([token], shortcuts);
+    return this.handleSequence([token], shortcuts, event.repeat);
   }
 
   reset(): void {
     this.clearPending();
   }
 
-  private handleSequence(sequence: string[], shortcuts: { action: AppAction; tokens: string[] }[]): boolean {
+  private handleSequence(sequence: string[], shortcuts: { action: AppAction; tokens: string[] }[], repeat: boolean): boolean {
     const exact = shortcuts.find((entry) => sameTokens(entry.tokens, sequence));
     if (exact !== undefined) {
       this.clearPending();
-      void exact.action.run();
+      if (!repeat || exact.action.repeatable !== false) void exact.action.run();
       return true;
     }
 

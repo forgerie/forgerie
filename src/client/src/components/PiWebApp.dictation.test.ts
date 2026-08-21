@@ -47,6 +47,74 @@ describe("PiWebApp composer dictation capability", () => {
     expect(editor.shadowRoot?.querySelector(".dictation-button")).not.toBeNull();
   });
 
+  it("toggles the selected session's dictation with Ctrl+Space before CodeMirror handles it", async () => {
+    const app = new PiWebApp();
+    const selectedSession = session("session-1");
+    Reflect.set(app, "state", {
+      ...initialAppState(),
+      selectedSession,
+      sessions: [selectedSession],
+      selectedWorkspace: workspace(),
+      status: status(),
+      sessionStatuses: { [selectedSession.id]: status() },
+      mainView: "chat",
+    });
+    const stopAndFinalize = vi.fn(() => new Promise<Float32Array>(() => undefined));
+    const createCaptureSession = vi.fn(() => Promise.resolve({
+      actualSampleRateHz: 16_000,
+      failure: undefined,
+      endpointWindow: () => new Float32Array(),
+      finalize: () => new Float32Array(),
+      stopAndFinalize,
+      abort: () => Promise.resolve(),
+    } satisfies SpeechCaptureSession));
+    const capability: ComposerDictationCapability = {
+      getStatus: () => Promise.resolve({
+        smartTurn: "ready",
+        whisper: "ready",
+        capability: "ready",
+        limits: { sampleRateHz: 16_000, maxTurnSeconds: 60, maxTurnBytes: 3_840_000, endpointWindowSeconds: 8, endpointWindowBytes: 512_000 },
+      }),
+      createCaptureSession,
+      speechApi: {
+        checkTurn: () => new Promise(() => undefined),
+        transcribe: () => new Promise(() => undefined),
+      },
+    };
+    Reflect.set(app, "sessionDictationCapabilityValue", capability);
+    document.body.append(app);
+    await app.updateComplete;
+    await app.updateComplete;
+
+    const editor = promptEditor(app);
+    await vi.waitFor(() => { expect(requiredMic(editor).disabled).toBe(false); });
+    const editorKeyDown = vi.fn();
+    const content = editor.view?.contentDOM;
+    if (content === undefined) throw new Error("Expected composer CodeMirror content");
+    content.addEventListener("keydown", editorKeyDown);
+
+    const started = dispatchControlSpace(content);
+    await settleEditor(editor);
+
+    expect(started.defaultPrevented).toBe(true);
+    expect(editorKeyDown).not.toHaveBeenCalled();
+    expect(createCaptureSession).toHaveBeenCalledOnce();
+    expect(requiredMic(editor).getAttribute("aria-pressed")).toBe("true");
+
+    const repeated = dispatchControlSpace(content, { repeat: true });
+    await settleEditor(editor);
+
+    expect(repeated.defaultPrevented).toBe(true);
+    expect(stopAndFinalize).not.toHaveBeenCalled();
+
+    const stopped = dispatchControlSpace(content);
+    await settleEditor(editor);
+
+    expect(stopped.defaultPrevented).toBe(true);
+    expect(editorKeyDown).not.toHaveBeenCalled();
+    expect(stopAndFinalize).toHaveBeenCalledOnce();
+  });
+
   it("keeps one dictation capability and active controller across unrelated parent rerenders", async () => {
     const app = new PiWebApp();
     Reflect.set(app, "state", {
@@ -140,6 +208,26 @@ function hasDictationDependencies(value: PromptEditor["capabilities"]["dictation
     && typeof value.createCaptureSession === "function"
     && typeof value.speechApi.checkTurn === "function"
     && typeof value.speechApi.transcribe === "function";
+}
+
+function dispatchControlSpace(target: HTMLElement, options: { repeat?: boolean } = {}): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: " ",
+    ctrlKey: true,
+    repeat: options.repeat ?? false,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+async function settleEditor(editor: PromptEditor): Promise<void> {
+  await Promise.resolve();
+  await editor.updateComplete;
+  await Promise.resolve();
+  await editor.updateComplete;
 }
 
 function requiredMic(editor: PromptEditor): HTMLButtonElement {

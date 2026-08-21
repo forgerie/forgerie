@@ -2581,6 +2581,16 @@ export class PiWebApp extends LitElement {
   private sessionActions(): AppAction[] {
     return [
       {
+        id: "app.session.toggle-dictation",
+        title: "Toggle Speech Dictation",
+        description: "Start or finish speech dictation in the current session composer",
+        shortcut: "mod+space",
+        repeatable: false,
+        group: "Session",
+        enabled: this.state.mainView === "chat" && this.promptEditor?.canToggleDictation() === true,
+        run: () => { this.promptEditor?.toggleDictation(); },
+      },
+      {
         id: "app.sessions.cleanup",
         title: "Clean Up Sessions",
         description: "Preview and manually clean up idle or archived sessions on the selected machine",
