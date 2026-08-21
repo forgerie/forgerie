@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatElapsed, latestToolStep, livenessPhase, livenessStep } from "./chatLiveness";
+import { formatElapsed, latestToolStep, livenessPhase, livenessStep, replyIsStreaming } from "./chatLiveness";
 import { elapsedSince } from "./sessionWorkingRuntime";
 import type { SessionActivity } from "./api";
 import type { ChatLine, ChatPart } from "./components/shared";
@@ -88,6 +88,38 @@ describe("livenessStep", () => {
 
   it("falls back to the status text when no activity is published", () => {
     expect(livenessStep([], undefined, "  Sending your message…  ")).toBe("Sending your message…");
+  });
+});
+
+describe("replyIsStreaming", () => {
+  const input = (overrides: Partial<Parameters<typeof replyIsStreaming>[0]> = {}) => ({
+    isStreaming: true,
+    isCompacting: false,
+    isBashRunning: false,
+    awaitingUserInput: false,
+    activity: undefined,
+    ...overrides,
+  });
+
+  it("keeps active assistant message delivery interim", () => {
+    expect(replyIsStreaming(input({ activity: activity({ label: "message started" }) }))).toBe(true);
+    expect(replyIsStreaming(input({ activity: activity({ label: "receiving response" }) }))).toBe(true);
+  });
+
+  it("settles the reply when later work or user input starts", () => {
+    expect(replyIsStreaming(input({ activity: activity({ label: "running tool" }) }))).toBe(false);
+    expect(replyIsStreaming(input({ isCompacting: true }))).toBe(false);
+    expect(replyIsStreaming(input({ isBashRunning: true }))).toBe(false);
+    expect(replyIsStreaming(input({ awaitingUserInput: true }))).toBe(false);
+  });
+
+  it("uses streaming status when no activity event is available", () => {
+    expect(replyIsStreaming(input())).toBe(true);
+    expect(replyIsStreaming(input({ isStreaming: false }))).toBe(false);
+  });
+
+  it("settles the reply after the assistant message completes", () => {
+    expect(replyIsStreaming(input({ activity: activity({ phase: "idle", label: "message complete" }) }))).toBe(false);
   });
 });
 

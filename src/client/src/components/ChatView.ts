@@ -3,7 +3,7 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
 import { chatTurnFlow, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, type ChatGroup, type ChatTurn } from "../chatGroups";
-import { livenessPhase, livenessStep, type LivenessPhase } from "../chatLiveness";
+import { livenessPhase, livenessStep, replyIsStreaming, type LivenessPhase } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
@@ -769,22 +769,34 @@ export class ChatView extends LitElement {
    */
   private renderTurn(turn: ChatTurn, liveTailGroup: ChatGroup | undefined, last: boolean) {
     const key = this.turnRenderKey(turn);
-    const closed = !(last && this.isSessionLive());
-    const flow = chatTurnFlow(turn, closed);
+    const turnClosed = !(last && this.isSessionLive());
+    const replySettled = !(last && this.latestReplyIsStreaming());
+    const flow = chatTurnFlow(turn, replySettled);
+    const continuationClosesTurn = turnClosed && flow.continuation.length > 0;
     return html`
       <section class="turn" data-turn-key=${key}>
         <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
           ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup)}
-          ${flow.work.length === 0 ? null : html`
-            <div class="turn-rail">
-              ${repeat(flow.work, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
-              ${closed ? this.renderRailMeta(turn, key) : null}
-            </div>
-          `}
+          ${this.renderTurnRail(flow.work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined)}
           ${flow.answer === undefined ? null : this.renderGroup(flow.answer, flow.answer === liveTailGroup)}
+          ${this.renderTurnRail(flow.continuation, liveTailGroup, continuationClosesTurn ? { turn, key } : undefined)}
           ${last ? this.renderRunningTurnTail() : null}
         </div>
       </section>
+    `;
+  }
+
+  private renderTurnRail(
+    groups: readonly ChatGroup[],
+    liveTailGroup: ChatGroup | undefined,
+    meta: { readonly turn: ChatTurn; readonly key: string } | undefined,
+  ) {
+    if (groups.length === 0) return null;
+    return html`
+      <div class="turn-rail">
+        ${repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
+        ${meta === undefined ? null : this.renderRailMeta(meta.turn, meta.key)}
+      </div>
     `;
   }
 
@@ -819,6 +831,16 @@ export class ChatView extends LitElement {
       || this.status?.isCompacting === true
       || this.status?.isBashRunning === true
       || this.activity?.phase === "active";
+  }
+
+  private latestReplyIsStreaming(): boolean {
+    return replyIsStreaming({
+      isStreaming: this.status?.isStreaming === true,
+      isCompacting: this.isCompacting || this.status?.isCompacting === true,
+      isBashRunning: this.status?.isBashRunning === true,
+      awaitingUserInput: this.pendingAsk !== undefined || this.pendingDialogs.length > 0,
+      activity: this.activity,
+    });
   }
 
   private renderQueuedMessages() {

@@ -3,9 +3,9 @@
 **Verdict (2026-08-20): B, the process rail, is adopted and implemented.**
 The transcript now groups steps chronologically (`groupChatMessages` flushes
 on readable content, part-order aware) and `chatTurnFlow` splits each turn
-into opener, railed work, and promoted answer. The fold-summary meta moved to
-a rail-closing line. The other treatments stay here as the record of the
-study. Open follow-ups moved to the backlog: the running-turn tail (liveness,
+into opener, railed work, promoted answer, and any continuation below it. The
+fold-summary meta moved to a rail-closing line. The other treatments stay here
+as the record of the study. Open follow-ups moved to the backlog: the running-turn tail (liveness,
 queued prompts, asks) still renders below the rail rather than inside it, and
 the promotion moment has no designed transition.
 
@@ -30,14 +30,17 @@ One conversation, four treatments, switchable in place. Open
 ## The promotion rule
 
 All three treatments rest on the same rule, and it needs no new data from the
-server. While a turn runs, every assistant text block is interim. When the
-turn closes, the last text block becomes the answer. `chatTurns` in
-`src/client/src/chatGroups.ts` already knows the boundary.
+server. The trailing assistant text stays interim only while message content
+is actively arriving. When message delivery finishes, or later tool, question,
+or compaction work begins, the latest assistant text becomes the answer and
+stays promoted. If newer prose starts streaming, the previous answer remains
+promoted until the newer message settles. `chatTurns` in
+`src/client/src/chatGroups.ts` owns this split.
 
-The cost is the promotion moment. The last interim block restyles when the
-turn completes. On `rail` it also moves outside the rail. The third turn in
-the mock is live, so every variant shows the pre-promotion state: nothing is
-bright yet, and that is the point.
+The cost is the promotion moment. The last interim block restyles when message
+delivery finishes. On `rail` it also moves outside the rail. Later work does
+not move it back. The third turn in the mock is live, so every variant shows
+the pre-promotion state: nothing is bright yet, and that is the point.
 
 ## Run and capture
 

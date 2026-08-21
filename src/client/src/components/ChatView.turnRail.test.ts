@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
+import type { SessionStatus } from "../api";
 import { ChatView } from "./ChatView";
 import type { ChatLine } from "./shared";
 
@@ -11,11 +12,31 @@ afterEach(() => {
 const said = (role: ChatLine["role"], text: string): ChatLine => ({ role, parts: [{ type: "text", text }] });
 const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
 
+function compactingStatus(): SessionStatus {
+  return {
+    sessionId: "session-1",
+    isStreaming: true,
+    isCompacting: true,
+    isBashRunning: false,
+    pendingMessageCount: 0,
+    queuedMessages: [],
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
+  };
+}
+
 async function loadedTranscript(messages: ChatLine[], live = false): Promise<ChatView> {
   const view = new ChatView();
   view.sessionId = "session-1";
   view.messages = messages;
-  view.isSendingPrompt = live;
+  if (live) {
+    view.activity = {
+      sessionId: "session-1",
+      phase: "active",
+      label: "receiving response",
+      at: "2026-08-20T10:00:00.000Z",
+    };
+  }
   document.body.append(view);
   await view.updateComplete;
   await view.updateComplete;
@@ -67,13 +88,14 @@ describe("ChatView process rail", () => {
     expect(prose.promoted[0]?.classList.contains("interim")).toBe(false);
   });
 
-  it("keeps every text block on the rail while the turn is running", async () => {
+  it("keeps only actively streaming trailing prose on the rail", async () => {
     const view = await loadedTranscript(turn, true);
 
     const prose = assistantProse(view);
-    expect(prose.promoted).toEqual([]);
-    expect(prose.onRail.map(proseText)).toEqual(["partway there", "the answer"]);
-    expect(prose.onRail.every((article) => article.classList.contains("interim"))).toBe(true);
+    expect(prose.promoted.map(proseText)).toEqual(["partway there"]);
+    expect(prose.promoted[0]?.classList.contains("interim")).toBe(false);
+    expect(prose.onRail.map(proseText)).toEqual(["the answer"]);
+    expect(prose.onRail[0]?.classList.contains("interim")).toBe(true);
   });
 
   it("keeps the opener bubble off the rail", async () => {
@@ -104,11 +126,50 @@ describe("ChatView process rail", () => {
     expect(assistantProse(view).promoted).toHaveLength(1);
   });
 
-  it("holds the answer back when a closed turn ends in tool work", async () => {
-    const view = await loadedTranscript([said("user", "question"), said("assistant", "working"), call("a")]);
+  it("keeps the latest assistant prose promoted while later tool work runs", async () => {
+    const answer: ChatLine = {
+      role: "assistant",
+      parts: [{ type: "text", text: "the answer" }],
+      meta: { timestamp: "2026-08-20T10:00:00.000Z" },
+    };
+    const view = await loadedTranscript([said("user", "question"), answer, call("a")], true);
+    view.activity = {
+      sessionId: "session-1",
+      phase: "active",
+      label: "running tool",
+      detail: "read",
+      at: "2026-08-20T10:00:01.000Z",
+    };
+    await view.updateComplete;
 
     const prose = assistantProse(view);
-    expect(prose.promoted).toEqual([]);
-    expect(prose.onRail.map(proseText)).toEqual(["working"]);
+    expect(prose.onRail).toEqual([]);
+    expect(prose.promoted.map(proseText)).toEqual(["the answer"]);
+    expect(prose.promoted[0]?.classList.contains("interim")).toBe(false);
+    expect(shadow(view).querySelector(".turn-rail .rail-meta")).toBeNull();
+  });
+
+  it("keeps the latest assistant prose promoted when a question opens", async () => {
+    const view = await loadedTranscript([said("user", "question"), said("assistant", "the answer")], true);
+    view.pendingAsk = {
+      askId: "ask-open",
+      askedAt: "2026-08-20T10:00:00.000Z",
+      questions: [{ id: "next", question: "What next?", options: [] }],
+    };
+    await view.updateComplete;
+
+    expect(shadow(view).querySelector("ask-user-card.open-ask-card")).not.toBeNull();
+    expect(assistantProse(view).promoted.map(proseText)).toEqual(["the answer"]);
+  });
+
+  it("keeps the latest assistant prose promoted while history compacts", async () => {
+    const view = await loadedTranscript([said("user", "question"), said("assistant", "the answer")]);
+    view.status = compactingStatus();
+    view.isCompacting = true;
+    await view.updateComplete;
+
+    const prose = assistantProse(view);
+    expect(prose.onRail).toEqual([]);
+    expect(prose.promoted.map(proseText)).toEqual(["the answer"]);
   });
 });

@@ -140,38 +140,59 @@ export function latestChatTurnStart(groups: ChatGroup[]): ChatTurnStart | undefi
  * How a turn reads on the process rail.
  *
  * The opener is the human message that started the turn. The answer is the
- * assistant text that closed it -- and it exists only for closed turns,
- * because while a turn runs every text block is still work in progress.
- * Everything between the two is the work: narration and step folds, in the
- * order they happened, which the transcript wraps in one rail.
+ * latest assistant prose whose message delivery has settled. It stays promoted
+ * while later tools, questions, compaction, or a newer streaming reply continue
+ * below it. Work before and after the answer remains in chronological order.
  */
 export interface ChatTurnFlow {
   /** The human message that opened the turn, when it is loaded. */
   readonly opener?: ChatGroup;
-  /** Narration, step folds, and other content between opener and answer. */
+  /** Narration and steps that happened before the promoted answer. */
   readonly work: readonly ChatGroup[];
-  /** The assistant text that closed the turn; absent while the turn runs. */
+  /** Latest settled assistant prose; absent until any assistant prose has settled. */
   readonly answer?: ChatGroup;
+  /** Work that happened after the promoted answer, including newer streaming prose. */
+  readonly continuation: readonly ChatGroup[];
 }
 
 /**
  * Splits a turn into opener, work, and answer.
  *
- * Promotion is an end-of-turn fact: the same trailing text block is work
- * while the turn is open and becomes the answer when it closes. Only
- * assistant prose is promotable -- a turn that ends in tool work was
- * interrupted, and a turn that ends in a question card is still asking.
+ * The latest assistant prose becomes the answer when delivery settles or later
+ * non-prose work proves it is no longer the active stream tail. While newer
+ * prose streams, the previous settled prose remains promoted and the new text
+ * stays in the continuation rail.
  */
-export function chatTurnFlow(turn: ChatTurn, closed: boolean): ChatTurnFlow {
+export function chatTurnFlow(turn: ChatTurn, replySettled: boolean): ChatTurnFlow {
   const first = turn.groups[0];
   const opener = first !== undefined && turn.openedByIndex !== undefined && first.kind === "message" && first.index === turn.openedByIndex
     ? first
     : undefined;
   const body = opener === undefined ? turn.groups : turn.groups.slice(1);
-  const last = body.at(-1);
-  const answer = closed && last !== undefined && isPromotableReply(last) ? last : undefined;
-  const work = answer === undefined ? body : body.slice(0, -1);
-  return { ...(opener === undefined ? {} : { opener }), work, ...(answer === undefined ? {} : { answer }) };
+  const latestReplyIndex = previousPromotableReplyIndex(body, body.length);
+  const latestReplyCanPromote = latestReplyIndex >= 0
+    && (replySettled || latestReplyIndex < body.length - 1);
+  const answerIndex = latestReplyCanPromote
+    ? latestReplyIndex
+    : previousPromotableReplyIndex(body, latestReplyIndex);
+  const answer = body[answerIndex];
+  if (answer === undefined) {
+    return { ...(opener === undefined ? {} : { opener }), work: body, continuation: [] };
+  }
+  return {
+    ...(opener === undefined ? {} : { opener }),
+    work: body.slice(0, answerIndex),
+    answer,
+    continuation: body.slice(answerIndex + 1),
+  };
+}
+
+function previousPromotableReplyIndex(groups: readonly ChatGroup[], before: number): number {
+  for (let index = before - 1; index >= 0; index -= 1) {
+    const group = groups[index];
+    if (group !== undefined && isPromotableReply(group)) return index;
+  }
+  return -1;
 }
 
 function isPromotableReply(group: ChatGroup): boolean {

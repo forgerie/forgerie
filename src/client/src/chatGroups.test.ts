@@ -275,6 +275,7 @@ describe("chatTurnFlow", () => {
       expect.objectContaining({ kind: "group", startIndex: 3 }),
     ]);
     expect(flow.answer).toMatchObject({ kind: "message", index: 4 });
+    expect(flow.continuation).toEqual([]);
   });
 
   it("keeps the trailing prose in the work while the turn is open", () => {
@@ -284,25 +285,64 @@ describe("chatTurnFlow", () => {
 
     expect(flow.answer).toBeUndefined();
     expect(flow.work.at(-1)).toMatchObject({ kind: "message", index: 2 });
+    expect(flow.continuation).toEqual([]);
   });
 
-  it("promotes no answer when the turn ends in tool work", () => {
-    const turn = turnOf([text("user", "question"), text("assistant", "working"), call("a")]);
+  it("keeps the previous settled prose promoted while newer prose streams", () => {
+    const turn = turnOf([
+      text("user", "question"),
+      text("assistant", "previous answer"),
+      call("a"),
+      text("assistant", "new answer streaming"),
+    ]);
 
-    const flow = chatTurnFlow(turn, true);
+    const flow = chatTurnFlow(turn, false);
 
-    expect(flow.answer).toBeUndefined();
-    expect(flow.work).toHaveLength(2);
+    expect(flow.work).toEqual([]);
+    expect(flow.answer).toMatchObject({ kind: "message", index: 1 });
+    expect(flow.continuation).toEqual([
+      expect.objectContaining({ kind: "group", startIndex: 2 }),
+      expect.objectContaining({ kind: "message", index: 3 }),
+    ]);
   });
 
-  it("promotes no answer when the turn ends in a question card", () => {
+  it("keeps the latest assistant prose promoted while later tool work runs", () => {
+    const turn = turnOf([text("user", "question"), text("assistant", "the answer"), call("a")]);
+
+    const flow = chatTurnFlow(turn, false);
+
+    expect(flow.answer).toMatchObject({ kind: "message", index: 1 });
+    expect(flow.work).toEqual([]);
+    expect(flow.continuation).toEqual([expect.objectContaining({ kind: "group", startIndex: 2 })]);
+  });
+
+  it("keeps the latest assistant prose promoted before a question card", () => {
     const record = { askId: "ask-1", reason: "submitted" as const, askedAt: "t", closedAt: "t", questions: [], answeredCount: 0, unansweredIds: [], summary: "s" };
     const turn = turnOf([
       text("user", "question"),
+      text("assistant", "the answer"),
       { role: "assistant", parts: [{ type: "askUserRecord", outcome: record }] },
     ]);
 
-    expect(chatTurnFlow(turn, true).answer).toBeUndefined();
+    const flow = chatTurnFlow(turn, false);
+
+    expect(flow.answer).toMatchObject({ kind: "message", index: 1 });
+    expect(flow.work).toEqual([]);
+    expect(flow.continuation).toEqual([expect.objectContaining({ kind: "message", index: 2 })]);
+  });
+
+  it("keeps the latest assistant prose promoted while history compacts", () => {
+    const turn = turnOf([
+      text("user", "question"),
+      text("assistant", "the answer"),
+      { ...text("assistant", "summary"), source: "compaction" },
+    ]);
+
+    const flow = chatTurnFlow(turn, false);
+
+    expect(flow.answer).toMatchObject({ kind: "message", index: 1 });
+    expect(flow.work).toEqual([]);
+    expect(flow.continuation).toEqual([expect.objectContaining({ kind: "group", startIndex: 2 })]);
   });
 
   it("reads a windowed turn with no loaded opener as all work", () => {
@@ -314,6 +354,7 @@ describe("chatTurnFlow", () => {
     expect(flow.opener).toBeUndefined();
     expect(flow.answer).toMatchObject({ kind: "message", index: 40 });
     expect(flow.work).toEqual([]);
+    expect(flow.continuation).toEqual([]);
   });
 });
 

@@ -25,6 +25,29 @@ export function livenessPhase(input: { isCompacting: boolean; indicatorActive: b
   return input.indicatorActive ? "working" : undefined;
 }
 
+export interface ReplyStreamingInput {
+  readonly isStreaming: boolean;
+  readonly isCompacting: boolean;
+  readonly isBashRunning: boolean;
+  readonly awaitingUserInput: boolean;
+  readonly activity: Pick<SessionActivity, "phase" | "label"> | undefined;
+}
+
+/**
+ * Whether the newest assistant prose is still receiving content.
+ *
+ * Session streaming covers the whole agent loop, including tools and waits.
+ * Answer promotion needs the narrower message-delivery phase. Activity is the
+ * authoritative live signal when present; status covers reconnect snapshots
+ * that arrive before the current activity event.
+ */
+export function replyIsStreaming(input: ReplyStreamingInput): boolean {
+  if (input.isCompacting || input.isBashRunning || input.awaitingUserInput) return false;
+  if (input.activity === undefined) return input.isStreaming;
+  return input.activity.phase === "active"
+    && (input.activity.label === "message started" || input.activity.label === "receiving response");
+}
+
 /** Elapsed time, coarse on purpose: this is reassurance, not a stopwatch. */
 export function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
