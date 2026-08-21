@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Process notifications — noise study</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  /* Annotation chrome. Not part of the design under review. */
+  .plate { border-top: 1px solid var(--pi-border); margin-top: 40px; padding-top: 10px; }
+  .plate:first-of-type { margin-top: 0; border-top: 0; }
+  .plate-name {
+    margin: 0 0 2px;
+    color: var(--pi-accent);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .plate-note { margin: 0 0 18px; color: var(--pi-dim); font-size: 12.5px; max-width: 60ch; }
+  .chat { display: block; overflow: visible; padding: 20px var(--calm-gutter); }
+  .column { width: min(100%, 36rem); margin-inline: auto; }
+
+  /* ---------- CURRENT ---------- */
+  .msg-header { margin: 14px 0 4px; }
+  .msg-header .label {
+    color: var(--calm-ink-dim);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .process-notification { padding: 8px 10px; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); background: var(--pi-surface); }
+  .process-notification.error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-surface)); }
+  .process-notification-header { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; line-height: 1.4; }
+  .process-notification-header strong { flex: 0 0 auto; font-weight: 600; }
+  .process-notification-header .summary { flex: 1 1 auto; min-width: 0; color: var(--pi-text); overflow-wrap: anywhere; }
+  .process-notification-header .exit-code { flex: 0 0 auto; margin-left: auto; color: var(--pi-muted); font-size: var(--pi-text-sm); font-family: ui-monospace, monospace; }
+  .raw-disclosure { margin-top: 8px; border-top: 1px solid var(--pi-border-muted); padding-top: 6px; }
+  .raw-disclosure summary { cursor: pointer; color: var(--pi-muted); font-size: var(--pi-text-sm); }
+  .skill-read { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); padding: 8px 10px; }
+  .skill-read > strong { color: var(--pi-accent); }
+  .skill-read > small { display: block; margin: 6px 0 0; color: var(--pi-muted); font-size: 12px; overflow-wrap: anywhere; }
+
+  /* ---------- SHARED BY PROPOSALS ----------
+     The transcript's own rule, already written in shared.ts: messages carry no
+     card, roles read from weight and tone, and colour is spent only on things
+     that need attention. These lines follow it. */
+  .events { display: grid; gap: 4px; margin: 0; }
+  /* A status event is short, so the name and the outcome share one line. A
+     matched line is log output of unknown length, so it never competes with the
+     name for width -- it gets its own full-width row underneath. That keeps the
+     narrowest posture from hyphenating a file path down a 20-character column. */
+  .event {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: baseline;
+    color: var(--calm-ink-dim);
+    font-size: var(--pi-text-sm);
+    line-height: 1.5;
+  }
+  .event .who { min-width: 0; overflow-wrap: anywhere; }
+  .event .what { min-width: 0; color: var(--calm-ink-muted); overflow-wrap: anywhere; }
+  /* Only the failure verb takes colour. A whole red line reads as shouting. */
+  .event .what .bad { color: var(--calm-danger); }
+  /* A matched line is log output, so it keeps monospace: that is what makes a
+     stack frame or a test path scannable. */
+  .event .what .line { font-family: ui-monospace, monospace; font-size: 12px; }
+  .event .meta { color: var(--pi-dim); }
+  .fold { color: var(--calm-ink-dim); font-size: var(--pi-text-sm); cursor: pointer; }
+  .fold::before { content: "▸ "; font-size: 11px; }
+  .fold.open::before { content: "▾ "; }
+  /* Inside the opened fold, the existing block idiom: a hairline rail, no fill,
+     no radius. Process events sit in the same column as tool steps because
+     that is what they are -- machinery the turn ran through. */
+  .fold-body { display: grid; gap: 12px; margin: 12px 0 0; }
+  .block { padding-left: 12px; border-left: 1px solid var(--calm-rule); }
+  .block-name { margin: 0; color: var(--calm-ink-dim); font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; }
+  .block-name.bad { color: var(--calm-danger); }
+  .block pre { margin: 4px 0 0; padding: 0; background: none; color: var(--calm-ink-muted); font: 12px/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .turn-meta { display: flex; align-items: baseline; gap: 10px; color: var(--calm-ink-dim); font-size: var(--pi-text-sm); }
+  .turn-meta .when { margin-left: auto; font-size: 11px; }
+
+  /* Variant B: the name is said once, then its run is indented under it. */
+  .run { display: grid; gap: 4px; }
+  .run-name { color: var(--calm-ink-dim); font-size: var(--pi-text-sm); }
+  .run-lines { display: grid; gap: 4px; padding-left: 12px; border-left: 1px solid var(--calm-rule); }
+  .run-lines .event { grid-template-columns: minmax(0, 1fr); }
+
+  .user-bubble {
+    width: fit-content;
+    max-width: min(100%, 30rem);
+    margin: 0 0 24px auto;
+    border: 1px solid var(--calm-rule);
+    border-radius: var(--pi-radius-surface);
+    background: var(--calm-canvas-soft);
+    padding: 12px 16px;
+    font-size: var(--pi-text-md);
+  }
+</style>
+</head>
+<body>
+<div class="chat">
+  <div class="column">
+
+    <!-- ============ CURRENT ============ -->
+    <section class="plate">
+      <p class="plate-name">Current</p>
+      <p class="plate-note">Six cards. The role label repeats above each one, the process name is said twice per card, the exit code three times, and the matched log line is not shown at all.</p>
+
+      <div class="user-bubble">Please continue as you were.</div>
+
+      <div class="msg-header"><b class="label">system</b></div>
+      <div class="process-notification error">
+        <div class="process-notification-header">
+          <span>✖</span><strong>chat-open-worker-production</strong>
+          <span class="summary">Process "chat-open-worker-production" failed with exit code 1 after 0s.</span>
+          <span class="exit-code">exit 1</span>
+        </div>
+        <details class="raw-disclosure"><summary>raw content</summary></details>
+      </div>
+
+      <div class="msg-header"><b class="label">system</b></div>
+      <div class="process-notification">
+        <div class="process-notification-header">
+          <span>ℹ</span><strong>performance-web-worker-8506</strong>
+          <span class="summary">Process "performance-web-worker-8506" matched log pattern "Server listening" on stdout.</span>
+        </div>
+        <details class="raw-disclosure"><summary>raw content</summary></details>
+      </div>
+
+      <div class="msg-header"><b class="label">system</b></div>
+      <div class="process-notification">
+        <div class="process-notification-header">
+          <span>ℹ</span><strong>chat-open-worker-production</strong>
+          <span class="summary">Process "chat-open-worker-production" matched log pattern "Diagnostic warnings:" on stdout.</span>
+        </div>
+        <details class="raw-disclosure"><summary>raw content</summary></details>
+      </div>
+
+      <div class="msg-header"><b class="label">system</b></div>
+      <div class="process-notification">
+        <div class="process-notification-header">
+          <span>ℹ</span><strong>chat-open-worker-production</strong>
+          <span class="summary">Process "chat-open-worker-production" matched log pattern "FAIL" on stderr.</span>
+        </div>
+        <details class="raw-disclosure"><summary>raw content</summary></details>
+      </div>
+
+      <div class="msg-header"><b class="label">system</b></div>
+      <div class="process-notification error">
+        <div class="process-notification-header">
+          <span>✖</span><strong>chat-open-worker-production</strong>
+          <span class="summary">Process "chat-open-worker-production" failed with exit code 1 after 95s.</span>
+          <span class="exit-code">exit 1</span>
+        </div>
+        <details class="raw-disclosure"><summary>raw content</summary></details>
+      </div>
+
+      <div class="msg-header"><b class="label">skill</b></div>
+      <div class="skill-read">
+        <strong>Loaded se-simplify-code</strong>
+        <small>read /home/simonwjackson/code/github/simonwjackson/pi-software-engineering/skills/se-simplify-code/SKILL.md</small>
+      </div>
+    </section>
+
+    <!-- ============ A ============ -->
+    <section class="plate">
+      <p class="plate-name">A · One line each</p>
+      <p class="plate-note">No cards, no role labels. Process name, then what happened — said once. A log match shows the matched line itself instead of a sentence announcing that a match occurred. Colour only on the failure verb. Every event still names its process.</p>
+
+      <div class="user-bubble">Please continue as you were.</div>
+
+      <div class="events">
+        <div class="event"><span class="who">chat-open-worker-production</span><span class="what"><span class="bad">failed</span> · exit 1 · 0s</span></div>
+        <div class="run">
+          <div class="run-name">performance-web-worker-8506</div>
+          <div class="run-lines"><div class="event"><span class="what"><span class="line">Server listening on http://127.0.0.1:8506</span></span></div></div>
+        </div>
+        <div class="run">
+          <div class="run-name">chat-open-worker-production</div>
+          <div class="run-lines"><div class="event"><span class="what"><span class="line">Diagnostic warnings:</span></span></div></div>
+        </div>
+        <div class="run">
+          <div class="run-name">chat-open-worker-production</div>
+          <div class="run-lines"><div class="event"><span class="what"><span class="line">FAIL src/client/src/chatScrollCoordinator.test.ts</span></span></div></div>
+        </div>
+        <div class="event"><span class="who">chat-open-worker-production</span><span class="what"><span class="bad">failed</span> · exit 1 · 95s</span></div>
+        <div class="event"><span class="who">skill</span><span class="what">se-simplify-code</span></div>
+      </div>
+    </section>
+
+    <!-- ============ B ============ -->
+    <section class="plate">
+      <p class="plate-name">B · Runs group under the process</p>
+      <p class="plate-note">A run of adjacent events from one process states the name once. Only adjacent events group, so the transcript never reorders what happened.</p>
+
+      <div class="user-bubble">Please continue as you were.</div>
+
+      <div class="events">
+        <div class="event"><span class="who">chat-open-worker-production</span><span class="what"><span class="bad">failed</span> · exit 1 · 0s</span></div>
+        <div class="run">
+          <div class="run-name">performance-web-worker-8506</div>
+          <div class="run-lines"><div class="event"><span class="what"><span class="line">Server listening on http://127.0.0.1:8506</span></span></div></div>
+        </div>
+        <div class="run">
+          <div class="run-name">chat-open-worker-production</div>
+          <div class="run-lines">
+            <div class="event"><span class="what"><span class="line">Diagnostic warnings:</span></span></div>
+            <div class="event"><span class="what"><span class="line">FAIL src/client/src/chatScrollCoordinator.test.ts</span></span></div>
+            <div class="event"><span class="what"><span class="bad">failed</span> · exit 1 · 95s</span></div>
+          </div>
+        </div>
+        <div class="event"><span class="who">skill</span><span class="what">se-simplify-code</span></div>
+      </div>
+    </section>
+
+    <!-- ============ C ============ -->
+    <section class="plate">
+      <p class="plate-name">C · Failures speak, matches fold</p>
+      <p class="plate-note">Failures stay on the page. Runs of log matches collapse into the fold idiom the transcript already uses for tool steps. Quietest, but it hides the matched lines behind a click.</p>
+
+      <div class="user-bubble">Please continue as you were.</div>
+
+      <div class="events">
+        <div class="event"><span class="who">chat-open-worker-production</span><span class="what"><span class="bad">failed</span> · exit 1 · 0s</span></div>
+        <div class="fold">3 log matches</div>
+        <div class="event"><span class="who">chat-open-worker-production</span><span class="what"><span class="bad">failed</span> · exit 1 · 95s</span></div>
+        <div class="fold">skill · se-simplify-code</div>
+      </div>
+    </section>
+
+    <!-- ============ D ============ -->
+    <section class="plate">
+      <p class="plate-name">D · Fold into the turn's steps</p>
+      <p class="plate-note">No separate vocabulary at all. Process events and skill loads stop being standalone messages and pool into the fold that already closes every turn — they were always machinery the turn ran through. One line for the whole run. This is a one-line classification change at chatGroups.ts:199.</p>
+
+      <div class="user-bubble">Please continue as you were.</div>
+
+      <div class="turn-meta">
+        <span class="fold">9 steps</span>
+        <span class="when">10:02 AM · Claude Opus 5</span>
+      </div>
+    </section>
+
+    <!-- ============ D-open ============ -->
+    <section class="plate">
+      <p class="plate-name">D · opened</p>
+      <p class="plate-note">The same fold, opened. Process events read as blocks beside the tool steps, in the transcript's existing hairline idiom.</p>
+
+      <div class="turn-meta">
+        <span class="fold open">9 steps</span>
+        <span class="when">10:02 AM · Claude Opus 5</span>
+      </div>
+      <div class="fold-body">
+        <div class="block">
+          <p class="block-name">bash</p>
+          <pre>npm run verify</pre>
+        </div>
+        <div class="block">
+          <p class="block-name bad">chat-open-worker-production · failed</p>
+          <pre>exit 1 · 0s</pre>
+        </div>
+        <div class="block">
+          <p class="block-name">performance-web-worker-8506</p>
+          <pre>Server listening on http://127.0.0.1:8506</pre>
+        </div>
+        <div class="block">
+          <p class="block-name">chat-open-worker-production</p>
+          <pre>Diagnostic warnings:
+FAIL src/client/src/chatScrollCoordinator.test.ts</pre>
+        </div>
+        <div class="block">
+          <p class="block-name bad">chat-open-worker-production · failed</p>
+          <pre>exit 1 · 95s</pre>
+        </div>
+        <div class="block">
+          <p class="block-name">skill</p>
+          <pre>se-simplify-code</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ E ============ -->
+    <section class="plate">
+      <p class="plate-name">E · Fold, except failures</p>
+      <p class="plate-note">D, but a process that failed does not get to hide. Informational events fold into the step count; failures stay on the page as one dim line with a coloured verb.</p>
+
+      <div class="user-bubble">Please continue as you were.</div>
+
+      <div class="events">
+        <div class="event"><span class="who">chat-open-worker-production</span><span class="what"><span class="bad">failed</span> · exit 1 · 0s</span></div>
+        <div class="event"><span class="who">chat-open-worker-production</span><span class="what"><span class="bad">failed</span> · exit 1 · 95s</span></div>
+      </div>
+      <div class="turn-meta" style="margin-top:10px">
+        <span class="fold">7 steps</span>
+        <span class="when">10:02 AM · Claude Opus 5</span>
+      </div>
+    </section>
+
+  </div>
+</div>
+</body>
+</html>
