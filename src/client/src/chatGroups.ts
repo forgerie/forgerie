@@ -107,6 +107,28 @@ export interface ChatTurn {
   readonly openedByIndex?: number;
 }
 
+export interface ChatTurnGalleryImage {
+  readonly messageIndex: number;
+  readonly partIndex: number;
+  readonly part: Extract<ChatPart, { type: "image" }>;
+  readonly toolName?: string;
+}
+
+/** Tool-produced images that belong to one turn, in transcript order. */
+export function chatTurnGalleryImages(turn: ChatTurn): ChatTurnGalleryImage[] {
+  return turn.groups.flatMap((group) => {
+    if (group.kind !== "tool-image") return [];
+    return group.message.parts.flatMap((part, partIndex) => part.type === "image"
+      ? [{ messageIndex: group.index, partIndex, part, ...(group.toolName === undefined ? {} : { toolName: group.toolName }) }]
+      : []);
+  });
+}
+
+/** Removes standalone tool-image groups after their images move into the turn gallery. */
+export function withoutToolImageGroups(groups: readonly ChatGroup[]): ChatGroup[] {
+  return groups.filter((group) => group.kind !== "tool-image");
+}
+
 /** Partitions rendered groups into turns, each opened by a human message. */
 export function chatTurns(groups: ChatGroup[]): ChatTurn[] {
   const turns: ChatTurn[] = [];

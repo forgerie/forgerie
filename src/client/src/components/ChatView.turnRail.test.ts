@@ -11,6 +11,13 @@ afterEach(() => {
 
 const said = (role: ChatLine["role"], text: string): ChatLine => ({ role, parts: [{ type: "text", text }] });
 const call = (summary: string): ChatLine => ({ role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary }] });
+const toolImage = (data: string, toolName = "read"): ChatLine => ({
+  role: "tool",
+  parts: [
+    { type: "toolResult", toolName, text: `${toolName} image`, isError: false },
+    { type: "image", mimeType: "image/png", data },
+  ],
+});
 
 function compactingStatus(): SessionStatus {
   return {
@@ -104,6 +111,58 @@ describe("ChatView process rail", () => {
     const user = shadow(view).querySelector(".msg.user");
     expect(user).not.toBeNull();
     expect(user?.closest(".turn-rail")).toBeNull();
+  });
+
+  it("collects tool images into one gallery directly under the promoted answer", async () => {
+    const view = await loadedTranscript([
+      said("user", "question"),
+      toolImage("FIRST"),
+      said("assistant", "the answer"),
+      toolImage("SECOND", "capture"),
+    ]);
+
+    const root = shadow(view);
+    const gallery = root.querySelector<HTMLElement>(".turn-image-gallery");
+    const answer = assistantProse(view).promoted[0];
+    if (gallery === null || answer === undefined) throw new Error("expected a promoted answer and image gallery");
+
+    expect(gallery.closest(".turn-rail")).toBeNull();
+    expect(root.querySelectorAll(".turn-image-gallery-thumb")).toHaveLength(2);
+    expect(root.querySelectorAll(".tool-image-output")).toHaveLength(0);
+    expect(answer.compareDocumentPosition(gallery) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(gallery.getAttribute("aria-label")).toBe("2 images from this turn");
+  });
+
+  it("keeps the gallery under the settled answer while later prose streams", async () => {
+    const view = await loadedTranscript([
+      said("user", "question"),
+      toolImage("FIRST"),
+      said("assistant", "settled answer"),
+      call("later work"),
+      said("assistant", "new prose streaming"),
+    ], true);
+
+    const root = shadow(view);
+    const gallery = root.querySelector<HTMLElement>(".turn-image-gallery");
+    const prose = assistantProse(view);
+    const answer = prose.promoted[0];
+    const streaming = prose.onRail[0];
+    if (gallery === null || answer === undefined || streaming === undefined) throw new Error("expected answer, gallery, and streaming continuation");
+
+    expect(proseText(answer)).toBe("settled answer");
+    expect(proseText(streaming)).toBe("new prose streaming");
+    expect(answer.compareDocumentPosition(gallery) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(gallery.compareDocumentPosition(streaming) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it("keeps a user attachment inline instead of moving it into the gallery", async () => {
+    const view = await loadedTranscript([
+      { role: "user", parts: [{ type: "image", mimeType: "image/png", data: "USER" }] },
+      said("assistant", "the answer"),
+    ]);
+
+    expect(shadow(view).querySelector(".msg.user .chat-image")).not.toBeNull();
+    expect(shadow(view).querySelector(".turn-image-gallery")).toBeNull();
   });
 
   it("closes the rail with the turn's meta instead of stamping the fold", async () => {

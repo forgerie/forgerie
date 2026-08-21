@@ -2,7 +2,7 @@ import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
-import { chatTurnFlow, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, type ChatGroup, type ChatTurn } from "../chatGroups";
+import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
 import { livenessPhase, livenessStep, replyIsStreaming, type LivenessPhase } from "../chatLiveness";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
@@ -24,8 +24,9 @@ import { chatStyles, renderSessionWarningIcon } from "./shared";
 import "./AskUserCard";
 import "./ExtensionDialogCard";
 import type { ExtensionDialogAnswerCallback, ExtensionDialogCancelCallback, ExtensionDialogDismissCallback } from "./ExtensionDialogCard";
-import { registerRenderedModal, type RenderedModalRegistration } from "./modalLayerRegistry";
 import "./FormattedText";
+import "./ImageLightbox";
+import type { ImageLightbox, ImageLightboxItem } from "./ImageLightbox";
 import "./ToolExecutionView";
 
 const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
@@ -285,7 +286,7 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) onSelectedLoadPaint?: (load: SelectedChatLoad) => void;
   @query(".chat") private chat?: HTMLDivElement;
   @query(".chat-load-retry") private retryButton?: HTMLButtonElement;
-  @query("dialog.image-zoom") private imageZoomDialog?: HTMLDialogElement;
+  @query("image-lightbox") private imageLightbox?: ImageLightbox;
   /**
    * The turn whose reserved space is still standing.
    *
@@ -294,12 +295,10 @@ export class ChatView extends LitElement {
    * screen; the space is only reclaimed when the next turn opens and takes it.
    */
   @state() private reservedTurnKey: string | undefined;
-  @state() private zoomedImage: { src: string; alt: string } | undefined = undefined;
   @state() private expandedMetaKey: string | undefined;
   /** ISO time the current stretch of work began; undefined while idle. */
   @state() private activeSince: string | undefined;
   private activePhase: LivenessPhase | undefined;
-  private imageZoomModalRegistration: RenderedModalRegistration | undefined;
   private readonly disclosures = new ChatDisclosureController();
   private readonly scrolling = new ChatScrollCoordinator();
   private loadMoreCheckFrame: number | undefined;
@@ -334,14 +333,8 @@ export class ChatView extends LitElement {
   private readonly onImageLoad = (): void => {
     this.scheduleCurrentFollowTarget();
   };
-  private readonly openImageZoom = (src: string, alt: string): void => {
-    this.zoomedImage = { src, alt };
-  };
-  private readonly closeImageZoom = (): void => {
-    if (this.zoomedImage !== undefined) this.zoomedImage = undefined;
-  };
-  private readonly onImageZoomDialogClick = (event: MouseEvent): void => {
-    if (event.target === this.imageZoomDialog) this.closeImageZoom();
+  private readonly openImageZoom = (images: readonly ImageLightboxItem[], index = 0): void => {
+    this.imageLightbox?.open(images, index);
   };
   private readonly handleClearServerQueue = (): void => {
     this.onClearServerQueue?.();
@@ -363,7 +356,6 @@ export class ChatView extends LitElement {
 
   override disconnectedCallback(): void {
     this.scrolling.dispose();
-    this.releaseImageZoomModal();
     if (this.loadMoreCheckFrame !== undefined) cancelAnimationFrame(this.loadMoreCheckFrame);
     this.cancelSelectedLoadPaintReport();
     window.removeEventListener("resize", this.onViewportResize);
@@ -476,7 +468,6 @@ export class ChatView extends LitElement {
       this.scheduleCurrentFollowTarget();
     }
     if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
-    if (changed.has("zoomedImage")) this.syncImageZoomDialog();
     if (changed.has("selectedMachineId") || changed.has("sessionCwd")) {
       this.cancelSelectedLoadPaintReport();
       if (!changed.has("selectedLoad")) this.scheduleSelectedLoadPaintReport();
@@ -523,41 +514,6 @@ export class ChatView extends LitElement {
     }
   }
 
-  private syncImageZoomDialog(): void {
-    const dialog = this.imageZoomDialog;
-    if (dialog === undefined) return;
-    if (this.zoomedImage !== undefined) {
-      if (this.imageZoomModalRegistration === undefined) {
-        const registration = registerRenderedModal({
-          element: dialog,
-          nativeTopLayer: true,
-          focus: () => {
-            const close = this.renderRoot.querySelector<HTMLElement>(".image-zoom-close");
-            (close ?? dialog).focus();
-          },
-        });
-        this.imageZoomModalRegistration = registration;
-        try {
-          if (!dialog.open) dialog.showModal();
-        } catch (error) {
-          this.imageZoomModalRegistration = undefined;
-          registration.unregister();
-          throw error;
-        }
-      }
-      this.imageZoomModalRegistration.focus();
-      return;
-    }
-    if (dialog.open) dialog.close();
-    this.releaseImageZoomModal();
-  }
-
-  private releaseImageZoomModal(): void {
-    const registration = this.imageZoomModalRegistration;
-    this.imageZoomModalRegistration = undefined;
-    registration?.unregister();
-  }
-
   override render() {
     const groups = this.groupedMessages();
     const liveTailGroup = this.isSessionLive() ? groups[groups.length - 1] : undefined;
@@ -574,7 +530,7 @@ export class ChatView extends LitElement {
           ${turns.length === 0 ? this.renderRunningTurnTail() : null}
         </div>
       </div>
-      ${this.renderImageZoom()}
+      <image-lightbox></image-lightbox>
     `;
   }
 
@@ -737,17 +693,6 @@ export class ChatView extends LitElement {
     `;
   }
 
-  private renderImageZoom() {
-    return html`
-      <dialog class="image-zoom" @click=${this.onImageZoomDialogClick} @close=${this.closeImageZoom} @cancel=${this.closeImageZoom}>
-        ${this.zoomedImage === undefined ? null : html`
-          <button type="button" class="image-zoom-close" aria-label="Close image" @click=${this.closeImageZoom}>×</button>
-          <img class="image-zoom-full" src=${this.zoomedImage.src} alt=${this.zoomedImage.alt} />
-        `}
-      </dialog>
-    `;
-  }
-
   private groupedMessages(): ChatGroup[] {
     if (this.groupedMessagesInput === this.messages && this.groupedMessagesStart === this.messageStart) return this.groupedMessagesCache;
     this.groupedMessagesInput = this.messages;
@@ -772,18 +717,71 @@ export class ChatView extends LitElement {
     const turnClosed = !(last && this.isSessionLive());
     const replySettled = !(last && this.latestReplyIsStreaming());
     const flow = chatTurnFlow(turn, replySettled);
-    const continuationClosesTurn = turnClosed && flow.continuation.length > 0;
+    const work = withoutToolImageGroups(flow.work);
+    const continuation = withoutToolImageGroups(flow.continuation);
+    const galleryImages = chatTurnGalleryImages(turn);
+    const continuationClosesTurn = turnClosed && continuation.length > 0;
     return html`
       <section class="turn" data-turn-key=${key}>
         <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
           ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup)}
-          ${this.renderTurnRail(flow.work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined)}
+          ${this.renderTurnRail(work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined)}
           ${flow.answer === undefined ? null : this.renderGroup(flow.answer, flow.answer === liveTailGroup)}
-          ${this.renderTurnRail(flow.continuation, liveTailGroup, continuationClosesTurn ? { turn, key } : undefined)}
+          ${this.renderTurnImageGallery(galleryImages)}
+          ${this.renderTurnRail(continuation, liveTailGroup, continuationClosesTurn ? { turn, key } : undefined)}
           ${last ? this.renderRunningTurnTail() : null}
         </div>
       </section>
     `;
+  }
+
+  private renderTurnImageGallery(images: readonly ChatTurnGalleryImage[]) {
+    if (images.length === 0) return null;
+    const zoomImages = images.map((image, index) => this.turnGalleryZoomImage(image, index, images.length));
+    const hasOverflow = images.length > 5;
+    const visible = hasOverflow ? images.slice(0, 4) : images;
+    const overflow = hasOverflow ? images.length - visible.length : 0;
+    const label = `${String(images.length)} ${images.length === 1 ? "image" : "images"} from this turn`;
+    const uniqueMessageIndexes = [...new Set(images.map((image) => image.messageIndex))];
+    return html`
+      ${uniqueMessageIndexes.map((index) => this.renderScrollMarker(this.messageScrollMarkerId(index)))}
+      <section class="turn-image-gallery" aria-label=${label}>
+        <div class="turn-image-gallery-head">
+          <strong>${String(images.length)} ${images.length === 1 ? "image" : "images"}</strong>
+          <span>from this turn</span>
+        </div>
+        <div class="turn-image-gallery-strip">
+          ${repeat(visible, (image) => `${String(image.messageIndex)}:${String(image.partIndex)}`, (image, index) => this.renderTurnGalleryThumbnail(image, index, zoomImages))}
+          ${overflow === 0 ? null : html`
+            <button
+              type="button"
+              class="turn-image-gallery-more"
+              aria-label=${`Open ${String(overflow)} more images from this turn`}
+              @click=${() => { this.openImageZoom(zoomImages, visible.length); }}
+            >+${String(overflow)}</button>
+          `}
+        </div>
+      </section>
+    `;
+  }
+
+  private renderTurnGalleryThumbnail(image: ChatTurnGalleryImage, index: number, zoomImages: readonly ImageLightboxItem[]) {
+    const zoomImage = zoomImages[index];
+    if (zoomImage === undefined) return null;
+    return html`
+      <button
+        type="button"
+        class="turn-image-gallery-thumb"
+        data-index=${image.messageIndex}
+        aria-label=${`Open ${zoomImage.alt}`}
+        @click=${() => { this.openImageZoom(zoomImages, index); }}
+      ><img src=${zoomImage.src} alt="" loading="lazy" /></button>
+    `;
+  }
+
+  private turnGalleryZoomImage(image: ChatTurnGalleryImage, index: number, total: number): ImageLightboxItem {
+    const { src } = chatImagePartSource(image.part);
+    return { src, alt: `${chatToolOutputLabel(image.toolName)}, image ${String(index + 1)} of ${String(total)}` };
   }
 
   private renderTurnRail(
@@ -1254,7 +1252,7 @@ export class ChatView extends LitElement {
     }
     if (part.type === "image") {
       const { src, alt } = chatImagePartSource(part);
-      return html`<img class="part chat-image" src=${src} alt=${alt} loading="lazy" role="button" tabindex="0" title="Click to enlarge" @load=${this.onImageLoad} @click=${() => { this.openImageZoom(src, alt); }} @keydown=${(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.openImageZoom(src, alt); } }} />`;
+      return html`<img class="part chat-image" src=${src} alt=${alt} loading="lazy" role="button" tabindex="0" title="Open full-screen image" @load=${this.onImageLoad} @click=${() => { this.openImageZoom([{ src, alt }]); }} @keydown=${(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.openImageZoom([{ src, alt }]); } }} />`;
     }
     if (part.type === "toolCall") return html`<div class="part tool-line">▶ ${part.toolName}<span class="summary">${part.summary}</span></div>`;
     if (part.type === "toolExecution") return html`<tool-execution-view class="part" .execution=${part}></tool-execution-view>`;

@@ -33,11 +33,9 @@ describe("ChatView image content derivation", () => {
 });
 
 describe("ChatView image event wiring", () => {
-  // Escape hatch: these two cases verify Lit event wiring (`@load` re-pin and
-  // `@click` zoom) whose only observable effect is a private state/scroll side
-  // effect. Vitest runs with no DOM environment here, so a shadow-DOM click
-  // harness would add disproportionate setup; direct handler extraction anchored
-  // to the stable `@load=`/`@click=` attribute markup is proportionate.
+  // Escape hatch: this case verifies the image `@load` re-pin wiring, whose
+  // only observable effect is a private scroll side effect. The full-screen
+  // click path is covered through real shadow DOM in ChatView.imageModal.test.
   it("delegates late image loads to the unified follow target", () => {
     const view = new ChatView();
     let placements = 0;
@@ -49,27 +47,7 @@ describe("ChatView image event wiring", () => {
 
     expect(placements).toBe(1);
   });
-
-  it("opens and closes the image zoom target on click and close", () => {
-    const view = new ChatView();
-    const part = { type: "image", mimeType: "image/png", data: "QUJD" } as const;
-    const rendered = renderPart(view, part);
-    const onClick = templateEventHandlerAfterMarker(rendered, "@click=");
-
-    expect(zoomedImage(view)).toBeUndefined();
-    onClick(new Event("click"));
-    expect(zoomedImage(view)).toEqual(chatImagePartSource(part));
-
-    const close: unknown = Reflect.get(view, "closeImageZoom");
-    if (typeof close !== "function") throw new Error("ChatView.closeImageZoom is not callable");
-    close.call(view);
-    expect(zoomedImage(view)).toBeUndefined();
-  });
 });
-
-function zoomedImage(view: ChatView): unknown {
-  return Reflect.get(view, "zoomedImage");
-}
 
 type RenderPart = (this: ChatView, part: ChatLine["parts"][number], message?: ChatLine) => TemplateResult;
 

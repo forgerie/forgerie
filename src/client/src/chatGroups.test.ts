@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatTurnFlow, chatTurns, groupChatMessages, latestChatTurnStart, summarizeChatGroup, turnMetaSource } from "./chatGroups";
+import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, latestChatTurnStart, summarizeChatGroup, turnMetaSource, withoutToolImageGroups } from "./chatGroups";
 import type { ChatLine } from "./components/shared";
 
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
@@ -245,6 +245,37 @@ describe("chatTurns", () => {
 
   it("returns no turns for an empty transcript", () => {
     expect(chatTurns([])).toEqual([]);
+  });
+});
+
+describe("turn image galleries", () => {
+  it("collects tool images in turn order and removes their standalone groups", () => {
+    const first = { type: "image" as const, mimeType: "image/png", data: "FIRST" };
+    const second = { type: "image" as const, mimeType: "image/webp", data: "SECOND" };
+    const groups = groupChatMessages([
+      text("user", "question"),
+      { role: "tool", parts: [{ type: "toolResult", toolName: "read", text: "first", isError: false }, first, second] },
+      text("assistant", "answer"),
+    ]);
+    const turn = chatTurns(groups)[0];
+    if (turn === undefined) throw new Error("expected a turn");
+
+    expect(chatTurnGalleryImages(turn)).toEqual([
+      { messageIndex: 1, partIndex: 0, part: first, toolName: "read" },
+      { messageIndex: 1, partIndex: 1, part: second, toolName: "read" },
+    ]);
+    expect(withoutToolImageGroups(turn.groups).some((group) => group.kind === "tool-image")).toBe(false);
+  });
+
+  it("does not collect a user attachment into the turn gallery", () => {
+    const attachment = { type: "image" as const, mimeType: "image/png", data: "USER" };
+    const turn = chatTurns(groupChatMessages([
+      { role: "user", parts: [attachment] },
+      text("assistant", "answer"),
+    ]))[0];
+    if (turn === undefined) throw new Error("expected a turn");
+
+    expect(chatTurnGalleryImages(turn)).toEqual([]);
   });
 });
 

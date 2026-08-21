@@ -9,6 +9,7 @@ import { SessionController } from "../controllers/sessionController";
 import { selectedChatLiveReady, selectedChatTarget } from "../selectedChatLoad";
 import { AuthDialog } from "./AuthDialog";
 import { ChatView } from "./ChatView";
+import type { ImageLightbox } from "./ImageLightbox";
 import { ModalSurface } from "./ModalSurface";
 import { PiWebApp } from "./PiWebApp";
 import type { PromptEditor } from "./PromptEditor";
@@ -316,10 +317,11 @@ async function openImageZoom(app: PiWebApp): Promise<HTMLElement> {
   const image = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat-image"), "chat image");
   image.focus();
   image.click();
-  await view.updateComplete;
-  const dialog = requiredElement(view.shadowRoot?.querySelector<HTMLDialogElement>("dialog.image-zoom"), "image zoom dialog");
+  const lightbox = requiredElement(view.shadowRoot?.querySelector<ImageLightbox>("image-lightbox"), "image lightbox");
+  await lightbox.updateComplete;
+  const dialog = requiredElement(lightbox.shadowRoot?.querySelector<HTMLDialogElement>("dialog"), "image zoom dialog");
   expect(dialog.open).toBe(true);
-  return requiredElement(dialog.querySelector<HTMLElement>(".image-zoom-close"), "image zoom close button");
+  return requiredElement(dialog.querySelector<HTMLElement>(".close"), "image zoom close button");
 }
 
 async function openUploadReview(app: PiWebApp): Promise<HTMLElement> {

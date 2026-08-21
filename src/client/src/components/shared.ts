@@ -741,15 +741,22 @@ export const chatStyles = css`
   .rail-meta .msg-meta:not(.expanded) { display: inline; width: auto; max-width: none; height: auto; font-size: var(--pi-text-xs); text-overflow: ellipsis; }
   .rail-meta .msg-meta::before { content: none; }
   .group-body { display: grid; gap: 18px; margin-top: 14px; padding: 0; }
+  /* Tool images are one visual output of the turn, not a run of full-height
+     tool messages. The gallery sits at answer weight outside the process rail,
+     but keeps the transcript's quiet rules and palette instead of introducing
+     a new card language. */
+  .turn-image-gallery { min-width: 0; display: grid; gap: 7px; margin: 0 0 var(--calm-para-gap); padding: 8px 0 10px; border-block: 1px solid var(--calm-rule); }
+  .turn-image-gallery-head { display: flex; align-items: baseline; gap: 7px; color: var(--calm-ink-dim); font-size: var(--pi-text-xs); }
+  .turn-image-gallery-head strong { color: var(--calm-ink-muted); font-weight: 500; }
+  .turn-image-gallery-strip { min-width: 0; display: flex; gap: clamp(5px, 1.4cqi, 8px); }
+  .turn-image-gallery-thumb, .turn-image-gallery-more { min-width: 0; height: clamp(56px, 12cqi, 72px); flex: 1 1 0; box-sizing: border-box; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); background: var(--calm-canvas-soft); color: var(--calm-ink-muted); padding: 0; overflow: hidden; cursor: zoom-in; }
+  .turn-image-gallery-thumb:hover, .turn-image-gallery-thumb:focus-visible, .turn-image-gallery-more:hover, .turn-image-gallery-more:focus-visible { border-color: var(--pi-accent); color: var(--pi-text-bright); background: var(--pi-surface-hover); }
+  .turn-image-gallery-thumb:focus-visible, .turn-image-gallery-more:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
+  .turn-image-gallery-thumb { flex: 0 1 clamp(72px, 20cqi, 112px); }
+  .turn-image-gallery-thumb img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  .turn-image-gallery-more { flex: 0 0 clamp(48px, 12cqi, 64px); font: 500 var(--pi-text-sm) system-ui, sans-serif; cursor: pointer; }
   .chat-image { display: block; max-width: 100%; max-height: 320px; margin: 8px 0 0; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); object-fit: contain; cursor: zoom-in; }
   .chat-image:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
-  dialog.image-zoom { position: fixed; inset: 0; margin: auto; max-width: calc(96vw - env(safe-area-inset-left) - env(safe-area-inset-right)); max-height: calc(96vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)); width: fit-content; height: fit-content; padding: 0; border: none; background: transparent; overflow: visible; }
-  dialog.image-zoom[open] { display: flex; }
-  dialog.image-zoom::backdrop { background: rgba(0, 0, 0, 0.8); }
-  .image-zoom-full { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: var(--pi-radius-control); object-fit: contain; cursor: zoom-out; }
-  .image-zoom-close { position: absolute; top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; font: 16px/1 system-ui, sans-serif; color: var(--pi-muted); background: color-mix(in srgb, var(--pi-surface) 88%, transparent); border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); cursor: pointer; }
-  .image-zoom-close:hover, .image-zoom-close:focus-visible { color: var(--pi-text-bright); border-color: var(--pi-accent); }
-  .image-zoom-close:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .group-msg { max-width: 100%; min-width: 0; box-sizing: border-box; padding: 0 0 0 12px; border-top: 0; border-left: 1px solid var(--calm-rule); color: var(--calm-ink-dim); overflow: visible; }
   .group-msg.tool, .group-msg.tool-execution-shell, .group-msg.bash { color: var(--calm-ink-dim); }
   .group-msg.system { color: var(--calm-ink-muted); }
