@@ -99,7 +99,7 @@ interface BulkSessionMutationResult {
   generatedAt?: string;
 }
 
-type ClientPendingStartSessionInfo = SessionInfo & { clientPendingStart: true; machineId: string };
+export type ClientPendingStartSessionInfo = SessionInfo & { clientPendingStart: true; machineId: string };
 
 type QueuedPendingSessionSendInput =
   | { type: "prompt"; text: string; streamingBehavior?: "steer" | "followUp" | undefined; attachments?: PromptAttachment[] | undefined; delivery: PromptAttachmentDelivery; purpose?: "initialPrompt" }
@@ -130,6 +130,15 @@ export interface SessionLaunchDestination {
   readonly cwd: string;
 }
 
+export type SessionLaunchCompletion =
+  | { readonly kind: "started" }
+  | { readonly kind: "failed"; readonly message: string };
+
+export interface SessionLaunchHandoff {
+  readonly pendingSessionId: string;
+  readonly completion: Promise<SessionLaunchCompletion>;
+}
+
 export interface SessionLaunchAttachmentMetadata {
   readonly name?: string | undefined;
   readonly mimeType: string;
@@ -145,6 +154,8 @@ export interface SessionLaunchRecovery {
   readonly attachments?: readonly SessionLaunchAttachmentMetadata[] | undefined;
   readonly delivery?: PromptAttachmentDelivery | undefined;
 }
+
+type SessionLaunchSelection = "select" | "preserve";
 
 interface PendingSessionStart {
   tempId: string;
@@ -303,8 +314,8 @@ export class SessionController {
   async startSession() {
     const workspace = this.getState().selectedWorkspace;
     if (!workspace) return;
-    const machineId = selectedMachineId(this.getState());
-    const pending = this.createPendingSessionStart(workspace, machineId);
+    const destination = sessionLaunchDestinationForWorkspace(workspace, selectedMachineId(this.getState()));
+    const pending = this.createPendingSessionStart(destination);
     this.pendingSessionStarts.set(pending.tempId, pending);
     this.insertAndSelectPendingSession(pending.session);
     await this.startPendingSession(pending);
@@ -312,21 +323,46 @@ export class SessionController {
 
   async launchSession(submission: FirstPromptSubmission, agentChoices?: NewSessionAgentChoices): Promise<void> {
     const workspace = this.getState().selectedWorkspace;
-    if (workspace === undefined || firstPromptSubmissionIsEmpty(submission)) return;
+    if (workspace === undefined) return;
+    const handoff = this.beginSessionLaunch(
+      sessionLaunchDestinationForWorkspace(workspace, selectedMachineId(this.getState())),
+      submission,
+      agentChoices,
+      "select",
+    );
+    await handoff?.completion;
+  }
+
+  launchSessionPreservingSelection(
+    destination: SessionLaunchDestination,
+    submission: FirstPromptSubmission,
+    agentChoices?: NewSessionAgentChoices,
+  ): SessionLaunchHandoff | undefined {
+    if (!this.isCurrentSessionLaunchDestination(destination)) return undefined;
+    return this.beginSessionLaunch(destination, submission, agentChoices, "preserve");
+  }
+
+  private beginSessionLaunch(
+    destination: SessionLaunchDestination,
+    submission: FirstPromptSubmission,
+    agentChoices: NewSessionAgentChoices | undefined,
+    selection: SessionLaunchSelection,
+  ): SessionLaunchHandoff | undefined {
+    if (!sessionLaunchDestinationIsValid(destination) || firstPromptSubmissionIsEmpty(submission)) return undefined;
     const promptResourceIdentity = submission.promptResourceCommandIdentity;
-    if (submission.text.startsWith("/") && promptResourceIdentity === undefined) return;
+    if (submission.text.startsWith("/") && promptResourceIdentity === undefined) return undefined;
     const attachments = submission.attachments?.map((attachment) => ({ ...attachment }));
-    const machineId = selectedMachineId(this.getState());
-    const pending = this.createPendingSessionStart(workspace, machineId);
+    const pending = this.createPendingSessionStart(destination);
     if (agentChoices !== undefined) pending.agentChoices = agentChoices;
     this.pendingSessionStarts.set(pending.tempId, pending);
-    this.insertAndSelectPendingSession(pending.session);
+    if (selection === "select") this.insertAndSelectPendingSession(pending.session);
+    else this.insertPendingSessionPreservingSelection(pending);
     if (promptResourceIdentity === undefined) {
       this.enqueuePendingSessionSend(pending.session, { type: "prompt", text: submission.text, attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
     } else {
       this.enqueuePendingSessionSend(pending.session, { type: "promptResource", text: submission.text, identity: promptResourceIdentity, attachments, delivery: submission.delivery ?? "inline", purpose: "initialPrompt" });
     }
-    await this.startPendingSession(pending);
+    return { pendingSessionId: pending.tempId, completion: this.startPendingSession(pending) };
   }
 
   getSessionLaunchRecovery(sessionId: string): SessionLaunchRecovery | undefined {
@@ -543,12 +579,14 @@ export class SessionController {
     });
   }
 
-  private async startPendingSession(pending: PendingSessionStart): Promise<void> {
+  private async startPendingSession(pending: PendingSessionStart): Promise<SessionLaunchCompletion> {
     try {
       const session = await this.api.startSession(pending.cwd, pending.machineId, pending.tempId, pending.agentChoices);
       await this.resolvePendingSessionStart(pending.tempId, session);
+      return { kind: "started" };
     } catch (error) {
-      await this.failPendingSessionStart(pending.tempId, error);
+      const recovered = await this.failPendingSessionStart(pending.tempId, error);
+      return recovered ? { kind: "started" } : { kind: "failed", message: errorMessage(error) };
     }
   }
 
@@ -894,7 +932,7 @@ export class SessionController {
       clientQueuedSessionMessages: { ...state.clientQueuedSessionMessages, [session.id]: [...current, queuedSessionMessagePreview(queued)] },
       sessionActivities: { ...state.sessionActivities, [session.id]: activity },
       activity: state.selectedSession?.id === session.id ? activity : state.activity,
-      error: "",
+      ...(state.selectedSession?.id === session.id ? { error: "" } : {}),
     });
   }
 
@@ -1995,13 +2033,14 @@ export class SessionController {
     });
   }
 
-  private createPendingSessionStart(workspace: Workspace, machineId: string): PendingSessionStart {
+  private createPendingSessionStart(destination: SessionLaunchDestination): PendingSessionStart {
+    const { workspaceId, cwd, machineId } = destination;
     const tempId = `pending-session-${String(++this.pendingSessionStartSeq)}-${Date.now().toString(36)}`;
     const now = new Date().toISOString();
     const session: ClientPendingStartSessionInfo = {
       id: tempId,
       path: `pi-web://pending-session/${tempId}`,
-      cwd: workspace.path,
+      cwd,
       persisted: false,
       name: "New session",
       created: now,
@@ -2011,7 +2050,17 @@ export class SessionController {
       clientPendingStart: true,
       machineId,
     };
-    return { tempId, workspaceId: workspace.id, cwd: workspace.path, machineId, session, queuedSends: [], discarded: false };
+    return { tempId, workspaceId, cwd, machineId, session, queuedSends: [], discarded: false };
+  }
+
+  private insertPendingSessionPreservingSelection(pending: PendingSessionStart): void {
+    if (!this.isCurrentPendingStart(pending)) return;
+    const state = this.getState();
+    const activity = creatingPendingSessionActivity(pending.tempId);
+    this.setState({
+      sessions: [pending.session, ...state.sessions.filter((candidate) => candidate.id !== pending.tempId)],
+      sessionActivities: { ...state.sessionActivities, [pending.tempId]: activity },
+    });
   }
 
   private insertAndSelectPendingSession(session: ClientPendingStartSessionInfo): void {
@@ -2104,8 +2153,7 @@ export class SessionController {
       sessionActivities: omitSessionActivity(state.sessionActivities, tempId),
       sendingPrompts: moveRecordKey(state.sendingPrompts, tempId, cachedSession.id),
       clientQueuedSessionMessages: moveRecordKey(state.clientQueuedSessionMessages, tempId, cachedSession.id),
-      ...(wasSelected ? { selectedSession: cachedSession, selectedChatLoad: selectedChatLoading(selectedChatTarget(pending.machineId, cachedSession)), status: state.sessionStatuses[cachedSession.id], activity: state.sessionActivities[cachedSession.id], pendingAsk: state.sessionStatuses[cachedSession.id]?.pendingAsk, pendingDialogs: state.sessionStatuses[cachedSession.id]?.pendingDialogs ?? [], closedDialogs: [] } : {}),
-      error: "",
+      ...(wasSelected ? { selectedSession: cachedSession, selectedChatLoad: selectedChatLoading(selectedChatTarget(pending.machineId, cachedSession)), status: state.sessionStatuses[cachedSession.id], activity: state.sessionActivities[cachedSession.id], pendingAsk: state.sessionStatuses[cachedSession.id]?.pendingAsk, pendingDialogs: state.sessionStatuses[cachedSession.id]?.pendingDialogs ?? [], closedDialogs: [], error: "" } : {}),
     });
     this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);
     if (wasSelected) {
@@ -2115,16 +2163,16 @@ export class SessionController {
     await this.flushQueuedPendingSends(cachedSession, pending.machineId, queuedSends, sessionLaunchDestination(pending));
   }
 
-  private async failPendingSessionStart(tempId: string, error: unknown): Promise<void> {
+  private async failPendingSessionStart(tempId: string, error: unknown): Promise<boolean> {
     const pending = this.pendingSessionStarts.get(tempId);
-    if (pending === undefined) return;
+    if (pending === undefined) return false;
     const identifiedCreatedSession = pending.backendSessionId === undefined
       ? undefined
       : this.suppressedCreatedSessions.get(pending.backendSessionId);
     if (identifiedCreatedSession?.machineId === pending.machineId
       && sessionPathsEqual(identifiedCreatedSession.session.cwd, pending.cwd)) {
       await this.resolvePendingSessionStart(tempId, identifiedCreatedSession.session);
-      return;
+      return true;
     }
     this.pendingSessionStarts.delete(tempId);
     const wasDiscarded = pending.discarded;
@@ -2154,7 +2202,7 @@ export class SessionController {
     }
     if (wasDiscarded || !isCurrentPendingStart) {
       if (isCurrentPendingStart) this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);
-      return;
+      return false;
     }
     const state = this.getState();
     const activity = failedPendingSessionActivity(tempId, message, pending.queuedSends.length);
@@ -2172,11 +2220,18 @@ export class SessionController {
       error: failure,
     });
     this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);
+    return false;
+  }
+
+  private isCurrentSessionLaunchDestination(destination: SessionLaunchDestination): boolean {
+    const state = this.getState();
+    return selectedMachineId(state) === destination.machineId
+      && state.selectedWorkspace?.id === destination.workspaceId
+      && sessionPathsEqual(state.selectedWorkspace.path, destination.cwd);
   }
 
   private isCurrentPendingStart(pending: PendingSessionStart): boolean {
-    const state = this.getState();
-    return selectedMachineId(state) === pending.machineId && state.selectedWorkspace?.id === pending.workspaceId;
+    return this.isCurrentSessionLaunchDestination(sessionLaunchDestination(pending));
   }
 
   private hasPendingStartFor(cwd: string, machineId: string): boolean {
@@ -2707,7 +2762,7 @@ function replacePendingSessionInList(sessions: readonly SessionInfo[], pendingSe
   return next;
 }
 
-function isClientPendingStartSessionInfo(session: SessionInfo | undefined): session is ClientPendingStartSessionInfo {
+export function isClientPendingStartSessionInfo(session: SessionInfo | undefined): session is ClientPendingStartSessionInfo {
   return session !== undefined && "clientPendingStart" in session && session.clientPendingStart === true;
 }
 
@@ -2769,6 +2824,16 @@ function failedInitialPromptActivity(sessionId: string, stage: SessionLaunchReco
       : "The session was created, but the first prompt may have been accepted. Inspect the transcript before sending it again.",
     at: new Date().toISOString(),
   };
+}
+
+function sessionLaunchDestinationForWorkspace(workspace: Workspace, machineId: string): SessionLaunchDestination {
+  return { machineId, workspaceId: workspace.id, cwd: workspace.path };
+}
+
+function sessionLaunchDestinationIsValid(destination: SessionLaunchDestination): boolean {
+  return destination.machineId.trim().length > 0
+    && destination.workspaceId.trim().length > 0
+    && destination.cwd.trim().length > 0;
 }
 
 function sessionLaunchDestination(pending: PendingSessionStart): SessionLaunchDestination {

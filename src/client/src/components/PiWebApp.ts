@@ -3,7 +3,7 @@ import { LitElement, html, type TemplateResult } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
-import { initialAppState, type AppState } from "../appState";
+import { initialAppState, type AppState, type GlobalSessionsState } from "../appState";
 import { createInboxLocationResolver } from "../inboxLocation";
 import { completeNewSessionDestination, createApiNewSessionDestinationCatalog, isNewSessionMachineAvailable, type NewSessionCompleteDestination, type NewSessionDestinationCatalog, type NewSessionLaunchIntent, type NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { sessionPathsEqual } from "../sessionPaths";
@@ -19,7 +19,7 @@ import { ProjectActivityOwnershipCoordinator } from "../controllers/projectActiv
 import { PiWebStatusController } from "../controllers/piWebStatusController";
 import type { ComposerCapabilities, ComposerDictationCapability } from "../composerCapabilities";
 import { composerBranchIdentity } from "../composerIdentity";
-import { SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot, type SessionTranscriptPreview } from "../controllers/sessionController";
+import { isClientPendingStartSessionInfo, SessionController, type SessionLaunchRecovery, type SessionLaunchRecoveryDraftSnapshot, type SessionTranscriptPreview } from "../controllers/sessionController";
 import { SessionInboxController } from "../controllers/sessionInboxController";
 import { SessionNotificationController } from "../controllers/sessionNotificationController";
 import { WorkspaceController, canDeleteWorkspace } from "../controllers/workspaceController";
@@ -1542,6 +1542,27 @@ export class PiWebApp extends LitElement {
     }
   }
 
+  private navigationGlobalSessions(): GlobalSessionsState | undefined {
+    const machineId = selectedMachineId(this.state);
+    const current = this.state.globalSessions?.machineId === machineId ? this.state.globalSessions : undefined;
+    const pending = this.state.sessions.filter((session) => isClientPendingStartSessionInfo(session) && session.machineId === machineId);
+    if (pending.length === 0) return current;
+
+    const pendingIds = new Set(pending.map((session) => session.id));
+    const activities = { ...(current?.activities ?? {}) };
+    for (const session of pending) {
+      const activity = this.state.sessionActivities[session.id];
+      if (activity !== undefined) activities[session.id] = activity;
+    }
+    return {
+      machineId,
+      status: current?.status ?? "fresh",
+      sessions: [...pending, ...(current?.sessions ?? []).filter((session) => !pendingIds.has(session.id))],
+      statuses: current?.statuses ?? {},
+      activities,
+    };
+  }
+
   private renderNavigationPanel(panelControls?: unknown) {
     return html`
       <app-navigation-panel
@@ -1551,7 +1572,7 @@ export class PiWebApp extends LitElement {
         .machineStatuses=${this.state.machineStatuses}
         .machineActivities=${this.state.machineActivities}
         .unreadPresence=${this.unreadPresence}
-        .globalSessions=${this.state.globalSessions}
+        .globalSessions=${this.navigationGlobalSessions()}
         .selectedSession=${this.state.selectedSession}
         .unreadSessionIds=${this.unreadSessionIds}
         .unreadCompletedAt=${this.cachedUnreadCompletedAt}
@@ -1970,6 +1991,36 @@ export class PiWebApp extends LitElement {
       return { kind: "rejected", reason: "destination-unavailable", message: "That destination is no longer available. Choose it again or select another destination." };
     }
 
+    const submission = {
+      ...intent.firstPrompt,
+      attachments: intent.firstPrompt.attachments === undefined ? undefined : [...intent.firstPrompt.attachments],
+      delivery: intent.firstPrompt.delivery ?? "inline",
+    };
+    if (intent.mode === "rapidfire") {
+      if (replacesFailedSessionId !== undefined) {
+        return { kind: "rejected", reason: "launch-rejected", message: "Rapidfire is unavailable while recovering a failed session launch." };
+      }
+      const currentWorkspace = this.state.selectedWorkspace;
+      if (currentWorkspace === undefined
+        || this.state.selectedMachine?.id !== destination.machine.id
+        || currentWorkspace.id !== destination.workspace.id
+        || !sessionPathsEqual(currentWorkspace.path, destination.workspace.path)) {
+        return { kind: "rejected", reason: "launch-rejected", message: "Rapidfire can only start sessions in the current workspace. Turn it off to switch destinations." };
+      }
+      const handoff = this.sessions.launchSessionPreservingSelection({
+        machineId: destination.machine.id,
+        workspaceId: destination.workspace.id,
+        cwd: destination.workspace.path,
+      }, submission, intent.agentChoices);
+      if (handoff === undefined || !this.sessions.hasQueuedInitialPrompt(handoff.pendingSessionId)) {
+        return { kind: "rejected", reason: "launch-rejected", message: "New session could not be queued." };
+      }
+      void handoff.completion.then((completion) => {
+        if (completion.kind === "failed") this.setState({ error: `Rapidfire session failed to start: ${completion.message}` });
+      }).catch((error: unknown) => { this.setState({ error: String(error) }); });
+      return { kind: "accepted" };
+    }
+
     try {
       const navigated = await this.navigateToNewSessionDestination(destination, isCurrentToken);
       if (!navigated || !isCurrentToken()) {
@@ -1980,11 +2031,7 @@ export class PiWebApp extends LitElement {
     }
 
     const previouslySelectedSessionId = this.state.selectedSession?.id;
-    const launch = this.sessions.launchSession({
-      ...intent.firstPrompt,
-      attachments: intent.firstPrompt.attachments === undefined ? undefined : [...intent.firstPrompt.attachments],
-      delivery: intent.firstPrompt.delivery ?? "inline",
-    }, intent.agentChoices);
+    const launch = this.sessions.launchSession(submission, intent.agentChoices);
     const pending = this.state.selectedSession;
     const queuedFirstPrompt = pending !== undefined && this.sessions.hasQueuedInitialPrompt(pending.id);
     if (pending === undefined || pending.id === previouslySelectedSessionId || !queuedFirstPrompt) {

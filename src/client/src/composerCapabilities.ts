@@ -19,6 +19,7 @@ export interface ComposerCapabilities {
   readonly tree?: ComposerTreeCapability;
   readonly archive?: ComposerArchiveCapability;
   readonly newSession?: ComposerNewSessionCapability;
+  readonly rapidfire?: ComposerRapidfireCapability;
   readonly dismiss?: ComposerDismissCapability;
   readonly dictation?: ComposerDictationCapability;
   /** Drawn as the island's own top edge; absent below the reporting threshold. */
@@ -81,6 +82,12 @@ export interface ComposerTreeCapability {
 
 export interface ComposerNewSessionCapability {
   readonly onNewSession: () => void;
+}
+
+export interface ComposerRapidfireCapability {
+  readonly active: boolean;
+  readonly disabled?: boolean;
+  readonly onToggle: () => void;
 }
 
 /**

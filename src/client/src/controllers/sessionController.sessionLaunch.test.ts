@@ -41,6 +41,47 @@ describe("SessionController session launch", () => {
     await launch;
   });
 
+  it("keeps an earlier Rapidfire failure visible when a later unselected launch succeeds", async () => {
+    const firstStart = deferred<SessionInfo>();
+    const secondStart = deferred<SessionInfo>();
+    const started: SessionInfo = { ...oldSession, id: "rapidfire-started", path: "/tmp/rapidfire-started.jsonl" };
+    let startCount = 0;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => {
+        startCount += 1;
+        return startCount === 1 ? firstStart.promise : secondStart.promise;
+      },
+      prompt: () => Promise.resolve({ accepted: true }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+    const destination = { machineId: "local", workspaceId: workspace.id, cwd: workspace.path };
+
+    const failed = controller.launchSessionPreservingSelection(destination, { text: "First Rapidfire prompt" });
+    if (failed === undefined) throw new Error("Expected the failed Rapidfire handoff");
+
+    firstStart.reject(new Error("first launch failed"));
+    await failed.completion;
+    expect(state.error).toContain("first launch failed");
+
+    const succeeding = controller.launchSessionPreservingSelection(destination, { text: "Second Rapidfire prompt" });
+    if (succeeding === undefined) throw new Error("Expected the succeeding Rapidfire handoff");
+    expect(state.error).toContain("first launch failed");
+
+    secondStart.resolve(started);
+    await succeeding.completion;
+
+    expect(state.error).toContain("first launch failed");
+    expect(state.selectedSession).toBe(oldSession);
+  });
+
   it("launches one session with a typed first-prompt submission and inline attachments", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     const startRequest = deferred<SessionInfo>();

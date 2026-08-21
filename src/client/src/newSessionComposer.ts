@@ -25,7 +25,10 @@ export interface NewSessionFirstPromptSubmission {
 
 export type NewSessionComposerSnapshot = NewSessionFirstPromptSubmission;
 
+export type NewSessionLaunchMode = "switch" | "rapidfire";
+
 export interface NewSessionLaunchIntent {
+  mode: NewSessionLaunchMode;
   destination: NewSessionCompleteDestination;
   firstPrompt: NewSessionFirstPromptSubmission;
   /** Model and thinking level chosen before the session existed. */

@@ -253,6 +253,7 @@ export class PromptEditor extends LitElement {
               @click=${() => { this.closeSteer(false); this.capabilities.newSession?.onNewSession(); }}
             >${renderNewSessionIcon()}</button>
           `}
+          ${this.renderRapidfireAction()}
           ${this.renderDismissAction()}
           ${this.renderPrimaryAction(rail)}
           ${this.renderQueueAction(rail)}
@@ -459,6 +460,33 @@ export class PromptEditor extends LitElement {
     `;
   }
 
+
+  private renderRapidfireAction() {
+    const rapidfire = this.capabilities.rapidfire;
+    if (rapidfire === undefined) return nothing;
+    const title = rapidfire.active ? "Turn off Rapidfire" : "Turn on Rapidfire for the current workspace";
+    return html`
+      <button
+        class="rapidfire-button"
+        type="button"
+        data-action="rapidfire"
+        title=${title}
+        aria-label="Rapidfire for current workspace"
+        aria-pressed=${rapidfire.active ? "true" : "false"}
+        ?disabled=${this.disabled || rapidfire.disabled === true}
+        @click=${() => {
+          this.closeSteer(false);
+          this.closeChoice(false);
+          this.capabilities.rapidfire?.onToggle();
+        }}
+      >
+        <svg class="rapidfire-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M2.5 4h8M8.5 2l2 2-2 2M2.5 8h8M8.5 6l2 2-2 2M2.5 12h8M8.5 10l2 2-2 2"></path>
+        </svg>
+        <span>Rapidfire</span>
+      </button>
+    `;
+  }
 
   /** The way out sits beside the way in, at the same size. */
   private renderDismissAction() {

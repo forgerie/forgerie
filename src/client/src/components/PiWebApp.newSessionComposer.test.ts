@@ -5,12 +5,13 @@ import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Machine, Project, SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
-import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination, type NewSessionLaunchIntent } from "../newSessionComposer";
+import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination, type NewSessionLaunchIntent, type NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { PiWebApp } from "./PiWebApp";
 import type { AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import { ComposerDraft } from "./ComposerDraft";
 import type { NewSessionComposer } from "./NewSessionComposer";
 import type { ChatView } from "./ChatView";
+import type { SessionInboxPanel } from "./SessionInboxPanel";
 import type { WorkspacePanel } from "./WorkspacePanel";
 import { NEW_SESSION_LABEL } from "./shared";
 import type { FirstPromptSubmission, SessionLaunchRecovery } from "../controllers/sessionController";
@@ -365,7 +366,7 @@ describe("PiWebApp New session composer root", () => {
       { kind: "followUp", text: "[First prompt queued]" },
     ]);
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Move this prompt" } } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { mode: "switch", destination, firstPrompt: { text: "Move this prompt" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toEqual({ kind: "accepted" });
     const replacement = required(appState(app).selectedSession, "replacement pending session");
@@ -439,6 +440,150 @@ describe("PiWebApp New session composer root", () => {
     expect(replaceText).toHaveBeenCalledExactlyOnceWith("Restore me");
   });
 
+  it("queues Rapidfire in the current workspace without changing the current location or session", async () => {
+    const app = new PiWebApp();
+    const destination = completeNewSessionDestination(localMachine, project, mainWorkspace);
+    const selectedSession = session("selected", mainWorkspace.path);
+    Reflect.set(app, "newSessionDestinationCatalog", new InMemoryNewSessionDestinationCatalog({
+      machines: [localMachine],
+      projectsByMachine: { [localMachine.id]: [project] },
+      workspacesByMachineAndProject: { [`${localMachine.id}:${project.id}`]: [mainWorkspace] },
+    }));
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedWorkspace: mainWorkspace,
+      selectedSession,
+      sessions: [selectedSession],
+      mainView: "core:workspace.git",
+    });
+    const navigate = vi.fn(() => Promise.resolve(true));
+    const openChat = vi.fn(() => Promise.resolve());
+    Reflect.set(app, "navigateToNewSessionDestination", navigate);
+    Reflect.set(app, "openChat", openChat);
+    const controller = sessionController(app);
+    const api: unknown = Reflect.get(controller, "api");
+    if (!isSessionTransport(api)) throw new Error("Expected SessionController transport");
+    const startSession = vi.fn<(cwd: string, machineId?: string, startupToken?: string, agentChoices?: unknown) => Promise<SessionInfo>>(() => new Promise<SessionInfo>(() => undefined));
+    Reflect.set(controller, "api", { ...api, startSession });
+    invoke(app, "openNewSessionComposer");
+
+    const outcome = await invokeAsync(app, "submitNewSession", {
+      mode: "rapidfire",
+      destination,
+      firstPrompt: { text: "Review the current workspace" },
+    } satisfies NewSessionLaunchIntent);
+
+    expect(outcome).toEqual({ kind: "accepted" });
+    const pending = required(appState(app).sessions.find(isClientPendingSession), "Rapidfire pending session");
+    expect(startSession).toHaveBeenCalledWith(mainWorkspace.path, localMachine.id, pending.id, undefined);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(openChat).not.toHaveBeenCalled();
+    expect(appState(app)).toMatchObject({
+      selectedMachine: localMachine,
+      selectedProject: project,
+      selectedWorkspace: mainWorkspace,
+      selectedSession,
+      mainView: "core:workspace.git",
+      newSessionComposer: { kind: "open" },
+    });
+    expect(appState(app).sessions.map((candidate) => candidate.id)).toEqual([pending.id, selectedSession.id]);
+
+    const navigation = required(renderApp(app).querySelector<AppNavigationPanel>("app-navigation-panel"), "navigation panel");
+    await elementUpdateComplete(navigation);
+    const inbox = required(navigation.shadowRoot?.querySelector<SessionInboxPanel>("session-inbox-panel"), "session inbox panel");
+    await elementUpdateComplete(inbox);
+    expect(inbox.shadowRoot?.querySelector(`[data-session='${pending.id}']`)).not.toBeNull();
+  });
+
+  it("reports a current-workspace Rapidfire start failure without changing the selected session", async () => {
+    const app = new PiWebApp();
+    const destination = completeNewSessionDestination(localMachine, project, mainWorkspace);
+    const selectedSession = session("selected", mainWorkspace.path);
+    Reflect.set(app, "newSessionDestinationCatalog", new InMemoryNewSessionDestinationCatalog({
+      machines: [localMachine],
+      projectsByMachine: { [localMachine.id]: [project] },
+      workspacesByMachineAndProject: { [`${localMachine.id}:${project.id}`]: [mainWorkspace] },
+    }));
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedWorkspace: mainWorkspace,
+      selectedSession,
+      sessions: [selectedSession],
+      mainView: "core:workspace.git",
+    });
+    const controller = sessionController(app);
+    const api: unknown = Reflect.get(controller, "api");
+    if (!isSessionTransport(api)) throw new Error("Expected SessionController transport");
+    Reflect.set(controller, "api", { ...api, startSession: () => Promise.reject(new Error("backend unavailable")) });
+    invoke(app, "openNewSessionComposer");
+
+    const outcome = await invokeAsync(app, "submitNewSession", {
+      mode: "rapidfire",
+      destination,
+      firstPrompt: { text: "Review the current workspace" },
+    } satisfies NewSessionLaunchIntent);
+
+    expect(outcome).toEqual({ kind: "accepted" });
+    await vi.waitFor(() => { expect(appState(app).error).toContain("backend unavailable"); });
+    expect(appState(app)).toMatchObject({
+      selectedMachine: localMachine,
+      selectedProject: project,
+      selectedWorkspace: mainWorkspace,
+      selectedSession,
+      mainView: "core:workspace.git",
+      newSessionComposer: { kind: "open" },
+    });
+    expect(appState(app).sessions.some(isClientPendingSession)).toBe(true);
+  });
+
+  it("refuses Rapidfire for a different workspace without losing the prompt to a hidden start", async () => {
+    const app = new PiWebApp();
+    const destination = completeNewSessionDestination(remoteMachine, remoteProject, remoteWorkspace);
+    const selectedSession = session("selected", mainWorkspace.path);
+    Reflect.set(app, "newSessionDestinationCatalog", new InMemoryNewSessionDestinationCatalog({
+      machines: [remoteMachine],
+      projectsByMachine: { [remoteMachine.id]: [remoteProject] },
+      workspacesByMachineAndProject: { [`${remoteMachine.id}:${remoteProject.id}`]: [remoteWorkspace] },
+    }));
+    setAppState(app, {
+      machines: [localMachine, remoteMachine],
+      selectedMachine: localMachine,
+      selectedProject: project,
+      selectedWorkspace: mainWorkspace,
+      selectedSession,
+      sessions: [selectedSession],
+    });
+    const controller = sessionController(app);
+    const api: unknown = Reflect.get(controller, "api");
+    if (!isSessionTransport(api)) throw new Error("Expected SessionController transport");
+    const startSession = vi.fn(api.startSession);
+    Reflect.set(controller, "api", { ...api, startSession });
+    invoke(app, "openNewSessionComposer");
+
+    const outcome = await invokeAsync(app, "submitNewSession", {
+      mode: "rapidfire",
+      destination,
+      firstPrompt: { text: "Keep this prompt" },
+    } satisfies NewSessionLaunchIntent);
+
+    if (!isRejectedNewSessionOutcome(outcome)) throw new Error("Expected a rejected Rapidfire outcome");
+    expect(outcome.reason).toBe("launch-rejected");
+    expect(outcome.message).toContain("current workspace");
+    expect(startSession).not.toHaveBeenCalled();
+    expect(appState(app).selectedSession).toBe(selectedSession);
+    expect(composerRequest(app)).toMatchObject({ kind: "open" });
+  });
+
   it("revalidates the exact destination before accepting the synchronous pending launch handoff", async () => {
     const app = new PiWebApp();
     const destination = completeNewSessionDestination(remoteMachine, remoteProject, remoteWorkspace);
@@ -477,7 +622,7 @@ describe("PiWebApp New session composer root", () => {
     const openChat = vi.fn(() => Promise.resolve());
     Reflect.set(app, "openChat", openChat);
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Build it" } } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { mode: "switch", destination, firstPrompt: { text: "Build it" } } satisfies NewSessionLaunchIntent);
 
     expect(navigate).toHaveBeenCalledWith(destination, expect.any(Function));
     expect(launchSession).toHaveBeenCalledWith({ text: "Build it", attachments: undefined, delivery: "inline" }, undefined);
@@ -528,7 +673,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(app, "navigateToNewSessionDestination", vi.fn(navigate));
     const launch = vi.spyOn(sessionController(app), "launchSession");
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { mode: "switch", destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toMatchObject({ kind: "rejected", reason: "destination-unavailable" });
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
@@ -544,7 +689,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(app, "navigateToNewSessionDestination", navigate);
     const launch = vi.spyOn(sessionController(app), "launchSession");
 
-    const outcome = await invokeAsync(app, "submitNewSession", { destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
+    const outcome = await invokeAsync(app, "submitNewSession", { mode: "switch", destination, firstPrompt: { text: "Keep me" } } satisfies NewSessionLaunchIntent);
 
     expect(outcome).toMatchObject({ kind: "rejected", reason: "destination-unavailable" });
     expect(composerRequest(app)).toMatchObject({ kind: "open" });
@@ -600,6 +745,13 @@ function appState(app: PiWebApp): AppState {
 
 function isAppState(value: unknown): value is AppState {
   return typeof value === "object" && value !== null && "newSessionComposer" in value && "machines" in value;
+}
+
+function isRejectedNewSessionOutcome(value: unknown): value is Extract<NewSessionSubmissionOutcome, { kind: "rejected" }> {
+  return typeof value === "object" && value !== null
+    && "kind" in value && value.kind === "rejected"
+    && "reason" in value && (value.reason === "destination-unavailable" || value.reason === "launch-rejected")
+    && "message" in value && typeof value.message === "string";
 }
 
 function isClientPendingSession(value: SessionInfo | undefined): boolean {

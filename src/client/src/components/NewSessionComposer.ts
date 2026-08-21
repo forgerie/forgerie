@@ -28,6 +28,7 @@ import {
   type NewSessionDestinationCatalog,
   type NewSessionFirstPromptSubmission,
   type NewSessionLaunchIntent,
+  type NewSessionLaunchMode,
   type NewSessionSubmissionOutcome,
 } from "../newSessionComposer";
 import type { ModalSurface } from "./ModalSurface";
@@ -66,6 +67,7 @@ export class NewSessionComposer extends LitElement {
   @state() private draftDisplay: ComposerDraftDisplayState = { inputMode: { kind: "normal" }, empty: true, focused: false, attachmentCount: 0, attachmentCapturePending: false };
   @state() private slashValidationError: SlashValidationError | undefined;
   @state() private validationPending = false;
+  @state() private launchMode: NewSessionLaunchMode = "switch";
   @query("modal-surface") private modalSurface?: ModalSurface;
   @query("prompt-editor") private editor?: PromptEditor;
   private draftWaitScheduled = false;
@@ -342,6 +344,13 @@ export class NewSessionComposer extends LitElement {
           onActivate: () => { this.openDestinationChoice(); },
         },
       }],
+      ...(this.recoverySeedId === undefined ? {
+        rapidfire: {
+          active: this.launchMode === "rapidfire",
+          disabled: state.kind === "submitting" || this.validationPending || this.draftDisplay.attachmentCapturePending,
+          onToggle: () => { this.toggleLaunchMode(); },
+        },
+      } : {}),
       model: {
         ...(this.chosenModel === undefined ? {} : { model: this.chosenModel }),
         ...(this.chosenThinkingLevel === undefined ? {} : { thinkingLevel: this.chosenThinkingLevel }),
@@ -446,8 +455,10 @@ export class NewSessionComposer extends LitElement {
       return "rejected";
     }
     try {
+      const mode = this.launchMode;
       const agentChoices = this.agentChoices();
       const outcome = await callback({
+        mode,
         destination: next.destination,
         firstPrompt: validation.submission,
         ...(agentChoices === undefined ? {} : { agentChoices }),
@@ -456,6 +467,10 @@ export class NewSessionComposer extends LitElement {
       if (outcome.kind === "accepted") {
         this.completedRecoverySeedId = this.claimedRecoverySeedId;
         this.claimedRecoverySeedId = undefined;
+        if (mode === "rapidfire") {
+          this.composerState = createNewSessionComposerState(next.destination);
+          this.refocusRapidfireDraft();
+        }
         return "accepted";
       }
       this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
@@ -503,6 +518,17 @@ export class NewSessionComposer extends LitElement {
 
   private clearValidationError(): void {
     if (this.slashValidationError !== undefined) this.slashValidationError = undefined;
+  }
+
+  private toggleLaunchMode(): void {
+    this.launchMode = this.launchMode === "rapidfire" ? "switch" : "rapidfire";
+  }
+
+  private refocusRapidfireDraft(): void {
+    queueMicrotask(() => {
+      if (!this.isConnected || this.launchMode !== "rapidfire" || this.composerState.kind !== "editing") return;
+      this.draft?.focusInput();
+    });
   }
 
   private retryPromptResourceValidation(): void {

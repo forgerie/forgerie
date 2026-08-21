@@ -121,6 +121,31 @@ describe("SessionController session_start dialog startup reachability", () => {
     await start;
   });
 
+  it("lets an unselected Rapidfire row be opened when startup needs input", async () => {
+    const state = { current: { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] } };
+    const harness = pendingStartController(state);
+    const handoff = harness.controller.launchSessionPreservingSelection(
+      { machineId: "local", workspaceId: workspace.id, cwd: workspace.path },
+      { text: "Rapidfire prompt" },
+    );
+    if (handoff === undefined) throw new Error("Expected a Rapidfire handoff");
+    const pending = state.current.sessions.find((session) => session.id === handoff.pendingSessionId);
+    if (pending === undefined) throw new Error("Expected the unselected Rapidfire row");
+
+    expect(state.current.selectedSession).toBe(oldSession);
+    reportBackendSessionId(harness, handoff.pendingSessionId);
+    expect(harness.socket.connectedSessionIds).toEqual([]);
+
+    await harness.controller.selectSession(pending);
+    expect(harness.socket.connectedSessionIds).toEqual([BACKEND_SESSION_ID]);
+
+    harness.socket.emit({ type: "dialog.opened", dialog: dialog("dialog-rapidfire") });
+    expect(state.current.pendingDialogs).toEqual([dialog("dialog-rapidfire")]);
+
+    resolveBackendSession(harness);
+    await handoff.completion;
+  });
+
   it("shows a dialog that opens mid-startup on the pending row, answerable before readiness", async () => {
     const state = { current: { ...initialAppState(), selectedWorkspace: workspace, sessions: [] } };
     const harness = pendingStartController(state);

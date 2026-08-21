@@ -100,6 +100,12 @@ function sendButton(composer: NewSessionComposer): HTMLButtonElement {
   return element;
 }
 
+function rapidfireToggle(composer: NewSessionComposer): HTMLButtonElement {
+  const element = promptEditor(composer).shadowRoot?.querySelector("button[data-action='rapidfire']");
+  if (!(element instanceof HTMLButtonElement)) throw new Error("Expected the Rapidfire toggle");
+  return element;
+}
+
 function promptField(composer: NewSessionComposer): HTMLElement {
   const content = draft(composer).view?.contentDOM;
   if (content === undefined) throw new Error("Expected CodeMirror prompt field");
@@ -228,7 +234,7 @@ describe("new-session-composer editing and submission", () => {
     sendButton(composer).click();
     await settleCatalog(composer);
 
-    expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "  exact prompt  " } });
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "switch", destination, firstPrompt: { text: "  exact prompt  " } });
     expect(dialogSurface(composer).busy).toBe(true);
     expect(cancelButton(composer).disabled).toBe(true);
     surfaceBackdrop(composer).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
@@ -243,6 +249,33 @@ describe("new-session-composer editing and submission", () => {
     expect(cancelButton(composer).disabled).toBe(true);
     expect(sendButton(composer).disabled).toBe(true);
     expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Starting session");
+  });
+
+  it("keeps Rapidfire open, preserves its destination, and clears each accepted prompt for the next launch", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = await mountComposer({ initialDestination: destination, onSubmit });
+    const toggle = rapidfireToggle(composer);
+
+    expect(toggle.getAttribute("aria-label")).toBe("Rapidfire for current workspace");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    toggle.click();
+    await composer.updateComplete;
+    expect(rapidfireToggle(composer).getAttribute("aria-label")).toBe("Rapidfire for current workspace");
+
+    await enterPrompt(composer, "Launch the first review");
+    sendButton(composer).click();
+
+    await vi.waitFor(() => { expect(promptText(composer)).toBe(""); });
+    expect(onSubmit).toHaveBeenLastCalledWith({ mode: "rapidfire", destination, firstPrompt: { text: "Launch the first review" } });
+    expect(dialogSurface(composer).busy).toBe(false);
+    expect(deepActiveElement()).toBe(promptField(composer));
+
+    await enterPrompt(composer, "Launch the second review");
+    sendButton(composer).click();
+
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledTimes(2); });
+    expect(onSubmit).toHaveBeenLastCalledWith({ mode: "rapidfire", destination, firstPrompt: { text: "Launch the second review" } });
   });
 
   it("returns a root rejection to the same mounted draft and permits destination recovery", async () => {
@@ -305,7 +338,7 @@ describe("new-session-composer editing and submission", () => {
     setEditorText(composer, "/review now");
     sendButton(composer).click();
     await settleCatalog(composer);
-    expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "switch", destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
   });
 
   it("blocks unknown slash commands after validation without creating a session through footer or Enter", async () => {
@@ -414,7 +447,7 @@ describe("new-session-composer editing and submission", () => {
     sendButton(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-action='retry-prompt-resource-validation']").click();
-    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "/review", promptResourceCommandIdentity: identity } }); });
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledWith({ mode: "switch", destination, firstPrompt: { text: "/review", promptResourceCommandIdentity: identity } }); });
 
     document.body.replaceChildren();
     const missingName = await mountComposer({ initialDestination: destination, initialPrompt: "/", onSubmit });
@@ -449,7 +482,7 @@ describe("new-session-composer editing and submission", () => {
     const textComposer = await mountComposer({ initialDestination: destination, initialPrompt: "plain text", onSubmit: textSubmit });
     sendButton(textComposer).click();
     await settleCatalog(textComposer);
-    expect(textSubmit).toHaveBeenCalledWith({ destination, firstPrompt: { text: "plain text" } });
+    expect(textSubmit).toHaveBeenCalledWith({ mode: "switch", destination, firstPrompt: { text: "plain text" } });
 
     document.body.replaceChildren();
     const attachmentSubmit = vi.fn((intent: NewSessionLaunchIntent): Promise<NewSessionSubmissionOutcome> => {
