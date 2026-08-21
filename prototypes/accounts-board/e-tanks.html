@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM accounts — E · tanks</title>
+<link rel="stylesheet" href="board.css" />
+<style>
+  /* Iteration E — tanks. Budget is liquid. Each account is a vessel pair:
+     wide vessel = 5 h window, slim vessel = 7 d window. The level IS the
+     reading; from across the room four waterlines tell the story. Text is
+     engraving: a name, a refill time, one status word when a status is true.
+     Empty + hatched = signed out. Red liquid = nearly dry. */
+
+  .tanks {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    justify-content: space-evenly;
+    align-items: stretch;
+    gap: var(--board-gutter);
+  }
+
+  .tank-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pi-space-md);
+    min-height: 0;
+  }
+
+  .vessels { flex: 1 1 auto; min-height: 0; display: flex; gap: var(--pi-space-sm); align-items: stretch; }
+
+  .vessel {
+    position: relative;
+    width: clamp(5rem, 10cqi, 9.5rem);
+    border: 1px solid var(--pi-border-muted);
+    border-radius: var(--pi-radius-control);
+    background: var(--pi-surface);
+    overflow: hidden;
+  }
+  .vessel.slim { width: clamp(1.5rem, 2.6cqi, 2.4rem); }
+
+  /* engraved gauge marks at 25 / 50 / 75 */
+  .vessel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(var(--pi-border-muted), var(--pi-border-muted)) 0 25% / 100% 1px no-repeat,
+      linear-gradient(var(--pi-border-muted), var(--pi-border-muted)) 0 50% / 100% 1px no-repeat,
+      linear-gradient(var(--pi-border-muted), var(--pi-border-muted)) 0 75% / 100% 1px no-repeat;
+    pointer-events: none;
+  }
+
+  .liquid {
+    position: absolute;
+    inset: auto 0 0 0;
+    background: color-mix(in srgb, var(--pi-text-secondary) 42%, var(--pi-surface));
+    border-top: 2px solid var(--pi-text-secondary);
+    transition: height var(--pi-motion-move) ease;
+  }
+  .in-use .liquid {
+    background: color-mix(in srgb, var(--pi-accent) 38%, var(--pi-surface));
+    border-top-color: var(--pi-accent);
+  }
+  .liquid.low {
+    background: color-mix(in srgb, var(--pi-danger) 34%, var(--pi-surface));
+    border-top-color: var(--pi-danger);
+  }
+  @media (prefers-reduced-motion: reduce) { .liquid { transition: none; } }
+
+  .waterline {
+    position: absolute;
+    top: -1.6em;
+    right: 7px;
+    font-size: var(--pi-text-xs);
+    color: var(--pi-dim);
+  }
+
+  .vessel.dead::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(45deg, transparent 0 9px, var(--pi-border-muted) 9px 10px);
+  }
+
+  .plate { display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; }
+  .plate .name { font-size: var(--board-label); font-weight: 650; color: var(--pi-text-bright); }
+  .plate .name .in-use-dot { margin-right: 8px; }
+  .plate .word { font-size: var(--board-meta); font-weight: 600; }
+  .plate .refill { font-size: var(--board-meta); color: var(--pi-text-secondary); }
+  .plate .refill-weekly { font-size: var(--pi-text-xs); color: var(--pi-dim); }
+  .plate .auth-hint { margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="board">
+  <header class="board-chrome">
+    <span class="board-title">LLM accounts</span>
+    <span class="board-clock" id="clock"></span>
+  </header>
+  <main class="board-body">
+    <div class="tanks" id="tanks"></div>
+  </main>
+  <footer class="board-footnote">iteration E — tanks</footer>
+</div>
+<script src="data.js"></script>
+<script>
+  const B = window.BOARD;
+
+  const vessel = (w, extra) => {
+    if (!w) return `<div class="vessel ${extra} dead"></div>`;
+    const left = B.remainingPercent(w);
+    return `
+      <div class="vessel ${extra}">
+        <div class="liquid ${left <= 10 ? "low" : ""}" style="height:${left}%">
+          <span class="waterline">${Math.round(left)}</span>
+        </div>
+      </div>`;
+  };
+
+  const group = (a, now) => {
+    const state = B.accountState(a);
+    const s5 = a.windows.find((w) => w.id === "5h");
+    const s7 = a.windows.find((w) => w.id === "7d");
+    const plate = [
+      `<span class="name">${a.inUse ? '<span class="in-use-dot"></span>' : ""}${a.product} ${a.ordinal}</span>`,
+      state ? `<span class="word tone-${state.tone}">${state.word}</span>` : "",
+      a.expired
+        ? `<code class="auth-hint">/login ${a.key}</code>`
+        : `<span class="refill">refills ${B.fmtClock(s5.resetsAtMs, now)}</span>
+           <span class="refill-weekly">7 d · ${B.fmtClock(s7.resetsAtMs, now)}</span>`,
+    ].filter(Boolean).join("");
+    return `
+      <div class="tank-group ${a.inUse ? "in-use" : ""}">
+        <div class="vessels">${vessel(s5, "")}${vessel(s7, "slim")}</div>
+        <div class="plate">${plate}</div>
+      </div>`;
+  };
+
+  B.startBoardClock((now) => {
+    document.getElementById("clock").textContent = B.fmtClock(now, now);
+    document.getElementById("tanks").innerHTML = B.ACCOUNTS.map((a) => group(a, now)).join("");
+  });
+</script>
+</body>
+</html>

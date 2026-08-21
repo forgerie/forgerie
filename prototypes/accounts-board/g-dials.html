@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM accounts — G · dials</title>
+<link rel="stylesheet" href="board.css" />
+<style>
+  /* Iteration G — dials. A chronograph row. Outer arc = 5 h budget, sweeping
+     down from full like a pressure needle. Inner arc = 7 d budget. The hand
+     points at the refill moment on a 12-hour bezel — the dial answers "how
+     much" and "when" in one glance, wordlessly. Hatched face = signed out. */
+
+  .dials {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    justify-content: space-evenly;
+    align-items: center;
+    gap: var(--board-gutter);
+  }
+
+  .dial { display: flex; flex-direction: column; align-items: center; gap: var(--pi-space-md); min-width: 0; }
+  .dial svg { width: clamp(9rem, 21cqi, 22rem); height: auto; }
+
+  .plate { display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; }
+  .plate .name { font-size: var(--board-label); font-weight: 650; color: var(--pi-text-bright); }
+  .plate .name .in-use-dot { margin-right: 8px; }
+  .plate .word { font-size: var(--board-meta); font-weight: 600; }
+  .plate .times { font-size: var(--pi-text-xs); color: var(--pi-dim); }
+</style>
+</head>
+<body>
+<div class="board">
+  <header class="board-chrome">
+    <span class="board-title">LLM accounts</span>
+    <span class="board-clock" id="clock"></span>
+  </header>
+  <main class="board-body">
+    <div class="dials" id="dials"></div>
+  </main>
+  <footer class="board-footnote">iteration G — dials</footer>
+</div>
+<script src="data.js"></script>
+<script>
+  const B = window.BOARD;
+
+  const polar = (cx, cy, r, deg) => {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  };
+
+  /* Arc from 12 o'clock, clockwise, spanning `frac` of the full circle. */
+  const arc = (r, frac, stroke, width) => {
+    if (frac <= 0) return "";
+    if (frac >= 1) return `<circle cx="100" cy="100" r="${r}" fill="none" stroke="${stroke}" stroke-width="${width}"/>`;
+    const sweep = frac * 360;
+    const [x0, y0] = polar(100, 100, r, 0);
+    const [x1, y1] = polar(100, 100, r, sweep);
+    return `<path d="M${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${sweep > 180 ? 1 : 0} 1 ${x1.toFixed(2)},${y1.toFixed(2)}"
+      fill="none" stroke="${stroke}" stroke-width="${width}"/>`;
+  };
+
+  const bezel = () => {
+    let marks = "";
+    for (let i = 0; i < 12; i++) {
+      const [x0, y0] = polar(100, 100, 84, i * 30);
+      const [x1, y1] = polar(100, 100, 90, i * 30);
+      marks += `<line x1="${x0.toFixed(2)}" y1="${y0.toFixed(2)}" x2="${x1.toFixed(2)}" y2="${y1.toFixed(2)}"
+        stroke="var(--pi-border)" stroke-width="${i % 3 === 0 ? 2 : 1}"/>`;
+    }
+    return `<circle cx="100" cy="100" r="90" fill="none" stroke="var(--pi-border-muted)"/>` + marks;
+  };
+
+  const clockAngle = (atMs) => {
+    const at = new Date(atMs);
+    return ((at.getHours() % 12) + at.getMinutes() / 60) * 30;
+  };
+
+  /* Bezel pointer: marks the refill moment on the 12 h ring without
+     crossing the arc bands. */
+  const hand = (atMs, tone) => {
+    const deg = clockAngle(atMs);
+    const [x0, y0] = polar(100, 100, 75, deg);
+    const [x1, y1] = polar(100, 100, 92, deg);
+    const color = tone ? `var(--pi-${tone})` : "var(--pi-muted)";
+    return `
+      <line x1="${x0.toFixed(2)}" y1="${y0.toFixed(2)}" x2="${x1.toFixed(2)}" y2="${y1.toFixed(2)}" stroke="${color}" stroke-width="2.5"/>
+      <circle cx="${x0.toFixed(2)}" cy="${y0.toFixed(2)}" r="2.5" fill="${color}"/>`;
+  };
+
+  const face = (a) => {
+    if (a.expired) {
+      return `
+        <defs><pattern id="hatch-${a.ordinal}" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="var(--pi-border-muted)" stroke-width="1.5"/>
+        </pattern></defs>
+        ${bezel()}
+        <circle cx="100" cy="100" r="78" fill="url(#hatch-${a.ordinal})"/>`;
+    }
+    const s5 = a.windows.find((w) => w.id === "5h");
+    const s7 = a.windows.find((w) => w.id === "7d");
+    const left5 = B.remainingPercent(s5) / 100;
+    const left7 = B.remainingPercent(s7) / 100;
+    const tone5 = B.windowTone(s5);
+    const stroke5 = tone5 ? `var(--pi-${tone5})` : a.inUse ? "var(--pi-accent)" : "var(--pi-text-secondary)";
+    const tone7 = B.windowTone(s7);
+    const stroke7 = tone7 ? `var(--pi-${tone7})` : "var(--pi-muted)";
+    return `
+      ${bezel()}
+      ${arc(66, 1, "var(--pi-surface-hover)", 11)}
+      ${arc(66, left5, stroke5, 11)}
+      ${arc(48, 1, "var(--pi-surface-hover)", 4.5)}
+      ${arc(48, left7, stroke7, 4.5)}
+      ${hand(s5.resetsAtMs, tone5)}`;
+  };
+
+  const dial = (a, now) => {
+    const state = B.accountState(a);
+    const s5 = a.windows.find((w) => w.id === "5h");
+    const s7 = a.windows.find((w) => w.id === "7d");
+    const plate = [
+      `<span class="name">${a.inUse ? '<span class="in-use-dot"></span>' : ""}${a.product} ${a.ordinal}</span>`,
+      state ? `<span class="word tone-${state.tone}">${state.word}</span>` : "",
+      a.expired
+        ? `<code class="auth-hint">/login ${a.key}</code>`
+        : `<span class="times">refills ${B.fmtClock(s5.resetsAtMs, now)} · 7 d ${B.fmtClock(s7.resetsAtMs, now)}</span>`,
+    ].filter(Boolean).join("");
+    return `
+      <div class="dial">
+        <svg viewBox="0 0 200 200" role="img" aria-label="${a.product} ${a.ordinal}">${face(a)}</svg>
+        <div class="plate">${plate}</div>
+      </div>`;
+  };
+
+  B.startBoardClock((now) => {
+    document.getElementById("clock").textContent = B.fmtClock(now, now);
+    document.getElementById("dials").innerHTML = B.ACCOUNTS.map((a) => dial(a, now)).join("");
+  });
+</script>
+</body>
+</html>

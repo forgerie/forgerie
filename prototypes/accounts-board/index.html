@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM accounts — fullscreen board iterations</title>
+<link rel="stylesheet" href="board.css" />
+<style>
+  .chooser { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--pi-space-lg); max-width: 46rem; }
+  .chooser p { margin: 0; color: var(--pi-text-secondary); font-size: var(--pi-text-md); }
+  .chooser a {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--pi-space-lg);
+    background: var(--pi-surface);
+    border-radius: var(--pi-radius-surface);
+    text-decoration: none;
+    color: inherit;
+  }
+  .chooser a:hover { background: var(--pi-surface-hover); }
+  .chooser a strong { color: var(--pi-text-bright); font-size: var(--pi-text-lg); }
+  .chooser a span { color: var(--pi-muted); font-size: var(--pi-text-sm); }
+</style>
+</head>
+<body>
+<div class="board">
+  <header class="board-chrome"><span class="board-title">LLM accounts — board iterations</span></header>
+  <main class="board-body">
+    <div class="chooser">
+      <p>Iterations for a fullscreen, second-screen account monitor. Same
+      live fixture everywhere (two Claude accounts, two Codex accounts; one
+      in use, one rate limited, one signed out, one with a stale probe).
+      Open one and press F11. Round 2 shows the state as form; round 1 told
+      it in labeled numbers.</p>
+      <a href="i-reservoir.html"><strong>I — reservoir (round 4)</strong><span>the whole feature as ONE shape: total relay fuel stacked by account,
+      projected 48 h through a sqrt time-warp; cliffs = refills, a dying wedge
+      = the hard stop, the hatched cap = what /login adds</span></a>
+      <a href="h-runway.html"><strong>H — relay runway (round 3)</strong><span>the verdict: how long you can keep working, and what to do at each
+      boundary. States: <a href="h-runway.html?scenario=calm">calm</a> ·
+      <a href="h-runway.html?scenario=crunch">crunch</a> ·
+      <a href="h-runway.html?scenario=idle">idle</a> ·
+      <a href="h-runway.html?scenario=dry">dry</a> ·
+      <a href="h-runway.html?scenario=stale">stale</a>;
+      add &amp;speed=60 to watch the active leg erode in time-lapse</span></a>
+      <a href="e-tanks.html"><strong>E — tanks (round 2)</strong><span>budget as liquid: waterline height is the reading; hatch = signed out</span></a>
+      <a href="f-trails.html"><strong>F — trails (round 2)</strong><span>seismograph: burn history, dashed projection, refill cliffs on a shared clock</span></a>
+      <a href="g-dials.html"><strong>G — dials (round 2)</strong><span>chronographs: budget arcs plus a bezel pointer at the refill moment</span></a>
+      <a href="a-meters.html"><strong>A — meter wall</strong><span>instrument-cluster cards; two labeled fuel gauges per account</span></a>
+      <a href="b-ledger.html"><strong>B — departure board</strong><span>one typographic row per account; hairlines, no cards — the calmest read</span></a>
+      <a href="c-horizon.html"><strong>C — horizon</strong><span>time axis: every chip marks the moment budget comes back</span></a>
+      <a href="d-triage.html"><strong>D — triage</strong><span>one giant number per account: the binding constraint, worst first</span></a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

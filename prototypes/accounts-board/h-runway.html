@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM accounts — H · relay runway</title>
+<link rel="stylesheet" href="board.css" />
+<style>
+  /* Iteration H — relay runway. The board answers the mid-work question:
+     can I keep going, until when, and what do I do at the boundary?
+     Pace turns percentages into wall-clock time; accounts chain into a relay.
+
+     States (the set is the model): ?scenario=calm | crunch | idle | dry | stale
+     Motion (informational only):
+       1. the active leg erodes at its "now" edge — time made visible
+          (?speed=60 renders 1 s as 1 min for judging the motion)
+       2. the verdict cross-fades when the plan changes
+       3. a boundary time pulses through its final 10 minutes */
+
+  .runway { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: clamp(1rem, 4cqb, 3rem); }
+
+  /* — verdict — */
+  .verdict { display: flex; flex-direction: column; gap: var(--pi-space-sm); margin-top: auto; }
+  .verdict-label { margin: 0; font-size: var(--board-meta); color: var(--pi-dim); }
+  .verdict-line {
+    margin: 0;
+    font-size: clamp(2.2rem, 7.5cqi, 6.5rem);
+    font-weight: 650;
+    line-height: 1.02;
+    letter-spacing: -0.015em;
+    color: var(--pi-text-bright);
+  }
+  .verdict-line.changing { animation: verdict-in var(--pi-motion-move) ease-out; }
+  @keyframes verdict-in { from { opacity: 0; transform: translateY(4px); } }
+  .verdict-sub { margin: 0; font-size: var(--board-value); color: var(--pi-text-secondary); }
+  .verdict-sub .auth-hint { font-size: 0.8em; }
+
+  /* — strip — */
+  .strip-block { display: flex; flex-direction: column; gap: 6px; margin-bottom: auto; }
+  .events { position: relative; height: 1.3rem; font-size: var(--pi-text-xs); color: var(--pi-dim); }
+  .events span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .events span::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    height: 8px;
+    width: 1px;
+    background: var(--pi-border);
+  }
+
+  .strip { position: relative; height: clamp(3rem, 11cqb, 5.5rem); }
+  .leg {
+    position: absolute;
+    inset-block: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--pi-surface-hover);
+    border-radius: var(--pi-radius-control);
+    font-size: var(--board-label);
+    font-weight: 650;
+    color: var(--pi-text-secondary);
+    overflow: hidden;
+    white-space: nowrap;
+    transition: left 1000ms linear, width 1000ms linear;
+  }
+  .leg.active {
+    background: color-mix(in srgb, var(--pi-accent) 30%, var(--pi-surface));
+    color: var(--pi-text-bright);
+  }
+  .leg.dead {
+    background: repeating-linear-gradient(45deg, var(--pi-surface) 0 8px, var(--pi-surface-hover) 8px 10px);
+    color: var(--pi-danger);
+    font-weight: 600;
+  }
+  .leg.idle {
+    background: var(--pi-surface);
+    border: 1px dashed var(--pi-border-muted);
+    color: var(--pi-muted);
+    font-weight: 500;
+  }
+  @media (prefers-reduced-motion: reduce) { .leg { transition: none; } .verdict-line.changing { animation: none; } }
+
+  .times { position: relative; height: 2rem; }
+  .times .now-mark {
+    position: absolute;
+    transform: none;
+    font-size: var(--board-value);
+    color: var(--pi-dim);
+    transition: left 1000ms linear;
+  }
+  .times .boundary {
+    position: absolute;
+    transform: translateX(-50%);
+    font-size: var(--board-value);
+    font-weight: 650;
+    color: var(--pi-text-bright);
+    white-space: nowrap;
+    text-align: center;
+  }
+  .times .boundary small { display: block; font-size: var(--pi-text-xs); font-weight: 400; color: var(--pi-muted); }
+  .times .boundary.imminent { animation: boundary-pulse 1.8s ease-in-out infinite; }
+  @keyframes boundary-pulse { 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .times .boundary.imminent { animation: none; text-decoration: underline; text-underline-offset: 4px; } }
+
+  /* — bench — */
+  .bench {
+    margin-top: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+    gap: var(--board-gutter);
+    border-top: 1px solid var(--pi-border-muted);
+    padding-top: var(--pi-space-lg);
+    list-style: none;
+    margin-block: auto 0;
+    padding-inline: 0;
+  }
+  .seat { display: flex; flex-direction: column; gap: 4px; }
+  .seat .who { display: flex; align-items: baseline; gap: 8px; font-size: var(--board-meta); font-weight: 650; color: var(--pi-text); }
+  .seat .who .in-use-dot { align-self: center; }
+  .seat .level { height: 4px; width: min(100%, 9rem); border-radius: var(--pi-radius-pill); background: var(--pi-surface-hover); overflow: hidden; }
+  .seat .level div { height: 100%; background: var(--pi-muted); }
+  .seat .level div.tone-danger-bg { background: var(--pi-danger); }
+  .seat .fact { font-size: var(--pi-text-xs); color: var(--pi-dim); }
+  .seat.rescue .fact { color: var(--pi-text-secondary); }
+
+  /* — stale: the board declares it cannot be trusted — */
+  .is-stale .strip-block, .is-stale .bench { opacity: 0.45; }
+</style>
+</head>
+<body>
+<main class="board">
+  <header class="board-chrome">
+    <span class="board-title">LLM accounts · relay</span>
+    <span class="board-clock" id="clock"></span>
+  </header>
+  <div class="board-body">
+    <div class="runway" id="runway">
+      <section class="verdict" aria-live="polite">
+        <p class="verdict-label" id="pace"></p>
+        <h1 class="verdict-line" id="verdict"></h1>
+        <p class="verdict-sub" id="sub"></p>
+      </section>
+      <section class="strip-block" aria-label="relay plan">
+        <div class="events" id="events"></div>
+        <div class="strip" id="strip"></div>
+        <div class="times" id="times"></div>
+      </section>
+      <ul class="bench" id="bench"></ul>
+    </div>
+  </div>
+  <footer class="board-footnote" id="foot"></footer>
+</main>
+<script src="data.js"></script>
+<script>
+  const B = window.BOARD;
+  const M = B.MIN;
+
+  /* Hand-authored plans (minutes from the anchor). A real implementation
+     derives legs from remaining %, measured pace, and reset instants. */
+  const SCENARIOS = {
+    calm: {
+      pace: "pace 32%/h · measured on the last hour · Claude 1",
+      spanMin: 477, // 14:03 -> 22:00
+      legs: [
+        { name: "Claude 1", from: 0, to: 71, active: true },
+        { name: "Codex 2", from: 71, to: 258 },
+        { name: "Codex 1", from: 258, to: 477 },
+      ],
+      handoffs: [
+        { t: 71, note: "switch to Codex 2" },
+        { t: 258, note: "switch to Codex 1" },
+      ],
+      refills: [
+        { t: 22, label: "Codex 2 refills" },
+        { t: 117, label: "Claude 1 refills" },
+        { t: 217, label: "Codex 1 refills" },
+      ],
+      verdict: (el) => el < 71
+        ? { line: "Clear until 22:00", sub: "nothing to do before the handoff · Codex 2 takes over at 15:14" }
+        : { line: "Clear until 22:00", sub: "on Codex 2 · Codex 1 takes over at 18:21" },
+      bench: [
+        { name: "Claude 1", inUse: true, level: 38, fact: "38% · refills 16:00" },
+        { name: "Codex 2", level: 2, low: true, fact: "sealed · fresh window 14:25" },
+        { name: "Codex 1", level: 87, fact: "87% · refills 17:40" },
+        { name: "Claude 3", level: 0, rescue: true, fact: "signed out · spare 5 h behind /login" },
+      ],
+    },
+    crunch: {
+      pace: "pace 41%/h · measured on the last hour · Claude 1",
+      spanMin: 297, // 14:03 -> 19:00
+      legs: [
+        { name: "Claude 1", from: 0, to: 59, active: true },
+        { name: "dry", from: 59, to: 117, dead: true },
+        { name: "Claude 1 again", from: 117, to: 297 },
+      ],
+      handoffs: [
+        { t: 59, note: "everything dry" },
+        { t: 117, note: "back to work" },
+      ],
+      refills: [
+        { t: 117, label: "Claude 1 refills" },
+        { t: 147, label: "Codex 2 unseals" },
+      ],
+      verdict: (el) => el < 59
+        ? { line: "Hard stop 15:02", tone: "danger", sub: "58 m dry after that · Claude 1 refills 16:00 · /login anthropic-3 covers the gap" }
+        : el < 117
+          ? { line: "Dry · back 16:00", tone: "danger", sub: "Claude 1 refills 16:00 · /login anthropic-3 works now" }
+          : { line: "Back on Claude 1", sub: "fresh window since 16:00" },
+      bench: [
+        { name: "Claude 1", inUse: true, level: 12, low: true, fact: "12% · refills 16:00" },
+        { name: "Codex 2", level: 0, low: true, fact: "sealed · 16:30" },
+        { name: "Codex 1", level: 0, low: true, fact: "7 d window dry · Mon 08:03" },
+        { name: "Claude 3", level: 0, rescue: true, fact: "signed out · /login adds 5 h now" },
+      ],
+    },
+    idle: {
+      pace: "pace ~0 · no active session",
+      spanMin: 240, // 14:03 -> 18:03
+      legs: [{ name: "refilling", from: 0, to: 240, idle: true }],
+      handoffs: [],
+      refills: [
+        { t: 22, label: "Codex 2 refills" },
+        { t: 117, label: "Claude 1 refills" },
+        { t: 217, label: "Codex 1 refills" },
+      ],
+      verdict: () => ({ line: "Ready", sub: "start on Codex 1 · 87% in hand · everything full by 17:40" }),
+      bench: [
+        { name: "Claude 1", level: 38, fact: "38% · refills 16:00" },
+        { name: "Codex 2", level: 2, low: true, fact: "sealed · fresh window 14:25" },
+        { name: "Codex 1", level: 87, fact: "87% · ready" },
+        { name: "Claude 3", level: 0, rescue: true, fact: "signed out · spare 5 h behind /login" },
+      ],
+    },
+    dry: {
+      pace: "pace 41%/h · measured on the last hour · Claude 1",
+      spanMin: 297,
+      legs: [
+        { name: "Claude 1", from: 0, to: 59, active: true },
+        { name: "dry", from: 59, to: 117, dead: true },
+        { name: "Claude 1 again", from: 117, to: 297 },
+      ],
+      handoffs: [
+        { t: 59, note: "nothing can cover" },
+        { t: 117, note: "back to work" },
+      ],
+      refills: [{ t: 117, label: "Claude 1 refills" }],
+      verdict: (el) => el < 59
+        ? { line: "Dry at 15:02", tone: "danger", sub: "no account can cover the gap · Claude 1 refills 16:00" }
+        : { line: "Dry · back 16:00", tone: "danger", sub: "Claude 1 refills 16:00" },
+      bench: [
+        { name: "Claude 1", inUse: true, level: 12, low: true, fact: "12% · refills 16:00" },
+        { name: "Codex 2", level: 0, low: true, fact: "sealed · 16:30" },
+        { name: "Codex 1", level: 0, low: true, fact: "7 d window dry · Mon 08:03" },
+        { name: "Claude 3", level: 0, low: true, fact: "signed out · weekly window dry too" },
+      ],
+    },
+    stale: {
+      pace: "probe silent · last data 13:51",
+      stale: true,
+      spanMin: 477,
+      legs: [
+        { name: "Claude 1", from: 0, to: 71, active: true },
+        { name: "Codex 2", from: 71, to: 258 },
+        { name: "Codex 1", from: 258, to: 477 },
+      ],
+      handoffs: [
+        { t: 71, note: "switch to Codex 2" },
+        { t: 258, note: "switch to Codex 1" },
+      ],
+      refills: [],
+      verdict: () => ({ line: "No signal 12 m", tone: "warning", sub: "plan below is from the last snapshot · restart the usage probe" }),
+      bench: [
+        { name: "Claude 1", inUse: true, level: 38, fact: "as of 13:51 · 38%" },
+        { name: "Codex 2", level: 2, low: true, fact: "as of 13:51 · sealed" },
+        { name: "Codex 1", level: 87, fact: "as of 13:51 · 87%" },
+        { name: "Claude 3", level: 0, fact: "as of 13:51 · signed out" },
+      ],
+    },
+  };
+
+  const params = new URLSearchParams(location.search);
+  const scenarioId = SCENARIOS[params.get("scenario")] ? params.get("scenario") : "calm";
+  const S = SCENARIOS[scenarioId];
+  const SPEED = Math.max(1, Number(params.get("speed")) || 1);
+  const pct = (m) => (Math.max(0, Math.min(m, S.spanMin)) / S.spanMin) * 100;
+
+  /* — build once — */
+  const board = document.querySelector(".board");
+  if (S.stale) board.classList.add("is-stale");
+  document.getElementById("pace").textContent = S.pace;
+  document.getElementById("foot").textContent = `iteration H — relay runway · ${scenarioId}${SPEED > 1 ? ` · time-lapse x${SPEED}` : ""}`;
+
+  document.getElementById("events").innerHTML = S.refills.map((r) =>
+    `<span style="left:${pct(r.t)}%">${r.label} ${B.fmtClock(B.NOW + r.t * M, B.NOW)}</span>`).join("");
+
+  const strip = document.getElementById("strip");
+  strip.innerHTML = S.legs.map((l, i) =>
+    `<div class="leg ${l.active ? "active" : ""} ${l.dead ? "dead" : ""} ${l.idle ? "idle" : ""}" data-i="${i}"
+       style="left:${pct(l.from)}%; width:${pct(l.to - l.from)}%">${l.name}</div>`).join("");
+
+  document.getElementById("times").innerHTML =
+    `<span class="now-mark" id="now-mark" style="left:0%">now</span>` +
+    S.handoffs.map((h) =>
+      `<span class="boundary" data-t="${h.t}" style="left:${pct(h.t)}%">${B.fmtClock(B.NOW + h.t * M, B.NOW)}<small>${h.note}</small></span>`).join("");
+
+  document.getElementById("bench").innerHTML = S.bench.map((s) => `
+    <li class="seat ${s.rescue ? "rescue" : ""}">
+      <span class="who">${s.inUse ? '<span class="in-use-dot"></span>' : ""}${s.name}</span>
+      <span class="level"><div class="${s.low ? "tone-danger-bg" : ""}" style="width:${s.level}%"></div></span>
+      <span class="fact">${s.fact}</span>
+    </li>`).join("");
+
+  /* — update in place: erosion, verdict swaps, imminent pulses — */
+  const verdictEl = document.getElementById("verdict");
+  const subEl = document.getElementById("sub");
+  let lastLine = "";
+
+  const tick = (now) => {
+    document.getElementById("clock").textContent = B.fmtClock(now, now);
+    const elapsed = Math.min(((now - B.NOW) / M) * SPEED, S.spanMin);
+
+    // 1. erosion: consumed time disappears from every leg's left edge
+    strip.querySelectorAll(".leg").forEach((el) => {
+      const l = S.legs[Number(el.dataset.i)];
+      const from = Math.max(l.from, elapsed);
+      el.style.left = `${pct(from)}%`;
+      el.style.width = `${pct(Math.max(0, l.to - from))}%`;
+      el.style.visibility = l.to <= elapsed ? "hidden" : "visible";
+      el.classList.toggle("active", elapsed >= l.from && elapsed < l.to && !l.dead && !l.idle);
+    });
+    document.getElementById("now-mark").style.left = `${pct(elapsed)}%`;
+
+    // 2. verdict follows the plan; cross-fade on change
+    const v = S.verdict(elapsed);
+    if (v.line !== lastLine) {
+      verdictEl.textContent = v.line;
+      verdictEl.className = `verdict-line ${v.tone ? `tone-${v.tone}` : ""} changing`;
+      requestAnimationFrame(() => requestAnimationFrame(() => verdictEl.classList.remove("changing")));
+      lastLine = v.line;
+    }
+    subEl.innerHTML = v.sub;
+
+    // 3. boundaries pulse through their final 10 minutes
+    document.querySelectorAll(".boundary").forEach((el) => {
+      const t = Number(el.dataset.t);
+      el.classList.toggle("imminent", t - elapsed > 0 && t - elapsed <= 10);
+      el.style.opacity = t <= elapsed ? 0.25 : "";
+    });
+  };
+
+  B.startBoardClock(tick);
+</script>
+</body>
+</html>

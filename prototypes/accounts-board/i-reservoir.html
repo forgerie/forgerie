@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM accounts — I · reservoir</title>
+<link rel="stylesheet" href="board.css" />
+<style>
+  /* Iteration I — reservoir. The whole feature as ONE shape: total remaining
+     relay fuel across every account, stacked and projected forward. Layer
+     thickness = that account's binding headroom (least remaining across its
+     windows). Cliffs = refills. A wedge thinning to nothing = a hard stop.
+     The hatched cap = capacity a /login would add. Time is warped (sqrt):
+     the next two hours — the part you can act on — get half the width.
+     The fill fades toward the future because the future is a projection.
+     No gauges, no rows, no cards. One mountain range; times engraved on it. */
+
+  .reservoir { flex: 1 1 auto; min-height: 0; position: relative; }
+  .reservoir svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+<div class="board">
+  <header class="board-chrome">
+    <span class="board-title">LLM accounts · relay fuel · next 48 h</span>
+    <span class="board-clock" id="clock"></span>
+  </header>
+  <main class="board-body">
+    <div class="reservoir" id="reservoir"></div>
+  </main>
+  <footer class="board-footnote">iteration I — reservoir · every account, every window, every refill: one shape</footer>
+</div>
+
+<script src="data.js"></script>
+<script>
+(() => {
+  const { ACCOUNTS, MIN, HOUR, fmtClock, startBoardClock } = window.BOARD;
+
+  const SPAN = 48 * HOUR;
+  const N = 1400;                     /* samples, uniform in warped x */
+  const YMAX = 320;                   /* three accounts' worth + air */
+  const WINDOW_LEN = { "5h": 5 * HOUR, "7d": 7 * 24 * HOUR };
+  /* Projection assumes work continues at a steady pace on the in-use
+     account. A burned 5 h window costs a slice of the weekly budget too. */
+  const WORK_PACE = { "5h": 24, "7d": 1.2 }; /* % per hour */
+
+  const warp = (t) => Math.sqrt(Math.max(0, t) / SPAN);
+
+  /* Remaining % of one window at now+t under the cliff-refill model shared
+     by every board iteration: flat/burning until the reset instant, then
+     back to 100 and (if in use) burning again, cliff after cliff. */
+  const windowRemaining = (w, inUse, nowMs, t) => {
+    const len = WINDOW_LEN[w.id];
+    const pace = inUse ? WORK_PACE[w.id] : 0;
+    const c0 = w.resetsAtMs - nowMs;
+    let segStart, segFull;
+    if (t < c0) { segStart = 0; segFull = 100 - w.usedPercent; }
+    else {
+      const k = Math.floor((t - c0) / len);
+      segStart = c0 + k * len;
+      segFull = 100;
+    }
+    return Math.max(0, segFull - pace * ((t - segStart) / HOUR));
+  };
+
+  /* Usable capacity of one account at now+t: the binding (least) window. */
+  const capacityAt = (account, nowMs, t) => {
+    if (account.expired || account.windows.length === 0) return null;
+    let least = Infinity;
+    for (const w of account.windows) least = Math.min(least, windowRemaining(w, account.inUse, nowMs, t));
+    return least === Infinity ? null : least;
+  };
+
+  const layerColor = (account) => {
+    if (account.inUse) return { fill: "rgba(102,153,224,0.45)", line: "#6699e0", text: "#cfe0f7" };
+    return { fill: "rgba(133,136,142,0.30)", line: "#a9abb0", text: "#c6c8cc" };
+  };
+
+  /* Analytic shape-change instants (exact clock times, no sample drift):
+     every reset that actually changes an account's binding capacity, and
+     the moments the in-use account runs dry. */
+  const shapeEvents = (nowMs) => {
+    const out = [];
+    const eps = MIN;
+    for (const a of ACCOUNTS) {
+      if (a.expired || a.windows.length === 0) continue;
+      let cliffCount = 0;
+      const instants = [];
+      for (const w of a.windows) {
+        const len = WINDOW_LEN[w.id];
+        for (let t = w.resetsAtMs - nowMs; t <= SPAN; t += len) {
+          if (t > eps) instants.push({ t, weekly: w.id === "7d" });
+        }
+      }
+      instants.sort((p, q) => p.t - q.t);
+      for (const inst of instants) {
+        const gain = (capacityAt(a, nowMs, inst.t + eps) ?? 0) - (capacityAt(a, nowMs, inst.t - eps) ?? 0);
+        if (gain <= 5) continue; /* a reset that changes nothing is a non-event */
+        cliffCount += 1;
+        if (inst.weekly) out.push({ t: inst.t, kind: "week", text: `${fmtClock(nowMs + inst.t, nowMs)} · week refills` });
+        else if (cliffCount <= 2 || a.error) out.push({ t: inst.t, kind: "cliff", text: fmtClock(nowMs + inst.t, nowMs) });
+      }
+      if (a.inUse) {
+        /* First dry moment: the hard stop. */
+        for (let t = 0; t <= SPAN; t += MIN) {
+          if ((capacityAt(a, nowMs, t) ?? 0) <= 0.01) {
+            out.push({ t, kind: "dry", text: `${a.product} ${a.ordinal} dry ${fmtClock(nowMs + t, nowMs)}` });
+            break;
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const SEALED = { fill: "rgba(224,108,117,0.30)", line: "#e06c75" };
+
+  const el = document.getElementById("reservoir");
+  const clockEl = document.getElementById("clock");
+  let lastNow = null;
+
+  const render = (nowMs) => {
+    lastNow = nowMs;
+    clockEl.textContent = fmtClock(nowMs, nowMs);
+
+    const W = el.clientWidth, H = el.clientHeight;
+    if (W < 40 || H < 40) return;
+
+    const fLabel = Math.max(11, Math.min(17, W * 0.011));
+    const fMeta = Math.max(10, Math.min(14, W * 0.0095));
+    const padL = 8, padR = Math.round(fMeta * 4.5), padT = Math.round(fMeta * 2.4);
+    const axisH = Math.round(fMeta * 2.2);
+    const plotW = W - padL - padR, plotH = H - padT - axisH;
+    const X = (x01) => padL + x01 * plotW;
+    const Y = (v) => padT + plotH - (v / YMAX) * plotH;
+
+    const live = ACCOUNTS.filter((a) => !a.expired && a.windows.length > 0);
+    const ghosts = ACCOUNTS.filter((a) => a.expired || a.windows.length === 0);
+
+    /* Sample every live account, bottom of the stack = the in-use account. */
+    const ordered = [...live].sort((a, b) => (b.inUse ? 1 : 0) - (a.inUse ? 1 : 0));
+    const xs = new Array(N + 1);
+    const caps = ordered.map(() => new Array(N + 1));
+    for (let i = 0; i <= N; i++) {
+      const x01 = i / N;
+      const t = x01 * x01 * SPAN;
+      xs[i] = x01;
+      ordered.forEach((a, ai) => { caps[ai][i] = capacityAt(a, nowMs, t) ?? 0; });
+    }
+    const bottoms = ordered.map(() => new Array(N + 1));
+    const tops = ordered.map(() => new Array(N + 1));
+    for (let i = 0; i <= N; i++) {
+      let acc = 0;
+      for (let ai = 0; ai < ordered.length; ai++) {
+        bottoms[ai][i] = acc;
+        acc += caps[ai][i];
+        tops[ai][i] = acc;
+      }
+    }
+    const totalTop = tops.length ? tops[tops.length - 1] : new Array(N + 1).fill(0);
+
+    const pathBetween = (lo, hi, i0, i1) => {
+      let d = `M ${X(xs[i0]).toFixed(1)} ${Y(hi[i0]).toFixed(1)}`;
+      for (let i = i0 + 1; i <= i1; i++) d += ` L ${X(xs[i]).toFixed(1)} ${Y(hi[i]).toFixed(1)}`;
+      for (let i = i1; i >= i0; i--) d += ` L ${X(xs[i]).toFixed(1)} ${Y(lo[i]).toFixed(1)}`;
+      return d + " Z";
+    };
+    const lineAlong = (hi, i0, i1) => {
+      let d = `M ${X(xs[i0]).toFixed(1)} ${Y(hi[i0]).toFixed(1)}`;
+      for (let i = i0 + 1; i <= i1; i++) d += ` L ${X(xs[i]).toFixed(1)} ${Y(hi[i]).toFixed(1)}`;
+      return d;
+    };
+
+    let defs = `
+      <linearGradient id="future-fade" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#fff" stop-opacity="1"/>
+        <stop offset="0.35" stop-color="#fff" stop-opacity="0.85"/>
+        <stop offset="1" stop-color="#fff" stop-opacity="0.42"/>
+      </linearGradient>
+      <mask id="fade-mask"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#future-fade)"/></mask>
+      <pattern id="ghost-hatch" width="10" height="10" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+        <rect width="10" height="10" fill="transparent"/>
+        <line x1="0" y1="0" x2="0" y2="10" stroke="#2a2c30" stroke-width="1.5"/>
+      </pattern>`;
+
+    let g = "";       /* faded plot geometry */
+    let engrave = ""; /* crisp engravings on top */
+
+    /* One faint rule per "one account's worth" of budget. */
+    for (const v of [100, 200, 300]) {
+      g += `<line x1="${padL}" y1="${Y(v).toFixed(1)}" x2="${W - padR}" y2="${Y(v).toFixed(1)}" stroke="#202225" stroke-width="1"/>`;
+      engrave += `<text x="${W - padR + 6}" y="${(Y(v) + fMeta * 0.35).toFixed(1)}" font-size="${fMeta}" fill="#62656b">${v / 100} acct${v > 100 ? "s" : ""}</text>`;
+    }
+
+    /* Layers, bottom-up. A rate-limited account is drawn in the danger hue
+       until the reset that unseals it — same geometry, different skin. */
+    const events = []; /* {x01, y, text, tone, kind} */
+    ordered.forEach((a, ai) => {
+      const c = layerColor(a);
+      let segs = [[0, N, c]];
+      if (a.error) {
+        const unsealT = Math.min(...a.windows.map((w) => w.resetsAtMs)) - nowMs;
+        const uI = Math.max(1, Math.min(N, Math.round(Math.sqrt(unsealT / SPAN) * N)));
+        segs = [[0, uI, { ...c, ...SEALED }], [uI, N, c]];
+      }
+      for (const [i0, i1, cc] of segs) {
+        g += `<path d="${pathBetween(bottoms[ai], tops[ai], i0, i1)}" fill="${cc.fill}"/>`;
+        g += `<path d="${lineAlong(tops[ai], i0, i1)}" fill="none" stroke="${cc.line}" stroke-width="${cc.line === SEALED.line ? 2 : 1.5}"/>`;
+      }
+
+      /* Engrave the name at the first x where the band can hold it; thin
+         bands get the smaller type instead of no name at all. */
+      let maxThick = 0;
+      for (let i = 0; i <= N; i++) maxThick = Math.max(maxThick, (caps[ai][i] / YMAX) * plotH);
+      const fName = maxThick >= fLabel * 1.9 ? fLabel : maxThick >= fMeta * 1.6 ? fMeta : 0;
+      if (fName > 0) for (let i = 0; i <= N; i++) {
+        const thick = (caps[ai][i] / YMAX) * plotH;
+        if (thick >= fName * 1.6) {
+          const yMid = Y((bottoms[ai][i] + tops[ai][i]) / 2);
+          const name = `${a.product} ${a.ordinal}`;
+          const unseal = a.error ? fmtClock(Math.min(...a.windows.map((w) => w.resetsAtMs)), nowMs) : "";
+          const word = a.inUse ? " · in use" : a.error ? ` · rate limited, back ${unseal}` : "";
+          engrave += `<text x="${(X(xs[i]) + 10).toFixed(1)}" y="${(yMid + fName * 0.35).toFixed(1)}" font-size="${fName}" font-weight="650" fill="${c.text}" paint-order="stroke" stroke="#111214" stroke-width="3">${name}<tspan font-weight="500" fill="${a.error ? "#e06c75" : "#85888e"}">${word}</tspan></text>`;
+          break;
+        }
+      }
+    });
+
+    /* Exact shape-change instants: refills engraved on the crest, dry
+       moments engraved on the floor where the wedge dies. */
+    for (const e of shapeEvents(nowMs)) {
+      const x01 = warp(e.t);
+      const i = Math.min(N, Math.max(0, Math.round(x01 * N) + 1));
+      const pool = e.kind === "dry" ? "floor" : "crest";
+      events.push({ x01, y: Y(totalTop[i]) - 8, text: e.text, kind: e.kind, pool, tone: e.kind === "week" ? "#e6e7e9" : e.kind === "dry" ? "#e06c75" : "#a9abb0" });
+    }
+
+    /* Signed-out accounts: a hatched cap riding the crest — the capacity a
+       /login would add. Absence drawn as a hole in the mountain. */
+    ghosts.forEach((a) => {
+      const lo = totalTop, hi = totalTop.map((v) => v + 100);
+      g += `<path d="${pathBetween(lo, hi, 0, N)}" fill="url(#ghost-hatch)"/>`;
+      g += `<path d="${lineAlong(hi, 0, N)}" fill="none" stroke="#62656b" stroke-width="1" stroke-dasharray="5 5"/>`;
+      for (let i = 0; i <= N; i++) {
+        const yMid = Y((lo[i] + hi[i]) / 2);
+        engrave += `<text x="${(X(xs[i]) + 10).toFixed(1)}" y="${(yMid + fLabel * 0.35).toFixed(1)}" font-size="${fLabel}" font-weight="650" fill="#85888e">${a.product} ${a.ordinal}<tspan font-weight="500" fill="#62656b"> · signed out — </tspan><tspan font-weight="500" font-family="ui-monospace,Menlo,monospace" font-size="${fMeta}" fill="#85888e">/login</tspan><tspan font-weight="500" fill="#62656b"> adds this</tspan></text>`;
+        break;
+      }
+    });
+
+    /* Engrave shape-change times, thinned per pool so they never crowd. */
+    events.sort((a, b) => a.x01 - b.x01);
+    const rank = { week: 4, dry: 3, cliff: 2 };
+    const placed = [];
+    for (const e of events) {
+      const clash = placed.find((p) => p.pool === e.pool && Math.abs(p.x01 - e.x01) < 0.055);
+      if (clash) { if (rank[e.kind] > rank[clash.kind]) placed.splice(placed.indexOf(clash), 1, e); continue; }
+      placed.push(e);
+    }
+    for (const e of placed) {
+      const x = X(e.x01);
+      if (e.pool === "floor") {
+        const yBase = padT + plotH;
+        engrave += `<line x1="${x.toFixed(1)}" y1="${yBase}" x2="${x.toFixed(1)}" y2="${(yBase - fMeta * 0.9).toFixed(1)}" stroke="#e06c75" stroke-width="1.5"/>`;
+        engrave += `<text x="${(x - 7).toFixed(1)}" y="${(yBase - fMeta * 0.5).toFixed(1)}" text-anchor="end" font-size="${fMeta}" font-weight="600" fill="${e.tone}" paint-order="stroke" stroke="#111214" stroke-width="3">${e.text}</text>`;
+        continue;
+      }
+      engrave += `<line x1="${x.toFixed(1)}" y1="${(e.y + 4).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(e.y + fMeta * 1.6).toFixed(1)}" stroke="#3a3d42" stroke-width="1"/>`;
+      engrave += `<text x="${x.toFixed(1)}" y="${e.y.toFixed(1)}" text-anchor="middle" font-size="${fMeta}" font-weight="${e.kind === "week" ? 650 : 500}" fill="${e.tone}" paint-order="stroke" stroke="#111214" stroke-width="3">${e.text}</text>`;
+    }
+
+    /* Time axis: real clock instants through the sqrt warp — the shrinking
+       tick spacing IS the warp made visible. */
+    const axisY = padT + plotH;
+    engrave += `<line x1="${padL}" y1="${axisY}" x2="${W - padR}" y2="${axisY}" stroke="#2a2c30" stroke-width="1"/>`;
+    engrave += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${axisY}" stroke="#6699e0" stroke-width="1.5"/>`;
+    engrave += `<text x="${padL}" y="${axisY + fMeta * 1.5}" font-size="${fMeta}" fill="#6699e0">now</text>`;
+    for (const hrs of [1, 2, 4, 8, 16, 24, 36, 48]) {
+      const tick = Math.ceil((nowMs + hrs * HOUR) / HOUR) * HOUR;
+      const x = X(warp(tick - nowMs));
+      if (x > W - padR - 8 || x < padL + fMeta * 2.4) continue;
+      engrave += `<line x1="${x.toFixed(1)}" y1="${axisY}" x2="${x.toFixed(1)}" y2="${axisY + 5}" stroke="#3a3d42" stroke-width="1"/>`;
+      engrave += `<text x="${x.toFixed(1)}" y="${axisY + fMeta * 1.5}" text-anchor="middle" font-size="${fMeta}" fill="#62656b">${fmtClock(tick, nowMs)}</text>`;
+    }
+
+    el.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="Total remaining LLM budget across accounts over the next 48 hours">
+      <defs>${defs}</defs>
+      <g mask="url(#fade-mask)">${g}</g>
+      ${engrave}
+    </svg>`;
+  };
+
+  new ResizeObserver(() => { if (lastNow !== null) render(lastNow); }).observe(el);
+  startBoardClock(render);
+})();
+</script>
+</body>
+</html>
