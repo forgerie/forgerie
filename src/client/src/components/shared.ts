@@ -917,6 +917,16 @@ export const formattedTextStyles = css`
   code { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
   pre { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); padding: 10px; overflow-x: auto; overflow-y: hidden; direction: ltr; text-align: left; unicode-bidi: isolate; }
   pre code { border: 0; padding: 0; background: transparent; }
+  .hljs-comment, .hljs-code, .hljs-formula { color: var(--pi-muted); font-style: italic; }
+  .hljs-doctag, .hljs-keyword, .hljs-template-tag, .hljs-template-variable, .hljs-type, .hljs-variable.language_ { color: var(--pi-purple); }
+  .hljs-title, .hljs-title.class_, .hljs-title.class_.inherited__, .hljs-title.function_, .hljs-section { color: var(--pi-accent); }
+  .hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number, .hljs-operator, .hljs-variable, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: var(--pi-warning); }
+  .hljs-regexp, .hljs-string, .hljs-meta .hljs-string, .hljs-addition { color: var(--pi-success); }
+  .hljs-built_in, .hljs-symbol, .hljs-name, .hljs-quote, .hljs-selector-tag, .hljs-selector-pseudo, .hljs-deletion { color: var(--pi-danger); }
+  .hljs-section, .hljs-strong { font-weight: 600; }
+  .hljs-emphasis { font-style: italic; }
+  .hljs-addition { background: color-mix(in srgb, var(--pi-success) 12%, transparent); }
+  .hljs-deletion { background: color-mix(in srgb, var(--pi-danger) 12%, transparent); }
   /* Content that is not prose takes the whole content column. It keeps the
      column's start edge -- it is the prose beside it that is narrow, not this
      that is offset -- and grows to the right into space the column already

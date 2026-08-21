@@ -1,22 +1,150 @@
+import type { LanguageFn } from "highlight.js";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import diff from "highlight.js/lib/languages/diff";
+import go from "highlight.js/lib/languages/go";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
+import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
 import { marked } from "marked";
 
-const renderer = new marked.Renderer();
-renderer.html = ({ text }) => escapeHtml(text);
+type CodeLanguage = readonly [name: string, language: LanguageFn];
 
-const MAX_MARKDOWN_CACHE_ENTRIES = 300;
+const codeHighlighter = hljs.newInstance();
+const codeLanguages: readonly CodeLanguage[] = [
+  ["bash", bash],
+  ["css", css],
+  ["diff", diff],
+  ["go", go],
+  ["javascript", javascript],
+  ["json", json],
+  ["markdown", markdown],
+  ["python", python],
+  ["rust", rust],
+  ["typescript", typescript],
+  ["xml", xml],
+];
+for (const [name, language] of codeLanguages) codeHighlighter.registerLanguage(name, language);
+codeHighlighter.registerAliases("shell", { languageName: "bash" });
+
+interface StringCacheBudget {
+  characters: number;
+  readonly maximumCharacters: number;
+  readonly maximumEntries: number;
+  readonly maximumEntryCharacters: number;
+}
+
+const MAX_HIGHLIGHTED_CODE_CHARACTERS = 5_000;
+const MAX_HIGHLIGHTED_CODE_CHARACTERS_PER_MARKDOWN = 10_000;
+const highlightedCodeCache = new Map<string, string>();
+const highlightedCodeCacheBudget: StringCacheBudget = {
+  characters: 0,
+  maximumCharacters: 1_000_000,
+  maximumEntries: 100,
+  maximumEntryCharacters: 1_000_000,
+};
 const markdownHtmlCache = new Map<string, string>();
+const markdownHtmlCacheBudget: StringCacheBudget = {
+  characters: 0,
+  maximumCharacters: 2_000_000,
+  maximumEntries: 300,
+  maximumEntryCharacters: 500_000,
+};
 
 export function toSafeMarkdownHtml(text: string): string {
   const cached = markdownHtmlCache.get(text);
   if (cached !== undefined) return cached;
+  const renderer = markdownRenderer();
   const html = marked.parse(text, { async: false, breaks: true, gfm: true, renderer });
   const safeHtml = sanitizeHtml(html);
-  markdownHtmlCache.set(text, safeHtml);
-  if (markdownHtmlCache.size > MAX_MARKDOWN_CACHE_ENTRIES) {
-    const oldest = markdownHtmlCache.keys().next().value;
-    if (oldest !== undefined) markdownHtmlCache.delete(oldest);
-  }
+  rememberString(markdownHtmlCache, markdownHtmlCacheBudget, text, safeHtml);
   return safeHtml;
+}
+
+function markdownRenderer() {
+  let remainingHighlightCharacters = MAX_HIGHLIGHTED_CODE_CHARACTERS_PER_MARKDOWN;
+  const renderer = new marked.Renderer();
+  renderer.html = ({ text }) => escapeHtml(text);
+  renderer.code = ({ text, lang, raw }) => {
+    const rendered = renderCodeBlock(text, lang, raw, remainingHighlightCharacters);
+    remainingHighlightCharacters -= rendered.highlightedCharacters;
+    return rendered.html;
+  };
+  return renderer;
+}
+
+interface RenderedCodeBlock {
+  readonly highlightedCharacters: number;
+  readonly html: string;
+}
+
+function renderCodeBlock(text: string, info: string | undefined, raw: string, remainingHighlightCharacters: number): RenderedCodeBlock {
+  const code = `${text.replace(/\n$/u, "")}\n`;
+  const language = codeFenceLanguage(info);
+  if (language === undefined) return { highlightedCharacters: 0, html: `<pre><code>${escapeHtml(code)}</code></pre>\n` };
+  if (code.length > remainingHighlightCharacters || !canHighlightCode(language, code, raw)) {
+    return { highlightedCharacters: 0, html: `<pre><code class="language-${language}">${escapeHtml(code)}</code></pre>\n` };
+  }
+  const highlighted = highlightedCode(language, code);
+  return {
+    highlightedCharacters: code.length,
+    html: `<pre><code class="hljs language-${language}">${highlighted}</code></pre>\n`,
+  };
+}
+
+// Highlighting runs synchronously during Lit render. Large, cumulative, or
+// still-open fences stay plain so streaming output cannot monopolize the UI thread.
+function canHighlightCode(language: string, code: string, raw: string): boolean {
+  return code.length <= MAX_HIGHLIGHTED_CODE_CHARACTERS
+    && codeHighlighter.getLanguage(language) !== undefined
+    && hasClosingCodeFence(raw);
+}
+
+function highlightedCode(language: string, code: string): string {
+  const cacheKey = `${language}\u0000${code}`;
+  const cached = highlightedCodeCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const highlighted = codeHighlighter.highlight(code, { language, ignoreIllegals: true }).value;
+  rememberString(highlightedCodeCache, highlightedCodeCacheBudget, cacheKey, highlighted);
+  return highlighted;
+}
+
+function hasClosingCodeFence(raw: string): boolean {
+  const opening = /^ {0,3}(`{3,}|~{3,})/u.exec(raw)?.[1];
+  const contentStart = raw.indexOf("\n");
+  if (opening === undefined || contentStart < 0) return false;
+  const marker = opening[0];
+  if (marker === undefined) return false;
+  const closing = new RegExp(`(?:^|\\n) {0,3}${marker}{${String(opening.length)},}[\\t ]*\\r?(?:\\n|$)`, "u");
+  return closing.test(raw.slice(contentStart + 1));
+}
+
+function rememberString(cache: Map<string, string>, budget: StringCacheBudget, key: string, value: string): void {
+  const entryCharacters = key.length + value.length;
+  if (entryCharacters > budget.maximumEntryCharacters) return;
+  const previous = cache.get(key);
+  if (previous !== undefined) {
+    cache.delete(key);
+    budget.characters -= key.length + previous.length;
+  }
+  cache.set(key, value);
+  budget.characters += entryCharacters;
+  while (cache.size > budget.maximumEntries || budget.characters > budget.maximumCharacters) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) return;
+    const oldestValue = cache.get(oldestKey);
+    cache.delete(oldestKey);
+    budget.characters -= oldestKey.length + (oldestValue?.length ?? 0);
+  }
+}
+
+function codeFenceLanguage(info: string | undefined): string | undefined {
+  return info?.match(/^[a-z0-9_+-]+/iu)?.[0]?.toLowerCase();
 }
 
 function escapeHtml(text: string): string {
