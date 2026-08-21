@@ -287,6 +287,23 @@ describe("SessionCommandService", () => {
     expect(cloned.setSessionName).toHaveBeenCalledWith("Build auth — Copy 2");
   });
 
+  it("uses text after /clone as the cloned session name", async () => {
+    const active = activeSession({ sessionName: "Build auth" });
+    const cloned = activeSession({ sessionId: "copy", sessionName: undefined }).runtime.session;
+    vi.mocked(active.runtime.fork).mockImplementationOnce(() => {
+      active.runtime.session = cloned;
+      return Promise.resolve({ cancelled: false });
+    });
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
+
+    await expect(service.run("s1", "/clone Investigate refresh tokens")).resolves.toMatchObject({
+      type: "done",
+      message: "Session cloned",
+      session: { id: "copy", name: "Investigate refresh tokens" },
+    });
+    expect(cloned.setSessionName).toHaveBeenCalledWith("Investigate refresh tokens");
+  });
+
   it("does not start a clone if tree navigation takes the gate during async name lookup", async () => {
     const active = activeSession();
     const names = deferred<readonly string[]>();

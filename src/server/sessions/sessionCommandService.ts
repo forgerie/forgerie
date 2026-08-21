@@ -121,7 +121,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     if (name === "name") return this.nameSession(active, rest);
     if (name === "compact") return this.compact(session, rest);
     if (name === "reload") return this.reload(session);
-    if (name === "clone") return this.clone(active);
+    if (name === "clone") return this.clone(active, rest);
     if (name === "fork") return this.fork(active);
     if (name === "tree") return this.tree(session);
 
@@ -207,11 +207,11 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     return { type: "done", message: "Session runtime resources reloaded. Extensions, skills, prompt templates, themes, and context/system prompt files are refreshed for this session. Reload the browser page separately for Forgerie browser plugin changes." };
   }
 
-  private async clone(active: CommandActiveSession<TSession>): Promise<ClientCommandResult> {
+  private async clone(active: CommandActiveSession<TSession>, requestedName: string): Promise<ClientCommandResult> {
     if (this.hasActiveWork(active.runtime.session)) return forkActiveUnsupported("clone");
     const initialLeafId = active.runtime.session.sessionManager.getLeafId();
     if (initialLeafId === null || initialLeafId === "") return { type: "unsupported", message: "Cannot clone: no current session entry" };
-    const relatedName = await this.nextRelatedSessionName(active, "copy");
+    const cloneName = requestedName === "" ? await this.nextRelatedSessionName(active, "copy") : requestedName;
     if (this.lifecycle.isTreeNavigationActive?.(active.runtime.session) === true) return treeNavigationActiveUnsupported();
     if (this.hasActiveWork(active.runtime.session)) return forkActiveUnsupported("clone");
     // The active leaf may have changed while related-session names were loaded.
@@ -221,7 +221,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     const result = await this.runSessionReplacement(active.runtime, async () => {
       const cloneResult = await active.runtime.fork(leafId, { position: "at" });
       if (!cloneResult.cancelled) {
-        this.tryNameRelatedSession(active.runtime.session, relatedName);
+        this.tryNameRelatedSession(active.runtime.session, cloneName);
         await this.lifecycle.onUserFork?.(active.runtime.session);
       }
       return cloneResult;

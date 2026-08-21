@@ -13,7 +13,7 @@ export const BUILTIN_COMMANDS: ClientCommand[] = [
   { name: "changelog", description: "Show changelog entries", source: "builtin" },
   { name: "hotkeys", description: "Show keyboard shortcuts", source: "builtin" },
   { name: "fork", description: "Create a new fork from a previous user message", source: "builtin" },
-  { name: "clone", description: "Duplicate current session at current position", source: "builtin" },
+  { name: "clone", description: "Duplicate current session; optional text sets its name", source: "builtin" },
   { name: "tree", description: "Navigate session tree", source: "builtin" },
   { name: "login", description: "Configure provider authentication", source: "builtin" },
   { name: "logout", description: "Remove provider authentication", source: "builtin" },
