@@ -52,6 +52,19 @@ python3 -m http.server 8600
   `--window-size` clamps below 500px width. **Verdict: `rail` won** and is
   implemented in the transcript; see the folder README.
 
+- [`voice-content/`](./voice-content/) — **the only prototype here with its own
+  flake and a server.** Real speech in both directions: CUDA Kokoro for the
+  voice, `whisper.cpp` for hearing, Smart Turn for turn-taking. The question is
+  whether the voice can use the chat stream as its source without reading the
+  chat aloud, so the narrator merges, drops, and points at the screen instead of
+  dictating it. Live for phone testing at
+  <https://zao.hummingbird-lake.ts.net:8790> (tailnet only; see the folder
+  README for how to take it down). Three treatments via `?variant=`: `follow` (whole transcript,
+  voice marks the block), `deck` (one evidence card, no log), `ambient` (dark
+  until the voice hands something over). Run with `nix run path:.` from that
+  directory, then talk to it. `loop-check.mjs` closes the spoken loop with no
+  human present.
+
 - [`pen-context/`](./pen-context/) — pen input on a tablet. Four variants:
   mark the transcript to build a prompt, margin review on a diff, send a
   drawing, and a pen capability probe. Serve with
