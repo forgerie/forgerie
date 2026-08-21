@@ -252,6 +252,33 @@ describe("ChatView turn anchoring", () => {
     expect(reservedTurnKeys(view)).toEqual(["turn:m:1"]);
   });
 
+  it("releases a standing reservation when the viewport resizes while the session is idle", async () => {
+    const view = await loadedTranscript([said("user", "question")]);
+    view.messages = [...view.messages, said("user", "second question")];
+    await view.updateComplete;
+    expect(reservedTurnKeys(view)).toEqual(["turn:m:1"]);
+
+    window.dispatchEvent(new Event("resize"));
+    await view.updateComplete;
+
+    expect(reservedTurnKeys(view)).toEqual([]);
+  });
+
+  it("keeps the reservation when the viewport resizes while the reply is still arriving", async () => {
+    const view = await loadedTranscript([said("assistant", "earlier answer")]);
+    view.isSendingPrompt = true;
+    await view.updateComplete;
+    view.messages = [...view.messages, said("user", "question")];
+    await view.updateComplete;
+    expect(reservedTurnKeys(view)).toEqual(["turn:m:1"]);
+
+    window.dispatchEvent(new Event("resize"));
+    await view.updateComplete;
+
+    expect(followMode(view)).toEqual({ kind: "turn", turnKey: "turn:m:1" });
+    expect(reservedTurnKeys(view)).toEqual(["turn:m:1"]);
+  });
+
   it("cancels a queued automatic placement when the reader pulls back", async () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
