@@ -17,6 +17,7 @@ import { customElement, property } from "lit/decorators.js";
 import type { Project, Workspace } from "../api";
 import type { WorkspaceManagementDialogState } from "../appState";
 import "./ModalSurface";
+import "./ProjectList";
 
 @customElement("workspace-management-dialog")
 export class WorkspaceManagementDialog extends LitElement {
@@ -28,6 +29,8 @@ export class WorkspaceManagementDialog extends LitElement {
   // Callbacks — all optional; the parent wires only those it needs.
   /** Called when the user picks a project on the project step. */
   @property({ attribute: false }) onSelectProject?: (project: Project) => void;
+  /** Called after the user confirms that Forgerie should close a project. */
+  @property({ attribute: false }) onCloseProject?: (project: Project) => void;
   /** Called when the user chooses the workspace to manage. */
   @property({ attribute: false }) onConfirmManage?: (workspace: Workspace) => void;
   /** Called when the user navigates back from workspace to project step. */
@@ -43,7 +46,7 @@ export class WorkspaceManagementDialog extends LitElement {
     const state = this.dialogState;
     if (state === undefined) return nothing;
 
-    const title = "Manage workspace";
+    const title = "Manage projects and workspaces";
 
     return html`
       <modal-surface
@@ -74,7 +77,7 @@ export class WorkspaceManagementDialog extends LitElement {
   private renderProjectStep() {
     return html`
       <div class="step" data-step="project">
-        <p class="step-prompt">Choose a project:</p>
+        <p class="step-prompt">Choose a project to manage its workspaces, or open its actions to close it.</p>
         ${this.projects.length === 0
           ? html`
               <div class="empty-state" data-empty-projects>
@@ -82,20 +85,11 @@ export class WorkspaceManagementDialog extends LitElement {
               </div>
             `
           : html`
-              <div class="item-list" role="listbox" aria-label="Projects">
-                ${this.projects.map((project) => html`
-                  <button
-                    class="item-btn"
-                    role="option"
-                    data-project-id=${project.id}
-                    title=${project.path}
-                    @click=${() => { this.onSelectProject?.(project); }}
-                  >
-                    <span class="item-primary">${project.name}</span>
-                    <span class="item-secondary">${project.path}</span>
-                  </button>
-                `)}
-              </div>
+              <project-list
+                .projects=${this.projects}
+                .onSelect=${(project: Project) => { this.onSelectProject?.(project); }}
+                .onClose=${(project: Project) => { this.onCloseProject?.(project); }}
+              ></project-list>
             `}
         <footer class="dialog-footer">
           <button
@@ -242,6 +236,11 @@ export class WorkspaceManagementDialog extends LitElement {
       padding: 12px 16px 8px;
       font-size: var(--pi-text-sm);
       color: var(--pi-muted, #85888e);
+    }
+
+    project-list {
+      flex: 1 1 auto;
+      min-height: 0;
     }
 
     /* ---- Item list (projects / workspaces) ---- */

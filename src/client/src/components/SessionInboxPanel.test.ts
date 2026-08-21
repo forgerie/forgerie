@@ -1058,6 +1058,7 @@ describe("header", () => {
 
     clickSelector(root, "[data-action='board-menu']");
     await panel.updateComplete;
+    expect(root.querySelector("[data-action='manage-workspaces']")?.textContent).toContain("Manage projects and workspaces");
     clickSelector(root, "[data-action='manage-workspaces']");
     await panel.updateComplete;
 

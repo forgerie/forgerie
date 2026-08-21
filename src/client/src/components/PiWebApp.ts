@@ -3633,6 +3633,10 @@ export class PiWebApp extends LitElement {
           .dialogState=${state.workspaceManagementDialog}
           .projects=${state.projects}
           .onSelectProject=${(project: Project) => { void this.openWorkspaceManagementDialogWorkspaceStep(project); }}
+          .onCloseProject=${(project: Project) => {
+            this.setState({ workspaceManagementDialog: undefined });
+            void this.projects.closeProject(project.id);
+          }}
           .onConfirmManage=${(workspace: Workspace) => { void this.confirmManageWorkspace(workspace); }}
           .onBack=${() => {
             const current = state.workspaceManagementDialog;

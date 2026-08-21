@@ -4,11 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, Workspace } from "../api";
 import type { WorkspaceManagementDialogState } from "../appState";
 import { WorkspaceManagementDialog } from "./WorkspaceManagementDialog";
+import type { ProjectList } from "./ProjectList";
 import { settleRenderedDialog } from "./modalSurfaceTestSupport";
 
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("WorkspaceManagementDialog workspace management", () => {
@@ -20,21 +22,36 @@ describe("WorkspaceManagementDialog workspace management", () => {
     });
 
     const root = required(dialog.shadowRoot, "shadow root");
-    expect(root.textContent).toContain("Manage workspace");
+    expect(root.textContent).toContain("Manage projects and workspaces");
     expect(root.textContent).not.toContain("Start session");
     required(root.querySelector<HTMLButtonElement>("[data-workspace-id='workspace']"), "workspace button").click();
     expect(onConfirmManage).toHaveBeenCalledWith(workspace);
   });
 
-  it("preserves project selection, loading, error, back, and cancel contracts", async () => {
+  it("offers project selection and close actions from the project step", async () => {
     const onSelectProject = vi.fn();
+    const onCloseProject = vi.fn();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const dialog = await mount({ dialogState: { step: "project" }, onSelectProject, onCloseProject });
+    const list = await projectList(dialog);
+    const row = projectRow(list);
+
+    row.click();
+    required(row.querySelector<HTMLButtonElement>(".action-menu-toggle"), "project actions button").click();
+    await list.updateComplete;
+    required(list.shadowRoot?.querySelector<HTMLButtonElement>(".action-menu-panel button"), "close project button").click();
+
+    expect(onSelectProject).toHaveBeenCalledWith(project);
+    expect(confirm).toHaveBeenCalledWith("Close Forgerie?\n\nThis only removes it from Forgerie; it will not change the project folder.");
+    expect(onCloseProject).toHaveBeenCalledWith(project);
+  });
+
+  it("preserves loading, error, back, and cancel contracts", async () => {
     const onCancel = vi.fn();
-    const dialog = await mount({ dialogState: { step: "project" }, onSelectProject, onCancel });
+    const dialog = await mount({ dialogState: { step: "project" }, onCancel });
     const root = required(dialog.shadowRoot, "shadow root");
 
-    required(root.querySelector<HTMLButtonElement>("[data-project-id='project']"), "project button").click();
     required(root.querySelector<HTMLButtonElement>("[data-action='cancel']"), "cancel button").click();
-    expect(onSelectProject).toHaveBeenCalledWith(project);
     expect(onCancel).toHaveBeenCalledOnce();
 
     dialog.dialogState = { step: "workspace", project, workspaces: [], loading: true, error: undefined };
@@ -57,6 +74,7 @@ const workspace: Workspace = { id: "workspace", projectId: project.id, path: pro
 async function mount(properties: {
   dialogState: WorkspaceManagementDialogState;
   onSelectProject?: (project: Project) => void;
+  onCloseProject?: (project: Project) => void;
   onConfirmManage?: (workspace: Workspace) => void;
   onBack?: () => void;
   onCancel?: () => void;
@@ -65,12 +83,23 @@ async function mount(properties: {
   dialog.dialogState = properties.dialogState;
   dialog.projects = [project];
   if (properties.onSelectProject !== undefined) dialog.onSelectProject = properties.onSelectProject;
+  if (properties.onCloseProject !== undefined) dialog.onCloseProject = properties.onCloseProject;
   if (properties.onConfirmManage !== undefined) dialog.onConfirmManage = properties.onConfirmManage;
   if (properties.onBack !== undefined) dialog.onBack = properties.onBack;
   if (properties.onCancel !== undefined) dialog.onCancel = properties.onCancel;
   document.body.append(dialog);
   await settleRenderedDialog(dialog);
   return dialog;
+}
+
+async function projectList(dialog: WorkspaceManagementDialog): Promise<ProjectList> {
+  const list = required(dialog.shadowRoot?.querySelector<ProjectList>("project-list"), "project list");
+  await list.updateComplete;
+  return list;
+}
+
+function projectRow(list: ProjectList): HTMLElement {
+  return required(list.shadowRoot?.querySelector<HTMLElement>(".action-row"), "project row");
 }
 
 function required<T>(value: T | null | undefined, label: string): T {
