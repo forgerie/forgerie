@@ -2,7 +2,6 @@ import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, isAbsolute, resolve } from "node:path";
 import { createSpeechService, speechServiceUnavailable, type SpeechBackend, type SpeechService } from "./speechService.js";
-import { SmartTurnProcess } from "./smartTurnProcess.js";
 import { WhisperProcess } from "./whisperProcess.js";
 
 export interface LiveSpeechCommandEnvironment {
@@ -16,26 +15,21 @@ export interface LiveSpeechCommands {
   readonly whisper: string | undefined;
 }
 
-const smartTurnCommandName = "forgerie-smart-turn-worker";
 const whisperCommandName = "forgerie-whisper-stt-worker";
 
 export async function createLiveSpeechService(env: LiveSpeechCommandEnvironment = process.env): Promise<SpeechService> {
   const commands = await resolveLiveSpeechCommands(env);
-  const smartTurn = backendForCommand(commands.smartTurn, smartTurnBackend, "smart_turn_runtime_missing", "smart_turn_runtime_unusable");
+  const smartTurn = speechServiceUnavailable("automatic_turn_detection_disabled");
   const whisper = backendForCommand(commands.whisper, whisperBackend, "whisper_runtime_missing", "whisper_runtime_unusable");
   return createSpeechService({ smartTurn, whisper });
 }
 
 export async function resolveLiveSpeechCommands(env: LiveSpeechCommandEnvironment = process.env): Promise<LiveSpeechCommands> {
-  const [smartTurn, whisper] = await Promise.all([
-    resolveCommand(env.FORGERIE_SMART_TURN_WORKER, smartTurnCommandName, env.PATH),
-    resolveCommand(env.FORGERIE_WHISPER_STT_WORKER, whisperCommandName, env.PATH),
-  ]);
+  // Explicit completion is the product policy. Do not resolve or start the
+  // Smart Turn backend while automatic turn detection is disabled.
+  const smartTurn = undefined;
+  const whisper = await resolveCommand(env.FORGERIE_WHISPER_STT_WORKER, whisperCommandName, env.PATH);
   return { smartTurn, whisper };
-}
-
-function smartTurnBackend(commandPath: string): SpeechBackend {
-  return new SmartTurnProcess({ commandPath });
 }
 
 function whisperBackend(commandPath: string): SpeechBackend {

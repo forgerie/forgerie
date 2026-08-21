@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("live speech service composition", () => {
-  it("resolves named commands from PATH and accepts absolute executable overrides only", async () => {
+  it("keeps automatic turn detection disabled while resolving Whisper from PATH or an absolute override", async () => {
     const dir = await mkdtemp(join(tmpdir(), "forgerie-live-speech-test-"));
     temps.push(dir);
     const smartTurn = join(dir, "forgerie-smart-turn-worker");
@@ -21,8 +21,8 @@ describe("live speech service composition", () => {
     await chmod(smartTurn, 0o755);
     await chmod(whisper, 0o755);
 
-    await expect(resolveLiveSpeechCommands({ PATH: dir })).resolves.toEqual({ smartTurn: await realpath(smartTurn), whisper: await realpath(whisper) });
-    await expect(resolveLiveSpeechCommands({ PATH: dir, FORGERIE_SMART_TURN_WORKER: "relative-worker", FORGERIE_WHISPER_STT_WORKER: whisper })).resolves.toEqual({ smartTurn: undefined, whisper: await realpath(whisper) });
+    await expect(resolveLiveSpeechCommands({ PATH: dir })).resolves.toEqual({ smartTurn: undefined, whisper: await realpath(whisper) });
+    await expect(resolveLiveSpeechCommands({ PATH: dir, FORGERIE_SMART_TURN_WORKER: smartTurn, FORGERIE_WHISPER_STT_WORKER: whisper })).resolves.toEqual({ smartTurn: undefined, whisper: await realpath(whisper) });
   });
 
   it("resolves relative PATH entries to absolute real paths and ignores unusable candidates", async () => {
@@ -35,7 +35,7 @@ describe("live speech service composition", () => {
     await chmod(smartTurn, 0o755);
     await chmod(whisper, 0o755);
 
-    await expect(resolveLiveSpeechCommands({ PATH: relative(process.cwd(), dir) })).resolves.toEqual({ smartTurn: await realpath(smartTurn), whisper: await realpath(whisper) });
+    await expect(resolveLiveSpeechCommands({ PATH: relative(process.cwd(), dir) })).resolves.toEqual({ smartTurn: undefined, whisper: await realpath(whisper) });
     await expect(resolveLiveSpeechCommands({ PATH: "relative-path-entry-that-does-not-exist" })).resolves.toEqual({ smartTurn: undefined, whisper: undefined });
   });
 

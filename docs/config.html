@@ -156,43 +156,45 @@
               <h2>Local speech dictation runtime</h2>
               <p>
                 Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends
-                it to the Forgerie web/API process that served the page. That gateway performs Smart Turn endpointing and
-                Whisper transcription, then inserts final text into the current active-session or new-session draft. Audio
-                is not proxied to the selected federated machine, even when the prompt text will later be sent to a remote
-                machine.
+                it to the Forgerie web/API process that served the page. That gateway performs Whisper transcription, then
+                inserts final text into the current active-session or new-session draft. Audio is not proxied to the
+                selected federated machine, even when the prompt text will later be sent to a remote machine.
               </p>
-              <p>The current first slice packages the model workers with Nix for <code>x86_64-linux</code> only:</p>
+              <p>
+                Automatic turn detection is disabled. After speech starts, a pause does not end the recording. The user
+                must stop dictation explicitly, or the 60-second capture limit stops it.
+              </p>
+              <p>The current runtime packages Whisper with Nix for <code>x86_64-linux</code> only:</p>
               <div class="code-card">
-                <pre><code>nix build .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker
-nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</code></pre>
+                <pre><code>nix build .#forgerie-whisper-stt-worker
+nix profile install .#forgerie-whisper-stt-worker</code></pre>
               </div>
               <p>
-                The flake pins and realizes the Smart Turn v3.2 ONNX model and the <code>whisper.cpp</code>
-                <code>ggml-base.en.bin</code> model. Wider installer integration and Docker or macOS model packaging are not
-                available yet. Missing or unusable worker commands degrade speech only; they do not stop the web UI or
-                session daemon.
+                The flake pins and realizes the <code>whisper.cpp</code> <code>ggml-base.en.bin</code> model. The Smart Turn
+                worker remains available as a Nix output, but the web/API process does not resolve or start it while
+                automatic turn detection is disabled. Wider installer integration and Docker or macOS model packaging are
+                not available yet. A missing or unusable Whisper worker disables speech only; it does not stop the web UI
+                or session daemon.
               </p>
-              <p>At web/API startup Forgerie resolves the named worker commands from the web process <code>PATH</code>:</p>
+              <p>
+                At web/API startup Forgerie resolves <code>forgerie-whisper-stt-worker</code> from the web process
+                <code>PATH</code>. Resolution produces an absolute real path, and the worker starts without a shell. To
+                bypass <code>PATH</code>, set an absolute executable override:
+              </p>
               <ul>
-                <li><code>forgerie-smart-turn-worker</code></li>
-                <li><code>forgerie-whisper-stt-worker</code></li>
-              </ul>
-              <p>Resolution produces absolute real paths and the workers are spawned without a shell. To bypass <code>PATH</code>, set absolute executable overrides:</p>
-              <ul>
-                <li><code>FORGERIE_SMART_TURN_WORKER=/absolute/path/to/forgerie-smart-turn-worker</code></li>
                 <li><code>FORGERIE_WHISPER_STT_WORKER=/absolute/path/to/forgerie-whisper-stt-worker</code></li>
               </ul>
               <p>
-                Relative paths, launcher strings, and shell snippets are ignored. Restart the web/API service or process
-                after changing either override or the <code>PATH</code> visible to that service.
+                Relative paths, launcher strings, and shell snippets are ignored. <code>FORGERIE_SMART_TURN_WORKER</code>
+                is ignored while automatic turn detection is disabled. Restart the web/API service or process after
+                changing the Whisper override or the <code>PATH</code> visible to that service.
               </p>
               <p>
-                The web/API process warms both workers eagerly after the HTTP listener starts. Readiness is reported by
+                The web/API process warms Whisper after the HTTP listener starts. Readiness is reported by
                 <code>GET /api/speech/status</code>:
               </p>
               <ul>
-                <li><code>ready</code>: Smart Turn and Whisper are ready. Tap mode can complete automatically.</li>
-                <li><code>manual-only</code>: Whisper is ready but Smart Turn is not. Dictation can still transcribe when the user presses the microphone again or releases a held press.</li>
+                <li><code>manual-only</code>: Whisper is ready. Dictation transcribes when the user stops it explicitly.</li>
                 <li><code>warming</code>: Whisper is still starting.</li>
                 <li><code>unavailable</code>: Whisper is unavailable, so composer dictation is disabled.</li>
               </ul>
@@ -205,18 +207,16 @@ nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</
                 changing it.
               </p>
               <p>
-                Speech limits are fixed in code for this slice: 16 kHz mono float32 PCM, a 60-second maximum turn, an
-                eight-second Smart Turn endpoint window, 100 ms minimum request duration, at most 16 endpoint checks per
-                turn, 10-second body upload and operation deadlines, one active plus one queued operation per backend, 96
-                endpoint checks and 12 transcriptions per gateway minute, and a 60-second warmup deadline. Raw microphone
-                audio is kept only in memory for the active bounded turn, endpoint window, and 30-second retry buffer;
-                Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session
-                behavior.
+                Speech uses fixed limits. Audio is 16 kHz mono float32 PCM, with a 60-second maximum turn. Body uploads
+                and operations have 10-second deadlines. The gateway admits one active and one queued transcription, up to
+                12 transcriptions per minute. Whisper has a 60-second warmup deadline. Raw microphone audio stays in memory
+                for the active bounded turn and 30-second retry buffer. Forgerie does not store raw audio as durable
+                application data. Final text follows the normal draft/session behavior.
               </p>
               <p>
-                In active-session and new-session composers, tap the microphone for automatic completion, hold it to keep
-                listening until release, and press it again during hands-free or manual-only capture to transcribe
-                immediately. Permission denial, missing microphone hardware, model failures, status failures, and timeouts
+                In active-session and new-session composers, tap the microphone once to start and again to transcribe. A
+                held press listens until release. In the current session composer, Ctrl+Space also starts and stops
+                dictation. Permission denial, missing microphone hardware, model failures, status failures, and timeouts
                 release the microphone and keep existing draft text unchanged.
               </p>
             </section>
@@ -241,7 +241,7 @@ nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker</
               </p>
               <ul>
                 <li><code>host</code> / <code>port</code>: restart the gateway web/API service or process.</li>
-                <li><code>FORGERIE_SMART_TURN_WORKER</code> / <code>FORGERIE_WHISPER_STT_WORKER</code> / <code>FORGERIE_SPEECH_ALLOWED_HOSTS</code>: restart the gateway web/API service or process. Speech workers are web-owned, not session-daemon-owned.</li>
+                <li><code>FORGERIE_WHISPER_STT_WORKER</code> / <code>FORGERIE_SPEECH_ALLOWED_HOSTS</code>: restart the gateway web/API service or process. The speech worker is web-owned, not session-daemon-owned. <code>FORGERIE_SMART_TURN_WORKER</code> is ignored while automatic turn detection is disabled.</li>
                 <li><code>maxUploadBytes</code>: restart both the web/API process and the session daemon on that machine.</li>
                 <li><code>agent.command</code> / <code>agent.dir</code> / <code>spawnSessions</code> / <code>subsessions</code> / <code>askUser</code> / <code>extensionDialogsTimeoutMs</code>: restart the session daemon on that machine.</li>
                 <li><code>pathAccess</code>: applies on the next request; existing file views may need a browser refresh.</li>
@@ -541,7 +541,7 @@ worktree_path="$1"
                       <td><code>FORGERIE_SMART_TURN_WORKER</code></td>
                       <td>Gateway web/API env</td>
                       <td>Not supported locally</td>
-                      <td>Restart web/API; absolute executable override only; otherwise resolved from <code>PATH</code></td>
+                      <td>Ignored while automatic turn detection is disabled</td>
                     </tr>
                     <tr>
                       <td>Speech Whisper worker</td>

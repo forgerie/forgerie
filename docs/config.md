@@ -26,41 +26,36 @@ For a nested deployment, redirect the slashless prefix to the trailing-slash URL
 
 ## Local speech dictation runtime
 
-Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends it to the Forgerie web/API process that served the page. That gateway performs Smart Turn endpointing and Whisper transcription, then inserts final text into the current active-session or new-session draft. Audio is not proxied to the selected federated machine, even when the prompt text will later be sent to a remote machine.
+Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends it to the Forgerie web/API process that served the page. That gateway performs Whisper transcription, then inserts final text into the current active-session or new-session draft. Audio is not proxied to the selected federated machine, even when the prompt text will later be sent to a remote machine.
 
-The current first slice packages the model workers with Nix for `x86_64-linux` only:
+Automatic turn detection is disabled. After speech starts, a pause does not end the recording. The user must stop dictation explicitly, or the 60-second capture limit stops it.
+
+The current runtime packages Whisper with Nix for `x86_64-linux` only:
 
 ```sh
-nix build .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker
-nix profile install .#forgerie-smart-turn-worker .#forgerie-whisper-stt-worker
+nix build .#forgerie-whisper-stt-worker
+nix profile install .#forgerie-whisper-stt-worker
 ```
 
-The flake pins and realizes the Smart Turn v3.2 ONNX model and the `whisper.cpp` `ggml-base.en.bin` model. Wider installer integration and Docker or macOS model packaging are not available yet. Missing or unusable worker commands degrade speech only; they do not stop the web UI or session daemon.
+The flake pins and realizes the `whisper.cpp` `ggml-base.en.bin` model. The Smart Turn worker remains available as a Nix output, but the web/API process does not resolve or start it while automatic turn detection is disabled. Wider installer integration and Docker or macOS model packaging are not available yet. A missing or unusable Whisper worker disables speech only; it does not stop the web UI or session daemon.
 
-At web/API startup Forgerie resolves the named worker commands from the web process `PATH`:
+At web/API startup Forgerie resolves `forgerie-whisper-stt-worker` from the web process `PATH`. Resolution produces an absolute real path, and the worker starts without a shell. To bypass `PATH`, set an absolute executable override:
 
-- `forgerie-smart-turn-worker`
-- `forgerie-whisper-stt-worker`
-
-Resolution produces absolute real paths and the workers are spawned without a shell. To bypass `PATH`, set absolute executable overrides:
-
-- `FORGERIE_SMART_TURN_WORKER=/absolute/path/to/forgerie-smart-turn-worker`
 - `FORGERIE_WHISPER_STT_WORKER=/absolute/path/to/forgerie-whisper-stt-worker`
 
-Relative paths, launcher strings, and shell snippets are ignored. Restart the web/API service or process after changing either override or the `PATH` visible to that service.
+Relative paths, launcher strings, and shell snippets are ignored. `FORGERIE_SMART_TURN_WORKER` is ignored while automatic turn detection is disabled. Restart the web/API service or process after changing the Whisper override or the `PATH` visible to that service.
 
-The web/API process warms both workers eagerly after the HTTP listener starts. Readiness is reported by `GET /api/speech/status`:
+The web/API process warms Whisper after the HTTP listener starts. Readiness is reported by `GET /api/speech/status`:
 
-- `ready`: Smart Turn and Whisper are ready. Tap mode can complete automatically.
-- `manual-only`: Whisper is ready but Smart Turn is not. Dictation can still transcribe when the user presses the microphone again or releases a held press.
+- `manual-only`: Whisper is ready. Dictation transcribes when the user stops it explicitly.
 - `warming`: Whisper is still starting.
 - `unavailable`: Whisper is unavailable, so composer dictation is disabled.
 
 Browser-classified speech POSTs also pass a gateway Host allowlist. `FORGERIE_SPEECH_ALLOWED_HOSTS` is a comma-separated list of allowed browser `Host` values for speech requests, such as `forgerie.example.ts.net:8504,forgerie.example.ts.net`. When unset, Forgerie allows the configured web/API host and localhost variants for the configured port. Set this when a reverse proxy or VPN hostname serves the browser, and restart the web/API service after changing it.
 
-Speech limits are fixed in code for this slice: 16 kHz mono float32 PCM, a 60-second maximum turn, an eight-second Smart Turn endpoint window, 100 ms minimum request duration, at most 16 endpoint checks per turn, 10-second body upload and operation deadlines, one active plus one queued operation per backend, 96 endpoint checks and 12 transcriptions per gateway minute, and a 60-second warmup deadline. Raw microphone audio is kept only in memory for the active bounded turn, endpoint window, and 30-second retry buffer; Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session behavior.
+Speech uses fixed limits. Audio is 16 kHz mono float32 PCM, with a 60-second maximum turn. Body uploads and operations have 10-second deadlines. The gateway admits one active and one queued transcription, up to 12 transcriptions per minute. Whisper has a 60-second warmup deadline. Raw microphone audio stays in memory for the active bounded turn and 30-second retry buffer. Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session behavior.
 
-In active-session and new-session composers, tap the microphone for automatic completion, hold it to keep listening until release, and press it again during hands-free or manual-only capture to transcribe immediately. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
+In active-session and new-session composers, tap the microphone once to start and again to transcribe. A held press listens until release. In the current session composer, Ctrl+Space also starts and stops dictation. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
 
 ## Precedence and reloads
 
@@ -77,7 +72,7 @@ Environment overrides include `PI_WEB_HOST`, `PI_WEB_PORT` / `PORT`, `PI_WEB_ALL
 Process restarts depend on the key:
 
 - `host` / `port`: restart the gateway web/API service or process.
-- `FORGERIE_SMART_TURN_WORKER` / `FORGERIE_WHISPER_STT_WORKER` / `FORGERIE_SPEECH_ALLOWED_HOSTS`: restart the gateway web/API service or process. Speech workers are web-owned, not session-daemon-owned.
+- `FORGERIE_WHISPER_STT_WORKER` / `FORGERIE_SPEECH_ALLOWED_HOSTS`: restart the gateway web/API service or process. The speech worker is web-owned, not session-daemon-owned. `FORGERIE_SMART_TURN_WORKER` is ignored while automatic turn detection is disabled.
 - `maxUploadBytes`: restart both the web/API process and the session daemon on that machine.
 - `agent.command` / `agent.dir` / `spawnSessions` / `subsessions` / `askUser` / `extensionDialogsTimeoutMs`: restart the session daemon on that machine.
 - `pathAccess`: applies on the next request; existing file views may need a browser refresh.
@@ -203,7 +198,7 @@ Rows with JSON key `—` are runtime-only environment variables, not config-file
 | Keyboard shortcuts | `shortcuts.<actionId>` | — | Global | Not supported locally | Applies after settings save/config refresh |
 | Project config version | `version` | — | Project | Project-local only; must be `1` when present | Next project-config read |
 | **Runtime-only environment variables** |  |  |  |  |  |
-| Speech Smart Turn worker | — | `FORGERIE_SMART_TURN_WORKER` | Gateway web/API env | Not supported locally | Restart web/API; absolute executable override only; otherwise resolved from `PATH` |
+| Speech Smart Turn worker | — | `FORGERIE_SMART_TURN_WORKER` | Gateway web/API env | Not supported locally | Ignored while automatic turn detection is disabled |
 | Speech Whisper worker | — | `FORGERIE_WHISPER_STT_WORKER` | Gateway web/API env | Not supported locally | Restart web/API; absolute executable override only; otherwise resolved from `PATH` |
 | Speech browser Host allowlist | — | `FORGERIE_SPEECH_ALLOWED_HOSTS` | Gateway web/API env | Not supported locally | Restart web/API |
 | Global config file path | — | `PI_WEB_CONFIG` (`XDG_CONFIG_HOME` affects the default path) | Process/env | Selects the global config file; not a project config | Restart services/processes after changing env |
