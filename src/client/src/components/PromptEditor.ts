@@ -143,9 +143,11 @@ export class PromptEditor extends LitElement {
   private readonly handleQueuePointerUpDocument = (event: PointerEvent): void => { this.onQueuePointerUp(event); };
   private readonly handleQueuePointerCancelDocument = (event: PointerEvent): void => { this.onQueuePointerCancel(event); };
   private readonly handleQueueKeyUpDocument = (event: KeyboardEvent): void => { this.onQueueKeyUp(event); };
+  private readonly handleRapidfireSubmitKeyDownCapture = (event: KeyboardEvent): void => { this.onRapidfireSubmitKeyDown(event); };
 
   override connectedCallback(): void {
     super.connectedCallback();
+    this.addEventListener("keydown", this.handleRapidfireSubmitKeyDownCapture, { capture: true });
     document.addEventListener("pointermove", this.handleQueuePointerMoveDocument, { capture: true });
     document.addEventListener("pointerup", this.handleQueuePointerUpDocument, { capture: true });
     document.addEventListener("pointercancel", this.handleQueuePointerCancelDocument, { capture: true });
@@ -188,6 +190,7 @@ export class PromptEditor extends LitElement {
   }
 
   override disconnectedCallback(): void {
+    this.removeEventListener("keydown", this.handleRapidfireSubmitKeyDownCapture, { capture: true });
     document.removeEventListener("pointermove", this.handleQueuePointerMoveDocument, { capture: true });
     document.removeEventListener("pointerup", this.handleQueuePointerUpDocument, { capture: true });
     document.removeEventListener("pointercancel", this.handleQueuePointerCancelDocument, { capture: true });
@@ -461,6 +464,21 @@ export class PromptEditor extends LitElement {
   }
 
 
+  private onRapidfireSubmitKeyDown(event: KeyboardEvent): void {
+    const rapidfire = this.capabilities.rapidfire;
+    const prompt = this.view?.contentDOM;
+    if (rapidfire === undefined || prompt === undefined || !event.composedPath().includes(prompt)) return;
+    if (event.defaultPrevented || event.isComposing || this.view?.composing === true || event.repeat) return;
+    if (event.key !== "Enter" || !event.shiftKey || (!event.ctrlKey && !event.metaKey) || event.altKey) return;
+    if (this.disabled || rapidfire.disabled === true || this.dictationBlocksComposer()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeSteer(false);
+    this.closeChoice(false);
+    if (!rapidfire.active) rapidfire.onToggle();
+    this.submitDraft();
+  }
+
   private renderRapidfireAction() {
     const rapidfire = this.capabilities.rapidfire;
     if (rapidfire === undefined) return nothing;
@@ -472,6 +490,7 @@ export class PromptEditor extends LitElement {
         data-action="rapidfire"
         title=${title}
         aria-label="Rapidfire for current workspace"
+        aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
         aria-pressed=${rapidfire.active ? "true" : "false"}
         ?disabled=${this.disabled || rapidfire.disabled === true}
         @pointerdown=${(event: PointerEvent) => { event.preventDefault(); }}

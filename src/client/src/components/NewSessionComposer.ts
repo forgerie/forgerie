@@ -525,9 +525,12 @@ export class NewSessionComposer extends LitElement {
   }
 
   private refocusRapidfireDraft(): void {
-    queueMicrotask(() => {
+    void this.updateComplete.then(async () => {
+      const editor = this.editor;
+      await editor?.updateComplete;
+      await editor?.draft?.updateComplete;
       if (!this.isConnected || this.launchMode !== "rapidfire" || this.composerState.kind !== "editing") return;
-      this.draft?.focusInput();
+      editor?.focusInput();
     });
   }
 

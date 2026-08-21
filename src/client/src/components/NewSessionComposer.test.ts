@@ -269,6 +269,63 @@ describe("new-session-composer editing and submission", () => {
     expect(deepActiveElement()).toBe(promptField(composer));
   });
 
+  it("waits for the nested prompt to become editable before restoring Rapidfire focus", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    let resolveSubmission: ((outcome: NewSessionSubmissionOutcome) => void) | undefined;
+    const composer = await mountComposer({
+      initialDestination: destination,
+      onSubmit: () => new Promise<NewSessionSubmissionOutcome>((resolve) => { resolveSubmission = resolve; }),
+    });
+    rapidfireToggle(composer).click();
+    await composer.updateComplete;
+    await enterPrompt(composer, "Launch the review");
+
+    const composerDraft = draft(composer);
+    const focusInput = composerDraft.focusInput.bind(composerDraft);
+    // happy-dom can focus a non-editable CodeMirror surface. Chromium cannot,
+    // so model that browser boundary while testing the nested update timing.
+    vi.spyOn(composerDraft, "focusInput").mockImplementation(() => promptField(composer).getAttribute("contenteditable") === "true" ? focusInput() : false);
+    const send = sendButton(composer);
+    send.focus();
+    send.click();
+
+    await vi.waitFor(() => { expect(composerDraft.disabled).toBe(true); });
+    promptField(composer).blur();
+    expect(deepActiveElement()).not.toBe(promptField(composer));
+
+    resolveSubmission?.({ kind: "accepted" });
+    await vi.waitFor(() => { expect(promptText(composer)).toBe(""); });
+    await promptEditor(composer).updateComplete;
+    await composerDraft.updateComplete;
+
+    expect(composerDraft.disabled).toBe(false);
+    expect(deepActiveElement()).toBe(promptField(composer));
+  });
+
+  it("enables Rapidfire, submits, and leaves the mode on with Ctrl+Shift+Enter", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
+    const composer = await mountComposer({ initialDestination: destination, initialPrompt: "Launch from the shortcut", onSubmit });
+    expect(rapidfireToggle(composer).getAttribute("aria-keyshortcuts")).toBe("Control+Shift+Enter Meta+Shift+Enter");
+    const shortcut = new KeyboardEvent("keydown", {
+      key: "Enter",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+
+    promptField(composer).dispatchEvent(shortcut);
+
+    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledOnce(); });
+    expect(shortcut.defaultPrevented).toBe(true);
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "rapidfire", destination, firstPrompt: { text: "Launch from the shortcut" } });
+    expect(rapidfireToggle(composer).getAttribute("aria-pressed")).toBe("true");
+    expect(promptText(composer)).toBe("");
+    expect(deepActiveElement()).toBe(promptField(composer));
+  });
+
   it("keeps Rapidfire open, preserves its destination, and clears each accepted prompt for the next launch", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
