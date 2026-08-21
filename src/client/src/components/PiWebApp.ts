@@ -5,7 +5,7 @@ import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, w
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState, type GlobalSessionsState } from "../appState";
 import { createInboxLocationResolver } from "../inboxLocation";
-import { completeNewSessionDestination, createApiNewSessionDestinationCatalog, isNewSessionMachineAvailable, type NewSessionCompleteDestination, type NewSessionDestinationCatalog, type NewSessionLaunchIntent, type NewSessionSubmissionOutcome } from "../newSessionComposer";
+import { completeNewSessionDestination, createApiNewSessionDestinationCatalog, isNewSessionMachineAvailable, type NewSessionCompleteDestination, type NewSessionDestinationCatalog, type NewSessionLaunchIntent, type NewSessionLaunchMode, type NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { sessionPathsEqual } from "../sessionPaths";
 import { isSessionActive } from "../../../shared/activity";
 import type { ManagedProcessesSnapshot } from "../../../shared/apiTypes";
@@ -1903,7 +1903,7 @@ export class PiWebApp extends LitElement {
   // New-session composer and workspace management
   // -------------------------------------------------------------------------
 
-  private openNewSessionComposer(): void {
+  private openNewSessionComposer(initialLaunchMode: NewSessionLaunchMode = "switch"): void {
     if (this.state.newSessionComposer.kind === "open") {
       this.newSessionComposer?.focusExisting();
       return;
@@ -1913,6 +1913,7 @@ export class PiWebApp extends LitElement {
       newSessionComposer: {
         kind: "open",
         ...(initialDestination === undefined ? {} : { initialDestination }),
+        ...(initialLaunchMode === "switch" ? {} : { initialLaunchMode }),
       },
     });
   }
@@ -2802,7 +2803,7 @@ export class PiWebApp extends LitElement {
       reloadPage: () => { this.hardReloadApp(); },
       deleteWorkspace: (workspace) => this.deleteWorkspace(workspace),
       startSession: () => { this.openNewSessionComposer(); },
-      openNewSessionComposer: () => { this.openNewSessionComposer(); },
+      openNewSessionComposer: (initialLaunchMode) => { this.openNewSessionComposer(initialLaunchMode); },
       archiveSession: () => {
         const session = this.state.selectedSession;
         if (session !== undefined) void this.archiveInboxSession(session);
@@ -3677,6 +3678,7 @@ export class PiWebApp extends LitElement {
         ${this.renderPanelSurface("workspace")}
         ${state.newSessionComposer.kind === "open" ? html`<new-session-composer
           .initialDestination=${state.newSessionComposer.initialDestination}
+          .initialLaunchMode=${state.newSessionComposer.initialLaunchMode ?? "switch"}
           .recoverySeedId=${state.newSessionComposer.recoverySeedId}
           .catalog=${this.newSessionDestinationCatalog}
           .loadAgentDefaults=${(cwd: string, machineId: string) => sessionsApi.newSessionModels(cwd, machineId)}

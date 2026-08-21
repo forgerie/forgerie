@@ -51,6 +51,31 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).selectedSession).toBe(selectedSession);
   });
 
+  it("mounts the same New session composer with Rapidfire active when requested", async () => {
+    const app = new PiWebApp();
+    const selectedSession = session("selected", mainWorkspace.path);
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      selectedWorkspace: mainWorkspace,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedSession,
+      sessions: [selectedSession],
+    });
+
+    invoke(app, "openNewSessionComposer", "rapidfire");
+    patchAppState(app, { selectedSession: undefined });
+    const composer = required(renderApp(app).querySelector<NewSessionComposer>("new-session-composer"), "new-session composer");
+    await elementUpdateComplete(composer);
+    const toggle = required(required(composer.shadowRoot?.querySelector("prompt-editor"), "prompt editor").shadowRoot?.querySelector<HTMLButtonElement>("[data-action='rapidfire']"), "Rapidfire toggle");
+
+    expect(composer.initialLaunchMode).toBe("rapidfire");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("requires a destination rather than guessing when the selected session cwd is not an exact loaded workspace", () => {
     const app = new PiWebApp();
     const selectedSession = session("selected", "/repo/.worktrees/feature/not-loaded");

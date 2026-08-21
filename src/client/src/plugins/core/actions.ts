@@ -168,6 +168,14 @@ export function createCoreActions(): PluginAction[] {
       run: (context) => { context.openNewSessionComposer(); },
     },
     {
+      id: "session.start-rapidfire",
+      title: "New Rapidfire session",
+      description: "Compose a first prompt with Rapidfire enabled",
+      shortcut: "mod+shift+enter",
+      group: "Session",
+      run: (context) => { context.openNewSessionComposer("rapidfire"); },
+    },
+    {
       id: "model.select",
       title: "Select Model",
       description: "Choose the model for the selected session",

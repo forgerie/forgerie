@@ -47,7 +47,24 @@ describe("PiWebApp global shortcut modality boundary", () => {
 
     const event = dispatchKeyThroughApp(app, target, "Enter");
 
-    expect(newSessionComposerIsOpen(app)).toBe(true);
+    expect(newSessionComposerRequest(app)).toEqual({ kind: "open" });
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("opens New session with Rapidfire enabled before CodeMirror handles Ctrl+Shift+Enter", async () => {
+    const { app, editor } = await renderChatEditor({});
+    const onSend = vi.fn();
+    const editorKeyDown = vi.fn();
+    editor.onSend = onSend;
+    editor.replaceText("keep this chat draft");
+    editor.view?.contentDOM.addEventListener("keydown", editorKeyDown);
+
+    const event = dispatchEditorKeyThroughApp(app, editor, "Enter", { ctrlKey: true, shiftKey: true });
+
+    expect(newSessionComposerRequest(app)).toEqual({ kind: "open", initialLaunchMode: "rapidfire" });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorKeyDown).not.toHaveBeenCalled();
+    expect(editor.view?.state.doc.toString()).toBe("keep this chat draft");
     expect(event.defaultPrevented).toBe(true);
   });
 
@@ -398,11 +415,15 @@ function actionPaletteIsOpen(app: PiWebApp): boolean {
   return state.actionPaletteOpen;
 }
 
-function newSessionComposerIsOpen(app: PiWebApp): boolean {
+function newSessionComposerRequest(app: PiWebApp): unknown {
   const state: unknown = Reflect.get(app, "state");
-  return typeof state === "object" && state !== null && "newSessionComposer" in state
-    && typeof state.newSessionComposer === "object" && state.newSessionComposer !== null
-    && "kind" in state.newSessionComposer && state.newSessionComposer.kind === "open";
+  if (typeof state !== "object" || state === null || !("newSessionComposer" in state)) throw new Error("New session composer request was unavailable");
+  return state.newSessionComposer;
+}
+
+function newSessionComposerIsOpen(app: PiWebApp): boolean {
+  const request = newSessionComposerRequest(app);
+  return typeof request === "object" && request !== null && "kind" in request && request.kind === "open";
 }
 
 function setAppState(app: PiWebApp, patch: Partial<AppState>): void {

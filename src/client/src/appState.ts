@@ -1,6 +1,6 @@
 import type { AuthProviderOption, CommandOption, CommandResult, ExtensionDialogAnswer, ExtensionDialogCloseReason, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, Machine, MachineHealth, MachineRuntime, OAuthFlowState, PendingAskUser, PendingExtensionDialog, PiWebStatusResponse, Project, QueuedSessionMessage, SessionActivity, SessionInfo, SessionStatus, SessionTreeSnapshot, TerminalCommandRun, Workspace, WorkspaceActivity } from "./api";
 import type { ChatLine } from "./components/shared";
-import type { NewSessionCompleteDestination } from "./newSessionComposer";
+import type { NewSessionCompleteDestination, NewSessionLaunchMode } from "./newSessionComposer";
 import type { QualifiedContributionId } from "./plugins/ids";
 import type { SelectedSessionNotificationInbox } from "./sessionNotifications";
 import { selectedChatNoTarget, type SelectedChatLoad } from "./selectedChatLoad";
@@ -157,7 +157,7 @@ export interface ClosedExtensionDialog {
 
 export type NewSessionComposerRequest =
   | { kind: "closed" }
-  | { kind: "open"; initialDestination?: NewSessionCompleteDestination; recoverySeedId?: string; replacesFailedSessionId?: string };
+  | { kind: "open"; initialDestination?: NewSessionCompleteDestination; initialLaunchMode?: NewSessionLaunchMode; recoverySeedId?: string; replacesFailedSessionId?: string };
 
 /** Workspace-management dialog state. Session creation uses NewSessionComposer. */
 export type WorkspaceManagementDialogState =

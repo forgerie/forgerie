@@ -2,6 +2,7 @@ import type { TemplateResult } from "lit";
 import type { AppAction } from "../actions";
 import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeEntry, FileTreeResponse, GitDiffResponse, GitStatusResponse, Machine, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, RunTerminalCommandInput, TerminalCommandRun, TerminalCommandRunFilter, TerminalCommandRunHandle, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse, Workspace } from "../api";
 import type { AppState } from "../appState";
+import type { NewSessionLaunchMode } from "../newSessionComposer";
 import type { SettingsSection } from "../settingsRoute";
 import type { LocalContributionId, PluginId, QualifiedContributionId } from "./ids";
 import type { ManagedProcessesRuntime } from "../../../plugin-api/unstable";
@@ -145,7 +146,7 @@ export interface PluginRuntimeContext {
   deleteWorkspace: (workspace?: Workspace) => void | Promise<void>;
   /** v1-compatible alias that opens the New session composer. */
   startSession: () => void | Promise<void>;
-  openNewSessionComposer: () => void;
+  openNewSessionComposer: (initialLaunchMode?: NewSessionLaunchMode) => void;
   archiveSession: () => void | Promise<void>;
   reloadSession: () => void | Promise<void>;
   deleteCachedNewSession: () => void | Promise<void>;

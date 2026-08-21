@@ -410,6 +410,7 @@ describe("PluginRegistry", () => {
       ["core:workspace.refresh-git", "mod+shift+g"],
       ["core:workspace.refresh-current", "mod+shift+r"],
       ["core:session.start", "mod+enter"],
+      ["core:session.start-rapidfire", "mod+shift+enter"],
       ["core:model.cycle", "mod+p"],
       ["core:session.stop", "mod+."],
     ]);

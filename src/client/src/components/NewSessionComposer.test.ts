@@ -302,30 +302,6 @@ describe("new-session-composer editing and submission", () => {
     expect(deepActiveElement()).toBe(promptField(composer));
   });
 
-  it("enables Rapidfire, submits, and leaves the mode on with Ctrl+Shift+Enter", async () => {
-    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
-    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
-    const composer = await mountComposer({ initialDestination: destination, initialPrompt: "Launch from the shortcut", onSubmit });
-    expect(rapidfireToggle(composer).getAttribute("aria-keyshortcuts")).toBe("Control+Shift+Enter Meta+Shift+Enter");
-    const shortcut = new KeyboardEvent("keydown", {
-      key: "Enter",
-      ctrlKey: true,
-      shiftKey: true,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    });
-
-    promptField(composer).dispatchEvent(shortcut);
-
-    await vi.waitFor(() => { expect(onSubmit).toHaveBeenCalledOnce(); });
-    expect(shortcut.defaultPrevented).toBe(true);
-    expect(onSubmit).toHaveBeenCalledWith({ mode: "rapidfire", destination, firstPrompt: { text: "Launch from the shortcut" } });
-    expect(rapidfireToggle(composer).getAttribute("aria-pressed")).toBe("true");
-    expect(promptText(composer)).toBe("");
-    expect(deepActiveElement()).toBe(promptField(composer));
-  });
-
   it("keeps Rapidfire open, preserves its destination, and clears each accepted prompt for the next launch", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));

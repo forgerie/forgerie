@@ -52,6 +52,7 @@ type SlashValidationResult =
 export class NewSessionComposer extends LitElement {
   /** Initial values are read once. Later property updates never replace the mounted local draft. */
   @property({ attribute: false }) initialDestination?: NewSessionCompleteDestination;
+  @property({ attribute: false }) initialLaunchMode: NewSessionLaunchMode = "switch";
   @property({ attribute: false }) recoverySeedId?: string;
   @property({ attribute: false }) catalog: NewSessionDestinationCatalog = createApiNewSessionDestinationCatalog();
   @property({ attribute: false }) onCancel?: () => void;
@@ -99,6 +100,7 @@ export class NewSessionComposer extends LitElement {
     super.willUpdate(changed);
     if (!this.initialized) {
       this.initialized = true;
+      this.launchMode = this.initialLaunchMode;
       this.composerState = createNewSessionComposerState(this.initialDestination);
       this.replaceRuntimeForDestination(this.composerState.destination);
       this.refreshDestinationDefaults(this.composerState.destination);

@@ -32,7 +32,9 @@ describe("core actions", () => {
     expect(context.refreshFiles).toHaveBeenCalledTimes(2);
     expect(context.refreshGit).toHaveBeenCalledOnce();
     expect(context.deleteWorkspace).toHaveBeenCalledOnce();
-    expect(context.openNewSessionComposer).toHaveBeenCalledOnce();
+    expect(context.openNewSessionComposer).toHaveBeenCalledTimes(2);
+    expect(context.openNewSessionComposer).toHaveBeenNthCalledWith(1);
+    expect(context.openNewSessionComposer).toHaveBeenNthCalledWith(2, "rapidfire");
     expect(context.openModelPicker).toHaveBeenCalledOnce();
     expect(context.cycleModel).toHaveBeenCalledOnce();
     expect(context.openThinkingLevelPicker).toHaveBeenCalledOnce();
