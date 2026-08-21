@@ -474,6 +474,7 @@ export class PromptEditor extends LitElement {
         aria-label="Rapidfire for current workspace"
         aria-pressed=${rapidfire.active ? "true" : "false"}
         ?disabled=${this.disabled || rapidfire.disabled === true}
+        @pointerdown=${(event: PointerEvent) => { event.preventDefault(); }}
         @click=${() => {
           this.closeSteer(false);
           this.closeChoice(false);

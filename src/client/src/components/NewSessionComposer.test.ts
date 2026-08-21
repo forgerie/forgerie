@@ -251,6 +251,24 @@ describe("new-session-composer editing and submission", () => {
     expect(root(composer).querySelector("[role='status']")?.textContent).toContain("Starting session");
   });
 
+  it("keeps the first-prompt caret when Rapidfire is toggled by pointer", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+    const toggle = rapidfireToggle(composer);
+
+    expect(deepActiveElement()).toBe(promptField(composer));
+
+    const pointerDown = new PointerEvent("pointerdown", { bubbles: true, cancelable: true, composed: true, pointerType: "mouse" });
+    // Browsers focus a pressed button unless the pointerdown default is
+    // cancelled. Model that default so this test catches pointer focus theft.
+    if (toggle.dispatchEvent(pointerDown)) toggle.focus();
+    toggle.click();
+    await composer.updateComplete;
+
+    expect(rapidfireToggle(composer).getAttribute("aria-pressed")).toBe("true");
+    expect(deepActiveElement()).toBe(promptField(composer));
+  });
+
   it("keeps Rapidfire open, preserves its destination, and clears each accepted prompt for the next launch", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
