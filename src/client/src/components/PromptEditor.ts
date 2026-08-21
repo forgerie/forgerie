@@ -172,8 +172,7 @@ export class PromptEditor extends LitElement {
     }
     if (changed.has("runtimeControlsAvailable") && !this.runtimeControlsAvailable) {
       this.resetSteerDisclosure();
-      this.resetDictationGesture();
-      this.dictationController?.surfaceDisabled();
+      // Dictation is gateway-local and must survive transient session-runtime refreshes.
     }
     if (changed.has("canSteer") || changed.has("isCompacting") || changed.has("disabled") || changed.has("submissionAvailable") || changed.has("sendAvailable") || changed.has("sending")) {
       const rail = this.rail();

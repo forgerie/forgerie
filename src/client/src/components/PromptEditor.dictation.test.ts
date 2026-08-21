@@ -435,7 +435,7 @@ describe("PromptEditor local dictation", () => {
     expect(statusText(editor)).toContain("ready");
   });
 
-  it("aborts active capture when runtime controls disconnect and ignores late speech results", async () => {
+  it("keeps active capture across a transient runtime controls disconnect", async () => {
     const dictation = fakeDictation();
     const editor = await mount({ dictation: dictation.capability });
     editor.replaceText("kept draft");
@@ -447,18 +447,21 @@ describe("PromptEditor local dictation", () => {
 
     editor.runtimeControlsAvailable = false;
     await settle(editor);
-    expect(dictation.abortCalls).toBe(1);
-    expect(editor.replaceText("new editable draft")).toBe(true);
-    await settle(editor);
+    expect(dictation.abortCalls).toBe(0);
+    expect(editor.replaceText("blocked replacement")).toBe(false);
+    expect(statusText(editor)).toContain("Listening");
 
-    dictation.emitSpeech();
-    dictation.emitPause(new Float32Array([0.1]));
-    dictation.resolveCheck({ complete: true, probability: 0.9, samples: 1 });
+    editor.runtimeControlsAvailable = true;
+    await settle(editor);
+    key(requiredMic(editor), "keydown", "Enter");
+    await settle(editor);
     dictation.resolveStop(new Float32Array([0.8]));
-    dictation.resolveTranscribe({ text: "late disconnected text" });
+    await settle(editor);
+    dictation.resolveTranscribe({ text: "connected again" });
     await settle(editor);
 
-    expect(editor.getText()).toBe("new editable draft");
+    expect(dictation.abortCalls).toBe(0);
+    expect(editor.getText()).toBe("kept draft connected again");
   });
 
   it("keeps one action rail and one microphone across the Fold viewport set", async () => {

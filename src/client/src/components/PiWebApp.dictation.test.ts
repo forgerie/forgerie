@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo, SessionStatus, Workspace } from "../api";
 import type { ComposerDictationCapability } from "../composerCapabilities";
 import { initialAppState } from "../appState";
+import { selectedChatLiveReady, selectedChatLoading, selectedChatTarget } from "../selectedChatLoad";
 import type { SpeechCaptureSession } from "../speechCapture";
 import { PiWebApp } from "./PiWebApp";
 import type { PromptEditor } from "./PromptEditor";
@@ -172,6 +173,68 @@ describe("PiWebApp composer dictation capability", () => {
     });
     await editor.updateComplete;
     expect(abortCalls).toBe(0);
+  });
+
+  it("keeps selected-session dictation active while the runtime refreshes", async () => {
+    const app = new PiWebApp();
+    const selectedSession = session("session-1");
+    const target = selectedChatTarget("local", selectedSession);
+    const liveState = {
+      ...initialAppState(),
+      selectedSession,
+      sessions: [selectedSession],
+      selectedWorkspace: workspace(),
+      selectedChatLoad: selectedChatLiveReady(target),
+      status: status(),
+      sessionStatuses: { [selectedSession.id]: status() },
+      mainView: "chat" as const,
+    };
+    Reflect.set(app, "state", liveState);
+    const abort = vi.fn(() => Promise.resolve());
+    const capability: ComposerDictationCapability = {
+      getStatus: () => Promise.resolve({
+        smartTurn: "unavailable",
+        whisper: "ready",
+        capability: "manual-only",
+        reason: "Smart Turn unavailable. Press the microphone again to finish.",
+        limits: { sampleRateHz: 16_000, maxTurnSeconds: 60, maxTurnBytes: 3_840_000, endpointWindowSeconds: 8, endpointWindowBytes: 512_000 },
+      }),
+      createCaptureSession: () => Promise.resolve({
+        actualSampleRateHz: 16_000,
+        failure: undefined,
+        endpointWindow: () => new Float32Array(),
+        finalize: () => new Float32Array(),
+        stopAndFinalize: () => new Promise(() => undefined),
+        abort,
+      }),
+      speechApi: {
+        checkTurn: () => new Promise(() => undefined),
+        transcribe: () => new Promise(() => undefined),
+      },
+    };
+    Reflect.set(app, "sessionDictationCapabilityValue", capability);
+    document.body.append(app);
+    await app.updateComplete;
+    await app.updateComplete;
+
+    const editor = promptEditor(app);
+    await vi.waitFor(() => { expect(requiredMic(editor).disabled).toBe(false); });
+    const content = editor.view?.contentDOM;
+    if (content === undefined) throw new Error("Expected composer CodeMirror content");
+    dispatchControlSpace(content);
+    await settleEditor(editor);
+    expect(editor.runtimeControlsAvailable).toBe(true);
+    expect(requiredMic(editor).getAttribute("aria-pressed")).toBe("true");
+
+    Reflect.set(app, "state", { ...liveState, selectedChatLoad: selectedChatLoading(target, "fresh") });
+    app.requestUpdate();
+    await app.updateComplete;
+    await settleEditor(editor);
+
+    expect(promptEditor(app)).toBe(editor);
+    expect(editor.runtimeControlsAvailable).toBe(false);
+    expect(abort).not.toHaveBeenCalled();
+    expect(requiredMic(editor).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("declares dictation for opening-session and new-session composers", async () => {
