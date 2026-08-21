@@ -27,6 +27,14 @@ describe("toSafeMarkdownHtml", () => {
     expect(code.querySelector(".hljs-keyword")?.textContent).toBe("if");
   });
 
+  it("highlights SQL fences", () => {
+    const code = renderedCode("```sql\nSELECT * FROM table\n```");
+
+    expect(code.classList.contains("hljs")).toBe(true);
+    expect(code.querySelector(".hljs-keyword")?.textContent).toBe("SELECT");
+    expect(code.textContent).toBe("SELECT * FROM table\n");
+  });
+
   it("keeps unknown fenced languages as escaped plain code", () => {
     const code = renderedCode("```diagram\n<node onclick=\"run()\">\n```");
 

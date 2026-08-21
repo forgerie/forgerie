@@ -2,4 +2,4 @@
 "forgerie": patch
 ---
 
-Highlight fenced Markdown code blocks when they include a supported language tag.
+Highlight fenced Markdown code blocks for common language tags, including SQL.

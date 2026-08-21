@@ -9,6 +9,7 @@ import json from "highlight.js/lib/languages/json";
 import markdown from "highlight.js/lib/languages/markdown";
 import python from "highlight.js/lib/languages/python";
 import rust from "highlight.js/lib/languages/rust";
+import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import { marked } from "marked";
@@ -26,6 +27,7 @@ const codeLanguages: readonly CodeLanguage[] = [
   ["markdown", markdown],
   ["python", python],
   ["rust", rust],
+  ["sql", sql],
   ["typescript", typescript],
   ["xml", xml],
 ];
