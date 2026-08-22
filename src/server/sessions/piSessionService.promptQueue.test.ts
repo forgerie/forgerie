@@ -985,9 +985,21 @@ target`, options: { expandPromptTemplates: false } },
     await service.dispose();
   });
 
-  it("clears prompts queued during compaction when aborting active work", async () => {
-    const fake = fakeRuntime("abort-compaction-session", { isCompacting: true });
-    const service = new PiSessionService(new CapturingSessionEventHub(), {
+  it("cancels compaction and restores its queued prompts when aborting active work", async () => {
+    let rejectCompaction: ((reason: Error) => void) | undefined;
+    const fake = fakeRuntime("abort-compaction-session", {
+      compact: () => {
+        fake.session.isCompacting = true;
+        return new Promise<never>((_, reject) => { rejectCompaction = reject; });
+      },
+      abortCompaction: () => {
+        fake.calls.abortCompaction += 1;
+        fake.session.isCompacting = false;
+        rejectCompaction?.(new Error("Compaction cancelled"));
+      },
+    });
+    const hub = new CapturingSessionEventHub();
+    const service = new PiSessionService(hub, {
       agentDir: TEST_AGENT_DIR,
       modelRuntime: testModelRuntime,
       createAgentRuntime: runtimeCreator(fake.runtime),
@@ -995,17 +1007,26 @@ target`, options: { expandPromptTemplates: false } },
       heartbeatIntervalMs: 60_000,
     });
 
+    await service.runCommand(sessionRef("abort-compaction-session"), "/compact");
     await service.prompt(sessionRef("abort-compaction-session"), "Do not deliver after abort", "followUp");
-    await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 1 });
+    await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ isCompacting: true, pendingMessageCount: 1 });
     const result = await service.abort(sessionRef("abort-compaction-session"));
 
     expect(result).toEqual({
       aborted: true,
       restoredMessages: [{ kind: "followUp", text: "Do not deliver after abort" }],
     });
+    expect(fake.calls.abortCompaction).toBe(1);
     expect(fake.calls.clearQueue).toBe(1);
     expect(fake.calls.prompt).toEqual([]);
-    await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 0, queuedMessages: [] });
+    await vi.waitFor(() => {
+      expect(hub.sessionEvents.some(({ sessionId, event }) => sessionId === "abort-compaction-session"
+        && event.type === "activity.update"
+        && event.activity.phase === "idle"
+        && event.activity.label === "compaction cancelled")).toBe(true);
+    });
+    expect(hub.sessionEvents.some(({ event }) => event.type === "session.error")).toBe(false);
+    await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ isCompacting: false, pendingMessageCount: 0, queuedMessages: [] });
     await service.dispose();
   });
 

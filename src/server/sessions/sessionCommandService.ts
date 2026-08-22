@@ -50,7 +50,7 @@ export interface CommandEventPublisher {
 
 export interface SessionCommandLifecycle<TSession extends CommandSession = CommandSession> {
   onCompactionStart?: (session: TSession) => void;
-  onCompactionEnd?: (session: TSession, result: "success" | "error", detail?: string) => void;
+  onCompactionEnd?: (session: TSession, result: "success" | "cancelled" | "error", detail?: string) => void;
   reloadSession?: (session: TSession) => Promise<void>;
   getSessionTree?: (session: TSession) => ClientSessionTreeSnapshot | undefined;
   hasActiveWork?: (session: TSession) => boolean;
@@ -186,6 +186,11 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
         this.lifecycle.onCompactionEnd?.(session, "success");
       })
       .catch((error: unknown) => {
+        if (isCompactionCancellation(error)) {
+          this.events.publish(session.sessionId, { type: "command.output", level: "info", message: "Compaction cancelled." });
+          this.lifecycle.onCompactionEnd?.(session, "cancelled");
+          return;
+        }
         const message = error instanceof Error ? error.message : String(error);
         this.events.publish(session.sessionId, { type: "command.output", level: "error", message: `Compaction failed: ${message}` });
         this.events.publish(session.sessionId, { type: "session.error", message });
@@ -401,6 +406,10 @@ function formatSessionStats(session: CommandSession): string {
     `Tokens: ↑${String(stats.tokens.input)} ↓${String(stats.tokens.output)} total ${String(stats.tokens.total)}`,
     `Cost: $${stats.cost.toFixed(4)}`,
   ].join("\n");
+}
+
+function isCompactionCancellation(error: unknown): boolean {
+  return error instanceof Error && (error.name === "AbortError" || error.message === "Compaction cancelled");
 }
 
 function formatCompactionResult(result: { summary: string; tokensBefore: number }): string {

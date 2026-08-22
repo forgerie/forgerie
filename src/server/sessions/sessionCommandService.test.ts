@@ -136,6 +136,26 @@ describe("SessionCommandService", () => {
     expect(active.runtime.session.compact).toHaveBeenCalledWith("focus on tests");
   });
 
+  it.each([
+    new Error("Compaction cancelled"),
+    Object.assign(new Error("request aborted"), { name: "AbortError" }),
+  ])("reports cancelled compaction without a session error", async (cancellation) => {
+    const active = activeSession({ compact: vi.fn(() => Promise.reject(cancellation)) });
+    const events = eventPublisher();
+    const onCompactionEnd = vi.fn();
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), events, { onCompactionEnd });
+
+    await expect(service.run("s1", "/compact")).resolves.toEqual({ type: "done", message: "Compaction started…" });
+    await vi.waitFor(() => {
+      expect(onCompactionEnd).toHaveBeenCalledWith(active.runtime.session, "cancelled");
+    });
+    expect(events.publish).toHaveBeenCalledExactlyOnceWith("s1", {
+      type: "command.output",
+      level: "info",
+      message: "Compaction cancelled.",
+    });
+  });
+
   it("reloads runtime resources through the injected lifecycle callback", async () => {
     const active = activeSession();
     const reloadSession = vi.fn(async () => { await Promise.resolve(); });

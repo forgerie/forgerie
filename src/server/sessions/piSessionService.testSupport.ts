@@ -45,6 +45,7 @@ export interface TestSession extends PiAgentSession {
   isCompacting: boolean;
   isBashRunning: boolean;
   pendingMessageCount: number;
+  abortCompaction: () => void;
   getSteeringMessages: () => readonly string[];
   getFollowUpMessages: () => readonly string[];
 }
@@ -155,7 +156,7 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
   const bindExtensionCalls: TestExtensionBindings[] = [];
   const listeners: ((event: unknown) => void)[] = [];
   let extensionUiContext = testExtensionUiContext;
-  const calls = { abort: 0, bindExtensions: bindExtensionCalls, clearQueue: 0, dispose: 0, prompt: promptCalls, reload: 0, sendCustomMessage: customMessageCalls };
+  const calls = { abort: 0, abortCompaction: 0, bindExtensions: bindExtensionCalls, clearQueue: 0, dispose: 0, prompt: promptCalls, reload: 0, sendCustomMessage: customMessageCalls };
   const session: TestSession = {
     sessionId,
     sessionFile: `/tmp/${sessionId}.jsonl`,
@@ -209,6 +210,10 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
       return Promise.resolve();
     },
     executeBash: () => Promise.resolve({ output: "", exitCode: 0, cancelled: false, truncated: false }),
+    abortCompaction: () => {
+      calls.abortCompaction += 1;
+      session.isCompacting = false;
+    },
     abort: () => {
       calls.abort += 1;
       return Promise.resolve();

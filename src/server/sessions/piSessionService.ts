@@ -473,6 +473,7 @@ export interface PiAgentSession {
   sendCustomMessage(message: { customType: string; content: string; display: boolean; details?: unknown }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void>;
   executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }): Promise<{ output: string; exitCode: number | undefined; cancelled: boolean; truncated: boolean; fullOutputPath?: string }>;
   navigateTree?(targetId: string, options?: { summarize?: boolean; customInstructions?: string }): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: unknown }>;
+  abortCompaction(): void;
   abortBranchSummary?(): void;
   abort(): Promise<void>;
   clearQueue(): { steering: string[]; followUp: string[] };
@@ -1058,7 +1059,9 @@ export class PiSessionService implements SessionRouteService {
         },
         onCompactionEnd: (session, result, detail) => {
           this.endSessionEntryMutation(session);
-          this.publishActivity(session, result === "success" ? "compaction complete" : "compaction failed", result === "success" ? "idle" : "error", detail);
+          if (result === "success") this.publishActivity(session, "compaction complete", "idle");
+          else if (result === "cancelled") this.publishActivity(session, "compaction cancelled", "idle");
+          else this.publishActivity(session, "compaction failed", "error", detail);
           this.publishStatus(session);
         },
         reloadSession: (session) => this.reloadSessionRuntime(session),
@@ -3399,6 +3402,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async abortSessionOperations(session: PiAgentSession): Promise<void> {
+    session.abortCompaction();
     let branchSummaryAbortFailed = false;
     let branchSummaryAbortError: unknown;
     try {
