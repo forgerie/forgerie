@@ -330,6 +330,23 @@ export const composerDraftStyles = css`
      editable text, dressed as the chip the menu introduced. The editor sits on
      --pi-bg, so the chip lifts to --pi-surface — the inverse of the menu. */
   .markdown-editor .cm-command-mark { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); padding: 0 4px 1px; font: 500 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .markdown-editor .cm-code-block-header { box-sizing: border-box; min-width: 0; border: 1px solid var(--pi-border); border-bottom: 0; border-radius: var(--pi-radius-control) var(--pi-radius-control) 0 0; background: var(--pi-surface); color: var(--pi-muted); padding: 4px 8px; overflow: hidden; font: 600 var(--pi-text-xs) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
+  .markdown-editor .cm-code-block-body { box-sizing: border-box; inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; contain: inline-size; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; border-inline: 1px solid var(--pi-border); background: var(--pi-bg); padding-inline: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .markdown-editor .cm-code-block-body .cm-line { min-width: max-content; min-height: 1.4em; white-space: pre; overflow-wrap: normal; word-break: normal; }
+  .markdown-editor .cm-code-block-footer { box-sizing: border-box; min-height: 6px; border: 1px solid var(--pi-border); border-top: 0; border-radius: 0 0 var(--pi-radius-control) var(--pi-radius-control); background: var(--pi-bg); }
+  .markdown-editor .cm-code-block-footer.cm-code-block-empty { min-height: calc(1.4em + 6px); cursor: text; }
+  .markdown-editor .cm-code-block-footer.cm-code-block-empty:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -3px; }
+  .markdown-editor .tok-comment { color: var(--pi-muted); font-style: italic; }
+  .markdown-editor :is(.tok-keyword, .tok-typeName, .tok-className, .tok-variableName2) { color: var(--pi-purple); }
+  .markdown-editor :is(.tok-propertyName, .tok-labelName, .tok-namespace) { color: var(--pi-accent); }
+  .markdown-editor :is(.tok-literal, .tok-number, .tok-bool, .tok-atom, .tok-operator) { color: var(--pi-warning); }
+  .markdown-editor :is(.tok-string, .tok-string2, .tok-inserted) { color: var(--pi-success); }
+  .markdown-editor :is(.tok-invalid, .tok-deleted) { color: var(--pi-danger); }
+  .markdown-editor :is(.tok-meta, .tok-punctuation) { color: var(--pi-muted); }
+  .markdown-editor :is(.tok-heading, .tok-strong) { font-weight: 600; }
+  .markdown-editor .tok-emphasis { font-style: italic; }
+  .markdown-editor .tok-strikethrough { text-decoration: line-through; }
+  .markdown-editor :is(.tok-link, .tok-url) { color: var(--pi-accent); text-decoration: underline; }
   .markdown-editor .cm-focused { outline: none; }
   .shell-mode .markdown-editor .cm-editor { border-color: var(--pi-success); box-shadow: 0 0 0 1px var(--pi-success-ring); }
   .resting { gap: 6px; padding-block: 7px; }

@@ -1,8 +1,9 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewlineAndIndent } from "@codemirror/commands";
 import { markdown, deleteMarkupBackward, insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
-import { defaultHighlightStyle, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
+import { classHighlighter } from "@lezer/highlight";
 import { html, LitElement, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
@@ -16,6 +17,8 @@ import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
 import { createMobilePromptEnterMedia, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
+import { composerCodeBlock, completeComposerCodeFence, leaveComposerCodeBlock, protectComposerCodeBlockBoundary } from "./composerCodeBlock";
+import { composerCodeLanguage } from "./composerCodeLanguages";
 import { composerCommandMark } from "./composerCommandMark";
 import { abortComposerDraftDictation, beginComposerDraftDictation, commitComposerDraftDictationTranscript, composerDraftDictation, finishComposerDraftDictation, isComposerDraftDictationActive } from "./composerDraftDictation";
 import "./AutocompleteMenu";
@@ -654,10 +657,11 @@ export class ComposerDraft extends LitElement {
         doc: this.draft,
         extensions: [
           history(),
-          markdown(),
+          markdown({ codeLanguages: composerCodeLanguage }),
+          composerCodeBlock(),
           indentOnInput(),
           indentUnit.of("  "),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          syntaxHighlighting(classHighlighter, { fallback: true }),
           EditorView.lineWrapping,
           composerDraftDictation(),
           composerCommandMark(),
@@ -675,12 +679,13 @@ export class ComposerDraft extends LitElement {
           }),
           keymap.of([
             { any: (view, event) => this.handleEditorKeyDown(event, view) },
-            { key: "ArrowDown", run: (view) => this.moveCompletion(1) || this.movePromptHistory(view, "newer") },
+            { key: "ArrowDown", run: (view) => this.moveCompletion(1) || leaveComposerCodeBlock(view) || this.movePromptHistory(view, "newer") },
             { key: "ArrowUp", run: (view) => this.moveCompletion(-1) || this.movePromptHistory(view, "older") },
             { key: "Escape", run: () => this.handleEditorEscape() },
             { key: "Tab", run: (view) => this.handleEditorTab(view) },
             { key: "Shift-Tab", run: (view) => indentWithTab.shift?.(view) ?? false },
-            { key: "Backspace", run: (view) => deleteMarkupBackward(view) },
+            { key: "Backspace", run: (view) => protectComposerCodeBlockBoundary(view, "backward") || deleteMarkupBackward(view) },
+            { key: "Delete", run: (view) => protectComposerCodeBlockBoundary(view, "forward") },
             ...historyKeymap,
             ...defaultKeymap,
           ]),
@@ -881,7 +886,7 @@ export class ComposerDraft extends LitElement {
       return true;
     }
     if (!shouldSendPromptOnEnterShortcut(shiftKey)) {
-      return insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
+      return completeComposerCodeFence(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
     }
     this.submit(this.working ? "followUp" : undefined);
     return true;

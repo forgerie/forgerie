@@ -13,26 +13,27 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import { marked } from "marked";
-
-type CodeLanguage = readonly [name: string, language: LanguageFn];
+import { canonicalCodeFenceLanguage, CODE_FENCE_LANGUAGES, codeFenceLanguageTag, type CodeFenceLanguageName } from "./codeFenceLanguages";
 
 const codeHighlighter = hljs.newInstance();
-const codeLanguages: readonly CodeLanguage[] = [
-  ["bash", bash],
-  ["css", css],
-  ["diff", diff],
-  ["go", go],
-  ["javascript", javascript],
-  ["json", json],
-  ["markdown", markdown],
-  ["python", python],
-  ["rust", rust],
-  ["sql", sql],
-  ["typescript", typescript],
-  ["xml", xml],
-];
-for (const [name, language] of codeLanguages) codeHighlighter.registerLanguage(name, language);
-codeHighlighter.registerAliases("shell", { languageName: "bash" });
+const codeLanguageGrammars: Readonly<Record<CodeFenceLanguageName, LanguageFn>> = {
+  bash,
+  css,
+  diff,
+  go,
+  javascript,
+  json,
+  markdown,
+  python,
+  rust,
+  sql,
+  typescript,
+  xml,
+};
+for (const { name, aliases } of CODE_FENCE_LANGUAGES) {
+  codeHighlighter.registerLanguage(name, codeLanguageGrammars[name]);
+  if (aliases.length > 0) codeHighlighter.registerAliases([...aliases], { languageName: name });
+}
 
 interface StringCacheBudget {
   characters: number;
@@ -87,27 +88,26 @@ interface RenderedCodeBlock {
 
 function renderCodeBlock(text: string, info: string | undefined, raw: string, remainingHighlightCharacters: number): RenderedCodeBlock {
   const code = `${text.replace(/\n$/u, "")}\n`;
-  const language = codeFenceLanguage(info);
-  if (language === undefined) return { highlightedCharacters: 0, html: `<pre><code>${escapeHtml(code)}</code></pre>\n` };
-  if (code.length > remainingHighlightCharacters || !canHighlightCode(language, code, raw)) {
-    return { highlightedCharacters: 0, html: `<pre><code class="language-${language}">${escapeHtml(code)}</code></pre>\n` };
+  const languageTag = codeFenceLanguageTag(info);
+  if (languageTag === undefined) return { highlightedCharacters: 0, html: `<pre><code>${escapeHtml(code)}</code></pre>\n` };
+  const language = canonicalCodeFenceLanguage(languageTag);
+  if (language === undefined || code.length > remainingHighlightCharacters || !canHighlightCode(code, raw)) {
+    return { highlightedCharacters: 0, html: `<pre><code class="language-${languageTag}">${escapeHtml(code)}</code></pre>\n` };
   }
   const highlighted = highlightedCode(language, code);
   return {
     highlightedCharacters: code.length,
-    html: `<pre><code class="hljs language-${language}">${highlighted}</code></pre>\n`,
+    html: `<pre><code class="hljs language-${languageTag}">${highlighted}</code></pre>\n`,
   };
 }
 
 // Highlighting runs synchronously during Lit render. Large, cumulative, or
 // still-open fences stay plain so streaming output cannot monopolize the UI thread.
-function canHighlightCode(language: string, code: string, raw: string): boolean {
-  return code.length <= MAX_HIGHLIGHTED_CODE_CHARACTERS
-    && codeHighlighter.getLanguage(language) !== undefined
-    && hasClosingCodeFence(raw);
+function canHighlightCode(code: string, raw: string): boolean {
+  return code.length <= MAX_HIGHLIGHTED_CODE_CHARACTERS && hasClosingCodeFence(raw);
 }
 
-function highlightedCode(language: string, code: string): string {
+function highlightedCode(language: CodeFenceLanguageName, code: string): string {
   const cacheKey = `${language}\u0000${code}`;
   const cached = highlightedCodeCache.get(cacheKey);
   if (cached !== undefined) return cached;
@@ -143,10 +143,6 @@ function rememberString(cache: Map<string, string>, budget: StringCacheBudget, k
     cache.delete(oldestKey);
     budget.characters -= oldestKey.length + (oldestValue?.length ?? 0);
   }
-}
-
-function codeFenceLanguage(info: string | undefined): string | undefined {
-  return info?.match(/^[a-z0-9_+-]+/iu)?.[0]?.toLowerCase();
 }
 
 function escapeHtml(text: string): string {

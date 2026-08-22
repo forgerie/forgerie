@@ -43,6 +43,13 @@ describe("toSafeMarkdownHtml", () => {
     expect(code.textContent).toBe("<node onclick=\"run()\">\n");
   });
 
+  it("does not inherit highlight.js aliases outside the shared vocabulary", () => {
+    const code = renderedCode("```zsh\necho ready\n```");
+
+    expect(code.className).toBe("language-zsh");
+    expect(code.querySelector("span")).toBeNull();
+  });
+
   it("keeps supported HTML code as text", () => {
     const code = renderedCode("~~~html\n<img src=\"x\" onerror=\"run()\">\n~~~");
 
