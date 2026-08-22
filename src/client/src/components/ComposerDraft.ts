@@ -115,6 +115,24 @@ export class ComposerDraft extends LitElement {
   private readonly completionOptionIdPrefix = `${this.instanceId}-completion-option-`;
   private readonly attachmentDeliveryGroupName = `${this.instanceId}-attachment-delivery`;
   private readonly handleCompletionBoundaryChange = (): void => { this.syncCompletionMenuBoundary(); };
+  /** Cancel native Tab navigation before CodeMirror can defer completion handling. */
+  private readonly handleCompletionTabKeyDown = (event: KeyboardEvent): void => {
+    if (
+      event.key !== "Tab"
+      || event.shiftKey
+      || event.altKey
+      || event.ctrlKey
+      || event.metaKey
+      || event.defaultPrevented
+      || event.isComposing
+      || this.editor?.composing === true
+      || this.isDictationActive()
+    ) return;
+    const completion = this.completions[this.selectedIndex];
+    if (completion === undefined) return;
+    event.preventDefault();
+    this.pick(completion);
+  };
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     if (changed.has("disabled") && this.disabled) this.abortDictationEdit();
@@ -168,6 +186,7 @@ export class ComposerDraft extends LitElement {
       }
     });
     this.abortDictationEdit();
+    this.editor?.contentDOM.removeEventListener("keydown", this.handleCompletionTabKeyDown, true);
     this.editor?.destroy();
     this.editor = undefined;
     super.disconnectedCallback();
@@ -668,6 +687,7 @@ export class ComposerDraft extends LitElement {
         ],
       }),
     });
+    this.editor.contentDOM.addEventListener("keydown", this.handleCompletionTabKeyDown, true);
     this.syncEditorAccessibility();
     this.syncCompletionMenuBoundary();
   }

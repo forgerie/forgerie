@@ -525,6 +525,36 @@ describe("ComposerDraft", () => {
     expect(draft.view?.state.doc.toString()).toBe("/");
   });
 
+  it("cancels Tab before accepting a completion and keeps editor focus", async () => {
+    const order: string[] = [];
+    const draft = await mountDraft({
+      runtime: runtimeWith(({ kind, from, to }) => kind === "command" ? [{ kind: "command", replaceFrom: from, replaceTo: to, insertText: "/review", detail: "skill" }] : []),
+      onDraftEdited: () => { order.push("edit"); },
+    });
+    setEditorText(draft, "/");
+    await waitForMenuItems(draft, 1);
+    order.length = 0;
+    draft.focusInput();
+    const content = editorContent(draft);
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true, composed: true });
+    const preventDefault = event.preventDefault.bind(event);
+    Object.defineProperty(event, "preventDefault", {
+      configurable: true,
+      value: () => {
+        order.push("prevent");
+        preventDefault();
+      },
+    });
+
+    content.dispatchEvent(event);
+    await draft.updateComplete;
+
+    expect(order).toEqual(["prevent", "edit"]);
+    expect(event.defaultPrevented).toBe(true);
+    expect(draft.view?.state.doc.toString()).toBe("/review ");
+    expect(document.activeElement).toBe(content);
+  });
+
   it("picks a pointer-selected completion and restores editor focus", async () => {
     const draft = await mountDraft({
       runtime: runtimeWith(({ kind, from, to }) => kind === "command" ? [{ kind: "command", replaceFrom: from, replaceTo: to, insertText: "/review", detail: "skill" }] : []),
