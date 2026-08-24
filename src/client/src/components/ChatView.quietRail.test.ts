@@ -136,6 +136,25 @@ describe("ChatView quiet rail", () => {
     expect(text).not.toContain("Found 2 occurrences");
   });
 
+  it("toggles the ledger when clicking anywhere on the summary line", async () => {
+    const view = await transcript([
+      said("user", "run tests"),
+      ran("read", "running", { path: "/repo/file.ts" }),
+    ], true);
+    const lineButton = summary(view).shadowRoot?.querySelector<HTMLButtonElement>("button.line.heartbeat");
+    if (lineButton === null || lineButton === undefined) throw new Error("The register rendered no heartbeat button");
+
+    expect(lineButton.getAttribute("aria-expanded")).toBe("false");
+    expect(ledger(view).hidden).toBe(true);
+
+    lineButton.click();
+    await view.updateComplete;
+    await view.updateComplete;
+
+    expect(ledger(view).hidden).toBe(false);
+    expect(lineButton.getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("leaves narration-only work in the ledger, with nothing to summarise", async () => {
     const view = await transcript([
       said("user", "q"),

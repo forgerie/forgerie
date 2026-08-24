@@ -38,27 +38,43 @@ export class TurnRailSummary extends LitElement {
    * is the turn's real state; this view simply is not the surface that shows it.
    */
   private renderWorking(state: Extract<TurnRailState, { kind: "working" }>) {
+    const label = this.open ? "Hide steps" : `Show all ${String(state.stepCount)} steps`;
     return html`
-      ${state.pins.map((pin) => renderPin(pin))}
-      <div class="line heartbeat">
+      ${state.pins.map((pin) => renderPin(pin, () => { this.toggle(); }))}
+      <button
+        type="button"
+        class="line heartbeat disclosure"
+        aria-expanded=${this.open ? "true" : "false"}
+        aria-label=${label}
+        title=${label}
+        @click=${() => { this.toggle(); }}
+      >
         <span class="glyph" aria-hidden="true">●</span>
         <span class="counts">${stepCountLabel(state.stepCount)}${retrySuffix(state.retries)}</span>
         ${this.startedAt === "" ? null : html`<session-working-runtime class="turn-runtime" .startedAt=${this.startedAt}></session-working-runtime>`}
-        ${this.renderDisclosure(`Show all ${String(state.stepCount)} steps`)}
-      </div>
+        <span class="disclosure-glyph" aria-hidden="true">${this.open ? "▾" : "▸"}</span>
+      </button>
     `;
   }
 
   private renderSettled(state: Extract<TurnRailState, { kind: "settled" }>) {
+    const label = this.open ? "Hide steps" : `Show all ${String(state.stepCount)} steps`;
     return html`
-      <div class="line receipt">
+      <button
+        type="button"
+        class="line receipt disclosure"
+        aria-expanded=${this.open ? "true" : "false"}
+        aria-label=${label}
+        title=${label}
+        @click=${() => { this.toggle(); }}
+      >
         <span class="glyph" aria-hidden="true">${state.outcome === "done" ? "✓" : "✗"}</span>
         <span class="counts">${stepCountLabel(state.stepCount)}${state.fileCount === 0 ? "" : ` · ${fileCountLabel(state.fileCount)}`}</span>
         ${state.added === 0 && state.removed === 0
           ? null
           : html`<span class="diff-stats"><b class="added">+${String(state.added)}</b><span>/</span><b class="removed">-${String(state.removed)}</b></span>`}
-        ${this.renderDisclosure(`Show all ${String(state.stepCount)} steps`)}
-      </div>
+        <span class="disclosure-glyph" aria-hidden="true">${this.open ? "▾" : "▸"}</span>
+      </button>
       ${state.unresolved.length === 0
         ? null
         : html`<p class="sub unresolved">unresolved — ${state.unresolved.map((pin) => `${pin.verb} ${pin.label}`).join(", ")}</p>`}
@@ -66,28 +82,20 @@ export class TurnRailSummary extends LitElement {
     `;
   }
 
-  /**
-   * One affordance for both lifetimes: the same control opens a running turn's
-   * ledger and a finished turn's receipt, so there is nothing extra to learn
-   * when a turn ends under the reader's eyes.
-   */
-  private renderDisclosure(label: string) {
-    return html`
-      <button
-        type="button"
-        class="disclosure"
-        aria-expanded=${this.open ? "true" : "false"}
-        aria-label=${this.open ? "Hide steps" : label}
-        title=${this.open ? "Hide steps" : label}
-        @click=${() => { this.dispatchEvent(new CustomEvent("rail-toggle", { bubbles: true, composed: true })); }}
-      >${this.open ? "▾" : "▸"}</button>
-    `;
+  private toggle(): void {
+    this.dispatchEvent(new CustomEvent("rail-toggle", { bubbles: true, composed: true }));
   }
 
   static override styles = css`
     :host { display: block; min-width: 0; color: var(--calm-ink-dim); font-size: var(--pi-text-sm); }
     .quiet-line { display: grid; gap: 2px; min-width: 0; }
-    .line { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+    .line {
+      display: flex; align-items: baseline; gap: 7px; width: 100%; min-width: 0; box-sizing: border-box;
+      padding: 3px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left;
+      cursor: pointer; border-radius: var(--pi-radius-control, 4px);
+    }
+    .line:hover { color: var(--calm-ink); }
+    .line:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
     .glyph { flex: 0 0 auto; color: var(--pi-muted); }
     /* Failure is the only state that earns a tone, matching the tool card's rule. */
     .pin .glyph { color: var(--calm-danger); }
@@ -107,22 +115,27 @@ export class TurnRailSummary extends LitElement {
     .removed { color: var(--pi-danger); }
     .sub { margin: 0 0 0 16px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .sub.evidence, .sub.unresolved { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .disclosure {
-      flex: 0 0 auto; margin-inline-start: auto; border: 0; background: none;
-      color: var(--pi-muted); padding: 0 2px; font: inherit; line-height: 1; cursor: pointer;
+    .disclosure-glyph {
+      flex: 0 0 auto; margin-inline-start: auto;
+      color: var(--pi-muted); padding: 0 2px; line-height: 1;
     }
-    .diff-stats + .disclosure, .turn-runtime + .disclosure { margin-inline-start: 0; }
-    .disclosure:hover, .disclosure:focus-visible { color: var(--calm-ink-muted); }
+    .diff-stats + .disclosure-glyph, .turn-runtime + .disclosure-glyph { margin-inline-start: 0; }
+    .line:hover .disclosure-glyph { color: var(--calm-ink-muted); }
   `;
 }
 
-function renderPin(pin: TurnStep) {
+function renderPin(pin: TurnStep, onToggle?: () => void) {
   return html`
-    <div class="line pin">
+    <button
+      type="button"
+      class="line pin failed"
+      aria-label=${`Failed step: ${pin.verb} ${pin.label}`}
+      @click=${onToggle}
+    >
       <span class="glyph" aria-hidden="true">✗</span>
       <span class="verb">${pin.verb}</span>
       <span class="target">${pin.label}</span>
-    </div>
+    </button>
     ${pin.evidence === undefined ? null : html`<p class="sub evidence">${pin.evidence}</p>`}
   `;
 }
