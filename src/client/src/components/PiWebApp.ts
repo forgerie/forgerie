@@ -30,6 +30,7 @@ import { SessionStorageWorkspaceSelectionMemory } from "../controllers/workspace
 import { KeyboardShortcutDispatcher } from "../keyboardShortcuts";
 import { selectedMachineId } from "../controllers/types";
 import { isKeyEventInEditableContext } from "../keyboardContext";
+import { initialInboxDensity, writeInboxDensityPreference, type InboxDensity } from "../inboxDensity";
 import { observeInputMode } from "../inputMode";
 import { machineSessionKey } from "../machineKeys";
 import { createManagedProcessesRuntime } from "../managedProcessesRuntime";
@@ -382,6 +383,8 @@ export class PiWebApp extends LitElement {
   private readonly machinePluginLoadPromises = new Map<string, Promise<void>>();
   private gatewayPluginLoadPromise: Promise<void> | undefined;
   private themePreference: ThemePreference = readStoredThemePreference() ?? DEFAULT_THEME_PREFERENCE;
+  /** Inbox row height. Read once at start-up; the settings panel changes it. */
+  @state() private inboxDensity: InboxDensity = initialInboxDensity();
   @state() private activeThemeId: QualifiedContributionId = CLASSIC_THEME_ID;
   @state() private isRefreshingApp = false;
   /**
@@ -1598,6 +1601,7 @@ export class PiWebApp extends LitElement {
         .onCancelKeyboardNavigation=${() => { void this.openChat(); }}
         .unavailableCwds=${this.unavailableCwds}
         .inboxShelves=${this.inboxShelves()}
+        .inboxDensity=${this.inboxDensity}
       ></app-navigation-panel>
     `;
   }
@@ -3021,6 +3025,13 @@ export class PiWebApp extends LitElement {
     this.applyPreferredTheme(true);
   }
 
+  /** Apply an inbox density choice now and remember it for the next visit. */
+  private applyInboxDensity(density: InboxDensity): void {
+    if (this.inboxDensity === density) return;
+    this.inboxDensity = density;
+    writeInboxDensityPreference(density);
+  }
+
   private applyPreferredTheme(persist: boolean): void {
     const theme = this.resolveCurrentThemePreference().activeTheme;
     if (theme === undefined) return;
@@ -3712,7 +3723,7 @@ export class PiWebApp extends LitElement {
         ${state.machineDialogOpen ? html`<machine-dialog .error=${state.error} .onSubmit=${(input: MachineDialogSubmit) => this.submitMachineDialog(input)} .onCancel=${() => { this.setState({ machineDialogOpen: false }); }}></machine-dialog>` : null}
         ${this.sessionCleanupDialog !== undefined ? html`<session-cleanup-dialog .preview=${this.sessionCleanupDialog.preview} .previewRequest=${this.sessionCleanupDialog.previewRequest} .result=${this.sessionCleanupDialog.result} .loading=${this.sessionCleanupDialog.loading === true} .running=${this.sessionCleanupDialog.running === true} .error=${this.sessionCleanupDialog.error ?? ""} .onPreview=${(request: SessionCleanupRequest) => { void this.previewSessionCleanup(request); }} .onRun=${(request: SessionCleanupRequest) => { void this.runSessionCleanup(request); }} .onClose=${() => { this.closeSessionCleanupDialog(); }}></session-cleanup-dialog>` : null}
         ${state.themeDialog !== undefined ? html`<command-picker title=${state.themeDialog.title} .options=${state.themeDialog.options} .selectedValue=${state.themeDialog.selectedValue} .onPick=${(value: string) => { this.pickTheme(value); }} .onCancel=${() => { this.setState({ themeDialog: undefined }); }}></command-picker>` : null}
-        ${this.settingsSection !== undefined ? html`<settings-dialog .section=${this.settingsSection} .machine=${state.selectedMachine} .machineRuntime=${this.selectedMachineRuntime()} .actions=${this.getDefaultActions()} .onNavigate=${(section: SettingsSection) => { this.navigateSettings(section); }} .onClose=${() => { this.closeSettings(); }} .onConfigSaved=${(config: PiWebConfigValues) => { this.applyClientConfig(config); }} .onRefreshMachineRuntime=${async (machineId: string) => { await this.machines.refreshMachineRuntime(machineId); }}></settings-dialog>` : null}
+        ${this.settingsSection !== undefined ? html`<settings-dialog .section=${this.settingsSection} .machine=${state.selectedMachine} .machineRuntime=${this.selectedMachineRuntime()} .actions=${this.getDefaultActions()} .onNavigate=${(section: SettingsSection) => { this.navigateSettings(section); }} .onClose=${() => { this.closeSettings(); }} .onConfigSaved=${(config: PiWebConfigValues) => { this.applyClientConfig(config); }} .inboxDensity=${this.inboxDensity} .onInboxDensityChange=${(density: InboxDensity) => { this.applyInboxDensity(density); }} .onRefreshMachineRuntime=${async (machineId: string) => { await this.machines.refreshMachineRuntime(machineId); }}></settings-dialog>` : null}
       </div>
     `;
   }

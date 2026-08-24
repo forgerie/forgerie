@@ -2,8 +2,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configApi, piPackagesApi, pluginsApi } from "../api";
+import type { InboxDensity } from "../inboxDensity";
 import { deepActiveElement, dialogSection, dialogSurface, pressKey, requiredElement, settleRenderedDialog, surfaceBackdrop } from "./modalSurfaceTestSupport";
-import { SettingsDialog } from "./SettingsDialog";
+import { activeSettingsPanelTag, SettingsDialog } from "./SettingsDialog";
 import { configResponse, pluginsResponse } from "./SettingsDialog.testSupport";
 
 beforeEach(() => {
@@ -63,7 +64,23 @@ describe("settings-dialog section tabs", () => {
   it("names each section once, without a repeated machine-scope subtitle", async () => {
     const dialog = await mountDialog();
 
-    expect(navLabels(dialog)).toEqual(["General", "Session daemon", "Pi packages", "Forgerie plugins", "Keyboard"]);
+    expect(navLabels(dialog)).toEqual(["General", "Appearance", "Session daemon", "Pi packages", "Forgerie plugins", "Keyboard"]);
+  });
+
+  it("routes the appearance section to the appearance panel and hands the choice through", async () => {
+    const chosen: InboxDensity[] = [];
+    const dialog = await mountDialog({ onInboxDensityChange: (density) => { chosen.push(density); } });
+    dialog.section = "appearance";
+    dialog.inboxDensity = "dense";
+    await settleRenderedDialog(dialog);
+
+    expect(activeSettingsPanelTag("appearance")).toBe("settings-appearance-panel");
+    const panel = requiredElement(dialog.shadowRoot?.querySelector("settings-appearance-panel"), "appearance panel");
+    expect(panel.inboxDensity).toBe("dense");
+
+    panel.onInboxDensityChange?.("comfortable");
+
+    expect(chosen).toEqual(["comfortable"]);
   });
 
   it("scrolls the selected tab into view so a deep link does not open with it off-screen", async () => {
@@ -92,6 +109,7 @@ function navLabels(dialog: SettingsDialog): string[] {
 
 interface SettingsDialogCallbacks {
   onClose?: () => void;
+  onInboxDensityChange?: (density: InboxDensity) => void;
 }
 
 async function mountDialog(callbacks: SettingsDialogCallbacks = {}): Promise<SettingsDialog> {

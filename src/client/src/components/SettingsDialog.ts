@@ -3,8 +3,10 @@ import { customElement, property, state } from "lit/decorators.js";
 import type { AppAction } from "../actions";
 import { configApi, piPackagesApi, pluginsApi, type Machine, type MachineRuntime, type PiPackageMutationResponse, type PiPackageScope, type PiPackagesResponse, type PiWebConfigResponse, type PiWebConfigValues, type PiWebPluginsResponse } from "../api";
 import type { SettingsSection } from "../settingsRoute";
+import { DEFAULT_INBOX_DENSITY, type InboxDensity } from "../inboxDensity";
 import "./ModalSurface";
 import "./settings/SettingsGeneralPanel";
+import "./settings/SettingsAppearancePanel";
 import "./settings/SettingsSessiondPanel";
 import "./settings/SettingsPackagesPanel";
 import "./settings/SettingsPluginsPanel";
@@ -22,6 +24,8 @@ export class SettingsDialog extends LitElement {
   @property({ attribute: false }) actions: AppAction[] = [];
   @property({ attribute: false }) machine: Machine | undefined;
   @property({ attribute: false }) machineRuntime: MachineRuntime | undefined;
+  @property({ attribute: false }) inboxDensity: InboxDensity = DEFAULT_INBOX_DENSITY;
+  @property({ attribute: false }) onInboxDensityChange?: (density: InboxDensity) => void;
   @property({ attribute: false }) onNavigate?: (section: SettingsSection) => void;
   @property({ attribute: false }) onClose?: () => void;
   @property({ attribute: false }) onConfigSaved?: (config: PiWebConfigValues) => void;
@@ -94,6 +98,7 @@ export class SettingsDialog extends LitElement {
             <button class="close-button" title="Close settings" aria-label="Close settings" @click=${() => this.onClose?.()}>×</button>
             <nav class="settings-nav" aria-label="Settings sections">
               ${this.renderNavButton("general", "General")}
+              ${this.renderNavButton("appearance", "Appearance")}
               ${this.renderNavButton("sessiond", "Session daemon")}
               ${this.renderNavButton("packages", "Pi packages")}
               ${this.renderNavButton("plugins", "Forgerie plugins")}
@@ -125,6 +130,14 @@ export class SettingsDialog extends LitElement {
           .onReload=${() => this.reloadSessiondState()}
           .onSave=${(config: PiWebConfigValues) => this.saveSessiondConfig(config)}
         ></settings-sessiond-panel>
+      `;
+    }
+    if (this.section === "appearance") {
+      return html`
+        <settings-appearance-panel
+          .inboxDensity=${this.inboxDensity}
+          .onInboxDensityChange=${(density: InboxDensity) => { this.onInboxDensityChange?.(density); }}
+        ></settings-appearance-panel>
       `;
     }
     if (this.section === "shortcuts") {
@@ -614,6 +627,7 @@ function errorMessage(error: unknown): string {
 
 export type SettingsPanelTag =
   | "settings-general-panel"
+  | "settings-appearance-panel"
   | "settings-sessiond-panel"
   | "settings-packages-panel"
   | "settings-plugins-panel"
@@ -637,6 +651,8 @@ export function activeSettingsPanelTag(section: SettingsSection): SettingsPanelT
       return "settings-plugins-panel";
     case "shortcuts":
       return "settings-shortcuts-panel";
+    case "appearance":
+      return "settings-appearance-panel";
     case "general":
       return "settings-general-panel";
   }

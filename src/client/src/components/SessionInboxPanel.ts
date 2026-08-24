@@ -27,6 +27,7 @@ import { renderBuiltinTabIcon } from "./tabIcons";
 import { NEW_SESSION_LABEL } from "./shared";
 import "./SessionWorkingRuntime";
 import { isKeyEventInEditableContext } from "../keyboardContext";
+import { DEFAULT_INBOX_DENSITY, inboxRowShape, type InboxDensity } from "../inboxDensity";
 import { ROW_PRESS, pressTravel, readRowPress } from "../rowPress";
 
 import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
@@ -156,6 +157,11 @@ export class SessionInboxPanel extends LitElement {
   @property({ attribute: false }) unreadCompletedAt: Readonly<Record<string, string>> = {};
   @property({ attribute: false }) projects: Project[] = [];
   @property({ attribute: false }) workspacesByProjectId: Record<string, Workspace[]> = {};
+  /**
+   * How tall an ordinary row is. Owned by the app, which reads the stored
+   * choice, so the panel never reaches into storage during a render.
+   */
+  @property({ attribute: false }) density: InboxDensity = DEFAULT_INBOX_DENSITY;
   @property({ attribute: false }) onSelectSession?: (session: SessionInfo) => void;
   @property({ attribute: false }) onArchiveSession?: (session: SessionInfo) => void;
   /** Pin: the row sorts to the top of its group and archiving is refused until unpinned. */
@@ -800,6 +806,7 @@ export class SessionInboxPanel extends LitElement {
         @contextmenu=${isDeleted ? nothing : (e: MouseEvent) => { this.onRowContextMenu(e, session); }}
         data-session=${session.id}
         data-state=${kind}
+        data-shape=${inboxRowShape(this.density, detail !== undefined)}
         style="--row-tone: var(--tone-${kind}, var(--pi-dim))"
         aria-selected=${String(isSelected)}
         aria-disabled=${isDeleted ? "true" : "false"}
@@ -812,7 +819,7 @@ export class SessionInboxPanel extends LitElement {
         }}
       >
         <span class="row-marker" aria-hidden="true"></span>
-        <div class="row-title">${session.pinned === true ? html`<span class="row-pin" title="Pinned" data-pinned-marker>${pinGlyph()}</span>` : nothing}${session.name ?? (session.firstMessage || session.id)}</div>
+        <div class="row-title">${session.name ?? (session.firstMessage || session.id)}</div>
         <div class="row-meta">
           ${isDeleted
             ? html`<span class="chip chip-deleted" data-location-chip>workspace removed</span>`
@@ -826,11 +833,14 @@ export class SessionInboxPanel extends LitElement {
           ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
           ${this.renderLiveWork(session.id)}
         </div>
-        <span class="row-time">
-          ${kind === "working"
-            ? html`<session-working-runtime .startedAt=${this.observedWorkingSince.get(session.id) ?? new Date(now).toISOString()}></session-working-runtime>`
-            : relativeTime(session.modified, now)}
-        </span>
+        <div class="row-trailing">
+          ${session.pinned === true ? html`<span class="row-pin" title="Pinned" data-pinned-marker>${pinGlyph()}</span>` : nothing}
+          <span class="row-time">
+            ${kind === "working"
+              ? html`<session-working-runtime .startedAt=${this.observedWorkingSince.get(session.id) ?? new Date(now).toISOString()}></session-working-runtime>`
+              : relativeTime(session.modified, now)}
+          </span>
+        </div>
         <div class="row-actions">
           ${kind === "archived"
             ? html`<button class="row-action" data-action="restore" title="Restore" aria-label="Restore session" @click=${handleRestore}>↩</button>`
@@ -1380,14 +1390,23 @@ export class SessionInboxPanel extends LitElement {
       position: relative;
     }
 
+    /*
+     * Two shapes, chosen by inboxRowShape and written to data-shape. The
+     * styles never work out the combination of density and detail for
+     * themselves: they select on the answer.
+     *
+     * One line: marker, title, location, trailing. The location takes a track
+     * of its own rather than a line of its own, so nothing is dropped.
+     * Two lines: the title keeps the first line and the location drops to the
+     * second, where a detail joins it.
+     */
     .row {
       position: relative;
       display: grid;
-      grid-template-columns: auto 1fr auto;
-      align-items: start;
-      gap: 2px var(--row-title-gap);
       width: 100%;
-      padding: 8px 12px;
+      padding: 6px 12px;
+      column-gap: var(--row-title-gap);
+      row-gap: 0;
       text-align: left;
       border-bottom: 1px solid var(--pi-border-muted, #202225);
       cursor: pointer;
@@ -1427,14 +1446,31 @@ export class SessionInboxPanel extends LitElement {
       opacity: 0.6;
     }
 
+    /*
+     * The title track is the flexible one, so it is the title that truncates.
+     * Sizing the location track with 1fr instead cut project names mid-word.
+     */
+    .row[data-shape="one-line"] {
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+      align-items: center;
+    }
+
+    .row[data-shape="two-line"] {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: start;
+      row-gap: 2px;
+    }
+
     .row-marker {
-      grid-row: 1 / span 2;
       align-self: center;
       width: var(--row-marker-size);
       height: var(--row-marker-size);
       border-radius: 50%;
       background: var(--row-tone, transparent);
     }
+
+    .row[data-shape="one-line"] .row-marker { grid-column: 1; grid-row: 1; }
+    .row[data-shape="two-line"] .row-marker { grid-column: 1; grid-row: 1 / span 2; }
 
     .row[data-state="open"] .row-marker,
     .row[data-state="archived"] .row-marker { background: none; }
@@ -1460,16 +1496,20 @@ export class SessionInboxPanel extends LitElement {
       .undo-toast { animation: none; }
     }
 
+    /*
+     * One line, always. A title too long for the pane ends in an ellipsis
+     * rather than pushing every row below it down the pane.
+     */
     .row-title {
       grid-column: 2;
+      grid-row: 1;
       min-width: 0;
       font-size: var(--pi-text-md);
       color: var(--pi-text, #e6e7e9);
       line-height: 1.35;
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2;
+      white-space: nowrap;
       overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .row[data-state="unread"] .row-title,
@@ -1478,10 +1518,27 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-text-bright, #fff);
     }
 
+    /*
+     * The pin sits with the time, not before the title.
+     *
+     * Leading it indented every pinned row's title by the width of the glyph,
+     * so a group of pinned rows -- and pinned rows sort to the top, so they
+     * arrive as a group -- had a ragged left edge against the rows below them.
+     * The titles are what the eye runs down.
+     */
+    .row-trailing {
+      grid-column: -2;
+      grid-row: 1;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      justify-self: end;
+    }
+
+    .row[data-shape="two-line"] .row-trailing { align-self: baseline; }
+
     .row-pin {
       display: inline-flex;
-      vertical-align: -1px;
-      margin-inline-end: 5px;
       color: var(--pi-accent, #4a7cc4);
     }
 
@@ -1501,14 +1558,26 @@ export class SessionInboxPanel extends LitElement {
     .row[data-state="archived"] .row-title { color: var(--pi-muted, #85888e); }
 
     .row-meta {
-      grid-column: 2;
       min-width: 0;
       display: flex;
       align-items: center;
       gap: 6px;
-      flex-wrap: wrap;
       font-size: var(--pi-text-sm);
       color: var(--pi-dim, #62656b);
+    }
+
+    /* Beside the title, sized to its content, so a project name is never cut. */
+    .row[data-shape="one-line"] .row-meta {
+      grid-column: 3;
+      grid-row: 1;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+    }
+
+    .row[data-shape="two-line"] .row-meta {
+      grid-column: 2;
+      grid-row: 2;
+      flex-wrap: wrap;
     }
 
     .chip {
@@ -1550,16 +1619,7 @@ export class SessionInboxPanel extends LitElement {
 
     .row[data-state="errored"] .row-detail { color: var(--pi-danger, #e06c75); }
 
-    /*
-     * The right column mirrors the left's two-line rhythm: when on the title's
-     * line, act on the location's line. Sharing baselines is what makes the
-     * time read as part of the session rather than as a label on a button.
-     */
     .row-time {
-      grid-column: 3;
-      grid-row: 1;
-      justify-self: end;
-      align-self: baseline;
       font-size: var(--pi-text-sm);
       font-variant-numeric: tabular-nums;
       color: var(--pi-dim, #62656b);
@@ -1580,20 +1640,43 @@ export class SessionInboxPanel extends LitElement {
        * row would appear and then stay.
        */
       display: var(--pi-row-actions-display, flex);
-      grid-column: 3;
-      grid-row: 2;
-      justify-self: end;
-      align-self: center;
+      /*
+       * Positioned, so the controls cost the row no height at all. An
+       * absolutely positioned grid child takes its grid area as its containing
+       * block, so the placement below is what confines it, and the track it
+       * names is never grown by it. Laying it out instead set the second row's
+       * floor at the button's 28px against 14px of text, which is where the ten
+       * dead pixels came from -- and only for a mouse, since a finger removes
+       * the controls, so the same list changed height with the input in use.
+       */
+      position: absolute;
+      inset-block: 0;
+      inset-inline-end: 0;
+      align-items: center;
+      justify-content: flex-end;
       gap: 3px;
-      /* Sits with the location line without making the row taller than it. */
-      margin-block-start: -4px;
       opacity: 0;
       transition: opacity var(--pi-motion-fast) ease;
     }
 
+    /* One line: over the time, which stands down while they are up. */
+    .row[data-shape="one-line"] .row-actions { grid-column: -2; grid-row: 1; }
+    /* Two lines: the cell beside the location is empty, so nothing stands down. */
+    .row[data-shape="two-line"] .row-actions { grid-column: -2; grid-row: 2; }
+
     .row:hover .row-actions,
-    .row:focus-within .row-actions,
-    .row[aria-selected="true"] .row-actions { opacity: 1; }
+    .row:focus-within .row-actions { opacity: 1; }
+
+    /*
+     * A selected two-line row keeps its controls up, because it has a spare
+     * cell to put them in. A selected one-line row does not: holding them up
+     * there would trade its timestamp away for as long as it stayed selected,
+     * which is the whole time you are reading that session.
+     */
+    .row[data-shape="two-line"][aria-selected="true"] .row-actions { opacity: 1; }
+
+    .row[data-shape="one-line"]:hover .row-trailing,
+    .row[data-shape="one-line"]:focus-within .row-trailing { visibility: hidden; }
 
     /* ≥44px touch target as required by plan. */
     /*

@@ -1399,6 +1399,80 @@ describe("live work indicator", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Row density
+//
+// The shape is a derived value written to data-shape, so these assert the
+// attribute the styles select on rather than any geometry happy-dom cannot
+// produce.
+// ---------------------------------------------------------------------------
+
+describe("row density", () => {
+  it("gives an ordinary row one line when dense", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    await expandOpenGroup(panel);
+
+    expect(rowShape(panel, "open-one")).toBe("one-line");
+  });
+
+  it("keeps the second line for a blocked row even when dense", async () => {
+    // The question is the reason to read the row, so density never takes it.
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("blocked-one")], {
+        statuses: { "blocked-one": mkBlockedStatus("blocked-one") },
+      }),
+    });
+
+    expect(rowShape(panel, "blocked-one")).toBe("two-line");
+    expect(rowElement(panel, "blocked-one").querySelector(".row-detail")?.textContent.trim()).toBe("Proceed?");
+  });
+
+  it("gives every row two lines when comfortable", async () => {
+    const panel = await mountPanel({
+      density: "comfortable",
+      globalSessions: mkGlobalSessions([mkSession("open-one")]),
+    });
+    await expandOpenGroup(panel);
+
+    expect(rowShape(panel, "open-one")).toBe("two-line");
+  });
+
+  it("keeps the location on a dense row rather than dropping it", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
+    await expandOpenGroup(panel);
+
+    const chip = rowElement(panel, "open-one").querySelector("[data-location-chip]");
+    expect(chip?.textContent).toContain("Repo");
+  });
+
+  it("puts the pinned marker with the time, not before the title", async () => {
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("pinned-one", { pinned: true })]) });
+    await expandOpenGroup(panel);
+    const row = rowElement(panel, "pinned-one");
+
+    // Leading the title indented every pinned row's title away from the rows
+    // below it, and pinned rows arrive together at the top of their group.
+    expect(row.querySelector(".row-title [data-pinned-marker]")).toBeNull();
+    expect(row.querySelector(".row-trailing [data-pinned-marker]")).not.toBeNull();
+  });
+});
+
+function rowElement(panel: SessionInboxPanel, sessionId: string): HTMLElement {
+  const row = shadowRoot(panel).querySelector(`[data-session='${sessionId}']`);
+  if (!(row instanceof HTMLElement)) throw new Error(`No row for ${sessionId}`);
+  return row;
+}
+
+function rowShape(panel: SessionInboxPanel, sessionId: string): string | null {
+  return rowElement(panel, sessionId).getAttribute("data-shape");
+}
+
+/** Open is collapsed by default, so a test that wants its rows must open it. */
+async function expandOpenGroup(panel: SessionInboxPanel): Promise<void> {
+  clickSelector(shadowRoot(panel), "[data-group='open'] button");
+  await panel.updateComplete;
+}
+
+// ---------------------------------------------------------------------------
 // Swipe to archive
 //
 // The gesture reads pointerType from the event, so these tests send real

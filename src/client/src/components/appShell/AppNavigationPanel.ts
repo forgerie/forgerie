@@ -3,6 +3,7 @@ import { customElement, property, query } from "lit/decorators.js";
 import type { Machine, MachineHealth, SessionActivity, SessionInfo, SessionStatus, Workspace, WorkspaceActivity } from "../../api";
 import type { Project } from "../../api";
 import type { GlobalSessionsState } from "../../appState";
+import { DEFAULT_INBOX_DENSITY, type InboxDensity } from "../../inboxDensity";
 import { EMPTY_UNREAD_PRESENCE, type UnreadPresence } from "../../unreadPresence";
 import type { KeyboardNavigableSection } from "../navigationFocus";
 import "../MachineSwitcher";
@@ -29,6 +30,7 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) unreadCompletedAt: Readonly<Record<string, string>> = {};
   @property({ attribute: false }) projects: Project[] = [];
   @property({ attribute: false }) workspacesByProjectId: Record<string, Workspace[]> = {};
+  @property({ attribute: false }) inboxDensity: InboxDensity = DEFAULT_INBOX_DENSITY;
 
   // ---- layout flags ----
   @property({ type: Boolean, reflect: true }) collapsible = false;
@@ -119,6 +121,7 @@ export class AppNavigationPanel extends LitElement {
         .unreadCompletedAt=${this.unreadCompletedAt}
         .projects=${this.projects}
         .workspacesByProjectId=${this.workspacesByProjectId}
+        .density=${this.inboxDensity}
         .onSelectSession=${this.onSelectSession}
         .onArchiveSession=${this.onArchiveSession}
         .onPinSession=${this.onPinSession}
