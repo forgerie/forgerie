@@ -330,9 +330,6 @@ export class ChatView extends LitElement {
     else if (this.scrolling.mode.kind === "turn") this.alignAnchoredTurn();
     else if (this.chat !== undefined) this.scrolling.syncViewportSize(this.chat);
   };
-  private readonly onImageLoad = (): void => {
-    this.scheduleCurrentFollowTarget();
-  };
   private readonly openImageZoom = (images: readonly ImageLightboxItem[], index = 0): void => {
     this.imageLightbox?.open(images, index);
   };
@@ -1252,7 +1249,9 @@ export class ChatView extends LitElement {
     }
     if (part.type === "image") {
       const { src, alt } = chatImagePartSource(part);
-      return html`<img class="part chat-image" src=${src} alt=${alt} loading="lazy" role="button" tabindex="0" title="Open full-screen image" @load=${this.onImageLoad} @click=${() => { this.openImageZoom([{ src, alt }]); }} @keydown=${(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.openImageZoom([{ src, alt }]); } }} />`;
+      // No `@load` re-pin: the band reserves its height in CSS, so a late
+      // decode changes nothing the reading position depends on.
+      return html`<img class="part chat-image" src=${src} alt=${alt} loading="lazy" role="button" tabindex="0" title="Open full-screen image" @click=${() => { this.openImageZoom([{ src, alt }]); }} @keydown=${(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.openImageZoom([{ src, alt }]); } }} />`;
     }
     if (part.type === "toolCall") return html`<div class="part tool-line">▶ ${part.toolName}<span class="summary">${part.summary}</span></div>`;
     if (part.type === "toolExecution") return html`<tool-execution-view class="part" .execution=${part}></tool-execution-view>`;

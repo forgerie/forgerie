@@ -772,7 +772,18 @@ export const chatStyles = css`
   .turn-image-gallery-thumb { flex: 0 1 clamp(72px, 20cqi, 112px); }
   .turn-image-gallery-thumb img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
   .turn-image-gallery-more { flex: 0 0 clamp(48px, 12cqi, 64px); font: 500 var(--pi-text-sm) system-ui, sans-serif; cursor: pointer; }
-  .chat-image { display: block; max-width: 100%; max-height: 320px; margin: 8px 0 0; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); object-fit: contain; cursor: zoom-in; }
+  /* An inline image occupies a band of fixed height. The height is definite
+     before the file arrives, so a late decode cannot grow the transcript under
+     the reader and move what they are reading. The image is contained inside
+     the band rather than cropped, and the band carries the soft canvas so the
+     space beside a tall image reads as a frame and not as a gap. Full size is
+     one tap away in the lightbox.
+
+     The band answers to both axes of the transcript. Width alone would give a
+     folded landscape screen a 200px band inside a viewport of about 374px,
+     where the band and the composer leave no room to read. The block term caps
+     the band against the height the transcript actually has. */
+  .chat-image { display: block; box-sizing: border-box; inline-size: 100%; block-size: clamp(120px, min(30cqi, 45cqb), 200px); margin: 8px 0 0; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); background: var(--calm-canvas-soft); object-fit: contain; cursor: zoom-in; }
   .chat-image:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   .group-msg { max-width: 100%; min-width: 0; box-sizing: border-box; padding: 0 0 0 12px; border-top: 0; border-left: 1px solid var(--calm-rule); color: var(--calm-ink-dim); overflow: visible; }
   .group-msg.tool, .group-msg.tool-execution-shell, .group-msg.bash { color: var(--calm-ink-dim); }

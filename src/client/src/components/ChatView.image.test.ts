@@ -1,13 +1,13 @@
 import type { TemplateResult } from "lit";
 import { describe, expect, it } from "vitest";
-import type { ChatLine } from "./shared";
+import { chatStyles, type ChatLine } from "./shared";
 import {
   ChatView,
   chatImagePartSource,
   chatMessageAnchorKey,
   chatToolOutputLabel,
 } from "./ChatView";
-import { templateEventHandlerAfterMarker } from "../templateInspection.testSupport";
+import { findOptionalTemplateEventHandlerNearMarker } from "../templateInspection.testSupport";
 
 describe("ChatView image content derivation", () => {
   // Content/attribute derivation (image src/alt, the tool-output header label,
@@ -32,20 +32,24 @@ describe("ChatView image content derivation", () => {
   });
 });
 
-describe("ChatView image event wiring", () => {
-  // Escape hatch: this case verifies the image `@load` re-pin wiring, whose
-  // only observable effect is a private scroll side effect. The full-screen
-  // click path is covered through real shadow DOM in ChatView.imageModal.test.
-  it("delegates late image loads to the unified follow target", () => {
-    const view = new ChatView();
-    let placements = 0;
-    if (!Reflect.set(view, "scheduleCurrentFollowTarget", () => { placements += 1; })) throw new Error("Could not observe ChatView.scheduleCurrentFollowTarget");
-    const rendered = renderPart(view, { type: "image", mimeType: "image/png", data: "QUJD" });
-    const onLoad = templateEventHandlerAfterMarker(rendered, "@load=");
+describe("inline transcript image", () => {
+  // A late image decode used to grow the transcript and then trigger a re-pin,
+  // which moved the reader's position. The band removes the growth, so the
+  // re-pin has nothing to correct and must not exist.
+  it("reserves a fixed band height, so a late decode cannot move the reading position", () => {
+    expect(chatStyles.cssText).toMatch(/\.chat-image\s*{[^}]*block-size:\s*clamp\(/);
+    expect(chatStyles.cssText).not.toMatch(/\.chat-image\s*{[^}]*max-height:/);
+  });
 
-    onLoad(new Event("load"));
+  it("contains the image inside the band instead of cropping it", () => {
+    expect(chatStyles.cssText).toMatch(/\.chat-image\s*{[^}]*object-fit:\s*contain/);
+  });
 
-    expect(placements).toBe(1);
+  // Escape hatch: absence of event wiring is only observable on the template.
+  it("wires no load handler, so image decodes never re-pin the transcript", () => {
+    const rendered = renderPart(new ChatView(), { type: "image", mimeType: "image/png", data: "QUJD" });
+
+    expect(findOptionalTemplateEventHandlerNearMarker(rendered, "@load=")).toBeUndefined();
   });
 });
 
