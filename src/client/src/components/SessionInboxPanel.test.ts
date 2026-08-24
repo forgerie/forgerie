@@ -1444,7 +1444,7 @@ describe("row density", () => {
     expect(chip?.textContent).toContain("Repo");
   });
 
-  it("puts the pinned marker with the time, not before the title", async () => {
+  it("puts the pinned marker in the trailing mark slot, not before the title", async () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("pinned-one", { pinned: true })]) });
     await expandOpenGroup(panel);
     const row = rowElement(panel, "pinned-one");
@@ -1452,7 +1452,22 @@ describe("row density", () => {
     // Leading the title indented every pinned row's title away from the rows
     // below it, and pinned rows arrive together at the top of their group.
     expect(row.querySelector(".row-title [data-pinned-marker]")).toBeNull();
-    expect(row.querySelector(".row-trailing [data-pinned-marker]")).not.toBeNull();
+    expect(row.querySelector(".row-mark [data-pinned-marker]")).not.toBeNull();
+  });
+
+  it("reserves the mark slot on every row, so revealing an action moves nothing", async () => {
+    // The action draws into the same slot the pin occupies. Were the slot only
+    // present on pinned rows, revealing an action would shove the timestamp
+    // sideways under the pointer.
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("plain-one"), mkSession("pinned-one", { pinned: true })]),
+    });
+    await expandOpenGroup(panel);
+
+    for (const id of ["plain-one", "pinned-one"]) {
+      expect(rowElement(panel, id).querySelector(".row-mark")).not.toBeNull();
+    }
+    expect(rowElement(panel, "plain-one").querySelector("[data-pinned-marker]")).toBeNull();
   });
 });
 

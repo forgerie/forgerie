@@ -833,14 +833,14 @@ export class SessionInboxPanel extends LitElement {
           ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
           ${this.renderLiveWork(session.id)}
         </div>
-        <div class="row-trailing">
+        <span class="row-mark">
           ${session.pinned === true ? html`<span class="row-pin" title="Pinned" data-pinned-marker>${pinGlyph()}</span>` : nothing}
-          <span class="row-time">
-            ${kind === "working"
-              ? html`<session-working-runtime .startedAt=${this.observedWorkingSince.get(session.id) ?? new Date(now).toISOString()}></session-working-runtime>`
-              : relativeTime(session.modified, now)}
-          </span>
-        </div>
+        </span>
+        <span class="row-time">
+          ${kind === "working"
+            ? html`<session-working-runtime .startedAt=${this.observedWorkingSince.get(session.id) ?? new Date(now).toISOString()}></session-working-runtime>`
+            : relativeTime(session.modified, now)}
+        </span>
         <div class="row-actions">
           ${kind === "archived"
             ? html`<button class="row-action" data-action="restore" title="Restore" aria-label="Restore session" @click=${handleRestore}>↩</button>`
@@ -1002,6 +1002,15 @@ export class SessionInboxPanel extends LitElement {
        */
       --row-marker-size: 7px;
       --row-title-gap: 10px;
+
+      /*
+       * The trailing slot that holds one mark: the pin at rest, the row's
+       * action while the row is under a pointer. Both draw in the same place,
+       * so revealing the action moves nothing. Reserved on every row, pinned
+       * or not, because a slot that appeared on hover would shove the
+       * timestamp sideways under the pointer.
+       */
+      --row-mark-size: 20px;
 
       /*
        * One tone per group kind, read by var(--tone-KIND) in group headers and
@@ -1450,13 +1459,15 @@ export class SessionInboxPanel extends LitElement {
      * The title track is the flexible one, so it is the title that truncates.
      * Sizing the location track with 1fr instead cut project names mid-word.
      */
+    /* marker | title | location | mark | time */
     .row[data-shape="one-line"] {
-      grid-template-columns: auto minmax(0, 1fr) auto auto;
+      grid-template-columns: auto minmax(0, 1fr) auto auto auto;
       align-items: center;
     }
 
+    /* marker | title | mark | time, with the location below the title. */
     .row[data-shape="two-line"] {
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
       align-items: start;
       row-gap: 2px;
     }
@@ -1526,16 +1537,46 @@ export class SessionInboxPanel extends LitElement {
      * arrive as a group -- had a ragged left edge against the rows below them.
      * The titles are what the eye runs down.
      */
-    .row-trailing {
-      grid-column: -2;
+    .row-mark {
       grid-row: 1;
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      justify-self: end;
+      justify-content: center;
+      width: var(--row-mark-size);
     }
 
-    .row[data-shape="two-line"] .row-trailing { align-self: baseline; }
+    /*
+     * Both lines named, never a single line number. An absolutely positioned
+     * grid child takes its grid area as its containing block, but an auto end
+     * line resolves to the grid container's padding edge rather than to
+     * start + 1. A single-line grid-column: 4 therefore gave the action a 57px
+     * box running from the mark slot to the row's edge, and centring in it put
+     * the glyph 19px right of the pin it replaces.
+     */
+    .row[data-shape="one-line"] .row-mark { grid-column: 4 / 5; }
+    .row[data-shape="one-line"] .row-time { grid-column: 5 / 6; }
+    .row[data-shape="one-line"] .row-actions { grid-column: 4 / 5; }
+
+    .row[data-shape="two-line"] .row-mark { grid-column: 3 / 4; }
+    .row[data-shape="two-line"] .row-time { grid-column: 4 / 5; }
+    .row[data-shape="two-line"] .row-actions { grid-column: 3 / 4; }
+
+    /*
+     * The mark centres in its track in both shapes, because the action that
+     * replaces it centres in the same track. Sharing the title's baseline moved
+     * the resting pin 3.5px off the action that takes its place. The timestamp
+     * is text and keeps the baseline.
+     */
+    .row-mark { align-self: center; }
+    .row[data-shape="two-line"] .row-time { align-self: baseline; }
+
+    /*
+     * The pin stands down exactly when the action takes its slot, so the two
+     * never draw over each other and the glyph never appears to move.
+     */
+    .row:hover .row-mark,
+    .row:focus-within .row-mark,
+    .row[aria-selected="true"] .row-mark { visibility: hidden; }
 
     .row-pin {
       display: inline-flex;
@@ -1620,6 +1661,8 @@ export class SessionInboxPanel extends LitElement {
     .row[data-state="errored"] .row-detail { color: var(--pi-danger, #e06c75); }
 
     .row-time {
+      grid-row: 1;
+      justify-self: end;
       font-size: var(--pi-text-sm);
       font-variant-numeric: tabular-nums;
       color: var(--pi-dim, #62656b);
@@ -1650,33 +1693,24 @@ export class SessionInboxPanel extends LitElement {
        * the controls, so the same list changed height with the input in use.
        */
       position: absolute;
+      /*
+       * The mark slot is the containing block, in both shapes, so the action
+       * draws exactly where the pin was rather than at the row's edge. The
+       * timestamp keeps its own column and never stands down for a control.
+       */
+      grid-row: 1 / 2;
       inset-block: 0;
-      inset-inline-end: 0;
+      inset-inline: 0;
       align-items: center;
-      justify-content: flex-end;
+      justify-content: center;
       gap: 3px;
       opacity: 0;
       transition: opacity var(--pi-motion-fast) ease;
     }
 
-    /* One line: over the time, which stands down while they are up. */
-    .row[data-shape="one-line"] .row-actions { grid-column: -2; grid-row: 1; }
-    /* Two lines: the cell beside the location is empty, so nothing stands down. */
-    .row[data-shape="two-line"] .row-actions { grid-column: -2; grid-row: 2; }
-
     .row:hover .row-actions,
-    .row:focus-within .row-actions { opacity: 1; }
-
-    /*
-     * A selected two-line row keeps its controls up, because it has a spare
-     * cell to put them in. A selected one-line row does not: holding them up
-     * there would trade its timestamp away for as long as it stayed selected,
-     * which is the whole time you are reading that session.
-     */
-    .row[data-shape="two-line"][aria-selected="true"] .row-actions { opacity: 1; }
-
-    .row[data-shape="one-line"]:hover .row-trailing,
-    .row[data-shape="one-line"]:focus-within .row-trailing { visibility: hidden; }
+    .row:focus-within .row-actions,
+    .row[aria-selected="true"] .row-actions { opacity: 1; }
 
     /* ≥44px touch target as required by plan. */
     /*
@@ -1684,12 +1718,17 @@ export class SessionInboxPanel extends LitElement {
      * pointer: a bordered box on every row would out-weigh the titles it sits
      * beside and draw a hard rail down the pane.
      */
+    /*
+     * Sized to the mark slot it sits in, not to a tap target. The pseudo below
+     * carries the tap target, so the glyph can match the pin it replaces
+     * without the control growing past the slot and clipping the timestamp.
+     */
     .row-action {
       position: relative;
       display: grid;
       place-items: center;
-      min-width: 28px;
-      min-height: 28px;
+      min-width: var(--row-mark-size);
+      min-height: var(--row-mark-size);
       padding: 0;
       font: inherit;
       font-size: var(--pi-text-md);
