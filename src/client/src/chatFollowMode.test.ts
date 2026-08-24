@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  anchoredReadingPosition,
   anchoredTurnKey,
+  followAnchor,
   followModeAfterReaderPullback,
   followModeAfterScroll,
   followModeAfterTurnOpened,
@@ -33,6 +35,11 @@ describe("followModeAfterScroll", () => {
   it("keeps an anchored turn when the transcript moves itself", () => {
     const turn = followTurn("turn:m:12");
     expect(followModeAfterScroll(turn, scroll({ atBottom: true, nearBottom: true }), "component")).toEqual(turn);
+  });
+
+  it("keeps a saved passage when the transcript moves itself", () => {
+    const passage = followAnchor({ kind: "anchor", anchorId: "m:4", offset: 24 });
+    expect(followModeAfterScroll(passage, scroll({ atBottom: true, nearBottom: true }), "component")).toEqual(passage);
   });
 
   it("hands an anchored turn back to the tail when the reader reaches the bottom", () => {
@@ -68,15 +75,23 @@ describe("followModeAfterTurnOpened", () => {
     expect(followModeAfterTurnOpened(FOLLOW_FREE, "turn:m:8", false)).toEqual(FOLLOW_FREE);
   });
 
+  it("leaves a restored passage in place when another device opens a turn", () => {
+    const passage = followAnchor({ kind: "anchor", anchorId: "m:4", offset: 24 });
+    expect(followModeAfterTurnOpened(passage, "turn:m:8", false)).toEqual(passage);
+  });
+
   it("anchors a turn sent from a free passage", () => {
     expect(followModeAfterTurnOpened(FOLLOW_FREE, "turn:m:8", true)).toEqual(followTurn("turn:m:8"));
   });
 });
 
-describe("anchoredTurnKey", () => {
-  it("returns only a turn target", () => {
+describe("follow target selection", () => {
+  it("returns only the matching target kind", () => {
+    const passage = { kind: "anchor" as const, anchorId: "m:4", offset: 24 };
     expect(anchoredTurnKey(followTurn("turn:m:8"))).toBe("turn:m:8");
-    expect(anchoredTurnKey(FOLLOW_TAIL)).toBeUndefined();
+    expect(anchoredReadingPosition(followAnchor(passage))).toEqual(passage);
+    expect(anchoredTurnKey(followAnchor(passage))).toBeUndefined();
+    expect(anchoredReadingPosition(FOLLOW_TAIL)).toBeUndefined();
     expect(anchoredTurnKey(FOLLOW_FREE)).toBeUndefined();
   });
 });

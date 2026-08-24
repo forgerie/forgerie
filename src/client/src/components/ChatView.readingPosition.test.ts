@@ -2,7 +2,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PendingExtensionDialog, SessionStatus } from "../api";
-import { textMessage } from "../chatMessages";
+import { normalizeMessages, textMessage } from "../chatMessages";
+import { chatLineReadingAnchorToken, chatReadingPositionStorageKey } from "../chatReadingPosition";
 import { ChatScrollCoordinator } from "../chatScrollCoordinator";
 import { FOLLOW_FREE } from "../chatFollowMode";
 import { selectedChatCachedReadable, selectedChatFreshReadable, selectedChatLiveReady, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget } from "../selectedChatLoad";
@@ -14,6 +15,7 @@ import type { TurnRailSummary } from "./TurnRailSummary";
 afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
+  sessionStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -104,9 +106,10 @@ describe("ChatView loading-time reader takeover", () => {
 });
 
 describe("ChatView session opening position", () => {
-  it("opens at the bottom instead of restoring a saved passage", async () => {
+  it("restores a saved passage from this browser window", async () => {
     const frames = installFrames();
-    localStorage.setItem(`pi-web:chat-scroll:${session.id}`, JSON.stringify({ mode: "anchor", anchorId: "m:0", offset: 20 }));
+    const anchorId = userReadingAnchorId("question");
+    sessionStorage.setItem(chatReadingPositionStorageKey({ machineId: "local", cwd: session.cwd, sessionId: session.id }), JSON.stringify({ kind: "anchor", anchorId, offset: 20 }));
     const view = new ChatView();
     view.sessionId = session.id;
     view.selectedMachineId = "local";
@@ -119,12 +122,269 @@ describe("ChatView session opening position", () => {
     await view.updateComplete;
 
     const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
-    defineScrollGeometry(chat, { scrollTop: 0, scrollHeight: 1_400, clientHeight: 400 });
+    const anchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(`[data-scroll-anchor-id="${anchorId}"]`), "saved message");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_400 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    chat.getBoundingClientRect = () => rect(100, 500);
+    anchor.getBoundingClientRect = () => rect(600 - scrollTop, 680 - scrollTop);
 
     frames.releaseAll();
 
-    expect(chat.scrollTop).toBe(1_400);
-    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "tail" });
+    expect(anchor.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(20);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "anchor", position: { kind: "anchor", anchorId, offset: 20 } });
+
+    chat.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+  });
+
+  it("loads earlier history until the saved passage is available", async () => {
+    const frames = installFrames();
+    const onLoadMore = vi.fn();
+    const anchorId = userReadingAnchorId("saved question");
+    sessionStorage.setItem(chatReadingPositionStorageKey({ machineId: "local", cwd: session.cwd, sessionId: session.id }), JSON.stringify({ kind: "anchor", anchorId, offset: 20 }));
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = normalizeMessages([{ role: "assistant", content: "tail page" }], 3);
+    view.messageStart = 3;
+    view.messageEnd = 4;
+    view.messageTotal = 4;
+    view.hasMore = true;
+    view.onLoadMore = onLoadMore;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_400 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    chat.getBoundingClientRect = () => rect(100, 500);
+    frames.releaseAll();
+
+    expect(onLoadMore).toHaveBeenCalledOnce();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+
+    view.loadingMore = true;
+    await view.updateComplete;
+    view.messages = normalizeMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "src/app.ts" } }] },
+      { role: "toolResult", toolCallId: "read-1", toolName: "read", content: [{ type: "text", text: "ok" }], isError: false },
+      { role: "user", content: "saved question" },
+      { role: "assistant", content: "tail page" },
+    ], 0);
+    view.messageStart = 0;
+    view.messageEnd = 4;
+    view.messageTotal = 4;
+    view.hasMore = false;
+    view.loadingMore = false;
+    await view.updateComplete;
+    const anchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(`[data-scroll-anchor-id="${anchorId}"]`), "loaded saved passage");
+    anchor.getBoundingClientRect = () => rect(400 - scrollTop, 480 - scrollTop);
+    frames.releaseAll();
+
+    expect(anchor.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(20);
+    expect(requiredScrollCoordinator(view).mode.kind).toBe("anchor");
+  });
+
+  it("waits for active work to finish before loading older saved history", async () => {
+    const frames = installFrames();
+    const onLoadMore = vi.fn();
+    sessionStorage.setItem(chatReadingPositionStorageKey({ machineId: "local", cwd: session.cwd, sessionId: session.id }), JSON.stringify({ kind: "anchor", anchorId: userReadingAnchorId("saved question"), offset: 20 }));
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = normalizeMessages([{ role: "assistant", content: "tail page" }], 3);
+    view.messageStart = 3;
+    view.messageEnd = 4;
+    view.messageTotal = 4;
+    view.hasMore = true;
+    view.onLoadMore = onLoadMore;
+    view.status = sessionStatus(true);
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    defineMutableScrollGeometry(chat);
+    frames.releaseAll();
+    expect(onLoadMore).not.toHaveBeenCalled();
+
+    view.status = sessionStatus(false);
+    await view.updateComplete;
+    frames.releaseAll();
+
+    expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
+  it("does not loop on an earlier-history failure while restoring", async () => {
+    const frames = installFrames();
+    const onLoadMore = vi.fn();
+    sessionStorage.setItem(chatReadingPositionStorageKey({ machineId: "local", cwd: session.cwd, sessionId: session.id }), JSON.stringify({ kind: "anchor", anchorId: userReadingAnchorId("saved question"), offset: 20 }));
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = normalizeMessages([{ role: "assistant", content: "tail page" }], 3);
+    view.messageStart = 3;
+    view.messageEnd = 4;
+    view.messageTotal = 4;
+    view.hasMore = true;
+    view.onLoadMore = onLoadMore;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    defineMutableScrollGeometry(chat);
+    frames.releaseAll();
+    expect(onLoadMore).toHaveBeenCalledOnce();
+
+    view.loadingMore = true;
+    await view.updateComplete;
+    view.loadingMore = false;
+    await view.updateComplete;
+    frames.releaseAll();
+
+    expect(onLoadMore).toHaveBeenCalledOnce();
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+  });
+
+  it("lets the reader cancel a pending saved-position restore", async () => {
+    const frames = installFrames();
+    const onLoadMore = vi.fn();
+    const anchorId = userReadingAnchorId("saved question");
+    sessionStorage.setItem(chatReadingPositionStorageKey({ machineId: "local", cwd: session.cwd, sessionId: session.id }), JSON.stringify({ kind: "anchor", anchorId, offset: 20 }));
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = normalizeMessages([{ role: "assistant", content: "tail page" }], 3);
+    view.messageStart = 3;
+    view.messageEnd = 4;
+    view.messageTotal = 4;
+    view.hasMore = true;
+    view.onLoadMore = onLoadMore;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    const geometry = defineMutableScrollGeometry(chat);
+    frames.releaseAll();
+    expect(onLoadMore).toHaveBeenCalledOnce();
+
+    geometry.scrollTop = 200;
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true }));
+    view.messages = normalizeMessages([
+      { role: "user", content: "saved question" },
+      { role: "assistant", content: "tail page" },
+    ], 2);
+    view.hasMore = false;
+    await view.updateComplete;
+    const anchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(`[data-scroll-anchor-id="${anchorId}"]`), "available saved passage");
+    anchor.getBoundingClientRect = () => rect(400 - geometry.scrollTop, 480 - geometry.scrollTop);
+    frames.releaseAll();
+
+    expect(anchor.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(100);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+  });
+
+  it("keeps settled fold and preamble-turn anchors stable when adjacent events prepend", async () => {
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = normalizeMessages([{ role: "assistant", content: [{ type: "thinking", thinking: "current" }] }], 2);
+    view.messageStart = 2;
+    view.messageEnd = 3;
+    view.messageTotal = 3;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const initialGroupAnchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>("details.event-group"), "initial event group").dataset["scrollAnchorId"];
+    const initialTurnAnchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".turn"), "initial preamble turn").dataset["scrollAnchorId"];
+
+    view.messages = normalizeMessages([
+      { role: "assistant", content: [{ type: "thinking", thinking: "older" }] },
+      { role: "assistant", content: [{ type: "thinking", thinking: "current" }] },
+    ], 1);
+    view.messageStart = 1;
+    await view.updateComplete;
+
+    expect(requiredElement(view.shadowRoot?.querySelector<HTMLElement>("details.event-group"), "expanded event group").dataset["scrollAnchorId"]).toBe(initialGroupAnchor);
+    expect(requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".turn"), "expanded preamble turn").dataset["scrollAnchorId"]).toBe(initialTurnAnchor);
+
+    view.messages = normalizeMessages([
+      { role: "user", content: "loaded opener" },
+      { role: "assistant", content: [{ type: "thinking", thinking: "older" }] },
+      { role: "assistant", content: [{ type: "thinking", thinking: "current" }] },
+    ], 0);
+    view.messageStart = 0;
+    await view.updateComplete;
+
+    const openedTurn = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".turn"), "turn with loaded opener");
+    const aliases: unknown = JSON.parse(openedTurn.dataset["scrollAnchorAliases"] ?? "[]");
+    expect(aliases).toContain(initialTurnAnchor);
+  });
+
+  it("returns to the same passage after switching to another conversation", async () => {
+    const frames = installFrames();
+    const first = { id: "session-first", cwd: "/repo" };
+    const second = { id: "session-second", cwd: "/repo" };
+    const view = new ChatView();
+    view.sessionId = first.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = first.cwd;
+    view.messages = [textMessage("user", "first question"), textMessage("assistant", "first answer")];
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", first));
+    document.body.append(view);
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 0;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_400 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    chat.getBoundingClientRect = () => rect(100, 500);
+    frames.releaseAll();
+
+    scrollTop = 500;
+    const firstAnchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(`[data-scroll-anchor-id="${userReadingAnchorId("first question")}"]`), "first passage");
+    firstAnchor.getBoundingClientRect = () => rect(630 - scrollTop, 710 - scrollTop);
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    chat.dispatchEvent(new Event("scroll"));
+
+    view.sessionId = second.id;
+    view.messages = [textMessage("user", "second question"), textMessage("assistant", "second answer")];
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", second));
+    await view.updateComplete;
+    frames.releaseAll();
+
+    view.sessionId = first.id;
+    view.messages = [textMessage("user", "first question"), textMessage("assistant", "first answer")];
+    view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", first));
+    await view.updateComplete;
+    const restoredAnchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(`[data-scroll-anchor-id="${userReadingAnchorId("first question")}"]`), "restored first passage");
+    restoredAnchor.getBoundingClientRect = () => rect(900 - scrollTop, 980 - scrollTop);
+    frames.releaseAll();
+
+    expect(restoredAnchor.getBoundingClientRect().top - chat.getBoundingClientRect().top).toBe(30);
+    expect(requiredScrollCoordinator(view).mode.kind).toBe("anchor");
   });
 
   it("follows fresh history to the bottom as soon as it arrives", async () => {
@@ -658,15 +918,21 @@ function installFrames(): { releaseAll: () => void } {
   };
 }
 
-function defineScrollGeometry(
-  element: HTMLElement,
-  geometry: { scrollTop: number; scrollHeight: number; clientHeight: number },
-): void {
+function userReadingAnchorId(text: string): string {
+  const token = chatLineReadingAnchorToken(textMessage("user", text));
+  if (token === undefined) throw new Error("Expected a user reading anchor token");
+  return `message:${token}`;
+}
+
+function defineMutableScrollGeometry(element: HTMLElement): { scrollTop: number } {
+  const geometry = { scrollTop: 0 };
   Object.defineProperties(element, {
-    scrollTop: { configurable: true, writable: true, value: geometry.scrollTop },
-    scrollHeight: { configurable: true, value: geometry.scrollHeight },
-    clientHeight: { configurable: true, value: geometry.clientHeight },
+    scrollTop: { configurable: true, get: () => geometry.scrollTop, set: (value: number) => { geometry.scrollTop = value; } },
+    scrollHeight: { configurable: true, value: 1_400 },
+    clientHeight: { configurable: true, value: 400 },
   });
+  element.getBoundingClientRect = () => rect(100, 500);
+  return geometry;
 }
 
 function rect(top: number, bottom: number): DOMRect {

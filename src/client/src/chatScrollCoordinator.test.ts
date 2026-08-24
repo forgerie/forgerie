@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChatScrollCoordinator, type ChatScrollFrameScheduler } from "./chatScrollCoordinator";
-import { followTurn, FOLLOW_FREE } from "./chatFollowMode";
+import { followAnchor, followTurn, FOLLOW_FREE } from "./chatFollowMode";
 import type { ChatScrollViewport } from "./chatScrollPosition";
 
 class ManualFrameScheduler implements ChatScrollFrameScheduler {
@@ -101,6 +101,23 @@ describe("ChatScrollCoordinator", () => {
 
     expect(coordinator.readerTouchMove(106, true)).toEqual({ direction: "older", readerOwned: true });
     expect(coordinator.readerTouchMove(100, true)).toEqual({ direction: "newer", readerOwned: true });
+  });
+
+  it("releases a restored passage for wheel movement toward newer content", () => {
+    const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
+    coordinator.follow(followAnchor({ kind: "anchor", anchorId: "message:4:0", offset: 20 }));
+
+    expect(coordinator.readerWheel(120, true)).toEqual({ direction: "newer", readerOwned: true });
+    expect(coordinator.mode).toEqual(FOLLOW_FREE);
+  });
+
+  it("releases a restored passage for touch movement toward newer content", () => {
+    const coordinator = new ChatScrollCoordinator(new ManualFrameScheduler());
+    coordinator.follow(followAnchor({ kind: "anchor", anchorId: "message:4:0", offset: 20 }));
+    coordinator.readerTouchStart(100);
+
+    expect(coordinator.readerTouchMove(90, true)).toEqual({ direction: "newer", readerOwned: true });
+    expect(coordinator.mode).toEqual(FOLLOW_FREE);
   });
 
   it("cancels queued movement as soon as the reader pulls back", () => {

@@ -160,6 +160,7 @@ export class ChatTranscriptStore {
 
       const normalized = await normalizeMessagesCooperatively(history.messages, {
         ...this.normalization,
+        messageStart: history.start,
         shouldContinue: () => this.isCooperativeMergeCurrent(sessionId, token, lifecycleGeneration),
       });
       if (normalized.kind === "superseded") return normalized;
@@ -215,8 +216,8 @@ export class ChatTranscriptStore {
     this.pendingPersists.set(sessionId, pending);
   }
 
-  applyLiveEvent(messages: ChatLine[], event: SessionUiEvent): ChatLine[] | undefined {
-    return applyTranscriptEvent(messages, event);
+  applyLiveEvent(messages: ChatLine[], event: SessionUiEvent, messageEnd = 0): ChatLine[] | undefined {
+    return applyTranscriptEvent(messages, event, messageEnd);
   }
 
   /**
@@ -224,12 +225,12 @@ export class ChatTranscriptStore {
    * committed history view. Returns a new in-memory message list; the raw
    * history cache is deliberately untouched so the partial never persists.
    */
-  seedStreamingPartial(messages: ChatLine[], partial: unknown): ChatLine[] {
-    return seedStreamingPartial(messages, partial);
+  seedStreamingPartial(messages: ChatLine[], partial: unknown, messageIndex?: number): ChatLine[] {
+    return seedStreamingPartial(messages, partial, messageIndex);
   }
 
-  reconcileStreamingPartial(messages: ChatLine[], partial: unknown): ChatLine[] {
-    return reconcileStreamingPartial(messages, partial);
+  reconcileStreamingPartial(messages: ChatLine[], partial: unknown, messageIndex?: number): ChatLine[] {
+    return reconcileStreamingPartial(messages, partial, messageIndex);
   }
 
   discard(sessionId: string): void {
@@ -351,7 +352,7 @@ export class ChatTranscriptStore {
 
 export function transcriptViewFromHistory(history: RawMessagePage | undefined): ChatTranscriptView {
   return transcriptView(
-    normalizeMessages(history?.messages ?? []),
+    normalizeMessages(history?.messages ?? [], history?.start),
     history?.start ?? 0,
     history?.messages.length ?? 0,
     history?.total ?? 0,

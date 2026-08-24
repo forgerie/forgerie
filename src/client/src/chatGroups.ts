@@ -1,3 +1,4 @@
+import { setChatLineTranscriptPosition } from "./chatLinePosition";
 import type { ChatLine, ChatPart } from "./components/shared";
 
 export type ChatGroup =
@@ -52,12 +53,17 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
   messages.forEach((message, index) => {
     const absoluteIndex = indexOffset + index;
     const metadata = { ...(message.source === undefined ? {} : { source: message.source }), ...(message.meta === undefined ? {} : { meta: message.meta }) };
+    const derivedMessage = (parts: ChatPart[], segmentIndex = 0): ChatLine => {
+      const derived = { role: message.role, parts, ...metadata };
+      const position = message.transcriptPosition;
+      return position === undefined ? derived : setChatLineTranscriptPosition(derived, { ...position, segmentIndex });
+    };
 
     // Compactions and branch summaries stay in a group of their own, so the
     // fold can keep naming them for what they are rather than calling them steps.
     if (isHistoryMessage(message)) {
       flushEvents();
-      pushHistory({ role: message.role, parts: message.parts, ...metadata }, absoluteIndex);
+      pushHistory(derivedMessage(message.parts), absoluteIndex);
       return;
     }
     flushHistory();
@@ -73,11 +79,13 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
     const leadingParts = message.parts.filter((part, index) => !isReadablePart(message, part) && (firstReadable === -1 || index < firstReadable));
     const trailingParts = message.parts.filter((part, index) => !isReadablePart(message, part) && firstReadable !== -1 && index > firstReadable);
 
-    if (leadingParts.length) pushEvent({ role: message.role, parts: leadingParts, ...metadata }, absoluteIndex);
+    const readableSegmentIndex = leadingParts.length > 0 ? 1 : 0;
+    const trailingSegmentIndex = readableSegmentIndex + (readableParts.length > 0 ? 1 : 0);
+    if (leadingParts.length) pushEvent(derivedMessage(leadingParts), absoluteIndex);
     if (readableParts.length) flushEvents();
-    if (trailingParts.length) pushEvent({ role: message.role, parts: trailingParts, ...metadata }, absoluteIndex);
+    if (trailingParts.length) pushEvent(derivedMessage(trailingParts, trailingSegmentIndex), absoluteIndex);
     if (readableParts.length) {
-      const readableMessage = { role: message.role, parts: readableParts, ...metadata };
+      const readableMessage = derivedMessage(readableParts, readableSegmentIndex);
       if (isToolImageMessage(readableMessage)) {
         const toolName = toolNameFromParts([...leadingParts, ...trailingParts]);
         groups.push({ kind: "tool-image", message: readableMessage, index: absoluteIndex, ...(toolName === undefined ? {} : { toolName }) });

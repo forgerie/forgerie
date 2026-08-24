@@ -7,6 +7,7 @@ import {
   type ProcessNotificationStatus,
 } from "../../shared/apiTypes";
 import { parseAskUserOutcome } from "./api/parsers";
+import { inheritChatLineTranscriptPosition, setChatLineTranscriptPosition } from "./chatLinePosition";
 import type { ChatLine, ChatPart, ToolExecutionPart, ToolPreview } from "./components/shared";
 
 export interface ChatNormalizationScheduler {
@@ -18,6 +19,7 @@ export interface ChatNormalizationOptions {
   budgetMs?: number | undefined;
   scheduler?: ChatNormalizationScheduler | undefined;
   shouldContinue?: (() => boolean) | undefined;
+  messageStart?: number | undefined;
 }
 
 export type ChatNormalizationResult =
@@ -43,8 +45,11 @@ const browserNormalizationScheduler: ChatNormalizationScheduler = {
   },
 };
 
-export function normalizeMessages(messages: unknown[]): ChatLine[] {
-  return visibleNormalizedMessages(messages.flatMap(normalizeMessage));
+export function normalizeMessages(messages: unknown[], messageStart?: number): ChatLine[] {
+  return visibleNormalizedMessages(messages.flatMap((message, index) => withTranscriptMessageIndex(
+    normalizeMessage(message),
+    messageStart === undefined ? undefined : messageStart + index,
+  )));
 }
 
 export async function normalizeMessagesCooperatively(messages: unknown[], options: ChatNormalizationOptions = {}): Promise<ChatNormalizationResult> {
@@ -56,7 +61,10 @@ export async function normalizeMessagesCooperatively(messages: unknown[], option
 
   for (let index = 0; index < messages.length; index += 1) {
     if (!shouldContinue()) return { kind: "superseded" };
-    lines.push(...normalizeMessage(messages[index]));
+    lines.push(...withTranscriptMessageIndex(
+      normalizeMessage(messages[index]),
+      options.messageStart === undefined ? undefined : options.messageStart + index,
+    ));
     if (index === messages.length - 1 || scheduler.now() - sliceStartedAt < budgetMs) continue;
     await scheduler.yield();
     if (!shouldContinue()) return { kind: "superseded" };
@@ -68,7 +76,21 @@ export async function normalizeMessagesCooperatively(messages: unknown[], option
 }
 
 function visibleNormalizedMessages(lines: ChatLine[]): ChatLine[] {
-  return coalesceToolExecutions(lines).filter((message) => message.parts.length > 0);
+  const visible = coalesceToolExecutions(lines).filter((message) => message.parts.length > 0);
+  const lineIndexes = new Map<number, number>();
+  for (const line of visible) {
+    const messageIndex = line.transcriptPosition?.messageIndex;
+    if (messageIndex === undefined) continue;
+    const lineIndex = lineIndexes.get(messageIndex) ?? 0;
+    setChatLineTranscriptPosition(line, { messageIndex, lineIndex, segmentIndex: 0 });
+    lineIndexes.set(messageIndex, lineIndex + 1);
+  }
+  return visible;
+}
+
+function withTranscriptMessageIndex(lines: ChatLine[], messageIndex: number | undefined): ChatLine[] {
+  if (messageIndex === undefined) return lines;
+  return lines.map((line) => setChatLineTranscriptPosition(line, { messageIndex, lineIndex: 0, segmentIndex: 0 }));
 }
 
 export function textMessage(role: ChatLine["role"], text: string): ChatLine {
@@ -85,12 +107,17 @@ export function appendText(messages: ChatLine[], role: ChatLine["role"], text: s
   const last = messages.at(-1);
   const lastPart = last?.parts.at(-1);
   if (last?.role === role && lastPart?.type === "text") {
-    return [
-      ...messages.slice(0, -1),
-      { ...last, parts: [...last.parts.slice(0, -1), { ...lastPart, text: lastPart.text + text }] },
-    ];
+    const next = inheritChatLineTranscriptPosition(last, {
+      ...last,
+      parts: [...last.parts.slice(0, -1), { ...lastPart, text: lastPart.text + text }],
+    });
+    return [...messages.slice(0, -1), next];
   }
-  if (last?.role === role) return [...messages.slice(0, -1), { ...last, parts: [...last.parts, { type: "text", text }] }];
+  if (last?.role === role) {
+    const updated: ChatLine = { ...last, parts: [...last.parts, { type: "text", text }] };
+    const next = inheritChatLineTranscriptPosition(last, updated);
+    return [...messages.slice(0, -1), next];
+  }
   return [...messages, textMessage(role, text)];
 }
 
@@ -99,12 +126,17 @@ export function appendThinking(messages: ChatLine[], text: string): ChatLine[] {
   const last = messages.at(-1);
   const lastPart = last?.parts.at(-1);
   if (last?.role === "assistant" && lastPart?.type === "thinking") {
-    return [
-      ...messages.slice(0, -1),
-      { ...last, parts: [...last.parts.slice(0, -1), { ...lastPart, text: lastPart.text + text }] },
-    ];
+    const next = inheritChatLineTranscriptPosition(last, {
+      ...last,
+      parts: [...last.parts.slice(0, -1), { ...lastPart, text: lastPart.text + text }],
+    });
+    return [...messages.slice(0, -1), next];
   }
-  if (last?.role === "assistant") return [...messages.slice(0, -1), { ...last, parts: [...last.parts, { type: "thinking", text }] }];
+  if (last?.role === "assistant") {
+    const updated: ChatLine = { ...last, parts: [...last.parts, { type: "thinking", text }] };
+    const next = inheritChatLineTranscriptPosition(last, updated);
+    return [...messages.slice(0, -1), next];
+  }
   return [...messages, { role: "assistant", parts: [{ type: "thinking", text }] }];
 }
 
@@ -354,9 +386,12 @@ function coalesceToolExecutions(lines: ChatLine[]): ChatLine[] {
   for (const line of lines) {
     let passthroughParts: ChatPart[] = [];
     const metadata = { ...(line.promptText === undefined ? {} : { promptText: line.promptText }), ...(line.source === undefined ? {} : { source: line.source }), ...(line.meta === undefined ? {} : { meta: line.meta }) };
+    const pushResult = (next: ChatLine): void => {
+      result.push(inheritChatLineTranscriptPosition(line, next));
+    };
     const flushPassthrough = () => {
       if (passthroughParts.length === 0) return;
-      result.push({ role: line.role, parts: passthroughParts, ...metadata });
+      pushResult({ role: line.role, parts: passthroughParts, ...metadata });
       passthroughParts = [];
     };
 
@@ -365,7 +400,7 @@ function coalesceToolExecutions(lines: ChatLine[]): ChatLine[] {
         flushPassthrough();
         const execution = toolExecutionFromCall(part);
         const lineIndex = result.length;
-        result.push({ role: "tool", parts: [execution], ...metadata });
+        pushResult({ role: "tool", parts: [execution], ...metadata });
         if (execution.toolCallId !== undefined) pendingTools.set(execution.toolCallId, { lineIndex, partIndex: 0 });
         continue;
       }
@@ -411,7 +446,8 @@ function mergeToolResultInto(lines: ChatLine[], target: { lineIndex: number; par
     ...(result.details === undefined ? {} : { details: result.details }),
     ...(preview === undefined ? {} : { preview }),
   };
-  lines[target.lineIndex] = { ...line, parts: [...line.parts.slice(0, target.partIndex), next, ...line.parts.slice(target.partIndex + 1)] };
+  const merged = { ...line, parts: [...line.parts.slice(0, target.partIndex), next, ...line.parts.slice(target.partIndex + 1)] };
+  lines[target.lineIndex] = inheritChatLineTranscriptPosition(line, merged);
   return true;
 }
 

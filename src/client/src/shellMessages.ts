@@ -1,3 +1,4 @@
+import { inheritChatLineTranscriptPosition } from "./chatLinePosition";
 import { textMessage } from "./chatMessages";
 import type { ChatLine } from "./components/shared";
 import type { SessionUiEvent } from "./sessionSocket";
@@ -11,7 +12,8 @@ export function appendShellChunk(messages: ChatLine[], chunk: string): ChatLine[
   const lastPart = last?.parts.at(-1);
   if (last?.role !== "bash" || lastPart?.type !== "text") return [...messages, textMessage("bash", chunk)];
   const separator = hasShellOutput(lastPart.text) ? "" : "\n\n";
-  return [...messages.slice(0, -1), { ...last, parts: [...last.parts.slice(0, -1), { ...lastPart, text: lastPart.text + separator + chunk }] }];
+  const next = inheritChatLineTranscriptPosition(last, { ...last, parts: [...last.parts.slice(0, -1), { ...lastPart, text: lastPart.text + separator + chunk }] });
+  return [...messages.slice(0, -1), next];
 }
 
 export function finalizeShellMessage(messages: ChatLine[], event: Extract<SessionUiEvent, { type: "shell.end" }>): ChatLine[] {
@@ -26,7 +28,8 @@ export function finalizeShellMessage(messages: ChatLine[], event: Extract<Sessio
   if (event.truncated === true) notes.push("output truncated");
   if (event.fullOutputPath !== undefined && event.fullOutputPath !== "") notes.push(`full output: ${event.fullOutputPath}`);
   if (notes.length === 0) return messages;
-  return [...messages.slice(0, -1), { ...last, parts: [...last.parts.slice(0, -1), { ...lastPart, text: `${lastPart.text}\n\n${notes.join("\n")}` }] }];
+  const next = inheritChatLineTranscriptPosition(last, { ...last, parts: [...last.parts.slice(0, -1), { ...lastPart, text: `${lastPart.text}\n\n${notes.join("\n")}` }] });
+  return [...messages.slice(0, -1), next];
 }
 
 function hasShellOutput(text: string): boolean {

@@ -96,7 +96,7 @@ export class ChatScrollCoordinator {
     this.wheelIntentDelta = 0;
     const direction = intentDelta < 0 ? "older" : "newer";
     this.readerTookControl();
-    if (forceTakeover) this.currentMode = FOLLOW_FREE;
+    if (forceTakeover || this.currentMode.kind === "anchor") this.currentMode = FOLLOW_FREE;
     else if (direction === "older") this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
     return { direction, readerOwned: this.currentMode.kind === "free" };
   }
@@ -110,7 +110,7 @@ export class ChatScrollCoordinator {
     const direction = y > this.touchStartY ? "older" : "newer";
     this.touchStartY = y;
     this.readerTookControl();
-    if (forceTakeover) this.currentMode = FOLLOW_FREE;
+    if (forceTakeover || this.currentMode.kind === "anchor") this.currentMode = FOLLOW_FREE;
     else if (direction === "older") this.currentMode = followModeAfterReaderPullback(this.currentMode, canScrollUp);
     return { direction, readerOwned: this.currentMode.kind === "free" };
   }

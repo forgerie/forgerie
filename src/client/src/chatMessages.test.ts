@@ -202,6 +202,36 @@ describe("chat message normalization", () => {
     ]);
   });
 
+  it("keeps history-backed positions stable when earlier normalized messages are prepended", () => {
+    const toolCall = { role: "assistant", content: [{ type: "toolCall", id: "edit-1", name: "edit", arguments: { path: "src/app.ts" } }] };
+    const toolResult = { role: "toolResult", toolCallId: "edit-1", toolName: "edit", content: [{ type: "text", text: "ok" }], isError: false };
+    const user = { role: "user", content: "continue" };
+    const tail = normalizeMessages([toolCall, toolResult, user], 10);
+    const expanded = normalizeMessages([
+      { role: "user", content: "older" },
+      { role: "assistant", content: "history" },
+      toolCall,
+      toolResult,
+      user,
+    ], 8);
+
+    expect(tail.map((line) => line.transcriptPosition)).toEqual([
+      { messageIndex: 10, lineIndex: 0, segmentIndex: 0 },
+      { messageIndex: 12, lineIndex: 0, segmentIndex: 0 },
+    ]);
+    expect(expanded.slice(-2).map((line) => line.transcriptPosition)).toEqual(tail.map((line) => line.transcriptPosition));
+  });
+
+  it("preserves a history-backed position while live text and thinking append", () => {
+    const textLine = normalizeMessages([{ role: "assistant", content: "hel" }], 4);
+    const completedText = appendText(textLine, "assistant", "lo");
+    expect(completedText[0]?.transcriptPosition).toEqual({ messageIndex: 4, lineIndex: 0, segmentIndex: 0 });
+
+    const thinkingLine = normalizeMessages([{ role: "assistant", content: [{ type: "thinking", thinking: "pla" }] }], 5);
+    const completedThinking = appendThinking(thinkingLine, "n");
+    expect(completedThinking[0]?.transcriptPosition).toEqual({ messageIndex: 5, lineIndex: 0, segmentIndex: 0 });
+  });
+
   it("formats bash execution records as bash chat lines", () => {
     expect(normalizeMessage({
       role: "bashExecution",

@@ -2,6 +2,7 @@ import { css, svg, type TemplateResult } from "lit";
 import type { AskUserOutcome, ProcessNotificationDetails } from "../../../shared/apiTypes";
 import type { PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import type { SessionWarningSeverity } from "../api";
+import type { ChatLineTranscriptPosition } from "../chatLinePosition";
 
 export const NEW_SESSION_LABEL = "New session";
 
@@ -76,6 +77,8 @@ export type ChatPart =
 export interface ChatLine {
   role: "user" | "assistant" | "tool" | "system" | "bash" | "skill";
   parts: ChatPart[];
+  /** Stable source location for history-backed lines. Kept non-enumerable by normalization. */
+  transcriptPosition?: ChatLineTranscriptPosition;
   /** Original user prompt when normalization splits one prompt into several visible lines. */
   promptText?: string;
   source?: "compaction" | "branch_summary";

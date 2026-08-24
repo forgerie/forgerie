@@ -1,3 +1,4 @@
+import { inheritChatLineTranscriptPosition, setChatLineTranscriptPosition } from "./chatLinePosition";
 import { appendText, appendThinking, askUserRecordFromToolDetails, normalizeMessage, normalizeMessages, previewFromDetails, summarizeArgs, textMessage } from "./chatMessages";
 import type { ChatLine, ToolExecutionPart } from "./components/shared";
 import { appendShellChunk, finalizeShellMessage, shellStartMessage } from "./shellMessages";
@@ -31,18 +32,18 @@ interface ToolResultUpdate {
  * This returns a new in-memory message list only; it never writes to the raw
  * history cache.
  */
-export function seedStreamingPartial(messages: ChatLine[], partial: unknown): ChatLine[] {
+export function seedStreamingPartial(messages: ChatLine[], partial: unknown, messageIndex?: number): ChatLine[] {
   if (partial === null || partial === undefined) return messages;
   // Normalize the same way committed history is (coalescing an in-progress tool
   // call into a `toolExecution` line) so the seeded partial renders identically
   // to its finalized form and live `tool.*` events can target it by call id.
-  const lines = normalizeMessages([partial]);
+  const lines = normalizeMessages([partial], messageIndex);
   return lines.length === 0 ? messages : [...messages, ...lines];
 }
 
-export function reconcileStreamingPartial(messages: ChatLine[], partial: unknown): ChatLine[] {
+export function reconcileStreamingPartial(messages: ChatLine[], partial: unknown, messageIndex?: number): ChatLine[] {
   if (partial === null || partial === undefined) return messages;
-  const partialLines = normalizeMessages([partial]);
+  const partialLines = normalizeMessages([partial], messageIndex);
   if (partialLines.length === 0) return messages;
   let turnStart = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -90,13 +91,14 @@ function toolCallIds(line: ChatLine): string[] {
 
 function withoutToolCallIds(line: ChatLine, excluded: ReadonlySet<string>): ChatLine[] {
   const parts = line.parts.filter((part) => !((part.type === "toolExecution" || part.type === "skillRead") && part.toolCallId !== undefined && excluded.has(part.toolCallId)));
-  return parts.length === 0 ? [] : [{ ...line, parts }];
+  return parts.length === 0 ? [] : [inheritChatLineTranscriptPosition(line, { ...line, parts })];
 }
 
-export function applyTranscriptEvent(messages: ChatLine[], event: SessionUiEvent): ChatLine[] | undefined {
-  if (event.type === "message.append") return appendNewMessage(messages, event.message);
-  if (event.type === "assistant.delta") return appendText(messages, "assistant", event.text);
-  if (event.type === "assistant.thinking.delta") return appendThinking(messages, event.text);
+export function applyTranscriptEvent(messages: ChatLine[], event: SessionUiEvent, messageEnd = 0): ChatLine[] | undefined {
+  const nextMessageIndex = nextTranscriptMessageIndex(messages, messageEnd);
+  if (event.type === "message.append") return appendNewMessage(messages, event.message, nextMessageIndex);
+  if (event.type === "assistant.delta") return positionLiveTail(appendText(messages, "assistant", event.text), nextMessageIndex);
+  if (event.type === "assistant.thinking.delta") return positionLiveTail(appendThinking(messages, event.text), nextMessageIndex);
   if (event.type === "tool.start") return appendToolExecutionStart(messages, event);
   if (event.type === "tool.update") return updateToolExecution(messages, event.toolCallId, (part) => mergeToolExecutionUpdate(part, event));
   if (event.type === "tool.end") {
@@ -110,20 +112,20 @@ export function applyTranscriptEvent(messages: ChatLine[], event: SessionUiEvent
       presentation: toolResultPresentation({ role: "toolResult", content: event.content }),
     });
   }
-  if (event.type === "shell.start") return [...messages, shellStartMessage(event.command, event.excludeFromContext)];
+  if (event.type === "shell.start") return [...messages, setChatLineTranscriptPosition(shellStartMessage(event.command, event.excludeFromContext), { messageIndex: nextMessageIndex, lineIndex: 0, segmentIndex: 0 })];
   if (event.type === "shell.chunk") return appendShellChunk(messages, event.chunk);
   if (event.type === "shell.end") return finalizeShellMessage(messages, event);
   if (event.type === "command.output") return [...messages, textMessage(event.level === "error" ? "system" : "tool", event.message)];
   if (event.type === "session.error") return [...messages, textMessage("system", event.message)];
-  if (event.type === "message.end") return event.message === undefined ? undefined : applyFinalMessage(messages, event.message);
+  if (event.type === "message.end") return event.message === undefined ? undefined : applyFinalMessage(messages, event.message, nextMessageIndex);
   return undefined;
 }
 
-function applyFinalMessage(messages: ChatLine[], rawMessage: unknown): ChatLine[] | undefined {
+function applyFinalMessage(messages: ChatLine[], rawMessage: unknown, messageIndex: number): ChatLine[] | undefined {
   const rawToolResult = toolResultFromRawMessage(rawMessage);
   if (rawToolResult !== undefined) return finalizeToolExecution(messages, rawToolResult);
 
-  const ended = normalizeMessage(rawMessage);
+  const ended = normalizeMessages([rawMessage], messageIndex);
   if (ended.length === 0) return undefined;
   const displayEnded = ended
     .map((line) => line.role === "assistant" ? withoutToolCalls(line) : line)
@@ -139,7 +141,9 @@ function applyFinalLine(messages: ChatLine[], displayEnded: ChatLine): ChatLine[
   if (askUserRecord !== undefined) return reconcileFinalAskUserRecord(messages, displayEnded, askUserRecord);
   const last = messages.at(-1);
   if (last?.role !== displayEnded.role) return [...messages, displayEnded];
-  if (displayEnded.role === "assistant" || sameMessageText(last, displayEnded)) return [...messages.slice(0, -1), displayEnded];
+  if (displayEnded.role === "assistant" || sameMessageText(last, displayEnded)) {
+    return [...messages.slice(0, -1), inheritChatLineTranscriptPosition(last, displayEnded)];
+  }
   return [...messages, displayEnded];
 }
 
@@ -149,15 +153,16 @@ function reconcileFinalAskUserRecord(
   record: Extract<ChatLine["parts"][number], { type: "askUserRecord" }>,
 ): ChatLine[] {
   for (let index = messages.length - 1; index >= 0; index--) {
-    if (lineHasAskUserRecord(messages[index], record)) {
-      return [...messages.slice(0, index), displayEnded, ...messages.slice(index + 1)];
+    const existing = messages[index];
+    if (lineHasAskUserRecord(existing, record) && existing !== undefined) {
+      return [...messages.slice(0, index), inheritChatLineTranscriptPosition(existing, displayEnded), ...messages.slice(index + 1)];
     }
   }
   return [...messages, displayEnded];
 }
 
 function withoutToolCalls(message: ChatLine): ChatLine {
-  return { ...message, parts: message.parts.filter((part) => part.type !== "toolCall") };
+  return inheritChatLineTranscriptPosition(message, { ...message, parts: message.parts.filter((part) => part.type !== "toolCall") });
 }
 
 function parseSkillReadPath(path: string | undefined): { name: string; path: string } | undefined {
@@ -238,7 +243,7 @@ function reconcileAskUserToolRecord(messages: ChatLine[], toolName: string, deta
     const line = messages[index];
     if (!lineHasAskUserRecord(line, record)) continue;
     if (meta === undefined || line === undefined) return messages;
-    return [...messages.slice(0, index), { ...line, meta }, ...messages.slice(index + 1)];
+    return [...messages.slice(0, index), inheritChatLineTranscriptPosition(line, { ...line, meta }), ...messages.slice(index + 1)];
   }
   return [...messages, { role: "tool", parts: [record], ...(meta === undefined ? {} : { meta }) }];
 }
@@ -266,7 +271,7 @@ function updateToolExecution(
     if (partIndex < 0) continue;
     const part = line.parts[partIndex];
     if (part?.type !== "toolExecution") continue;
-    const updatedLine = { ...line, parts: [...line.parts.slice(0, partIndex), update(part), ...line.parts.slice(partIndex + 1)] };
+    const updatedLine = inheritChatLineTranscriptPosition(line, { ...line, parts: [...line.parts.slice(0, partIndex), update(part), ...line.parts.slice(partIndex + 1)] });
     const nextLine = reconcileLine(updatedLine);
     return [...messages.slice(0, lineIndex), nextLine, ...messages.slice(lineIndex + 1)];
   }
@@ -274,8 +279,8 @@ function updateToolExecution(
 }
 
 function reconcileToolResultPresentation(line: ChatLine, presentation: ToolResultPresentation): ChatLine {
-  const next = { ...line, parts: [...line.parts.filter((part) => part.type !== "image"), ...presentation.images] };
-  return presentation.meta === undefined ? next : { ...next, meta: presentation.meta };
+  const next = inheritChatLineTranscriptPosition(line, { ...line, parts: [...line.parts.filter((part) => part.type !== "image"), ...presentation.images] });
+  return presentation.meta === undefined ? next : inheritChatLineTranscriptPosition(next, { ...next, meta: presentation.meta });
 }
 
 function toolResultPresentation(message: unknown): ToolResultPresentation {
@@ -337,9 +342,12 @@ function replaceSkillReadLines(messages: ChatLine[], indexes: number[], replacem
   const insertIndex = replacementIndexes[0];
   if (insertIndex === undefined) return messages;
   const replaced = new Set(replacementIndexes);
+  const positionedReplacement = messages[insertIndex] === undefined
+    ? replacement
+    : inheritChatLineTranscriptPosition(messages[insertIndex], replacement);
   const next: ChatLine[] = [];
   for (let index = 0; index < messages.length; index++) {
-    if (index === insertIndex) next.push(replacement);
+    if (index === insertIndex) next.push(positionedReplacement);
     const message = messages[index];
     if (message !== undefined && !replaced.has(index)) next.push(message);
   }
@@ -389,15 +397,33 @@ function messageText(message: ChatLine): string {
     .join("\n\n");
 }
 
-function appendNewMessage(messages: ChatLine[], rawMessage: unknown): ChatLine[] {
-  const lines = normalizeMessage(rawMessage);
+function appendNewMessage(messages: ChatLine[], rawMessage: unknown, messageIndex: number): ChatLine[] {
+  const lines = normalizeMessages([rawMessage], messageIndex);
   return lines.length === 0 ? messages : [...messages, ...lines];
+}
+
+function positionLiveTail(messages: ChatLine[], messageIndex: number): ChatLine[] {
+  const last = messages.at(-1);
+  if (last === undefined || last.transcriptPosition !== undefined) return messages;
+  setChatLineTranscriptPosition(last, { messageIndex, lineIndex: 0, segmentIndex: 0 });
+  return messages;
+}
+
+function nextTranscriptMessageIndex(messages: readonly ChatLine[], fallback: number): number {
+  let latest = fallback - 1;
+  for (const message of messages) {
+    const messageIndex = message.transcriptPosition?.messageIndex;
+    if (messageIndex !== undefined) latest = Math.max(latest, messageIndex);
+  }
+  return latest + 1;
 }
 
 function appendLine(messages: ChatLine[], line: ChatLine): ChatLine[] {
   const last = messages.at(-1);
   if (isDuplicateSkillLine(messages, line)) return messages;
-  if (last?.role === line.role && line.role !== "skill") return [...messages.slice(0, -1), { ...last, parts: [...last.parts, ...line.parts] }];
+  if (last?.role === line.role && line.role !== "skill") {
+    return [...messages.slice(0, -1), inheritChatLineTranscriptPosition(last, { ...last, parts: [...last.parts, ...line.parts] })];
+  }
   return [...messages, line];
 }
 

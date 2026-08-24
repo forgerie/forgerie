@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, latestChatTurnStart, summarizeChatGroup, turnMetaSource, withoutToolImageGroups } from "./chatGroups";
+import { normalizeMessages } from "./chatMessages";
 import type { ChatLine } from "./components/shared";
 
 const text = (role: ChatLine["role"], value: string): ChatLine => ({ role, parts: [{ type: "text", text: value }] });
@@ -41,6 +42,29 @@ describe("groupChatMessages", () => {
       { kind: "message", index: 5, message: text("user", "second question") },
       { kind: "group", startIndex: 6, endIndex: 6, messages: [messages[6]] },
       { kind: "message", index: 7, message: text("assistant", "second answer") },
+    ]);
+  });
+
+  it("gives split fragments distinct stable source segments", () => {
+    const [message] = normalizeMessages([{
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "plan" },
+        { type: "text", text: "answer" },
+        { type: "toolCall", id: "skill-1", name: "read", arguments: { path: "/skills/demo/SKILL.md" } },
+      ],
+    }], 7);
+    if (message === undefined) throw new Error("Expected normalized message");
+
+    const groups = groupChatMessages([message]);
+    const positions = groups.flatMap((group) => group.kind === "group"
+      ? group.messages.map((line) => line.transcriptPosition)
+      : [group.message.transcriptPosition]);
+
+    expect(positions).toEqual([
+      { messageIndex: 7, lineIndex: 0, segmentIndex: 0 },
+      { messageIndex: 7, lineIndex: 0, segmentIndex: 1 },
+      { messageIndex: 7, lineIndex: 0, segmentIndex: 2 },
     ]);
   });
 

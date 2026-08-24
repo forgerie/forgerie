@@ -224,6 +224,7 @@ export class SessionController {
   // applies exactly once. Reset whenever the selection changes.
   private streamWatermark: { sessionId: string; seq: number } | undefined;
   private latestTranscriptSeq: { sessionId: string; seq: number } | undefined;
+  private liveMessagePageEnd = 0;
   private transcriptRevision = 0;
   private pendingTranscriptEvents: SessionUiEvent[] = [];
   private pendingStatusBySession = new Map<string, SessionStatus>();
@@ -275,6 +276,7 @@ export class SessionController {
     this.selectionSeq += 1;
     this.socket.close();
     this.latestTranscriptSeq = undefined;
+    this.liveMessagePageEnd = 0;
     this.clearPendingUpdates();
     for (const queue of this.readinessQueuedSends.values()) this.restoreReadinessQueueDraft(queue);
     this.readinessQueuedSends.clear();
@@ -289,6 +291,7 @@ export class SessionController {
     this.notifications?.clearSelectedSession();
     this.streamWatermark = undefined;
     this.latestTranscriptSeq = undefined;
+    this.liveMessagePageEnd = 0;
     this.clearPendingUpdates();
     // Note: sendingPrompts is intentionally NOT cleared here. Deselecting a
     // session must not cancel the in-flight upload indicator of the session
@@ -631,6 +634,7 @@ export class SessionController {
     const cached = this.transcripts.boundedCachedView(transcriptKey, MESSAGE_PAGE_SIZE);
     const showCachedImmediately = cached !== undefined;
     const openingView = cached ?? transcriptViewFromHistory(undefined);
+    this.liveMessagePageEnd = openingView.messagePageEnd;
     this.setState({
       selectedSession: session,
       selectedChatLoad: showCachedImmediately ? selectedChatCachedReadable(target) : selectedChatLoading(target),
@@ -1829,12 +1833,13 @@ export class SessionController {
       // history cache, so it never persists.
       const transcriptStayedCurrent = historyResult.transcriptRevision === this.transcriptRevision;
       const history = transcriptStayedCurrent ? historyResult.history : this.currentTranscriptView();
+      this.liveMessagePageEnd = Math.max(this.liveMessagePageEnd, history.messagePageEnd);
       const latestTranscriptSeq = this.latestTranscriptSeq?.sessionId === target.session.id ? this.latestTranscriptSeq.seq : 0;
       const snapshotCoversLatestEvent = streamSnapshot.seq >= latestTranscriptSeq;
       const messages = transcriptStayedCurrent
-        ? this.transcripts.seedStreamingPartial(history.messages, streamSnapshot.partial)
+        ? this.transcripts.seedStreamingPartial(history.messages, streamSnapshot.partial, this.liveMessagePageEnd)
         : snapshotCoversLatestEvent
-          ? this.transcripts.reconcileStreamingPartial(history.messages, streamSnapshot.partial)
+          ? this.transcripts.reconcileStreamingPartial(history.messages, streamSnapshot.partial, this.liveMessagePageEnd)
           : history.messages;
       const watermarkSeq = Math.max(streamSnapshot.seq, latestTranscriptSeq);
       this.streamWatermark = { sessionId: target.session.id, seq: watermarkSeq };
@@ -2514,7 +2519,9 @@ export class SessionController {
       this.applyClosedDialog(event.dialogId, event.reason, event.answer);
       return;
     }
-    const transcript = this.transcripts.applyLiveEvent(this.getState().messages, event);
+    const state = this.getState();
+    const transcript = this.transcripts.applyLiveEvent(state.messages, event, this.liveMessagePageEnd);
+    if (commitsTranscriptMessage(event)) this.liveMessagePageEnd += 1;
     if (transcript) {
       this.transcriptRevision += 1;
       this.setState({ messages: transcript });
@@ -2673,7 +2680,10 @@ export class SessionController {
       const events = this.pendingTranscriptEvents;
       this.pendingTranscriptEvents = [];
       let messages = this.getState().messages;
-      for (const event of events) messages = this.transcripts.applyLiveEvent(messages, event) ?? messages;
+      for (const event of events) {
+        messages = this.transcripts.applyLiveEvent(messages, event, this.liveMessagePageEnd) ?? messages;
+        if (commitsTranscriptMessage(event)) this.liveMessagePageEnd += 1;
+      }
       if (messages !== this.getState().messages) {
         this.transcriptRevision += 1;
         this.setState({ messages });
@@ -3126,6 +3136,12 @@ function isTranscriptContentEvent(event: SessionUiEvent): boolean {
     || event.type === "message.end"
     || event.type === "command.output"
     || event.type === "session.error";
+}
+
+function commitsTranscriptMessage(event: SessionUiEvent): boolean {
+  // `message.append` is the optimistic projection of the same raw message that
+  // its later `message.end` commits. Advancing on both would skip one raw index.
+  return event.type === "message.end" && event.message !== undefined;
 }
 
 function isHighFrequencyTranscriptEvent(event: SessionUiEvent): boolean {

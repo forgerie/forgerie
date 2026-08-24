@@ -12,7 +12,8 @@ import "./TranscriptLivenessView";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { selectLiveGrowthAnchor, scrollDeltaForLiveGrowth, type LiveGrowthAnchorMeasurement } from "../chatLiveGrowthAnchoring";
 import { ChatScrollCoordinator, type ChatReaderGesture } from "../chatScrollCoordinator";
-import { anchoredTurnKey, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
+import { SessionStorageChatReadingPositionStore, chatLineReadingAnchorToken, type ChatAnchorReadingPosition, type ChatReadingIdentity } from "../chatReadingPosition";
+import { anchoredReadingPosition, anchoredTurnKey, followAnchor, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
 import { isNearScrollBottom } from "../chatScrollPosition";
@@ -229,6 +230,7 @@ export function formatMessageTimestamp(timestamp: string, now: Date = new Date()
 }
 
 const MODEL_WORD_CAPS: Record<string, string> = { gpt: "GPT", glm: "GLM", ai: "AI", api: "API" };
+const CHAT_SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 
 /*
  * A transcript answers "which model said this"; the provider route is
@@ -312,6 +314,11 @@ export class ChatView extends LitElement {
   @state() private livenessClock: LivenessClock | undefined;
   private readonly disclosures = new ChatDisclosureController();
   private readonly scrolling = new ChatScrollCoordinator();
+  private readonly readingPositions = new SessionStorageChatReadingPositionStore();
+  private pendingReadingPosition: ChatAnchorReadingPosition | undefined;
+  private pendingReadingIdentity: ChatReadingIdentity | undefined;
+  private readingPositionLoadStart: number | undefined;
+  private readingPositionLoadBlockedAtStart: number | undefined;
   private loadMoreCheckFrame: number | undefined;
   /** Invalidates an older deferred anchor restore when another render wins. */
   private liveGrowthRestoreEpoch = 0;
@@ -341,6 +348,7 @@ export class ChatView extends LitElement {
     if (!this.isSessionLive()) this.reservedTurnKey = undefined;
     if (this.scrolling.mode.kind === "tail") this.scrollToBottom();
     else if (this.scrolling.mode.kind === "turn") this.alignAnchoredTurn();
+    else if (this.scrolling.mode.kind === "anchor") this.scheduleCurrentFollowTarget();
     else if (this.chat !== undefined) this.scrolling.syncViewportSize(this.chat);
   };
   private readonly openImageZoom = (images: readonly ImageLightboxItem[], index = 0): void => {
@@ -352,10 +360,14 @@ export class ChatView extends LitElement {
   private readonly handleToggleWarnings = (): void => {
     this.onToggleWarnings?.();
   };
+  private readonly onPageHide = (): void => {
+    this.rememberReadingPosition();
+  };
 
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener("resize", this.onViewportResize);
+    window.addEventListener("pagehide", this.onPageHide);
     window.visualViewport?.addEventListener("resize", this.onViewportResize);
   }
 
@@ -365,10 +377,12 @@ export class ChatView extends LitElement {
   }
 
   override disconnectedCallback(): void {
+    this.rememberReadingPosition();
     this.scrolling.dispose();
     if (this.loadMoreCheckFrame !== undefined) cancelAnimationFrame(this.loadMoreCheckFrame);
     this.cancelSelectedLoadPaintReport();
     window.removeEventListener("resize", this.onViewportResize);
+    window.removeEventListener("pagehide", this.onPageHide);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
     super.disconnectedCallback();
   }
@@ -377,9 +391,42 @@ export class ChatView extends LitElement {
     return changed.has("sessionId") || changed.has("selectedMachineId") || changed.has("sessionCwd");
   }
 
+  private readingIdentity(): ChatReadingIdentity {
+    return { machineId: this.selectedMachineId, cwd: this.sessionCwd, sessionId: this.sessionId };
+  }
+
+  private previousReadingIdentity(changed: PropertyValues<this>): ChatReadingIdentity {
+    const machineId = changed.has("selectedMachineId") ? changed.get("selectedMachineId") : this.selectedMachineId;
+    const cwd = changed.has("sessionCwd") ? changed.get("sessionCwd") : this.sessionCwd;
+    const sessionId = changed.has("sessionId") ? changed.get("sessionId") : this.sessionId;
+    return {
+      machineId: typeof machineId === "string" ? machineId : "",
+      cwd: typeof cwd === "string" ? cwd : "",
+      sessionId: typeof sessionId === "string" ? sessionId : "",
+    };
+  }
+
+  private rememberReadingPosition(identity = this.readingIdentity()): void {
+    if (!this.hasUpdated || identity.sessionId === "") return;
+    this.readingPositions.remember(identity, this.chat, this.scrollAnchorElements());
+  }
+
+  private currentPendingReadingPosition(): ChatAnchorReadingPosition | undefined {
+    const identity = this.pendingReadingIdentity;
+    return identity?.machineId === this.selectedMachineId
+      && identity.cwd === this.sessionCwd
+      && identity.sessionId === this.sessionId
+      ? this.pendingReadingPosition
+      : undefined;
+  }
+
   private prepareSessionUiState(): void {
     this.disclosures.syncSession(this.sessionId);
     this.prepareSessionOpeningScrollState();
+    this.clearPendingReadingPosition();
+    const identity = this.readingIdentity();
+    this.pendingReadingPosition = this.readingPositions.read(identity);
+    this.pendingReadingIdentity = this.pendingReadingPosition === undefined ? undefined : identity;
     this.retryFocusPending = false;
     this.cancelSelectedLoadPaintReport();
   }
@@ -397,6 +444,7 @@ export class ChatView extends LitElement {
   protected override willUpdate(changed: PropertyValues<this>): void {
     const identityChanged = this.sessionIdentityChanged(changed);
     if (identityChanged) {
+      this.rememberReadingPosition(this.previousReadingIdentity(changed));
       this.livenessClock = undefined;
       this.prepareSessionUiState();
     }
@@ -458,12 +506,16 @@ export class ChatView extends LitElement {
   }
 
   protected override updated(changed: Map<string, unknown>): void {
-    if (changed.has("loadingMore") && !this.loadingMore) this.loadMoreRequested = false;
+    if (changed.has("loadingMore") && !this.loadingMore) {
+      this.loadMoreRequested = false;
+      this.finishReadingPositionHistoryLoad();
+    }
     if (changed.has("hasMore") && !this.hasMore) this.loadMoreRequested = false;
     const identityChanged = this.sessionIdentityChanged(changed);
     if (identityChanged || this.sessionOpeningStartedThisUpdate) {
       this.cancelSelectedLoadPaintReport();
-      this.openAtBottom();
+      if (this.currentPendingReadingPosition() !== undefined) this.continuePendingReadingPosition();
+      else this.openAtBottom();
     }
     const openedAsk = changed.has("pendingAsk") && this.isNewPendingAsk(changed.get("pendingAsk"));
     const openedDialog = changed.has("pendingDialogs") && this.isNewOpenDialog(changed.get("pendingDialogs"));
@@ -480,6 +532,7 @@ export class ChatView extends LitElement {
     } else if (!identityChanged && contentChanged) {
       this.scheduleCurrentFollowTarget();
     }
+    if (changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("selectedLoad") || changed.has("status") || changed.has("onLoadMore")) this.continuePendingReadingPosition();
     if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
     if (changed.has("selectedMachineId") || changed.has("sessionCwd")) {
       this.cancelSelectedLoadPaintReport();
@@ -535,7 +588,7 @@ export class ChatView extends LitElement {
       ${this.renderTopNotices()}
       ${this.renderNotificationLiveRegions()}
       <div class="chat-wrap">
-        <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }}>
+        <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }} @keydown=${(event: KeyboardEvent) => { this.onScrollKeyDown(event); }} @pointerdown=${(event: PointerEvent) => { this.onScrollPointerDown(event); }}>
           ${this.renderEmptyLoadState(turns.length)}
           ${this.renderHistoryBoundary()}
           ${this.renderReadableLoadNotice()}
@@ -727,6 +780,7 @@ export class ChatView extends LitElement {
    */
   private renderTurn(turn: ChatTurn, liveTailGroup: ChatGroup | undefined, last: boolean) {
     const key = this.turnRenderKey(turn);
+    const readingAnchor = this.turnReadingAnchor(turn);
     const turnClosed = !(last && this.isSessionLive());
     const replySettled = !(last && this.latestReplyIsStreaming());
     const flow = chatTurnFlow(turn, replySettled);
@@ -735,7 +789,7 @@ export class ChatView extends LitElement {
     const galleryImages = chatTurnGalleryImages(turn);
     const continuationClosesTurn = turnClosed && continuation.length > 0;
     return html`
-      <section class="turn" data-turn-key=${key}>
+      <section class="turn" data-turn-key=${key} data-scroll-anchor-id=${readingAnchor.id} data-scroll-anchor-aliases=${readingAnchor.aliases.length === 0 ? undefined : JSON.stringify(readingAnchor.aliases)}>
         <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
           ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup)}
           ${this.renderTurnRail(work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined, !turnClosed && continuation.length === 0, `${key}:work`)}
@@ -1132,7 +1186,7 @@ export class ChatView extends LitElement {
     const roleClass = interim && message.role === "assistant" ? "msg assistant interim" : `msg ${message.role}`;
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      <article class=${toolOnly || askUserRecordOnly ? shellClass : roleClass} data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
+      <article class=${toolOnly || askUserRecordOnly ? shellClass : roleClass} data-index=${index} data-scroll-anchor-id=${this.messageReadingAnchorKey(message, index)}>
         ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message)}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
@@ -1143,7 +1197,7 @@ export class ChatView extends LitElement {
     const label = chatToolOutputLabel(toolName);
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      <article class="msg tool-image-output" data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
+      <article class="msg tool-image-output" data-index=${index} data-scroll-anchor-id=${this.messageReadingAnchorKey(message, index)}>
         ${this.renderMessageHeader(message, label)}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
@@ -1182,7 +1236,7 @@ export class ChatView extends LitElement {
     const open = this.disclosures.isOpen(disclosureKey, false);
     return html`
       ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
-      <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
+      <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} data-scroll-anchor-id=${this.groupReadingAnchorKey(messages, startIndex, live)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
         <summary><span>${summarizeChatGroup(messages)}</span></summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
       </details>
@@ -1196,7 +1250,7 @@ export class ChatView extends LitElement {
           const toolOnly = this.isToolExecutionOnlyMessage(message);
           const selfLabelling = this.isSelfLabellingMessage(message);
           return html`
-            <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventAnchorKey(startIndex + offset)}>
+            <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventReadingAnchorKey(message, startIndex + offset)}>
               ${toolOnly || selfLabelling ? null : this.renderMessageHeader(message)}
               ${message.parts.map((part) => this.renderPart(part, message))}
             </section>
@@ -1339,6 +1393,29 @@ export class ChatView extends LitElement {
     }
   }
 
+  private onScrollKeyDown(event: KeyboardEvent): void {
+    if (!CHAT_SCROLL_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+    this.acceptDirectReaderScrollIntent();
+  }
+
+  private onScrollPointerDown(event: PointerEvent): void {
+    const chat = this.chat;
+    if (chat === undefined || event.target !== chat) return;
+    const gutterWidth = Math.max(0, chat.offsetWidth - chat.clientWidth);
+    if (gutterWidth === 0) return;
+    const bounds = chat.getBoundingClientRect();
+    const inScrollbarGutter = event.clientX <= bounds.left + gutterWidth || event.clientX >= bounds.right - gutterWidth;
+    if (inScrollbarGutter) this.acceptDirectReaderScrollIntent();
+  }
+
+  private acceptDirectReaderScrollIntent(): void {
+    this.scrolling.cancelAutomaticMotion();
+    this.scrolling.follow(FOLLOW_FREE);
+    this.clearPendingReadingPosition();
+  }
+
   private onWheel(event: WheelEvent) {
     const forceTakeover = this.shouldForceReaderScrollTakeover();
     const gesture = this.scrolling.readerWheel(event.deltaY, this.canScrollUp(), forceTakeover);
@@ -1368,6 +1445,7 @@ export class ChatView extends LitElement {
   }
 
   private applyReaderHistoryPagingGesture(gesture: ChatReaderGesture): void {
+    if (gesture.readerOwned) this.clearPendingReadingPosition();
     this.readerHistoryPagingEnabled = gesture.direction === "older" && gesture.readerOwned;
     if (this.readerHistoryPagingEnabled) this.requestLoadMoreIfNeeded();
   }
@@ -1379,6 +1457,7 @@ export class ChatView extends LitElement {
 
   private acceptReaderScrollTakeover(): void {
     this.loadingScrollReaderOwned = true;
+    this.clearPendingReadingPosition();
   }
 
   private isPrependingMessages(changed: Map<string, unknown>): boolean {
@@ -1504,7 +1583,8 @@ export class ChatView extends LitElement {
       this.scrolling.withProgrammaticScroll(chat, () => { this.alignElementToTopNow(turn); });
       return true;
     }
-    return false;
+    const position = anchoredReadingPosition(mode);
+    return position === undefined ? false : this.restoreReadingPositionNow(position);
   }
 
   private alignElementToTopNow(element: HTMLElement): void {
@@ -1557,6 +1637,69 @@ export class ChatView extends LitElement {
     return true;
   }
 
+  private continuePendingReadingPosition(): void {
+    const position = this.currentPendingReadingPosition();
+    if (position === undefined || this.loadingMore || !selectedChatHasReadableHistory(this.currentSelectedLoad())) return;
+    this.scrolling.schedulePlacement(() => { this.restoreReadingPositionNow(position); });
+  }
+
+  private restoreReadingPositionNow(position: ChatAnchorReadingPosition): boolean {
+    const chat = this.chat;
+    if (chat === undefined) return false;
+    const result = this.scrolling.withProgrammaticScroll(chat, () => this.readingPositions.restore(
+      position,
+      chat,
+      this.scrollAnchorElements(),
+      { fallbackToBottom: !this.hasMore },
+    ));
+    if (result.status === "restored") {
+      this.clearPendingReadingPosition();
+      this.scrolling.follow(followAnchor(position));
+      return true;
+    }
+    if (result.status === "bottom") {
+      this.readingPositions.forget(this.readingIdentity());
+      this.clearPendingReadingPosition();
+      this.scrolling.follow(FOLLOW_TAIL);
+      return true;
+    }
+    if (result.status === "missing") {
+      this.pendingReadingPosition = result.position;
+      this.pendingReadingIdentity = this.readingIdentity();
+      this.scrolling.follow(FOLLOW_FREE);
+      this.requestEarlierMessagesForReadingPosition(chat);
+    }
+    return false;
+  }
+
+  private requestEarlierMessagesForReadingPosition(chat: HTMLDivElement): boolean {
+    if (this.loadMoreRequested
+      || this.loadingMore
+      || this.isSessionLive()
+      || !this.hasMore
+      || this.onLoadMore === undefined
+      || this.readingPositionLoadBlockedAtStart === this.messageStart) return false;
+    this.loadMoreRequested = true;
+    this.readingPositionLoadStart = this.messageStart;
+    this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop = 0; });
+    this.onLoadMore();
+    return true;
+  }
+
+  private finishReadingPositionHistoryLoad(): void {
+    const requestedStart = this.readingPositionLoadStart;
+    if (requestedStart === undefined) return;
+    this.readingPositionLoadStart = undefined;
+    this.readingPositionLoadBlockedAtStart = this.messageStart < requestedStart ? undefined : requestedStart;
+  }
+
+  private clearPendingReadingPosition(): void {
+    this.pendingReadingPosition = undefined;
+    this.pendingReadingIdentity = undefined;
+    this.readingPositionLoadStart = undefined;
+    this.readingPositionLoadBlockedAtStart = undefined;
+  }
+
   private openAtBottom(): void {
     this.scrolling.cancelAutomaticMotion();
     this.scrolling.follow(FOLLOW_TAIL);
@@ -1591,6 +1734,10 @@ export class ChatView extends LitElement {
     return Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".scroll-marker"));
   }
 
+  private scrollAnchorElements(): HTMLElement[] {
+    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>("[data-scroll-anchor-id]"));
+  }
+
   private scrollMarkerAt(markerId: string): HTMLElement | undefined {
     return this.scrollMarkers().find((marker) => marker.dataset["markerId"] === markerId);
   }
@@ -1602,6 +1749,39 @@ export class ChatView extends LitElement {
 
   private messageAnchorKey(index: number): string {
     return chatMessageAnchorKey(index);
+  }
+
+  private messageReadingAnchorKey(message: ChatLine, index: number): string | undefined {
+    return this.lineReadingAnchorKey("message", message, this.messageAnchorKey(index));
+  }
+
+  private groupReadingAnchorKey(messages: readonly ChatLine[], startIndex: number, live: boolean): string | undefined {
+    if (live) return undefined;
+    const last = messages.at(-1);
+    return last === undefined ? this.groupAnchorKey(startIndex) : this.lineReadingAnchorKey("group", last, this.groupAnchorKey(startIndex));
+  }
+
+  private eventReadingAnchorKey(message: ChatLine, index: number): string | undefined {
+    return this.lineReadingAnchorKey("event", message, this.eventAnchorKey(index));
+  }
+
+  private turnReadingAnchor(turn: ChatTurn): { id: string; aliases: string[] } {
+    const fallback = this.turnRenderKey(turn);
+    const ids = [...new Set(turn.groups.flatMap((group) => {
+      const message = group.kind === "group" ? group.messages.at(-1) : group.message;
+      if (message === undefined) return [];
+      return [this.lineReadingAnchorKey("turn", message, fallback) ?? fallback];
+    }))];
+    const id = (turn.openedByIndex === undefined ? ids.at(-1) : ids[0]) ?? fallback;
+    return { id, aliases: ids.filter((candidate) => candidate !== id) };
+  }
+
+  private lineReadingAnchorKey(kind: "message" | "group" | "event" | "turn", message: ChatLine, fallback: string): string | undefined {
+    const token = chatLineReadingAnchorToken(message);
+    if (token !== undefined) return `${kind}:${token}`;
+    const position = message.transcriptPosition;
+    if (position !== undefined) return `${kind}:${String(position.messageIndex)}:${String(position.lineIndex)}:${String(position.segmentIndex)}`;
+    return kind === "turn" ? fallback : undefined;
   }
 
   private groupRenderKeyFor(group: ChatGroup): string {

@@ -555,6 +555,17 @@ describe("applyTranscriptEvent", () => {
     ]);
   });
 
+  it("keeps optimistic and finalized user projections on one raw index", () => {
+    let messages: ChatLine[] = [];
+    let messageEnd = 10;
+    messages = applyTranscriptEvent(messages, { type: "message.append", message: { role: "user", content: "question" } }, messageEnd) ?? messages;
+    messages = applyTranscriptEvent(messages, { type: "message.end", message: { role: "user", content: "question" } }, messageEnd) ?? messages;
+    messageEnd += 1;
+    messages = applyTranscriptEvent(messages, { type: "assistant.delta", text: "answer" }, messageEnd) ?? messages;
+
+    expect(messages.map((message) => message.transcriptPosition?.messageIndex)).toEqual([10, 11]);
+  });
+
   it("seeds a null or undefined partial as a no-op", () => {
     const messages = [textMessage("user", "question")];
     expect(seedStreamingPartial(messages, null)).toBe(messages);
@@ -604,16 +615,26 @@ describe("applyTranscriptEvent", () => {
     ]);
   });
 
+  it("assigns live lines the raw index their hydrated message will use", () => {
+    const history = normalizeMessages([{ role: "user", content: "question" }], 10);
+    const live = applyTranscriptEvent(history, { type: "assistant.delta", text: "partial" }, 11);
+    const hydrated = normalizeMessages([{ role: "assistant", content: "partial" }], 11);
+
+    expect(live?.at(-1)?.transcriptPosition).toEqual({ messageIndex: 11, lineIndex: 0, segmentIndex: 0 });
+    expect(live?.at(-1)?.transcriptPosition).toEqual(hydrated.at(-1)?.transcriptPosition);
+  });
+
   it("seeds an in-flight assistant partial with text and thinking so live deltas append onto it", () => {
     const seeded = seedStreamingPartial([textMessage("user", "question")], {
       role: "assistant",
       content: [{ type: "thinking", thinking: "plan" }, { type: "text", text: "partial" }],
-    });
+    }, 4);
 
     expect(seeded).toEqual([
       textMessage("user", "question"),
       { role: "assistant", parts: [{ type: "thinking", text: "plan" }, { type: "text", text: "partial" }] },
     ]);
+    expect(seeded[1]?.transcriptPosition).toEqual({ messageIndex: 4, lineIndex: 0, segmentIndex: 0 });
 
     // A live delta continues the seeded assistant message rather than starting a new one.
     expect(applyTranscriptEvent(seeded, { type: "assistant.delta", text: " answer" })).toEqual([
