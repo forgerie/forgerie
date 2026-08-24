@@ -4,6 +4,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
 import { livenessPhase, livenessStep, replyIsStreaming, type LivenessPhase } from "../chatLiveness";
+import { turnRailState } from "../turnRail";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
@@ -28,6 +29,7 @@ import "./FormattedText";
 import "./ImageLightbox";
 import type { ImageLightbox, ImageLightboxItem } from "./ImageLightbox";
 import "./ToolExecutionView";
+import "./TurnRailSummary";
 
 const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 const messageDayFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
@@ -296,6 +298,12 @@ export class ChatView extends LitElement {
    */
   @state() private reservedTurnKey: string | undefined;
   @state() private expandedMetaKey: string | undefined;
+  /**
+   * Rails the reader has opened, by rail key. Expansion is per-turn state that
+   * lives as long as the session view does -- not a preference, so it is
+   * deliberately not persisted.
+   */
+  @state() private expandedRails: ReadonlySet<string> = new Set();
   /** ISO time the current stretch of work began; undefined while idle. */
   @state() private activeSince: string | undefined;
   private activePhase: LivenessPhase | undefined;
@@ -722,10 +730,10 @@ export class ChatView extends LitElement {
       <section class="turn" data-turn-key=${key}>
         <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
           ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup)}
-          ${this.renderTurnRail(work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined)}
+          ${this.renderTurnRail(work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined, !turnClosed && continuation.length === 0, `${key}:work`)}
           ${flow.answer === undefined ? null : this.renderGroup(flow.answer, flow.answer === liveTailGroup)}
           ${this.renderTurnImageGallery(galleryImages)}
-          ${this.renderTurnRail(continuation, liveTailGroup, continuationClosesTurn ? { turn, key } : undefined)}
+          ${this.renderTurnRail(continuation, liveTailGroup, continuationClosesTurn ? { turn, key } : undefined, !turnClosed, `${key}:continuation`)}
           ${last ? this.renderRunningTurnTail() : null}
         </div>
       </section>
@@ -781,18 +789,44 @@ export class ChatView extends LitElement {
     return { src, alt: `${chatToolOutputLabel(image.toolName)}, image ${String(index + 1)} of ${String(total)}` };
   }
 
+  /**
+   * The turn's work, said once.
+   *
+   * The rail leads with the collapsed register -- a heartbeat while the turn
+   * runs, a receipt once it ends -- and keeps the step ledger behind it. The
+   * ledger stays in the DOM while hidden so opening it costs no re-render and
+   * steals no scroll position; a turn whose steps carry no tool executions has
+   * nothing to summarise and shows the ledger as before.
+   */
   private renderTurnRail(
     groups: readonly ChatGroup[],
     liveTailGroup: ChatGroup | undefined,
     meta: { readonly turn: ChatTurn; readonly key: string } | undefined,
+    live: boolean,
+    railKey: string,
   ) {
     if (groups.length === 0) return null;
+    const state = turnRailState(groups, live);
+    const open = state.kind === "idle" || this.expandedRails.has(railKey);
     return html`
       <div class="turn-rail">
-        ${repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
+        ${state.kind === "idle" ? null : html`<turn-rail-summary
+          .state=${state}
+          ?open=${open}
+          @rail-toggle=${() => { this.toggleRail(railKey); }}
+        ></turn-rail-summary>`}
+        <div class="rail-ledger" ?hidden=${!open}>
+          ${repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
+        </div>
         ${meta === undefined ? null : this.renderRailMeta(meta.turn, meta.key)}
       </div>
     `;
+  }
+
+  private toggleRail(railKey: string): void {
+    const next = new Set(this.expandedRails);
+    if (!next.delete(railKey)) next.add(railKey);
+    this.expandedRails = next;
   }
 
   /**

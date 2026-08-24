@@ -739,6 +739,11 @@ export const chatStyles = css`
      it, back at full voice. */
   .turn-rail { min-width: 0; display: flex; flex-direction: column; gap: 12px; margin: 0 0 var(--calm-para-gap); padding-inline-start: clamp(12px, 2.5cqi, 18px); border-inline-start: 1px solid var(--calm-rule); }
   .turn-rail .msg { margin: 0; }
+  /* The step ledger behind the collapsed register. It keeps the rail's own
+     rhythm when open and leaves the DOM untouched when closed, so opening it
+     never reflows what the reader was already looking at. */
+  .rail-ledger { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .rail-ledger[hidden] { display: none; }
   /* Interim narration is the agent working, not the agent answering. It keeps
      reading order but drops to the interface's small muted voice, so the
      promoted answer is the only assistant prose at full size. */
