@@ -15,7 +15,6 @@ export class ToolExecutionView extends LitElement {
   /** Full standalone card, or body-only detail nested under a ledger row. */
   @property() presentation: "full" | "detail" = "full";
   @state() private showFullDiff = false;
-  @state() private diffOpen = true;
 
   override render() {
     const execution = this.execution;
@@ -50,7 +49,7 @@ export class ToolExecutionView extends LitElement {
 
         ${previewMismatch ? html`<p class="notice">Applied diff differs from the preview.</p>` : null}
         ${errorText === undefined || errorText === "" ? null : html`<pre class="error-text">${errorText}</pre>`}
-        ${visibleDiff === undefined ? this.renderTextBody(bodyText, execution.status === "error", target) : this.renderDiffBody(visibleDiff, actualDiff === undefined ? "Preview diff" : "Applied diff", target)}
+        ${visibleDiff === undefined ? this.renderTextBody(bodyText, target) : this.renderDiffBody(visibleDiff, actualDiff === undefined ? "Preview diff" : "Applied diff", target)}
       </section>
     `;
   }
@@ -71,11 +70,10 @@ export class ToolExecutionView extends LitElement {
     `;
   }
 
-  private renderTextBody(text: string | undefined, open: boolean, target: ToolTarget | undefined) {
+  private renderTextBody(text: string | undefined, target: ToolTarget | undefined) {
     if ((text === undefined || text === "") && target === undefined) return null;
     return html`
-      <details class="text-body" ?open=${open}>
-        <summary>Details</summary>
+      <div class="text-body">
         ${this.renderExpandedTarget(target)}
         ${text === undefined || text === "" ? null : html`
           <div class="detail-result">
@@ -83,7 +81,7 @@ export class ToolExecutionView extends LitElement {
             <pre>${text}</pre>
           </div>
         `}
-      </details>
+      </div>
     `;
   }
 
@@ -92,11 +90,11 @@ export class ToolExecutionView extends LitElement {
     const truncated = !this.showFullDiff && lines.length > MAX_COLLAPSED_DIFF_LINES;
     const visibleLines = truncated ? lines.slice(0, MAX_COLLAPSED_DIFF_LINES) : lines;
     return html`
-      <details class="diff-details" ?open=${this.diffOpen} @toggle=${(event: Event) => { this.onDiffToggle(event); }}>
-        <summary>
+      <div class="diff-body">
+        <div class="diff-header">
           <span>${label}</span>
           <small>${String(lines.length)} ${lines.length === 1 ? "line" : "lines"}</small>
-        </summary>
+        </div>
         ${this.renderExpandedTarget(target)}
         <div class="diff-toolbar">
           <span>${truncated ? `Showing ${String(visibleLines.length)} of ${String(lines.length)} lines` : "Full diff"}</span>
@@ -107,13 +105,8 @@ export class ToolExecutionView extends LitElement {
             Show all ${String(lines.length)} diff lines
           </button>
         ` : null}
-      </details>
+      </div>
     `;
-  }
-
-  private onDiffToggle(event: Event): void {
-    const details = event.currentTarget;
-    if (details instanceof HTMLDetailsElement) this.diffOpen = details.open;
   }
 
   static override styles = css`
@@ -139,17 +132,17 @@ export class ToolExecutionView extends LitElement {
     .notice { margin: 0; color: var(--pi-warning); }
     .muted { margin: 0; color: var(--pi-muted); }
     .error-text { margin: 0; border: 0; border-radius: 0; background: none; color: var(--calm-danger); padding: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .text-body { border-top: 1px solid var(--pi-border-muted); padding-top: 6px; }
-    .detail-target, .detail-result { display: grid; gap: 4px; margin-top: 8px; min-width: 0; }
+    .text-body { display: grid; gap: 8px; }
+    .detail-target, .detail-result { display: grid; gap: 4px; min-width: 0; }
     .detail-label { color: var(--pi-muted); font-size: var(--pi-text-sm); text-transform: uppercase; letter-spacing: .04em; }
     .text-body pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--calm-ink-dim); }
     .detail-result pre { box-sizing: border-box; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; border: 0; border-radius: 0; background: none; padding: 0; color: var(--calm-ink-dim); white-space: pre; overflow-wrap: normal; direction: ltr; text-align: left; unicode-bidi: isolate; }
     .detail-target-value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pi-accent); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
-    .diff-details { min-width: 0; max-width: 100%; border-top: 1px solid var(--pi-border-muted); padding-top: 6px; }
-    .diff-details > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; color: var(--pi-muted); cursor: pointer; }
-    .diff-details > summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .diff-details > summary small { flex: 0 0 auto; color: var(--pi-dim); }
-    .diff-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin-top: 8px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
+    .diff-body { display: grid; gap: 8px; min-width: 0; max-width: 100%; }
+    .diff-header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; color: var(--pi-muted); }
+    .diff-header span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .diff-header small { flex: 0 0 auto; color: var(--pi-dim); }
+    .diff-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; color: var(--pi-muted); font-size: var(--pi-text-sm); }
     .diff-toolbar span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     button { border: 0; border-radius: var(--pi-radius-control); background: none; color: var(--calm-ink-dim); padding: 3px 0; font: var(--pi-text-sm) system-ui, sans-serif; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
     button:hover, button:focus { color: var(--calm-ink-muted); }

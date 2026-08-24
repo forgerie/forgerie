@@ -45,7 +45,7 @@ describe("ToolExecutionView", () => {
   it("omits targets and empty details when no display text exists", async () => {
     const view = await mount(execution({ summary: "", args: undefined, resultText: "", details: undefined }));
 
-    expect(view.shadowRoot?.querySelector(".path, .summary, details")).toBeNull();
+    expect(view.shadowRoot?.querySelector(".path, .summary, .text-body, .diff-body")).toBeNull();
   });
 
   it("renders text results, errors, and edit counts", async () => {
@@ -62,7 +62,7 @@ describe("ToolExecutionView", () => {
 
     const failed = await mount(execution({ status: "error", resultText: "permission denied" }));
     expect(text(failed, ".error-text")).toBe("permission denied");
-    expect(failed.shadowRoot?.querySelector("details.text-body")?.hasAttribute("open")).toBe(true);
+    expect(text(failed, ".detail-result pre")).toBe("permission denied");
   });
 
   it("renders preview differences and reports an applied mismatch", async () => {
@@ -84,7 +84,7 @@ describe("ToolExecutionView", () => {
     expect(view.shadowRoot?.querySelectorAll(".diff-content .added")).toHaveLength(2);
     expect(view.shadowRoot?.querySelector(".diff-content .context")).not.toBeNull();
     expect(view.shadowRoot?.querySelectorAll(".diff-content .meta")).toHaveLength(2);
-    expect(text(view, ".diff-details summary span")).toBe("Applied diff");
+    expect(text(view, ".diff-header span")).toBe("Applied diff");
   });
 
   it("shows a preview error when no execution error exists", async () => {
@@ -107,19 +107,6 @@ describe("ToolExecutionView", () => {
     expect(view.shadowRoot?.querySelectorAll(".diff-content span")).toHaveLength(181);
     expect(view.shadowRoot?.querySelector("button.show-more")).toBeNull();
     expect(view.shadowRoot?.textContent).toContain("Full diff");
-  });
-
-  it("remembers whether difference details are open", async () => {
-    const view = await mount(execution({ preview: { diff: "+line" } }));
-    const details = view.shadowRoot?.querySelector<HTMLDetailsElement>("details.diff-details");
-    if (details === null || details === undefined) throw new Error("Expected difference details");
-
-    details.open = false;
-    details.dispatchEvent(new Event("toggle"));
-    view.execution = execution({ preview: { diff: "+changed" } });
-    await view.updateComplete;
-
-    expect(view.shadowRoot?.querySelector<HTMLDetailsElement>("details.diff-details")?.open).toBe(false);
   });
 });
 

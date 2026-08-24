@@ -89,6 +89,6 @@ describe("TurnRailLedger", () => {
     await detail.updateComplete;
     expect(detail.presentation).toBe("detail");
     expect(detail.shadowRoot?.querySelector(".tool-header")).toBeNull();
-    expect(detail.shadowRoot?.querySelector(".diff-details")).not.toBeNull();
+    expect(detail.shadowRoot?.querySelector(".diff-body")).not.toBeNull();
   });
 });
