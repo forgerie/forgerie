@@ -4,8 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PendingExtensionDialog, SessionStatus } from "../api";
 import { textMessage } from "../chatMessages";
 import { ChatScrollCoordinator } from "../chatScrollCoordinator";
+import { FOLLOW_FREE } from "../chatFollowMode";
 import { selectedChatCachedReadable, selectedChatFreshReadable, selectedChatLiveReady, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
+import type { ChatLine, ToolExecutionPart } from "./shared";
+import type { TurnRailSummary } from "./TurnRailSummary";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -552,6 +555,54 @@ describe("ChatView session opening position", () => {
   });
 });
 
+describe("ChatView expanded ledger growth", () => {
+  it("keeps the reader's page fixed when an open live ledger grows above it", async () => {
+    const frames = installFrames();
+    const view = new ChatView();
+    view.sessionId = session.id;
+    view.selectedMachineId = "local";
+    view.sessionCwd = session.cwd;
+    view.messages = [textMessage("user", "question"), toolExecution("read", "archive.ts", "running")];
+    view.status = sessionStatus(true);
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
+    document.body.append(view);
+    await view.updateComplete;
+    await view.updateComplete;
+
+    const chat = requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+    let scrollTop = 300;
+    Object.defineProperties(chat, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollHeight: { configurable: true, value: 1_200 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    chat.getBoundingClientRect = () => rect(0, 400);
+    frames.releaseAll();
+    scrollTop = 300;
+
+    const summary = requiredElement(view.shadowRoot?.querySelector<TurnRailSummary>("turn-rail-summary"), "turn summary");
+    const disclosure = requiredElement(summary.shadowRoot?.querySelector<HTMLButtonElement>("button.disclosure"), "rail disclosure");
+    disclosure.click();
+    await view.updateComplete;
+    await view.updateComplete;
+
+    const anchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>("[data-rail-growth-anchor]"), "rail growth anchor");
+    let measurement = 0;
+    anchor.getBoundingClientRect = () => {
+      measurement += 1;
+      return measurement === 1 ? rect(-12, -12) : rect(38, 38);
+    };
+    requiredScrollCoordinator(view).follow(FOLLOW_FREE);
+
+    view.messages = [...view.messages, toolExecution("edit", "ChatView.ts", "running")];
+    await view.updateComplete;
+    frames.releaseAll();
+
+    expect(scrollTop).toBe(350);
+    expect(requiredScrollCoordinator(view).mode).toEqual({ kind: "free" });
+  });
+});
+
 async function mountView(): Promise<ChatView> {
   const view = new ChatView();
   view.sessionId = session.id;
@@ -560,6 +611,10 @@ async function mountView(): Promise<ChatView> {
   document.body.append(view);
   await view.updateComplete;
   return view;
+}
+
+function toolExecution(toolName: string, summary: string, status: ToolExecutionPart["status"]): ChatLine {
+  return { role: "tool", parts: [{ type: "toolExecution", toolName, summary, status }] };
 }
 
 function sessionStatus(isStreaming: boolean): SessionStatus {

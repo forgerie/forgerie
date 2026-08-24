@@ -10,6 +10,7 @@ import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
 import "./TranscriptLivenessView";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
+import { selectLiveGrowthAnchor, scrollDeltaForLiveGrowth, type LiveGrowthAnchorMeasurement } from "../chatLiveGrowthAnchoring";
 import { ChatScrollCoordinator, type ChatReaderGesture } from "../chatScrollCoordinator";
 import { anchoredTurnKey, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
@@ -442,9 +443,14 @@ export class ChatView extends LitElement {
   }
 
   protected override update(changed: Map<string, unknown>): void {
-    const prependAnchor = this.isPrependingMessages(changed) ? this.capturePrependScrollAnchor() : undefined;
+    const prepending = this.isPrependingMessages(changed);
+    const prependAnchor = prepending ? this.capturePrependScrollAnchor() : undefined;
+    const liveGrowthAnchor = !prepending && this.shouldAnchorLiveLedgerGrowth(changed)
+      ? this.captureLiveGrowthAnchor()
+      : undefined;
     super.update(changed);
     if (prependAnchor !== undefined) this.restorePrependScrollAnchor(prependAnchor);
+    else if (liveGrowthAnchor !== undefined) this.restoreLiveGrowthAnchor(liveGrowthAnchor);
   }
 
   protected override updated(changed: Map<string, unknown>): void {
@@ -817,6 +823,7 @@ export class ChatView extends LitElement {
         <div class="rail-ledger" ?hidden=${!open}>
           ${repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
         </div>
+        <span class="rail-growth-anchor" data-rail-growth-anchor=${railKey} aria-hidden="true"></span>
         ${meta === undefined ? null : this.renderRailMeta(meta.turn, meta.key)}
       </div>
     `;
@@ -1362,6 +1369,41 @@ export class ChatView extends LitElement {
   private isPrependingMessages(changed: Map<string, unknown>): boolean {
     const oldMessageStart = changed.get("messageStart");
     return typeof oldMessageStart === "number" && this.messageStart < oldMessageStart;
+  }
+
+  /**
+   * Only free readers with an open ledger need this anchor. Tail and turn modes
+   * already place themselves after every content change; closed ledgers have a
+   * fixed height; history prepends use the older, broader anchor contract.
+   */
+  private shouldAnchorLiveLedgerGrowth(changed: Map<string, unknown>): boolean {
+    return changed.has("messages")
+      && this.expandedRails.size > 0
+      && this.scrolling.mode.kind === "free";
+  }
+
+  private captureLiveGrowthAnchor(): LiveGrowthAnchorMeasurement | undefined {
+    const chat = this.chat;
+    if (chat === undefined) return undefined;
+    const chatTop = chat.getBoundingClientRect().top;
+    const measurements = Array.from(this.renderRoot.querySelectorAll<HTMLElement>("[data-rail-growth-anchor]"))
+      .flatMap((element) => {
+        const id = element.dataset["railGrowthAnchor"];
+        if (id === undefined || !this.expandedRails.has(id)) return [];
+        return [{ id, offset: element.getBoundingClientRect().top - chatTop }];
+      });
+    return selectLiveGrowthAnchor(measurements);
+  }
+
+  private restoreLiveGrowthAnchor(anchor: LiveGrowthAnchorMeasurement): void {
+    const chat = this.chat;
+    if (chat === undefined) return;
+    const element = this.renderRoot.querySelector<HTMLElement>(`[data-rail-growth-anchor="${CSS.escape(anchor.id)}"]`);
+    if (element === null) return;
+    const currentOffset = element.getBoundingClientRect().top - chat.getBoundingClientRect().top;
+    const delta = scrollDeltaForLiveGrowth(currentOffset, anchor.offset);
+    this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop += delta; });
+    this.scrolling.sync(chat);
   }
 
   private requestLoadMoreIfNeeded(): void {
