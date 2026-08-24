@@ -97,7 +97,7 @@ describe("ChatView quiet rail", () => {
     expect(ledger(view).querySelector("details.event-group")).not.toBeNull();
   });
 
-  it("shows the running step and pins the failure it has not recovered from", async () => {
+  it("pins the failure it has not recovered from while the turn works", async () => {
     const view = await transcript([
       said("user", "add the digest budget"),
       failedEdit,
@@ -108,8 +108,16 @@ describe("ChatView quiet rail", () => {
     expect(text).toContain("edit");
     expect(text).toContain("ExtensionPackageRepository.kt");
     expect(text).toContain("Found 2 occurrences of edits[0].");
-    expect(text).toContain("read");
     expect(text).toContain("2 steps");
+  });
+
+  it("leaves naming the running step to the transcript's liveness row", async () => {
+    const view = await transcript([
+      said("user", "add the digest budget"),
+      ran("read", "running", { path: "/repo/only-in-the-running-step.ts" }),
+    ], true);
+
+    expect(summaryText(view)).not.toContain("only-in-the-running-step.ts");
   });
 
   it("drops the pin once the same edit lands, keeping it as a retry", async () => {

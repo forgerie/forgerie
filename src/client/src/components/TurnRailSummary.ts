@@ -26,17 +26,22 @@ export class TurnRailSummary extends LitElement {
     `;
   }
 
+  /**
+   * While the turn runs, the transcript's liveness row already names the current
+   * step and carries its elapsed clock. Naming it again here put the same
+   * sentence on screen twice, so the working register keeps only what that row
+   * cannot say: failures it has not recovered from, how much work has happened,
+   * and the way into the ledger. `state.current` stays in the model because it
+   * is the turn's real state; this view simply is not the surface that shows it.
+   */
   private renderWorking(state: Extract<TurnRailState, { kind: "working" }>) {
     return html`
       ${state.pins.map((pin) => renderPin(pin))}
       <div class="line heartbeat">
         <span class="glyph" aria-hidden="true">●</span>
-        ${state.current === undefined
-          ? html`<span class="verb">working</span>`
-          : html`<span class="verb">${state.current.verb}</span><span class="target">${state.current.label}</span>`}
+        <span class="counts">${stepCountLabel(state.stepCount)}${retrySuffix(state.retries)}</span>
         ${this.renderDisclosure(`Show all ${String(state.stepCount)} steps`)}
       </div>
-      <p class="sub">${stepCountLabel(state.stepCount)}${retrySuffix(state.retries)}</p>
     `;
   }
 
