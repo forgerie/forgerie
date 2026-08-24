@@ -20,7 +20,7 @@ export class TurnRailLedger extends LitElement {
           <details class=${`row ${row.outcome}`}>
             <summary>
               <span class="glyph" aria-hidden="true">${outcomeGlyph(row.outcome)}</span>
-              <span class="sr-only">${outcomeLabel(row.outcome)}</span>
+              ${row.outcome === "failed" ? null : html`<span class="sr-only">${outcomeLabel(row.outcome)}</span>`}
               <span class="verb">${row.verb}</span>
               <span class="target">${row.label}</span>
               ${row.editCount === undefined ? null : html`<span class="quantity">${String(row.editCount)} ${row.editCount === 1 ? "edit" : "edits"}</span>`}
