@@ -71,9 +71,9 @@ describe("TurnRailLedger", () => {
     const summaries = [...(ledger.shadowRoot?.querySelectorAll("summary") ?? [])];
 
     expect(summaries).toHaveLength(3);
-    expect(compactText(summaries[0] ?? null)).toContain("edit TurnRailSummary.ts 2 edits +2/-1");
-    expect(compactText(summaries[1] ?? null)).toBe("✓ read turnRail.ts");
-    expect(compactText(summaries[2] ?? null)).toContain("bash npm run verify failed");
+    expect(compactText(summaries[0] ?? null)).toContain("done edit TurnRailSummary.ts 2 edits +2/-1");
+    expect(compactText(summaries[1] ?? null)).toBe("✓ done read turnRail.ts");
+    expect(compactText(summaries[2] ?? null)).toContain("failed bash npm run verify failed");
   });
 
   it("opens the shipped tool detail without repeating its header", async () => {

@@ -18,7 +18,7 @@ import { sessionActivityIndicator } from "../sessionStatusStrip";
 import { isNearScrollBottom } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
-import { selectedChatHasReadableHistory, selectedChatIsOpening, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
+import { selectedChatCanUseRuntime, selectedChatHasReadableHistory, selectedChatIsOpening, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
 import type { SessionLaunchRecovery } from "../controllers/sessionController";
 import type { ChatLine, ChatPart } from "./shared";
@@ -31,6 +31,7 @@ import "./ImageLightbox";
 import type { ImageLightbox, ImageLightboxItem } from "./ImageLightbox";
 import "./ToolExecutionView";
 import "./TurnRailLedger";
+import type { TurnRailLedger } from "./TurnRailLedger";
 import "./TurnRailSummary";
 
 const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
@@ -312,6 +313,8 @@ export class ChatView extends LitElement {
   private readonly disclosures = new ChatDisclosureController();
   private readonly scrolling = new ChatScrollCoordinator();
   private loadMoreCheckFrame: number | undefined;
+  /** Invalidates an older deferred anchor restore when another render wins. */
+  private liveGrowthRestoreEpoch = 0;
   private groupedMessagesInput?: ChatLine[];
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
@@ -1050,7 +1053,7 @@ export class ChatView extends LitElement {
       .lastActivityAt=${this.livenessClock?.lastActivityAt ?? ""}
       .stuckAfterMs=${livenessBeatMs(step)}
       .step=${step}
-      .onStop=${this.onStopActiveWork}
+      .onStop=${selectedChatCanUseRuntime(this.currentSelectedLoad()) ? this.onStopActiveWork : undefined}
     ></transcript-liveness>`;
   }
 
@@ -1408,14 +1411,25 @@ export class ChatView extends LitElement {
   }
 
   private restoreLiveGrowthAnchor(anchor: LiveGrowthAnchorMeasurement): void {
-    const chat = this.chat;
-    if (chat === undefined) return;
     const element = this.renderRoot.querySelector<HTMLElement>(`[data-rail-growth-anchor="${CSS.escape(anchor.id)}"]`);
     if (element === null) return;
-    const currentOffset = element.getBoundingClientRect().top - chat.getBoundingClientRect().top;
-    const delta = scrollDeltaForLiveGrowth(currentOffset, anchor.offset);
-    this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop += delta; });
-    this.scrolling.sync(chat);
+    const ledger = element.closest(".turn-rail")?.querySelector<TurnRailLedger>("turn-rail-ledger");
+    const epoch = this.liveGrowthRestoreEpoch + 1;
+    this.liveGrowthRestoreEpoch = epoch;
+    // A Lit child commits after its parent. Measuring immediately after
+    // ChatView's update sees the old ledger height and produces a zero delta.
+    // Wait for the compact ledger itself, then restore the seam after its rows
+    // have entered layout. A newer render invalidates this deferred correction.
+    void (ledger?.updateComplete ?? Promise.resolve()).then(() => {
+      if (epoch !== this.liveGrowthRestoreEpoch) return;
+      const chat = this.chat;
+      const current = this.renderRoot.querySelector<HTMLElement>(`[data-rail-growth-anchor="${CSS.escape(anchor.id)}"]`);
+      if (chat === undefined || current === null) return;
+      const currentOffset = current.getBoundingClientRect().top - chat.getBoundingClientRect().top;
+      const delta = scrollDeltaForLiveGrowth(currentOffset, anchor.offset);
+      this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop += delta; });
+      this.scrolling.sync(chat);
+    });
   }
 
   private requestLoadMoreIfNeeded(): void {

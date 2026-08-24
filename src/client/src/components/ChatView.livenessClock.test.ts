@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { selectedChatLiveReady, selectedChatReadOnly, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
 import type { ChatLine, ToolExecutionPart } from "./shared";
 import type { TranscriptLivenessView } from "./TranscriptLivenessView";
@@ -18,6 +19,9 @@ function tool(toolName: string, summary: string, status: ToolExecutionPart["stat
 async function mount(step: ChatLine, activityAt: string): Promise<ChatView> {
   const view = new ChatView();
   view.sessionId = "session-1";
+  view.selectedMachineId = "local";
+  view.sessionCwd = "/repo";
+  view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", { id: "session-1", cwd: "/repo" }));
   view.messages = [{ role: "user", parts: [{ type: "text", text: "question" }] }, step];
   view.activity = { sessionId: "session-1", phase: "active", label: "running tool", at: activityAt };
   document.body.append(view);
@@ -71,7 +75,7 @@ describe("ChatView liveness clocks", () => {
     expect(liveness(view).lastActivityAt).toBe("2026-08-24T11:00:20.000Z");
   });
 
-  it("passes the existing stop capability to a stuck liveness row", async () => {
+  it("passes the existing stop capability to a live-ready liveness row", async () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-08-24T11:00:00.000Z");
     const view = await mount(tool("bash", "npm run verify"), "2026-08-24T11:00:00.000Z");
@@ -80,5 +84,16 @@ describe("ChatView liveness clocks", () => {
     await view.updateComplete;
 
     expect(liveness(view).onStop).toBe(onStop);
+  });
+
+  it("withholds Stop when the selected transcript is not runtime-ready", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-24T11:00:00.000Z");
+    const view = await mount(tool("bash", "npm run verify"), "2026-08-24T11:00:00.000Z");
+    view.onStopActiveWork = vi.fn();
+    view.selectedLoad = selectedChatReadOnly(selectedChatTarget("local", { id: "session-1", cwd: "/repo" }), "fresh");
+    await view.updateComplete;
+
+    expect(liveness(view).onStop).toBeUndefined();
   });
 });

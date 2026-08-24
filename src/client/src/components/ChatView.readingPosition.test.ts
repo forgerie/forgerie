@@ -8,6 +8,7 @@ import { FOLLOW_FREE } from "../chatFollowMode";
 import { selectedChatCachedReadable, selectedChatFreshReadable, selectedChatLiveReady, selectedChatLoading, selectedChatPreviewReadable, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
 import type { ChatLine, ToolExecutionPart } from "./shared";
+import type { TurnRailLedger } from "./TurnRailLedger";
 import type { TurnRailSummary } from "./TurnRailSummary";
 
 afterEach(() => {
@@ -587,15 +588,16 @@ describe("ChatView expanded ledger growth", () => {
     await view.updateComplete;
 
     const anchor = requiredElement(view.shadowRoot?.querySelector<HTMLElement>("[data-rail-growth-anchor]"), "rail growth anchor");
-    let measurement = 0;
-    anchor.getBoundingClientRect = () => {
-      measurement += 1;
-      return measurement === 1 ? rect(-12, -12) : rect(38, 38);
-    };
+    const compactLedger = requiredElement(view.shadowRoot?.querySelector<TurnRailLedger>("turn-rail-ledger"), "compact ledger");
+    anchor.getBoundingClientRect = () => compactLedger.shadowRoot?.querySelectorAll("details").length === 1
+      ? rect(-12, -12)
+      : rect(38, 38);
     requiredScrollCoordinator(view).follow(FOLLOW_FREE);
 
     view.messages = [...view.messages, toolExecution("edit", "ChatView.ts", "running")];
     await view.updateComplete;
+    await compactLedger.updateComplete;
+    await Promise.resolve();
     frames.releaseAll();
 
     expect(scrollTop).toBe(350);

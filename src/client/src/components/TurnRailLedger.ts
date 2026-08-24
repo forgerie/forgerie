@@ -20,6 +20,7 @@ export class TurnRailLedger extends LitElement {
           <details class=${`row ${row.outcome}`}>
             <summary>
               <span class="glyph" aria-hidden="true">${outcomeGlyph(row.outcome)}</span>
+              <span class="sr-only">${outcomeLabel(row.outcome)}</span>
               <span class="verb">${row.verb}</span>
               <span class="target">${row.label}</span>
               ${row.editCount === undefined ? null : html`<span class="quantity">${String(row.editCount)} ${row.editCount === 1 ? "edit" : "edits"}</span>`}
@@ -46,6 +47,7 @@ export class TurnRailLedger extends LitElement {
     summary { display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 5px 0; cursor: pointer; list-style: none; }
     summary::-webkit-details-marker { display: none; }
     .glyph { flex: 0 0 auto; color: var(--pi-muted); }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
     .failed .glyph, .failed .outcome { color: var(--calm-danger); }
     .verb { flex: 0 0 auto; color: var(--calm-ink-muted); font-weight: 500; }
     .target { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--pi-accent); text-overflow: ellipsis; white-space: nowrap; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
@@ -62,6 +64,12 @@ function outcomeGlyph(outcome: TurnLedgerRow["outcome"]): string {
   if (outcome === "done") return "✓";
   if (outcome === "failed") return "✗";
   return "●";
+}
+
+function outcomeLabel(outcome: TurnLedgerRow["outcome"]): string {
+  if (outcome === "done") return "done";
+  if (outcome === "failed") return "failed";
+  return "working";
 }
 
 declare global {
