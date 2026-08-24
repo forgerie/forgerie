@@ -1,6 +1,7 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { TurnRailState, TurnStep } from "../turnRail";
+import "./SessionWorkingRuntime";
 
 /**
  * The turn rail's collapsed register.
@@ -14,6 +15,8 @@ import type { TurnRailState, TurnStep } from "../turnRail";
 @customElement("turn-rail-summary")
 export class TurnRailSummary extends LitElement {
   @property({ attribute: false }) state: TurnRailState | undefined;
+  /** ISO timestamp for the whole live turn; empty on settled receipts. */
+  @property() startedAt = "";
   @property({ type: Boolean }) open = false;
 
   override render() {
@@ -40,6 +43,7 @@ export class TurnRailSummary extends LitElement {
       <div class="line heartbeat">
         <span class="glyph" aria-hidden="true">●</span>
         <span class="counts">${stepCountLabel(state.stepCount)}${retrySuffix(state.retries)}</span>
+        ${this.startedAt === "" ? null : html`<session-working-runtime class="turn-runtime" .startedAt=${this.startedAt}></session-working-runtime>`}
         ${this.renderDisclosure(`Show all ${String(state.stepCount)} steps`)}
       </div>
     `;
@@ -98,6 +102,7 @@ export class TurnRailSummary extends LitElement {
       direction: ltr; text-align: left; unicode-bidi: isolate;
     }
     .diff-stats { flex: 0 0 auto; display: inline-flex; gap: 3px; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+    .turn-runtime { flex: 0 0 auto; margin-inline-start: auto; color: var(--pi-muted); }
     .added { color: var(--pi-success); }
     .removed { color: var(--pi-danger); }
     .sub { margin: 0 0 0 16px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
@@ -106,7 +111,7 @@ export class TurnRailSummary extends LitElement {
       flex: 0 0 auto; margin-inline-start: auto; border: 0; background: none;
       color: var(--pi-muted); padding: 0 2px; font: inherit; line-height: 1; cursor: pointer;
     }
-    .diff-stats + .disclosure { margin-inline-start: 0; }
+    .diff-stats + .disclosure, .turn-runtime + .disclosure { margin-inline-start: 0; }
     .disclosure:hover, .disclosure:focus-visible { color: var(--calm-ink-muted); }
   `;
 }

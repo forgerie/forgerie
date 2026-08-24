@@ -21,6 +21,15 @@ export class TranscriptLivenessView extends LitElement {
   /** What the session is doing right now. */
   @property() step = "";
 
+  /** ISO timestamp of the newest activity event for this visible step. */
+  @property() lastActivityAt = "";
+
+  /** How old both the step and its silence must be before the row calls it stuck. */
+  @property({ type: Number }) stuckAfterMs = 60_000;
+
+  /** The same stop capability the composer already exposes. */
+  @property({ attribute: false }) onStop?: () => void;
+
   @state() private now = Date.now();
 
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -37,11 +46,24 @@ export class TranscriptLivenessView extends LitElement {
 
   override render() {
     const elapsed = elapsedSince(this.startedAt, this.now);
+    const silence = elapsedSince(this.lastActivityAt, this.now);
+    const stuck = elapsed !== undefined
+      && silence !== undefined
+      && elapsed >= this.stuckAfterMs
+      && silence >= this.stuckAfterMs;
     return html`
-      <p class="liveness" aria-live="polite">
-        <span class="liveness-dot" aria-hidden="true"></span>
-        <span>${elapsed === undefined ? this.step : `${formatElapsed(elapsed)} · ${this.step}`}</span>
-      </p>
+      <div class="liveness-block" aria-live="polite">
+        <p class="liveness">
+          <span class="liveness-dot" aria-hidden="true"></span>
+          <span>${elapsed === undefined ? this.step : `${formatElapsed(elapsed)} · ${this.step}`}</span>
+        </p>
+        ${stuck ? html`
+          <p class="stuck">
+            <span>No activity for ${formatElapsed(silence)}</span>
+            ${this.onStop === undefined ? null : html`<button class="stop" type="button" @click=${() => { this.onStop?.(); }}>Stop</button>`}
+          </p>
+        ` : null}
+      </div>
     `;
   }
 

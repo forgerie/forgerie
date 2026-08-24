@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatElapsed, latestToolStep, livenessPhase, livenessStep, replyIsStreaming } from "./chatLiveness";
+import { advanceLivenessClock, formatElapsed, latestToolStep, livenessBeatMs, livenessPhase, livenessStep, livenessTiming, replyIsStreaming } from "./chatLiveness";
 import { elapsedSince } from "./sessionWorkingRuntime";
 import type { SessionActivity } from "./api";
 import type { ChatLine, ChatPart } from "./components/shared";
@@ -88,6 +88,84 @@ describe("livenessStep", () => {
 
   it("falls back to the status text when no activity is published", () => {
     expect(livenessStep([], undefined, "  Sending your message…  ")).toBe("Sending your message…");
+  });
+});
+
+describe("liveness clock", () => {
+  const observedAt = "2026-08-10T00:00:00.000Z";
+
+  it("starts the turn and step clocks together", () => {
+    const clock = advanceLivenessClock(undefined, { phase: "working", step: "read archive.ts", activityAt: observedAt }, observedAt);
+
+    expect(clock).toEqual({
+      phase: "working",
+      turnStartedAt: observedAt,
+      step: "read archive.ts",
+      stepStartedAt: observedAt,
+      activityMarker: observedAt,
+      lastActivityAt: observedAt,
+    });
+  });
+
+  it("resets only the step clock when the visible step changes", () => {
+    const first = advanceLivenessClock(undefined, { phase: "working", step: "read archive.ts", activityAt: observedAt }, observedAt);
+    const changedAt = "2026-08-10T00:06:00.000Z";
+    const second = advanceLivenessClock(first, { phase: "working", step: "bash npm run verify", activityAt: changedAt }, changedAt);
+
+    expect(second?.turnStartedAt).toBe(observedAt);
+    expect(second?.stepStartedAt).toBe(changedAt);
+    expect(second?.lastActivityAt).toBe(changedAt);
+  });
+
+  it("preserves step age but refreshes silence when activity advances", () => {
+    const first = advanceLivenessClock(undefined, { phase: "working", step: "bash npm run verify", activityAt: observedAt }, observedAt);
+    const activityAt = "2026-08-10T00:00:20.000Z";
+    const second = advanceLivenessClock(first, { phase: "working", step: "bash npm run verify", activityAt }, activityAt);
+
+    expect(second?.stepStartedAt).toBe(observedAt);
+    expect(second?.lastActivityAt).toBe(activityAt);
+  });
+
+  it("restarts both clocks when the phase changes and clears them when idle", () => {
+    const first = advanceLivenessClock(undefined, { phase: "working", step: "read archive.ts", activityAt: observedAt }, observedAt);
+    const compactingAt = "2026-08-10T00:02:00.000Z";
+
+    expect(advanceLivenessClock(first, { phase: "compacting", step: "compacting history" }, compactingAt)).toMatchObject({
+      phase: "compacting",
+      turnStartedAt: compactingAt,
+      stepStartedAt: compactingAt,
+    });
+    expect(advanceLivenessClock(first, { phase: undefined, step: "" }, compactingAt)).toBeUndefined();
+  });
+
+  it("uses a long beat for commands and a short beat for local file operations", () => {
+    expect(livenessBeatMs("bash npm run verify")).toBe(60_000);
+    expect(livenessBeatMs("process dev")).toBe(60_000);
+    expect(livenessBeatMs("subagent se-code-review")).toBe(60_000);
+    expect(livenessBeatMs("read archive.ts")).toBe(10_000);
+    expect(livenessBeatMs("edit ChatView.ts")).toBe(10_000);
+    expect(livenessBeatMs("working")).toBe(60_000);
+  });
+
+  it("reports stuck only when both the step and the activity silence exceed the beat", () => {
+    const clock = advanceLivenessClock(undefined, { phase: "working", step: "bash npm run verify", activityAt: observedAt }, observedAt);
+    if (clock === undefined) throw new Error("expected a working clock");
+
+    expect(livenessTiming(clock, Date.parse("2026-08-10T00:00:59.000Z")).stuck).toBe(false);
+    expect(livenessTiming(clock, Date.parse("2026-08-10T00:01:00.000Z"))).toMatchObject({
+      turnElapsedMs: 60_000,
+      stepElapsedMs: 60_000,
+      silentElapsedMs: 60_000,
+      stuck: true,
+    });
+
+    const refreshed = advanceLivenessClock(clock, {
+      phase: "working",
+      step: "bash npm run verify",
+      activityAt: "2026-08-10T00:00:45.000Z",
+    }, "2026-08-10T00:00:45.000Z");
+    if (refreshed === undefined) throw new Error("expected a refreshed clock");
+    expect(livenessTiming(refreshed, Date.parse("2026-08-10T00:01:00.000Z")).stuck).toBe(false);
   });
 });
 

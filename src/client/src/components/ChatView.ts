@@ -3,7 +3,7 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
-import { livenessPhase, livenessStep, replyIsStreaming, type LivenessPhase } from "../chatLiveness";
+import { advanceLivenessClock, livenessBeatMs, livenessPhase, livenessStep, replyIsStreaming, type LivenessClock } from "../chatLiveness";
 import { turnRailState } from "../turnRail";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
@@ -280,6 +280,7 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) onDismissClosedDialog?: ExtensionDialogDismissCallback;
   @property({ attribute: false }) notificationInbox?: SelectedSessionNotificationView;
   @property({ attribute: false }) onClearServerQueue?: () => void;
+  @property({ attribute: false }) onStopActiveWork?: () => void;
   @property({ attribute: false }) onDismissWarning?: (dismissId: string) => void;
   @property({ type: Boolean }) warningsVisible = true;
   @property({ attribute: false }) onToggleWarnings?: () => void;
@@ -304,9 +305,8 @@ export class ChatView extends LitElement {
    * deliberately not persisted.
    */
   @state() private expandedRails: ReadonlySet<string> = new Set();
-  /** ISO time the current stretch of work began; undefined while idle. */
-  @state() private activeSince: string | undefined;
-  private activePhase: LivenessPhase | undefined;
+  /** Turn age, step age, and activity silence for the current live phase. */
+  @state() private livenessClock: LivenessClock | undefined;
   private readonly disclosures = new ChatDisclosureController();
   private readonly scrolling = new ChatScrollCoordinator();
   private loadMoreCheckFrame: number | undefined;
@@ -390,14 +390,12 @@ export class ChatView extends LitElement {
   }
 
   protected override willUpdate(changed: PropertyValues<this>): void {
-    this.trackActiveSince();
     const identityChanged = this.sessionIdentityChanged(changed);
     if (identityChanged) {
-      this.activeSince = undefined;
-      this.activePhase = undefined;
+      this.livenessClock = undefined;
       this.prepareSessionUiState();
-      this.trackActiveSince();
     }
+    this.trackLivenessClock();
     if (changed.has("isSendingPrompt") && this.isSendingPrompt) this.sentFromHere = true;
     const previousSelectedLoad = changed.get("selectedLoad");
     const currentSelectedLoad = this.currentSelectedLoad();
@@ -812,6 +810,7 @@ export class ChatView extends LitElement {
       <div class="turn-rail">
         ${state.kind === "idle" ? null : html`<turn-rail-summary
           .state=${state}
+          .startedAt=${live ? this.livenessClock?.turnStartedAt ?? "" : ""}
           ?open=${open}
           @rail-toggle=${() => { this.toggleRail(railKey); }}
         ></turn-rail-summary>`}
@@ -1028,8 +1027,11 @@ export class ChatView extends LitElement {
     const step = this.livenessStepText();
     if (step === undefined) return null;
     return html`<transcript-liveness
-      .startedAt=${this.activeSince ?? ""}
+      .startedAt=${this.livenessClock?.stepStartedAt ?? ""}
+      .lastActivityAt=${this.livenessClock?.lastActivityAt ?? ""}
+      .stuckAfterMs=${livenessBeatMs(step)}
       .step=${step}
+      .onStop=${this.onStopActiveWork}
     ></transcript-liveness>`;
   }
 
@@ -1052,20 +1054,21 @@ export class ChatView extends LitElement {
   }
 
   /**
-   * When the current stretch of work began.
+   * Advance the three clocks without asking ChatView's transcript to tick.
    *
-   * Not `activity.at`: the activity feed republishes on every tool event, so its
-   * timestamp is the last thing that happened, and elapsed time computed from it
-   * sits at zero for as long as the agent keeps reporting. This latches the
-   * first moment the session entered its current phase and holds it until the
-   * phase changes, so compaction times itself rather than inheriting the
-   * minutes of the turn that triggered it.
+   * The turn clock survives tool changes. The step clock resets when the
+   * reader-visible step changes. Activity timestamps refresh only the silence
+   * clock. TranscriptLivenessView owns the one-second timer, so hundreds of
+   * historical message groups still do no work when a second passes.
    */
-  private trackActiveSince(): void {
+  private trackLivenessClock(): void {
     const phase = livenessPhase({ isCompacting: this.isCompacting, indicatorActive: this.livenessIndicator()?.active === true });
-    if (phase === this.activePhase) return;
-    this.activePhase = phase;
-    this.activeSince = phase === undefined ? undefined : new Date().toISOString();
+    const step = this.livenessStepText() ?? "";
+    this.livenessClock = advanceLivenessClock(this.livenessClock, {
+      phase,
+      step,
+      ...(phase === "working" && this.activity?.at !== undefined ? { activityAt: this.activity.at } : {}),
+    }, new Date().toISOString());
   }
 
   private renderHistoryBoundary() {

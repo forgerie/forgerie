@@ -20,9 +20,115 @@ import type { ChatLine } from "./components/shared";
  */
 export type LivenessPhase = "working" | "compacting";
 
+/**
+ * The two clocks a live transcript needs.
+ *
+ * `turnStartedAt` answers how long the whole reply has taken. `stepStartedAt`
+ * answers how long the thing named on the liveness row has taken. Keeping both
+ * avoids the old lie where a fresh verify step inherited the six minutes spent
+ * on every step before it. `lastActivityAt` is the silence clock: it advances
+ * without resetting step age when the daemon publishes another event for the
+ * same visible step.
+ */
+export interface LivenessClock {
+  readonly phase: LivenessPhase;
+  readonly turnStartedAt: string;
+  readonly step: string;
+  readonly stepStartedAt: string;
+  readonly activityMarker?: string;
+  readonly lastActivityAt: string;
+}
+
+export interface LivenessClockInput {
+  readonly phase: LivenessPhase | undefined;
+  readonly step: string;
+  readonly activityAt?: string;
+}
+
+export interface LivenessTiming {
+  readonly turnElapsedMs: number;
+  readonly stepElapsedMs: number;
+  readonly silentElapsedMs: number;
+  readonly beatMs: number;
+  readonly stuck: boolean;
+}
+
 export function livenessPhase(input: { isCompacting: boolean; indicatorActive: boolean }): LivenessPhase | undefined {
   if (input.isCompacting) return "compacting";
   return input.indicatorActive ? "working" : undefined;
+}
+
+/**
+ * Advance the clocks when ChatView observes a new state.
+ *
+ * The observation time, rather than `Date.now()` hidden inside this function,
+ * is an explicit dependency so phase and step transitions are deterministic in
+ * tests. Activity timestamps are identity markers: a new one refreshes the
+ * silence clock but never pretends the step itself restarted.
+ */
+export function advanceLivenessClock(
+  previous: LivenessClock | undefined,
+  input: LivenessClockInput,
+  observedAt: string,
+): LivenessClock | undefined {
+  if (input.phase === undefined) return undefined;
+  const activityMarker = validIso(input.activityAt);
+  if (previous?.phase !== input.phase) {
+    return {
+      phase: input.phase,
+      turnStartedAt: observedAt,
+      step: input.step,
+      stepStartedAt: observedAt,
+      ...(activityMarker === undefined ? {} : { activityMarker }),
+      lastActivityAt: activityMarker ?? observedAt,
+    };
+  }
+  if (previous.step !== input.step) {
+    return {
+      phase: input.phase,
+      turnStartedAt: previous.turnStartedAt,
+      step: input.step,
+      stepStartedAt: observedAt,
+      ...(activityMarker === undefined ? {} : { activityMarker }),
+      lastActivityAt: activityMarker ?? observedAt,
+    };
+  }
+  if (activityMarker !== undefined && activityMarker !== previous.activityMarker) {
+    return { ...previous, activityMarker, lastActivityAt: activityMarker };
+  }
+  return previous;
+}
+
+/** A short beat for local file work; a long one for processes and orchestration. */
+export function livenessBeatMs(step: string): number {
+  const verb = step.trim().split(/\s+/u)[0]?.toLowerCase();
+  if (verb === "read" || verb === "edit" || verb === "write") return 10_000;
+  return 60_000;
+}
+
+/** The observable timing state at one instant. */
+export function livenessTiming(clock: LivenessClock, now: number): LivenessTiming {
+  const turnElapsedMs = elapsed(clock.turnStartedAt, now);
+  const stepElapsedMs = elapsed(clock.stepStartedAt, now);
+  const silentElapsedMs = elapsed(clock.lastActivityAt, now);
+  const beatMs = livenessBeatMs(clock.step);
+  return {
+    turnElapsedMs,
+    stepElapsedMs,
+    silentElapsedMs,
+    beatMs,
+    stuck: stepElapsedMs >= beatMs && silentElapsedMs >= beatMs,
+  };
+}
+
+function elapsed(startedAt: string, now: number): number {
+  const started = Date.parse(startedAt);
+  return Number.isFinite(started) ? Math.max(0, now - started) : 0;
+}
+
+function validIso(value: string | undefined): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  return Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
 export interface ReplyStreamingInput {

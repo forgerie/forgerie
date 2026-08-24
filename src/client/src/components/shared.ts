@@ -930,10 +930,15 @@ export const chatStyles = css`
 /** The liveness line at the foot of a running turn. */
 export const transcriptLivenessStyles = css`
   :host { display: block; }
+  .liveness-block { display: grid; gap: 2px; min-width: 0; }
   .liveness { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; color: var(--calm-ink-dim); font-size: var(--pi-text-sm); }
-  /* One line, always. A step is a glance; the fold holds the full text. */
+  /* The step is a glance; the fold holds the full text. */
   .liveness span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .liveness-dot { flex: 0 0 auto; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--pi-accent); }
+  .stuck { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0 0 0 15px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
+  .stuck span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stop { flex: 0 0 auto; border: 0; background: none; color: var(--calm-ink-dim); padding: 0; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .stop:hover, .stop:focus-visible { color: var(--calm-danger); }
   @media (prefers-reduced-motion: no-preference) {
     .liveness-dot { animation: transcript-liveness-pulse 1.8s ease-in-out infinite; }
   }
