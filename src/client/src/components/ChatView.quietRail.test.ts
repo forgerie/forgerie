@@ -94,7 +94,10 @@ describe("ChatView quiet rail", () => {
 
     expect(ledger(view).hidden).toBe(false);
     expect(summary(view).shadowRoot?.querySelector("button.disclosure")?.getAttribute("aria-expanded")).toBe("true");
-    expect(ledger(view).querySelector("details.event-group")).not.toBeNull();
+    const compact = ledger(view).querySelector("turn-rail-ledger");
+    expect(compact).not.toBeNull();
+    expect(compact?.shadowRoot?.querySelectorAll("details")).toHaveLength(1);
+    expect(ledger(view).querySelector("details.rail-full-activity details.event-group")).not.toBeNull();
   });
 
   it("pins the failure it has not recovered from while the turn works", async () => {

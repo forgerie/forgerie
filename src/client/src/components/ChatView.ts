@@ -4,7 +4,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
 import { advanceLivenessClock, livenessBeatMs, livenessPhase, livenessStep, replyIsStreaming, type LivenessClock } from "../chatLiveness";
-import { turnRailState } from "../turnRail";
+import { turnLedgerRows, turnRailState } from "../turnRail";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
@@ -30,6 +30,7 @@ import "./FormattedText";
 import "./ImageLightbox";
 import type { ImageLightbox, ImageLightboxItem } from "./ImageLightbox";
 import "./ToolExecutionView";
+import "./TurnRailLedger";
 import "./TurnRailSummary";
 
 const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
@@ -811,6 +812,7 @@ export class ChatView extends LitElement {
   ) {
     if (groups.length === 0) return null;
     const state = turnRailState(groups, live);
+    const rows = turnLedgerRows(groups);
     const open = state.kind === "idle" || this.expandedRails.has(railKey);
     return html`
       <div class="turn-rail">
@@ -821,7 +823,17 @@ export class ChatView extends LitElement {
           @rail-toggle=${() => { this.toggleRail(railKey); }}
         ></turn-rail-summary>`}
         <div class="rail-ledger" ?hidden=${!open}>
-          ${repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
+          ${rows.length === 0
+            ? repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))
+            : html`
+              <turn-rail-ledger .rows=${rows}></turn-rail-ledger>
+              <details class="rail-full-activity">
+                <summary>Thinking and other activity</summary>
+                <div class="rail-full-activity-body">
+                  ${repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
+                </div>
+              </details>
+            `}
         </div>
         <span class="rail-growth-anchor" data-rail-growth-anchor=${railKey} aria-hidden="true"></span>
         ${meta === undefined ? null : this.renderRailMeta(meta.turn, meta.key)}

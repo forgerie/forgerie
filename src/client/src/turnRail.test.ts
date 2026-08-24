@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatGroup } from "./chatGroups";
 import type { ChatLine, ToolExecutionPart } from "./components/shared";
-import { turnRailState } from "./turnRail";
+import { turnLedgerRows, turnRailState } from "./turnRail";
 
 function exec(toolName: string, status: ToolExecutionPart["status"], args?: unknown, extra: Partial<ToolExecutionPart> = {}): ToolExecutionPart {
   return { type: "toolExecution", toolName, summary: "", status, ...(args === undefined ? {} : { args }), ...extra };
@@ -19,6 +19,47 @@ function prose(text: string): ChatGroup {
 
 const repositoryPath = "/home/simonwjackson/code/sandbox/fullscreen-browser/app/src/main/kotlin/com/simonwjackson/fullscreenbrowser/ExtensionPackageRepository.kt";
 const duplicateOldText = `Found 2 occurrences of edits[0] in ${repositoryPath}. Each oldText must be unique. Please provide more context to make it unique.`;
+
+describe("turnLedgerRows", () => {
+  it("derives edit count and diff stats from fields already on the execution", () => {
+    const rows = turnLedgerRows([
+      work(exec("edit", "success", { path: repositoryPath, edits: [{}, {}] }, {
+        details: { diff: "+one\n+two\n-three\n context" },
+      })),
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      verb: "edit",
+      label: "ExtensionPackageRepository.kt",
+      outcome: "done",
+      editCount: 2,
+      added: 2,
+      removed: 1,
+    });
+  });
+
+  it("leaves rows without meaningful quantities unfilled", () => {
+    const rows = turnLedgerRows([work(exec("read", "success", { path: repositoryPath }))]);
+
+    expect(rows[0]?.editCount).toBeUndefined();
+    expect(rows[0]?.added).toBe(0);
+    expect(rows[0]?.removed).toBe(0);
+  });
+
+  it("keeps failure evidence with the failed row", () => {
+    const rows = turnLedgerRows([
+      work(exec("bash", "error", { command: "npm run verify" }, { resultText: "vitest failed" })),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      verb: "bash",
+      label: "npm run verify",
+      outcome: "failed",
+      evidence: "vitest failed",
+    });
+  });
+});
 
 describe("turnRailState", () => {
   it("stays idle for a turn that did no work", () => {

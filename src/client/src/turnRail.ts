@@ -21,6 +21,15 @@ export interface TurnStep {
   readonly evidence?: string;
 }
 
+/** One row in the expanded ledger, plus the real execution its detail opens. */
+export interface TurnLedgerRow extends TurnStep {
+  readonly key: string;
+  readonly editCount?: number;
+  readonly added: number;
+  readonly removed: number;
+  readonly execution: ToolExecutionPart;
+}
+
 /**
  * What the turn rail is, at any moment.
  *
@@ -101,6 +110,31 @@ export function turnSteps(groups: readonly ChatGroup[]): TurnStep[] {
 }
 
 /**
+ * The compact middle depth between a receipt and a full tool card.
+ *
+ * Rows only expose facts already carried by the execution: edit count from
+ * args, diff quantities from details, and outcome from status. A verb with no
+ * meaningful quantity leaves that space empty rather than inventing a grid to
+ * fill. The original execution stays attached so opening the row can reuse the
+ * shipped detail view instead of duplicating its failure handling and diff UI.
+ */
+export function turnLedgerRows(groups: readonly ChatGroup[]): TurnLedgerRow[] {
+  return toolExecutions(groups).map((execution, index) => {
+    const step = toTurnStep(execution);
+    const diff = executionDiffStats(execution);
+    const editCount = executionEditCount(execution);
+    return {
+      ...step,
+      key: execution.toolCallId ?? `${String(index)}:${execution.toolName}:${step.target ?? step.label}`,
+      ...(editCount === undefined ? {} : { editCount }),
+      added: diff.added,
+      removed: diff.removed,
+      execution,
+    };
+  });
+}
+
+/**
  * The literal identity a step is retried against.
  *
  * Exported because supersession, display, and the tool card must agree on what
@@ -173,14 +207,32 @@ function countDiff(groups: readonly ChatGroup[]): { added: number; removed: numb
   let added = 0;
   let removed = 0;
   for (const execution of toolExecutions(groups)) {
-    const diff = stringArg(execution.details, "diff");
-    if (diff === undefined) continue;
-    for (const line of diff.split("\n")) {
-      if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
-      else if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
-    }
+    const stats = executionDiffStats(execution);
+    added += stats.added;
+    removed += stats.removed;
   }
   return { added, removed };
+}
+
+function executionDiffStats(execution: ToolExecutionPart): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  const diff = stringArg(execution.details, "diff");
+  if (diff === undefined) return { added, removed };
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
+    else if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
+  }
+  return { added, removed };
+}
+
+function executionEditCount(execution: ToolExecutionPart): number | undefined {
+  if (execution.toolName !== "edit") return undefined;
+  const edits = property(execution.args, "edits");
+  if (Array.isArray(edits)) return edits.length;
+  return typeof property(execution.args, "oldText") === "string" && typeof property(execution.args, "newText") === "string"
+    ? 1
+    : undefined;
 }
 
 function toolExecutions(groups: readonly ChatGroup[]): ToolExecutionPart[] {
@@ -234,8 +286,12 @@ function failureEvidence(resultText: string | undefined): string | undefined {
   return trimmed.length > MAX_EVIDENCE ? `${trimmed.slice(0, MAX_EVIDENCE - 1).trimEnd()}…` : trimmed;
 }
 
-function stringArg(value: unknown, key: string): string | undefined {
+function property(value: unknown, key: string): unknown {
   if (typeof value !== "object" || value === null) return undefined;
-  const property: unknown = Reflect.get(value, key);
-  return typeof property === "string" && property !== "" ? property : undefined;
+  return Reflect.get(value, key);
+}
+
+function stringArg(value: unknown, key: string): string | undefined {
+  const valueAtKey = property(value, key);
+  return typeof valueAtKey === "string" && valueAtKey !== "" ? valueAtKey : undefined;
 }

@@ -12,6 +12,8 @@ interface ToolTarget {
 @customElement("tool-execution-view")
 export class ToolExecutionView extends LitElement {
   @property({ attribute: false }) execution: ToolExecutionPart | undefined;
+  /** Full standalone card, or body-only detail nested under a ledger row. */
+  @property() presentation: "full" | "detail" = "full";
   @state() private showFullDiff = false;
   @state() private diffOpen = true;
 
@@ -30,19 +32,21 @@ export class ToolExecutionView extends LitElement {
     const target = toolTarget(execution, path);
 
     return html`
-      <section class=${`tool-card ${execution.status}`}>
-        <div class="tool-header">
-          <div class="tool-title">
-            <span class="status-icon" aria-hidden="true">${statusIcon(execution.status)}</span>
-            <strong>${execution.toolName}</strong>
-            ${this.renderHeaderTarget(target)}
+      <section class=${`tool-card ${execution.status} ${this.presentation}`}>
+        ${this.presentation === "detail" ? null : html`
+          <div class="tool-header">
+            <div class="tool-title">
+              <span class="status-icon" aria-hidden="true">${statusIcon(execution.status)}</span>
+              <strong>${execution.toolName}</strong>
+              ${this.renderHeaderTarget(target)}
+            </div>
+            <div class="tool-meta">
+              ${editCountLabel(execution) === undefined ? null : html`<span>${editCountLabel(execution)}</span>`}
+              ${diffStats === undefined ? null : html`<span class="diff-stats"><b class="added">+${diffStats.added}</b><span>/</span><b class="removed">-${diffStats.removed}</b></span>`}
+              <span class="status-label">${statusLabel(execution.status)}</span>
+            </div>
           </div>
-          <div class="tool-meta">
-            ${editCountLabel(execution) === undefined ? null : html`<span>${editCountLabel(execution)}</span>`}
-            ${diffStats === undefined ? null : html`<span class="diff-stats"><b class="added">+${diffStats.added}</b><span>/</span><b class="removed">-${diffStats.removed}</b></span>`}
-            <span class="status-label">${statusLabel(execution.status)}</span>
-          </div>
-        </div>
+        `}
 
         ${previewMismatch ? html`<p class="notice">Applied diff differs from the preview.</p>` : null}
         ${errorText === undefined || errorText === "" ? null : html`<pre class="error-text">${errorText}</pre>`}

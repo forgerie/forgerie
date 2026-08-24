@@ -747,6 +747,9 @@ export const chatStyles = css`
   /* Zero-height seam after the ledger. Free readers who have already scrolled
      past it anchor here while live rows append above them. */
   .rail-growth-anchor { display: block; width: 100%; height: 0; }
+  .rail-full-activity { min-width: 0; color: var(--pi-muted); font-size: var(--pi-text-sm); }
+  .rail-full-activity > summary { cursor: pointer; }
+  .rail-full-activity-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin-top: 12px; }
   /* Interim narration is the agent working, not the agent answering. It keeps
      reading order but drops to the interface's small muted voice, so the
      promoted answer is the only assistant prose at full size. */
