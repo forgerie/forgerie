@@ -71,6 +71,7 @@ export class SettingsDialog extends LitElement {
   }
 
   protected override updated(changed: PropertyValues<this>): void {
+    if (changed.has("section")) this.revealSelectedNavButton();
     const currentTarget = this.settingsTarget();
     if (!changed.has("machine")) return;
     const previousTarget = settingsMachineTarget(changed.get("machine"));
@@ -88,21 +89,17 @@ export class SettingsDialog extends LitElement {
   override render(): TemplateResult {
     return html`
       <modal-surface .onClose=${() => this.onClose?.()} .label=${"Forgerie settings"}>
-        <header class="settings-header">
-          <div>
-            <span class="eyebrow">Settings</span>
-            <h1>Forgerie</h1>
-          </div>
-          <button class="close-button" title="Close settings" aria-label="Close settings" @click=${() => this.onClose?.()}>×</button>
-        </header>
         <div class="settings-body">
-          <nav class="settings-nav" aria-label="Settings sections">
-            ${this.renderNavButton("general", "General", "Gateway + selected machine")}
-            ${this.renderNavButton("sessiond", "Session daemon", "Selected machine")}
-            ${this.renderNavButton("packages", "Pi packages", "Selected machine")}
-            ${this.renderNavButton("plugins", "Forgerie plugins", "Selected machine")}
-            ${this.renderNavButton("shortcuts", "Keyboard", "Gateway shortcuts")}
-          </nav>
+          <div class="settings-chrome">
+            <button class="close-button" title="Close settings" aria-label="Close settings" @click=${() => this.onClose?.()}>×</button>
+            <nav class="settings-nav" aria-label="Settings sections">
+              ${this.renderNavButton("general", "General")}
+              ${this.renderNavButton("sessiond", "Session daemon")}
+              ${this.renderNavButton("packages", "Pi packages")}
+              ${this.renderNavButton("plugins", "Forgerie plugins")}
+              ${this.renderNavButton("shortcuts", "Keyboard")}
+            </nav>
+          </div>
           <main class="settings-content">
             ${this.renderActiveSection()}
           </main>
@@ -194,18 +191,36 @@ export class SettingsDialog extends LitElement {
     `;
   }
 
-  private renderNavButton(section: SettingsSection, label: string, detail: string): TemplateResult {
+  /**
+   * One line per section. The old second line repeated "Selected machine" on
+   * three of five tabs, and every panel already names its own target in its
+   * description, so the subtitle only cost height.
+   */
+  private renderNavButton(section: SettingsSection, label: string): TemplateResult {
     const selected = this.section === section;
     return html`
-      <button class=${selected ? "selected" : ""} aria-current=${selected ? "page" : "false"} @click=${() => { this.navigate(section); }}>
-        <strong>${label}</strong>
-        <small>${detail}</small>
-      </button>
+      <button class=${selected ? "selected" : ""} aria-current=${selected ? "page" : "false"} @click=${() => { this.navigate(section); }}>${label}</button>
     `;
   }
 
   private navigate(section: SettingsSection): void {
     this.onNavigate?.(section);
+  }
+
+  /**
+   * In the strip layout the tabs scroll horizontally, so deep-linking to a
+   * later section (`?settings=shortcuts`) would otherwise open with the current
+   * tab off-screen and the bar reading as though General were selected.
+   *
+   * Deferred by a frame: on the first update the dialog is rendered but the
+   * modal surface has not been placed, so the strip has no scroll extent yet
+   * and scrolling into view is a no-op.
+   */
+  private revealSelectedNavButton(): void {
+    requestAnimationFrame(() => {
+      const selected = this.renderRoot.querySelector(".settings-nav button.selected");
+      selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
   }
 
   private async loadConfig(): Promise<void> {
@@ -550,27 +565,45 @@ export class SettingsDialog extends LitElement {
   static override styles = css`
     :host { position: fixed; inset: 0; z-index: 30; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; container-type: inline-size; }
     modal-surface { --modal-surface-backdrop-padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); --modal-surface-width: min(980px, 100%); --modal-surface-max-height: min(760px, 100%); --modal-surface-min-height: min(620px, 100%); --modal-surface-radius: 14px; }
-    .settings-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--pi-border); }
-    .eyebrow { display: block; color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    h1 { margin: 0; font-size: 20px; line-height: 1.2; }
-    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; font: inherit; cursor: pointer; }
-    .close-button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; background: transparent; color: var(--pi-muted); padding: 0; font-size: 24px; }
+    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; font: inherit; cursor: pointer; }
+
+    /*
+     * The dialog used to open with a 63px band carrying an eyebrow reading
+     * SETTINGS above a title reading Forgerie -- two labels for a surface the
+     * user just opened, above a tab bar that names the section anyway. The band
+     * is gone; the close button rides the tab bar, and modal-surface still
+     * carries "Forgerie settings" as the dialog's accessible name.
+     */
+    .settings-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+    .settings-chrome { display: flex; flex-direction: column; width: 200px; min-height: 0; padding: 8px; border-right: 1px solid var(--pi-border); background: var(--pi-surface); }
+    /*
+     * Selection is an edge marker, not a filled rounded bubble. A pill per tab
+     * inside a rounded dialog stacked three radii on one control; a 2px rule on
+     * the edge the tabs run along says the same thing with no shape.
+     */
+    .settings-nav { min-height: 0; display: flex; flex-direction: column; gap: 0; overflow: auto; }
+    .settings-nav button { width: 100%; text-align: left; border: 0; border-radius: 0; background: transparent; color: var(--pi-muted); padding: 9px 10px; }
+    .settings-nav button:hover, .settings-nav button:focus-visible { background: var(--pi-surface-hover); color: var(--pi-text); }
+    .settings-nav button.selected { color: var(--pi-text); background: transparent; box-shadow: inset 2px 0 0 var(--pi-accent); }
+    /*
+     * Close is first in the DOM and first visually in both layouts, so tab
+     * order matches reading order. Leading placement also matches the platform
+     * convention on the acceptance device, where dismiss sits at the top-left.
+     */
+    .close-button { align-self: flex-start; flex: 0 0 auto; width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: transparent; color: var(--pi-muted); padding: 0; font-size: 22px; }
     .close-button:hover, .close-button:focus { color: var(--pi-text); background: var(--pi-surface-hover); }
-    .settings-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
-    .settings-nav { min-height: 0; padding: 10px; border-right: 1px solid var(--pi-border); background: var(--pi-surface); overflow: auto; }
-    .settings-nav button { display: grid; gap: 2px; width: 100%; margin: 0 0 6px; text-align: left; border-color: transparent; background: transparent; }
-    .settings-nav button:hover, .settings-nav button:focus { background: var(--pi-surface-hover); }
-    .settings-nav button.selected { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
-    .settings-nav small { color: var(--pi-muted); }
-    .settings-content { min-width: 0; min-height: 0; overflow: auto; padding: 18px; }
+    .settings-content { min-width: 0; min-height: 0; overflow: auto; padding: 14px 16px; }
 
     @container (max-width: 760px) {
       modal-surface { --modal-surface-backdrop-padding: 0; --modal-surface-place-items: stretch; --modal-surface-width: 100%; --modal-surface-max-height: none; --modal-surface-min-height: 0; --modal-surface-border: 0; --modal-surface-radius: 0; }
-      .settings-header { padding: max(12px, env(safe-area-inset-top)) 12px 12px; }
       .settings-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-      .settings-nav { display: flex; gap: 8px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--pi-border); overflow-x: auto; overflow-y: hidden; }
-      .settings-nav button { flex: 0 0 auto; width: auto; min-width: 128px; margin: 0; }
-      .settings-content { padding: 14px 12px calc(18px + env(safe-area-inset-bottom)); }
+      .settings-chrome { flex-direction: row; align-items: center; gap: 4px; width: auto; padding: max(4px, env(safe-area-inset-top)) 4px 4px; border-right: 0; border-bottom: 1px solid var(--pi-border); }
+      .settings-nav { flex: 1 1 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+      .settings-nav button { flex: 0 0 auto; width: auto; padding: 10px 12px; }
+      /* The strip runs horizontally, so the marker moves to its bottom edge. */
+      .settings-nav button.selected { box-shadow: inset 0 -2px 0 var(--pi-accent); }
+      .close-button { align-self: center; }
+      .settings-content { padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); }
     }
   `;
 }

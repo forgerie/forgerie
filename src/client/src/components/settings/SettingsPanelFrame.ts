@@ -41,19 +41,30 @@ export class SettingsPanelFrame extends LitElement {
   @property({ attribute: false }) notices: readonly SettingsNotice[] = [];
   @property({ attribute: false }) onAction?: () => void | Promise<void>;
 
+  /**
+   * The panel has no visible title. Every panel's heading restated its own tab
+   * label -- General/General, Keyboard/Keyboard shortcuts -- so the tab is the
+   * title and `heading` survives only as the region's accessible name. The
+   * reload action shares the description line instead of claiming a band.
+   */
   override render(): TemplateResult {
     return html`
       <section class="panel" aria-label=${this.heading || "Settings panel"}>
-        <header class="section-heading">
-          <div class="heading-copy">
-            ${this.heading === "" ? nothing : html`<h2>${this.heading}</h2>`}
-            <div class="description"><slot name="description">${this.description}</slot></div>
-          </div>
-          <div class="heading-actions"><slot name="actions">${this.renderDefaultAction()}</slot></div>
-        </header>
+        ${this.renderSectionHeading()}
         ${this.renderNoticeStack()}
         <div class="content"><slot></slot></div>
       </section>
+    `;
+  }
+
+  private renderSectionHeading(): TemplateResult | typeof nothing {
+    const action = this.renderDefaultAction();
+    if (this.description === "" && action === nothing) return nothing;
+    return html`
+      <header class="section-heading">
+        <div class="description"><slot name="description">${this.description}</slot></div>
+        <div class="heading-actions"><slot name="actions">${action}</slot></div>
+      </header>
     `;
   }
 
@@ -93,17 +104,16 @@ export class SettingsPanelFrame extends LitElement {
   static override styles = css`
     :host { display: block; container-type: inline-size; }
     .panel { display: block; }
-    .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-    .heading-copy { display: grid; gap: 6px; min-width: 0; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
     .heading-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
-    h2 { margin: 0; font-size: var(--pi-text-lg); line-height: 1.25; }
-    .description { color: var(--pi-muted); line-height: 1.45; }
+    .description { flex: 1 1 auto; min-width: 0; color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.45; }
     .description ::slotted(*) { margin: 0; }
-    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; font: inherit; cursor: pointer; }
+    /* 4px everywhere. Mixed radii on one screen are what read as bubbly. */
+    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); color: var(--pi-text); padding: 6px 10px; font: inherit; cursor: pointer; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     .secondary { flex: 0 0 auto; }
     .notice-stack { display: grid; gap: 12px; margin-bottom: 14px; }
-    .notice { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); padding: var(--pi-space-md); line-height: 1.45; }
+    .notice { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-inline); background: var(--pi-surface); padding: var(--pi-space-md); line-height: 1.45; }
     .notice.error { border-color: var(--pi-danger); color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-surface)); }
     .notice.success { border-color: var(--pi-success-border); color: var(--pi-success); background: var(--pi-success-surface); }
     .notice.warning { border-color: var(--pi-warning-border); color: var(--pi-text); background: var(--pi-warning-surface); }
@@ -114,10 +124,11 @@ export class SettingsPanelFrame extends LitElement {
     .content { display: grid; gap: 14px; min-width: 0; }
     .content ::slotted(*) { min-width: 0; }
 
-    @container (max-width: 760px) {
-      .section-heading { display: grid; gap: 12px; }
-      .heading-actions { justify-self: start; }
-    }
+    /*
+     * No width query. The settings content column measures 451-680px across the
+     * Fold 8 posture matrix, so a rule that stacked the action below the
+     * description would fire at every posture and cost a band everywhere.
+     */
   `;
 }
 

@@ -48,7 +48,9 @@ describe("settings-dialog modal surface", () => {
 
   it("moves focus from the dialog section to the first dialog control on Tab", async () => {
     const dialog = await mountDialog();
-    const closeButton = requiredElement(dialog.shadowRoot?.querySelector<HTMLButtonElement>("header .close-button"), "settings close button");
+    // Close leads the chrome in both the rail and the strip layout, so Tab
+    // reaches it before the section tabs.
+    const closeButton = requiredElement(dialog.shadowRoot?.querySelector<HTMLButtonElement>(".settings-chrome > .close-button"), "settings close button");
     expect(deepActiveElement()).toBe(dialogSection(dialog));
 
     pressKey(dialogSurface(dialog), "Tab");
@@ -56,6 +58,37 @@ describe("settings-dialog modal surface", () => {
     expect(deepActiveElement()).toBe(closeButton);
   });
 });
+
+describe("settings-dialog section tabs", () => {
+  it("names each section once, without a repeated machine-scope subtitle", async () => {
+    const dialog = await mountDialog();
+
+    expect(navLabels(dialog)).toEqual(["General", "Session daemon", "Pi packages", "Forgerie plugins", "Keyboard"]);
+  });
+
+  it("scrolls the selected tab into view so a deep link does not open with it off-screen", async () => {
+    // happy-dom has no layout, so assert the call rather than the geometry.
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => undefined);
+    const dialog = await mountDialog();
+
+    dialog.section = "shortcuts";
+    await settleRenderedDialog(dialog);
+    await nextFrame();
+
+    const selected = requiredElement(dialog.shadowRoot?.querySelector(".settings-nav button.selected"), "selected tab");
+    expect(selected.textContent.trim()).toBe("Keyboard");
+    expect(scrollIntoView.mock.instances).toContain(selected);
+  });
+});
+
+async function nextFrame(): Promise<void> {
+  await new Promise<void>((resolve) => { requestAnimationFrame(() => { resolve(); }); });
+}
+
+function navLabels(dialog: SettingsDialog): string[] {
+  return [...requiredElement(dialog.shadowRoot?.querySelector(".settings-nav"), "settings nav").querySelectorAll("button")]
+    .map((button) => button.textContent.trim());
+}
 
 interface SettingsDialogCallbacks {
   onClose?: () => void;

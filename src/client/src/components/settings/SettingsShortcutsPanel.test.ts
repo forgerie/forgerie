@@ -1,256 +1,357 @@
+// @vitest-environment happy-dom
+
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TemplateResult } from "lit";
 import type { AppAction } from "../../actions";
 import type { PiWebConfigResponse, PiWebConfigValues } from "../../api";
 import { SettingsShortcutsPanel } from "./SettingsShortcutsPanel";
-import type { SettingsNotice } from "./SettingsPanelFrame";
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 describe("settings-shortcuts-panel layout", () => {
-  it("renders header, ordered notices, and shortcut settings through the shared frame", () => {
-    const panel = new SettingsShortcutsPanel();
-    panel.configResponse = configResponse({ shortcuts: {} });
-    panel.error = "Failed to load shortcut settings.";
-    panel.savedMessage = "Shortcut settings saved.";
+  it("renders the shared frame with ordered notices and no per-row editor", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) }, (element) => {
+      element.error = "Failed to load shortcut settings.";
+      element.savedMessage = "Shortcut settings saved.";
+    });
 
-    const template = panel.render();
-    const rendered = flattenTemplateContent(template);
+    const frame = required(shadow(panel).querySelector("settings-panel-frame"), "settings-panel-frame");
+    expect(frame.getAttribute("heading")).toBe("Keyboard shortcuts");
+    expect(noticeTypes(frame)).toEqual(["error", "success"]);
 
-    expect(rendered).toContain("<settings-panel-frame");
-    expect(frameNotices(template).map((notice) => notice.type)).toEqual(["error", "success"]);
-    expectTextOrder(rendered, [
-      "Keyboard shortcuts",
-      "Type a shortcut such as ",
-      "<code>mod+k</code>",
-      "Reload",
-      "Failed to load shortcut settings.",
-      "Shortcut settings saved.",
-      "Config file",
-      "No actions registered.",
-    ]);
-    expect(rendered).not.toContain("Enter key behavior");
+    // Collapsed rows carry no text field: that is the whole vertical saving.
+    expect(shadow(panel).querySelectorAll(".type-input").length).toBe(0);
+    expect(shadow(panel).querySelectorAll(".row-panel").length).toBe(0);
+    expect(rowNames(panel)).toEqual(["Cycle Model", "Open Palette"]);
   });
 
-  it("shows the loading shortcuts state without a composer preference", () => {
-    const panel = new SettingsShortcutsPanel();
-    panel.loading = true;
+  it("shows the loading state before any config arrives", async () => {
+    const panel = await mountPanel({ actions: [], loading: true });
 
-    const rendered = flattenTemplateContent(panel.render());
+    expect(shadow(panel).textContent).toContain("Loading shortcuts…");
+    expect(shadow(panel).querySelector(".filter-input")).toBeNull();
+  });
 
-    expectTextOrder(rendered, ["Keyboard shortcuts", "Loading shortcuts…"]);
-    expect(rendered).not.toContain("Chat composer");
-    expect(rendered).not.toContain("Config file");
+  it("renders each action as one collapsed row showing its effective shortcut", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:model.cycle": null } }) });
+
+    expect(chipLabels(panel)).toEqual(["off", "Ctrl+K"]);
   });
 });
 
-describe("settings-shortcuts-panel shortcut row actions", () => {
-  it("saves edited shortcuts, disables them with None, and resets overrides", () => {
-    vi.stubGlobal("HTMLInputElement", FakeHTMLInputElement);
+describe("settings-shortcuts-panel filtering", () => {
+  it("narrows rows to the filter and reports the visible count", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) });
+
+    await typeInto(panel, ".filter-input", "cycle");
+
+    expect(rowNames(panel)).toEqual(["Cycle Model"]);
+    expect(shadow(panel).querySelector(".filter-count")?.textContent).toBe("1/2");
+  });
+
+  it("matches on the rendered shortcut, not only the title", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) });
+
+    await typeInto(panel, ".filter-input", "ctrl+k");
+
+    expect(rowNames(panel)).toEqual(["Open Palette"]);
+  });
+});
+
+describe("settings-shortcuts-panel row menu", () => {
+  it("opens the four verbs, including a typed path for devices without a hardware keyboard", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) });
+
+    await clickMore(panel, "Open Palette");
+
+    expect(verbLabels(panel)).toEqual([
+      "Record a new shortcut",
+      "Type a shortcut instead",
+      "Disable this shortcut",
+      "Reset to default",
+    ]);
+  });
+
+  it("exposes the action id and default only once a row is opened", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) });
+    expect(shadow(panel).textContent).not.toContain("core:actions.show");
+
+    await clickMore(panel, "Open Palette");
+
+    const facts = required(shadow(panel).querySelector(".row-facts"), ".row-facts");
+    expect(facts.textContent).toContain("core:actions.show");
+    expect(facts.textContent).toContain("Default Ctrl+K");
+  });
+
+  it("closes the menu when the same row is tapped again", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) });
+
+    await clickMore(panel, "Open Palette");
+    expect(shadow(panel).querySelectorAll(".row-panel").length).toBe(1);
+
+    await clickMore(panel, "Open Palette");
+    expect(shadow(panel).querySelectorAll(".row-panel").length).toBe(0);
+  });
+
+  it("disables a shortcut, and resets an override back to the default", async () => {
     const onSave = vi.fn<SaveHandler>();
-    const savePanel = panelWithShortcuts({ shortcuts: { "core:other": "mod+o" } }, onSave);
 
-    findTemplateEventHandler<Event>(savePanel.render(), "@input=")(
-      new EventWithTarget("input", new FakeHTMLInputElement(" control + shift + p ")),
-    );
+    const disabling = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:model.cycle": "mod+o" } }), onSave });
+    await clickMore(disabling, "Open Palette");
+    await clickVerb(disabling, "Disable this shortcut");
 
-    expectTextOrder(flattenTemplateContent(savePanel.render()), ["Open palette", "Ctrl+Shift+P", "Custom · Unsaved"]);
-
-    findTemplateEventHandler<Event>(savePanel.render(), ">Save</button>")(new Event("click"));
-
-    const nonePanel = panelWithShortcuts({ shortcuts: { "core:open-palette": "mod+shift+p", "core:other": "mod+o" } }, onSave);
-    findTemplateEventHandler<Event>(nonePanel.render(), ">None</button>")(new Event("click"));
-
-    const resetPanel = panelWithShortcuts({ shortcuts: { "core:open-palette": null, "core:other": "mod+o" } }, onSave);
-    findTemplateEventHandler<Event>(resetPanel.render(), ">Reset</button>")(new Event("click"));
+    const resetting = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:actions.show": null, "core:model.cycle": "mod+o" } }), onSave });
+    await clickMore(resetting, "Open Palette");
+    await clickVerb(resetting, "Reset to default");
 
     expect(onSave.mock.calls).toEqual([
-      [{ shortcuts: { "core:other": "mod+o", "core:open-palette": "mod+shift+p" } }],
-      [{ shortcuts: { "core:open-palette": null, "core:other": "mod+o" } }],
-      [{ shortcuts: { "core:other": "mod+o" } }],
+      [{ shortcuts: { "core:model.cycle": "mod+o", "core:actions.show": null } }],
+      [{ shortcuts: { "core:model.cycle": "mod+o" } }],
     ]);
+  });
+
+  it("drops the shortcuts key entirely when the last override is reset", async () => {
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:actions.show": "mod+j" } }), onSave });
+
+    await clickMore(panel, "Open Palette");
+    await clickVerb(panel, "Reset to default");
+
+    expect(onSave).toHaveBeenCalledWith({});
   });
 });
 
-function frameNotices(template: TemplateResult): readonly SettingsNotice[] {
-  const notices = collectTemplateValues(template).find(isSettingsNoticeArray);
-  if (notices === undefined) throw new Error("Expected settings-panel-frame notices to be rendered");
-  return notices;
-}
+describe("settings-shortcuts-panel typed entry", () => {
+  it("saves a typed shortcut, which is the only path that works with an on-screen keyboard", async () => {
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
 
-function flattenTemplateContent(template: TemplateResult): string {
-  const chunks: string[] = [];
-  visitTemplate(template);
-  return chunks.join("");
+    await clickMore(panel, "Open Palette");
+    await clickVerb(panel, "Type a shortcut instead");
+    await typeInto(panel, ".type-input", "control + shift + p");
 
-  function visitTemplate(current: TemplateResult): void {
-    const strings = templateStrings(current);
-    const values = templateValues(current);
-    for (let index = 0; index < values.length; index += 1) {
-      const staticChunk = strings[index];
-      if (staticChunk !== undefined) chunks.push(staticChunk);
-      visitValue(values[index]);
-    }
-    const finalChunk = strings[values.length];
-    if (finalChunk !== undefined) chunks.push(finalChunk);
-  }
+    expect(chipLabels(panel)).toEqual(["Ctrl+P", "Ctrl+Shift+P"]);
 
-  function visitValue(value: unknown): void {
-    if (Array.isArray(value)) {
-      for (const item of value) visitValue(item);
-      return;
-    }
-    if (isSettingsNotice(value)) {
-      visitValue(value.title);
-      visitValue(value.content);
-      return;
-    }
-    if (isTemplateResult(value)) {
-      visitTemplate(value);
-      return;
-    }
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      chunks.push(String(value));
-    }
-  }
-}
+    await clickButton(panel, ".type-row .primary");
 
-function collectTemplateValues(template: TemplateResult): unknown[] {
-  const values: unknown[] = [];
-  visit(template);
-  return values;
+    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "mod+shift+p" } });
+  });
 
-  function visit(current: unknown): void {
-    if (Array.isArray(current)) {
-      for (const item of current) visit(item);
-      return;
-    }
-    if (!isTemplateResult(current)) return;
-    for (const value of templateValues(current)) {
-      values.push(value);
-      visit(value);
-    }
-  }
-}
+  it("seeds the field with the saved binding and explains why an unparseable entry cannot be saved", async () => {
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
 
-function expectTextOrder(content: string, labels: readonly string[]): void {
-  let previousIndex = -1;
-  for (const label of labels) {
-    const currentIndex = content.indexOf(label, previousIndex + 1);
-    if (currentIndex === -1) throw new Error(`Expected rendered content to include ${label}`);
-    expect(currentIndex).toBeGreaterThan(previousIndex);
-    previousIndex = currentIndex;
-  }
-}
+    await clickMore(panel, "Open Palette");
+    await clickVerb(panel, "Type a shortcut instead");
+    expect(field(panel, ".type-input").value).toBe("mod+k");
 
-function templateStrings(template: TemplateResult): readonly string[] {
-  const strings = Reflect.get(template, "strings");
-  if (!isStringArray(strings)) throw new Error("TemplateResult strings were unavailable");
-  return strings;
-}
+    await typeInto(panel, ".type-input", "p");
 
-function templateValues(template: TemplateResult): readonly unknown[] {
-  const values = Reflect.get(template, "values");
-  if (!Array.isArray(values)) throw new Error("TemplateResult values were unavailable");
-  return values.map((value: unknown) => value);
-}
+    // Save stays disabled, so the hint has to carry the reason.
+    expect(required(shadow(panel).querySelector<HTMLButtonElement>(".type-row .primary"), "save").disabled).toBe(true);
+    expect(shadow(panel).querySelector(".hint.warn")?.textContent).toBe("Shortcuts must start with Ctrl/⌘ or Alt.");
+    expect(onSave).not.toHaveBeenCalled();
+  });
 
-function isTemplateResult(value: unknown): value is TemplateResult {
-  return typeof value === "object" && value !== null && isStringArray(Reflect.get(value, "strings")) && Array.isArray(Reflect.get(value, "values"));
-}
+  it("abandons the edit on Cancel without saving", async () => {
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
 
-function isSettingsNotice(value: unknown): value is SettingsNotice {
-  return typeof value === "object" && value !== null && typeof Reflect.get(value, "type") === "string" && Reflect.has(value, "content");
-}
+    await clickMore(panel, "Open Palette");
+    await clickVerb(panel, "Type a shortcut instead");
+    await typeInto(panel, ".type-input", "mod+j");
+    await clickButton(panel, ".type-row button:not(.primary)");
 
-function isSettingsNoticeArray(value: unknown): value is readonly SettingsNotice[] {
-  return Array.isArray(value) && value.every(isSettingsNotice);
-}
+    expect(onSave).not.toHaveBeenCalled();
+    expect(chipLabels(panel)).toEqual(["Ctrl+P", "Ctrl+K"]);
+  });
+});
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item: unknown) => typeof item === "string");
-}
+describe("settings-shortcuts-panel recording", () => {
+  it("records a chord from the chip and commits it once the sequence settles", async () => {
+    vi.useFakeTimers();
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
+
+    await clickChip(panel, "Open Palette");
+    expect(chipLabels(panel)).toEqual(["Ctrl+P", "press keys…"]);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "j", ctrlKey: true }));
+    await panel.updateComplete;
+    expect(chipLabels(panel)).toEqual(["Ctrl+P", "Ctrl+J"]);
+
+    await vi.advanceTimersByTimeAsync(1300);
+
+    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "mod+j" } });
+  });
+
+  it("records a two-step sequence before committing", async () => {
+    vi.useFakeTimers();
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
+
+    await clickChip(panel, "Open Palette");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true }));
+    await panel.updateComplete;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p" }));
+    await panel.updateComplete;
+
+    await vi.advanceTimersByTimeAsync(1300);
+
+    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "mod+g p" } });
+  });
+
+  it("refuses a first chord without Ctrl or Alt and keeps recording", async () => {
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
+
+    await clickChip(panel, "Open Palette");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p" }));
+    await panel.updateComplete;
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(chipLabels(panel)).toEqual(["Ctrl+P", "press keys…"]);
+  });
+
+  it("abandons the recording on Escape", async () => {
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
+
+    await clickChip(panel, "Open Palette");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await panel.updateComplete;
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(chipLabels(panel)).toEqual(["Ctrl+P", "Ctrl+K"]);
+  });
+});
+
+describe("settings-shortcuts-panel conflicts", () => {
+  it("marks the binding that never fires and names the winner", async () => {
+    // A custom binding outranks a default one, so the overridden Cycle Model
+    // wins mod+k and Open Palette's default stops firing. Rows sort by title.
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:model.cycle": "mod+k" } }) });
+
+    const dots = [...shadow(panel).querySelectorAll(".dot")];
+    expect(dots.map((dot) => dot.className)).toEqual(["dot shadows", "dot shadowed"]);
+    expect(dots[0]?.getAttribute("title")).toBe("Overrides Open Palette");
+    expect(dots[1]?.getAttribute("title")).toBe("Never fires — Cycle Model wins this key");
+  });
+
+  it("previews a conflict from a typed draft before it is saved", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) });
+    expect(shadow(panel).querySelectorAll(".dot").length).toBe(0);
+
+    await clickMore(panel, "Cycle Model");
+    await clickVerb(panel, "Type a shortcut instead");
+    await typeInto(panel, ".type-input", "mod+k");
+
+    expect(shadow(panel).querySelector(".hint.warn")?.textContent).toBe("Overrides Open Palette");
+    const dots = [...shadow(panel).querySelectorAll(".dot")];
+    expect(dots.map((dot) => dot.getAttribute("title"))).toEqual(["Overrides Open Palette", "Never fires — Cycle Model wins this key"]);
+  });
+});
+
+/* ------------------------------------------------------------- harness -- */
 
 type SaveHandler = (config: PiWebConfigValues) => void | Promise<void>;
-type TemplateEventHandler<E extends Event> = (event: E) => void;
 
-function panelWithShortcuts(config: PiWebConfigValues, onSave: SaveHandler): SettingsShortcutsPanel {
+interface PanelOptions {
+  actions?: AppAction[];
+  configResponse?: PiWebConfigResponse;
+  loading?: boolean;
+  onSave?: SaveHandler;
+}
+
+async function mountPanel(options: PanelOptions, configure?: (panel: SettingsShortcutsPanel) => void): Promise<SettingsShortcutsPanel> {
   const panel = new SettingsShortcutsPanel();
-  panel.actions = [shortcutAction()];
-  panel.configResponse = configResponse(config);
-  panel.onSave = onSave;
+  panel.actions = options.actions ?? defaultActions();
+  if (options.configResponse !== undefined) panel.configResponse = options.configResponse;
+  if (options.loading !== undefined) panel.loading = options.loading;
+  if (options.onSave !== undefined) panel.onSave = options.onSave;
+  configure?.(panel);
+  document.body.append(panel);
+  await panel.updateComplete;
   return panel;
 }
 
-function shortcutAction(): AppAction {
-  return {
-    id: "core:open-palette",
-    title: "Open palette",
-    description: "Open the command palette.",
-    shortcut: "mod+k",
-    group: "Navigation",
-    run: vi.fn(),
-  };
+function defaultActions(): AppAction[] {
+  return [
+    { id: "core:actions.show", title: "Open Palette", description: "Open the command palette.", shortcut: "mod+k", group: "General", run: vi.fn() },
+    { id: "core:model.cycle", title: "Cycle Model", description: "Cycle the active model.", shortcut: "mod+p", group: "General", run: vi.fn() },
+  ];
 }
 
-function findTemplateEventHandler<E extends Event>(template: TemplateResult, marker: string): TemplateEventHandler<E> {
-  const handler = findOptionalTemplateEventHandler<E>(template, marker);
-  if (handler === undefined) throw new Error(`Expected template event handler near ${marker}`);
-  return handler;
+function texts(panel: SettingsShortcutsPanel, selector: string): string[] {
+  return [...shadow(panel).querySelectorAll(selector)].map((node) => node.textContent.trim());
 }
 
-function findOptionalTemplateEventHandler<E extends Event>(template: TemplateResult, marker: string): TemplateEventHandler<E> | undefined {
-  return findInTemplate(template);
-
-  function findInTemplate(current: TemplateResult): TemplateEventHandler<E> | undefined {
-    const strings = templateStrings(current);
-    const values = templateValues(current);
-    for (let index = 0; index < values.length; index += 1) {
-      const value = values[index];
-      if (isTemplateEventHandler<E>(value) && templateEventHandlerMatches(strings, index, marker)) return value;
-      const nestedHandler = findInValue(value);
-      if (nestedHandler !== undefined) return nestedHandler;
-    }
-    return undefined;
-  }
-
-  function findInValue(value: unknown): TemplateEventHandler<E> | undefined {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        const nestedHandler = findInValue(item);
-        if (nestedHandler !== undefined) return nestedHandler;
-      }
-      return undefined;
-    }
-    if (isTemplateResult(value)) return findInTemplate(value);
-    return undefined;
-  }
+function rowNames(panel: SettingsShortcutsPanel): string[] {
+  return texts(panel, ".row-name");
 }
 
-function templateEventHandlerMatches(strings: readonly string[], valueIndex: number, marker: string): boolean {
-  return (strings[valueIndex] ?? "").includes(marker) || (strings[valueIndex + 1] ?? "").includes(marker);
+function chipLabels(panel: SettingsShortcutsPanel): string[] {
+  return texts(panel, ".chip");
 }
 
-function isTemplateEventHandler<E extends Event>(value: unknown): value is TemplateEventHandler<E> {
-  return typeof value === "function";
+function verbLabels(panel: SettingsShortcutsPanel): string[] {
+  return texts(panel, ".row-verbs button");
 }
 
-class FakeHTMLInputElement extends EventTarget {
-  constructor(readonly value: string) {
-    super();
-  }
+function noticeTypes(frame: Element): string[] {
+  const notices: unknown = Reflect.get(frame, "notices");
+  if (!Array.isArray(notices)) throw new Error("Expected the frame to receive a notices array");
+  return notices.map((notice: unknown) => {
+    if (typeof notice !== "object" || notice === null) throw new Error("Expected a settings notice object");
+    return String(Reflect.get(notice, "type"));
+  });
 }
 
-class EventWithTarget extends Event {
-  constructor(type: string, private readonly eventTarget: EventTarget) {
-    super(type);
-  }
+async function clickMore(panel: SettingsShortcutsPanel, actionTitle: string): Promise<void> {
+  await clickButton(panel, `.more[aria-label="More options for ${actionTitle}"]`);
+}
 
-  override get target(): EventTarget {
-    return this.eventTarget;
-  }
+async function clickChip(panel: SettingsShortcutsPanel, actionTitle: string): Promise<void> {
+  const chip = [...shadow(panel).querySelectorAll<HTMLButtonElement>(".chip")]
+    .find((button) => (button.getAttribute("aria-label") ?? "").includes(actionTitle));
+  required(chip, `chip for ${actionTitle}`).click();
+  await panel.updateComplete;
+}
+
+async function clickVerb(panel: SettingsShortcutsPanel, label: string): Promise<void> {
+  const verb = [...shadow(panel).querySelectorAll<HTMLButtonElement>(".row-verbs button")]
+    .find((button) => button.textContent.trim() === label);
+  required(verb, `verb ${label}`).click();
+  await panel.updateComplete;
+  await panel.updateComplete;
+}
+
+async function clickButton(panel: SettingsShortcutsPanel, selector: string): Promise<void> {
+  required(shadow(panel).querySelector<HTMLButtonElement>(selector), selector).click();
+  await panel.updateComplete;
+  await panel.updateComplete;
+}
+
+async function typeInto(panel: SettingsShortcutsPanel, selector: string, value: string): Promise<void> {
+  const input = field(panel, selector);
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await panel.updateComplete;
+}
+
+function field(panel: SettingsShortcutsPanel, selector: string): HTMLInputElement {
+  return required(shadow(panel).querySelector<HTMLInputElement>(selector), selector);
+}
+
+function shadow(panel: SettingsShortcutsPanel): ShadowRoot {
+  return required(panel.shadowRoot, "the panel shadow root");
+}
+
+function required<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) throw new Error(`Expected ${what} to be rendered`);
+  return value;
 }
 
 function configResponse(config: PiWebConfigValues): PiWebConfigResponse {

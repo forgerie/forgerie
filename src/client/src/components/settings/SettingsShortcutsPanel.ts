@@ -1,17 +1,39 @@
-import { css, html, LitElement, type PropertyValues, type TemplateResult } from "lit";
+import { css, html, LitElement, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { AppAction } from "../../actions";
 import type { PiWebConfigResponse, PiWebConfigValues, PiWebShortcutConfig } from "../../api";
-import { formatShortcut, isShortcutSequenceStarter, parseShortcutInput, resolveShortcutBindings, shortcutSequenceTimeoutMs, shortcutTokenFromEvent, type ShortcutBindingResolution } from "../../keyboardShortcuts";
+import { formatShortcut, isShortcutSequenceStarter, parseShortcutInput, shortcutSequenceTimeoutMs, shortcutTokenFromEvent } from "../../keyboardShortcuts";
 import "./SettingsPanelFrame";
 import type { SettingsNotice } from "./SettingsPanelFrame";
+import {
+  appendRecordedToken,
+  closeShortcutEditor,
+  deriveShortcutSettingsList,
+  editorShortcut,
+  openShortcutMenu,
+  rowEditorFor,
+  shortcutBindingLabel,
+  shortcutBindingShortcut,
+  startRecording,
+  startTyping,
+  type ShortcutConflictState,
+  type ShortcutEditor,
+  type ShortcutListRow,
+} from "./shortcutSettingsList";
 
 const RECORD_SHORTCUT_LISTENER_OPTIONS = { capture: true } as const;
 
-function renderShortcutsDescription(): TemplateResult {
-  return html`Type a shortcut such as <code>mod+k</code> or <code>mod+g p</code>, or record one. Custom shortcuts win over defaults.`;
-}
-
+/**
+ * Keyboard shortcuts settings.
+ *
+ * The collapsed row is one line — name, shortcut chip, overflow. Tapping the
+ * chip records in place; the overflow menu carries the three remaining verbs
+ * plus "Type a shortcut instead", which is the only entry path that works
+ * without a hardware keyboard (`isShortcutSequenceStarter` requires `mod` or
+ * `alt` in the first chord, and on-screen keyboards emit neither).
+ *
+ * All row state lives in `shortcutSettingsList`; this element composes it.
+ */
 @customElement("settings-shortcuts-panel")
 export class SettingsShortcutsPanel extends LitElement {
   @property({ attribute: false }) actions: AppAction[] = [];
@@ -22,20 +44,19 @@ export class SettingsShortcutsPanel extends LitElement {
   @property() savedMessage = "";
   @property({ attribute: false }) onReload?: () => void | Promise<void>;
   @property({ attribute: false }) onSave?: (config: PiWebConfigValues) => void | Promise<void>;
-  @state() private drafts: Record<string, string> = {};
+  @state() private editor: ShortcutEditor = { kind: "closed" };
+  @state() private filter = "";
   @state() private localError = "";
-  @state() private recording: RecordingState | undefined;
   private recordingTimer: number | undefined;
   private recordingListenerActive = false;
 
   private readonly onRecordKeyDown = (event: KeyboardEvent): void => {
-    const recording = this.recording;
-    if (recording === undefined) return;
+    if (this.editor.kind !== "recording") return;
     event.preventDefault();
     event.stopPropagation();
 
     if (event.key === "Escape") {
-      this.stopRecording();
+      this.closeEditor();
       return;
     }
 
@@ -44,23 +65,21 @@ export class SettingsShortcutsPanel extends LitElement {
       this.localError = "Press a letter, number, punctuation, function, or navigation key. Esc cancels.";
       return;
     }
-    if (recording.tokens.length === 0 && !isShortcutSequenceStarter(token)) {
+    if (this.editor.tokens.length === 0 && !isShortcutSequenceStarter(token)) {
       this.localError = "Start with Ctrl/⌘ or Alt.";
       return;
     }
 
-    const tokens = [...recording.tokens, token];
     this.localError = "";
-    this.drafts = { [recording.actionId]: tokens.join(" ") };
-    this.recording = { actionId: recording.actionId, tokens };
+    this.editor = appendRecordedToken(this.editor, token);
     this.armRecordingTimer();
   };
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     if (changed.has("configResponse") && this.configResponse !== undefined) {
-      this.drafts = {};
       this.localError = "";
       this.stopRecording();
+      this.editor = closeShortcutEditor();
     }
   }
 
@@ -70,34 +89,171 @@ export class SettingsShortcutsPanel extends LitElement {
   }
 
   override render(): TemplateResult {
-    const groups = shortcutGroups(this.actions);
-    const shortcutResolutions = this.shortcutResolutions();
     return html`
       <settings-panel-frame
         heading="Keyboard shortcuts"
-        .description=${renderShortcutsDescription()}
+        .description=${this.renderDescription()}
         actionLabel="Reload"
         .actionDisabled=${this.loading}
         .notices=${this.panelNotices()}
         .onAction=${this.onReload}
       >
-        ${this.configResponse === undefined && this.loading ? html`<div class="loading-card">Loading shortcuts…</div>` : html`
-          <div class="config-path-card">
-            <span>Config file</span>
-            <code>${this.configResponse?.path ?? "Unknown"}</code>
-            <small>Overrides are saved under <code>shortcuts</code>. <code>null</code> disables a shortcut.</small>
-          </div>
-          ${groups.length === 0 ? html`<div class="loading-card">No actions registered.</div>` : groups.map((group) => html`
-            <section class="shortcut-group">
-              <h3>${group.name}</h3>
-              <div class="shortcut-list">
-                ${group.actions.map((action) => this.renderShortcutRow(action, shortcutResolutions.get(action.id)))}
-              </div>
-            </section>
-          `)}
-        `}
+        ${this.renderBody()}
       </settings-panel-frame>
     `;
+  }
+
+  /**
+   * The config path used to be a 96px card. It is reference material read once,
+   * so it collapses into the frame description as a disclosure.
+   */
+  private renderDescription(): TemplateResult {
+    return html`
+      <details class="config-note">
+        <summary>How overrides work</summary>
+        <p>
+          Tap a shortcut to record it, or choose <em>Type a shortcut instead</em> from the row menu and enter one such as
+          <code>mod+k</code> or <code>mod+g p</code>. Custom shortcuts win over defaults.
+        </p>
+        <p>
+          Overrides are saved under <code>shortcuts</code>${this.configResponse === undefined ? nothing : html` in <code>${this.configResponse.path}</code>`};
+          <code>null</code> disables a shortcut.
+        </p>
+      </details>
+    `;
+  }
+
+  private renderBody(): TemplateResult {
+    if (this.configResponse === undefined && this.loading) {
+      return html`<div class="loading-card">Loading shortcuts…</div>`;
+    }
+    if (this.actions.length === 0) {
+      return html`<div class="loading-card">No actions registered.</div>`;
+    }
+
+    const list = deriveShortcutSettingsList({
+      actions: this.actions,
+      shortcuts: this.configResponse?.config.shortcuts ?? {},
+      filter: this.filter,
+      editor: this.editor,
+    });
+
+    return html`
+      <div class="list">
+        <div class="filter-bar">
+          <input
+            class="filter-input"
+            type="search"
+            .value=${this.filter}
+            placeholder="Filter actions and shortcuts…"
+            aria-label="Filter shortcuts"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            @input=${(event: Event) => { this.filter = inputValue(event); }}
+          >
+          <span class="filter-count">${list.shown === list.total ? `${String(list.total)} · ${String(list.customCount)} custom` : `${String(list.shown)}/${String(list.total)}`}</span>
+        </div>
+        ${list.shown === 0 ? html`<div class="loading-card">No action matches that filter.</div>` : list.groups.map((group) => html`
+          <section class="group">
+            <h3>${group.name}<span>${group.rows.length}</span></h3>
+            <div class="rows">${group.rows.map((row) => this.renderRow(row))}</div>
+          </section>
+        `)}
+      </div>
+    `;
+  }
+
+  private renderRow(row: ShortcutListRow): TemplateResult {
+    const editor = rowEditorFor(this.editor, row.action.id);
+    const recording = editor.kind === "recording";
+    const open = editor.kind !== "closed";
+    return html`
+      <div class=${`row-host${open ? " open" : ""}${row.conflict.kind === "shadowed" ? " shadowed" : ""}`}>
+        <div class="row">
+          <span class="row-name" title=${row.action.description ?? row.action.title}>
+            ${row.action.title}
+            ${row.conflict.kind === "clear" ? nothing : html`<i class=${`dot ${row.conflict.kind}`} title=${conflictText(row.conflict)}></i>`}
+          </span>
+          <button
+            class=${chipClass(row, recording)}
+            ?disabled=${this.saving}
+            aria-label=${`${recording ? "Stop recording" : "Record"} shortcut for ${row.action.title}`}
+            @click=${() => { this.toggleRecording(row.action.id); }}
+          >${chipLabel(row, editor)}</button>
+          <button
+            class="more"
+            ?disabled=${this.saving}
+            aria-expanded=${open ? "true" : "false"}
+            aria-label=${`More options for ${row.action.title}`}
+            @click=${() => { this.toggleMenu(row.action.id); }}
+          >⋯</button>
+        </div>
+        ${open ? this.renderRowPanel(row, editor) : nothing}
+      </div>
+    `;
+  }
+
+  private renderRowPanel(row: ShortcutListRow, editor: ShortcutEditor): TemplateResult {
+    return html`
+      <div class="row-panel">
+        <div class="row-facts">
+          <code>${row.action.id}</code>
+          <span>${row.action.shortcut === undefined || row.action.shortcut === "" ? "No default" : `Default ${formatShortcut(row.action.shortcut)}`}</span>
+        </div>
+        ${row.action.description === undefined || row.action.description === "" ? nothing : html`<p class="row-desc">${row.action.description}</p>`}
+        ${editor.kind === "typing" ? this.renderTypeField(row, editor.draft) : nothing}
+        ${this.renderRowHint(row, editor)}
+        ${editor.kind === "typing" ? nothing : html`
+          <div class="row-verbs">
+            <button ?disabled=${this.saving} @click=${() => { this.toggleRecording(row.action.id); }}>${editor.kind === "recording" ? "Stop recording" : "Record a new shortcut"}</button>
+            <button ?disabled=${this.saving} @click=${() => { this.beginTyping(row); }}>Type a shortcut instead</button>
+            <button ?disabled=${this.saving || row.saved.kind === "disabled"} @click=${() => { void this.saveShortcut(row.action.id, null); }}>Disable this shortcut</button>
+            <button ?disabled=${this.saving || !row.overridden} @click=${() => { void this.saveShortcut(row.action.id, undefined); }}>Reset to default</button>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  private renderTypeField(row: ShortcutListRow, draft: string): TemplateResult {
+    return html`
+      <div class="type-row">
+        <input
+          class="type-input"
+          data-action-id=${row.action.id}
+          .value=${draft}
+          placeholder=${row.action.shortcut ?? "mod+k"}
+          aria-label=${`Shortcut for ${row.action.title}`}
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          ?disabled=${this.saving}
+          @input=${(event: Event) => { this.editor = startTyping(row.action.id, inputValue(event)); this.localError = ""; }}
+          @keydown=${(event: KeyboardEvent) => { this.onTypeKeyDown(event, row); }}
+        >
+        <button class="primary" ?disabled=${this.saving || !row.dirty} @click=${() => { void this.commitTyped(row); }}>Save</button>
+        <button ?disabled=${this.saving} @click=${() => { this.closeEditor(); }}>Cancel</button>
+      </div>
+    `;
+  }
+
+  private renderRowHint(row: ShortcutListRow, editor: ShortcutEditor): TemplateResult | typeof nothing {
+    if (editor.kind === "recording") {
+      return html`<p class="hint live">${editor.tokens.length === 0
+        ? "Recording — press Ctrl/⌘ or Alt with a key. Esc cancels."
+        : `Recording ${formatShortcut(editor.tokens.join(" "))} — press another key for a sequence, or wait to finish.`}</p>`;
+    }
+    if (editor.kind === "typing") {
+      // Save is disabled while the draft cannot be parsed, so the reason has to
+      // be visible here or the button just looks broken.
+      const problem = draftProblem(editor.draft);
+      if (problem !== undefined) return html`<p class="hint warn">${problem}</p>`;
+      if (row.conflict.kind !== "clear") return html`<p class="hint warn">${conflictText(row.conflict)}</p>`;
+      return html`<p class="hint">Use <code>mod</code> for Ctrl/⌘. Separate a sequence with a space.</p>`;
+    }
+    if (row.conflict.kind !== "clear") return html`<p class="hint warn">${conflictText(row.conflict)}</p>`;
+    return nothing;
   }
 
   private panelNotices(): readonly SettingsNotice[] {
@@ -108,164 +264,90 @@ export class SettingsShortcutsPanel extends LitElement {
     return notices;
   }
 
-  private renderShortcutRow(action: AppAction, resolution: ShortcutBindingResolution | undefined): TemplateResult {
-    const shortcuts = this.configResponse?.config.shortcuts;
-    const configured = shortcutPreference(action.id, shortcuts);
-    const state = shortcutState(action, shortcuts);
-    const inputText = this.shortcutInputText(action);
-    const parsedInput = inputText.trim() === "" ? undefined : parseShortcutInput(inputText);
-    const previewShortcut = parsedInput?.ok === true ? parsedInput.shortcut : effectiveShortcut(action, shortcuts);
-    const hasConfiguredShortcut = configured !== undefined;
-    const hasDraft = this.drafts[action.id] !== undefined;
-    const displayState = hasDraft && inputText.trim() !== "" ? "custom" : state;
-    const recordingHint = this.recordingHint(action.id);
-    const conflictLabel = shortcutConflictLabel(resolution);
-    return html`
-      <article class=${shortcutRowClass(resolution)}>
-        <div class="shortcut-main">
-          <strong>${action.title}</strong>
-          ${action.description !== undefined && action.description !== "" ? html`<small>${action.description}</small>` : null}
-          <small class="shortcut-id">${action.id}</small>
-          <small>${action.shortcut !== undefined && action.shortcut !== "" ? html`Default: <kbd>${formatShortcut(action.shortcut)}</kbd>` : "No default shortcut"}</small>
-        </div>
-        <div class="shortcut-editor">
-          <div class="shortcut-status">
-            ${previewShortcut !== undefined && previewShortcut !== "" ? html`<kbd>${formatShortcut(previewShortcut)}</kbd>` : html`<span class="unassigned">${state === "disabled" ? "Disabled" : "Unassigned"}</span>`}
-            <small class=${displayState}>${shortcutStateLabel(displayState)}${hasDraft ? " · Unsaved" : ""}</small>
-            ${conflictLabel === undefined ? null : html`<small class=${shortcutConflictClass(resolution)}>${conflictLabel}</small>`}
-          </div>
-          <label class="shortcut-input-label">
-            <span>Shortcut</span>
-            <input
-              class="shortcut-input"
-              data-action-id=${action.id}
-              .value=${inputText}
-              placeholder=${action.shortcut ?? "mod+k"}
-              autocomplete="off"
-              autocapitalize="off"
-              spellcheck="false"
-              ?disabled=${this.saving}
-              @input=${(event: Event) => { this.updateDraft(action.id, inputValue(event)); }}
-            >
-          </label>
-          ${recordingHint !== "" ? html`<small class="recording-hint">${recordingHint}</small>` : null}
-          <div class="shortcut-actions">
-            <button class="primary" ?disabled=${this.loading || this.saving || !hasDraft || inputText.trim() === ""} @click=${() => { void this.saveShortcut(action); }}>Save</button>
-            <button ?disabled=${this.loading || this.saving} @click=${() => { void this.toggleRecording(action.id); }}>${this.recording?.actionId === action.id ? "Cancel recording" : "Record"}</button>
-            <button ?disabled=${this.loading || this.saving || configured === null} @click=${() => { void this.setShortcutNone(action.id); }}>None</button>
-            <button ?disabled=${this.loading || this.saving || !hasConfiguredShortcut} @click=${() => { void this.resetShortcut(action.id); }}>Reset</button>
-          </div>
-        </div>
-      </article>
-    `;
-  }
-
-  private shortcutInputText(action: AppAction): string {
-    const draft = this.drafts[action.id];
-    if (draft !== undefined) return draft;
-    const configured = shortcutPreference(action.id, this.configResponse?.config.shortcuts);
-    if (configured === null) return "";
-    return configured ?? action.shortcut ?? "";
-  }
-
-  private recordingHint(actionId: string): string {
-    const recording = this.recording;
-    if (recording?.actionId !== actionId) return "";
-    if (recording.tokens.length === 0) return "Recording: press Ctrl/⌘ or Alt with a key. Press Esc to cancel.";
-    return `Recording: ${formatShortcut(recording.tokens.join(" "))}. Press another key to add a sequence, or wait to finish.`;
-  }
-
-  private updateDraft(actionId: string, value: string): void {
-    this.drafts = { [actionId]: value };
-    this.localError = "";
-  }
-
-  private async saveShortcut(action: AppAction): Promise<void> {
+  private toggleMenu(actionId: string): void {
     this.stopRecording();
-    const input = this.shortcutInputText(action).trim();
-    const parsed = parseShortcutInput(input);
+    this.localError = "";
+    this.editor = openShortcutMenu(this.editor, actionId);
+  }
+
+  private toggleRecording(actionId: string): void {
+    const next = startRecording(this.editor, actionId);
+    this.stopRecording();
+    this.localError = "";
+    this.editor = next;
+    if (next.kind === "recording") this.ensureRecordingListener();
+  }
+
+  private beginTyping(row: ShortcutListRow): void {
+    this.stopRecording();
+    this.localError = "";
+    this.editor = startTyping(row.action.id, shortcutBindingShortcut(row.saved));
+    void this.focusTypeField(row.action.id);
+  }
+
+  private closeEditor(): void {
+    this.stopRecording();
+    this.localError = "";
+    this.editor = closeShortcutEditor();
+  }
+
+  private onTypeKeyDown(event: KeyboardEvent, row: ShortcutListRow): void {
+    if (event.key === "Escape") { event.stopPropagation(); this.closeEditor(); return; }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void this.commitTyped(row);
+  }
+
+  private async commitTyped(row: ShortcutListRow): Promise<void> {
+    if (this.editor.kind !== "typing") return;
+    const parsed = parseShortcutInput(this.editor.draft);
     if (!parsed.ok) {
       this.localError = parsed.message;
       return;
     }
-    this.localError = "";
-    await this.saveShortcutPreference(action.id, parsed.shortcut);
+    await this.saveShortcut(row.action.id, parsed.shortcut);
   }
 
-  private async setShortcutNone(actionId: string): Promise<void> {
+  private async focusTypeField(actionId: string): Promise<void> {
+    await this.updateComplete;
+    for (const input of this.renderRoot.querySelectorAll<HTMLInputElement>(".type-input")) {
+      if (input.dataset["actionId"] === actionId) { input.focus(); input.select(); return; }
+    }
+  }
+
+  private async saveShortcut(actionId: string, shortcut: string | null | undefined): Promise<void> {
     this.stopRecording();
     this.localError = "";
-    await this.saveShortcutPreference(actionId, null);
-  }
-
-  private async resetShortcut(actionId: string): Promise<void> {
-    this.stopRecording();
-    this.localError = "";
-    await this.saveShortcutPreference(actionId, undefined);
-  }
-
-  private async saveShortcutPreference(actionId: string, shortcut: string | null | undefined): Promise<void> {
+    this.editor = closeShortcutEditor();
     const config: PiWebConfigValues = { ...(this.configResponse?.config ?? {}) };
     const currentShortcuts = config.shortcuts ?? {};
-    const shortcuts = shortcut === undefined ? withoutShortcutPreference(currentShortcuts, actionId) : { ...currentShortcuts, [actionId]: shortcut };
-    if (Object.keys(shortcuts).length === 0) {
-      delete config.shortcuts;
-    } else {
-      config.shortcuts = shortcuts;
-    }
+    const shortcuts = shortcut === undefined
+      ? withoutShortcutPreference(currentShortcuts, actionId)
+      : { ...currentShortcuts, [actionId]: shortcut };
+    if (Object.keys(shortcuts).length === 0) delete config.shortcuts;
+    else config.shortcuts = shortcuts;
     await this.onSave?.(config);
   }
 
-  private shortcutResolutions(): Map<string, ShortcutBindingResolution> {
-    return new Map(resolveShortcutBindings(this.actions, this.previewShortcutConfig(), { enabledOnly: true }).map((resolution) => [resolution.action.id, resolution]));
-  }
-
-  private previewShortcutConfig(): PiWebShortcutConfig | undefined {
-    const shortcuts = { ...(this.configResponse?.config.shortcuts ?? {}) };
-    for (const [actionId, draft] of Object.entries(this.drafts)) {
-      const trimmedDraft = draft.trim();
-      if (trimmedDraft === "") continue;
-      const parsed = parseShortcutInput(trimmedDraft);
-      if (parsed.ok) shortcuts[actionId] = parsed.shortcut;
-    }
-    return Object.keys(shortcuts).length === 0 ? undefined : shortcuts;
-  }
-
-  private async toggleRecording(actionId: string): Promise<void> {
-    if (this.recording?.actionId === actionId) {
-      this.stopRecording();
-      return;
-    }
-    this.stopRecording();
-    this.localError = "";
-    this.recording = { actionId, tokens: [] };
-    this.ensureRecordingListener();
-    await this.updateComplete;
-    this.focusShortcutInput(actionId);
-  }
-
-  private focusShortcutInput(actionId: string): void {
-    for (const input of this.renderRoot.querySelectorAll<HTMLInputElement>(".shortcut-input")) {
-      if (input.dataset["actionId"] === actionId) {
-        input.focus();
-        input.select();
-        return;
-      }
-    }
-  }
-
+  /**
+   * Recording commits when the sequence settles rather than on a Save button:
+   * the chip is the control, so there is nothing else to press.
+   */
   private armRecordingTimer(): void {
     this.clearRecordingTimer();
     this.recordingTimer = window.setTimeout(() => {
       this.recordingTimer = undefined;
-      this.stopRecording();
+      const shortcut = editorShortcut(this.editor);
+      const actionId = this.editor.kind === "recording" ? this.editor.actionId : undefined;
+      this.removeRecordingListener();
+      if (actionId === undefined || shortcut === undefined) { this.editor = closeShortcutEditor(); return; }
+      void this.saveShortcut(actionId, shortcut);
     }, shortcutSequenceTimeoutMs);
   }
 
   private stopRecording(): void {
     this.clearRecordingTimer();
     this.removeRecordingListener();
-    this.recording = undefined;
   }
 
   private clearRecordingTimer(): void {
@@ -288,124 +370,134 @@ export class SettingsShortcutsPanel extends LitElement {
 
   static override styles = css`
     :host { display: block; container-type: inline-size; }
-    h3, p { margin: 0; }
-    h3 { font-size: var(--pi-text-sm); line-height: 1.3; }
-    p { color: var(--pi-muted); line-height: 1.45; }
+    h3 { margin: 0; font-size: var(--pi-text-sm); line-height: 1.3; }
     button, input { font: inherit; }
-    button { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
     button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
-    .primary { border-color: var(--pi-accent-border); background: var(--pi-accent); color: var(--pi-bg); }
-    .loading-card { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); padding: var(--pi-space-md); }
-    .loading-card, .config-path-card { color: var(--pi-muted); }
-    .config-path-card { display: grid; gap: 5px; }
-    .config-path-card span { color: var(--pi-muted); font-size: var(--pi-text-sm); font-weight: 700; text-transform: uppercase; }
-    code { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
-    .shortcut-group { margin: 0; }
-    .shortcut-group h3 { margin: 0 0 8px; color: var(--pi-muted); font-size: var(--pi-text-sm); text-transform: uppercase; }
-    .shortcut-list { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); overflow: hidden; }
-    .shortcut-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 48%); gap: 14px; align-items: start; padding: 12px; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-surface); }
-    .shortcut-row.shadowed { background: color-mix(in srgb, var(--pi-warning) 5%, var(--pi-surface)); }
-    .shortcut-row.shadowing { background: color-mix(in srgb, var(--pi-accent) 5%, var(--pi-surface)); }
-    .shortcut-row:last-child { border-bottom: 0; }
-    .shortcut-main { min-width: 0; display: grid; gap: 4px; }
-    .shortcut-main strong, .shortcut-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .shortcut-main small { color: var(--pi-muted); }
-    .shortcut-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .shortcut-editor { min-width: 0; display: grid; gap: 8px; }
-    .shortcut-status { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-    .shortcut-status small { color: var(--pi-muted); font-size: var(--pi-text-xs); }
-    .shortcut-status small.custom { color: var(--pi-accent); }
-    .shortcut-status small.disabled { color: var(--pi-warning); }
-    .shortcut-status small.conflict { border: 1px solid currentColor; border-radius: var(--pi-radius-pill); padding: 2px 7px; }
-    .shortcut-status small.conflict.shadowing { color: var(--pi-accent); }
-    .shortcut-status small.conflict.shadowed { color: var(--pi-warning); }
-    .shortcut-input-label { min-width: 0; display: grid; gap: 5px; }
-    .shortcut-input-label span { color: var(--pi-muted); font-size: var(--pi-text-xs); font-weight: 700; text-transform: uppercase; }
-    input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text); padding: 8px 9px; outline: none; font: var(--pi-control-font-size, 16px) var(--pi-control-monospace-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-    input:focus { border-color: var(--pi-accent); box-shadow: 0 0 0 1px var(--pi-accent-border); }
-    .shortcut-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
-    kbd { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); color: var(--pi-text-secondary); padding: 3px 7px; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
-    .unassigned { color: var(--pi-muted); font-size: var(--pi-text-sm); }
-    .recording-hint { color: var(--pi-accent); font-size: var(--pi-text-sm); }
+    code { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; color: var(--pi-text); font: var(--pi-text-xs) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .loading-card { border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-surface); padding: var(--pi-space-md); color: var(--pi-muted); }
 
-    @container (max-width: 760px) {
-      .shortcut-row { grid-template-columns: minmax(0, 1fr); align-items: start; }
-      .shortcut-status, .shortcut-actions { justify-content: flex-start; }
-    }
+    .config-note summary { cursor: pointer; color: var(--pi-muted); font-size: var(--pi-text-sm); }
+    .config-note p { margin: 6px 0 0; color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.45; }
+
+    .list { display: grid; gap: 10px; }
+
+    /* Search beats scrolling once the registry passes a screenful of actions. */
+    .filter-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 4px 0; background: var(--pi-bg); }
+    .filter-input { flex: 1 1 auto; min-width: 0; box-sizing: border-box; height: 40px; padding: 0 10px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); color: var(--pi-text); outline: none; font: var(--pi-control-font-size, 16px) system-ui, sans-serif; }
+    .filter-input:focus { border-color: var(--pi-accent); box-shadow: 0 0 0 1px var(--pi-accent-border); }
+    .filter-count { flex: 0 0 auto; color: var(--pi-dim, var(--pi-muted)); font: var(--pi-text-xs) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .group h3 { position: sticky; top: 52px; z-index: 2; display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; padding: 3px 0; background: var(--pi-bg); color: var(--pi-muted); font-size: var(--pi-text-xs); text-transform: uppercase; letter-spacing: .06em; }
+    .group h3 span { color: var(--pi-border); letter-spacing: 0; }
+
+    /*
+     * A flat ruled list, not a card. The 12px rounded surface around every
+     * group put a second container inside a dialog that is already a container,
+     * and rounded corners on a list of 42 one-line rows read as decoration.
+     * The sticky group heading does the grouping instead.
+     */
+    .rows { border-top: 1px solid var(--pi-border-muted); }
+    .row-host { border-bottom: 1px solid var(--pi-border-muted); }
+    .row-host.open { background: var(--pi-selection-bg); }
+    .row-host.shadowed { background: color-mix(in srgb, var(--pi-warning) 6%, transparent); }
+
+    /*
+     * 40px of ink inside a 44px target. The description and action id are not
+     * here on purpose — they are reference detail, and they reappear in the row
+     * panel when a row is opened.
+     */
+    .row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; }
+    .row-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--pi-text-sm); }
+    .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* A binding that never fires is the one thing worth spotting mid-scan. */
+    .dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; }
+    .dot.shadowed { background: var(--pi-warning); }
+    .dot.shadows { background: var(--pi-accent); }
+
+    /*
+     * The chip is a keycap, so it is shaped like one: a 4px corner and a
+     * weighted bottom edge. A 999px pill said "tag", which is the wrong verb
+     * for something you press to record a key.
+     */
+    .chip { min-height: 30px; padding: 3px 8px; border: 1px solid var(--pi-border); border-bottom-width: 2px; border-radius: var(--pi-radius-inline); background: var(--pi-bg); color: var(--pi-text-secondary); font: var(--pi-text-xs) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; cursor: pointer; }
+    .chip:hover:not(:disabled) { border-color: var(--pi-accent-border); color: var(--pi-text); }
+    .chip.custom { border-color: var(--pi-accent-border); color: var(--pi-accent); }
+    .chip.empty { border-style: dashed; border-bottom-width: 1px; color: var(--pi-muted); }
+    .chip.recording { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-text); }
+    .more { width: 30px; height: 30px; border: 0; border-radius: var(--pi-radius-inline); background: transparent; color: var(--pi-muted); cursor: pointer; }
+    .more:hover:not(:disabled) { color: var(--pi-text); background: var(--pi-surface-hover); }
+
+    .row-panel { display: grid; gap: 8px; padding: 4px 10px 10px; }
+    .row-facts { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--pi-muted); font-size: var(--pi-text-xs); }
+    .row-desc { margin: 0; color: var(--pi-muted); font-size: var(--pi-text-xs); line-height: 1.45; }
+    .hint { margin: 0; color: var(--pi-muted); font-size: var(--pi-text-xs); }
+    .hint.live { color: var(--pi-accent); }
+    .hint.warn { color: var(--pi-warning); }
+
+    /* Verbs gain columns from available space rather than a fixed count. */
+    .row-verbs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; }
+    .row-verbs button { min-height: 40px; padding: 0 10px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); color: var(--pi-text); font-size: var(--pi-text-xs); text-align: left; cursor: pointer; }
+    .row-verbs button:hover:not(:disabled) { background: var(--pi-surface-hover); }
+
+    .type-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+    .type-input { box-sizing: border-box; width: 100%; min-width: 0; height: 44px; padding: 0 10px; border: 1px solid var(--pi-accent); border-radius: var(--pi-radius-inline); background: var(--pi-bg); color: var(--pi-text); outline: none; font: var(--pi-control-font-size, 16px) var(--pi-control-monospace-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+    .type-row button { min-height: 44px; padding: 0 12px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-surface); color: var(--pi-text); font-size: var(--pi-text-xs); cursor: pointer; }
+    .type-row .primary { border-color: var(--pi-accent-border); background: var(--pi-accent); color: var(--pi-bg); }
+
+    /*
+     * There is deliberately no width query here. The panel measures 451-680px
+     * across the Fold 8 posture matrix, so any threshold wide enough to fit a
+     * description inline would either never fire (dead code, which is what the
+     * old 760px two-column rule was) or fire for some postures and not others,
+     * changing the row's content when the device is rotated. The description
+     * lives in the row panel and in the row's tooltip instead.
+     */
   `;
 }
 
-interface RecordingState {
-  actionId: string;
-  tokens: string[];
+function chipClass(row: ShortcutListRow, recording: boolean): string {
+  if (recording) return "chip recording";
+  if (shortcutBindingShortcut(row.state) === "") return "chip empty";
+  return row.state.kind === "custom" ? "chip custom" : "chip";
 }
 
-type ShortcutState = "default" | "custom" | "disabled" | "unassigned";
-
-function shortcutRowClass(resolution: ShortcutBindingResolution | undefined): string {
-  if (resolution?.active === false) return "shortcut-row shadowed";
-  if (resolution?.active === true && resolution.shadows.length > 0) return "shortcut-row shadowing";
-  return "shortcut-row";
-}
-
-function shortcutConflictClass(resolution: ShortcutBindingResolution | undefined): string {
-  return resolution?.active === false ? "conflict shadowed" : "conflict shadowing";
-}
-
-function shortcutConflictLabel(resolution: ShortcutBindingResolution | undefined): string | undefined {
-  if (resolution === undefined) return undefined;
-  if (!resolution.active) return `Shadowed by ${resolution.shadowedBy?.action.title ?? "another action"}`;
-  const shadowedCount = resolution.shadows.length;
-  if (shadowedCount === 0) return undefined;
-  const shadowedNames = resolution.shadows.slice(0, 2).map((binding) => binding.action.title).join(", ");
-  const suffix = shadowedCount > 2 ? `, +${String(shadowedCount - 2)} more` : "";
-  return `Shadows ${String(shadowedCount)} ${shadowedCount === 1 ? "action" : "actions"}: ${shadowedNames}${suffix}`;
-}
-
-function shortcutGroups(actions: AppAction[]): { name: string; actions: AppAction[] }[] {
-  const grouped = new Map<string, AppAction[]>();
-  for (const action of [...actions].sort(compareActions)) {
-    const group = action.group ?? "Other";
-    grouped.set(group, [...(grouped.get(group) ?? []), action]);
+function chipLabel(row: ShortcutListRow, editor: ShortcutEditor): string {
+  if (editor.kind === "recording") {
+    return editor.tokens.length === 0 ? "press keys…" : formatShortcut(editor.tokens.join(" "));
   }
-  return [...grouped.entries()].map(([name, groupActions]) => ({ name, actions: groupActions }));
+  if (row.display !== "") return row.display;
+  return row.state.kind === "disabled" ? "off" : "set…";
 }
 
-function compareActions(left: AppAction, right: AppAction): number {
-  return (left.group ?? "Other").localeCompare(right.group ?? "Other") || left.title.localeCompare(right.title);
+/** The reason a typed draft cannot be saved, or undefined when it is fine or still empty. */
+function draftProblem(draft: string): string | undefined {
+  if (draft.trim() === "") return undefined;
+  const parsed = parseShortcutInput(draft);
+  return parsed.ok ? undefined : parsed.message;
 }
 
-function shortcutPreference(actionId: string, shortcuts: PiWebShortcutConfig | undefined): string | null | undefined {
-  if (shortcuts === undefined || !Object.hasOwn(shortcuts, actionId)) return undefined;
-  return shortcuts[actionId];
+function conflictText(conflict: ShortcutConflictState): string {
+  if (conflict.kind === "shadowed") return `Never fires — ${conflict.winner} wins this key`;
+  if (conflict.kind === "shadows") {
+    const [first, ...rest] = conflict.victims;
+    return rest.length === 0 ? `Overrides ${first ?? "another action"}` : `Overrides ${first ?? ""} +${String(rest.length)}`;
+  }
+  return "";
 }
 
 function withoutShortcutPreference(shortcuts: PiWebShortcutConfig, actionId: string): PiWebShortcutConfig {
   return Object.fromEntries(Object.entries(shortcuts).filter(([shortcutActionId]) => shortcutActionId !== actionId));
 }
 
-function effectiveShortcut(action: AppAction, shortcuts: PiWebShortcutConfig | undefined): string | undefined {
-  const configured = shortcutPreference(action.id, shortcuts);
-  if (configured === null) return undefined;
-  return configured ?? action.shortcut;
-}
-
-function shortcutState(action: AppAction, shortcuts: PiWebShortcutConfig | undefined): ShortcutState {
-  const configured = shortcutPreference(action.id, shortcuts);
-  if (configured === null) return "disabled";
-  if (configured !== undefined) return "custom";
-  return action.shortcut === undefined || action.shortcut === "" ? "unassigned" : "default";
-}
-
-function shortcutStateLabel(state: ShortcutState): string {
-  switch (state) {
-    case "default": return "Default";
-    case "custom": return "Custom";
-    case "disabled": return "Disabled";
-    case "unassigned": return "No default";
-  }
-}
-
 function inputValue(event: Event): string {
   return event.target instanceof HTMLInputElement ? event.target.value : "";
 }
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "settings-shortcuts-panel": SettingsShortcutsPanel;
+  }
+}
+
+export { shortcutBindingLabel };
