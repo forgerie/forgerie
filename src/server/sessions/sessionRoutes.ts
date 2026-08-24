@@ -404,10 +404,10 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
-  app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown; text?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/commands/run`, async (request, reply) => {
+  app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown; text?: unknown; streamingBehavior?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/commands/run`, async (request, reply) => {
     try {
       const body = optionalRecord(request.body);
-      return await sessions.runCommand(sessionRefFromBody(request.params.sessionId, body), requireString(body, "text"));
+      return await sessions.runCommand(sessionRefFromBody(request.params.sessionId, body), requireString(body, "text"), body["streamingBehavior"]);
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
     }

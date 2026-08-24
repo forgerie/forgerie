@@ -136,6 +136,18 @@ describe("SessionCommandService", () => {
     expect(active.runtime.session.compact).toHaveBeenCalledWith("focus on tests");
   });
 
+  it("does not start a queued compaction after its guard is cancelled", async () => {
+    const active = activeSession();
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
+
+    await expect(service.run("s1", "/compact", { canStartCompaction: () => false })).resolves.toEqual({
+      type: "unsupported",
+      message: "Queued compaction was cancelled.",
+    });
+
+    expect(active.runtime.session.compact).not.toHaveBeenCalled();
+  });
+
   it.each([
     new Error("Compaction cancelled"),
     Object.assign(new Error("request aborted"), { name: "AbortError" }),

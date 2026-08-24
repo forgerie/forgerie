@@ -138,6 +138,29 @@ describe("SessionController send queue", () => {
     expect(state.sendingPrompts).toEqual({});
   });
 
+  it("forwards Queue intent when the draft is a slash command", async () => {
+    const commandCalls: { text: string; machineId: string; streamingBehavior?: "steer" | "followUp" }[] = [];
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      runCommand: (_session, text, machineId, streamingBehavior) => {
+        commandCalls.push({ text, machineId: machineId ?? "local", ...(streamingBehavior === undefined ? {} : { streamingBehavior }) });
+        return Promise.resolve({ type: "done", message: "Compaction queued…" });
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.send("/compact", "followUp");
+
+    expect(commandCalls).toEqual([{ text: "/compact", machineId: "local", streamingBehavior: "followUp" }]);
+  });
+
   it("queues prompt sends for a pending session start and flushes them after resolution", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     const startRequest = deferred<SessionInfo>();

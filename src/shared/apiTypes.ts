@@ -1,13 +1,10 @@
 export type MachineKind = "local" | "remote";
 export type MachineStatus = "unknown" | "online" | "offline" | "error";
 
-/**
- * Registry of feature-gating capabilities. Currently empty: every component is
- * expected to run the current version, so no capability is advertised. Add an
- * entry here (plus the runtime/requirements entries in `capabilities.ts`) when
- * a future feature needs rolling-version gating again.
- */
-export const PI_WEB_CAPABILITIES = {} as const;
+/** Registry of features that require rolling-version compatibility gates. */
+export const PI_WEB_CAPABILITIES = {
+  queuedCompaction: "session.queue.compact",
+} as const;
 
 export type PiWebCapability = typeof PI_WEB_CAPABILITIES[keyof typeof PI_WEB_CAPABILITIES];
 
@@ -504,7 +501,7 @@ export type DoubleEscapeAction = "fork" | "tree" | "none";
 
 export interface SessionAbortResult {
   aborted: true;
-  /** Messages removed from Pi's queues, ordered as the TUI restores them. */
+  /** Queued session work restored to the draft in delivery order. */
   restoredMessages: QueuedSessionMessage[];
 }
 

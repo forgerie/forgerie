@@ -95,7 +95,7 @@ export interface SessionRouteService {
   archiveMany(refs: readonly SessionBulkMutationRef[]): Promise<SessionBulkArchiveResponse>;
   deleteArchivedMany(refs: readonly SessionBulkMutationRef[]): Promise<SessionBulkDeleteArchivedResponse>;
   shell(ref: SessionRouteRef, text: string): Promise<void>;
-  runCommand(ref: SessionRouteRef, text: string): Promise<ClientCommandResult>;
+  runCommand(ref: SessionRouteRef, text: string, streamingBehavior?: unknown): Promise<ClientCommandResult>;
   respondToCommand(ref: SessionRouteRef, requestId: string, value: string): Promise<ClientCommandResult>;
   navigateTree(ref: SessionRouteRef, request: ClientSessionTreeNavigateRequest): Promise<ClientSessionTreeNavigateResult>;
   forkFromTree(ref: SessionRouteRef, request: ClientSessionTreeForkRequest): Promise<ClientSessionTreeForkResult>;

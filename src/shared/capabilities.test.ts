@@ -2,21 +2,25 @@ import { describe, expect, it } from "vitest";
 import { effectivePiWebCapabilities, isPiWebCapability, PI_WEB_CAPABILITIES, SESSIOND_RUNTIME_CAPABILITIES, WEB_RUNTIME_CAPABILITIES, parseKnownPiWebCapabilities } from "./capabilities";
 
 describe("Forgerie capabilities", () => {
-  it("advertises no capabilities while the registry has no entries", () => {
-    expect(PI_WEB_CAPABILITIES).toEqual({});
-    expect(WEB_RUNTIME_CAPABILITIES).toEqual([]);
-    expect(SESSIOND_RUNTIME_CAPABILITIES).toEqual([]);
+  it("advertises queued compaction only when web and sessiond both support it", () => {
+    expect(PI_WEB_CAPABILITIES).toEqual({ queuedCompaction: "session.queue.compact" });
+    expect(WEB_RUNTIME_CAPABILITIES).toEqual(["session.queue.compact"]);
+    expect(SESSIOND_RUNTIME_CAPABILITIES).toEqual(["session.queue.compact"]);
 
     expect(effectivePiWebCapabilities({
-      web: { available: true, capabilities: [] },
+      web: { available: true, capabilities: ["session.queue.compact"] },
+      sessiond: { available: true, capabilities: ["session.queue.compact"] },
+    })).toEqual(["session.queue.compact"]);
+    expect(effectivePiWebCapabilities({
+      web: { available: true, capabilities: ["session.queue.compact"] },
       sessiond: { available: true, capabilities: [] },
     })).toEqual([]);
   });
 
-  it("drops every current capability string when parsing runtime data", () => {
-    expect(parseKnownPiWebCapabilities(["piPackages.manage", "future.capability"])).toEqual([]);
+  it("keeps known capability strings when parsing runtime data", () => {
+    expect(parseKnownPiWebCapabilities(["session.queue.compact", "future.capability"])).toEqual(["session.queue.compact"]);
     expect(parseKnownPiWebCapabilities(["future.capability", 1])).toBeUndefined();
-    expect(isPiWebCapability("piPackages.manage")).toBe(false);
+    expect(isPiWebCapability("session.queue.compact")).toBe(true);
     expect(isPiWebCapability("future.capability")).toBe(false);
   });
 });

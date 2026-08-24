@@ -2,6 +2,7 @@ import { EditorView } from "@codemirror/view";
 import { html, LitElement, nothing, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
+import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
 import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevels";
 import { createSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import { PromptDictationController, type PromptDictationCapability, type PromptDictationState } from "../controllers/promptDictationController";
@@ -93,6 +94,7 @@ export class PromptEditor extends LitElement {
   @property() workspaceId?: string;
   @property({ type: Boolean }) canSteer = false;
   @property({ type: Boolean }) isCompacting = false;
+  @property({ type: Boolean }) queuedCompactionAvailable = true;
   @property({ attribute: false }) doubleEscapeAction?: DoubleEscapeAction;
   @property({ type: Boolean }) sending = false;
   @property({ attribute: false, hasChanged: promptHistoryChanged }) promptHistory: readonly string[] = [];
@@ -416,15 +418,21 @@ export class PromptEditor extends LitElement {
    * can stop without exposing unsupported follow-up delivery.
    */
   private rail(): ComposerRail {
+    const queuedCompactBlocked = (this.canSteer || this.isCompacting) && !this.queuedCompactionAvailable && this.isCompactDraft();
     return composerRail({
       disabled: this.disabled,
       submissionAvailable: this.submissionAvailable,
-      sendAvailable: this.sendAvailable,
+      sendAvailable: this.sendAvailable && !queuedCompactBlocked,
       sending: this.sending || this.attachmentCapturePending || this.dictationBlocksComposer(),
       isStreaming: this.canSteer,
       isCompacting: this.isCompacting,
       stoppable: this.capabilities.stop?.stoppable === true,
     });
+  }
+
+  private isCompactDraft(): boolean {
+    const parsed = parseLeadingSlashCommand(this.draftElement?.getText() ?? "");
+    return parsed.kind === "command" && parsed.name === "compact";
   }
 
   private renderDictationAction() {
@@ -546,7 +554,9 @@ export class PromptEditor extends LitElement {
       <button
         class=${`icon-button queue-button${steerAvailable ? " has-steer" : ""}`}
         ?disabled=${!rail.canInvokeQueue}
-        title=${steerAvailable ? "Queue until the current activity finishes; hold for Steer" : "Queue until the current activity finishes"}
+        title=${!this.queuedCompactionAvailable && this.isCompactDraft()
+          ? "Update the selected machine before queueing /compact"
+          : steerAvailable ? "Queue until the current activity finishes; hold for Steer" : "Queue until the current activity finishes"}
         aria-label="Queue message"
         aria-describedby=${steerAvailable ? descriptionId : nothing}
         aria-haspopup=${steerAvailable ? "dialog" : nothing}

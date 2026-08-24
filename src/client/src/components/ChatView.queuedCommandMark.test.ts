@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
+import type { SessionStatus } from "../api";
 import { ChatView } from "./ChatView";
 
 afterEach(() => {
@@ -38,4 +39,29 @@ describe("ChatView queued command marks", () => {
     expect(queued[2]?.querySelector(".command-mark")).toBeNull();
     expect(queued[2]?.querySelector<HTMLElement & { text: string }>("formatted-text")?.text).toBe("plain prose follow-up");
   });
+
+  it("marks queued compact from the server status queue", async () => {
+    const view = new ChatView();
+    view.sessionId = "session-1";
+    view.status = queuedStatus("/compact");
+    document.body.append(view);
+    await view.updateComplete;
+
+    const ghost = view.shadowRoot?.querySelector(".queued-ghost");
+    expect(ghost?.querySelector(".command-mark .command-name")?.textContent).toBe("compact");
+    expect(ghost?.querySelector("formatted-text")).toBeNull();
+  });
 });
+
+function queuedStatus(text: string): SessionStatus {
+  return {
+    sessionId: "session-1",
+    isStreaming: true,
+    isCompacting: false,
+    isBashRunning: false,
+    pendingMessageCount: 1,
+    queuedMessages: [{ kind: "followUp", text }],
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
+  };
+}

@@ -8,6 +8,7 @@ import { createInboxLocationResolver } from "../inboxLocation";
 import { completeNewSessionDestination, createApiNewSessionDestinationCatalog, isNewSessionMachineAvailable, type NewSessionCompleteDestination, type NewSessionDestinationCatalog, type NewSessionLaunchIntent, type NewSessionLaunchMode, type NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { sessionPathsEqual } from "../sessionPaths";
 import { isSessionActive } from "../../../shared/activity";
+import { PI_WEB_CAPABILITIES, supportsPiWebCapability } from "../../../shared/capabilities";
 import type { ManagedProcessesSnapshot } from "../../../shared/apiTypes";
 import { ActivityController } from "../controllers/activityController";
 import { AuthController } from "../controllers/authController";
@@ -3334,6 +3335,7 @@ export class PiWebApp extends LitElement {
       .runtimeControlsAvailable=${runtimeAvailable}
       .canSteer=${runtimeAvailable && state.status?.isStreaming === true}
       .isCompacting=${runtimeAvailable && state.status?.isCompacting === true}
+      .queuedCompactionAvailable=${supportsPiWebCapability(this.selectedMachineRuntime(), PI_WEB_CAPABILITIES.queuedCompaction)}
       .doubleEscapeAction=${state.status?.doubleEscapeAction}
       .sending=${state.sendingPrompts[session.id] === true}
       .chromeSummoned=${this.appShell.isChromeSummoned}

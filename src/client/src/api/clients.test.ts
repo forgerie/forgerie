@@ -280,6 +280,18 @@ describe("session API compatibility", () => {
     expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo", text: "hello" });
   });
 
+  it("posts queued command intent with the command request", async () => {
+    const fetchMock = stubJsonFetch({ type: "done", message: "Compaction queued…" });
+
+    await expect(sessionsApi.runCommand({ id: "s 1", cwd: "/repo" }, "/compact", "remote a", "followUp")).resolves.toEqual({ type: "done", message: "Compaction queued…" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchCall(fetchMock, 0);
+    expect(url).toBe("https://pi.example.test/api/machines/remote%20a/sessions/s%201/commands/run");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(requestBody(init))).toEqual({ cwd: "/repo", text: "/compact", streamingBehavior: "followUp" });
+  });
+
   it("posts identity-bound prompt-resource invocations with cwd, identity, delivery mode, and attachments", async () => {
     const fetchMock = stubJsonFetch({ accepted: true, deliveryFingerprint: "a".repeat(64) });
     const identity = { source: "prompt" as const, name: "review", fingerprint: "b".repeat(64) };

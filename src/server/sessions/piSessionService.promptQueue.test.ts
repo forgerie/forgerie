@@ -152,6 +152,37 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     await service.dispose();
   });
 
+  it("keeps prompt-resource expansion disabled when it waits behind queued compaction", async () => {
+    const fake = fakeRuntime("queued-prompt-resource-session", {
+      isStreaming: true,
+      promptTemplates: [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }],
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("queued-prompt-resource-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+    const identity = {
+      source: "prompt" as const,
+      name: "review",
+      fingerprint: await fingerprintPromptResourceCommand({ source: "prompt", name: "review", origin: "prompt:unknown:unknown:unknown:unknown", content: "Review $ARGUMENTS" }),
+    };
+
+    await service.runCommand(sessionRef("queued-prompt-resource-session"), "/compact", "followUp");
+    await service.runPromptResourceCommand(sessionRef("queued-prompt-resource-session"), "/review src", identity, "followUp");
+    expect(fake.calls.prompt).toEqual([]);
+
+    fake.session.isStreaming = false;
+    fake.emit({ type: "agent_end" });
+
+    await vi.waitFor(() => {
+      expect(fake.calls.prompt).toEqual([{ text: "Review src", options: { expandPromptTemplates: false } }]);
+    });
+    await service.dispose();
+  });
+
   it("rejects a stale prompt-resource identity after its content changes", async () => {
     const fake = fakeRuntime("prompt-resource-stale-session", {
       promptTemplates: [{ name: "review", description: "Review", content: "Changed $ARGUMENTS" }],
@@ -805,6 +836,220 @@ target`, options: { expandPromptTemplates: false } },
     await service.dispose();
   });
 
+  it("queues compaction after the active run and keeps later prompts behind it", async () => {
+    const followUpMessages = ["Finish the current queue first"];
+    const fake = fakeRuntime("queued-compaction-session", {
+      isStreaming: true,
+      pendingMessageCount: 1,
+      getFollowUpMessages: () => followUpMessages,
+    });
+    let resolveCompaction: ((result: { summary: string; tokensBefore: number }) => void) | undefined;
+    const compact = vi.fn(() => {
+      fake.session.isCompacting = true;
+      return new Promise<{ summary: string; tokensBefore: number }>((resolve) => { resolveCompaction = resolve; });
+    });
+    fake.session.compact = compact;
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("queued-compaction-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await expect(service.runCommand(sessionRef("queued-compaction-session"), "/compact focus on decisions", "followUp")).resolves.toEqual({
+      type: "done",
+      message: "Compaction queued…",
+    });
+    await service.prompt(sessionRef("queued-compaction-session"), "Continue after compaction", "followUp", [{
+      kind: "image",
+      mimeType: "image/png",
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      name: "shot.png",
+    }]);
+
+    expect(compact).not.toHaveBeenCalled();
+    expect(fake.calls.abort).toBe(0);
+    expect(fake.calls.prompt).toEqual([]);
+    await expect(service.status(sessionRef("queued-compaction-session"))).resolves.toMatchObject({
+      pendingMessageCount: 3,
+      queuedMessages: [
+        { kind: "followUp", text: "Finish the current queue first" },
+        { kind: "followUp", text: "/compact focus on decisions" },
+        { kind: "followUp", text: "Continue after compaction" },
+      ],
+    });
+
+    followUpMessages.length = 0;
+    fake.session.pendingMessageCount = 0;
+    fake.session.isStreaming = false;
+    fake.emit({ type: "agent_end" });
+
+    await vi.waitFor(() => { expect(compact).toHaveBeenCalledExactlyOnceWith("focus on decisions"); });
+    expect(fake.calls.prompt).toEqual([]);
+
+    fake.session.isCompacting = false;
+    resolveCompaction?.({ summary: "short", tokensBefore: 100 });
+    await vi.waitFor(() => { expect(fake.calls.prompt).toHaveLength(1); });
+    expect(fake.calls.prompt[0]).toMatchObject({
+      text: "Continue after compaction",
+      options: { images: [{ type: "image", mimeType: "image/png" }] },
+    });
+    await service.dispose();
+  });
+
+  it.each([
+    Object.assign(new Error("request aborted"), { name: "AbortError" }),
+    new Error("summary model failed"),
+  ])("delivers later prompts after queued compaction ends with %s", async (compactionError) => {
+    const fake = fakeRuntime("failed-queued-compaction-session", { isStreaming: true });
+    fake.session.compact = vi.fn(() => {
+      fake.session.isCompacting = true;
+      return Promise.reject(compactionError).finally(() => { fake.session.isCompacting = false; });
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("failed-queued-compaction-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.runCommand(sessionRef("failed-queued-compaction-session"), "/compact", "followUp");
+    await service.prompt(sessionRef("failed-queued-compaction-session"), "Continue despite compaction result", "followUp");
+    fake.session.isStreaming = false;
+    fake.emit({ type: "agent_end" });
+
+    await vi.waitFor(() => {
+      expect(fake.calls.prompt).toEqual([{ text: "Continue despite compaction result", options: undefined }]);
+    });
+    await service.dispose();
+  });
+
+  it("queues direct compact requests while the session is active and deduplicates them", async () => {
+    const compact = vi.fn(() => Promise.resolve({ summary: "", tokensBefore: 0 }));
+    const fake = fakeRuntime("direct-queued-compaction-session", { isStreaming: true, compact });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("direct-queued-compaction-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await expect(service.runCommand(sessionRef("direct-queued-compaction-session"), "/compact")).resolves.toEqual({ type: "done", message: "Compaction queued…" });
+    await expect(service.runCommand(sessionRef("direct-queued-compaction-session"), "/compact")).resolves.toEqual({ type: "done", message: "Compaction is already queued." });
+
+    expect(compact).not.toHaveBeenCalled();
+    await service.dispose();
+  });
+
+  it("deduplicates concurrent compact requests before either starts", async () => {
+    let resolveCompaction: ((result: { summary: string; tokensBefore: number }) => void) | undefined;
+    const compact = vi.fn(() => new Promise<{ summary: string; tokensBefore: number }>((resolve) => { resolveCompaction = resolve; }));
+    const fake = fakeRuntime("concurrent-compaction-session", { compact });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("concurrent-compaction-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    const [first, second] = await Promise.all([
+      service.runCommand(sessionRef("concurrent-compaction-session"), "/compact"),
+      service.runCommand(sessionRef("concurrent-compaction-session"), "/compact"),
+    ]);
+
+    expect(first).toEqual({ type: "done", message: "Compaction started…" });
+    expect(second).toEqual({ type: "done", message: "Compaction is already queued." });
+    await vi.waitFor(() => { expect(compact).toHaveBeenCalledOnce(); });
+    resolveCompaction?.({ summary: "short", tokensBefore: 100 });
+    await service.dispose();
+  });
+
+  it("restores a queued compaction between earlier and later prompts when stopped", async () => {
+    const followUpMessages = ["Finish first"];
+    const compact = vi.fn(() => Promise.resolve({ summary: "", tokensBefore: 0 }));
+    const fake = fakeRuntime("abort-queued-compaction-session", {
+      isStreaming: true,
+      pendingMessageCount: 1,
+      getFollowUpMessages: () => followUpMessages,
+      compact,
+      clearQueue: () => {
+        fake.calls.clearQueue += 1;
+        followUpMessages.length = 0;
+        fake.session.pendingMessageCount = 0;
+        return { steering: [], followUp: ["Finish first"] };
+      },
+    });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("abort-queued-compaction-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.runCommand(sessionRef("abort-queued-compaction-session"), "/compact", "followUp");
+    await service.prompt(sessionRef("abort-queued-compaction-session"), "Continue later", "followUp");
+
+    await expect(service.abort(sessionRef("abort-queued-compaction-session"))).resolves.toEqual({
+      aborted: true,
+      restoredMessages: [
+        { kind: "followUp", text: "Finish first" },
+        { kind: "followUp", text: "/compact" },
+        { kind: "followUp", text: "Continue later" },
+      ],
+    });
+    expect(compact).not.toHaveBeenCalled();
+    await expect(service.status(sessionRef("abort-queued-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 0, queuedMessages: [] });
+    await service.dispose();
+  });
+
+  it("waits for committed compaction startup before Stop aborts it", async () => {
+    let rejectCompaction: ((reason: Error) => void) | undefined;
+    const fake = fakeRuntime("stop-starting-compaction-session", { isStreaming: true });
+    const compact = vi.fn(() => new Promise<never>((_, reject) => { rejectCompaction = reject; }));
+    const abortCompaction = vi.fn(() => {
+      fake.session.isCompacting = false;
+      rejectCompaction?.(new Error("Compaction cancelled"));
+    });
+    fake.session.compact = compact;
+    fake.session.abortCompaction = abortCompaction;
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("stop-starting-compaction-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.runCommand(sessionRef("stop-starting-compaction-session"), "/compact", "followUp");
+    await service.prompt(sessionRef("stop-starting-compaction-session"), "Restore this later prompt", "followUp");
+    fake.session.isStreaming = false;
+    fake.emit({ type: "agent_end" });
+    await vi.waitFor(() => { expect(compact).toHaveBeenCalledOnce(); });
+
+    let stopped = false;
+    const stop = service.abort(sessionRef("stop-starting-compaction-session")).then((result) => {
+      stopped = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    fake.session.isCompacting = true;
+    fake.emit({ type: "compaction_start" });
+
+    await expect(stop).resolves.toEqual({
+      aborted: true,
+      restoredMessages: [{ kind: "followUp", text: "Restore this later prompt" }],
+    });
+    expect(abortCompaction).toHaveBeenCalledOnce();
+    await service.dispose();
+  });
+
   it("holds prompts sent during compaction until compaction finishes", async () => {
     const hub = new CapturingSessionEventHub();
     const fake = fakeRuntime("compacting-session", { isCompacting: true });
@@ -863,6 +1108,31 @@ target`, options: { expandPromptTemplates: false } },
       queuedMessages: [],
     });
     resolveFirstPrompt?.();
+    await service.dispose();
+  });
+
+  it("clears a queued compaction without starting it after the active run ends", async () => {
+    vi.useFakeTimers();
+    const compact = vi.fn(() => Promise.resolve({ summary: "", tokensBefore: 0 }));
+    const fake = fakeRuntime("clear-queued-compaction-session", { isStreaming: true, compact });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("clear-queued-compaction-session")]),
+      heartbeatIntervalMs: 60_000,
+    });
+
+    await service.runCommand(sessionRef("clear-queued-compaction-session"), "/compact", "followUp");
+    await service.prompt(sessionRef("clear-queued-compaction-session"), "Do not send this", "followUp");
+
+    await expect(service.clearQueue(sessionRef("clear-queued-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 0, queuedMessages: [] });
+    fake.session.isStreaming = false;
+    fake.emit({ type: "agent_end" });
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(compact).not.toHaveBeenCalled();
+    expect(fake.calls.prompt).toEqual([]);
     await service.dispose();
   });
 
@@ -1009,7 +1279,9 @@ target`, options: { expandPromptTemplates: false } },
 
     await service.runCommand(sessionRef("abort-compaction-session"), "/compact");
     await service.prompt(sessionRef("abort-compaction-session"), "Do not deliver after abort", "followUp");
-    await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ isCompacting: true, pendingMessageCount: 1 });
+    await vi.waitFor(async () => {
+      await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ isCompacting: true, pendingMessageCount: 1 });
+    });
     const result = await service.abort(sessionRef("abort-compaction-session"));
 
     expect(result).toEqual({

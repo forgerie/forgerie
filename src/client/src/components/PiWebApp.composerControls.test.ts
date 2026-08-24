@@ -41,6 +41,14 @@ describe("PiWebApp composer controls", () => {
     expect(editor.capabilities.stop?.stoppable).toBe(true);
   });
 
+  it("gates queued compaction on the selected machine runtime capability", async () => {
+    const unsupported = await renderSelectedEditor(status({ isStreaming: true }));
+    expect(unsupported.queuedCompactionAvailable).toBe(false);
+
+    const supported = await renderSelectedEditor(status({ isStreaming: true }), undefined, selectedChatLiveReady, true);
+    expect(supported.queuedCompactionAvailable).toBe(true);
+  });
+
   it("uses activity-only active work for Stop availability", async () => {
     const editor = await renderSelectedEditor(status(), activity({ phase: "active", label: "Running tool" }));
 
@@ -82,7 +90,7 @@ describe("PiWebApp composer controls", () => {
   });
 });
 
-async function renderSelectedEditor(sessionStatus: SessionStatus, sessionActivity?: SessionActivity, makeLoad: (target: SelectedChatTarget) => SelectedChatLoad = selectedChatLiveReady): Promise<PromptEditor> {
+async function renderSelectedEditor(sessionStatus: SessionStatus, sessionActivity?: SessionActivity, makeLoad: (target: SelectedChatTarget) => SelectedChatLoad = selectedChatLiveReady, queuedCompactionAvailable = false): Promise<PromptEditor> {
   const app = new PiWebApp();
   const selected = session("selected", "/repo", "Selected session");
   setAppState(app, {
@@ -90,6 +98,7 @@ async function renderSelectedEditor(sessionStatus: SessionStatus, sessionActivit
     mainView: "chat",
     status: sessionStatus,
     activity: sessionActivity,
+    machineRuntimes: queuedCompactionAvailable ? { local: { machineId: "local", ok: true, checkedAt: "now", capabilities: ["session.queue.compact"] } } : {},
     selectedChatLoad: makeLoad(selectedChatTarget("local", selected)),
   });
   const container = document.createElement("div");

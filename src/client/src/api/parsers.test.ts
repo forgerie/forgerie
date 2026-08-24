@@ -565,12 +565,14 @@ describe("API parsers", () => {
       aborted: true,
       restoredMessages: [
         { kind: "steer", text: "adjust" },
+        { kind: "followUp", text: "/compact" },
         { kind: "followUp", text: "continue" },
       ],
     })).toEqual({
       aborted: true,
       restoredMessages: [
         { kind: "steer", text: "adjust" },
+        { kind: "followUp", text: "/compact" },
         { kind: "followUp", text: "continue" },
       ],
     });

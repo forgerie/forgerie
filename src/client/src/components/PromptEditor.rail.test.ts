@@ -85,6 +85,22 @@ describe("PromptEditor control rail", () => {
     expect(onSend).toHaveBeenCalledWith("and then run the tests", "followUp", undefined, undefined);
   });
 
+  it("keeps /compact in the draft when the selected machine cannot queue it", async () => {
+    const onSend = vi.fn();
+    const composer = await mountEditor({ canSteer: true, queuedCompactionAvailable: false, capabilities: sessionCapabilities({ stoppable: true }), onSend });
+    composer.replaceText("/compact");
+    await composer.updateComplete;
+
+    const queue = button(composer, ".queue-button");
+    expect(queue.disabled).toBe(true);
+    expect(queue.title).toBe("Update the selected machine before queueing /compact");
+    queue.click();
+    composer.view?.contentDOM.dispatchEvent(keyEvent("keydown", "Enter"));
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(composer.view?.state.doc.toString()).toBe("/compact");
+  });
+
   it("holding streaming Queue through the threshold reveals Steer without queueing on release or click", async () => {
     vi.useFakeTimers();
     const onSend = vi.fn();

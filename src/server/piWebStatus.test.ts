@@ -90,14 +90,14 @@ describe("Forgerie status", () => {
     }
   });
 
-  it("advertises no capabilities while the capability registry is empty", async () => {
+  it("advertises queued compaction when web and sessiond both support it", async () => {
     const daemon = daemonWithRuntime(runningSessiondRuntime());
 
     const runtime = await getPiWebRuntime(daemon);
 
-    expect(runtime.components.web.capabilities).toEqual([]);
-    expect(runtime.components.sessiond.capabilities).toEqual([]);
-    expect(runtime.capabilities).toEqual([]);
+    expect(runtime.components.web.capabilities).toEqual(["session.queue.compact"]);
+    expect(runtime.components.sessiond.capabilities).toEqual(["session.queue.compact"]);
+    expect(runtime.capabilities).toEqual(["session.queue.compact"]);
   });
 
   it("carries the daemon-owned active agent profile through the web runtime response", async () => {
@@ -390,7 +390,7 @@ function runningSessiondRuntime(runtimeVersion = "1.202605.7"): PiWebRuntimeComp
     label: "Session daemon",
     runtimeVersion,
     available: true,
-    capabilities: [],
+    capabilities: ["session.queue.compact"],
   };
 }
 

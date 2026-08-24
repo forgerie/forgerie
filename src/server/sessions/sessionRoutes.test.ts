@@ -35,7 +35,7 @@ import { PiSessionService, type PiSessionManagerGateway } from "./piSessionServi
 import { testModelRuntime } from "./piSessionService.testSupport.js";
 import { SessionNotificationStore } from "./sessionNotificationStore.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
-import type { ClientSession } from "../types.js";
+import type { ClientCommandResult, ClientSession } from "../types.js";
 import { registerSessionRoutes } from "./sessionRoutes.js";
 import type { NormalizedSessionCleanupRequest } from "./sessionCleanup.js";
 
@@ -789,6 +789,24 @@ describe("session routes", () => {
     }
   });
 
+  it("forwards queued command intent through the command route", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const response = await routeApp.inject({ method: "POST", url: "/sessions/session-1/commands/run", payload: { cwd: "/repo", text: "/compact", streamingBehavior: "followUp" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ type: "done", message: "Compaction queued…" });
+      expect(routeService.commandCalls).toEqual([{ lookup: { id: "session-1", cwd: resolve("/repo") }, text: "/compact", streamingBehavior: "followUp" }]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
   it("forwards identity-bound prompt-resource invocations through the dedicated route", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);
@@ -1316,6 +1334,7 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly cancelDialogCalls: { lookup: SessionRouteRef; dialogId: string }[] = [];
   readonly startCalls: { cwd: string; startupToken: string | undefined; initialModelSpec?: string; initialThinkingLevel?: ThinkingLevel }[] = [];
   readonly newSessionModelCwds: string[] = [];
+  readonly commandCalls: { lookup: SessionRouteRef; text: string; streamingBehavior?: unknown }[] = [];
   readonly promptResourceCommandCalls: { lookup: SessionRouteRef; text: string; identity: unknown; streamingBehavior?: unknown; attachments?: unknown }[] = [];
   askError: Error | undefined;
   dialogError: Error | undefined;
@@ -1512,7 +1531,10 @@ class CapturingRouteSessionService implements SessionRouteService {
   }
 
   shell(): never { throw unusedRouteMethod("shell"); }
-  runCommand(): never { throw unusedRouteMethod("runCommand"); }
+  runCommand(lookup: SessionRouteRef, text: string, streamingBehavior?: unknown): Promise<ClientCommandResult> {
+    this.commandCalls.push({ lookup, text, ...(streamingBehavior === undefined ? {} : { streamingBehavior }) });
+    return Promise.resolve({ type: "done", message: "Compaction queued…" });
+  }
   runPromptResourceCommand(lookup: SessionRouteRef, text: string, identity: unknown, streamingBehavior?: unknown, attachments?: unknown): Promise<{ accepted: true; deliveryFingerprint: string }> {
     this.promptResourceCommandCalls.push({ lookup, text, identity, ...(streamingBehavior === undefined ? {} : { streamingBehavior }), ...(attachments === undefined ? {} : { attachments }) });
     return Promise.resolve({ accepted: true, deliveryFingerprint: "b".repeat(64) });

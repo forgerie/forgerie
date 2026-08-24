@@ -34,6 +34,7 @@ import { BUILTIN_COMMANDS } from "./builtinCommands.js";
 import { buildActiveCommandCatalog, buildActiveCommandList, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
 import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
 import { SessionCommandService } from "./sessionCommandService.js";
+import { SessionCompactionQueue, type QueuedCompactionHandle, type QueuedPromptKind } from "./sessionCompactionQueue.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
 import { SessionArchiveStore, type ArchivedSessionRecord, type ArchiveSessionInput } from "./sessionArchiveStore.js";
 import { SessionPinStore, type PinnedSessionRecord, type PinSessionInput } from "./sessionPinStore.js";
@@ -44,7 +45,7 @@ import { deterministicSessionName, fallbackSessionName, generateShortSessionName
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
-import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
+import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
@@ -69,6 +70,7 @@ import type {
   SessionNotificationDismissAllRequest,
   SessionNotificationDismissRequest,
   SessionNotificationInboxSnapshot,
+  QueuedSessionMessage,
   SessionUnreadAcknowledgeRequest,
   SessionUnreadCatalogSnapshot,
   SessionWarning,
@@ -181,14 +183,9 @@ function refMatchesStartupSession(ref: PiSessionRef, session: PiAgentSession): b
   return cwdPathsEqual(session.sessionManager.getCwd(), ref.cwd);
 }
 
-type QueuedPromptKind = "steer" | "followUp";
-
-interface QueuedPrompt {
-  kind: QueuedPromptKind;
-  text: string;
-  images?: ImageContent[];
-  echoUserMessage?: boolean;
-  expandPromptTemplates?: boolean;
+interface CompactionStartGate {
+  promise: Promise<void>;
+  resolve: () => void;
 }
 
 interface DeferredSubsessionNotification {
@@ -284,10 +281,10 @@ function requirePromptText(value: unknown): string {
   return value;
 }
 
-function parsePromptStreamingBehavior(value: unknown): QueuedPromptKind | undefined {
+function parseStreamingBehavior(value: unknown): QueuedPromptKind | undefined {
   if (value === undefined) return undefined;
   if (value === "steer" || value === "followUp") return value;
-  throw new Error('Prompt streamingBehavior must be "steer" or "followUp"');
+  throw new Error('streamingBehavior must be "steer" or "followUp"');
 }
 
 type SessionArchiveRepository = Pick<SessionArchiveStore, "list" | "get" | "archive" | "restore" | "isArchived"> & {
@@ -938,8 +935,10 @@ export class PiSessionService implements SessionRouteService {
   private readonly deferredGeneratedSessionNames = new WeakMap<PiAgentSession, string>();
   private readonly claimedSessionTitleIntents = new WeakSet<PiAgentSession>();
   private readonly sessionTitleGenerationControllers = new WeakMap<PiAgentSession, AbortController>();
-  private readonly compactionPromptQueues = new Map<string, QueuedPrompt[]>();
+  private readonly compactionQueue = new SessionCompactionQueue();
   private readonly compactionDrainTimers = new Map<string, NodeJS.Timeout>();
+  private readonly queuedCompactionTimers = new Map<string, NodeJS.Timeout>();
+  private readonly compactionStartGates = new Map<string, CompactionStartGate>();
   private readonly authLossWarnings = new Set<string>();
   /** Tracked subsession id -> the parent session id that spawned it. */
   private readonly subsessionParents = new Map<string, string>();
@@ -1053,16 +1052,20 @@ export class PiSessionService implements SessionRouteService {
       events,
       {
         onCompactionStart: (session) => {
+          this.armCompactionStartGate(session.sessionId);
           this.beginSessionEntryMutation(session, "compact the session");
           this.publishActivity(session, "compacting", "active");
           this.publishStatus(session);
         },
         onCompactionEnd: (session, result, detail) => {
+          this.resolveCompactionStartGate(session.sessionId);
           this.endSessionEntryMutation(session);
+          this.compactionQueue.finishCompaction(session.sessionId);
           if (result === "success") this.publishActivity(session, "compaction complete", "idle");
           else if (result === "cancelled") this.publishActivity(session, "compaction cancelled", "idle");
           else this.publishActivity(session, "compaction failed", "error", detail);
           this.publishStatus(session);
+          this.scheduleCompactionQueueDrain(session.sessionId);
         },
         reloadSession: (session) => this.reloadSessionRuntime(session),
         getSessionTree: (session) => {
@@ -1212,7 +1215,8 @@ export class PiSessionService implements SessionRouteService {
     this.unreadPublicationStopped = true;
     this.clearUnreadPublicationRetry();
     clearInterval(this.heartbeat);
-    this.clearCompactionDrainTimers();
+    clearSessionTimers(this.compactionDrainTimers);
+    clearSessionTimers(this.queuedCompactionTimers);
     // Same startup-park hazard as closeActive(): settle `session_start` dialogs
     // of sessions still binding extensions before awaiting their pending opens.
     for (const sessionId of this.startupSessions.keys()) this.endSessionExtensionDialogs(sessionId);
@@ -1228,7 +1232,7 @@ export class PiSessionService implements SessionRouteService {
     this.pendingSessionOpens.clear();
     this.startupSessions.clear();
     this.activities.clear();
-    this.compactionPromptQueues.clear();
+    this.compactionQueue.clearAll();
     this.authLossWarnings.clear();
     this.subsessionParents.clear();
     this.subsessionChildren.clear();
@@ -2359,14 +2363,13 @@ export class PiSessionService implements SessionRouteService {
     // command text, so the server must not echo it either, or it would show up
     // as a transient line that vanishes on reload.
     const echoUserMessage = options?.echoUserMessage !== false;
-    const requestedBehavior = parsePromptStreamingBehavior(streamingBehavior);
+    const requestedBehavior = parseStreamingBehavior(streamingBehavior);
     const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
     const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
     this.assertTreeNavigationInactive(session, "send a prompt");
-    const isQueued = session.isStreaming || session.isCompacting;
-    const behavior = isQueued ? requestedBehavior ?? "followUp" : undefined;
+    const isQueued = session.isStreaming || session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
     if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, promptText)) {
       this.publishActivity(session, "duplicate queued message ignored", "active");
       this.publishStatus(session);
@@ -2377,8 +2380,10 @@ export class PiSessionService implements SessionRouteService {
     // conversation has already moved past. Ignored duplicates skip this on
     // purpose: they must not void an ask posted after the queued original.
     await this.voidOpenAskForUserMessage(session);
-    if (session.isCompacting) {
-      this.enqueuePromptDuringCompaction(session, promptText, behavior ?? "followUp", images, echoUserMessage);
+    const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
+    const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
+    if (waitsForCompaction) {
+      this.enqueuePromptBehindCompaction(session, promptText, behavior ?? "followUp", images, echoUserMessage);
       return;
     }
     const accepted = await this.submitPromptUntilPreflight(session, promptText, behavior, images, echoUserMessage);
@@ -2418,16 +2423,15 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
-  private enqueuePromptDuringCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): void {
-    const queue = this.compactionPromptQueues.get(session.sessionId) ?? [];
-    queue.push({ kind, text, ...(images.length > 0 ? { images } : {}), ...(echoUserMessage ? {} : { echoUserMessage: false }), ...(expandPromptTemplates ? {} : { expandPromptTemplates: false }) });
-    this.compactionPromptQueues.set(session.sessionId, queue);
-    this.publishActivity(session, "message queued during compaction", "active");
+  private enqueuePromptBehindCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): void {
+    const prompt = { kind, text, ...(images.length > 0 ? { images } : {}), ...(echoUserMessage ? {} : { echoUserMessage: false }), ...(expandPromptTemplates ? {} : { expandPromptTemplates: false }) };
+    this.compactionQueue.enqueuePrompt(session.sessionId, prompt);
+    this.publishActivity(session, session.isCompacting ? "message queued during compaction" : "message queued behind compaction", "active");
     this.publishStatus(session);
   }
 
   async runPromptResourceCommand(ref: PiSessionRef, text: string, identity: PromptResourceCommandIdentity, streamingBehavior?: unknown, attachments?: unknown): Promise<{ accepted: true; deliveryFingerprint: string }> {
-    const requestedBehavior = parsePromptStreamingBehavior(streamingBehavior);
+    const requestedBehavior = parseStreamingBehavior(streamingBehavior);
     const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
     const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
     await this.assertWritable(ref);
@@ -2437,15 +2441,16 @@ export class PiSessionService implements SessionRouteService {
     const resolved = resolvePromptResourceIdentity(catalog, text, identity);
     if (resolved.kind !== "matched") throw new Error("Prompt-resource command is no longer available for this session.");
     const expanded = expandPromptResourceCommand(resolved.command, resolved.args);
-    const isQueued = session.isStreaming || session.isCompacting;
-    const behavior = isQueued ? requestedBehavior ?? "followUp" : undefined;
+    const isQueued = session.isStreaming || session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
     if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, expanded)) {
       this.publishActivity(session, "duplicate queued message ignored", "active");
       this.publishStatus(session);
       return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
     }
     await this.voidOpenAskForUserMessage(session);
-    if (session.isCompacting) this.enqueuePromptDuringCompaction(session, expanded, behavior ?? "followUp", images, true, false);
+    const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
+    const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
+    if (waitsForCompaction) this.enqueuePromptBehindCompaction(session, expanded, behavior ?? "followUp", images, true, false);
     else {
       const accepted = await this.submitPromptUntilPreflight(session, expanded, behavior, images, true, false);
       if (!accepted) throw new Error("Prompt-resource command delivery was rejected before agent start.");
@@ -2470,6 +2475,7 @@ export class PiSessionService implements SessionRouteService {
     const command = (isExcluded ? text.slice(2) : text.slice(1)).trim();
     if (!command) throw new Error("Usage: !<shell command>");
     if (session.isBashRunning) throw new Error("A bash command is already running");
+    if (session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId)) throw new Error("Cannot run a shell command while compaction is queued or running");
 
     this.publishActivity(session, "running bash", "active", command);
     this.events.publish(session.sessionId, { type: "shell.start", command, excludeFromContext: isExcluded });
@@ -2497,10 +2503,23 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
-  async runCommand(ref: PiSessionRef, text: string): Promise<ClientCommandResult> {
+  async runCommand(ref: PiSessionRef, text: string, streamingBehavior?: unknown): Promise<ClientCommandResult> {
+    parseStreamingBehavior(streamingBehavior);
     await this.assertWritable(ref);
     const active = await this.getActive(ref);
-    const sourceSessionId = active.runtime.session.sessionId;
+    const session = active.runtime.session;
+    const sourceSessionId = session.sessionId;
+    const parsed = parseLeadingSlashCommand(text);
+    if (parsed.kind === "command" && parsed.name === "compact") {
+      if (session.isCompacting || this.compactionQueue.isCompactionRunning(sourceSessionId)) return { type: "unsupported", message: "Compaction is already running." };
+      if (this.compactionQueue.isCompactionQueued(sourceSessionId)) return { type: "done", message: "Compaction is already queued." };
+      const waitsForActiveWork = this.compactionMustWait(session);
+      this.compactionQueue.queueCompaction(sourceSessionId, text);
+      this.publishActivity(session, waitsForActiveWork ? "compaction queued" : "compacting", "active");
+      this.publishStatus(session);
+      this.scheduleQueuedCompaction(sourceSessionId);
+      return { type: "done", message: waitsForActiveWork ? "Compaction queued…" : "Compaction started…" };
+    }
     const result = await this.commandService.run(sourceSessionId, text);
     this.publishCreatedCommandSession(sourceSessionId, result);
     return result;
@@ -3180,7 +3199,7 @@ export class PiSessionService implements SessionRouteService {
   async clearQueue(ref: PiSessionRef): Promise<ClientSessionStatus> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
-    this.clearCompactionPromptQueue(session.sessionId);
+    this.clearDeferredCompactionWork(session.sessionId);
     clearSessionQueue(session);
     this.publishStatus(session);
     return this.statusFromSession(session);
@@ -3198,8 +3217,8 @@ export class PiSessionService implements SessionRouteService {
     if (active === undefined) return { aborted: true, restoredMessages: [] };
     const session = active.runtime.session;
     const sessionId = session.sessionId;
-    const restoredMessages = queuedMessagesFromSession(session, this.compactionQueuedMessages(sessionId));
-    this.clearCompactionPromptQueue(sessionId);
+    const restoredMessages = this.queuedMessages(session);
+    this.clearDeferredCompactionWork(sessionId);
     clearSessionQueue(session);
     // Settle run-scoped dialogs now, at abort-request time: pi's agent loop
     // waits for a parked `tool_call` dialog handler before it can emit
@@ -3383,7 +3402,7 @@ export class PiSessionService implements SessionRouteService {
     this.activities.delete(sessionId);
     this.workspaceActivity?.removeSession(sessionId, active.runtime.session.sessionManager.getCwd());
     this.clearAuthLossWarningsForSession(sessionId);
-    this.clearCompactionPromptQueue(sessionId);
+    this.clearDeferredCompactionWork(sessionId);
     // Disarm subsession notification before teardown so the abort below cannot
     // emit a "stopped working" event that notifies the parent (e.g. on archive).
     // The parent/children link is kept so the parent can still see the child.
@@ -3402,6 +3421,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async abortSessionOperations(session: PiAgentSession): Promise<void> {
+    await this.waitForCompactionStart(session);
     session.abortCompaction();
     let branchSummaryAbortFailed = false;
     let branchSummaryAbortError: unknown;
@@ -3691,7 +3711,7 @@ export class PiSessionService implements SessionRouteService {
         this.active.delete(sessionId);
         this.activities.delete(sessionId);
         this.clearAuthLossWarningsForSession(sessionId);
-        this.clearCompactionPromptQueue(sessionId);
+        this.clearDeferredCompactionWork(sessionId);
         removedActive = true;
       }
       if (removedActive) {
@@ -3948,7 +3968,7 @@ export class PiSessionService implements SessionRouteService {
     for (const [sessionId, candidate] of this.active.entries()) {
       if (candidate === active) {
         this.active.delete(sessionId);
-        if (sessionId !== session.sessionId) this.clearCompactionPromptQueue(sessionId);
+        if (sessionId !== session.sessionId) this.clearDeferredCompactionWork(sessionId);
       }
     }
     active.unsubscribe = session.subscribe((event) => {
@@ -3961,8 +3981,10 @@ export class PiSessionService implements SessionRouteService {
         this.publishSessionName(session);
       }
       if (eventType === "agent_end") this.abortRunScopedExtensionDialogs(session.sessionId);
+      if (eventType === "compaction_start") this.resolveCompactionStartGate(session.sessionId);
       if (eventType === "compaction_end") this.scheduleCompactionQueueDrain(session.sessionId);
       if (eventType === "agent_start" || eventType === "agent_end") this.scheduleCompactionQueueDrain(session.sessionId);
+      if (eventType === "agent_start" || eventType === "agent_end" || eventType === "compaction_end") this.scheduleQueuedCompaction(session.sessionId);
       this.publishStatus(session);
       this.updateSubsessionTracking(session);
     });
@@ -3971,13 +3993,75 @@ export class PiSessionService implements SessionRouteService {
     if (session.sessionName !== undefined) this.publishSessionName(session);
   }
 
+  private armCompactionStartGate(sessionId: string): void {
+    if (this.compactionStartGates.has(sessionId)) return;
+    let resolveGate: (() => void) | undefined;
+    const promise = new Promise<void>((resolve) => { resolveGate = resolve; });
+    this.compactionStartGates.set(sessionId, { promise, resolve: () => { resolveGate?.(); } });
+  }
+
+  private resolveCompactionStartGate(sessionId: string): void {
+    const gate = this.compactionStartGates.get(sessionId);
+    if (gate === undefined) return;
+    this.compactionStartGates.delete(sessionId);
+    gate.resolve();
+  }
+
+  private async waitForCompactionStart(session: PiAgentSession): Promise<void> {
+    if (session.isCompacting) return;
+    await this.compactionStartGates.get(session.sessionId)?.promise;
+  }
+
+  private compactionMustWait(session: PiAgentSession): boolean {
+    return session.isStreaming
+      || session.isBashRunning
+      || session.pendingMessageCount > 0
+      || this.compactionQueue.readyPromptCount(session.sessionId) > 0
+      || this.isSessionEntryMutationActive(session)
+      || this.isTreeExclusiveOperationActive(session);
+  }
+
+  private scheduleQueuedCompaction(sessionId: string): void {
+    if (!this.compactionQueue.isCompactionQueued(sessionId)) return;
+    scheduleSessionTimer(this.queuedCompactionTimers, sessionId, 0, () => { this.drainQueuedCompaction(sessionId); });
+  }
+
+  private drainQueuedCompaction(sessionId: string): void {
+    const active = this.active.get(sessionId);
+    if (!this.compactionQueue.isCompactionQueued(sessionId) || active === undefined) return;
+    const { session } = active.runtime;
+    if (session.isCompacting || this.compactionMustWait(session)) return;
+
+    const handle = this.compactionQueue.startCompaction(sessionId);
+    if (handle === undefined) return;
+    this.publishStatus(session);
+    void this.commandService.run(sessionId, handle.text, { canStartCompaction: (session) => this.commitQueuedCompactionStart(session, handle) }).then((result) => {
+      if (result.type === "unsupported") this.failQueuedCompaction(session, handle, result.message);
+    }).catch((error: unknown) => {
+      this.failQueuedCompaction(session, handle, error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  private commitQueuedCompactionStart(session: PiAgentSession, handle: QueuedCompactionHandle): boolean {
+    const current = this.active.get(handle.sessionId)?.runtime.session;
+    if (current !== session || session.isCompacting || this.compactionMustWait(session)) {
+      if (this.compactionQueue.deferCompaction(handle)) this.scheduleQueuedCompaction(handle.sessionId);
+      return false;
+    }
+    return this.compactionQueue.commitCompactionStart(handle);
+  }
+
+  private failQueuedCompaction(session: PiAgentSession, handle: QueuedCompactionHandle, message: string): void {
+    if (!this.compactionQueue.failCompaction(handle)) return;
+    this.events.publish(session.sessionId, { type: "command.output", level: "error", message: `Queued compaction failed to start: ${message}` });
+    this.publishActivity(session, "compaction failed", "error", message);
+    this.publishStatus(session);
+    this.scheduleCompactionQueueDrain(session.sessionId);
+  }
+
   private scheduleCompactionQueueDrain(sessionId: string, delayMs = 0): void {
-    if (!this.compactionPromptQueues.has(sessionId) || this.compactionDrainTimers.has(sessionId)) return;
-    const timer = setTimeout(() => {
-      this.compactionDrainTimers.delete(sessionId);
-      this.drainCompactionPromptQueue(sessionId);
-    }, delayMs);
-    this.compactionDrainTimers.set(sessionId, timer);
+    if (!this.compactionQueue.hasReadyPrompts(sessionId)) return;
+    scheduleSessionTimer(this.compactionDrainTimers, sessionId, delayMs, () => { this.drainCompactionPromptQueue(sessionId); });
   }
 
   private drainCompactionPromptQueue(sessionId: string): void {
@@ -3990,45 +4074,24 @@ export class PiSessionService implements SessionRouteService {
     }
 
     if (session.isStreaming) {
-      const queued = this.takeCompactionPromptQueue(sessionId);
+      const queued = this.compactionQueue.takeReadyPrompts(sessionId);
       if (queued.length === 0) return;
       this.publishStatus(session);
       for (const prompt of queued) void this.submitPrompt(session, prompt.text, prompt.kind, prompt.images, prompt.echoUserMessage ?? true, prompt.expandPromptTemplates ?? true);
       return;
     }
 
-    const prompt = this.shiftCompactionPrompt(sessionId);
+    const prompt = this.compactionQueue.shiftReadyPrompt(sessionId);
     if (prompt === undefined) return;
     this.publishStatus(session);
     const submitted = this.submitPrompt(session, prompt.text, undefined, prompt.images, prompt.echoUserMessage ?? true, prompt.expandPromptTemplates ?? true);
     void submitted.finally(() => { this.scheduleCompactionQueueDrain(sessionId); });
   }
 
-  private takeCompactionPromptQueue(sessionId: string): QueuedPrompt[] {
-    const queued = this.compactionPromptQueues.get(sessionId) ?? [];
-    this.compactionPromptQueues.delete(sessionId);
-    return queued;
-  }
-
-  private shiftCompactionPrompt(sessionId: string): QueuedPrompt | undefined {
-    const queue = this.compactionPromptQueues.get(sessionId);
-    const prompt = queue?.shift();
-    if (queue === undefined || queue.length === 0) this.compactionPromptQueues.delete(sessionId);
-    return prompt;
-  }
-
-  private clearCompactionPromptQueue(sessionId: string): void {
-    this.compactionPromptQueues.delete(sessionId);
-    const timer = this.compactionDrainTimers.get(sessionId);
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      this.compactionDrainTimers.delete(sessionId);
-    }
-  }
-
-  private clearCompactionDrainTimers(): void {
-    for (const timer of this.compactionDrainTimers.values()) clearTimeout(timer);
-    this.compactionDrainTimers.clear();
+  private clearDeferredCompactionWork(sessionId: string): void {
+    this.compactionQueue.clear(sessionId);
+    clearSessionTimer(this.compactionDrainTimers, sessionId);
+    clearSessionTimer(this.queuedCompactionTimers, sessionId);
   }
 
   private acceptSessionTitleIntent(session: PiAgentSession, titleInput: string): void {
@@ -4164,6 +4227,7 @@ export class PiSessionService implements SessionRouteService {
   private publishHeartbeats(): void {
     for (const active of this.active.values()) {
       const { session } = active.runtime;
+      this.scheduleQueuedCompaction(session.sessionId);
       // Re-evaluate subsession completion here too: agent_end can arrive while
       // the session still reports active work transiently, so the event-driven
       // latch may not fire. The heartbeat re-checks once the session settles.
@@ -4182,7 +4246,7 @@ export class PiSessionService implements SessionRouteService {
   private activityLabelFromStatus(session: PiAgentSession): string {
     if (this.treeNavigations.has(session)) return "navigating session tree";
     if (this.isSessionEntryMutationActive(session)) return "updating session";
-    if (session.isCompacting) return "compacting";
+    if (this.isCompactionRunning(session)) return "compacting";
     if (session.isBashRunning) return "running bash";
     if (session.isStreaming) return "agent running";
     if (this.pendingMessageCount(session) > 0) return "queued";
@@ -4191,9 +4255,10 @@ export class PiSessionService implements SessionRouteService {
 
   private hasActiveWork(session: PiAgentSession): boolean {
     return this.treeNavigations.has(session)
+      || this.isCompactionRunning(session)
       || this.isSessionEntryMutationActive(session)
       || this.isTreeExclusiveOperationActive(session)
-      || sessionHasActiveWork(session, this.compactionQueuedMessages(session.sessionId).length);
+      || sessionHasActiveWork(session, this.compactionQueue.pendingCount(session.sessionId));
   }
 
   private async runTreeExclusiveOperation<T>(
@@ -4273,6 +4338,7 @@ export class PiSessionService implements SessionRouteService {
     if (remaining <= 0) this.sessionEntryMutationCounts.delete(session);
     else this.sessionEntryMutationCounts.set(session, remaining);
     this.observeUnreadActivityState(session);
+    this.scheduleQueuedCompaction(session.sessionId);
   }
 
   private isSessionEntryMutationActive(session: PiAgentSession): boolean {
@@ -4423,11 +4489,11 @@ export class PiSessionService implements SessionRouteService {
       ...(model === undefined ? {} : { model }),
       thinkingLevel: session.thinkingLevel,
       isStreaming: session.isStreaming,
-      isCompacting: session.isCompacting,
+      isCompacting: this.isCompactionRunning(session),
       isBashRunning: session.isBashRunning,
       ...this.liveWorkCounts(session),
       pendingMessageCount: this.pendingMessageCount(session),
-      queuedMessages: queuedMessagesFromSession(session, this.compactionQueuedMessages(session.sessionId)),
+      queuedMessages: this.queuedMessages(session),
       doubleEscapeAction: session.settingsManager.getDoubleEscapeAction?.() ?? "tree",
       messageCount: session.messages.length,
       tokens: stats.tokens,
@@ -4453,16 +4519,20 @@ export class PiSessionService implements SessionRouteService {
     return warnings;
   }
 
-  private pendingMessageCount(session: PiAgentSession): number {
-    return session.pendingMessageCount + this.compactionQueuedMessages(session.sessionId).length;
+  private isCompactionRunning(session: PiAgentSession): boolean {
+    return session.isCompacting || this.compactionQueue.isCompactionRunning(session.sessionId);
   }
 
-  private compactionQueuedMessages(sessionId: string): readonly QueuedPrompt[] {
-    return this.compactionPromptQueues.get(sessionId) ?? [];
+  private pendingMessageCount(session: PiAgentSession): number {
+    return session.pendingMessageCount + this.compactionQueue.pendingCount(session.sessionId);
+  }
+
+  private queuedMessages(session: PiAgentSession): QueuedSessionMessage[] {
+    return this.compactionQueue.queuedMessages(session.sessionId, runtimeQueuedMessages(session));
   }
 
   private hasQueuedMessageText(session: PiAgentSession, text: string): boolean {
-    return queuedMessagesFromSession(session, this.compactionQueuedMessages(session.sessionId)).some((message) => message.text === text);
+    return this.queuedMessages(session).some((message) => message.text === text);
   }
 }
 
@@ -5021,11 +5091,31 @@ function clearSessionQueue(session: PiAgentSession): void {
   session.clearQueue();
 }
 
-function queuedMessagesFromSession(session: PiAgentSession, extraQueuedMessages: readonly QueuedPrompt[] = []): { kind: "steer" | "followUp"; text: string }[] {
+function scheduleSessionTimer(timers: Map<string, NodeJS.Timeout>, sessionId: string, delayMs: number, task: () => void): void {
+  if (timers.has(sessionId)) return;
+  const timer = setTimeout(() => {
+    timers.delete(sessionId);
+    task();
+  }, delayMs);
+  timers.set(sessionId, timer);
+}
+
+function clearSessionTimer(timers: Map<string, NodeJS.Timeout>, sessionId: string): void {
+  const timer = timers.get(sessionId);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  timers.delete(sessionId);
+}
+
+function clearSessionTimers(timers: Map<string, NodeJS.Timeout>): void {
+  for (const timer of timers.values()) clearTimeout(timer);
+  timers.clear();
+}
+
+function runtimeQueuedMessages(session: PiAgentSession): QueuedSessionMessage[] {
   return [
     ...session.getSteeringMessages().map((text) => ({ kind: "steer" as const, text })),
     ...session.getFollowUpMessages().map((text) => ({ kind: "followUp" as const, text })),
-    ...extraQueuedMessages,
   ];
 }
 

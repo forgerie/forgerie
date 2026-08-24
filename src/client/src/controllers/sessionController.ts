@@ -826,7 +826,7 @@ export class SessionController {
       else this.enqueueReadinessSend(session, machineId, { type: "prompt", text, streamingBehavior, attachments, delivery });
       return;
     }
-    if (!hasAttachments && trimmed.startsWith("/")) return this.runCommand(text);
+    if (!hasAttachments && trimmed.startsWith("/")) return this.runCommand(text, streamingBehavior);
     if (!hasAttachments && isShellInput(text)) return this.runShell(text);
 
     // Capture the originating session/machine before any await so the request
@@ -859,7 +859,7 @@ export class SessionController {
     await this.deliverShellToSession(session, text, machineId, { optimisticLine: true });
   }
 
-  async runCommand(text: string) {
+  async runCommand(text: string, streamingBehavior?: "steer" | "followUp") {
     const session = this.getState().selectedSession;
     if (!session || session.archived === true) return;
     if (isClientPendingStartSessionInfo(session)) {
@@ -871,7 +871,7 @@ export class SessionController {
       this.enqueueReadinessSend(session, machineId, { type: "command", text });
       return;
     }
-    await this.deliverCommandToSession(session, text, machineId, { applyResult: true });
+    await this.deliverCommandToSession(session, text, machineId, { applyResult: true, ...(streamingBehavior === undefined ? {} : { streamingBehavior }) });
   }
 
   private shouldQueueUntilReady(session: SessionInfo, machineId: string): boolean {
@@ -1086,7 +1086,7 @@ export class SessionController {
     }
   }
 
-  private async deliverCommandToSession(session: SessionInfo, text: string, machineId: string, options: { applyResult: boolean }): Promise<boolean> {
+  private async deliverCommandToSession(session: SessionInfo, text: string, machineId: string, options: { applyResult: boolean; streamingBehavior?: "steer" | "followUp" }): Promise<boolean> {
     // Commands are not inserted into the transcript optimistically: a builtin
     // command produces its own result line, and a runtime/skill command is
     // forwarded to the agent, which streams back the canonical (expanded)
@@ -1095,7 +1095,7 @@ export class SessionController {
     // per-session sending indicator that send() uses for the pre-receipt window.
     this.markSendingPrompt(session.id, true);
     try {
-      const result = await this.api.runCommand(session, text, machineId);
+      const result = await this.api.runCommand(session, text, machineId, options.streamingBehavior);
       if (options.applyResult && this.isSelectedSessionIdentity(session.id, machineId)) this.applyCommandResult(result);
       else if (result.type === "select" || result.type === "tree") this.setState({ error: `Queued command “${text}” needs input; open the session and run it again.` });
       this.markCachedNewSessionPersisted(session);

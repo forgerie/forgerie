@@ -64,6 +64,10 @@ export interface SessionCommandLifecycle<TSession extends CommandSession = Comma
   onUserFork?: (session: TSession) => Promise<void>;
 }
 
+export interface SessionCommandRunOptions<TSession extends CommandSession = CommandSession> {
+  canStartCompaction?: (session: TSession) => boolean;
+}
+
 export interface SessionCommandNaming {
   listSessionNames?: (cwd: string) => Promise<readonly string[]>;
 }
@@ -91,7 +95,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     private readonly naming: SessionCommandNaming = {},
   ) {}
 
-  async run(sessionId: string, text: string): Promise<ClientCommandResult> {
+  async run(sessionId: string, text: string, options: SessionCommandRunOptions<TSession> = {}): Promise<ClientCommandResult> {
     const active = await this.getActive(sessionId);
     const session = active.runtime.session;
     const parsed = parseLeadingSlashCommand(text);
@@ -119,7 +123,10 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
 
     if (name === "session") return { type: "done", message: formatSessionStats(session) };
     if (name === "name") return this.nameSession(active, rest);
-    if (name === "compact") return this.compact(session, rest);
+    if (name === "compact") {
+      if (options.canStartCompaction?.(session) === false) return { type: "unsupported", message: "Queued compaction was cancelled." };
+      return this.compact(session, rest);
+    }
     if (name === "reload") return this.reload(session);
     if (name === "clone") return this.clone(active, rest);
     if (name === "fork") return this.fork(active);
