@@ -209,11 +209,13 @@ describe("VoiceComposerDialog", () => {
     expect(onSendText).toHaveBeenCalledWith("end this turn by hand");
   });
 
-  it("says what went wrong rather than closing on the reader", async () => {
+  it("says what went wrong in the service's own words rather than closing on the reader", async () => {
+    // "That did not work" tells a reader nothing they can act on. A denied
+    // microphone and a missing one need different responses from them.
     const speech = speechCapability({ captureError: new Error("no microphone") });
     const { dialog, dismissed } = await openDialog(speech.capability);
 
     expect(dismissed()).toBe(false);
-    expect(dialog.shadowRoot?.textContent).toContain("did not work");
+    expect(dialog.shadowRoot?.textContent).toContain("no microphone");
   });
 });

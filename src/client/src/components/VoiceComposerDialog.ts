@@ -1,4 +1,4 @@
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { ComposerDictationCapability } from "../composerCapabilities";
 import { PromptDictationController } from "../controllers/promptDictationController";
@@ -88,28 +88,30 @@ export class VoiceComposerDialog extends LitElement {
         .onClose=${() => { this.dismiss(); }}
         .onBusyEscape=${() => { this.dismiss(); }}
       >
-        <div class="head">
+        <header>
           <h2>Speak</h2>
           <button type="button" class="close" aria-label="Close" @click=${() => { this.dismiss(); }}>&times;</button>
-        </div>
+        </header>
 
-        <div class="status">${this.renderIndicator()}<span class="status-text">${this.statusLine()}</span></div>
+        <div class="body">
+          <p class="status" role="status" aria-live="polite">${this.renderIndicator()}<span>${this.statusLine()}</span></p>
 
-        <div class="transcript" @pointerdown=${() => { this.hold(); }}>
           ${transcript === undefined
-            ? html`<p class="waiting">${state.kind === "failed" ? state.message : "Speech appears here as it is transcribed."}</p>`
+            ? nothing
             : html`<textarea
+                class="transcript"
                 .value=${transcript}
                 aria-label="Message to send"
-                rows="4"
+                rows="2"
+                @pointerdown=${() => { this.hold(); }}
                 @input=${(event: Event) => { this.edit(event); }}
               ></textarea>`}
         </div>
 
-        <div class="actions">
+        <footer>
           <button type="button" class="discard" @click=${() => { this.dismiss(); }}>Discard</button>
           ${this.renderPrimaryAction(transcript)}
-        </div>
+        </footer>
       </modal-surface>
     `;
   }
@@ -174,7 +176,7 @@ export class VoiceComposerDialog extends LitElement {
       case "held":
         return "Held. Send when you are ready.";
       case "failed":
-        return state.retryable ? "That did not work. Try again." : "Speech is unavailable.";
+        return state.message;
     }
   }
 
@@ -305,43 +307,100 @@ export class VoiceComposerDialog extends LitElement {
   static override styles = css`
     /* Above the wheel (40), which is what opened this and must not draw over it. */
     :host { position: fixed; inset: 0; z-index: 50; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; }
+    /* A bottom sheet, not a centred dialog. Every control here is meant for a
+       thumb on a phone held in one hand, and a box floating in the middle of
+       the screen puts them at the far end of that thumb's reach. It also takes
+       only the height it needs: this surface has one job at a time. */
     modal-surface {
-      --modal-surface-width: min(560px, calc(100vw - 24px));
-      --modal-surface-max-height: min(720px, calc(100dvh - 24px));
+      --modal-surface-place-items: end center;
+      --modal-surface-backdrop-padding: 0;
+      --modal-surface-width: min(560px, 100vw);
+      --modal-surface-max-height: min(720px, 100dvh);
+      --modal-surface-radius: var(--pi-radius-surface) var(--pi-radius-surface) 0 0;
     }
-    .head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 6px; }
-    h2 { flex: 1 1 auto; margin: 0; font-size: var(--pi-text-md); color: var(--pi-text); }
-    .close { background: none; border: none; color: var(--pi-dim); font-size: 22px; line-height: 1; padding: 6px 10px; cursor: pointer; }
+    /* Hairline separators, per the dialog grammar. Chrome recedes; the
+       sentence you are about to send is the brightest thing here. */
+    header {
+      display: flex; align-items: center; gap: var(--pi-space-sm);
+      padding: var(--pi-space-md) var(--pi-space-lg);
+      border-block-end: 1px solid var(--pi-border-muted);
+    }
+    h2 { flex: 1 1 auto; margin: 0; font-size: var(--pi-text-lg); font-weight: 650; color: var(--pi-text-bright); }
+    .close {
+      background: none; border: none; color: var(--pi-dim); cursor: pointer;
+      font-size: var(--pi-text-lg); line-height: 1;
+      padding: var(--pi-space-xs) var(--pi-space-sm); border-radius: var(--pi-radius-inline);
+    }
+    .close:hover { background: var(--pi-surface-hover); color: var(--pi-text); }
 
-    .status { display: flex; align-items: center; gap: 10px; padding: 4px 16px 10px; min-height: 52px; }
-    .status-text { color: var(--pi-dim); font-size: var(--pi-text-sm); }
-    .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--pi-accent); }
-    .dot.working { background: var(--pi-dim); }
-    .dot.held, .dot.failed { background: none; border: 2px solid var(--pi-border); }
+    .body { padding: var(--pi-space-lg); display: flex; flex-direction: column; gap: var(--pi-space-md); }
+
+    /* The status line is the only thing on screen while listening, so it is
+       read at body size rather than as metadata. */
+    .status {
+      display: flex; align-items: center; gap: var(--pi-space-md); margin: 0;
+      min-height: 34px; color: var(--pi-text); font-size: var(--pi-text-md);
+    }
+    .dot { width: 10px; height: 10px; border-radius: var(--pi-radius-pill); flex: 0 0 auto; background: var(--pi-accent); }
+    .dot.working { background: var(--pi-muted); }
+    .dot.held, .dot.failed { background: none; border: 1px solid var(--pi-border); }
+
+    /* An open microphone is the one fact this surface cannot show any other
+       way: there is no level meter behind it, and a still dot looks the same
+       as a dead one. The app already uses ambient pulses for live status. */
+    .dot.listening { animation: listening 1.6s ease-in-out infinite; }
+    @keyframes listening { 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) {
+      .dot.listening { animation: none; }
+    }
 
     /* The number sits inside the ring, so the ring needs to be its containing
        block. Without the wrapper it would position against :host and land in
        the corner of the viewport. */
-    .ring-wrap { position: relative; display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; flex: 0 0 auto; }
-    .ring { position: absolute; inset: 0; width: 40px; height: 40px; transform: rotate(-90deg); }
-    .ring-track { fill: none; stroke: var(--pi-border-muted); stroke-width: 3; }
-    .ring-value { fill: none; stroke: var(--pi-accent); stroke-width: 3; stroke-linecap: round; }
-    .ring-number { position: relative; font-size: var(--pi-text-sm); color: var(--pi-dim); font-variant-numeric: tabular-nums; }
+    .ring-wrap { position: relative; display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; flex: 0 0 auto; }
+    .ring { position: absolute; inset: 0; width: 34px; height: 34px; transform: rotate(-90deg); }
+    .ring-track { fill: none; stroke: var(--pi-border-muted); stroke-width: 2.5; }
+    .ring-value { fill: none; stroke: var(--pi-accent); stroke-width: 2.5; stroke-linecap: round; }
+    .ring-number { position: relative; font-size: var(--pi-text-xs); color: var(--pi-text-secondary); font-variant-numeric: tabular-nums; }
 
     /* One target. A touch anywhere on it stops the send; a touch on the text
        also focuses it, which is the only way the keyboard ever appears here. */
-    .transcript { padding: 0 16px; }
-    .waiting { margin: 0; padding: 14px 12px; min-height: 96px; color: var(--pi-dim); border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-control); }
-    textarea {
-      width: 100%; box-sizing: border-box; resize: none; padding: 12px;
-      font: inherit; font-size: var(--pi-text-md); color: var(--pi-text);
-      background: var(--pi-surface); border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control);
+    /* Sized to the sentence, not to a guess. An empty box the height of a
+       paragraph reads as content that failed to arrive. */
+    .transcript {
+      display: block; width: 100%; box-sizing: border-box; resize: none;
+      field-sizing: content; min-height: 3lh; max-height: 40dvh;
+      padding: var(--pi-space-md);
+      font-family: inherit; color: var(--pi-text-bright);
+      /* Static 16 px: mobile browsers zoom the page when a focused input is
+         smaller, and this field is focused by the repair tap on purpose. */
+      font-size: var(--pi-control-font-size);
+      line-height: 1.45;
+      background: var(--pi-bg); border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control);
+    }
+    .transcript:focus-visible, .close:focus-visible, footer button:focus-visible {
+      outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px;
     }
 
-    .actions { display: flex; gap: 10px; padding: 14px 16px; }
-    .actions button { flex: 0 0 auto; padding: 16px 18px; font: inherit; border-radius: var(--pi-radius-control); border: 1px solid var(--pi-border); background: var(--pi-surface); color: var(--pi-text); cursor: pointer; }
-    .cancel, .send, .finish { flex: 1 1 auto; font-weight: 600; }
-    .send, .finish { background: var(--pi-selection-bg); }
+    /* A sheet sits on the bottom edge, so the gesture bar is its problem now. */
+    footer {
+      display: flex; gap: var(--pi-space-md);
+      padding: var(--pi-space-md) var(--pi-space-lg);
+      padding-block-end: calc(var(--pi-space-md) + var(--pi-app-safe-area-bottom, 0px));
+      border-block-start: 1px solid var(--pi-border-muted);
+    }
+    footer button {
+      flex: 0 0 auto; min-height: 48px; padding: 0 var(--pi-space-lg);
+      font-family: inherit; font-size: var(--pi-text-md);
+      border-radius: var(--pi-radius-control); cursor: pointer;
+    }
+    /* Bordered-neutral secondary, one filled accent primary. */
+    .discard { background: none; border: 1px solid var(--pi-border); color: var(--pi-text-secondary); }
+    .discard:hover { background: var(--pi-surface-hover); color: var(--pi-text); }
+    .cancel, .send, .finish {
+      flex: 1 1 auto; font-weight: 650; border: none;
+      background: var(--pi-accent); color: var(--pi-bg);
+    }
   `;
 }
 
