@@ -40,6 +40,12 @@ const TICK_MS = 80;
  *   stops it. Whisper mishears, and a wrong sentence must be catchable without
  *   being fast.
  *
+ * Finish and the countdown are two different gates and both are needed.
+ * `liveSpeechService.ts` disables automatic turn detection on purpose --
+ * "explicit completion is the product policy" -- so nothing will ever decide
+ * a turn is over. Finish ends the recording. The countdown then gates sending
+ * text that Whisper may have got wrong.
+ *
  * The countdown lives here and not in `PromptDictationController` because the
  * controller's job ends when it hands over a transcript. Putting the timer
  * there would hand the same countdown to the inline composer microphone, which
@@ -205,6 +211,27 @@ export class VoiceComposerDialog extends LitElement {
     this.controller = controller;
     controller.press();
     controller.release();
+    this.readCapability(capability, controller);
+  }
+
+  /**
+   * Ask the service what it can do, before claiming anything to the reader.
+   *
+   * The controller assumes `ready` until told otherwise, which would make the
+   * dialog promise that a pause ends the turn and then take it back a second
+   * later. Automatic turn detection is disabled by product policy, so that
+   * promise is one this dialog can never keep and must never make.
+   */
+  private readCapability(capability: ComposerDictationCapability, controller: PromptDictationController): void {
+    void capability.getStatus()
+      .then((status) => {
+        if (this.controller !== controller) return;
+        controller.setCapability(status.capability, "Speech dictation is unavailable.");
+      })
+      .catch(() => {
+        // A status that cannot be read is not itself a failure: capture may
+        // still work, and a real attempt reports a truer reason than this one.
+      });
   }
 
   /**

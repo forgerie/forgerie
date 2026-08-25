@@ -32,9 +32,9 @@ function speechCapability(options: { transcript?: string; captureError?: Error; 
 
   const capability: ComposerDictationCapability = {
     getStatus: () => Promise.resolve({
-      smartTurn: "ready",
+      smartTurn: options.turnDetection ?? "ready",
       whisper: "ready",
-      capability: "ready",
+      capability: options.turnDetection === "unavailable" ? "manual-only" : "ready",
       limits: {
         sampleRateHz: 16_000,
         maxTurnSeconds: SPEECH_POLICY.audio.maxTurnSeconds,
@@ -183,17 +183,23 @@ describe("VoiceComposerDialog", () => {
     expect(onSendText).not.toHaveBeenCalled();
   });
 
+  it("says up front that nothing will end the turn, rather than promising it will", async () => {
+    // `liveSpeechService.ts` disables automatic turn detection on purpose:
+    // "explicit completion is the product policy". The controller assumes
+    // ready until told otherwise, so a dialog that skipped the status read
+    // would promise a pause ends the turn and take it back a second later.
+    const speech = speechCapability({ transcript: "end this turn by hand", turnDetection: "unavailable" });
+    const { dialog } = await openDialog(speech.capability);
+
+    expect(dialog.shadowRoot?.textContent).toContain("Nothing will end this turn but you");
+    expect(dialog.shadowRoot?.textContent).not.toContain("sends itself");
+  });
+
   it("can still end a turn when nothing on the server will end it", async () => {
-    // The shipped speech service reports `smartTurn: "unavailable"` on at
-    // least one real deployment. Without a way to finish by hand, the dialog
-    // would listen until the 60 s cap with no way out but Discard.
     const speech = speechCapability({ transcript: "end this turn by hand", turnDetection: "unavailable" });
     const { dialog, onSendText } = await openDialog(speech.capability);
 
-    await speech.speak(dialog);
     expect(transcriptBox(dialog)).toBeNull();
-    expect(dialog.shadowRoot?.textContent).toContain("Nothing will end this turn but you");
-
     button(dialog, "finish")?.click();
     await vi.advanceTimersByTimeAsync(0);
     await dialog.updateComplete;
