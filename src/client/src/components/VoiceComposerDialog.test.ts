@@ -17,7 +17,7 @@ const SAMPLES = new Float32Array([0.2, 0.4, 0.2]);
  * returns text. Nothing about the controller is replaced, so a test that passes
  * here is a statement about the shipped wiring.
  */
-function speechCapability(options: { transcript?: string; captureError?: Error } = {}) {
+function speechCapability(options: { transcript?: string; captureError?: Error; turnDetection?: "ready" | "unavailable" } = {}) {
   let captureCount = 0;
   let pauseCandidate: PromptDictationCaptureOptions["onPauseCandidate"] | undefined;
 
@@ -50,7 +50,9 @@ function speechCapability(options: { transcript?: string; captureError?: Error }
       return Promise.resolve(capture);
     },
     speechApi: {
-      checkTurn: () => Promise.resolve({ complete: true, probability: 0.9, samples: SAMPLES.length }),
+      checkTurn: () => options.turnDetection === "unavailable"
+        ? Promise.reject(new Error("Smart Turn is unavailable."))
+        : Promise.resolve({ complete: true, probability: 0.9, samples: SAMPLES.length }),
       transcribe: () => Promise.resolve({ text: options.transcript ?? "" }),
     },
   };
@@ -179,6 +181,26 @@ describe("VoiceComposerDialog", () => {
 
     expect(dismissed()).toBe(true);
     expect(onSendText).not.toHaveBeenCalled();
+  });
+
+  it("can still end a turn when nothing on the server will end it", async () => {
+    // The shipped speech service reports `smartTurn: "unavailable"` on at
+    // least one real deployment. Without a way to finish by hand, the dialog
+    // would listen until the 60 s cap with no way out but Discard.
+    const speech = speechCapability({ transcript: "end this turn by hand", turnDetection: "unavailable" });
+    const { dialog, onSendText } = await openDialog(speech.capability);
+
+    await speech.speak(dialog);
+    expect(transcriptBox(dialog)).toBeNull();
+    expect(dialog.shadowRoot?.textContent).toContain("Nothing will end this turn but you");
+
+    button(dialog, "finish")?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    await dialog.updateComplete;
+
+    expect(transcriptBox(dialog)?.value).toBe("end this turn by hand");
+    await vi.advanceTimersByTimeAsync(VOICE_SEND_COUNTDOWN_MS);
+    expect(onSendText).toHaveBeenCalledWith("end this turn by hand");
   });
 
   it("says what went wrong rather than closing on the reader", async () => {

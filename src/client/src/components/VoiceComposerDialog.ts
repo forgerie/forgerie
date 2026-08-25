@@ -102,12 +102,29 @@ export class VoiceComposerDialog extends LitElement {
 
         <div class="actions">
           <button type="button" class="discard" @click=${() => { this.dismiss(); }}>Discard</button>
-          ${transcript === undefined
-            ? html`<button type="button" class="cancel" @click=${() => { this.dismiss(); }}>Cancel</button>`
-            : html`<button type="button" class="send" @click=${() => { this.send(); }}>Send &uarr;</button>`}
+          ${this.renderPrimaryAction(transcript)}
         </div>
       </modal-surface>
     `;
+  }
+
+  /**
+   * Finish, or Send, depending on whether there is anything to send yet.
+   *
+   * Finish is not a fallback. Turn detection can be unavailable on the server,
+   * over budget for the turn, or simply slower than a reader who has already
+   * stopped talking, and in every one of those cases the promise that a pause
+   * ends the turn is not kept. Without this control the dialog would listen
+   * until the 60 s cap with no way out but Discard.
+   */
+  private renderPrimaryAction(transcript: string | undefined) {
+    if (transcript !== undefined) {
+      return html`<button type="button" class="send" @click=${() => { this.send(); }}>Send &uarr;</button>`;
+    }
+    if (this.composerState.kind === "failed") {
+      return html`<button type="button" class="cancel" @click=${() => { this.dismiss(); }}>Close</button>`;
+    }
+    return html`<button type="button" class="finish" @click=${() => { this.finishTurn(); }}>Finish &uarr;</button>`;
   }
 
   /**
@@ -143,7 +160,7 @@ export class VoiceComposerDialog extends LitElement {
       case "listening":
         return state.endsItself
           ? "Listening. Stop talking and it sends itself."
-          : "Listening. Turn detection is off, so finish with Send.";
+          : "Listening. Nothing will end this turn but you.";
       case "working":
         return "Working out what you said.";
       case "counting":
@@ -188,6 +205,17 @@ export class VoiceComposerDialog extends LitElement {
     this.controller = controller;
     controller.press();
     controller.release();
+  }
+
+  /**
+   * End the turn now and transcribe what was said.
+   *
+   * The controller already models this: a press while the microphone is open
+   * completes from the current capture. It is the same action as tapping the
+   * composer microphone a second time.
+   */
+  private finishTurn(): void {
+    this.controller?.press();
   }
 
   private heard(transcript: string): void {
@@ -285,8 +313,8 @@ export class VoiceComposerDialog extends LitElement {
 
     .actions { display: flex; gap: 10px; padding: 14px 16px; }
     .actions button { flex: 0 0 auto; padding: 16px 18px; font: inherit; border-radius: var(--pi-radius-control); border: 1px solid var(--pi-border); background: var(--pi-surface); color: var(--pi-text); cursor: pointer; }
-    .cancel, .send { flex: 1 1 auto; font-weight: 600; }
-    .send { background: var(--pi-selection-bg); }
+    .cancel, .send, .finish { flex: 1 1 auto; font-weight: 600; }
+    .send, .finish { background: var(--pi-selection-bg); }
   `;
 }
 
