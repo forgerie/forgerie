@@ -5,9 +5,13 @@ import type { PromptDictationCaptureOptions } from "../controllers/promptDictati
 import type { SpeechCaptureSession } from "../speechCapture";
 import { SPEECH_POLICY } from "../../../shared/speechPolicy";
 import { VOICE_SEND_COUNTDOWN_MS } from "../appShell/voiceComposerState";
+import { VOICE_HEARING_WINDOW_MS } from "../appShell/voiceCaptureProgress";
 import { VoiceComposerDialog } from "./VoiceComposerDialog";
 
 const SAMPLES = new Float32Array([0.2, 0.4, 0.2]);
+
+/** Mirrors LISTEN_TICK_MS in the dialog: the rate a silence is noticed at. */
+const LISTEN_TICK_MS = 150;
 
 /**
  * A real speech capability whose audio and transcript are configured.
@@ -20,6 +24,7 @@ const SAMPLES = new Float32Array([0.2, 0.4, 0.2]);
 function speechCapability(options: { transcript?: string; captureError?: Error; turnDetection?: "ready" | "unavailable" } = {}) {
   let captureCount = 0;
   let pauseCandidate: PromptDictationCaptureOptions["onPauseCandidate"] | undefined;
+  let speechActivity: PromptDictationCaptureOptions["onSpeechActivity"] | undefined;
 
   const capture: SpeechCaptureSession = {
     actualSampleRateHz: SPEECH_POLICY.audio.sampleRateHz,
@@ -47,6 +52,7 @@ function speechCapability(options: { transcript?: string; captureError?: Error; 
       captureCount += 1;
       if (options.captureError !== undefined) return Promise.reject(options.captureError);
       pauseCandidate = captureOptions.onPauseCandidate;
+      speechActivity = captureOptions.onSpeechActivity;
       return Promise.resolve(capture);
     },
     speechApi: {
@@ -60,6 +66,12 @@ function speechCapability(options: { transcript?: string; captureError?: Error; 
   return {
     capability,
     captureCount: () => captureCount,
+    /** Report voiced audio, the way the capture worklet does while you talk. */
+    async voice(dialog: VoiceComposerDialog, seconds: number): Promise<void> {
+      const sampleCount = SPEECH_POLICY.audio.sampleRateHz * seconds;
+      speechActivity?.({ startSample: 0, endSample: sampleCount, sampleCount });
+      await dialog.updateComplete;
+    },
     /** Say a sentence and let the turn finish, exactly as a pause would. */
     async speak(dialog: VoiceComposerDialog): Promise<void> {
       pauseCandidate?.({ samples: SAMPLES, endSample: SAMPLES.length });
@@ -181,6 +193,33 @@ describe("VoiceComposerDialog", () => {
 
     expect(dismissed()).toBe(true);
     expect(onSendText).not.toHaveBeenCalled();
+  });
+
+  it("shows a voice arriving, so a reader is not talking into a still screen", async () => {
+    // "Listening" is a claim. This is the evidence, and it is driven by the
+    // voiced-audio reports the capture session already emits.
+    const speech = speechCapability();
+    const { dialog } = await openDialog(speech.capability);
+    expect(dialog.shadowRoot?.querySelector(".dot.hearing")).toBeNull();
+
+    await speech.voice(dialog, 2);
+
+    expect(dialog.shadowRoot?.querySelector(".dot.hearing")).not.toBeNull();
+    expect(dialog.shadowRoot?.textContent).toContain("Hearing you");
+    expect(dialog.shadowRoot?.textContent).toContain("0:02");
+  });
+
+  it("notices a silence that no event reports, and keeps what was said", async () => {
+    const speech = speechCapability();
+    const { dialog } = await openDialog(speech.capability);
+    await speech.voice(dialog, 3);
+
+    await vi.advanceTimersByTimeAsync(VOICE_HEARING_WINDOW_MS + LISTEN_TICK_MS);
+    await dialog.updateComplete;
+
+    expect(dialog.shadowRoot?.querySelector(".dot.hearing")).toBeNull();
+    expect(dialog.shadowRoot?.textContent).toContain("Gone quiet");
+    expect(dialog.shadowRoot?.textContent).toContain("0:03");
   });
 
   it("says up front that nothing will end the turn, rather than promising it will", async () => {

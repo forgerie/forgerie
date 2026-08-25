@@ -37,11 +37,16 @@ const MOUNT = (frame) => `
         smartTurn: "unavailable", whisper: "ready", capability: "manual-only",
         limits: { sampleRateHz: 16000, maxTurnSeconds: 60, maxTurnBytes: 3840000, endpointWindowSeconds: 8, endpointWindowBytes: 512000 },
       }),
-      createCaptureSession: () => Promise.resolve({
-        actualSampleRateHz: 16000, failure: undefined,
-        endpointWindow: () => new Float32Array(), finalize: () => new Float32Array(),
-        stopAndFinalize: never, abort: () => Promise.resolve(),
-      }),
+      createCaptureSession: (captureOptions) => {
+        window.__voice = (seconds) => captureOptions.onSpeechActivity({
+          startSample: 0, endSample: 16000 * seconds, sampleCount: 16000 * seconds,
+        });
+        return Promise.resolve({
+          actualSampleRateHz: 16000, failure: undefined,
+          endpointWindow: () => new Float32Array(), finalize: () => new Float32Array(),
+          stopAndFinalize: never, abort: () => Promise.resolve(),
+        });
+      },
       speechApi: { checkTurn: never, transcribe: never },
     };
     dialog.ownerKey = "local:capture";
@@ -50,6 +55,13 @@ const MOUNT = (frame) => `
     document.body.append(dialog);
 
     const frame = ${JSON.stringify(frame)};
+    if (frame === "hearing") {
+      // Report voiced audio the way the capture worklet does mid-sentence: one
+      // sentence so far, then a steady trickle so the hearing window stays open.
+      // A zero-sample report means silence and is ignored, which is the point.
+      setTimeout(() => window.__voice?.(4), 120);
+      setInterval(() => window.__voice?.(0.01), 100);
+    }
     if (frame === "counting" || frame === "held") {
       const heard = Object.getPrototypeOf(dialog).heard;
       heard.call(dialog, "Pull the queued compaction indicator out of the composer and put it on the turn real instead");
@@ -74,7 +86,7 @@ async function main() {
     await waitForDebugger(port);
     for (const scheme of SCHEMES) {
       for (const posture of POSTURES) {
-        for (const frame of ["listening", "counting", "held"]) {
+        for (const frame of ["listening", "hearing", "counting", "held"]) {
           await capture({ port, url, out, scheme, posture, frame });
         }
       }
