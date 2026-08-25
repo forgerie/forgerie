@@ -753,6 +753,10 @@ export const chatStyles = css`
   .rail-activity-row { min-width: 0; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--pi-border-muted); }
   .rail-activity-row:first-of-type { border-top: 1px solid var(--pi-border-muted); }
   .rail-activity-row:last-of-type { border-bottom: 0; }
+  .rail-thinking { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 7px; }
+  .rail-thinking .rail-activity-glyph { color: var(--pi-muted); font-size: var(--pi-text-xs); line-height: 1.6; }
+  .rail-thinking .rail-activity-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+  .rail-thinking formatted-text { display: block; min-width: 0; }
   .rail-activity-row .part:is(details) { border-top: 0; padding-top: 0; }
   .rail-activity-row .part:is(details) > summary { display: flex; align-items: baseline; gap: 7px; list-style: none; }
   .rail-activity-row .part:is(details) > summary::-webkit-details-marker { display: none; }

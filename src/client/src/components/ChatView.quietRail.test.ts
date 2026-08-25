@@ -105,7 +105,10 @@ describe("ChatView quiet rail", () => {
     expect(compact?.shadowRoot?.querySelectorAll("details")).toHaveLength(1);
     expect(ledger(view).querySelector("details.rail-full-activity")).toBeNull();
     expect(ledger(view).querySelector("details.event-group")).toBeNull();
-    expect(ledger(view).querySelector(".rail-flat-activity details.part summary")?.textContent).toBe("thinking");
+    const thinking = ledger(view).querySelector(".rail-thinking");
+    expect(thinking?.querySelector("details")).toBeNull();
+    expect(thinking?.querySelector(".rail-activity-label")?.textContent).toBe("Thinking:");
+    expect(Reflect.get(thinking?.querySelector("formatted-text") ?? {}, "text")).toBe("checking the implementation");
   });
 
   it("preserves grouped activity anchors without adding a duplicate message marker", async () => {

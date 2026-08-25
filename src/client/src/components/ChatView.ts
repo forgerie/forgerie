@@ -941,9 +941,20 @@ export class ChatView extends LitElement {
     const roleClass = message.role === "assistant" ? "msg assistant interim rail-activity-row" : `msg ${message.role} rail-activity-row`;
     return html`
       <article class=${roleClass} data-index=${index} data-scroll-anchor-id=${readingAnchorId}>
-        ${message.parts.map((part) => this.renderPart(part, message))}
+        ${message.parts.map((part) => this.renderRailActivityPart(part, message))}
       </article>
     `;
+  }
+
+  private renderRailActivityPart(part: ChatPart, message: ChatLine) {
+    if (part.type === "thinking") return html`
+      <div class="part rail-thinking">
+        <span class="rail-activity-glyph" aria-hidden="true">●</span>
+        <span class="rail-activity-label">Thinking:</span>
+        <formatted-text .text=${part.text}></formatted-text>
+      </div>
+    `;
+    return this.renderPart(part, message);
   }
 
   /**
