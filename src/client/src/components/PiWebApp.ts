@@ -109,6 +109,7 @@ import "./appShell/AppPanelControls";
 import "./appShell/AppPanelOpener";
 import "./appShell/AppPanelEdgeControl";
 import "./appShell/AppRadialMenu";
+import "./VoiceComposerDialog";
 import type { RadialMenuEntry } from "./appShell/AppRadialMenu";
 import "./appShell/AppRefreshControl";
 import { appStyles, NEW_SESSION_LABEL, renderNewSessionIcon, type ChatLine } from "./shared";
@@ -330,6 +331,9 @@ export class PiWebApp extends LitElement {
    * peek, a hold is a wheel, and the peek's still-timer gives up at exactly the
    * moment this one arms.
    */
+  /** Whether the wheel's dictate bearing has been released and not yet dismissed. */
+  @state() private voiceComposerOpen = false;
+
   private readonly radialMenu = new RadialMenuController(this, {
     slotCount: () => RADIAL_SLOT_COUNT,
     viewport: () => ({ width: this.clientWidth, height: this.clientHeight }),
@@ -2301,11 +2305,20 @@ export class PiWebApp extends LitElement {
 
     return slots.map((target, slot) => {
       if (target === undefined) return { slot, label: "Empty", icon: undefined, enabled: false };
+      // A held bearing draws like a free one. The reader is not told which
+      // empty directions the wheel might fill later; both open nothing.
+      if (target.kind === "vacant") return { slot, label: "Empty", icon: undefined, enabled: false };
       if (target.kind === "navigation") {
         return { slot, label: "Inbox", icon: renderRadialIcon("inbox"), enabled: true };
       }
       if (target.kind === "overflow") {
         return { slot, label: "More", icon: renderRadialIcon("more"), enabled: true };
+      }
+      if (target.kind === "dictate") {
+        // Enabled only with a session to speak to. Releasing here opens a live
+        // microphone, and a microphone with nowhere to send is a recording the
+        // reader cannot use.
+        return { slot, label: "Dictate", icon: undefined, enabled: this.state.selectedSession !== undefined };
       }
 
       const panel = panels.find((candidate) => candidate.id === target.tool);
@@ -2329,7 +2342,32 @@ export class PiWebApp extends LitElement {
     // Overflow opens the workspace sheet, whose tab strip already lists every
     // panel. The wheel does not need a second list of its own.
     if (target.kind === "overflow") { this.panelPeek.open("workspace"); return; }
+    // `radialEntries` reports a held bearing as disabled and the controller
+    // does not commit a disabled slot, so this never reaches that far.
+    if (target.kind === "vacant") return;
+    if (target.kind === "dictate") { this.voiceComposerOpen = true; return; }
     this.openWorkspaceTool(target.tool);
+  }
+
+  /**
+   * The wheel's one bearing, once released.
+   *
+   * Keyed on the session so switching destinations tears the dialog down
+   * rather than quietly re-pointing a live microphone at somewhere else.
+   */
+  private renderVoiceComposer() {
+    if (!this.voiceComposerOpen) return null;
+    const session = this.state.selectedSession;
+    if (session === undefined) return null;
+    const ownerKey = machineSessionKey(selectedMachineId(this.state), session.id);
+    return html`
+      <voice-composer-dialog
+        .capability=${this.sessionDictationCapability()}
+        .ownerKey=${ownerKey}
+        .onSendText=${(text: string) => { this.sendPrompt(text); }}
+        .onDismiss=${() => { this.voiceComposerOpen = false; }}
+      ></voice-composer-dialog>
+    `;
   }
 
   private renderRadialMenu() {
@@ -3663,6 +3701,7 @@ export class PiWebApp extends LitElement {
         @wheel=${(event: WheelEvent) => { this.panelPeek.onWheel(event); }}
       >
         ${this.renderRadialMenu()}
+        ${this.renderVoiceComposer()}
         ${this.renderPeekScrim()}
         ${this.renderPanelSurface("navigation")}
         ${this.renderNavigationPanelEdgeControl()}
@@ -3708,6 +3747,9 @@ export class PiWebApp extends LitElement {
           .onCloseProject=${(project: Project) => {
             this.setState({ workspaceManagementDialog: undefined });
             void this.projects.closeProject(project.id);
+          }}
+          .onAddProject=${() => {
+            this.setState({ projectDialogOpen: true });
           }}
           .onConfirmManage=${(workspace: Workspace) => { void this.confirmManageWorkspace(workspace); }}
           .onBack=${() => {
