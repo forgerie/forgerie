@@ -748,7 +748,7 @@ export const chatStyles = css`
   .rail-ledger { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
   .rail-ledger.flat { gap: 0; }
   .rail-ledger[hidden] { display: none; }
-  .rail-flat-activity { min-width: 0; display: grid; border-inline-start: 2px solid var(--calm-rule); padding-inline-start: 10px; }
+  .rail-flat-activity { min-width: 0; display: grid; }
   .rail-flat-group-anchor { display: block; width: 100%; height: 0; }
   .rail-activity-row { min-width: 0; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--pi-border-muted); }
   .rail-activity-row:first-of-type { border-top: 1px solid var(--pi-border-muted); }

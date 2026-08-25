@@ -41,7 +41,7 @@ export class TurnRailLedger extends LitElement {
 
   static override styles = css`
     :host { display: block; min-width: 0; color: var(--calm-ink-dim); font-size: var(--pi-text-sm); }
-    .ledger { display: grid; min-width: 0; border-inline-start: 2px solid var(--calm-rule); padding-inline-start: 10px; }
+    .ledger { display: grid; min-width: 0; }
     .row { min-width: 0; border-bottom: 1px solid var(--pi-border-muted); }
     .row:last-child { border-bottom: 0; }
     summary { display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 5px 0; cursor: pointer; list-style: none; }
