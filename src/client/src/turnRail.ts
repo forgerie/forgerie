@@ -30,35 +30,36 @@ export interface TurnLedgerRow extends TurnStep {
   readonly execution: ToolExecutionPart;
 }
 
+interface TurnRailAggregate {
+  readonly stepCount: number;
+  readonly fileCount: number;
+  readonly added: number;
+  readonly removed: number;
+  readonly retries: number;
+}
+
 /**
  * What the turn rail is, at any moment.
  *
  * Three cases, because a reader only ever asks three questions: is anything
- * happening, what broke, and what did the turn cost. Everything else is one
- * disclosure away and does not belong in the collapsed register.
+ * happening, what broke, and what did the turn cost. Active and settled turns
+ * share one aggregate contract, so their collapsed information cannot drift.
  */
 export type TurnRailState =
   | { readonly kind: "idle" }
-  | {
+  | (TurnRailAggregate & {
     readonly kind: "working";
     /** Unresolved failures, oldest first. The only thing that makes the rail grow. */
     readonly pins: readonly TurnStep[];
     /** The step running right now; absent between steps, when the agent is thinking. */
     readonly current?: TurnStep;
-    readonly stepCount: number;
-    readonly retries: number;
-  }
-  | {
+  })
+  | (TurnRailAggregate & {
     readonly kind: "settled";
     readonly outcome: "done" | "failed";
-    readonly stepCount: number;
-    readonly fileCount: number;
-    readonly added: number;
-    readonly removed: number;
-    readonly retries: number;
     /** Pins nothing superseded before the turn ended. Non-empty exactly when `outcome` is "failed". */
     readonly unresolved: readonly TurnStep[];
-  };
+  });
 
 /** Verbs whose target is a path on disk, and so count toward "files touched". */
 const FILE_VERBS = new Set(["read", "edit", "write"]);
@@ -78,28 +79,30 @@ export function turnRailState(groups: readonly ChatGroup[], live: boolean): Turn
   if (steps.length === 0) return { kind: "idle" };
 
   const { pins, retries } = resolvePins(steps);
+  const diff = countDiff(groups);
+  const aggregate = {
+    stepCount: steps.length,
+    fileCount: countFiles(steps),
+    added: diff.added,
+    removed: diff.removed,
+    retries,
+  };
   if (live) {
     const current = lastWorkingStep(steps);
     return {
       kind: "working",
       pins,
       ...(current === undefined ? {} : { current }),
-      stepCount: steps.length,
-      retries,
+      ...aggregate,
     };
   }
 
-  const diff = countDiff(groups);
   return {
     kind: "settled",
     // The receipt takes the worst standing state: one surviving pin makes the
     // whole turn failed, however much else landed.
     outcome: pins.length === 0 ? "done" : "failed",
-    stepCount: steps.length,
-    fileCount: countFiles(steps),
-    added: diff.added,
-    removed: diff.removed,
-    retries,
+    ...aggregate,
     unresolved: pins,
   };
 }

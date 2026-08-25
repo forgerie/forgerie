@@ -1,6 +1,6 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { TurnRailState, TurnStep } from "../turnRail";
+import type { TurnRailState } from "../turnRail";
 import "./SessionWorkingRuntime";
 
 /**
@@ -9,9 +9,12 @@ import "./SessionWorkingRuntime";
  * A turn used to cost roughly one screen of scroll per step, because every step
  * restated its absolute path and opened its own diff. This says the same work in
  * one line plus one line per unresolved failure, and puts the rest one tap away.
- * Success is a heartbeat that replaces itself; only failure is allowed to grow
- * the rail, because failure is the one status worth a glance.
+ * The live register and finished receipt share one information layout. The
+ * state marker and runtime change while work is active, but the totals stay in
+ * place when the turn settles.
  */
+type VisibleTurnRailState = Exclude<TurnRailState, { readonly kind: "idle" }>;
+
 @customElement("turn-rail-summary")
 export class TurnRailSummary extends LitElement {
   @property({ attribute: false }) state: TurnRailState | undefined;
@@ -22,62 +25,35 @@ export class TurnRailSummary extends LitElement {
   override render() {
     const state = this.state;
     if (state === undefined || state.kind === "idle") return null;
-    return html`
-      <div class=${`quiet-line ${state.kind}`}>
-        ${state.kind === "working" ? this.renderWorking(state) : this.renderSettled(state)}
-      </div>
-    `;
+    return html`<div class=${`quiet-line ${state.kind}`}>${this.renderSummary(state)}</div>`;
   }
 
-  /**
-   * While the turn runs, the transcript's liveness row already names the current
-   * step and carries its elapsed clock. Naming it again here put the same
-   * sentence on screen twice, so the working register keeps only what that row
-   * cannot say: failures it has not recovered from, how much work has happened,
-   * and the way into the ledger. `state.current` stays in the model because it
-   * is the turn's real state; this view simply is not the surface that shows it.
-   */
-  private renderWorking(state: Extract<TurnRailState, { kind: "working" }>) {
+  /** The transcript's liveness row names the current step, so this line owns totals only. */
+  private renderSummary(state: VisibleTurnRailState) {
     const label = this.open ? "Hide steps" : `Show all ${String(state.stepCount)} steps`;
-    return html`
-      ${state.pins.map((pin) => renderPin(pin, () => { this.toggle(); }))}
-      <button
-        type="button"
-        class="line heartbeat disclosure"
-        aria-expanded=${this.open ? "true" : "false"}
-        aria-label=${label}
-        title=${label}
-        @click=${() => { this.toggle(); }}
-      >
-        <span class="glyph" aria-hidden="true">●</span>
-        <span class="counts">${stepCountLabel(state.stepCount)}${retrySuffix(state.retries)}</span>
-        ${this.startedAt === "" ? null : html`<session-working-runtime class="turn-runtime" .startedAt=${this.startedAt}></session-working-runtime>`}
-        <span class="disclosure-glyph" aria-hidden="true">${this.open ? "▾" : "▸"}</span>
-      </button>
-    `;
-  }
-
-  private renderSettled(state: Extract<TurnRailState, { kind: "settled" }>) {
-    const label = this.open ? "Hide steps" : `Show all ${String(state.stepCount)} steps`;
+    const working = state.kind === "working";
+    const unresolved = working ? state.pins : state.unresolved;
+    const glyph = working ? "●" : state.outcome === "done" ? "✓" : "✗";
     return html`
       <button
         type="button"
-        class="line receipt disclosure"
+        class=${`line ${working ? "heartbeat" : "receipt"} disclosure`}
         aria-expanded=${this.open ? "true" : "false"}
-        aria-label=${label}
         title=${label}
         @click=${() => { this.toggle(); }}
       >
-        <span class="glyph" aria-hidden="true">${state.outcome === "done" ? "✓" : "✗"}</span>
+        <span class="sr-only">${label}. </span>
+        <span class="glyph" aria-hidden="true">${glyph}</span>
         <span class="counts">${stepCountLabel(state.stepCount)}${state.fileCount === 0 ? "" : ` · ${fileCountLabel(state.fileCount)}`}</span>
         ${state.added === 0 && state.removed === 0
           ? null
           : html`<span class="diff-stats"><b class="added">+${String(state.added)}</b><span>/</span><b class="removed">-${String(state.removed)}</b></span>`}
+        ${working && this.startedAt !== "" ? html`<session-working-runtime class="turn-runtime" .startedAt=${this.startedAt}></session-working-runtime>` : null}
         <span class="disclosure-glyph" aria-hidden="true">${this.open ? "▾" : "▸"}</span>
       </button>
-      ${state.unresolved.length === 0
+      ${unresolved.length === 0
         ? null
-        : html`<p class="sub unresolved">unresolved — ${state.unresolved.map((pin) => `${pin.verb} ${pin.label}`).join(", ")}</p>`}
+        : html`<p class="sub unresolved">unresolved — ${unresolved.map((pin) => `${pin.verb} ${pin.label}`).join(", ")}</p>`}
       ${state.retries === 0 ? null : html`<p class="sub">${retryLabel(state.retries)}</p>`}
     `;
   }
@@ -97,46 +73,20 @@ export class TurnRailSummary extends LitElement {
     .line:hover { color: var(--calm-ink); }
     .line:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
     .glyph { flex: 0 0 auto; color: var(--pi-muted); }
-    /* Failure is the only state that earns a tone, matching the tool card's rule. */
-    .pin .glyph { color: var(--calm-danger); }
-    .receipt.line .glyph { color: var(--pi-muted); }
-    .quiet-line.settled .line .glyph { color: var(--pi-muted); }
-    .verb { flex: 0 0 auto; color: var(--calm-ink-muted); font-weight: 500; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
     .counts { flex: 0 0 auto; color: var(--calm-ink-muted); }
-    .target {
-      flex: 1 1 auto; min-width: 0; overflow: hidden;
-      color: var(--pi-accent); text-overflow: ellipsis; white-space: nowrap;
-      font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      direction: ltr; text-align: left; unicode-bidi: isolate;
-    }
     .diff-stats { flex: 0 0 auto; display: inline-flex; gap: 3px; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
     .turn-runtime { flex: 0 0 auto; margin-inline-start: auto; color: var(--pi-muted); }
     .added { color: var(--pi-success); }
     .removed { color: var(--pi-danger); }
     .sub { margin: 0 0 0 16px; color: var(--pi-muted); font-size: var(--pi-text-sm); }
-    .sub.evidence, .sub.unresolved { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sub.unresolved { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .disclosure-glyph {
       flex: 0 0 auto; margin-inline-start: auto;
       color: var(--pi-muted); padding: 0 2px; line-height: 1;
     }
-    .diff-stats + .disclosure-glyph, .turn-runtime + .disclosure-glyph { margin-inline-start: 0; }
+    .diff-stats + .turn-runtime, .diff-stats + .disclosure-glyph, .turn-runtime + .disclosure-glyph { margin-inline-start: 0; }
     .line:hover .disclosure-glyph { color: var(--calm-ink-muted); }
-  `;
-}
-
-function renderPin(pin: TurnStep, onToggle?: () => void) {
-  return html`
-    <button
-      type="button"
-      class="line pin failed"
-      aria-label=${`Failed step: ${pin.verb} ${pin.label}`}
-      @click=${onToggle}
-    >
-      <span class="glyph" aria-hidden="true">✗</span>
-      <span class="verb">${pin.verb}</span>
-      <span class="target">${pin.label}</span>
-    </button>
-    ${pin.evidence === undefined ? null : html`<p class="sub evidence">${pin.evidence}</p>`}
   `;
 }
 
@@ -150,10 +100,6 @@ function fileCountLabel(count: number): string {
 
 function retryLabel(retries: number): string {
   return `${String(retries)} ${retries === 1 ? "retry" : "retries"}`;
-}
-
-function retrySuffix(retries: number): string {
-  return retries === 0 ? "" : ` · ${retryLabel(retries)}`;
 }
 
 declare global {

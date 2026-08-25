@@ -133,7 +133,7 @@ describe("ChatView quiet rail", () => {
     expect(markerIds).not.toContain("m:1");
   });
 
-  it("pins the failure it has not recovered from while the turn works", async () => {
+  it("reports unresolved work in the same form while the turn is active", async () => {
     const view = await transcript([
       said("user", "add the digest budget"),
       failedEdit,
@@ -141,10 +141,10 @@ describe("ChatView quiet rail", () => {
     ], true);
 
     const text = summaryText(view);
-    expect(text).toContain("edit");
-    expect(text).toContain("ExtensionPackageRepository.kt");
-    expect(text).toContain("Found 2 occurrences of edits[0].");
+    expect(text).toContain("unresolved — edit ExtensionPackageRepository.kt");
+    expect(text).not.toContain("Found 2 occurrences of edits[0].");
     expect(text).toContain("2 steps");
+    expect(text).toContain("2 files");
   });
 
   it("leaves naming the running step to the transcript's liveness row", async () => {
@@ -156,7 +156,7 @@ describe("ChatView quiet rail", () => {
     expect(summaryText(view)).not.toContain("only-in-the-running-step.ts");
   });
 
-  it("drops the pin once the same edit lands, keeping it as a retry", async () => {
+  it("shows the finished receipt information while the turn is active", async () => {
     const view = await transcript([
       said("user", "add the digest budget"),
       failedEdit,
@@ -165,8 +165,15 @@ describe("ChatView quiet rail", () => {
     ], true);
 
     const text = summaryText(view);
+    expect(text).toContain("3 steps");
+    expect(text).toContain("2 files");
+    expect(text).toContain("+2");
+    expect(text).toContain("-1");
     expect(text).toContain("1 retry");
     expect(text).not.toContain("Found 2 occurrences");
+    const disclosure = summary(view).shadowRoot?.querySelector<HTMLButtonElement>("button.disclosure");
+    expect(disclosure?.hasAttribute("aria-label")).toBe(false);
+    expect(disclosure?.querySelector(".sr-only")?.textContent).toBe("Show all 3 steps. ");
   });
 
   it("toggles the ledger when clicking anywhere on the summary line", async () => {

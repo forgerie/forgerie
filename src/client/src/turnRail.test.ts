@@ -66,17 +66,20 @@ describe("turnRailState", () => {
     expect(turnRailState([prose("the answer")], false)).toEqual({ kind: "idle" });
   });
 
-  it("names the running step and counts the steps so far", () => {
+  it("reports the same aggregate information while the turn is working", () => {
     const state = turnRailState([
-      work(exec("read", "success", { path: repositoryPath })),
-      work(exec("edit", "running", { path: repositoryPath })),
+      work(exec("edit", "success", { path: repositoryPath }, { details: { diff: "+added one\n+added two\n-removed one\n context" } })),
+      work(exec("read", "running", { path: "/repo/app/src/" })),
     ], true);
 
     expect(state.kind).toBe("working");
     if (state.kind !== "working") return;
-    expect(state.current?.verb).toBe("edit");
-    expect(state.current?.label).toBe("ExtensionPackageRepository.kt");
+    expect(state.current?.verb).toBe("read");
+    expect(state.current?.label).toBe("src/");
     expect(state.stepCount).toBe(2);
+    expect(state.fileCount).toBe(2);
+    expect(state.added).toBe(2);
+    expect(state.removed).toBe(1);
     expect(state.pins).toEqual([]);
   });
 
