@@ -746,13 +746,20 @@ export const chatStyles = css`
      rhythm when open and leaves the DOM untouched when closed, so opening it
      never reflows what the reader was already looking at. */
   .rail-ledger { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .rail-ledger.flat { gap: 0; }
   .rail-ledger[hidden] { display: none; }
+  .rail-flat-activity { min-width: 0; display: grid; border-inline-start: 2px solid var(--calm-rule); padding-inline-start: 10px; }
+  .rail-flat-group-anchor { display: block; width: 100%; height: 0; }
+  .rail-activity-row { min-width: 0; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--pi-border-muted); }
+  .rail-activity-row:first-of-type { border-top: 1px solid var(--pi-border-muted); }
+  .rail-activity-row:last-of-type { border-bottom: 0; }
+  .rail-activity-row .part:is(details) { border-top: 0; padding-top: 0; }
+  .rail-activity-row .part:is(details) > summary { display: flex; align-items: baseline; gap: 7px; list-style: none; }
+  .rail-activity-row .part:is(details) > summary::-webkit-details-marker { display: none; }
+  .rail-activity-row .part:is(details) > summary::before { content: "●"; flex: 0 0 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); }
   /* Zero-height seam after the ledger. Free readers who have already scrolled
      past it anchor here while live rows append above them. */
   .rail-growth-anchor { display: block; width: 100%; height: 0; }
-  .rail-full-activity { min-width: 0; color: var(--pi-muted); font-size: var(--pi-text-sm); }
-  .rail-full-activity > summary { cursor: pointer; }
-  .rail-full-activity-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin-top: 12px; }
   /* Interim narration is the agent working, not the agent answering. It keeps
      reading order but drops to the interface's small muted voice, so the
      promoted answer is the only assistant prose at full size. */

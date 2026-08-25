@@ -2,6 +2,7 @@ import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { ChatDisclosureController } from "../chatDisclosure";
+import { inheritChatLineTranscriptPosition } from "../chatLinePosition";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
 import { advanceLivenessClock, livenessBeatMs, livenessPhase, livenessStep, replyIsStreaming, type LivenessClock } from "../chatLiveness";
 import { turnLedgerRows, turnRailState } from "../turnRail";
@@ -879,17 +880,12 @@ export class ChatView extends LitElement {
           ?open=${open}
           @rail-toggle=${() => { this.toggleRail(railKey); }}
         ></turn-rail-summary>`}
-        <div class="rail-ledger" ?hidden=${!open}>
+        <div class=${rows.length === 0 ? "rail-ledger" : "rail-ledger flat"} ?hidden=${!open}>
           ${rows.length === 0
             ? repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))
             : html`
               <turn-rail-ledger .rows=${rows}></turn-rail-ledger>
-              <details class="rail-full-activity">
-                <summary>Thinking and other activity</summary>
-                <div class="rail-full-activity-body">
-                  ${repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))}
-                </div>
-              </details>
+              ${this.renderFlatRailActivity(groups, liveTailGroup)}
             `}
         </div>
         <span class="rail-growth-anchor" data-rail-growth-anchor=${railKey} aria-hidden="true"></span>
@@ -902,6 +898,52 @@ export class ChatView extends LitElement {
     const next = new Set(this.expandedRails);
     if (!next.delete(railKey)) next.add(railKey);
     this.expandedRails = next;
+  }
+
+  /** Other activity joins the compact tool rows without restoring the old group folds. */
+  private renderFlatRailActivity(groups: readonly ChatGroup[], liveTailGroup: ChatGroup | undefined) {
+    const hasActivity = groups.some((group) => group.kind !== "group"
+      || group.messages.some((message) => message.parts.some((part) => part.type !== "toolExecution" && part.type !== "empty")));
+    if (!hasActivity) return null;
+
+    return html`
+      <div class="rail-flat-activity">
+        ${groups.map((group) => {
+          if (group.kind !== "group") return this.renderRailActivityMessage(group.message, group.index);
+          const messages = group.messages.map((message) => inheritChatLineTranscriptPosition(message, {
+            ...message,
+            parts: message.parts.filter((part) => part.type !== "toolExecution" && part.type !== "empty"),
+          }));
+          return html`
+            ${this.renderScrollMarker(this.groupScrollMarkerId(group.endIndex))}
+            <span class="rail-flat-group-anchor" data-scroll-anchor-id=${this.groupReadingAnchorKey(group.messages, group.startIndex, group === liveTailGroup)}></span>
+            ${messages.map((message, offset) => message.parts.length === 0
+              ? null
+              : this.renderGroupedRailActivityMessage(message, group.startIndex + offset))}
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  private renderRailActivityMessage(message: ChatLine, index: number) {
+    return html`
+      ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
+      ${this.renderRailActivityRow(message, index, this.messageReadingAnchorKey(message, index))}
+    `;
+  }
+
+  private renderGroupedRailActivityMessage(message: ChatLine, index: number) {
+    return this.renderRailActivityRow(message, index, this.eventReadingAnchorKey(message, index));
+  }
+
+  private renderRailActivityRow(message: ChatLine, index: number, readingAnchorId: string | undefined) {
+    const roleClass = message.role === "assistant" ? "msg assistant interim rail-activity-row" : `msg ${message.role} rail-activity-row`;
+    return html`
+      <article class=${roleClass} data-index=${index} data-scroll-anchor-id=${readingAnchorId}>
+        ${message.parts.map((part) => this.renderPart(part, message))}
+      </article>
+    `;
   }
 
   /**

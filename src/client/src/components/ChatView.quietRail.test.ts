@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
+import { setChatLineTranscriptPosition } from "../chatLinePosition";
 import { ChatView } from "./ChatView";
 import type { ChatLine, ToolExecutionPart } from "./shared";
 import type { TurnRailSummary } from "./TurnRailSummary";
@@ -82,8 +83,13 @@ describe("ChatView quiet rail", () => {
     expect(summaryText(view)).not.toContain(repositoryPath);
   });
 
-  it("opens the ledger in place when the reader asks for it", async () => {
-    const view = await transcript([said("user", "q"), succeededEdit, said("assistant", "the answer")]);
+  it("opens one flat ledger of steps and other activity", async () => {
+    const view = await transcript([
+      said("user", "q"),
+      { role: "assistant", parts: [{ type: "thinking", text: "checking the implementation" }] },
+      succeededEdit,
+      said("assistant", "the answer"),
+    ]);
     const disclosure = summary(view).shadowRoot?.querySelector("button.disclosure");
     if (!(disclosure instanceof HTMLButtonElement)) throw new Error("The register rendered no disclosure");
 
@@ -97,7 +103,31 @@ describe("ChatView quiet rail", () => {
     const compact = ledger(view).querySelector("turn-rail-ledger");
     expect(compact).not.toBeNull();
     expect(compact?.shadowRoot?.querySelectorAll("details")).toHaveLength(1);
-    expect(ledger(view).querySelector("details.rail-full-activity details.event-group")).not.toBeNull();
+    expect(ledger(view).querySelector("details.rail-full-activity")).toBeNull();
+    expect(ledger(view).querySelector("details.event-group")).toBeNull();
+    expect(ledger(view).querySelector(".rail-flat-activity details.part summary")?.textContent).toBe("thinking");
+  });
+
+  it("preserves grouped activity anchors without adding a duplicate message marker", async () => {
+    const positionedWork = setChatLineTranscriptPosition<ChatLine>({
+      role: "assistant",
+      parts: [
+        { type: "thinking", text: "checking the implementation" },
+        { type: "toolExecution", toolName: "read", summary: "", status: "success", args: { path: "/repo/file.ts" } },
+      ],
+    }, { messageIndex: 4, lineIndex: 0, segmentIndex: 0 });
+    const view = await transcript([said("user", "q"), positionedWork, said("assistant", "the answer")]);
+    const disclosure = summary(view).shadowRoot?.querySelector("button.disclosure");
+    if (!(disclosure instanceof HTMLButtonElement)) throw new Error("The register rendered no disclosure");
+
+    disclosure.click();
+    await view.updateComplete;
+    await view.updateComplete;
+
+    expect(ledger(view).querySelector<HTMLElement>(".rail-activity-row")?.dataset["scrollAnchorId"]).toBe("event:4:0:0");
+    const markerIds = [...shadow(view).querySelectorAll<HTMLElement>(".scroll-marker")].map((marker) => marker.dataset["markerId"]);
+    expect(markerIds.filter((id) => id === "g:1")).toHaveLength(1);
+    expect(markerIds).not.toContain("m:1");
   });
 
   it("pins the failure it has not recovered from while the turn works", async () => {
