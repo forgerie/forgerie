@@ -2118,6 +2118,54 @@ describe("SessionController session launch", () => {
       expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
     });
   });
+
+  it("retries prompt-resource reconciliation after a digest failure", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-resource-digest-retry", path: "/tmp/started-resource-digest-retry.jsonl" };
+    const startRequest = deferred<SessionInfo>();
+    const resourceRequest = deferred<{ accepted: true; deliveryFingerprint: string }>();
+    const socket = new EmitSocket();
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "b".repeat(64) };
+    const canonicalText = "Expanded prompt after digest retry";
+    const receipt = await fingerprintPromptResourceDeliveryText(canonicalText);
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => startRequest.promise,
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      runPromptResourceCommand: () => resourceRequest.promise,
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket },
+    );
+
+    const launch = controller.launchSession({ text: "/review retry", promptResourceCommandIdentity: identity });
+    startRequest.resolve(started);
+    await vi.waitFor(() => {
+      expect(state.selectedSession?.id).toBe(started.id);
+    });
+
+    resourceRequest.resolve({ accepted: true, deliveryFingerprint: receipt });
+    await launch;
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeDefined();
+
+    const digest = vi.spyOn(globalThis.crypto.subtle, "digest").mockRejectedValueOnce(new Error("digest unavailable"));
+    socket.emit({ type: "message.append", message: { role: "user", content: canonicalText } });
+    controller.flushPendingUpdates();
+    await vi.waitFor(() => { expect(digest).toHaveBeenCalled(); });
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeDefined();
+
+    digest.mockRestore();
+    socket.emit({ type: "message.append", message: { role: "assistant", content: "retry reconciliation" } });
+    controller.flushPendingUpdates();
+    await vi.waitFor(() => {
+      expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
+    });
+  });
 });
 
 function pendingLaunchText(controller: SessionController, sessionId: string): string | undefined {

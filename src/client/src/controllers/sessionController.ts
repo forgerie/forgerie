@@ -2134,6 +2134,15 @@ export class SessionController {
       if (queuedMessages !== undefined && queuedMessages !== messages) {
         this.reconcilePendingSessionLaunchProjection(machineId, sessionId, queuedMessages);
       }
+    }).catch(() => {
+      if (this.pendingSessionLaunchProjections.get(key) !== projection) return;
+      const queuedMessages = projection.receiptReconciliationQueuedMessages;
+      projection.receiptReconciliationPending = false;
+      projection.receiptReconciliationQueuedMessages = undefined;
+      projection.receiptCheckedTexts.clear();
+      if (queuedMessages !== undefined && queuedMessages !== messages) {
+        this.reconcilePendingSessionLaunchProjection(machineId, sessionId, queuedMessages);
+      }
     });
   }
 
