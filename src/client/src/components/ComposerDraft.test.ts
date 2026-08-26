@@ -58,6 +58,35 @@ describe("ComposerDraft", () => {
     expect(shiftEnterDraft.view?.state.doc.toString()).toBe("first line\n");
   });
 
+  it("keeps Shift+Enter as a new line when the Android IME drops or interleaves the Shift keydown", async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = matchMedia(query);
+      Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const draft = await mountDraft({ onSubmit });
+    const content = draft.view?.contentDOM;
+    if (content === undefined) throw new Error("Expected CodeMirror to mount");
+    draft.replaceText("first line");
+
+    // A hardware Shift chord from earlier in the session, fully released.
+    press(draft, "Shift");
+    content.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+    // Android IME placeholder keydown (keyCode 229) in front of the chord.
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", bubbles: true, cancelable: true }));
+    // The chord itself arrives without its paired Shift keydown.
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(draft.view?.state.doc.toString()).toBe("first line\n");
+
+    // Plain Enter still sends: autocap phantom shift is shiftKey=false here.
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledWith({ text: "first line\n" }, undefined);
+  });
+
   it("mounts in chat and modal hosts with the same runtime contract", async () => {
     const runtime = runtimeWith(({ kind, from, to }) => kind === "command" ? [{ kind: "command", replaceFrom: from, replaceTo: to, insertText: "/skill:review", detail: "skill" }] : []);
     const chatSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");

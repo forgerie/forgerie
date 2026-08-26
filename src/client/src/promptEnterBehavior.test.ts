@@ -4,7 +4,12 @@ import {
   shouldSendPromptOnEnterShortcut,
   shouldUsePromptEnterShiftShortcut,
   type PromptEnterMedia,
+  type PromptEnterShiftEvidence,
 } from "./promptEnterBehavior";
+
+function evidence(explicitShiftKeyActive: boolean, hardwareShiftKeySeen = false): PromptEnterShiftEvidence {
+  return { explicitShiftKeyActive, hardwareShiftKeySeen };
+}
 
 describe("promptEnterBehavior", () => {
   it("uses the expected mobile media query", () => {
@@ -17,10 +22,17 @@ describe("promptEnterBehavior", () => {
   });
 
   it("ignores implicit Shift state on mobile-like keyboards", () => {
-    expect(shouldUsePromptEnterShiftShortcut(false, true, { matches: true } satisfies PromptEnterMedia)).toBe(false);
-    expect(shouldUsePromptEnterShiftShortcut(true, false, { matches: true } satisfies PromptEnterMedia)).toBe(false);
-    expect(shouldUsePromptEnterShiftShortcut(true, true, { matches: true } satisfies PromptEnterMedia)).toBe(true);
-    expect(shouldUsePromptEnterShiftShortcut(true, false, { matches: false } satisfies PromptEnterMedia)).toBe(true);
-    expect(shouldUsePromptEnterShiftShortcut(true, false, undefined)).toBe(true);
+    expect(shouldUsePromptEnterShiftShortcut(false, evidence(true, true), { matches: true } satisfies PromptEnterMedia)).toBe(false);
+    expect(shouldUsePromptEnterShiftShortcut(true, evidence(false), { matches: true } satisfies PromptEnterMedia)).toBe(false);
+    expect(shouldUsePromptEnterShiftShortcut(true, evidence(true), { matches: true } satisfies PromptEnterMedia)).toBe(true);
+    expect(shouldUsePromptEnterShiftShortcut(true, evidence(false), { matches: false } satisfies PromptEnterMedia)).toBe(true);
+    expect(shouldUsePromptEnterShiftShortcut(true, evidence(false), undefined)).toBe(true);
+  });
+
+  it("trusts Shift+Enter on mobile once a hardware Shift keydown has ever been seen", () => {
+    // Android IMEs drop or interleave the per-chord Shift keydown, so past
+    // hardware evidence must stand in for the currently-held flag.
+    expect(shouldUsePromptEnterShiftShortcut(true, evidence(false, true), { matches: true } satisfies PromptEnterMedia)).toBe(true);
+    expect(shouldUsePromptEnterShiftShortcut(false, evidence(false, true), { matches: true } satisfies PromptEnterMedia)).toBe(false);
   });
 });

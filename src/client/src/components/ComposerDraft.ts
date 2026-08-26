@@ -110,6 +110,8 @@ export class ComposerDraft extends LitElement {
   private readonly placeholderCompartment = new Compartment();
   private readonly mobilePromptEnterMedia = createMobilePromptEnterMedia();
   private explicitShiftKeyActive = false;
+  /** Sticky for the editor's lifetime: only hardware keyboards dispatch a Shift keydown. */
+  private hardwareShiftKeySeen = false;
   private mutationVersion = 0;
   private lastDisplayState: ComposerDraftDisplayState | undefined;
   private readonly restoredSeedIds = new Set<string>();
@@ -856,15 +858,22 @@ export class ComposerDraft extends LitElement {
     if (this.isDictationActive()) return true;
     if (event.key === "Shift") {
       this.explicitShiftKeyActive = true;
+      this.hardwareShiftKeySeen = true;
       return false;
     }
     if (event.defaultPrevented || event.isComposing || view.composing) return false;
     if (event.key !== "Enter") {
-      this.explicitShiftKeyActive = false;
+      // Android IMEs interleave placeholder keydowns (keyCode 229) between real
+      // keys; they must not wipe a genuinely held Shift before Enter arrives.
+      if (!isImePlaceholderKey(event.key)) this.explicitShiftKeyActive = false;
       return false;
     }
 
-    const shiftKey = shouldUsePromptEnterShiftShortcut(event.shiftKey, this.explicitShiftKeyActive, this.mobilePromptEnterMedia);
+    const shiftKey = shouldUsePromptEnterShiftShortcut(
+      event.shiftKey,
+      { explicitShiftKeyActive: this.explicitShiftKeyActive, hardwareShiftKeySeen: this.hardwareShiftKeySeen },
+      this.mobilePromptEnterMedia,
+    );
     this.explicitShiftKeyActive = false;
     return this.handleEditorEnter(view, shiftKey);
   }
@@ -1138,4 +1147,9 @@ const codeLikeInputAssistanceAttributes: Record<string, string> = {
 
 function inputAssistanceContentAttributes(inputMode: InputMode): Record<string, string> {
   return inputMode.kind === "normal" ? proseInputAssistanceAttributes : codeLikeInputAssistanceAttributes;
+}
+
+/** Android IMEs dispatch these placeholder keydowns (keyCode 229) instead of real key values. */
+function isImePlaceholderKey(key: string): boolean {
+  return key === "Unidentified" || key === "Process";
 }
