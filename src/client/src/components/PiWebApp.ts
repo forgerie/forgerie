@@ -3760,7 +3760,7 @@ export class PiWebApp extends LitElement {
             void this.projects.closeProject(project.id);
           }}
           .onAddProject=${() => {
-            this.setState({ projectDialogOpen: true });
+            this.setState({ workspaceManagementDialog: undefined, projectDialogOpen: true });
           }}
           .onConfirmManage=${(workspace: Workspace) => { void this.confirmManageWorkspace(workspace); }}
           .onBack=${() => {

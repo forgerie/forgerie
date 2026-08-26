@@ -625,6 +625,7 @@ export class SessionInboxPanel extends LitElement {
         <button
           role="menuitem"
           data-action="manage-workspaces"
+          title="Manage projects and workspaces"
           @click=${() => { this.runMenuCommand(this.onManageWorkspaces); }}
         >Manage projects and workspaces</button>
         ${this.onShowActions === undefined ? nothing : html`

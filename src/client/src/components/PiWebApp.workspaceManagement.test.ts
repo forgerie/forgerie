@@ -15,6 +15,25 @@ afterEach(() => {
 });
 
 describe("PiWebApp project management", () => {
+  it("opens the project dialog when requested from the management dialog", () => {
+    const app = new PiWebApp();
+    Reflect.set(app, "state", {
+      ...initialAppState(),
+      projects: [project],
+      workspaceManagementDialog: { step: "project" },
+      projectDialogOpen: false,
+    } satisfies AppState);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(app.render(), container);
+    const dialog = required(container.querySelector<WorkspaceManagementDialog>("workspace-management-dialog"), "workspace management dialog");
+
+    dialog.onAddProject?.();
+
+    expect(appState(app)).toMatchObject({ projectDialogOpen: true });
+    expect(appState(app).workspaceManagementDialog).toBeUndefined();
+  });
+
   it("closes the management dialog before closing a project", () => {
     const app = new PiWebApp();
     const closeProject = vi.fn(() => Promise.resolve());

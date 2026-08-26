@@ -28,13 +28,18 @@ describe("WorkspaceManagementDialog workspace management", () => {
     expect(onConfirmManage).toHaveBeenCalledWith(workspace);
   });
 
-  it("offers project selection and close actions from the project step", async () => {
+  it("offers project selection, creation, and close actions from the project step", async () => {
     const onSelectProject = vi.fn();
     const onCloseProject = vi.fn();
+    const onAddProject = vi.fn();
     vi.stubGlobal("confirm", vi.fn(() => true));
-    const dialog = await mount({ dialogState: { step: "project" }, onSelectProject, onCloseProject });
+    const dialog = await mount({ dialogState: { step: "project" }, onSelectProject, onCloseProject, onAddProject });
+    const root = required(dialog.shadowRoot, "shadow root");
     const list = await projectList(dialog);
     const row = projectRow(list);
+
+    required(root.querySelector<HTMLButtonElement>("[data-action='add-project']"), "add project button").click();
+    expect(onAddProject).toHaveBeenCalledOnce();
 
     row.click();
     required(row.querySelector<HTMLButtonElement>(".action-menu-toggle"), "project actions button").click();
@@ -44,6 +49,17 @@ describe("WorkspaceManagementDialog workspace management", () => {
     expect(onSelectProject).toHaveBeenCalledWith(project);
     expect(confirm).toHaveBeenCalledWith("Close Forgerie?\n\nThis only removes it from Forgerie; it will not change the project folder.");
     expect(onCloseProject).toHaveBeenCalledWith(project);
+  });
+
+  it("offers project creation from the empty state when no projects exist", async () => {
+    const onAddProject = vi.fn();
+    const dialog = await mount({ dialogState: { step: "project" }, projects: [], onAddProject });
+    const root = required(dialog.shadowRoot, "shadow root");
+
+    expect(root.querySelector("[data-empty-projects]")?.textContent).toContain("No projects found. Add a project first.");
+    expect(root.querySelectorAll("[data-action='add-project']")).toHaveLength(1);
+    required(root.querySelector<HTMLButtonElement>("[data-empty-projects] [data-action='add-project']"), "empty state add project button").click();
+    expect(onAddProject).toHaveBeenCalledOnce();
   });
 
   it("preserves loading, error, back, and cancel contracts", async () => {
@@ -73,17 +89,20 @@ const workspace: Workspace = { id: "workspace", projectId: project.id, path: pro
 
 async function mount(properties: {
   dialogState: WorkspaceManagementDialogState;
+  projects?: Project[];
   onSelectProject?: (project: Project) => void;
   onCloseProject?: (project: Project) => void;
+  onAddProject?: () => void;
   onConfirmManage?: (workspace: Workspace) => void;
   onBack?: () => void;
   onCancel?: () => void;
 }): Promise<WorkspaceManagementDialog> {
   const dialog = new WorkspaceManagementDialog();
   dialog.dialogState = properties.dialogState;
-  dialog.projects = [project];
+  dialog.projects = properties.projects ?? [project];
   if (properties.onSelectProject !== undefined) dialog.onSelectProject = properties.onSelectProject;
   if (properties.onCloseProject !== undefined) dialog.onCloseProject = properties.onCloseProject;
+  if (properties.onAddProject !== undefined) dialog.onAddProject = properties.onAddProject;
   if (properties.onConfirmManage !== undefined) dialog.onConfirmManage = properties.onConfirmManage;
   if (properties.onBack !== undefined) dialog.onBack = properties.onBack;
   if (properties.onCancel !== undefined) dialog.onCancel = properties.onCancel;

@@ -31,6 +31,8 @@ export class WorkspaceManagementDialog extends LitElement {
   @property({ attribute: false }) onSelectProject?: (project: Project) => void;
   /** Called after the user confirms that Forgerie should close a project. */
   @property({ attribute: false }) onCloseProject?: (project: Project) => void;
+  /** Called when the user requests adding/creating a new project. */
+  @property({ attribute: false }) onAddProject?: () => void;
   /** Called when the user chooses the workspace to manage. */
   @property({ attribute: false }) onConfirmManage?: (workspace: Workspace) => void;
   /** Called when the user navigates back from workspace to project step. */
@@ -81,7 +83,13 @@ export class WorkspaceManagementDialog extends LitElement {
         ${this.projects.length === 0
           ? html`
               <div class="empty-state" data-empty-projects>
-                No projects found. Add a project first.
+                <p>No projects found. Add a project first.</p>
+                <button
+                  class="footer-btn primary"
+                  data-action="add-project"
+                  title="Add project"
+                  @click=${() => { this.onAddProject?.(); }}
+                >Add project</button>
               </div>
             `
           : html`
@@ -92,6 +100,14 @@ export class WorkspaceManagementDialog extends LitElement {
               ></project-list>
             `}
         <footer class="dialog-footer">
+          ${this.projects.length === 0 ? null : html`
+            <button
+              class="footer-btn primary"
+              data-action="add-project"
+              title="Add project"
+              @click=${() => { this.onAddProject?.(); }}
+            >Add project</button>
+          `}
           <button
             class="footer-btn"
             data-action="cancel"
@@ -329,6 +345,10 @@ export class WorkspaceManagementDialog extends LitElement {
       font-size: var(--pi-text-md);
     }
 
+    .empty-state p {
+      margin: 0 0 var(--pi-space-lg);
+    }
+
     .error-state {
       padding: 16px;
     }
@@ -365,6 +385,17 @@ export class WorkspaceManagementDialog extends LitElement {
 
     .footer-btn:hover {
       background: var(--pi-surface-hover, #202225);
+    }
+
+    .footer-btn.primary {
+      color: var(--pi-bg, #111214);
+      background: var(--pi-accent, #6699e0);
+      border-color: var(--pi-accent-border, var(--pi-accent, #6699e0));
+      font-weight: 500;
+    }
+
+    .footer-btn.primary:hover {
+      background: color-mix(in srgb, var(--pi-accent, #6699e0) 88%, var(--pi-text-bright));
     }
 
     .footer-btn:focus-visible {
