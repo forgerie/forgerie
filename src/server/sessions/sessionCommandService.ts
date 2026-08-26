@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { SessionUiEvent } from "../../shared/apiTypes.js";
 import { parseLeadingSlashCommand } from "../../shared/promptResourceCommand.js";
+import { parsePromptDraft, type PromptLibrary } from "../resources/promptLibrary.js";
 import type { ClientCommandResult, ClientSession, ClientSessionTreeSnapshot } from "../types.js";
 import { BUILTIN_COMMANDS, isBuiltinCommand } from "./builtinCommands.js";
 import { resolveCanonicalCommandSource } from "./commandCatalog.js";
@@ -93,6 +94,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     private readonly events: CommandEventPublisher,
     private readonly lifecycle: SessionCommandLifecycle<TSession> = {},
     private readonly naming: SessionCommandNaming = {},
+    private readonly promptLibrary?: PromptLibrary,
   ) {}
 
   async run(sessionId: string, text: string, options: SessionCommandRunOptions<TSession> = {}): Promise<ClientCommandResult> {
@@ -131,6 +133,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     if (name === "clone") return this.clone(active, rest);
     if (name === "fork") return this.fork(active);
     if (name === "tree") return this.tree(session);
+    if (name === "prompt-new") return await this.savePrompt(session, parsed.args);
 
     return { type: "unsupported", message: `/${name} is not implemented in the web UI yet` };
   }
@@ -217,6 +220,30 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
       return { type: "unsupported", message: `Reload failed: ${message}` };
     }
     return { type: "done", message: "Session runtime resources reloaded. Extensions, skills, prompt templates, themes, and context/system prompt files are refreshed for this session. Reload the browser page separately for Forgerie browser plugin changes." };
+  }
+
+  /**
+   * Writes the message body to the agent profile's prompt library, then
+   * reloads session resources so the new `/<name>` works in this session
+   * without a restart. A busy session still gets the file; only activation waits.
+   */
+  private async savePrompt(session: TSession, args: string): Promise<ClientCommandResult> {
+    if (this.promptLibrary === undefined) return { type: "unsupported", message: "/prompt-new is not available for this session runtime." };
+    const result = await this.promptLibrary.save(parsePromptDraft(args));
+    if (result.kind !== "saved") return { type: "unsupported", message: result.message };
+    const activated = await this.activateSavedPrompt(session);
+    const activation = activated ? `Use /${result.name} now.` : `Run /reload to use /${result.name} in this session.`;
+    return { type: "done", message: `Saved /${result.name} → ${result.path}. ${activation}` };
+  }
+
+  private async activateSavedPrompt(session: TSession): Promise<boolean> {
+    if (this.lifecycle.reloadSession === undefined || this.hasActiveWork(session)) return false;
+    try {
+      await this.lifecycle.reloadSession(session);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async clone(active: CommandActiveSession<TSession>, requestedName: string): Promise<ClientCommandResult> {

@@ -1,5 +1,9 @@
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionUiEvent } from "../../shared/apiTypes.js";
+import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
 import { SessionCommandService, type CommandActiveSession, type CommandSession } from "./sessionCommandService.js";
 
 interface TestCommandSession extends CommandSession {
@@ -190,6 +194,58 @@ describe("SessionCommandService", () => {
       message: "Cannot reload while the session is active. Stop current activity before reloading.",
     });
     expect(reloadSession).not.toHaveBeenCalled();
+  });
+
+  it("saves /prompt-new into the agent prompt library and activates it by reloading", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "forgerie-prompt-new-"));
+    const active = activeSession();
+    const reloadSession = vi.fn(async () => { await Promise.resolve(); });
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher(), { reloadSession }, {}, new AgentDirPromptLibrary(agentDir));
+
+    const path = join(agentDir, "prompts", "tell.md");
+    await expect(service.run("s1", "/prompt-new tell\nSpeak plainly.")).resolves.toEqual({
+      type: "done",
+      message: `Saved /tell → ${path}. Use /tell now.`,
+    });
+    await expect(readFile(path, "utf8")).resolves.toBe("---\ndescription: Speak plainly.\n---\n\nSpeak plainly.\n");
+    expect(reloadSession).toHaveBeenCalledWith(active.runtime.session);
+  });
+
+  it("still saves /prompt-new while the session is busy, and says how to activate it", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "forgerie-prompt-new-"));
+    const active = activeSession({ isStreaming: true });
+    const reloadSession = vi.fn(async () => { await Promise.resolve(); });
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher(), { reloadSession }, {}, new AgentDirPromptLibrary(agentDir));
+
+    const result = await service.run("s1", "/prompt-new tell Speak plainly.");
+
+    if (result.type !== "done") throw new Error("Expected done result");
+    expect(result.message).toContain("Run /reload to use /tell in this session.");
+    await expect(readFile(join(agentDir, "prompts", "tell.md"), "utf8")).resolves.toContain("Speak plainly.");
+    expect(reloadSession).not.toHaveBeenCalled();
+  });
+
+  it("reports /prompt-new refusals without reloading the session", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "forgerie-prompt-new-"));
+    const active = activeSession();
+    const reloadSession = vi.fn(async () => { await Promise.resolve(); });
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher(), { reloadSession }, {}, new AgentDirPromptLibrary(agentDir));
+
+    await expect(service.run("s1", "/prompt-new")).resolves.toEqual({ type: "unsupported", message: "Usage: /prompt-new <name> <prompt text…>" });
+    const missingBody = await service.run("s1", "/prompt-new tell");
+    if (missingBody.type !== "unsupported") throw new Error("Expected unsupported result");
+    expect(missingBody.message).toContain("No prompt text");
+    expect(reloadSession).not.toHaveBeenCalled();
+  });
+
+  it("reports /prompt-new as unavailable when no prompt library is wired", async () => {
+    const active = activeSession();
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
+
+    await expect(service.run("s1", "/prompt-new tell x")).resolves.toEqual({
+      type: "unsupported",
+      message: "/prompt-new is not available for this session runtime.",
+    });
   });
 
   it("returns an injected full tree snapshot for /tree without creating a select request", async () => {

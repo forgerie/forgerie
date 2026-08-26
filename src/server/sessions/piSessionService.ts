@@ -46,6 +46,7 @@ import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
 import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
+import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
@@ -1082,6 +1083,7 @@ export class PiSessionService implements SessionRouteService {
         onUserFork: (session) => this.detachForkedSession(session),
       },
       { listSessionNames: (cwd) => this.listSessionNames(cwd) },
+      new AgentDirPromptLibrary(this.agentDir),
     );
   }
 

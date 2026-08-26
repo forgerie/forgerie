@@ -422,6 +422,23 @@ The chat composer opens completion menus on three trigger characters:
 - `@` completes file paths: `@` for tracked files, `@ ` (at, then space) or `!@` for all files. Picking one inserts an `@path` reference into the draft, quoted automatically when the path contains spaces.
 - `#` completes the models available to the session, filtered case-insensitively as you type (at most 12 entries). Picking one inserts a `#provider/model-id` reference into the draft, which tells agents the request should run on that model — for example as the `model` parameter of `spawn_session`.
 
+## Saving a prompt from the composer
+
+`/prompt-new <name>` writes the rest of the message to the active agent profile's prompt library at `<agent dir>/prompts/<name>.md` — `~/.pi/agent/prompts/` in the default profile. The prompt is then available as `/<name>` in every session and in the TUI, because Forgerie and Pi read the same profile.
+
+```text
+/prompt-new tell
+Speak in ASD-STE100 Simplified Technical English.
+```
+
+Rules:
+
+- The first line after the name starts the prompt body; line breaks are kept.
+- The description shown in the command picker is the first body line, shortened to 120 characters. To control the frontmatter yourself, start the body with `---`; a body that opens that way is written to disk unchanged.
+- Names are lowercased, and a leading `/` is dropped, so phone autocapitalization is not an error. Names accept lowercase letters, digits, and dashes.
+- Forgerie never overwrites an existing prompt and never accepts a name that a built-in command already uses. Both are refused with the conflicting path or name.
+- After a successful save, Forgerie reloads that session's Pi resources so `/<name>` works at once. While the session is busy the file is still written, and the reply says to run `/reload`.
+
 ## Optional completion tools
 
 File and path `@` completions work without extra tools. If `fzf` is available on the Forgerie server's `PATH`, Forgerie uses it to improve completion filtering/ranking; otherwise it falls back to built-in ranking.

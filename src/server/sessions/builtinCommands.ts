@@ -18,6 +18,9 @@ export const BUILTIN_COMMANDS: ClientCommand[] = [
   { name: "login", description: "Configure provider authentication", source: "builtin" },
   { name: "logout", description: "Remove provider authentication", source: "builtin" },
   { name: "new", description: "Start a new session", source: "builtin" },
+  // Forgerie-native, not a pi TUI command. This list is the set of built-in
+  // slash commands the web composer offers, so it is where the entry belongs.
+  { name: "prompt-new", description: "Save the rest of this message as a reusable prompt", source: "builtin" },
   { name: "compact", description: "Manually compact session context", source: "builtin" },
   { name: "resume", description: "Resume a different session", source: "builtin" },
   { name: "reload", description: "Reload Pi runtime resources for this session", source: "builtin" },
