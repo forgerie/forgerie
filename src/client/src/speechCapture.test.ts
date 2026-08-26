@@ -163,7 +163,6 @@ describe("speech capture browser lifecycle", () => {
     host.emitWorkletMessage(workletBatch(0, [0.02, 0.02, 0.02, 0.02], 0.02));
     host.emitWorkletMessage(workletBatch(4, new Array(10_400).fill(0), 0.001));
 
-    expect(host.workletAcks).toBe(2);
     expect(candidates).toHaveLength(1);
     expect([...session.endpointWindow()]).toEqual([...session.finalize()]);
 
@@ -171,7 +170,6 @@ describe("speech capture browser lifecycle", () => {
     host.emitWorkletMessage(workletBatch(10_404, [1, 1, 1, 1], 1));
 
     expect([...session.finalize()]).toEqual([]);
-    expect(host.workletAcks).toBe(2);
   });
 
   it("emits voiced activity with sample timing so pending endpoint checks can be cancelled on resumed speech", async () => {
@@ -190,13 +188,27 @@ describe("speech capture browser lifecycle", () => {
     await session.abort();
   });
 
+  it("uses a worklet barrier to drain delayed batches without stopping capture", async () => {
+    const host = fakeHost();
+    const session = await createSpeechCaptureSession({ host });
+    host.worklet.onPostMessage = (message) => {
+      host.emitWorkletMessage(workletBatch(0, [1, 2], 1));
+      host.emitWorkletMessage({ kind: "flushed", requestId: message.requestId, totalSamples: 2 });
+    };
+
+    await session.synchronize();
+
+    expect([...session.finalize()]).toEqual([1, 2]);
+    expect(host.trackStopped).toBe(false);
+    await session.abort();
+  });
+
   it("flushes the worklet before stopAndFinalize snapshots and clears retained chunks exactly once", async () => {
     const host = fakeHost();
     const terminals: SpeechCaptureTerminal[] = [];
     const session = await createSpeechCaptureSession({ host, onTerminal: (terminal) => { terminals.push(terminal); } });
     host.emitWorkletMessage(workletBatch(0, [1, 2], 1));
     host.worklet.onPostMessage = (message) => {
-      if (message.kind !== "flush") return;
       host.emitWorkletMessage(workletBatch(2, [3], 1));
       host.emitWorkletMessage({ kind: "flushed", requestId: message.requestId, totalSamples: 3 });
     };
@@ -237,26 +249,6 @@ describe("speech capture browser lifecycle", () => {
     host.emitWorkletMessage({ kind: "flushed", requestId: host.workletFlushes[0] ?? "flush-1", totalSamples: 2 });
     await session.abort();
     expect(terminals).toHaveLength(1);
-  });
-
-  it("turns worklet overflow into an exactly-once terminal failure and clears gapped audio", async () => {
-    const host = fakeHost();
-    const terminals: SpeechCaptureTerminal[] = [];
-    const session = await createSpeechCaptureSession({ host, onTerminal: (terminal) => { terminals.push(terminal); } });
-    host.emitWorkletMessage(workletBatch(0, [1, 2], 1));
-
-    host.emitWorkletMessage({ kind: "overflow", totalSamples: 2 });
-    await settleLifecycle();
-    host.emitWorkletMessage({ kind: "overflow", totalSamples: 2 });
-    host.emitWorkletMessage(workletBatch(2, [3], 1));
-
-    expect(session.failure).toMatchObject({ kind: "overflow", retryable: false });
-    expect([...session.finalize()]).toEqual([]);
-    expect(host.trackStopped).toBe(true);
-    expect(host.audioContextClosed).toBe(true);
-    expect(terminals).toHaveLength(1);
-    expect(terminals[0]).toMatchObject({ kind: "failed", error: { kind: "overflow" } });
-    expect([...terminals[0]?.samples ?? []]).toEqual([]);
   });
 
   it("treats the capture limit as terminal, returns finalized samples to the owner, and releases resources", async () => {
@@ -402,14 +394,12 @@ class RecordingGainNode extends RecordingAudioNode implements SpeechGainNodeLike
 
 class RecordingWorkletNode extends RecordingAudioNode implements SpeechAudioWorkletNodeLike {
   private listener: ((event: MessageEvent<SpeechCaptureMessage>) => void) | undefined;
-  public acks = 0;
   public readonly flushes: string[] = [];
   public closed = false;
   public onPostMessage: ((message: SpeechCaptureControlMessage) => void) | undefined;
   public readonly port = {
     postMessage: (message: SpeechCaptureControlMessage): void => {
-      if (message.kind === "ack") this.acks += 1;
-      if (message.kind === "flush") this.flushes.push(message.requestId);
+      this.flushes.push(message.requestId);
       this.onPostMessage?.(message);
     },
     addEventListener: (_type: "message", listener: (event: MessageEvent<SpeechCaptureMessage>) => void): void => { this.listener = listener; },
@@ -564,10 +554,6 @@ class RecordingSpeechHost implements SpeechCaptureBrowserHost {
 
   public get gainConnections(): string[] {
     return this.context.gain.connections;
-  }
-
-  public get workletAcks(): number {
-    return this.worklet.acks;
   }
 
   public get workletFlushes(): string[] {

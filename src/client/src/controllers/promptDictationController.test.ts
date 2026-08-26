@@ -288,7 +288,7 @@ describe("PromptDictationController", () => {
     expect(harness.checkTurn).toHaveBeenCalledOnce();
   });
 
-  it("covers AE7: limit terminal forces one transcription; overflow/track/context failure aborts", async () => {
+  it("covers AE7: limit terminal forces one transcription; other capture failures abort", async () => {
     const limitHarness = await startedAutoHarness([1, 2]);
     limitHarness.transcribe.mockResolvedValue({ text: "limit" });
     limitHarness.terminal({ kind: "failed", error: new SpeechCaptureError("limit_reached", "limit"), samples: new Float32Array([1, 2]) });
@@ -296,12 +296,12 @@ describe("PromptDictationController", () => {
     expect(limitHarness.transcribe).toHaveBeenCalledOnce();
     expect(limitHarness.draft.events).toContain("commit:limit");
 
-    const overflowHarness = await startedAutoHarness([1, 2]);
-    overflowHarness.terminal({ kind: "failed", error: new SpeechCaptureError("overflow", "overflow"), samples: new Float32Array() });
+    const failedHarness = await startedAutoHarness([1, 2]);
+    failedHarness.terminal({ kind: "failed", error: new SpeechCaptureError("worklet_failed", "worklet failed"), samples: new Float32Array() });
     await flushPromises();
-    expect(overflowHarness.transcribe).not.toHaveBeenCalled();
-    expect(overflowHarness.state()).toMatchObject({ tag: "error", reason: "capture-failed" });
-    expect(overflowHarness.draft.events).toEqual(["begin:owner-a", "abort"]);
+    expect(failedHarness.transcribe).not.toHaveBeenCalled();
+    expect(failedHarness.state()).toMatchObject({ tag: "error", reason: "capture-failed" });
+    expect(failedHarness.draft.events).toEqual(["begin:owner-a", "abort"]);
   });
 
   it("initial-speech timeout aborts an empty turn and unlocks the draft", async () => {
@@ -417,6 +417,26 @@ describe("PromptDictationController", () => {
     expect(capture.abortCalls).toBe(1);
     expect(harness.state()).toMatchObject({ tag: "error", reason: "initial-speech-timeout" });
     expect(harness.draft.events).toEqual(["begin:owner-a", "abort"]);
+  });
+
+  it("drains delayed worklet batches before applying the initial-speech timeout", async () => {
+    const harness = createHarness();
+    const capture = harness.installCapture([]);
+    const synchronized = deferred<undefined>();
+    capture.synchronizeImpl = () => synchronized.promise;
+
+    harness.controller.press();
+    await flushPromises();
+    harness.scheduler.advance(SPEECH_POLICY.timing.initialSpeechTimeoutMs);
+    expect(capture.synchronizeCalls).toBe(1);
+    expect(capture.abortCalls).toBe(0);
+
+    harness.activity(0, 16_000);
+    synchronized.resolve(undefined);
+    await flushPromises();
+
+    expect(capture.abortCalls).toBe(0);
+    expect(harness.state()).toEqual({ tag: "held" });
   });
 
   it("lets limit terminal samples win once when manual finalization is pending", async () => {
@@ -727,16 +747,22 @@ function fakeDraft(): PromptDictationDraftOwner & { ownerKeyValue: string; reado
   };
 }
 
-function fakeCapture(finalSamples: number[]): SpeechCaptureSession & { stopCalls: number; abortCalls: number; stopImpl: () => Promise<Float32Array>; abortImpl: () => Promise<void> } {
+function fakeCapture(finalSamples: number[]): SpeechCaptureSession & { synchronizeCalls: number; stopCalls: number; abortCalls: number; synchronizeImpl: () => Promise<void>; stopImpl: () => Promise<Float32Array>; abortImpl: () => Promise<void> } {
   return {
     actualSampleRateHz: 16_000,
     failure: undefined,
+    synchronizeCalls: 0,
     stopCalls: 0,
     abortCalls: 0,
+    synchronizeImpl: () => Promise.resolve(),
     stopImpl: () => Promise.resolve(new Float32Array(finalSamples)),
     abortImpl: () => Promise.resolve(),
     endpointWindow: () => new Float32Array(finalSamples),
     finalize: () => new Float32Array(finalSamples),
+    synchronize() {
+      this.synchronizeCalls += 1;
+      return this.synchronizeImpl();
+    },
     stopAndFinalize() {
       this.stopCalls += 1;
       return this.stopImpl();

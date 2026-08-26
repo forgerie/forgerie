@@ -31,6 +31,7 @@ function speechCapability(options: { transcript?: string; captureError?: Error; 
     failure: undefined,
     endpointWindow: () => SAMPLES,
     finalize: () => SAMPLES,
+    synchronize: () => Promise.resolve(),
     stopAndFinalize: () => Promise.resolve(SAMPLES),
     abort: () => Promise.resolve(),
   };

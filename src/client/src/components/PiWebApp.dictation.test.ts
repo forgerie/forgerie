@@ -66,6 +66,7 @@ describe("PiWebApp composer dictation capability", () => {
       failure: undefined,
       endpointWindow: () => new Float32Array(),
       finalize: () => new Float32Array(),
+      synchronize: () => Promise.resolve(),
       stopAndFinalize,
       abort: () => Promise.resolve(),
     } satisfies SpeechCaptureSession));
@@ -168,6 +169,7 @@ describe("PiWebApp composer dictation capability", () => {
       failure: undefined,
       endpointWindow: () => new Float32Array(),
       finalize: () => new Float32Array(),
+      synchronize: () => Promise.resolve(),
       stopAndFinalize: () => new Promise(() => undefined),
       abort: () => { abortCalls += 1; return Promise.resolve(); },
     });
@@ -204,6 +206,7 @@ describe("PiWebApp composer dictation capability", () => {
         failure: undefined,
         endpointWindow: () => new Float32Array(),
         finalize: () => new Float32Array(),
+        synchronize: () => Promise.resolve(),
         stopAndFinalize: () => new Promise(() => undefined),
         abort,
       }),

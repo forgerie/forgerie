@@ -297,9 +297,27 @@ export class PromptDictationController {
   private armInitialSpeechTimer(generation: number): void {
     this.clearInitialSpeechTimer();
     this.initialSpeechTimer = this.options.scheduler.setTimeout(() => {
-      if (!this.acceptsGeneration(generation) || this.speechStarted) return;
-      void this.abortCurrent("initial-speech-timeout", "No speech was detected before the initial timeout.");
+      void this.handleInitialSpeechTimeout(generation);
     }, this.policy.timing.initialSpeechTimeoutMs);
+  }
+
+  private async handleInitialSpeechTimeout(generation: number): Promise<void> {
+    if (!this.acceptsGeneration(generation) || this.speechStarted) return;
+    const capture = this.capture;
+    if (capture === undefined) return;
+    try {
+      await capture.synchronize();
+    } catch {
+      if (!this.acceptsGeneration(generation)) return;
+      await this.abortCurrent("capture-failed", "Speech capture could not synchronize before the initial timeout.");
+      return;
+    }
+    if (!this.acceptsGeneration(generation) || this.hasSpeechStarted()) return;
+    await this.abortCurrent("initial-speech-timeout", "No speech was detected before the initial timeout.");
+  }
+
+  private hasSpeechStarted(): boolean {
+    return this.speechStarted;
   }
 
   private handleSpeechActivity(activity: { readonly startSample: number; readonly endSample: number; readonly sampleCount: number }, generation: number, ownerKey: string): void {

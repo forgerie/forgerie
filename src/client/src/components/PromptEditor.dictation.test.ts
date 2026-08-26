@@ -620,6 +620,7 @@ function fakeDictation(status: Partial<Awaited<ReturnType<ComposerDictationCapab
     failure: undefined,
     endpointWindow: () => new Float32Array([0.1]),
     finalize: () => new Float32Array([0.2]),
+    synchronize: () => Promise.resolve(),
     stopAndFinalize: () => stopDeferred.promise,
     abort: () => { abortCalls += 1; return Promise.resolve(); },
   };

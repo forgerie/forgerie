@@ -1,7 +1,7 @@
 import speechCaptureWorkletUrl from "./speechCaptureWorklet.ts?worker&url";
 import { SPEECH_POLICY, type SpeechRuntimePolicy } from "../../shared/speechPolicy";
 
-export type SpeechCaptureFailureKind = "unsupported" | "permission_denied" | "device_unavailable" | "worklet_load_failed" | "context_failed" | "track_ended" | "limit_reached" | "overflow" | "worklet_failed" | "cancelled";
+export type SpeechCaptureFailureKind = "unsupported" | "permission_denied" | "device_unavailable" | "worklet_load_failed" | "context_failed" | "track_ended" | "limit_reached" | "worklet_failed" | "cancelled";
 
 export class SpeechCaptureError extends Error {
   public constructor(public readonly kind: SpeechCaptureFailureKind, message: string, public readonly options: { readonly retryable: boolean } = { retryable: false }) {
@@ -30,12 +30,12 @@ export interface SpeechPauseCandidate {
 export type SpeechCaptureMessage =
   | { readonly kind: "batch"; readonly startSample: number; readonly endSample: number; readonly samples: Float32Array; readonly rms: number; readonly voiced: boolean }
   | { readonly kind: "limit"; readonly totalSamples: number }
-  | { readonly kind: "overflow"; readonly totalSamples: number }
   | { readonly kind: "flushed"; readonly requestId: string; readonly totalSamples: number };
 
-export type SpeechCaptureControlMessage =
-  | { readonly kind: "ack" }
-  | { readonly kind: "flush"; readonly requestId: string };
+export interface SpeechCaptureControlMessage {
+  readonly kind: "flush";
+  readonly requestId: string;
+}
 
 export type SpeechCaptureTerminal =
   | { readonly kind: "finalized"; readonly samples: Float32Array }
@@ -46,6 +46,7 @@ export interface SpeechCaptureSession {
   readonly failure: SpeechCaptureError | undefined;
   endpointWindow(): Float32Array;
   finalize(): Float32Array;
+  synchronize(): Promise<void>;
   stopAndFinalize(): Promise<Float32Array>;
   abort(): Promise<void>;
 }
@@ -266,7 +267,6 @@ export async function createSpeechCaptureSession(options: SpeechCaptureOptions =
         maxSamples: policy.audio.maxTurnSamples,
         batchSamples: Math.round(policy.audio.sampleRateHz * 0.05),
         rmsThreshold: options.rmsThreshold ?? 0.012,
-        maxOutstandingBatches: 4,
       },
     });
     source = context.createMediaStreamSource(stream);
@@ -315,6 +315,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
   private terminalNotified = false;
   private captureFailure: SpeechCaptureError | undefined;
   private flushCounter = 0;
+  private flushTail: Promise<void> = Promise.resolve();
   private pendingFlush: { readonly requestId: string; resolve(): void } | undefined;
   private readonly abortFromSignal = (): void => {
     void this.failTerminal(new SpeechCaptureError("cancelled", "Speech capture was cancelled."), { clearSamples: true, notifySamples: new Float32Array() });
@@ -334,10 +335,6 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
       void this.failTerminal(new SpeechCaptureError("limit_reached", "Speech capture reached the maximum turn duration."), { clearSamples: true, notifySamples: this.snapshotAndClear() });
       return;
     }
-    if (message.kind === "overflow") {
-      void this.failTerminal(new SpeechCaptureError("overflow", "Speech capture backpressure overflowed before audio could be retained."), { clearSamples: true, notifySamples: new Float32Array() });
-      return;
-    }
     this.chunks.push(message.samples, message.startSample);
     const candidate = this.detector.accept({
       startSample: message.startSample,
@@ -347,7 +344,6 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
       voiced: message.voiced,
     });
     if (message.voiced) this.options.onSpeechActivity?.({ startSample: message.startSample, endSample: message.endSample, sampleCount: message.samples.length });
-    this.options.worklet.port.postMessage({ kind: "ack" });
     if (candidate !== undefined) this.options.onPauseCandidate?.({ endSample: candidate.endSample, samples: this.endpointWindow() });
   };
   private readonly onTrackEnded = (): void => {
@@ -402,6 +398,10 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     return this.chunks.flattenAll();
   }
 
+  public synchronize(): Promise<void> {
+    return this.enqueueFlush(250);
+  }
+
   public stopAndFinalize(): Promise<Float32Array> {
     this.stopPromise ??= this.stopAndFinalizeOnce();
     return this.stopPromise;
@@ -419,7 +419,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     }
     this.stopInputTracks();
     try {
-      await this.requestFlush(250);
+      await this.enqueueFlush(250);
     } catch (error) {
       const captureError = error instanceof SpeechCaptureError ? error : new SpeechCaptureError("worklet_failed", "Speech capture worklet failed to flush before finalization.");
       await this.failTerminal(captureError, { clearSamples: true, notifySamples: new Float32Array() });
@@ -438,6 +438,12 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
       this.notifyTerminal({ kind: "failed", error: this.captureFailure ?? error, samples: options.notifySamples });
     })();
     await this.terminalPromise;
+  }
+
+  private enqueueFlush(timeoutMs: number): Promise<void> {
+    const requested = this.flushTail.then(() => this.requestFlush(timeoutMs));
+    this.flushTail = requested.catch(() => undefined);
+    return requested;
   }
 
   private requestFlush(timeoutMs: number): Promise<void> {

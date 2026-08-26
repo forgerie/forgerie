@@ -50,13 +50,15 @@ describe("speech capture worklet protocol", () => {
     expect(messageProperty(processor.port.posted[1], "requestId")).toBe("flush-1");
   });
 
-  it("reports overflow instead of dropping an unacknowledged batch", () => {
-    const processor = createProcessor({ batchSamples: 2, maxOutstandingBatches: 1, maxSamples: 10 });
+  it("keeps capture alive when main-thread message handling is delayed while the turn limit stays bounded", () => {
+    const processor = createProcessor({ batchSamples: 2, maxSamples: 10 });
 
-    expect(processor.process([[new Float32Array([0.1, 0.1])]])).toBe(true);
-    expect(processor.process([[new Float32Array([0.2, 0.2])]])).toBe(false);
+    for (let batch = 0; batch < 5; batch += 1) {
+      expect(processor.process([[new Float32Array([0.1, 0.1])]])).toBe(true);
+    }
+    expect(processor.process([[new Float32Array([0.2])]])).toBe(false);
 
-    expect(processor.port.posted.map(messageKind)).toEqual(["batch", "overflow"]);
+    expect(processor.port.posted.map(messageKind)).toEqual(["batch", "batch", "batch", "batch", "batch", "limit"]);
   });
 
   it("flushes the final partial batch before the terminal limit message", () => {

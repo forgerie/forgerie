@@ -5,7 +5,6 @@ interface SpeechCaptureWorkletOptions {
     readonly maxSamples?: number;
     readonly batchSamples?: number;
     readonly rmsThreshold?: number;
-    readonly maxOutstandingBatches?: number;
   };
 }
 
@@ -18,7 +17,6 @@ const defaultTargetSampleRateHz = 16_000;
 const defaultBatchSamples = 800;
 const defaultMaxSamples = defaultTargetSampleRateHz * 60;
 const defaultRmsThreshold = 0.012;
-const defaultMaxOutstandingBatches = 4;
 
 class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
   private readonly sourceSampleRateHz: number;
@@ -26,7 +24,6 @@ class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
   private readonly maxSamples: number;
   private readonly batchSamples: number;
   private readonly rmsThreshold: number;
-  private readonly maxOutstandingBatches: number;
   private readonly batch: Float32Array;
   private batchLength = 0;
   private batchEnergy = 0;
@@ -35,7 +32,6 @@ class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
   private sourceAccumulatorCount = 0;
   private sourceStep = 1;
   private sourceStepProgress = 0;
-  private outstandingBatches = 0;
   private terminal = false;
 
   public constructor(options?: SpeechCaptureWorkletOptions) {
@@ -46,14 +42,9 @@ class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
     this.maxSamples = Math.max(0, Math.floor(finitePositive(processorOptions?.maxSamples) ?? defaultMaxSamples));
     this.batchSamples = Math.max(1, Math.floor(finitePositive(processorOptions?.batchSamples) ?? defaultBatchSamples));
     this.rmsThreshold = finitePositive(processorOptions?.rmsThreshold) ?? defaultRmsThreshold;
-    this.maxOutstandingBatches = Math.max(1, Math.floor(finitePositive(processorOptions?.maxOutstandingBatches) ?? defaultMaxOutstandingBatches));
     this.batch = new Float32Array(this.batchSamples);
     this.sourceStep = Math.max(1, this.sourceSampleRateHz / this.targetSampleRateHz);
     this.port.onmessage = (event: MessageEvent<SpeechCaptureWorkletControlMessage>) => {
-      if (event.data.kind === "ack") {
-        this.outstandingBatches = Math.max(0, this.outstandingBatches - 1);
-        return;
-      }
       if (event.data.kind === "flush" && event.data.requestId !== undefined) this.flushAndAcknowledge(event.data.requestId);
     };
   }
@@ -95,45 +86,33 @@ class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
     this.batchLength += 1;
     this.batchEnergy += sample * sample;
     this.totalOutputSamples += 1;
-    if (this.batchLength >= this.batchSamples) this.flushBatch({ terminal: false });
+    if (this.batchLength >= this.batchSamples) this.flushBatch();
     return !this.terminal;
   }
 
-  private flushBatch(options: { readonly terminal: boolean }): void {
+  private flushBatch(): void {
     if (this.batchLength === 0) return;
-    if (!options.terminal && this.outstandingBatches >= this.maxOutstandingBatches) {
-      this.reportOverflowOnce();
-      return;
-    }
     const samples = new Float32Array(this.batchLength);
     samples.set(this.batch.subarray(0, this.batchLength));
     const endSample = this.totalOutputSamples;
     const startSample = endSample - this.batchLength;
     const rms = Math.sqrt(this.batchEnergy / this.batchLength);
-    this.outstandingBatches += 1;
     this.port.postMessage({ kind: "batch", startSample, endSample, samples, rms, voiced: rms >= this.rmsThreshold }, [samples.buffer]);
     this.batchLength = 0;
     this.batchEnergy = 0;
   }
 
   private flushAndAcknowledge(requestId: string): void {
-    this.flushBatch({ terminal: true });
+    this.flushBatch();
     this.port.postMessage({ kind: "flushed", requestId, totalSamples: this.totalOutputSamples });
   }
 
   private reportLimitOnce(): void {
     if (this.terminal) return;
-    this.flushBatch({ terminal: true });
+    this.flushBatch();
     this.terminal = true;
     this.port.postMessage({ kind: "limit", totalSamples: this.totalOutputSamples });
     this.clearBatch();
-  }
-
-  private reportOverflowOnce(): void {
-    if (this.terminal) return;
-    this.terminal = true;
-    this.clearBatch();
-    this.port.postMessage({ kind: "overflow", totalSamples: this.totalOutputSamples });
   }
 
   private clearBatch(): void {
