@@ -5,7 +5,7 @@ import { ControllableChatNormalizationScheduler } from "../chatMessages.testSupp
 import { ChatTranscriptStore } from "../chatTranscriptStore";
 import { SessionController, type PromptEditorTextReplacement } from "./sessionController";
 import { fingerprintPromptResourceDeliveryText, type PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
-import { defaultApi, deferred, emptyPage, FakeSocket, MemoryStorage, oldSession, sessionLookupId, status, workspace, type AppState, type PromptAttachment, type SessionInfo } from "./sessionController.testSupport";
+import { defaultApi, deferred, EmitSocket, emptyPage, FakeSocket, MemoryStorage, oldSession, sessionLookupId, status, workspace, type AppState, type PromptAttachment, type SessionInfo } from "./sessionController.testSupport";
 
 describe("SessionController session launch", () => {
   it("selects one pending session and queues its initial prompt before creation resolves", async () => {
@@ -482,6 +482,7 @@ describe("SessionController session launch", () => {
     await controller.deleteCachedNewSession(state.selectedSession);
 
     expect(controller.getSessionLaunchRecovery(temporaryId)).toBeUndefined();
+    expect(controller.pendingSessionLaunchView("local", temporaryId)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[temporaryId]).toBeUndefined();
   });
 
@@ -837,6 +838,7 @@ describe("SessionController session launch", () => {
     const temporaryId = state.selectedSession?.id;
     if (temporaryId === undefined) throw new Error("Expected a pending session");
     await controller.deleteCachedNewSession(state.selectedSession);
+    expect(controller.pendingSessionLaunchView("local", temporaryId)).toBeUndefined();
     state = { ...state, selectedWorkspace: { ...workspace, id: "workspace-2", path: "/other" } };
     startRequest.reject(new Error("late failure"));
     await launch;
@@ -1701,6 +1703,7 @@ describe("SessionController session launch", () => {
     await controller.deleteCachedNewSession(state.selectedSession);
 
     expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
     expect(state.sessionActivities[started.id]).toBeUndefined();
     expect(state.sessions.some((session) => session.id === started.id)).toBe(false);
@@ -1743,6 +1746,7 @@ describe("SessionController session launch", () => {
     await controller.archiveSession(persisted);
 
     expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
     expect(state.sessionActivities[started.id]).toBeUndefined();
     expect(state.sendingPrompts[started.id]).toBeUndefined();
@@ -1789,6 +1793,7 @@ describe("SessionController session launch", () => {
     await controller.deleteArchivedSessions([archived]);
 
     expect(controller.getSessionLaunchRecovery(started.id)).toBeUndefined();
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
     expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
     expect(state.sessionActivities[started.id]).toBeUndefined();
     expect(state.sendingPrompts[started.id]).toBeUndefined();
@@ -1931,6 +1936,7 @@ describe("SessionController session launch", () => {
   it("replaces the pending identity, delivers the initial prompt once, and clears its preview after acceptance", async () => {
     const started: SessionInfo = { ...oldSession, id: "started-session", path: "/tmp/started-session.jsonl" };
     const startRequest = deferred<SessionInfo>();
+    const promptRequest = deferred<{ accepted: true }>();
     const promptCalls: { sessionId: string; text: string }[] = [];
     let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
     const api: typeof defaultApi = {
@@ -1940,8 +1946,116 @@ describe("SessionController session launch", () => {
       status: (session) => Promise.resolve(status(sessionLookupId(session))),
       prompt: (session, text) => {
         promptCalls.push({ sessionId: sessionLookupId(session), text });
-        return Promise.resolve({ accepted: true });
+        return promptRequest.promise;
       },
+    };
+    const socket = new EmitSocket();
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket },
+    );
+
+    const launch = controller.launchSession({ text: "Build the feature" });
+    const temporaryId = state.selectedSession?.id;
+    if (temporaryId === undefined) throw new Error("Expected pending session");
+    expect(pendingLaunchText(controller, temporaryId)).toBe("Build the feature");
+    expect(controller.pendingSessionLaunchView("remote", temporaryId)).toBeUndefined();
+
+    await controller.applySessionCleanupResult({
+      generatedAt: "now",
+      thresholds: { archiveIdleDays: 30, deleteArchivedDays: 60 },
+      projects: [{ cwd: workspace.path, archiveCount: 1, deleteCount: 0 }],
+      totals: { archiveCount: 1, deleteCount: 0 },
+      archivedSessionIds: [temporaryId],
+      deletedSessionIds: [],
+    }, "remote");
+    expect(pendingLaunchText(controller, temporaryId)).toBe("Build the feature");
+
+    startRequest.resolve(started);
+    await vi.waitFor(() => {
+      expect(state.selectedSession?.id).toBe(started.id);
+      expect(promptCalls).toEqual([{ sessionId: started.id, text: "Build the feature" }]);
+    });
+    expect(controller.pendingSessionLaunchView("local", temporaryId)).toBeUndefined();
+    expect(pendingLaunchText(controller, started.id)).toBe("Build the feature");
+
+    promptRequest.resolve({ accepted: true });
+    await launch;
+
+    expect(state.sessions.map((session) => session.id)).toEqual([started.id]);
+    expect(state.selectedSession?.id).toBe(started.id);
+    expect(promptCalls).toEqual([{ sessionId: started.id, text: "Build the feature" }]);
+    expect(state.clientQueuedSessionMessages[temporaryId]).toBeUndefined();
+    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    expect(pendingLaunchText(controller, started.id)).toBe("Build the feature");
+
+    socket.emit({ type: "message.append", message: { role: "assistant", content: "startup note" } });
+    controller.flushPendingUpdates();
+    expect(pendingLaunchText(controller, started.id)).toBe("Build the feature");
+
+    socket.emit({ type: "message.append", message: { role: "user", content: "Different prompt" } });
+    controller.flushPendingUpdates();
+    expect(pendingLaunchText(controller, started.id)).toBe("Build the feature");
+
+    socket.emit({ type: "message.append", message: { role: "user", content: "Build the feature" } });
+    controller.flushPendingUpdates();
+
+    expect(state.messages.at(-1)?.role).toBe("user");
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
+  });
+
+  it("keeps the initial queue hidden when the canonical prompt arrives before delivery acknowledgement", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-early-canonical", path: "/tmp/started-early-canonical.jsonl" };
+    const startRequest = deferred<SessionInfo>();
+    const promptRequest = deferred<{ accepted: true }>();
+    const socket = new EmitSocket();
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => startRequest.promise,
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      prompt: () => promptRequest.promise,
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket },
+    );
+
+    const launch = controller.launchSession({ text: "Build before acknowledgement" });
+    startRequest.resolve(started);
+    await vi.waitFor(() => {
+      expect(state.selectedSession?.id).toBe(started.id);
+    });
+
+    socket.emit({ type: "message.append", message: { role: "user", content: "Unrelated prompt" } });
+    socket.emit({ type: "message.append", message: { role: "user", content: "Build before acknowledgement" } });
+    controller.flushPendingUpdates();
+    const launchView = controller.pendingSessionLaunchView("local", started.id);
+    expect(launchView).toBeDefined();
+    expect(launchView?.initialPreviewPending).toBe(true);
+    expect(launchView?.suppressedCanonicalMessage).toBe(state.messages.at(-1));
+    expect(state.messages.find((message) => message !== launchView?.suppressedCanonicalMessage && message.role === "user")).toBeDefined();
+
+    promptRequest.resolve({ accepted: true });
+    await launch;
+
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
+  });
+
+  it("releases a background launch projection after the first prompt is accepted", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-background", path: "/tmp/started-background.jsonl" };
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => Promise.resolve(started),
+      prompt: () => Promise.resolve({ accepted: true }),
     };
     const controller = new SessionController(
       () => state,
@@ -1950,19 +2064,68 @@ describe("SessionController session launch", () => {
       undefined,
       { api, socket: new FakeSocket() },
     );
+    const handoff = controller.launchSessionPreservingSelection(
+      { machineId: "local", workspaceId: workspace.id, cwd: workspace.path },
+      { text: "Launch in background" },
+    );
+    if (handoff === undefined) throw new Error("Expected background launch handoff");
 
-    const launch = controller.launchSession({ text: "Build the feature" });
-    const temporaryId = state.selectedSession?.id;
+    await handoff.completion;
+
+    expect(state.selectedSession).toBe(oldSession);
+    expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
+  });
+
+  it("reconciles a prompt-resource first turn when its canonical message arrives before the receipt", async () => {
+    const started: SessionInfo = { ...oldSession, id: "started-resource-session", path: "/tmp/started-resource-session.jsonl" };
+    const startRequest = deferred<SessionInfo>();
+    const resourceRequest = deferred<{ accepted: true; deliveryFingerprint: string }>();
+    const socket = new EmitSocket();
+    const identity: PromptResourceCommandIdentity = { source: "prompt", name: "review", fingerprint: "a".repeat(64) };
+    const canonicalText = "Expanded review prompt";
+    const receipt = await fingerprintPromptResourceDeliveryText(canonicalText);
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, sessions: [] };
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      startSession: () => startRequest.promise,
+      messages: () => Promise.resolve(emptyPage),
+      status: (session) => Promise.resolve(status(sessionLookupId(session))),
+      runPromptResourceCommand: () => resourceRequest.promise,
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket },
+    );
+
+    const launch = controller.launchSession({ text: "/review src", promptResourceCommandIdentity: identity });
     startRequest.resolve(started);
+    await vi.waitFor(() => {
+      expect(state.selectedSession?.id).toBe(started.id);
+    });
+
+    socket.emit({ type: "message.append", message: { role: "user", content: canonicalText } });
+    controller.flushPendingUpdates();
+    expect(pendingLaunchText(controller, started.id)).toBe("/review src");
+    expect(controller.pendingSessionLaunchView("local", started.id)?.suppressedCanonicalMessage).toBeUndefined();
+
+    resourceRequest.resolve({ accepted: true, deliveryFingerprint: receipt });
     await launch;
 
-    expect(state.sessions.map((session) => session.id)).toEqual([started.id]);
-    expect(state.selectedSession?.id).toBe(started.id);
-    expect(promptCalls).toEqual([{ sessionId: started.id, text: "Build the feature" }]);
-    expect(state.clientQueuedSessionMessages[temporaryId ?? ""]).toBeUndefined();
-    expect(state.clientQueuedSessionMessages[started.id]).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(controller.pendingSessionLaunchView("local", started.id)).toBeUndefined();
+    });
   });
 });
+
+function pendingLaunchText(controller: SessionController, sessionId: string): string | undefined {
+  return controller.pendingSessionLaunchView("local", sessionId)?.message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n");
+}
 
 interface ControllerWithLaunchRecoveries {
   sessionLaunchRecoveries: unknown;

@@ -722,6 +722,14 @@ export const chatStyles = css`
     background: var(--calm-canvas-soft);
     padding: 12px 16px;
   }
+  /* The first prompt already belongs to the turn, but its session has not
+     accepted it yet. Keep the normal user shape and use the queue's dashed,
+     muted treatment until the canonical transcript replaces it. */
+  .msg.user.pending-session-launch {
+    border-style: dashed;
+    background: color-mix(in srgb, var(--calm-canvas-soft) 55%, transparent);
+    color: var(--calm-ink-muted);
+  }
   .msg.tool, .msg.bash, .msg.skill { color: var(--calm-ink-dim); }
   .msg.tool-execution-shell, .msg.ask-user-record-shell { padding: 0; border: 0; background: transparent; color: var(--calm-ink-muted); }
   .msg.ask-user-record-shell ask-user-card { margin: 0 auto; }
@@ -750,9 +758,9 @@ export const chatStyles = css`
   .rail-ledger[hidden] { display: none; }
   .rail-flat-activity { min-width: 0; display: grid; }
   .rail-flat-group-anchor { display: block; width: 100%; height: 0; }
+  .rail-tool-segment { min-width: 0; border-bottom: 1px solid var(--pi-border-muted); }
   .rail-activity-row { min-width: 0; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--pi-border-muted); }
-  .rail-activity-row:first-of-type { border-top: 1px solid var(--pi-border-muted); }
-  .rail-activity-row:last-of-type { border-bottom: 0; }
+  .rail-tool-segment:last-child, .rail-activity-row:last-child { border-bottom: 0; }
   .rail-thinking { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 7px; }
   .rail-thinking .rail-activity-glyph { color: var(--pi-muted); font-size: var(--pi-text-xs); line-height: 1.6; }
   .rail-thinking .rail-activity-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
@@ -861,6 +869,7 @@ export const chatStyles = css`
   .queued-kind { color: var(--pi-muted); font-size: var(--pi-text-sm); text-transform: uppercase; }
   .queued-command { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
   .queued-command-rest { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .pending-session-launch-recovery { margin: 0 0 var(--calm-turn-gap); }
   .session-launch-recovery { display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid var(--pi-warning-border); }
   .session-launch-recovery strong { color: var(--pi-warning); font-weight: 600; }
   .session-launch-recovery p { margin: 0; color: var(--calm-ink-dim); }

@@ -261,6 +261,61 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).clientQueuedSessionMessages[pending.id]).toEqual([
       { kind: "followUp", text: "[First prompt queued]" },
     ]);
+    expect(controller.pendingSessionLaunchView(localMachine.id, pending.id)).toBeDefined();
+
+    const pendingContainer = renderApp(app);
+    const chat = required(pendingContainer.querySelector<ChatView>("chat-view"), "pending session chat");
+    await elementUpdateComplete(chat);
+    const chatRoot = required(chat.shadowRoot, "pending session chat shadow root");
+    const pendingMessage = required(chatRoot.querySelector(".msg.user.pending-session-launch formatted-text"), "pending first prompt");
+    const liveness = required(chatRoot.querySelector("transcript-liveness"), "pending session liveness");
+
+    expect(Reflect.get(pendingMessage, "text")).toBe("Build through the real controller");
+    expect(Reflect.get(liveness, "step")).toBe("Starting session");
+    expect(chatRoot.querySelector(".chat-load-state.empty")).toBeNull();
+    expect(chatRoot.querySelector(".queued-messages")).toBeNull();
+
+    const pendingLaunch = required(chat.pendingSessionLaunch, "pending launch view");
+    chat.pendingSessionLaunch = { ...pendingLaunch, initialPreviewPending: false };
+    chat.clientQueuedMessages = [{ kind: "followUp", text: "Queue another task" }];
+    await elementUpdateComplete(chat);
+    const followUp = required(chatRoot.querySelector(".queued-messages formatted-text"), "queued follow-up");
+    expect(Reflect.get(followUp, "text")).toBe("Queue another task");
+    chat.clientQueuedMessages = [];
+
+    chat.messages = [{ role: "assistant", parts: [{ type: "text", text: "startup note" }] }];
+    await elementUpdateComplete(chat);
+    expect(chatRoot.querySelector(".msg.user.pending-session-launch formatted-text")).not.toBeNull();
+
+    const unrelatedPrompt = { role: "user" as const, parts: [{ type: "text" as const, text: "Unrelated prompt" }] };
+    const expandedPrompt = { role: "user" as const, parts: [{ type: "text" as const, text: "Expanded prompt" }] };
+    chat.pendingSessionLaunch = { ...pendingLaunch, initialPreviewPending: false, suppressedCanonicalMessage: expandedPrompt };
+    chat.messages = [unrelatedPrompt, expandedPrompt];
+    await elementUpdateComplete(chat);
+    expect(chatRoot.querySelectorAll(".msg.user")).toHaveLength(2);
+    expect([...chatRoot.querySelectorAll(".msg.user formatted-text")].map((message) => String(Reflect.get(message, "text")))).toEqual([
+      "Build through the real controller",
+      "Unrelated prompt",
+    ]);
+
+    chat.messages = [];
+    chat.pendingSessionLaunch = { ...pendingLaunch, initialPreviewPending: true };
+    chat.clientQueuedMessages = [
+      { kind: "followUp", text: "[First prompt queued]" },
+      { kind: "followUp", text: "Queue after recovery" },
+    ];
+    chat.sessionLaunchRecovery = {
+      stage: "creationFailed",
+      sessionId: pending.id,
+      destination: { machineId: localMachine.id, workspaceId: mainWorkspace.id, cwd: mainWorkspace.path },
+      retrying: false,
+    };
+    await elementUpdateComplete(chat);
+    expect(chatRoot.querySelector(".msg.user.pending-session-launch")).not.toBeNull();
+    expect(chatRoot.querySelectorAll(".session-launch-recovery")).toHaveLength(1);
+    expect(chatRoot.querySelector(".pending-session-launch-recovery .session-launch-recovery")).not.toBeNull();
+    expect(chatRoot.querySelector(".queued-kind")?.textContent).toBe("Follow-up 1");
+    expect(Reflect.get(required(chatRoot.querySelector(".queued-messages formatted-text"), "recovery follow-up"), "text")).toBe("Queue after recovery");
   });
 
   it("binds rendered creation recovery to its chat session and seeds one replacement composer", async () => {
@@ -790,6 +845,7 @@ function composerRequest(app: PiWebApp): unknown {
 interface SessionLaunchController {
   launchSession: (prompt: FirstPromptSubmission) => Promise<void>;
   getSessionLaunchRecovery: (sessionId: string) => SessionLaunchRecovery | undefined;
+  pendingSessionLaunchView: (machineId: string, sessionId: string) => ChatView["pendingSessionLaunch"];
   claimSessionLaunchRecoveryDraft: (sessionId: string) => { id: string; snapshot: FirstPromptSubmission } | undefined;
   hasQueuedInitialPrompt: (sessionId: string) => boolean;
   retrySessionLaunch: (sessionId: string) => Promise<void>;

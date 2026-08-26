@@ -71,6 +71,12 @@ export interface SelectedSessionReady {
   session: SessionInfo;
 }
 
+export interface PendingSessionLaunchView {
+  readonly message: ReturnType<typeof textMessage>;
+  readonly initialPreviewPending: boolean;
+  readonly suppressedCanonicalMessage?: ReturnType<typeof textMessage>;
+}
+
 export type SessionTranscriptPreview = ChatTranscriptView;
 
 export interface ReadinessSendRecovery {
@@ -90,6 +96,7 @@ export interface SessionControllerDependencies {
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
   replacePromptEditorText?: (replacement: PromptEditorTextReplacement) => boolean | void | Promise<boolean | void>;
   onSelectedSessionReady?: (selection: SelectedSessionReady) => void;
+  onPendingSessionLaunchProjectionChange?: () => void;
   onManagedProcessesEvent?: (event: Extract<SharedSessionUiEvent, { type: "processes.update" | "processes.output" }> | { type: "processes.refresh" }) => void;
 }
 
@@ -178,6 +185,16 @@ interface PendingSessionStart {
 
 type FirstPromptQueuedSend = Extract<QueuedPendingSessionSend, { type: "prompt" }> | Extract<QueuedPendingSessionSend, { type: "promptResource" }>;
 
+interface PendingSessionLaunchProjection {
+  readonly queued: FirstPromptQueuedSend;
+  readonly message: ReturnType<typeof textMessage>;
+  initialPreviewPending: boolean;
+  canonicalMessage: ReturnType<typeof textMessage> | undefined;
+  receiptReconciliationPending: boolean;
+  receiptReconciliationQueuedMessages: readonly ReturnType<typeof textMessage>[] | undefined;
+  readonly receiptCheckedTexts: Set<string>;
+}
+
 type ClaimedSessionLaunchRecoveryDraftQueue = Omit<Extract<QueuedPendingSessionSend, { type: "prompt" }>, "text" | "attachments" | "deliveredText">
   | Omit<Extract<QueuedPendingSessionSend, { type: "promptResource" }>, "text" | "attachments" | "deliveredText">;
 
@@ -214,6 +231,7 @@ export class SessionController {
   private readonly inbox: SessionInboxBridge | undefined;
   private readonly replacePromptEditorText: SessionControllerDependencies["replacePromptEditorText"];
   private readonly onSelectedSessionReady: SessionControllerDependencies["onSelectedSessionReady"];
+  private readonly onPendingSessionLaunchProjectionChange: SessionControllerDependencies["onPendingSessionLaunchProjectionChange"];
   private readonly onManagedProcessesEvent: SessionControllerDependencies["onManagedProcessesEvent"];
   private selectionSeq = 0;
   private disposed = false;
@@ -234,6 +252,8 @@ export class SessionController {
   private pendingQueuedSendSeq = 0;
   private recoveryDraftClaimSeq = 0;
   private readonly pendingSessionStarts = new Map<string, PendingSessionStart>();
+  /** Ephemeral view data kept outside AppState and durable draft storage. */
+  private readonly pendingSessionLaunchProjections = new Map<string, PendingSessionLaunchProjection>();
   private readonly readinessQueuedSends = new Map<string, ReadinessQueuedSends>();
   private readonly transcriptPreviewRequests = new Map<string, Promise<MessagePage>>();
   private readonly sessionLaunchRecoveries = new Map<string, SessionLaunchRecoveryRecord>();
@@ -254,6 +274,7 @@ export class SessionController {
     this.inbox = deps.inbox;
     this.replacePromptEditorText = deps.replacePromptEditorText;
     this.onSelectedSessionReady = deps.onSelectedSessionReady;
+    this.onPendingSessionLaunchProjectionChange = deps.onPendingSessionLaunchProjectionChange;
     this.onManagedProcessesEvent = deps.onManagedProcessesEvent;
   }
 
@@ -279,6 +300,7 @@ export class SessionController {
     this.liveMessagePageEnd = 0;
     this.clearPendingUpdates();
     for (const queue of this.readinessQueuedSends.values()) this.restoreReadinessQueueDraft(queue);
+    this.pendingSessionLaunchProjections.clear();
     this.readinessQueuedSends.clear();
     this.transcriptPreviewRequests.clear();
     this.transcripts.dispose();
@@ -376,6 +398,16 @@ export class SessionController {
     return this.pendingSessionStarts.get(sessionId)?.queuedSends.some(isInitialPromptSend) === true;
   }
 
+  pendingSessionLaunchView(machineId: string, sessionId: string): PendingSessionLaunchView | undefined {
+    const projection = this.pendingSessionLaunchProjections.get(machineSessionKey(machineId, sessionId));
+    if (projection === undefined) return undefined;
+    return {
+      message: projection.message,
+      initialPreviewPending: projection.initialPreviewPending,
+      ...(projection.canonicalMessage === undefined ? {} : { suppressedCanonicalMessage: projection.canonicalMessage }),
+    };
+  }
+
   claimSessionLaunchRecoveryDraft(sessionId: string): SessionLaunchRecoveryDraftSeed | undefined {
     const record = this.sessionLaunchRecoveries.get(sessionId);
     if (record === undefined || (record.recovery.stage !== "creationFailed" && record.recovery.stage !== "promptConfirmedUnsent") || record.claimedDraft !== undefined) return undefined;
@@ -383,6 +415,7 @@ export class SessionController {
     const queued = index === -1 ? undefined : record.queuedSends[index];
     if (queued === undefined || !isInitialPromptSend(queued)) return undefined;
     record.queuedSends.splice(index, 1);
+    this.pendingSessionLaunchProjections.delete(machineSessionKey(record.recovery.destination.machineId, sessionId));
     if (record.pending !== undefined && record.pending.queuedSends !== record.queuedSends) {
       record.pending.queuedSends = record.pending.queuedSends.filter((candidate) => candidate.id !== queued.id);
     }
@@ -420,6 +453,7 @@ export class SessionController {
       insertQueuedRecoveryDraft(record.pending.queuedSends, claimed.index, queued);
     }
     delete record.claimedDraft;
+    this.setPendingSessionLaunchProjection(record.recovery.destination.machineId, sessionId, queued);
     record.recovery = recoveryWithQueuedSubmission(record.recovery, queued);
     this.publishCreationFailedRecoveryQueue(sessionId, record);
   }
@@ -448,6 +482,7 @@ export class SessionController {
       || state.selectedSession?.id !== replacementSessionId
       || !state.sessions.some((session) => session.id === replacementSessionId)) return;
     this.sessionLaunchRecoveries.delete(failedSessionId);
+    this.pendingSessionLaunchProjections.delete(machineSessionKey(record.recovery.destination.machineId, failedSessionId));
     clearDraft(machineSessionKey(record.recovery.destination.machineId, failedSessionId));
     const removeFailedSession = record.recovery.stage === "creationFailed";
     this.setState({
@@ -508,7 +543,7 @@ export class SessionController {
     const retainedQueuedSends = record.queuedSends.slice(1);
     this.sessionLaunchRecoveries.delete(sessionId);
     this.dropNextQueuedSessionMessage(sessionId);
-    this.clearInitialPromptRecoveryProjection(sessionId);
+    this.clearInitialPromptRecoveryProjection(record.recovery.destination.machineId, sessionId);
     await this.flushQueuedPendingSends(record.session, record.recovery.destination.machineId, retainedQueuedSends, record.recovery.destination);
   }
 
@@ -531,7 +566,7 @@ export class SessionController {
         const retainedQueuedSends = record.queuedSends.slice(1);
         this.sessionLaunchRecoveries.delete(sessionId);
         this.dropNextQueuedSessionMessage(sessionId);
-        this.clearInitialPromptRecoveryProjection(sessionId);
+        this.clearInitialPromptRecoveryProjection(machineId, sessionId);
         this.markCachedNewSessionPersisted(record.session);
         await this.flushQueuedPendingSends(record.session, machineId, retainedQueuedSends, record.recovery.destination);
         return;
@@ -560,7 +595,8 @@ export class SessionController {
     });
   }
 
-  private clearInitialPromptRecoveryProjection(sessionId: string): void {
+  private clearInitialPromptRecoveryProjection(machineId: string, sessionId: string): void {
+    this.pendingSessionLaunchProjections.delete(machineSessionKey(machineId, sessionId));
     const state = this.getState();
     const clearsSessionActivity = isInitialPromptRecoveryActivity(state.sessionActivities[sessionId]);
     const clearsSelectedActivity = state.selectedSession?.id === sessionId && isInitialPromptRecoveryActivity(state.activity);
@@ -635,6 +671,7 @@ export class SessionController {
     const showCachedImmediately = cached !== undefined;
     const openingView = cached ?? transcriptViewFromHistory(undefined);
     this.liveMessagePageEnd = openingView.messagePageEnd;
+    this.reconcilePendingSessionLaunchProjection(machineId, session.id, openingView.messages, openingView.messagePageStart);
     this.setState({
       selectedSession: session,
       selectedChatLoad: showCachedImmediately ? selectedChatCachedReadable(target) : selectedChatLoading(target),
@@ -655,6 +692,7 @@ export class SessionController {
         if (seq !== this.selectionSeq || this.getState().selectedSession?.id !== session.id) return;
         const merge = await this.transcripts.mergeHistoryCooperatively(transcriptKey, page);
         if (merge.kind === "superseded" || seq !== this.selectionSeq || this.getState().selectedSession?.id !== session.id) return;
+        this.reconcilePendingSessionLaunchProjection(machineId, session.id, merge.view.messages, merge.view.messagePageStart);
         this.setState({ ...merge.view, selectedChatLoad: selectedChatReadOnly(target, "fresh"), isLoadingEarlierMessages: false, status: undefined, activity: undefined, pendingAsk: undefined, pendingDialogs: [], closedDialogs: [] });
         this.transcripts.schedulePersist(transcriptKey);
         this.transcriptPreviewRequests.delete(transcriptKey);
@@ -737,6 +775,7 @@ export class SessionController {
       const merge = await this.transcripts.mergeHistoryCooperatively(key, page);
       if (merge.kind === "superseded" || !this.isSelectedSessionReference(session, machineId)) return;
       if (transcriptRevision !== this.transcriptRevision) return;
+      this.reconcilePendingSessionLaunchProjection(machineId, session.id, merge.view.messages, merge.view.messagePageStart);
       this.setState(merge.view);
     } catch (error) {
       if (this.isSelectedSessionReference(session, machineId)) this.setState({ error: String(error) });
@@ -929,9 +968,10 @@ export class SessionController {
     }
     const queued: QueuedPendingSessionSend = { ...input, id: `pending-send-${String(++this.pendingQueuedSendSeq)}` };
     pending.queuedSends.push(queued);
+    if (isInitialPromptSend(queued)) this.setPendingSessionLaunchProjection(session.machineId, session.id, queued);
     const state = this.getState();
     const current = state.clientQueuedSessionMessages[session.id] ?? [];
-    const activity = creatingPendingSessionActivity(session.id, pending.queuedSends.length);
+    const activity = creatingPendingSessionActivity(session.id);
     this.setState({
       clientQueuedSessionMessages: { ...state.clientQueuedSessionMessages, [session.id]: [...current, queuedSessionMessagePreview(queued)] },
       sessionActivities: { ...state.sessionActivities, [session.id]: activity },
@@ -944,6 +984,12 @@ export class SessionController {
     for (const [index, queued] of queuedSends.entries()) {
       const delivered = await this.deliverQueuedPendingSend(session, machineId, queued);
       if (delivered) {
+        if (isInitialPromptSend(queued)) {
+          this.markPendingSessionLaunchInitialPreviewConsumed(machineId, session.id);
+          if (this.isSelectedSessionIdentity(session.id, machineId)) {
+            this.reconcilePendingSessionLaunchProjection(machineId, session.id, this.getState().messages, this.getState().messagePageStart);
+          } else this.pendingSessionLaunchProjections.delete(machineSessionKey(machineId, session.id));
+        }
         this.dropNextQueuedSessionMessage(session.id);
         continue;
       }
@@ -956,7 +1002,7 @@ export class SessionController {
       if (stage === "accepted") {
         this.markCachedNewSessionPersisted(session);
         this.dropNextQueuedSessionMessage(session.id);
-        this.clearInitialPromptRecoveryProjection(session.id);
+        this.clearInitialPromptRecoveryProjection(machineId, session.id);
         continue;
       }
       const recovery: SessionLaunchRecovery = {
@@ -1441,6 +1487,7 @@ export class SessionController {
     if (pendingStart !== undefined) {
       pendingStart.discarded = true;
       pendingStart.queuedSends = [];
+      this.pendingSessionLaunchProjections.delete(machineSessionKey(machineId, session.id));
     }
     else {
       void this.api.stop(session, machineId).catch(() => {
@@ -1793,6 +1840,7 @@ export class SessionController {
         void previewRequest.then((page) => {
           if (!this.isCurrentRefreshTarget(target) || this.currentSelectedChatReadability(selectedTarget) !== "absent") return;
           const preview = transcriptViewFromHistory(page);
+          this.reconcilePendingSessionLaunchProjection(target.machineId, target.session.id, preview.messages, preview.messagePageStart);
           this.setState({ ...preview, selectedChatLoad: selectedChatPreviewReadable(selectedTarget), isLoadingEarlierMessages: false });
         }).catch(() => undefined);
       }
@@ -1807,6 +1855,7 @@ export class SessionController {
         if (merge.kind === "superseded" || !this.isCurrentRefreshTarget(target)) return undefined;
         this.flushPendingUpdates();
         const history = transcriptRevision === this.transcriptRevision ? merge.view : this.currentTranscriptView();
+        this.reconcilePendingSessionLaunchProjection(target.machineId, target.session.id, history.messages, history.messagePageStart);
         this.setState({ ...(history === merge.view ? merge.view : {}), selectedChatLoad: selectedChatFreshReadable(selectedTarget), isLoadingEarlierMessages: false });
         return { history, transcriptRevision, canonicalPage: page };
       });
@@ -1941,10 +1990,13 @@ export class SessionController {
   private clearSessionLaunchRecoveryLifecycleState(sessionIds: readonly string[], machineId: string): void {
     const affectedIds: string[] = [];
     for (const sessionId of new Set(sessionIds)) {
+      let affected = this.pendingSessionLaunchProjections.delete(machineSessionKey(machineId, sessionId));
       const record = this.sessionLaunchRecoveries.get(sessionId);
-      if (record?.recovery.destination.machineId !== machineId) continue;
-      this.sessionLaunchRecoveries.delete(sessionId);
-      affectedIds.push(sessionId);
+      if (record?.recovery.destination.machineId === machineId) {
+        this.sessionLaunchRecoveries.delete(sessionId);
+        affected = true;
+      }
+      if (affected) affectedIds.push(sessionId);
     }
     if (affectedIds.length === 0) return;
 
@@ -2013,6 +2065,83 @@ export class SessionController {
     this.inbox?.notifyRestored(machineId, restored);
     const selected = this.getState().selectedSession;
     if (selected?.id === restored.id && sessionPathsEqual(selected.cwd, restored.cwd)) await this.selectSession(restored);
+  }
+
+  private setPendingSessionLaunchProjection(machineId: string, sessionId: string, queued: FirstPromptQueuedSend): void {
+    this.pendingSessionLaunchProjections.set(machineSessionKey(machineId, sessionId), {
+      queued,
+      message: pendingSessionLaunchChatMessage(queued),
+      initialPreviewPending: true,
+      canonicalMessage: undefined,
+      receiptReconciliationPending: false,
+      receiptReconciliationQueuedMessages: undefined,
+      receiptCheckedTexts: new Set<string>(),
+    });
+  }
+
+  private markPendingSessionLaunchInitialPreviewConsumed(machineId: string, sessionId: string): void {
+    const key = machineSessionKey(machineId, sessionId);
+    const projection = this.pendingSessionLaunchProjections.get(key);
+    if (projection === undefined) return;
+    projection.initialPreviewPending = false;
+    if (projection.canonicalMessage !== undefined) this.pendingSessionLaunchProjections.delete(key);
+  }
+
+  private reconcilePendingSessionLaunchProjection(
+    machineId: string,
+    sessionId: string | undefined,
+    messages: readonly ReturnType<typeof textMessage>[],
+    messageStart = 0,
+  ): void {
+    if (sessionId === undefined) return;
+    const key = machineSessionKey(machineId, sessionId);
+    const projection = this.pendingSessionLaunchProjections.get(key);
+    if (projection === undefined) return;
+    if (messageStart > 0) {
+      this.pendingSessionLaunchProjections.delete(key);
+      return;
+    }
+    if (projection.queued.type === "prompt") {
+      const match = canonicalMessagesFindPrompt(messages, projection.queued.deliveredText ?? projection.queued.text);
+      if (match !== undefined) {
+        if (projection.initialPreviewPending) projection.canonicalMessage = match;
+        else this.pendingSessionLaunchProjections.delete(key);
+      }
+      return;
+    }
+    const receipt = projection.queued.deliveryReceipt;
+    if (receipt === undefined) return;
+    if (projection.receiptReconciliationPending) {
+      projection.receiptReconciliationQueuedMessages = messages;
+      return;
+    }
+    projection.receiptReconciliationPending = true;
+    void canonicalMessagesFindDeliveryReceipt(messages, receipt, projection.receiptCheckedTexts).then((match) => {
+      if (this.pendingSessionLaunchProjections.get(key) !== projection) return;
+      projection.receiptReconciliationPending = false;
+      if (match !== undefined) {
+        if (projection.initialPreviewPending) {
+          projection.canonicalMessage = match;
+          this.onPendingSessionLaunchProjectionChange?.();
+        } else {
+          this.pendingSessionLaunchProjections.delete(key);
+          this.onPendingSessionLaunchProjectionChange?.();
+        }
+        return;
+      }
+      const queuedMessages = projection.receiptReconciliationQueuedMessages;
+      projection.receiptReconciliationQueuedMessages = undefined;
+      if (queuedMessages !== undefined && queuedMessages !== messages) {
+        this.reconcilePendingSessionLaunchProjection(machineId, sessionId, queuedMessages);
+      }
+    });
+  }
+
+  private movePendingSessionLaunchPrompt(machineId: string, fromSessionId: string, toSessionId: string): void {
+    const fromKey = machineSessionKey(machineId, fromSessionId);
+    const projection = this.pendingSessionLaunchProjections.get(fromKey);
+    this.pendingSessionLaunchProjections.delete(fromKey);
+    if (projection !== undefined) this.pendingSessionLaunchProjections.set(machineSessionKey(machineId, toSessionId), projection);
   }
 
   private sessionCacheKey(sessionId: string): string {
@@ -2090,7 +2219,7 @@ export class SessionController {
     const creationFailedActivity = recoveryRecord?.recovery.stage === "creationFailed" && recoveryRecord.creationFailureMessage !== undefined
       ? failedPendingSessionActivity(session.id, recoveryRecord.creationFailureMessage, recoveryRecord.queuedSends.length)
       : undefined;
-    const activity = options?.activity ?? creationFailedActivity ?? state.sessionActivities[session.id] ?? (pendingStart !== undefined ? creatingPendingSessionActivity(session.id, pendingStart.queuedSends.length) : undefined);
+    const activity = options?.activity ?? creationFailedActivity ?? state.sessionActivities[session.id] ?? (pendingStart !== undefined ? creatingPendingSessionActivity(session.id) : undefined);
     const failedStart = pendingStart === undefined && activity?.phase === "error"
       ? `Failed to start session: ${activity.detail ?? activity.label}`
       : undefined;
@@ -2133,6 +2262,7 @@ export class SessionController {
     const queuedSends = pending.queuedSends.splice(0);
     const releasedCreatedSessions = this.takeSuppressedCreatedSessionsFor(pending.cwd, pending.machineId, session.id);
     if (pending.discarded) {
+      this.pendingSessionLaunchProjections.delete(machineSessionKey(pending.machineId, tempId));
       clearDraft(machineSessionKey(pending.machineId, tempId));
       this.setState({ clientQueuedSessionMessages: omitKey(this.getState().clientQueuedSessionMessages, tempId) });
       this.applyReleasedCreatedSessions(releasedCreatedSessions, pending.machineId);
@@ -2143,6 +2273,7 @@ export class SessionController {
     }
 
     rememberCachedNewSession(session, pending.machineId);
+    this.movePendingSessionLaunchPrompt(pending.machineId, tempId, session.id);
     moveDraft(machineSessionKey(pending.machineId, tempId), machineSessionKey(pending.machineId, session.id));
     const cachedSession = markCachedNewSessionInfo(session, pending.machineId);
     if (!this.isCurrentPendingStart(pending)) {
@@ -2181,6 +2312,7 @@ export class SessionController {
     }
     this.pendingSessionStarts.delete(tempId);
     const wasDiscarded = pending.discarded;
+    if (wasDiscarded) this.pendingSessionLaunchProjections.delete(machineSessionKey(pending.machineId, tempId));
     // The pending start is dead: stop routing its dialog frames (a card on the
     // failed row could never be answered) and drop the early-subscribed socket
     // so it stops reconnecting against a session that may not exist.
@@ -2524,6 +2656,7 @@ export class SessionController {
     if (commitsTranscriptMessage(event)) this.liveMessagePageEnd += 1;
     if (transcript) {
       this.transcriptRevision += 1;
+      this.reconcilePendingSessionLaunchProjection(selectedMachineId(state), state.selectedSession?.id, transcript, state.messagePageStart);
       this.setState({ messages: transcript });
     } else if (event.type === "session.name") {
       this.applySessionName(event.sessionId, event.name);
@@ -2565,7 +2698,7 @@ export class SessionController {
     // restore this row's own generic wording rather than clearing the text of a
     // creation request that has not returned yet.
     this.queueActivityUpdate(event.activity.phase === "idle"
-      ? creatingPendingSessionActivity(pending.tempId, pending.queuedSends.length)
+      ? creatingPendingSessionActivity(pending.tempId)
       : pendingStartActivity(event.activity, pending.tempId));
   }
 
@@ -2686,6 +2819,7 @@ export class SessionController {
       }
       if (messages !== this.getState().messages) {
         this.transcriptRevision += 1;
+        this.reconcilePendingSessionLaunchProjection(selectedMachineId(this.getState()), this.getState().selectedSession?.id, messages, this.getState().messagePageStart);
         this.setState({ messages });
       }
     }
@@ -2794,12 +2928,12 @@ function pendingStartActivity(activity: SessionActivity, sessionId: string): Ses
   };
 }
 
-function creatingPendingSessionActivity(sessionId: string, queuedCount = 0): SessionActivity {
+function creatingPendingSessionActivity(sessionId: string): SessionActivity {
   return {
     sessionId,
     phase: "active",
     label: "Creating session",
-    detail: queuedCount > 0 ? `${String(queuedCount)} queued ${queuedCount === 1 ? "message" : "messages"} will send when the backend session is ready` : "Waiting for the backend session to be ready",
+    detail: "Starting session",
     at: new Date().toISOString(),
   };
 }
@@ -2993,7 +3127,11 @@ async function queuedInitialPromptAccepted(page: MessagePage, queued: Extract<Qu
 }
 
 function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): boolean {
-  return normalizeMessages(page.messages).some((message) => {
+  return canonicalMessagesFindPrompt(normalizeMessages(page.messages), prompt) !== undefined;
+}
+
+function canonicalMessagesFindPrompt(messages: readonly ReturnType<typeof textMessage>[], prompt: string): ReturnType<typeof textMessage> | undefined {
+  return messages.find((message) => {
     if (message.role !== "user") return false;
     if (message.promptText === prompt) return true;
     return canonicalUserMessageText(message) === prompt;
@@ -3001,14 +3139,24 @@ function canonicalTranscriptContainsPrompt(page: MessagePage, prompt: string): b
 }
 
 async function canonicalTranscriptContainsDeliveryReceipt(page: MessagePage, receipt: string): Promise<boolean> {
-  for (const message of normalizeMessages(page.messages)) {
+  return await canonicalMessagesFindDeliveryReceipt(normalizeMessages(page.messages), receipt, new Set<string>()) !== undefined;
+}
+
+async function canonicalMessagesFindDeliveryReceipt(
+  messages: readonly ReturnType<typeof textMessage>[],
+  receipt: string,
+  checkedTexts: Set<string>,
+): Promise<ReturnType<typeof textMessage> | undefined> {
+  for (const message of messages) {
     if (message.role !== "user") continue;
     const texts = message.promptText === undefined ? [canonicalUserMessageText(message)] : [message.promptText, canonicalUserMessageText(message)];
     for (const text of texts) {
-      if (await fingerprintPromptResourceDeliveryText(text) === receipt) return true;
+      if (checkedTexts.has(text)) continue;
+      checkedTexts.add(text);
+      if (await fingerprintPromptResourceDeliveryText(text) === receipt) return message;
     }
   }
-  return false;
+  return undefined;
 }
 
 function canonicalUserMessageText(message: { parts: readonly { type: string; text?: string | undefined }[] }): string {
@@ -3037,6 +3185,20 @@ function queuedSessionMessagePreview(queued: QueuedPendingSessionSend): QueuedSe
     return { kind: queued.streamingBehavior === "steer" ? "steer" : "followUp", text };
   }
   return { kind: "followUp", text: queued.text };
+}
+
+function pendingSessionLaunchChatMessage(queued: FirstPromptQueuedSend): ReturnType<typeof textMessage> {
+  const parts: ReturnType<typeof textMessage>["parts"] = [];
+  if (queued.text !== "") parts.push({ type: "text", text: queued.text });
+  if (queued.delivery === "inline") {
+    parts.push(...(queued.attachments ?? [])
+      .filter((attachment) => attachment.kind === "image")
+      .map((attachment) => ({ type: "image" as const, mimeType: attachment.mimeType, data: attachment.data })));
+  }
+  const summarizedAttachments = queued.attachments?.filter((attachment) => queued.delivery !== "inline" || attachment.kind !== "image");
+  const attachmentText = queuedAttachmentSummary(summarizedAttachments);
+  if (attachmentText !== undefined) parts.push({ type: "text", text: attachmentText });
+  return { role: "user", parts };
 }
 
 function initialPromptPreviewText(attachments: PromptAttachment[] | undefined): string {

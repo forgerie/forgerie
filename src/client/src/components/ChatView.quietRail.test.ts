@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { setChatLineTranscriptPosition } from "../chatLinePosition";
 import { ChatView } from "./ChatView";
 import type { ChatLine, ToolExecutionPart } from "./shared";
+import { TurnRailLedger } from "./TurnRailLedger";
 import type { TurnRailSummary } from "./TurnRailSummary";
 
 afterEach(() => {
@@ -53,6 +54,24 @@ function ledger(view: ChatView): HTMLElement {
   const element = shadow(view).querySelector<HTMLElement>(".rail-ledger");
   if (element === null) throw new Error("The rail rendered no step ledger");
   return element;
+}
+
+function expandedRailOrder(view: ChatView): string[] {
+  const order: string[] = [];
+  const visit = (element: Element): void => {
+    if (element instanceof TurnRailLedger) {
+      order.push(...element.rows.map((row) => `tool:${row.verb}:${row.label}`));
+      return;
+    }
+    if (element.matches(".rail-thinking")) {
+      const formatted = element.querySelector("formatted-text");
+      order.push(`thinking:${String(Reflect.get(formatted ?? {}, "text"))}`);
+      return;
+    }
+    for (const child of element.children) visit(child);
+  };
+  visit(ledger(view));
+  return order;
 }
 
 const failedEdit = ran("edit", "error", { path: repositoryPath, edits: [1, 2] }, {
@@ -111,6 +130,59 @@ describe("ChatView quiet rail", () => {
     expect(Reflect.get(thinking?.querySelector("formatted-text") ?? {}, "text")).toBe("checking the implementation");
   });
 
+  it("keeps tool and thinking rows in the order they arrived", async () => {
+    const view = await transcript([
+      said("user", "q"),
+      { role: "assistant", parts: [{ type: "thinking", text: "planning the change" }] },
+      succeededEdit,
+      { role: "assistant", parts: [{ type: "thinking", text: "checking the result" }] },
+      ran("bash", "success", { command: "npm test" }),
+      said("assistant", "the answer"),
+    ]);
+    const disclosure = summary(view).shadowRoot?.querySelector("button.disclosure");
+    if (!(disclosure instanceof HTMLButtonElement)) throw new Error("The register rendered no disclosure");
+
+    disclosure.click();
+    await view.updateComplete;
+    await view.updateComplete;
+
+    expect(expandedRailOrder(view)).toEqual([
+      "thinking:planning the change",
+      "tool:edit:ExtensionPackageRepository.kt",
+      "thinking:checking the result",
+      "tool:bash:npm test",
+    ]);
+  });
+
+  it("keeps mixed parts within one message in arrival order", async () => {
+    const view = await transcript([
+      said("user", "q"),
+      {
+        role: "assistant",
+        parts: [
+          { type: "thinking", text: "planning the change" },
+          { type: "toolExecution", toolName: "edit", summary: "", status: "success", args: { path: repositoryPath } },
+          { type: "thinking", text: "checking the result" },
+          { type: "toolExecution", toolName: "bash", summary: "", status: "success", args: { command: "npm test" } },
+        ],
+      },
+      said("assistant", "the answer"),
+    ]);
+    const disclosure = summary(view).shadowRoot?.querySelector("button.disclosure");
+    if (!(disclosure instanceof HTMLButtonElement)) throw new Error("The register rendered no disclosure");
+
+    disclosure.click();
+    await view.updateComplete;
+    await view.updateComplete;
+
+    expect(expandedRailOrder(view)).toEqual([
+      "thinking:planning the change",
+      "tool:edit:ExtensionPackageRepository.kt",
+      "thinking:checking the result",
+      "tool:bash:npm test",
+    ]);
+  });
+
   it("preserves grouped activity anchors without adding a duplicate message marker", async () => {
     const positionedWork = setChatLineTranscriptPosition<ChatLine>({
       role: "assistant",
@@ -131,6 +203,30 @@ describe("ChatView quiet rail", () => {
     const markerIds = [...shadow(view).querySelectorAll<HTMLElement>(".scroll-marker")].map((marker) => marker.dataset["markerId"]);
     expect(markerIds.filter((id) => id === "g:1")).toHaveLength(1);
     expect(markerIds).not.toContain("m:1");
+  });
+
+  it("keeps markers for tool-only groups inside a mixed rail", async () => {
+    const positionedTool = setChatLineTranscriptPosition<ChatLine>(
+      ran("read", "success", { path: "/repo/first.ts" }),
+      { messageIndex: 4, lineIndex: 0, segmentIndex: 0 },
+    );
+    const view = await transcript([
+      said("user", "q"),
+      positionedTool,
+      said("assistant", "checking between tools"),
+      succeededEdit,
+      said("assistant", "the answer"),
+    ]);
+    const disclosure = summary(view).shadowRoot?.querySelector("button.disclosure");
+    if (!(disclosure instanceof HTMLButtonElement)) throw new Error("The register rendered no disclosure");
+
+    disclosure.click();
+    await view.updateComplete;
+    await view.updateComplete;
+
+    const markerIds = [...shadow(view).querySelectorAll<HTMLElement>(".scroll-marker")].map((marker) => marker.dataset["markerId"]);
+    expect(markerIds).toContain("g:1");
+    expect(markerIds).toContain("g:3");
   });
 
   it("reports unresolved work in the same form while the turn is active", async () => {

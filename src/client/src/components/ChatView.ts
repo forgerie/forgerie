@@ -5,7 +5,7 @@ import { ChatDisclosureController } from "../chatDisclosure";
 import { inheritChatLineTranscriptPosition } from "../chatLinePosition";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
 import { advanceLivenessClock, livenessBeatMs, livenessPhase, livenessStep, replyIsStreaming, type LivenessClock } from "../chatLiveness";
-import { turnLedgerRows, turnRailState } from "../turnRail";
+import { turnLedgerRows, turnRailState, type TurnLedgerRow } from "../turnRail";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
@@ -22,8 +22,8 @@ import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedS
 import type { ClosedExtensionDialog } from "../appState";
 import { selectedChatCanUseRuntime, selectedChatHasReadableHistory, selectedChatIsOpening, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
-import type { SessionLaunchRecovery } from "../controllers/sessionController";
-import type { ChatLine, ChatPart } from "./shared";
+import type { PendingSessionLaunchView, SessionLaunchRecovery } from "../controllers/sessionController";
+import type { ChatLine, ChatPart, ToolExecutionPart } from "./shared";
 import { chatStyles, renderSessionWarningIcon } from "./shared";
 import "./AskUserCard";
 import "./ExtensionDialogCard";
@@ -44,6 +44,51 @@ export interface QueuedMessageSection {
   heading: string;
   detail: string;
   messages: QueuedSessionMessage[];
+}
+
+type RailChronologyEntry =
+  | { kind: "tools"; rows: TurnLedgerRow[] }
+  | { kind: "activity"; message: ChatLine; index: number; firstActivityInMessage: boolean };
+
+/** Preserve wire order while reducing consecutive tool executions to compact ledger segments. */
+function railChronologyEntries(
+  messages: readonly ChatLine[],
+  startIndex: number,
+  rowsByExecution: ReadonlyMap<ToolExecutionPart, TurnLedgerRow>,
+): RailChronologyEntry[] {
+  const entries: RailChronologyEntry[] = [];
+
+  messages.forEach((message, messageOffset) => {
+    let activityParts: ChatPart[] = [];
+    let activityCount = 0;
+    const flushActivity = () => {
+      if (activityParts.length === 0) return;
+      entries.push({
+        kind: "activity",
+        message: inheritChatLineTranscriptPosition(message, { ...message, parts: activityParts }),
+        index: startIndex + messageOffset,
+        firstActivityInMessage: activityCount === 0,
+      });
+      activityParts = [];
+      activityCount += 1;
+    };
+
+    for (const part of message.parts) {
+      if (part.type === "empty") continue;
+      const row = part.type === "toolExecution" ? rowsByExecution.get(part) : undefined;
+      if (row === undefined) {
+        activityParts.push(part);
+        continue;
+      }
+      flushActivity();
+      const previous = entries.at(-1);
+      if (previous?.kind === "tools") previous.rows.push(row);
+      else entries.push({ kind: "tools", rows: [row] });
+    }
+    flushActivity();
+  });
+
+  return entries;
 }
 
 /**
@@ -259,6 +304,8 @@ function humanizeModelId(id: string): string {
 @customElement("chat-view")
 export class ChatView extends LitElement {
   @property({ attribute: false }) messages: ChatLine[] = [];
+  /** Read-only projection of the first prompt while its backend session does not exist yet. */
+  @property({ attribute: false }) pendingSessionLaunch?: PendingSessionLaunchView;
   @property() sessionId = "";
   @property() sessionTitle = "";
   @property() selectedMachineId = "local";
@@ -324,6 +371,9 @@ export class ChatView extends LitElement {
   /** Invalidates an older deferred anchor restore when another render wins. */
   private liveGrowthRestoreEpoch = 0;
   private groupedMessagesInput?: ChatLine[];
+  private renderedPendingSessionLaunch: PendingSessionLaunchView | undefined;
+  private renderedPendingSessionLaunchSource: ChatLine[] | undefined;
+  private renderedPendingSessionLaunchMessages: ChatLine[] = [];
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
   private turnsCache: ChatTurn[] = [];
@@ -760,11 +810,33 @@ export class ChatView extends LitElement {
     `;
   }
 
+  private renderedMessages(): ChatLine[] {
+    const pending = this.pendingSessionLaunch;
+    if (pending === undefined) {
+      if (this.renderedPendingSessionLaunch !== undefined) {
+        this.renderedPendingSessionLaunch = undefined;
+        this.renderedPendingSessionLaunchSource = undefined;
+        this.renderedPendingSessionLaunchMessages = [];
+      }
+      return this.messages;
+    }
+    if (this.renderedPendingSessionLaunch !== pending || this.renderedPendingSessionLaunchSource !== this.messages) {
+      this.renderedPendingSessionLaunch = pending;
+      this.renderedPendingSessionLaunchSource = this.messages;
+      const visibleMessages = pending.suppressedCanonicalMessage === undefined
+        ? this.messages
+        : this.messages.filter((message) => message !== pending.suppressedCanonicalMessage);
+      this.renderedPendingSessionLaunchMessages = [pending.message, ...visibleMessages];
+    }
+    return this.renderedPendingSessionLaunchMessages;
+  }
+
   private groupedMessages(): ChatGroup[] {
-    if (this.groupedMessagesInput === this.messages && this.groupedMessagesStart === this.messageStart) return this.groupedMessagesCache;
-    this.groupedMessagesInput = this.messages;
+    const messages = this.renderedMessages();
+    if (this.groupedMessagesInput === messages && this.groupedMessagesStart === this.messageStart) return this.groupedMessagesCache;
+    this.groupedMessagesInput = messages;
     this.groupedMessagesStart = this.messageStart;
-    this.groupedMessagesCache = groupChatMessages(this.messages, this.messageStart);
+    this.groupedMessagesCache = groupChatMessages(messages, this.messageStart);
     this.turnsCache = chatTurns(this.groupedMessagesCache);
     return this.groupedMessagesCache;
   }
@@ -883,10 +955,7 @@ export class ChatView extends LitElement {
         <div class=${rows.length === 0 ? "rail-ledger" : "rail-ledger flat"} ?hidden=${!open}>
           ${rows.length === 0
             ? repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))
-            : html`
-              <turn-rail-ledger .rows=${rows}></turn-rail-ledger>
-              ${this.renderFlatRailActivity(groups, liveTailGroup)}
-            `}
+            : this.renderChronologicalRailActivity(groups, liveTailGroup, rows)}
         </div>
         <span class="rail-growth-anchor" data-rail-growth-anchor=${railKey} aria-hidden="true"></span>
         ${meta === undefined ? null : this.renderRailMeta(meta.turn, meta.key)}
@@ -900,41 +969,49 @@ export class ChatView extends LitElement {
     this.expandedRails = next;
   }
 
-  /** Other activity joins the compact tool rows without restoring the old group folds. */
-  private renderFlatRailActivity(groups: readonly ChatGroup[], liveTailGroup: ChatGroup | undefined) {
-    const hasActivity = groups.some((group) => group.kind !== "group"
-      || group.messages.some((message) => message.parts.some((part) => part.type !== "toolExecution" && part.type !== "empty")));
-    if (!hasActivity) return null;
-
+  /** Tool and non-tool activity share one stream in the order the wire delivered it. */
+  private renderChronologicalRailActivity(
+    groups: readonly ChatGroup[],
+    liveTailGroup: ChatGroup | undefined,
+    rows: readonly TurnLedgerRow[],
+  ) {
+    const rowsByExecution = new Map(rows.map((row) => [row.execution, row]));
+    const chronology = groups.map((group) => ({
+      group,
+      entries: group.kind === "group"
+        ? railChronologyEntries(group.messages, group.startIndex, rowsByExecution)
+        : railChronologyEntries([group.message], group.index, rowsByExecution),
+    }));
+    // Match the previous reading-position contract: once a rail has any
+    // non-tool activity, every group in that rail keeps its marker and anchor.
+    const hasActivity = chronology.some(({ entries }) => entries.some((entry) => entry.kind === "activity"));
     return html`
       <div class="rail-flat-activity">
-        ${groups.map((group) => {
-          if (group.kind !== "group") return this.renderRailActivityMessage(group.message, group.index);
-          const messages = group.messages.map((message) => inheritChatLineTranscriptPosition(message, {
-            ...message,
-            parts: message.parts.filter((part) => part.type !== "toolExecution" && part.type !== "empty"),
-          }));
-          return html`
-            ${this.renderScrollMarker(this.groupScrollMarkerId(group.endIndex))}
-            <span class="rail-flat-group-anchor" data-scroll-anchor-id=${this.groupReadingAnchorKey(group.messages, group.startIndex, group === liveTailGroup)}></span>
-            ${messages.map((message, offset) => message.parts.length === 0
-              ? null
-              : this.renderGroupedRailActivityMessage(message, group.startIndex + offset))}
-          `;
-        })}
+        ${chronology.map(({ group, entries }) => html`
+            ${hasActivity
+              ? group.kind === "group"
+                ? html`
+                  ${this.renderScrollMarker(this.groupScrollMarkerId(group.endIndex))}
+                  <span class="rail-flat-group-anchor" data-scroll-anchor-id=${this.groupReadingAnchorKey(group.messages, group.startIndex, group === liveTailGroup)}></span>
+                `
+                : this.renderScrollMarker(this.messageScrollMarkerId(group.index))
+              : null}
+            ${entries.map((entry) => {
+              if (entry.kind === "tools") return html`
+                <div class="rail-tool-segment">
+                  <turn-rail-ledger .rows=${entry.rows}></turn-rail-ledger>
+                </div>
+              `;
+              const readingAnchorId = entry.firstActivityInMessage
+                ? group.kind === "group"
+                  ? this.eventReadingAnchorKey(entry.message, entry.index)
+                  : this.messageReadingAnchorKey(entry.message, entry.index)
+                : undefined;
+              return this.renderRailActivityRow(entry.message, entry.index, readingAnchorId);
+            })}
+          `)}
       </div>
     `;
-  }
-
-  private renderRailActivityMessage(message: ChatLine, index: number) {
-    return html`
-      ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      ${this.renderRailActivityRow(message, index, this.messageReadingAnchorKey(message, index))}
-    `;
-  }
-
-  private renderGroupedRailActivityMessage(message: ChatLine, index: number) {
-    return this.renderRailActivityRow(message, index, this.eventReadingAnchorKey(message, index));
   }
 
   private renderRailActivityRow(message: ChatLine, index: number, readingAnchorId: string | undefined) {
@@ -1001,12 +1078,20 @@ export class ChatView extends LitElement {
   }
 
   private renderQueuedMessages() {
-    return html`${chatQueuedMessageSections(this.clientQueuedMessages, this.sessionLaunchRecovery)
+    const messages = this.pendingSessionLaunch?.initialPreviewPending === true
+      ? this.clientQueuedMessages.slice(1)
+      : this.clientQueuedMessages;
+    if (this.pendingSessionLaunch !== undefined && this.sessionLaunchRecovery !== undefined) {
+      return html`
+        <div class="pending-session-launch-recovery">${this.renderSessionLaunchRecovery()}</div>
+        ${chatQueuedMessageSections(messages).map((section) => this.renderQueuedMessageList(section, false))}
+      `;
+    }
+    return html`${chatQueuedMessageSections(messages, this.sessionLaunchRecovery)
       .map((section) => this.renderQueuedMessageList(section))}`;
   }
 
-  private renderQueuedMessageList(section: QueuedMessageSection) {
-    const hasFirstPromptRecovery = this.sessionLaunchRecovery !== undefined;
+  private renderQueuedMessageList(section: QueuedMessageSection, hasFirstPromptRecovery = this.sessionLaunchRecovery !== undefined) {
     return html`
       <aside class="queued-messages" aria-live="polite">
         <div class="queued-heading">
@@ -1236,7 +1321,14 @@ export class ChatView extends LitElement {
     // Only assistant prose takes the interim register: narration on the rail
     // reads as the working voice, while cards and shell output keep their own
     // dress inside it.
-    const roleClass = interim && message.role === "assistant" ? "msg assistant interim" : `msg ${message.role}`;
+    const pendingSessionLaunch = this.pendingSessionLaunch !== undefined
+      && message.role === "user"
+      && index === this.messageStart;
+    const roleClass = pendingSessionLaunch
+      ? "msg user pending-session-launch"
+      : interim && message.role === "assistant"
+        ? "msg assistant interim"
+        : `msg ${message.role}`;
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
       <article class=${toolOnly || askUserRecordOnly ? shellClass : roleClass} data-index=${index} data-scroll-anchor-id=${this.messageReadingAnchorKey(message, index)}>

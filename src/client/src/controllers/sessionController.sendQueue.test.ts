@@ -196,7 +196,7 @@ describe("SessionController send queue", () => {
       { kind: "followUp", text: "first" },
       { kind: "steer", text: "second" },
     ]);
-    expect(state.activity?.detail).toContain("2 queued messages");
+    expect(state.activity?.detail).toBe("Starting session");
 
     startRequest.resolve(started);
     await start;
