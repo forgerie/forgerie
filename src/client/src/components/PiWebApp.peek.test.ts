@@ -114,6 +114,19 @@ describe("PiWebApp panel peek", () => {
     expect(storedIntents().navigation).toBe("auto");
   });
 
+  it("keeps a clickable sessions opener when the narrow shell hides the inbox", async () => {
+    const app = await mountApp(FOLDED_PORTRAIT);
+    const opener = navigationOpener(app);
+    await opener.updateComplete;
+    const button = opener.shadowRoot?.querySelector<HTMLButtonElement>("button");
+    if (button === undefined || button === null) throw new Error("The sessions opener had no button");
+
+    button.click();
+    await app.updateComplete;
+
+    expect(peekSheet(app)?.getAttribute("data-side")).toBe("navigation");
+  });
+
   it("promotes a look to a decision only through the pin inside the sheet", async () => {
     // Wide enough that navigation can dock, but dismissed, so it is peekable.
     localStorage.setItem("pi-web-panel-intents", JSON.stringify({ navigation: "dismissed", workspace: "auto" }));

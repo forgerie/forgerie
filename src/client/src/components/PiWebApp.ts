@@ -3438,7 +3438,6 @@ export class PiWebApp extends LitElement {
    */
   private renderPanelOpener(side: ShellPanel) {
     if (this.panelSurfacePresentation(side).visible) return null;
-    if (side === "navigation" && this.appShell.isMobileNavigationLayout) return null;
     const noun = side === "navigation" ? "sessions" : "workspace";
     return html`
       <app-panel-opener
