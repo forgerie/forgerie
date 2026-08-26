@@ -15,6 +15,7 @@ import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePr
 import { detectPromptCompletionTrigger, type PromptCompletionTrigger } from "../promptCompletions";
 import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
 import { createMobilePromptEnterMedia, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
+import { createVirtualKeyboardTracker, type VirtualKeyboardTracker } from "../virtualKeyboard";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
 import { composerCodeBlock, completeComposerCodeFence, leaveComposerCodeBlock, protectComposerCodeBlockBoundary } from "./composerCodeBlock";
@@ -112,6 +113,7 @@ export class ComposerDraft extends LitElement {
   private explicitShiftKeyActive = false;
   /** Sticky for the editor's lifetime: only hardware keyboards dispatch a Shift keydown. */
   private hardwareShiftKeySeen = false;
+  private virtualKeyboard: VirtualKeyboardTracker | undefined;
   private mutationVersion = 0;
   private lastDisplayState: ComposerDraftDisplayState | undefined;
   private readonly restoredSeedIds = new Set<string>();
@@ -177,6 +179,8 @@ export class ComposerDraft extends LitElement {
   }
 
   override disconnectedCallback(): void {
+    this.virtualKeyboard?.dispose();
+    this.virtualKeyboard = undefined;
     window.removeEventListener("resize", this.handleCompletionBoundaryChange);
     window.removeEventListener("orientationchange", this.handleCompletionBoundaryChange);
     window.visualViewport?.removeEventListener("resize", this.handleCompletionBoundaryChange);
@@ -199,6 +203,7 @@ export class ComposerDraft extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    this.virtualKeyboard = createVirtualKeyboardTracker();
     window.addEventListener("resize", this.handleCompletionBoundaryChange);
     window.addEventListener("orientationchange", this.handleCompletionBoundaryChange);
     window.visualViewport?.addEventListener("resize", this.handleCompletionBoundaryChange);
@@ -895,7 +900,9 @@ export class ComposerDraft extends LitElement {
       if (completion !== undefined) this.pick(completion);
       return true;
     }
-    if (!shouldSendPromptOnEnterShortcut(shiftKey)) {
+    // An open on-screen keyboard has no Shift+Enter chord: its Enter always
+    // inserts a new line, and the send button is the submit path.
+    if (!shouldSendPromptOnEnterShortcut(shiftKey) || this.virtualKeyboard?.open === true) {
       return completeComposerCodeFence(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
     }
     this.submit(this.working ? "followUp" : undefined);

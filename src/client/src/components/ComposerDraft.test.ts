@@ -87,6 +87,37 @@ describe("ComposerDraft", () => {
     expect(onSubmit).toHaveBeenCalledWith({ text: "abc\n" }, undefined);
   });
 
+  it("turns Enter into a new line while the on-screen keyboard is open and back into send when it closes", async () => {
+    class ConfigurableVisualViewport extends EventTarget {
+      width = 704;
+      height = 783;
+    }
+    const viewport = new ConfigurableVisualViewport();
+    Object.defineProperty(window, "visualViewport", { value: viewport, configurable: true });
+    try {
+      const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+      const draft = await mountDraft({ onSubmit });
+      draft.replaceText("glass typing");
+
+      // The on-screen keyboard opens: height collapses at constant width.
+      viewport.height = 420;
+      viewport.dispatchEvent(new Event("resize"));
+      press(draft, "Enter");
+
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(draft.view?.state.doc.toString()).toBe("glass typing\n");
+
+      // The keyboard closes (hardware typing session): Enter sends again.
+      viewport.height = 783;
+      viewport.dispatchEvent(new Event("resize"));
+      press(draft, "Enter");
+
+      expect(onSubmit).toHaveBeenCalledWith({ text: "glass typing\n" }, undefined);
+    } finally {
+      Reflect.deleteProperty(window, "visualViewport");
+    }
+  });
+
   it("keeps Shift+Enter as a new line when the Android IME drops or interleaves the Shift keydown", async () => {
     const matchMedia = window.matchMedia.bind(window);
     vi.spyOn(window, "matchMedia").mockImplementation((query) => {
