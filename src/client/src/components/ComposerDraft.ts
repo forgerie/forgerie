@@ -863,9 +863,10 @@ export class ComposerDraft extends LitElement {
     }
     if (event.defaultPrevented || event.isComposing || view.composing) return false;
     if (event.key !== "Enter") {
+      // Keep a genuinely held Shift armed: typed capitals report shiftKey, and
       // Android IMEs interleave placeholder keydowns (keyCode 229) between real
-      // keys; they must not wipe a genuinely held Shift before Enter arrives.
-      if (!isImePlaceholderKey(event.key)) this.explicitShiftKeyActive = false;
+      // keys. Neither means the chord was released — keyup/blur handle that.
+      if (!event.shiftKey && !isImePlaceholderKey(event.key)) this.explicitShiftKeyActive = false;
       return false;
     }
 

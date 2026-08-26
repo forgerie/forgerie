@@ -14,13 +14,16 @@ export function createMobilePromptEnterMedia(): PromptEnterMedia | undefined {
 }
 
 export function shouldUsePromptEnterShiftShortcut(shiftKey: boolean, evidence: PromptEnterShiftEvidence, media = createMobilePromptEnterMedia()): boolean {
-  // Touch keyboards can report autocapitalization as Shift on Enter after a line break.
-  // On mobile-like screens, only trust Shift when a real Shift keydown backs it up.
-  // Android routes hardware keyboards through the IME, which drops or interleaves the
-  // per-chord Shift keydown, so any past hardware Shift evidence is enough — on-screen
-  // keyboards never dispatch a standalone Shift keydown, so the autocap phantom stays out.
+  // A Shift key is physically held right now. Trust it even when the event's own
+  // shiftKey flag is false: CodeMirror's Android key-delay path swallows the real
+  // Enter keydown and re-dispatches a synthetic one that strips all modifiers.
+  if (evidence.explicitShiftKeyActive) return true;
   if (!shiftKey) return false;
-  if (media?.matches === true) return evidence.explicitShiftKeyActive || evidence.hardwareShiftKeySeen;
+  // Touch keyboards can report autocapitalization as Shift on Enter after a line
+  // break. On mobile-like screens, only trust the flag once a real Shift keydown
+  // has ever been seen — on-screen keyboards never dispatch one, so the autocap
+  // phantom stays out.
+  if (media?.matches === true) return evidence.hardwareShiftKeySeen;
   return true;
 }
 

@@ -58,6 +58,35 @@ describe("ComposerDraft", () => {
     expect(shiftEnterDraft.view?.state.doc.toString()).toBe("first line\n");
   });
 
+  it("inserts a new line when CodeMirror's Android key delay strips Shift from the Enter it re-dispatches", async () => {
+    // Replays the sequence captured on the acceptance device: Shift is held
+    // (Android auto-repeats its keydown), CodeMirror swallows the real Enter
+    // and re-dispatches a synthetic one with no modifiers.
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = matchMedia(query);
+      Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const draft = await mountDraft({ onSubmit });
+    const content = draft.view?.contentDOM;
+    if (content === undefined) throw new Error("Expected CodeMirror to mount");
+    draft.replaceText("abc");
+
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", shiftKey: true, bubbles: true, cancelable: true }));
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", shiftKey: true, bubbles: true, cancelable: true }));
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: false, bubbles: true, cancelable: true }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(draft.view?.state.doc.toString()).toBe("abc\n");
+
+    // Releasing Shift restores plain Enter as send.
+    content.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledWith({ text: "abc\n" }, undefined);
+  });
+
   it("keeps Shift+Enter as a new line when the Android IME drops or interleaves the Shift keydown", async () => {
     const matchMedia = window.matchMedia.bind(window);
     vi.spyOn(window, "matchMedia").mockImplementation((query) => {
