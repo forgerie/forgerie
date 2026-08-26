@@ -14,8 +14,7 @@ import { inputModeForDraft, inputModesEqual, type InputMode } from "../inputMode
 import { capturePromptAttachments, effectivePromptAttachmentDelivery, isInlinePromptAttachment, promptAttachmentsCanUseInlineDelivery, type CapturedAttachment } from "../promptAttachmentCapture";
 import { detectPromptCompletionTrigger, type PromptCompletionTrigger } from "../promptCompletions";
 import { clearDraft, loadDraft, saveDraft } from "../promptDraftStorage";
-import { createMobilePromptEnterMedia, shouldSendPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
-import { createVirtualKeyboardTracker, type VirtualKeyboardTracker } from "../virtualKeyboard";
+import { createMobilePromptEnterMedia, shouldSubmitPromptOnEnterShortcut, shouldUsePromptEnterShiftShortcut } from "../promptEnterBehavior";
 import { addPromptHistoryEntry, createPromptHistory, leavePromptHistory, navigatePromptHistory, type PromptHistoryState } from "../promptHistory";
 import { promptEditorStyles, type CompletionItem } from "./shared";
 import { composerCodeBlock, completeComposerCodeFence, leaveComposerCodeBlock, protectComposerCodeBlockBoundary } from "./composerCodeBlock";
@@ -113,7 +112,8 @@ export class ComposerDraft extends LitElement {
   private explicitShiftKeyActive = false;
   /** Sticky for the editor's lifetime: only hardware keyboards dispatch a Shift keydown. */
   private hardwareShiftKeySeen = false;
-  private virtualKeyboard: VirtualKeyboardTracker | undefined;
+  /** Ctrl/Cmd is currently held: the send chord, since Enter alone is a new line. */
+  private explicitSendModifierActive = false;
   private mutationVersion = 0;
   private lastDisplayState: ComposerDraftDisplayState | undefined;
   private readonly restoredSeedIds = new Set<string>();
@@ -179,8 +179,6 @@ export class ComposerDraft extends LitElement {
   }
 
   override disconnectedCallback(): void {
-    this.virtualKeyboard?.dispose();
-    this.virtualKeyboard = undefined;
     window.removeEventListener("resize", this.handleCompletionBoundaryChange);
     window.removeEventListener("orientationchange", this.handleCompletionBoundaryChange);
     window.visualViewport?.removeEventListener("resize", this.handleCompletionBoundaryChange);
@@ -203,7 +201,6 @@ export class ComposerDraft extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this.virtualKeyboard = createVirtualKeyboardTracker();
     window.addEventListener("resize", this.handleCompletionBoundaryChange);
     window.addEventListener("orientationchange", this.handleCompletionBoundaryChange);
     window.visualViewport?.addEventListener("resize", this.handleCompletionBoundaryChange);
@@ -866,12 +863,19 @@ export class ComposerDraft extends LitElement {
       this.hardwareShiftKeySeen = true;
       return false;
     }
+    if (isSendModifierKey(event.key)) {
+      this.explicitSendModifierActive = true;
+      return false;
+    }
     if (event.defaultPrevented || event.isComposing || view.composing) return false;
     if (event.key !== "Enter") {
-      // Keep a genuinely held Shift armed: typed capitals report shiftKey, and
+      // Keep genuinely held modifiers armed: typed capitals report shiftKey, and
       // Android IMEs interleave placeholder keydowns (keyCode 229) between real
-      // keys. Neither means the chord was released — keyup/blur handle that.
-      if (!event.shiftKey && !isImePlaceholderKey(event.key)) this.explicitShiftKeyActive = false;
+      // keys. Neither means a chord was released — keyup/blur handle that.
+      if (!isImePlaceholderKey(event.key)) {
+        if (!event.shiftKey) this.explicitShiftKeyActive = false;
+        if (!event.ctrlKey && !event.metaKey) this.explicitSendModifierActive = false;
+      }
       return false;
     }
 
@@ -880,33 +884,38 @@ export class ComposerDraft extends LitElement {
       { explicitShiftKeyActive: this.explicitShiftKeyActive, hardwareShiftKeySeen: this.hardwareShiftKeySeen },
       this.mobilePromptEnterMedia,
     );
+    const submit = shouldSubmitPromptOnEnterShortcut(event.ctrlKey || event.metaKey, this.explicitSendModifierActive);
     this.explicitShiftKeyActive = false;
-    return this.handleEditorEnter(view, shiftKey);
+    // The send modifier is not cleared here: holding Ctrl through repeated
+    // Enters must keep submitting, and it has no autocapitalization phantom to
+    // guard against. Keyup and blur release it.
+    return this.handleEditorEnter(view, { shiftKey, submit });
   }
 
   private handleEditorKeyUp(event: KeyboardEvent): boolean {
     if (event.key === "Shift") this.explicitShiftKeyActive = false;
+    if (isSendModifierKey(event.key)) this.explicitSendModifierActive = false;
     return false;
   }
 
   private resetEditorModifierState(): boolean {
     this.explicitShiftKeyActive = false;
+    this.explicitSendModifierActive = false;
     return false;
   }
 
-  private handleEditorEnter(view: EditorView, shiftKey: boolean): boolean {
-    if (!shiftKey && this.completions.length) {
+  private handleEditorEnter(view: EditorView, chord: { shiftKey: boolean; submit: boolean }): boolean {
+    if (chord.submit) {
+      this.submit(this.working ? "followUp" : undefined);
+      return true;
+    }
+    if (!chord.shiftKey && this.completions.length) {
       const completion = this.completions[this.selectedIndex];
       if (completion !== undefined) this.pick(completion);
       return true;
     }
-    // An open on-screen keyboard has no Shift+Enter chord: its Enter always
-    // inserts a new line, and the send button is the submit path.
-    if (!shouldSendPromptOnEnterShortcut(shiftKey) || this.virtualKeyboard?.open === true) {
-      return completeComposerCodeFence(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
-    }
-    this.submit(this.working ? "followUp" : undefined);
-    return true;
+    // Enter alone always inserts a new line, on every device and keyboard.
+    return completeComposerCodeFence(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
   }
 
   private handleEditorTab(view: EditorView): boolean {
@@ -1160,4 +1169,9 @@ function inputAssistanceContentAttributes(inputMode: InputMode): Record<string, 
 /** Android IMEs dispatch these placeholder keydowns (keyCode 229) instead of real key values. */
 function isImePlaceholderKey(key: string): boolean {
   return key === "Unidentified" || key === "Process";
+}
+
+/** Ctrl and Cmd both arm the send chord; the composer treats them alike. */
+function isSendModifierKey(key: string): boolean {
+  return key === "Control" || key === "Meta";
 }

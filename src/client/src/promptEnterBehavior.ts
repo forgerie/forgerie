@@ -13,6 +13,11 @@ export function createMobilePromptEnterMedia(): PromptEnterMedia | undefined {
   return typeof window !== "undefined" && "matchMedia" in window ? window.matchMedia(MOBILE_PROMPT_ENTER_MEDIA_QUERY) : undefined;
 }
 
+/**
+ * Whether Enter should act as Shift+Enter. Enter and Shift+Enter both insert a
+ * new line, so this only decides whether Enter bypasses an open completion
+ * menu: Shift+Enter takes the new line instead of picking a completion.
+ */
 export function shouldUsePromptEnterShiftShortcut(shiftKey: boolean, evidence: PromptEnterShiftEvidence, media = createMobilePromptEnterMedia()): boolean {
   // A Shift key is physically held right now. Trust it even when the event's own
   // shiftKey flag is false: CodeMirror's Android key-delay path swallows the real
@@ -27,6 +32,12 @@ export function shouldUsePromptEnterShiftShortcut(shiftKey: boolean, evidence: P
   return true;
 }
 
-export function shouldSendPromptOnEnterShortcut(shiftKey: boolean): boolean {
-  return !shiftKey;
+/**
+ * Whether Enter submits the draft. Enter alone always inserts a new line — on
+ * every device and keyboard — so submitting needs the send button or a held
+ * Ctrl/Cmd. The held flag covers Android, where CodeMirror re-dispatches Enter
+ * as a synthetic event with every modifier stripped.
+ */
+export function shouldSubmitPromptOnEnterShortcut(sendModifierKey: boolean, sendModifierHeld: boolean): boolean {
+  return sendModifierKey || sendModifierHeld;
 }
