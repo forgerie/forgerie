@@ -3,6 +3,7 @@ import { LitElement, html, type TemplateResult } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type AskUserSubmission, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
 import type { AppAction } from "../actions";
+import { appFullscreenAction } from "../appFullscreen";
 import { initialAppState, type AppState, type GlobalSessionsState } from "../appState";
 import { createInboxLocationResolver } from "../inboxLocation";
 import { completeNewSessionDestination, createApiNewSessionDestinationCatalog, isNewSessionMachineAvailable, type NewSessionCompleteDestination, type NewSessionDestinationCatalog, type NewSessionLaunchIntent, type NewSessionLaunchMode, type NewSessionSubmissionOutcome } from "../newSessionComposer";
@@ -600,6 +601,10 @@ export class PiWebApp extends LitElement {
     return hasRenderedModal(this.ownerDocument);
   }
 
+  private readonly onFullscreenChange = (): void => {
+    this.requestUpdate();
+  };
+
   override connectedCallback(): void {
     super.connectedCallback();
     removeLegacySessionTabsStorage();
@@ -607,6 +612,9 @@ export class PiWebApp extends LitElement {
     this.observeViewportSpace();
     window.addEventListener("popstate", this.onPopState);
     window.addEventListener("pageshow", this.onPageShow);
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("fullscreenchange", this.onFullscreenChange);
+    }
     this.browserResume.connect();
     window.addEventListener("keydown", this.onKeyDown, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
     this.systemLightThemeMedia?.addEventListener("change", this.onSystemLightThemeChange);
@@ -636,6 +644,9 @@ export class PiWebApp extends LitElement {
     this.sessionUnread.retainMachines(new Set<string>());
     window.removeEventListener("popstate", this.onPopState);
     window.removeEventListener("pageshow", this.onPageShow);
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("fullscreenchange", this.onFullscreenChange);
+    }
     this.browserResume.disconnect();
     window.removeEventListener("keydown", this.onKeyDown, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
     this.systemLightThemeMedia?.removeEventListener("change", this.onSystemLightThemeChange);
@@ -2693,6 +2704,7 @@ export class PiWebApp extends LitElement {
 
   private panelLayoutActions(): AppAction[] {
     return [
+      appFullscreenAction(),
       {
         id: "app.layout.reset-navigation-panel-size",
         title: "Reset Navigation Panel Size",

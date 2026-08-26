@@ -1,6 +1,6 @@
-// The app must not call the Fullscreen API. Chrome reserves Escape for leaving
-// Fullscreen API mode and never delivers the key to the page, so a modal dialog
-// never receives its `cancel` event and Escape stops closing overlays. The
-// installed app already runs full screen from `display: fullscreen` in
-// manifest.webmanifest, which does not take the key.
+// Never enter Fullscreen API mode from a general tap. Chrome reserves Escape
+// for leaving that mode and never delivers the key to the page, so the first
+// Escape cannot close an overlay. Users can opt in through Actions instead.
+// The installed app also runs full screen from `display: fullscreen` in the
+// manifest, which does not take the key.
 import "./components/PiWebApp";

@@ -2,4 +2,4 @@
 "forgerie": patch
 ---
 
-Make Escape close overlays in the installed app. The app no longer calls the Fullscreen API on first interaction: Chrome reserves Escape for leaving that mode and never passes the key to the page, so the first Escape only left full screen and the image viewer stayed open. The installed app still runs full screen from its web manifest.
+Stop entering browser full-screen mode on the first tap. Use Actions → Enter Full Screen to opt in; while it is active, Escape leaves full screen before it closes an overlay. The installed app still runs full screen from its web manifest.
