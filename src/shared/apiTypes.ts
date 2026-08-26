@@ -1007,6 +1007,12 @@ export interface WorkspaceActivityResponse {
   generatedAt: string;
 }
 
+/** A prompt file written into the active agent profile's prompt library. */
+export interface SavedPrompt {
+  name: string;
+  path: string;
+}
+
 export interface SlashCommand {
   name: string;
   description?: string;

@@ -44,6 +44,9 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   // Models a composer may choose from before any session exists, so this sits
   // beside the session routes rather than under one.
   app.all(`${prefix}/models`, (request, reply) => proxy(request, reply));
+  // Prompt authoring targets the agent profile, not a session, so the prompt
+  // dialog can save without one open.
+  app.all(`${prefix}/prompts`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/sessions`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/sessions/*`, (request, reply) => proxy(request, reply));
 }

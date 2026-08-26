@@ -125,6 +125,7 @@ export interface PluginRuntimeContext {
   openActionPalette: () => void;
   focusPrompt: () => void;
   addProject: () => void | Promise<void>;
+  openPromptDialog: () => void;
   addMachine: () => void | Promise<void>;
   refreshSelectedMachine: () => void | Promise<void>;
   removeSelectedMachine: () => void | Promise<void>;

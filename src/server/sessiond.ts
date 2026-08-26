@@ -37,6 +37,8 @@ import { applyAgentHttpIdleTimeout } from "./sessiond/agentHttpDispatcher.js";
 import { sessionServiceDependencies } from "./sessiond/sessionServiceDependencies.js";
 import { scrubNonAgentVisibleEnvKeys } from "./sessiond/agentProcessEnvironment.js";
 import { PromptResourceCatalogService } from "./resources/promptResourceCatalog.js";
+import { AgentDirPromptLibrary } from "./resources/promptLibrary.js";
+import { registerPromptLibraryRoutes } from "./resources/promptLibraryRoutes.js";
 import { registerPromptResourceRoutes } from "./resources/promptResourceRoutes.js";
 
 const daemonEnvironment: NodeJS.ProcessEnv = Object.freeze({ ...process.env });
@@ -138,20 +140,22 @@ async function createSessionDaemonRuntime() {
   auth.subscribe((change) => { sessions.applyAuthChange(change); });
   const terminals = new TerminalService(eventHub, workspaceActivity);
   const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
+  const promptLibrary = new AgentDirPromptLibrary(activeAgentProfile.dir);
   const runtimeComponent = Object.freeze({
     ...getPiWebRuntimeComponent("sessiond", SESSIOND_RUNTIME_CAPABILITIES),
     activeAgentProfile,
   });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources };
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary }: SessionDaemonRuntime): void {
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
   registerSessionRoutes(app, sessions, eventHub);
   registerProcessRoutes(app, sessions);
   registerTerminalRoutes(app, terminals);
   registerPromptResourceRoutes(app, promptResources);
+  registerPromptLibraryRoutes(app, promptLibrary);
 
   app.get("/health", () => ({
     ok: true,

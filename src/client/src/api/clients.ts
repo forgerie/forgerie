@@ -6,6 +6,7 @@ import {
   arrayOf,
   parseAborted,
   parseMachineSessionListingSnapshot,
+  parseSavedPrompt,
   parseSessionAskCatalogSnapshot,
   parseAskUserCloseResponse,
   parseAccepted,
@@ -161,6 +162,11 @@ export const piPackagesApi = {
 
 export const activityApi = {
   workspaceActivity: (machineId = "local") => request(`${machinePrefix(machineId)}/activity`, parseWorkspaceActivityResponse),
+};
+
+export const promptsApi = {
+  /** Writes a prompt into the target machine's agent profile. Needs no session. */
+  savePrompt: (name: string, body: string, machineId = "local") => request(`${machinePrefix(machineId)}/prompts`, parseSavedPrompt, { method: "POST", body: JSON.stringify({ name, body }) }),
 };
 
 export const projectsApi = {
@@ -406,6 +412,7 @@ export const api = {
   ...pluginsApi,
   ...piPackagesApi,
   ...activityApi,
+  ...promptsApi,
   ...projectsApi,
   ...workspacesApi,
   ...sessionsApi,

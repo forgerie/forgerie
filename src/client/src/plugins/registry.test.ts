@@ -30,6 +30,7 @@ function createContext(statePatch: Partial<AppState> = {}) {
     openActionPalette: vi.fn(() => { calls.push("openActionPalette"); }),
     focusPrompt: vi.fn(() => { calls.push("focusPrompt"); }),
     addProject: vi.fn(() => { calls.push("addProject"); }),
+    openPromptDialog: vi.fn(() => { calls.push("openPromptDialog"); }),
     addMachine: vi.fn(() => { calls.push("addMachine"); }),
     refreshSelectedMachine: vi.fn(() => { calls.push("refreshSelectedMachine"); }),
     removeSelectedMachine: vi.fn(() => { calls.push("removeSelectedMachine"); }),

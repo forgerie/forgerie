@@ -4,6 +4,7 @@
 //
 //   node scripts/capture-postures.mjs --url http://127.0.0.1:8504/ --out /tmp/shots --label slice2
 //   node scripts/capture-postures.mjs --url ... --click-title Sessions --label overlay
+//   node scripts/capture-postures.mjs --url ... --press ctrl+k --click-title "New Prompt"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -110,6 +111,13 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
       await sleep(300);
     }
 
+    // Real key input through CDP, not a synthetic DOM event: surfaces opened
+    // by a keyboard shortcut are reached the way the user reaches them.
+    for (const combo of args.presses) {
+      await pressCombo(cdp, combo);
+      await sleep(args.settle);
+    }
+
     // Repeated --click-title flags run in order, so a capture can walk a
     // short path (open the workspace sheet, then pick a tool tab).
     for (const clickTitle of args.clickTitles) {
@@ -136,13 +144,14 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
 }
 
 function parseArgs(argv) {
-  const parsed = { out: "/tmp/forgerie-postures", label: "posture", settle: 4000, timeout: 20000, clickTitles: [] };
+  const parsed = { out: "/tmp/forgerie-postures", label: "posture", settle: 4000, timeout: 20000, clickTitles: [], presses: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--url") parsed.url = argv[++i];
     else if (arg === "--out") parsed.out = argv[++i];
     else if (arg === "--label") parsed.label = argv[++i];
     else if (arg === "--click-title") parsed.clickTitles.push(argv[++i]);
+    else if (arg === "--press") parsed.presses.push(argv[++i]);
     else if (arg === "--input-mode") parsed.inputMode = argv[++i];
     else if (arg === "--color-scheme") parsed.colorScheme = requireColorScheme(argv[++i]);
     else if (arg === "--chrome-bin") parsed.chromeBin = argv[++i];
@@ -150,6 +159,24 @@ function parseArgs(argv) {
     else fail(`Unknown argument: ${arg}`);
   }
   return parsed;
+}
+
+const CDP_MODIFIERS = { alt: 1, ctrl: 2, control: 2, meta: 4, cmd: 4, shift: 8 };
+
+/** Dispatches a combo such as "ctrl+k" or "shift+meta+p" as real key input. */
+async function pressCombo(cdp, combo) {
+  const parts = combo.split("+").map((part) => part.trim().toLowerCase()).filter((part) => part !== "");
+  const key = parts.pop();
+  if (key === undefined) fail(`--press needs a key, got ${JSON.stringify(combo)}`);
+  let modifiers = 0;
+  for (const part of parts) {
+    const bit = CDP_MODIFIERS[part];
+    if (bit === undefined) fail(`Unknown modifier ${JSON.stringify(part)} in ${JSON.stringify(combo)}`);
+    modifiers |= bit;
+  }
+  const base = { modifiers, key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0) };
+  await cdp.send("Input.dispatchKeyEvent", { ...base, type: "keyDown" });
+  await cdp.send("Input.dispatchKeyEvent", { ...base, type: "keyUp" });
 }
 
 function requireColorScheme(value) {

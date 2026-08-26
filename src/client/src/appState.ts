@@ -123,6 +123,7 @@ export interface AppState {
   /** State for the workspace-management picker dialog. */
   workspaceManagementDialog: WorkspaceManagementDialogState | undefined;
   actionPaletteOpen: boolean;
+  promptDialogOpen: boolean;
   projectDialogOpen: boolean;
   machineDialogOpen: boolean;
   workspaceTool: QualifiedContributionId;
@@ -268,6 +269,7 @@ export function initialAppState(): AppState {
     newSessionComposer: { kind: "closed" },
     workspaceManagementDialog: undefined,
     actionPaletteOpen: false,
+    promptDialogOpen: false,
     projectDialogOpen: false,
     machineDialogOpen: false,
     workspaceTool: "core:workspace.files",

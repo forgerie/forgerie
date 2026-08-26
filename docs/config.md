@@ -422,22 +422,28 @@ The chat composer opens completion menus on three trigger characters:
 - `@` completes file paths: `@` for tracked files, `@ ` (at, then space) or `!@` for all files. Picking one inserts an `@path` reference into the draft, quoted automatically when the path contains spaces.
 - `#` completes the models available to the session, filtered case-insensitively as you type (at most 12 entries). Picking one inserts a `#provider/model-id` reference into the draft, which tells agents the request should run on that model — for example as the `model` parameter of `spawn_session`.
 
-## Saving a prompt from the composer
+## Saving a prompt
 
-`/prompt-new <name>` writes the rest of the message to the active agent profile's prompt library at `<agent dir>/prompts/<name>.md` — `~/.pi/agent/prompts/` in the default profile. The prompt is then available as `/<name>` in every session and in the TUI, because Forgerie and Pi read the same profile.
+Both paths below write to the active agent profile's prompt library at `<agent dir>/prompts/<name>.md` — `~/.pi/agent/prompts/` in the default profile. The prompt is then available as `/<name>` in every session and in the TUI, because Forgerie and Pi read the same profile.
+
+**New Prompt dialog** — the primary path. Open the action palette (`Ctrl/Cmd+K`) and run **New Prompt**. It needs no open session and no composer draft: type a command name, type the prompt, save. `Ctrl/Cmd+Enter` saves from either field, because Enter types a newline in the prompt body. The dialog reports the written path, and **Write another** clears both fields without reopening it.
+
+The dialog posts to `POST /api/machines/<machineId>/prompts` with `{ name, body }`, so a prompt can also be written to a registered remote machine's profile, or from a script.
+
+**`/prompt-new <name>` in the composer** — a shortcut when the prompt text is already in the message you are typing. It saves the rest of the message.
 
 ```text
 /prompt-new tell
 Speak in ASD-STE100 Simplified Technical English.
 ```
 
-Rules:
+Rules for both paths:
 
-- The first line after the name starts the prompt body; line breaks are kept.
+- The prompt body keeps its line breaks.
 - The description shown in the command picker is the first body line, shortened to 120 characters. To control the frontmatter yourself, start the body with `---`; a body that opens that way is written to disk unchanged.
 - Names are lowercased, and a leading `/` is dropped, so phone autocapitalization is not an error. Names accept lowercase letters, digits, and dashes.
 - Forgerie never overwrites an existing prompt and never accepts a name that a built-in command already uses. Both are refused with the conflicting path or name.
-- After a successful save, Forgerie reloads that session's Pi resources so `/<name>` works at once. While the session is busy the file is still written, and the reply says to run `/reload`.
+- New sessions see the prompt at once. `/prompt-new` also reloads its own session's Pi resources so `/<name>` works there immediately; while that session is busy the file is still written and the reply says to run `/reload`. After using the dialog, run `/reload` in sessions that are already open.
 
 ## Optional completion tools
 

@@ -59,6 +59,13 @@ export function createCoreActions(): PluginAction[] {
       run: (context) => context.addProject(),
     },
     {
+      id: "prompt.new",
+      title: "New Prompt",
+      description: "Save a reusable /prompt without tying it to a session or the composer",
+      group: "General",
+      run: (context) => { context.openPromptDialog(); },
+    },
+    {
       id: "auth.login",
       title: "Configure Provider Authentication",
       description: "Run /login without tying authentication to a session",

@@ -20,6 +20,7 @@ describe("core actions", () => {
     expect(context.openSelectedMachine).toHaveBeenCalledOnce();
     expect(context.removeSelectedMachine).toHaveBeenCalledOnce();
     expect(context.addProject).toHaveBeenCalledOnce();
+    expect(context.openPromptDialog).toHaveBeenCalledOnce();
     expect(context.configureAuth).toHaveBeenCalledOnce();
     expect(context.logoutAuth).toHaveBeenCalledOnce();
     expect(context.openThemePicker).toHaveBeenCalledOnce();
@@ -99,6 +100,7 @@ function runtimeContext(statePatch: Partial<AppState> = {}): PluginRuntimeContex
     openActionPalette: callback(),
     focusPrompt: callback(),
     addProject: callback(),
+    openPromptDialog: callback(),
     addMachine: callback(),
     refreshSelectedMachine: callback(),
     removeSelectedMachine: callback(),
