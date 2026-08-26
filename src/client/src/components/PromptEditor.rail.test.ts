@@ -95,7 +95,7 @@ describe("PromptEditor control rail", () => {
     expect(queue.disabled).toBe(true);
     expect(queue.title).toBe("Update the selected machine before queueing /compact");
     queue.click();
-    pressSendChord(composer);
+    composer.view?.contentDOM.dispatchEvent(keyEvent("keydown", "Enter"));
 
     expect(onSend).not.toHaveBeenCalled();
     expect(composer.view?.state.doc.toString()).toBe("/compact");
@@ -739,7 +739,7 @@ describe("PromptEditor control rail", () => {
     expect(draft.submissionDisabled).toBe(false);
     expect(composer.shadowRoot?.querySelector(".attachment-chip")?.textContent).toContain("note.txt");
 
-    pressSendChord(composer);
+    pressEnter(composer);
     await composer.updateComplete;
     await composer.draft?.updateComplete;
 
@@ -766,12 +766,12 @@ describe("PromptEditor control rail", () => {
     expect(composer.view?.state.doc.toString()).toBe("keep queued draft");
   });
 
-  it("accepts the send chord as a follow-up submit while queue-capable", async () => {
+  it("accepts Enter as a follow-up submit while queue-capable", async () => {
     const onSend = vi.fn();
     const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend });
     composer.replaceText("queue from Enter");
 
-    pressSendChord(composer);
+    pressEnter(composer);
     await composer.updateComplete;
 
     expect(onSend).toHaveBeenCalledExactlyOnceWith("queue from Enter", "followUp", undefined, undefined);
@@ -780,13 +780,13 @@ describe("PromptEditor control rail", () => {
   it.each([
     { name: "send", overrides: { sendAvailable: false } },
     { name: "submission", overrides: { submissionAvailable: false } },
-  ])("rejects a send-chord submit when the idle $name gate is closed and preserves the draft", async ({ overrides }) => {
+  ])("rejects Enter submit when the idle $name gate is closed and preserves the draft", async ({ overrides }) => {
     const onSend = vi.fn();
     const onDraftSubmit = vi.fn(() => "accepted" as const);
     const composer = await mountEditor({ onSend, onDraftSubmit, ...overrides });
     composer.replaceText("keep idle draft");
 
-    pressSendChord(composer);
+    pressEnter(composer);
     await composer.updateComplete;
     await composer.draft?.updateComplete;
 
@@ -798,13 +798,13 @@ describe("PromptEditor control rail", () => {
   it.each([
     { name: "send", overrides: { sendAvailable: false } },
     { name: "submission", overrides: { submissionAvailable: false } },
-  ])("rejects a send-chord submit when the Queue $name gate is closed and preserves the draft", async ({ overrides }) => {
+  ])("rejects Enter submit when the Queue $name gate is closed and preserves the draft", async ({ overrides }) => {
     const onSend = vi.fn();
     const onDraftSubmit = vi.fn(() => "accepted" as const);
     const composer = await mountEditor({ canSteer: true, capabilities: sessionCapabilities({ stoppable: true }), onSend, onDraftSubmit, ...overrides });
     composer.replaceText("keep queued draft");
 
-    pressSendChord(composer);
+    pressEnter(composer);
     await composer.updateComplete;
     await composer.draft?.updateComplete;
 
@@ -870,9 +870,8 @@ function requiredDraft(composer: PromptEditor) {
   return draft;
 }
 
-/** The composer's submit chord: Enter alone always inserts a new line. */
-function pressSendChord(composer: PromptEditor): void {
-  composer.view?.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+function pressEnter(composer: PromptEditor): void {
+  composer.view?.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 }
 
 async function openSteerByPointerHold(composer: PromptEditor, queue: HTMLButtonElement): Promise<void> {

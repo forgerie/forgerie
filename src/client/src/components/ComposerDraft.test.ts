@@ -33,60 +33,87 @@ describe("ComposerDraft", () => {
     expect(draft.view?.dom.querySelector(".cm-command-mark")).toBeNull();
   });
 
-  it("inserts a new line for Enter and Shift+Enter, and submits only for the Ctrl send chord", async () => {
+  it("uses Enter to send and Shift+Enter to insert a new line on mobile-like screens", async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = matchMedia(query);
+      Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
+    const enterSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const enterDraft = await mountDraft({ onSubmit: enterSubmit });
+    enterDraft.replaceText("send me");
+
+    press(enterDraft, "Enter");
+
+    expect(enterSubmit).toHaveBeenCalledWith({ text: "send me" }, undefined);
+
+    const shiftEnterSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const shiftEnterDraft = await mountDraft({ onSubmit: shiftEnterSubmit });
+    shiftEnterDraft.replaceText("first line");
+    press(shiftEnterDraft, "Shift");
+    shiftEnterDraft.view?.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+
+    expect(shiftEnterSubmit).not.toHaveBeenCalled();
+    expect(shiftEnterDraft.view?.state.doc.toString()).toBe("first line\n");
+  });
+
+  it("inserts a new line when CodeMirror's Android key delay strips Shift from the Enter it re-dispatches", async () => {
+    // Replays the sequence captured on the acceptance device: Shift is held
+    // (Android auto-repeats its keydown), CodeMirror swallows the real Enter
+    // and re-dispatches a synthetic one with no modifiers.
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = matchMedia(query);
+      Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const draft = await mountDraft({ onSubmit });
+    const content = draft.view?.contentDOM;
+    if (content === undefined) throw new Error("Expected CodeMirror to mount");
+    draft.replaceText("abc");
+
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", shiftKey: true, bubbles: true, cancelable: true }));
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", shiftKey: true, bubbles: true, cancelable: true }));
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: false, bubbles: true, cancelable: true }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(draft.view?.state.doc.toString()).toBe("abc\n");
+
+    // Releasing Shift restores plain Enter as send.
+    content.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledWith({ text: "abc\n" }, undefined);
+  });
+
+  it("keeps Shift+Enter as a new line when the Android IME drops or interleaves the Shift keydown", async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = matchMedia(query);
+      Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
     const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
     const draft = await mountDraft({ onSubmit });
     const content = draft.view?.contentDOM;
     if (content === undefined) throw new Error("Expected CodeMirror to mount");
     draft.replaceText("first line");
 
-    press(draft, "Enter");
+    // A hardware Shift chord from earlier in the session, fully released.
     press(draft, "Shift");
+    content.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+    // Android IME placeholder keydown (keyCode 229) in front of the chord.
+    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", bubbles: true, cancelable: true }));
+    // The chord itself arrives without its paired Shift keydown.
     content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }));
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(draft.view?.state.doc.toString()).toBe("first line\n\n");
+    expect(draft.view?.state.doc.toString()).toBe("first line\n");
 
-    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true }));
-
-    expect(onSubmit).toHaveBeenCalledWith({ text: "first line\n\n" }, undefined);
-  });
-
-  it.each([
-    { modifier: "Control", key: "Control" },
-    { modifier: "Meta", key: "Meta" },
-  ])("submits on a held $modifier when CodeMirror's Android key delay strips it from the Enter it re-dispatches", async ({ key }) => {
-    // Replays the shape captured on the acceptance device: Android auto-repeats
-    // the held modifier keydown, CodeMirror swallows the real Enter and
-    // re-dispatches a synthetic one carrying no modifiers at all.
-    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
-    const draft = await mountDraft({ onSubmit });
-    const content = draft.view?.contentDOM;
-    if (content === undefined) throw new Error("Expected CodeMirror to mount");
-    draft.replaceText("send me");
-
-    content.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
-    content.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
-    // Android IME placeholder keydown (keyCode 229) in front of the chord.
-    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", bubbles: true, cancelable: true }));
+    // Plain Enter still sends: autocap phantom shift is shiftKey=false here.
     content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-
-    expect(onSubmit).toHaveBeenCalledWith({ text: "send me" }, undefined);
-  });
-
-  it("releases the send chord on keyup so Enter goes back to inserting a new line", async () => {
-    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
-    const draft = await mountDraft({ onSubmit });
-    const content = draft.view?.contentDOM;
-    if (content === undefined) throw new Error("Expected CodeMirror to mount");
-    draft.replaceText("draft");
-
-    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Control", bubbles: true, cancelable: true }));
-    content.dispatchEvent(new KeyboardEvent("keyup", { key: "Control", bubbles: true }));
-    content.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(draft.view?.state.doc.toString()).toBe("draft\n");
+    expect(onSubmit).toHaveBeenCalledWith({ text: "first line\n" }, undefined);
   });
 
   it("mounts in chat and modal hosts with the same runtime contract", async () => {
@@ -104,7 +131,7 @@ describe("ComposerDraft", () => {
       press(draft, "Enter");
       expect(draft.view?.state.doc.toString()).toBe("/skill:review ");
       draft.replaceText("send me");
-      pressSendChord(draft);
+      press(draft, "Enter");
     }
 
     expect(chatSubmit).toHaveBeenCalledWith({ text: "send me" }, undefined);
@@ -204,7 +231,7 @@ describe("ComposerDraft", () => {
     const draft = await mountDraft({ onSubmit });
 
     await attachFile(draft, new File(["hello"], "note.txt", { type: "text/plain" }));
-    pressSendChord(draft);
+    press(draft, "Enter");
     await draft.updateComplete;
 
     expect(onSubmit).toHaveBeenCalledOnce();
@@ -742,13 +769,6 @@ async function mountDraft(options: {
 
 function runtimeWith(resolve: (trigger: PromptCompletionTrigger) => readonly CompletionItem[] | Promise<readonly CompletionItem[]>): ComposerRuntime {
   return { supportedCompletionKinds: new Set(["command", "file", "model"]), inputModeForDraft, resolveCompletion: (trigger) => Promise.resolve(resolve(trigger)) };
-}
-
-/** The composer's submit chord: Enter alone always inserts a new line. */
-function pressSendChord(draft: ComposerDraft): void {
-  const view = draft.view;
-  if (view === undefined) throw new Error("Expected CodeMirror to mount");
-  view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true }));
 }
 
 function press(draft: ComposerDraft, key: string): KeyboardEvent {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MOBILE_PROMPT_ENTER_MEDIA_QUERY,
-  shouldSubmitPromptOnEnterShortcut,
+  shouldSendPromptOnEnterShortcut,
   shouldUsePromptEnterShiftShortcut,
   type PromptEnterMedia,
   type PromptEnterShiftEvidence,
@@ -16,15 +16,9 @@ describe("promptEnterBehavior", () => {
     expect(MOBILE_PROMPT_ENTER_MEDIA_QUERY).toBe("(pointer: coarse), (max-width: 760px)");
   });
 
-  it("submits only for the send chord, so Enter alone is always a new line", () => {
-    expect(shouldSubmitPromptOnEnterShortcut(false, false)).toBe(false);
-    expect(shouldSubmitPromptOnEnterShortcut(true, false)).toBe(true);
-  });
-
-  it("honors a held send modifier when the Enter event strips the flag", () => {
-    // CodeMirror's Android key-delay path re-dispatches Enter as a synthetic
-    // keydown without modifiers; the held Ctrl/Cmd must still submit.
-    expect(shouldSubmitPromptOnEnterShortcut(false, true)).toBe(true);
+  it("always sends Enter and keeps Shift+Enter for a new line", () => {
+    expect(shouldSendPromptOnEnterShortcut(false)).toBe(true);
+    expect(shouldSendPromptOnEnterShortcut(true)).toBe(false);
   });
 
   it("ignores implicit Shift state on mobile-like keyboards", () => {
