@@ -9,7 +9,7 @@ export function applyShortcutPreferences(actions: AppAction[], shortcuts: PiWebS
 
 export function applyActiveShortcutPreferences(actions: AppAction[], shortcuts: PiWebShortcutConfig | undefined): AppAction[] {
   const activeShortcutActionIds = new Set(resolveShortcutBindings(actions, shortcuts, { enabledOnly: true })
-    .filter((binding) => binding.active)
+    .filter((binding) => binding.active && binding.conflicts.length === 0 && binding.partiallyShadowedBy.length === 0)
     .map((binding) => binding.action.id));
   return applyShortcutPreferences(actions, shortcuts).map((action) => action.shortcut !== undefined && !activeShortcutActionIds.has(action.id) ? withoutShortcut(action) : action);
 }

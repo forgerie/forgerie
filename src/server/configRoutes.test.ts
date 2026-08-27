@@ -41,7 +41,7 @@ describe("config routes", () => {
       allowedHosts: true,
       spawnSessions: true,
       subsessions: true,
-      shortcuts: { "core:view.chat": "mod+1", "core:session.stop": null },
+      shortcuts: { "core:view.chat": "ctrl+1", "core:session.stop": null },
       plugins: { info: { enabled: false, settings: { note: "hidden" } } },
       pathAccess: { allowedPaths: ["/tmp"] },
       uploads: { defaultFolder: "uploads\\manual" },
@@ -62,6 +62,28 @@ describe("config routes", () => {
     expect(response.statusCode).toBe(200);
     expect(savedConfig).toEqual(expectedConfig);
     expect(response.json<PiWebConfigResponse>().config).toEqual(expectedConfig);
+  });
+
+  it("normalizes legacy Mod shortcut requests to physical Ctrl", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/config",
+      payload: { config: { shortcuts: { "core:actions.show": "mod+shift+p" } } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(savedConfig.shortcuts).toEqual({ "core:actions.show": "ctrl+shift+p" });
+  });
+
+  it("rejects GUI modifiers before writing shortcut config", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/config",
+      payload: { config: { shortcuts: { "core:actions.show": "meta+k" } } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(service.write).not.toHaveBeenCalled();
   });
 
   it("rejects invalid config payloads before writing", async () => {
@@ -247,7 +269,7 @@ function fullConfig(): PiWebConfigValues {
     host: "127.0.0.1",
     port: 8504,
     allowedHosts: ["gateway.example.test"],
-    shortcuts: { "core:view.chat": "mod+1" },
+    shortcuts: { "core:view.chat": "ctrl+1" },
     plugins: { info: { enabled: true, settings: { note: "visible" } } },
     pathAccess: { allowedPaths: ["/srv/repos"] },
     uploads: { defaultFolder: "uploads" },

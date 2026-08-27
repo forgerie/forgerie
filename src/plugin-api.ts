@@ -1,5 +1,6 @@
 import type { TemplateResult } from "lit";
 import type { FileContentResponse, FileTreeResponse, MachineKind, PiWebStatusResponse, TerminalCommandRunHandle, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse, DeleteWorkspaceFileResponse, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse } from "./shared/apiTypes.js";
+import type { KeyboardShortcutContext } from "./shared/shortcutContexts.js";
 
 export type {
   FileContentMediaType,
@@ -27,6 +28,8 @@ export type {
   MoveWorkspaceFileOptions,
   MoveWorkspaceFileResponse,
 } from "./shared/apiTypes.js";
+
+export type { KeyboardShortcutContext } from "./shared/shortcutContexts.js";
 
 export type PluginId = string;
 export type LocalContributionId = string;
@@ -118,6 +121,8 @@ export interface PluginAction {
   title: string;
   description?: string;
   shortcut?: string;
+  /** Workbench-only by default. Add contexts only when the command must outrank local keys there. */
+  shortcutContexts?: readonly KeyboardShortcutContext[];
   group?: string;
   enabled?: (context: PluginRuntimeContext) => boolean;
   /** Explain why a disabled action is visible but unavailable. */

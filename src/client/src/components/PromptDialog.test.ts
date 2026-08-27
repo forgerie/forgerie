@@ -75,6 +75,20 @@ describe("prompt-dialog", () => {
     expect(savePrompt).toHaveBeenCalledWith("tell", "Line one.", "local");
   });
 
+  it("does not save on Meta+Enter", async () => {
+    const savePrompt = vi.spyOn(api, "savePrompt").mockResolvedValue({ name: "tell", path: "/prompts/tell.md" });
+    const dialog = await mountDialog();
+    setValue(nameInput(dialog), "tell");
+    setValue(bodyInput(dialog), "Line one.");
+    await dialog.updateComplete;
+
+    const event = new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true, composed: true });
+    bodyInput(dialog).dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(savePrompt).not.toHaveBeenCalled();
+  });
+
   it("starts a second prompt without reopening the dialog", async () => {
     vi.spyOn(api, "savePrompt").mockResolvedValue({ name: "tell", path: "/prompts/tell.md" });
     const dialog = await mountDialog();

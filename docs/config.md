@@ -55,7 +55,7 @@ Browser-classified speech POSTs also pass a gateway Host allowlist. `FORGERIE_SP
 
 Speech uses fixed limits. Audio is 16 kHz mono float32 PCM, with a 60-second maximum turn. Body uploads and operations have 10-second deadlines. The gateway admits one active and one queued transcription, up to 12 transcriptions per minute. Whisper has a 60-second warmup deadline. Raw microphone audio stays in memory for the active bounded turn and 30-second retry buffer. Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session behavior.
 
-In active-session and new-session composers, tap the microphone once to start and again to transcribe. A held press listens until release. In the current session composer, Ctrl+Space also starts and stops dictation. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
+In active-session and new-session composers, tap the microphone once to start and again to transcribe. A held press listens until release. The **Toggle Speech Dictation** action has no default shortcut, but you can assign one in **Settings → Keyboard**. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
 
 ## Precedence and reloads
 
@@ -108,7 +108,7 @@ Process restarts depend on the key:
     "info": { "enabled": false }
   },
   "shortcuts": {
-    "core:view.chat": "mod+1",
+    "core:actions.show": "ctrl+alt+p",
     "core:session.stop": null
   }
 }
@@ -401,18 +401,40 @@ Reload the browser tab after changing plugin enablement. Already-loaded plugin J
 
 ### Shortcut config
 
-Shortcut values are keyed by action id. Values are shortcut strings such as `mod+k` or `mod+g p`; `null` disables that action's shortcut.
+Shortcut values are keyed by action id. Use physical `ctrl`, `alt`, and `shift` modifiers. Forgerie rejects `meta`, `cmd`, `command`, `gui`, `primary`, and `option`. The first chord must start with Ctrl or Alt. Separate sequence chords with a space, as in `ctrl+k ctrl+s`. Use `null` to disable an action's shortcut.
+
+Legacy `mod` values from older config files are accepted during load. Overrides that only repeated an old built-in default are removed so the new keymap can take effect. Other legacy values are normalized to `ctrl`. New values and interactive edits must use the current grammar.
 
 ```json
 {
   "shortcuts": {
-    "core:view.chat": "mod+1",
+    "core:actions.show": "ctrl+alt+p",
     "core:session.stop": null
   }
 }
 ```
 
-Prefer Settings → Keyboard for editing shortcuts interactively.
+Custom shortcuts override defaults. Equal-priority conflicts stay inactive until you change one binding. Settings reports both direct conflicts and sequence-prefix conflicts before you save.
+
+The browser keeps control of some shortcuts and does not deliver them to the page. This includes browser-tab and window commands on some platforms. Every Forgerie command remains available through a visible control or the Actions palette.
+
+#### Default keymap
+
+| Action | Action id | Shortcut |
+| --- | --- | --- |
+| Show Actions | `core:actions.show` | `Ctrl+Shift+P` |
+| Focus Prompt | `core:prompt.focus` | `Ctrl+Alt+I` |
+| Open Settings | `core:settings.open` | `Ctrl+,` |
+| Open Keyboard Shortcuts | `core:settings.shortcuts` | `Ctrl+K Ctrl+S` |
+| Go to Files | `core:view.files` | `Ctrl+Shift+E` |
+| Go to Git | `core:view.git` | `Ctrl+Shift+G` |
+| Go to Terminal | `core:view.terminal` | <code>Ctrl+&#96;</code> |
+| New session | `core:session.start` | `Ctrl+Enter` |
+| New Rapidfire session | `core:session.start-rapidfire` | `Ctrl+Shift+Enter` |
+
+The keymap follows VS Code command meanings where those commands exist in Forgerie. It uses Ctrl on every operating system. Command and GUI keys do not run Forgerie shortcuts. The `Ctrl+K Ctrl+S` sequence starts only from the workbench, so `Ctrl+K` remains available to the composer and terminal.
+
+Prefer **Settings → Keyboard** for recording, typing, disabling, resetting, filtering, and resolving shortcut conflicts.
 
 ## Prompt completions
 
@@ -426,7 +448,7 @@ The chat composer opens completion menus on three trigger characters:
 
 Both paths below write to the active agent profile's prompt library at `<agent dir>/prompts/<name>.md` — `~/.pi/agent/prompts/` in the default profile. The prompt is then available as `/<name>` in every session and in the TUI, because Forgerie and Pi read the same profile.
 
-**New Prompt dialog** — the primary path. Open the action palette (`Ctrl/Cmd+K`) and run **New Prompt**. It needs no open session and no composer draft: type a command name, type the prompt, save. `Ctrl/Cmd+Enter` saves from either field, because Enter types a newline in the prompt body. The dialog reports the written path, and **Write another** clears both fields without reopening it.
+**New Prompt dialog** — the primary path. Open the Actions palette with `Ctrl+Shift+P` and run **New Prompt**. It needs no open session and no composer draft: type a command name, type the prompt, save. `Ctrl+Enter` saves from either field, because Enter types a newline in the prompt body. The dialog reports the written path, and **Write another** clears both fields without reopening it.
 
 The dialog posts to `POST /api/machines/<machineId>/prompts` with `{ name, body }`, so a prompt can also be written to a registered remote machine's profile, or from a script.
 

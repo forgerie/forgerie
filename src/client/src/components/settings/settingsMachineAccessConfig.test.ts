@@ -8,7 +8,7 @@ describe("selected-machine access config helpers", () => {
       host: "127.0.0.1",
       port: 8504,
       allowedHosts: ["gateway.local"],
-      shortcuts: { "core:view.chat": "mod+1" },
+      shortcuts: { "core:view.chat": "ctrl+1" },
       plugins: { info: { enabled: true } },
       spawnSessions: false,
       pathAccess: { allowedPaths: ["/old"] },
@@ -27,7 +27,7 @@ describe("selected-machine access config helpers", () => {
         host: "127.0.0.1",
         port: 8504,
         allowedHosts: ["gateway.local"],
-        shortcuts: { "core:view.chat": "mod+1" },
+        shortcuts: { "core:view.chat": "ctrl+1" },
         plugins: { info: { enabled: true } },
         spawnSessions: false,
         pathAccess: { allowedPaths: ["~/SDKs"] },
@@ -38,7 +38,7 @@ describe("selected-machine access config helpers", () => {
         host: "127.0.0.1",
         port: 8504,
         allowedHosts: ["gateway.local"],
-        shortcuts: { "core:view.chat": "mod+1" },
+        shortcuts: { "core:view.chat": "ctrl+1" },
         plugins: { info: { enabled: true } },
         spawnSessions: false,
         pathAccess: { allowedPaths: ["~/SDKs"] },
@@ -51,7 +51,7 @@ describe("selected-machine access config helpers", () => {
   it("merges cleared selected-machine access/upload defaults without clearing gateway-only values", () => {
     const gateway = configResponse({
       host: "127.0.0.1",
-      shortcuts: { "core:view.chat": "mod+1" },
+      shortcuts: { "core:view.chat": "ctrl+1" },
       pathAccess: { allowedPaths: ["/old"] },
       uploads: { defaultFolder: "old/uploads" },
     });
@@ -61,13 +61,13 @@ describe("selected-machine access config helpers", () => {
       ...gateway,
       config: {
         host: "127.0.0.1",
-        shortcuts: { "core:view.chat": "mod+1" },
+        shortcuts: { "core:view.chat": "ctrl+1" },
         pathAccess: { allowedPaths: [] },
         uploads: {},
       },
       effectiveConfig: {
         host: "127.0.0.1",
-        shortcuts: { "core:view.chat": "mod+1" },
+        shortcuts: { "core:view.chat": "ctrl+1" },
         pathAccess: { allowedPaths: [] },
         uploads: {},
       },

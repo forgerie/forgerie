@@ -29,7 +29,7 @@ const RECORD_SHORTCUT_LISTENER_OPTIONS = { capture: true } as const;
  * The collapsed row is one line — name, shortcut chip, overflow. Tapping the
  * chip records in place; the overflow menu carries the three remaining verbs
  * plus "Type a shortcut instead", which is the only entry path that works
- * without a hardware keyboard (`isShortcutSequenceStarter` requires `mod` or
+ * without a hardware keyboard (`isShortcutSequenceStarter` requires `ctrl` or
  * `alt` in the first chord, and on-screen keyboards emit neither).
  *
  * All row state lives in `shortcutSettingsList`; this element composes it.
@@ -59,6 +59,10 @@ export class SettingsShortcutsPanel extends LitElement {
       this.closeEditor();
       return;
     }
+    if (event.metaKey || event.key === "Meta") {
+      this.localError = "Only Ctrl, Alt, and Shift modifiers are supported. Esc cancels.";
+      return;
+    }
 
     const token = shortcutTokenFromEvent(event);
     if (token === undefined) {
@@ -66,7 +70,7 @@ export class SettingsShortcutsPanel extends LitElement {
       return;
     }
     if (this.editor.tokens.length === 0 && !isShortcutSequenceStarter(token)) {
-      this.localError = "Start with Ctrl/⌘ or Alt.";
+      this.localError = "Start with Ctrl or Alt.";
       return;
     }
 
@@ -113,7 +117,7 @@ export class SettingsShortcutsPanel extends LitElement {
         <summary>How overrides work</summary>
         <p>
           Tap a shortcut to record it, or choose <em>Type a shortcut instead</em> from the row menu and enter one such as
-          <code>mod+k</code> or <code>mod+g p</code>. Custom shortcuts win over defaults.
+          <code>ctrl+shift+p</code> or <code>ctrl+k ctrl+s</code>. Custom shortcuts win over defaults.
         </p>
         <p>
           Overrides are saved under <code>shortcuts</code>${this.configResponse === undefined ? nothing : html` in <code>${this.configResponse.path}</code>`};
@@ -169,7 +173,7 @@ export class SettingsShortcutsPanel extends LitElement {
     const recording = editor.kind === "recording";
     const open = editor.kind !== "closed";
     return html`
-      <div class=${`row-host${open ? " open" : ""}${row.conflict.kind === "shadowed" ? " shadowed" : ""}`}>
+      <div class=${rowHostClass(row, open)}>
         <div class="row">
           <span class="row-name" title=${row.action.description ?? row.action.title}>
             ${row.action.title}
@@ -223,7 +227,7 @@ export class SettingsShortcutsPanel extends LitElement {
           class="type-input"
           data-action-id=${row.action.id}
           .value=${draft}
-          placeholder=${row.action.shortcut ?? "mod+k"}
+          placeholder=${row.action.shortcut ?? "ctrl+k"}
           aria-label=${`Shortcut for ${row.action.title}`}
           autocomplete="off"
           autocapitalize="off"
@@ -241,7 +245,7 @@ export class SettingsShortcutsPanel extends LitElement {
   private renderRowHint(row: ShortcutListRow, editor: ShortcutEditor): TemplateResult | typeof nothing {
     if (editor.kind === "recording") {
       return html`<p class="hint live">${editor.tokens.length === 0
-        ? "Recording — press Ctrl/⌘ or Alt with a key. Esc cancels."
+        ? "Recording — press Ctrl or Alt with a key. Esc cancels."
         : `Recording ${formatShortcut(editor.tokens.join(" "))} — press another key for a sequence, or wait to finish.`}</p>`;
     }
     if (editor.kind === "typing") {
@@ -250,7 +254,7 @@ export class SettingsShortcutsPanel extends LitElement {
       const problem = draftProblem(editor.draft);
       if (problem !== undefined) return html`<p class="hint warn">${problem}</p>`;
       if (row.conflict.kind !== "clear") return html`<p class="hint warn">${conflictText(row.conflict)}</p>`;
-      return html`<p class="hint">Use <code>mod</code> for Ctrl/⌘. Separate a sequence with a space.</p>`;
+      return html`<p class="hint">Use Ctrl, Alt, and Shift only. Separate a sequence with a space.</p>`;
     }
     if (row.conflict.kind !== "clear") return html`<p class="hint warn">${conflictText(row.conflict)}</p>`;
     return nothing;
@@ -399,7 +403,7 @@ export class SettingsShortcutsPanel extends LitElement {
     .rows { border-top: 1px solid var(--pi-border-muted); }
     .row-host { border-bottom: 1px solid var(--pi-border-muted); }
     .row-host.open { background: var(--pi-selection-bg); }
-    .row-host.shadowed { background: color-mix(in srgb, var(--pi-warning) 6%, transparent); }
+    .row-host.shadowed, .row-host.conflict { background: color-mix(in srgb, var(--pi-warning) 6%, transparent); }
 
     /*
      * 40px of ink inside a 44px target. The description and action id are not
@@ -412,7 +416,7 @@ export class SettingsShortcutsPanel extends LitElement {
 
     /* A binding that never fires is the one thing worth spotting mid-scan. */
     .dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; }
-    .dot.shadowed { background: var(--pi-warning); }
+    .dot.shadowed, .dot.conflict, .dot.partial-conflict, .dot.partial-shadowed { background: var(--pi-warning); }
     .dot.shadows { background: var(--pi-accent); }
 
     /*
@@ -456,6 +460,14 @@ export class SettingsShortcutsPanel extends LitElement {
   `;
 }
 
+function rowHostClass(row: ShortcutListRow, open: boolean): string {
+  const classes = ["row-host"];
+  if (open) classes.push("open");
+  if (row.conflict.kind === "shadowed" || row.conflict.kind === "partial-shadowed") classes.push("shadowed");
+  if (row.conflict.kind === "conflict" || row.conflict.kind === "partial-conflict") classes.push("conflict");
+  return classes.join(" ");
+}
+
 function chipClass(row: ShortcutListRow, recording: boolean): string {
   if (recording) return "chip recording";
   if (shortcutBindingShortcut(row.state) === "") return "chip empty";
@@ -479,11 +491,17 @@ function draftProblem(draft: string): string | undefined {
 
 function conflictText(conflict: ShortcutConflictState): string {
   if (conflict.kind === "shadowed") return `Never fires — ${conflict.winner} wins this key`;
-  if (conflict.kind === "shadows") {
-    const [first, ...rest] = conflict.victims;
-    return rest.length === 0 ? `Overrides ${first ?? "another action"}` : `Overrides ${first ?? ""} +${String(rest.length)}`;
-  }
+  if (conflict.kind === "conflict") return `Conflicts with ${formatPeerList(conflict.peers)}. Neither shortcut runs.`;
+  if (conflict.kind === "partial-conflict") return `Conflicts with ${formatPeerList(conflict.peers)} where both commands apply.`;
+  if (conflict.kind === "partial-shadowed") return `Overridden by ${formatPeerList(conflict.winners)} where both commands apply.`;
+  if (conflict.kind === "shadows") return `Overrides ${formatPeerList(conflict.victims)}`;
   return "";
+}
+
+function formatPeerList(peers: readonly string[]): string {
+  const [first, ...rest] = peers;
+  if (rest.length === 0) return first ?? "another action";
+  return `${first ?? "another action"} +${String(rest.length)}`;
 }
 
 function withoutShortcutPreference(shortcuts: PiWebShortcutConfig, actionId: string): PiWebShortcutConfig {

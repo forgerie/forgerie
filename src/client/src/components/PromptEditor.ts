@@ -223,6 +223,7 @@ export class PromptEditor extends LitElement {
       >
         ${this.capabilities.contextUsage === undefined ? nothing : html`<context-usage-meter .contextUsage=${this.capabilities.contextUsage}></context-usage-meter>`}
         <composer-draft
+          data-keyboard-shortcut-context="composer"
           .disabled=${this.disabled}
           .submissionDisabled=${busy || !this.submissionAvailable}
           .working=${rail.kind === "queueCapable"}

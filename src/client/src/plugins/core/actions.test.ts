@@ -24,7 +24,9 @@ describe("core actions", () => {
     expect(context.configureAuth).toHaveBeenCalledOnce();
     expect(context.logoutAuth).toHaveBeenCalledOnce();
     expect(context.openThemePicker).toHaveBeenCalledOnce();
-    expect(context.piWebUnstable?.openSettings).toHaveBeenCalledOnce();
+    expect(context.piWebUnstable?.openSettings).toHaveBeenCalledTimes(2);
+    expect(context.piWebUnstable?.openSettings).toHaveBeenNthCalledWith(1);
+    expect(context.piWebUnstable?.openSettings).toHaveBeenNthCalledWith(2, "shortcuts");
     expect(context.reloadPage).toHaveBeenCalledOnce();
     expect(context.selectMainView).toHaveBeenCalledWith("chat");
     expect(context.selectMainView).toHaveBeenCalledWith("core:workspace.files");

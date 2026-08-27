@@ -48,8 +48,9 @@ describe("PiWebApp composer dictation capability", () => {
     expect(editor.shadowRoot?.querySelector(".dictation-button")).not.toBeNull();
   });
 
-  it("toggles the selected session's dictation with Ctrl+Space before CodeMirror handles it", async () => {
+  it("toggles the selected session's dictation with a configured Ctrl+Space before CodeMirror handles it", async () => {
     const app = new PiWebApp();
+    Reflect.set(app, "shortcutConfig", { "app.session.toggle-dictation": "ctrl+space" });
     const selectedSession = session("session-1");
     Reflect.set(app, "state", {
       ...initialAppState(),
@@ -179,6 +180,7 @@ describe("PiWebApp composer dictation capability", () => {
 
   it("keeps selected-session dictation active while the runtime refreshes", async () => {
     const app = new PiWebApp();
+    Reflect.set(app, "shortcutConfig", { "app.session.toggle-dictation": "ctrl+space" });
     const selectedSession = session("session-1");
     const target = selectedChatTarget("local", selectedSession);
     const liveState = {

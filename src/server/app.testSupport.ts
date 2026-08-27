@@ -180,7 +180,7 @@ export function fullPiWebConfig(): PiWebConfigValues {
     host: "127.0.0.1",
     port: 8504,
     allowedHosts: ["gateway.example.test"],
-    shortcuts: { "core:view.chat": "mod+1" },
+    shortcuts: { "core:view.chat": "ctrl+1" },
     plugins: { info: { enabled: true, settings: { note: "remote" } } },
     pathAccess: { allowedPaths: ["/srv/repos"] },
     uploads: { defaultFolder: "uploads" },

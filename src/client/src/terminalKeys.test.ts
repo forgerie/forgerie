@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { terminalSoftKeySequence, type TerminalModesSnapshot } from "./terminalKeys";
+import { TERMINAL_SOFT_KEYS, terminalSoftKeySequence, type TerminalModesSnapshot } from "./terminalKeys";
 
 describe("terminalSoftKeySequence", () => {
   it("maps common control keys to terminal bytes", () => {
@@ -38,7 +38,11 @@ describe("terminalSoftKeySequence", () => {
     expect(terminalSoftKeySequence("end", applicationCursorMode)).toBe("\x1bOF");
   });
 
-  it("maps meta word movement to escape-prefixed sequences", () => {
+  it("labels escape-prefixed word movement as Alt keys", () => {
+    expect(TERMINAL_SOFT_KEYS.filter((key) => key.id.startsWith("meta-")).map((key) => [key.label, key.ariaLabel])).toEqual([
+      ["Alt+B", "Alt B"],
+      ["Alt+F", "Alt F"],
+    ]);
     expect(terminalSoftKeySequence("meta-backward-word")).toBe("\x1bb");
     expect(terminalSoftKeySequence("meta-forward-word")).toBe("\x1bf");
   });

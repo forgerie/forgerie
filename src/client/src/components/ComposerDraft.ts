@@ -862,6 +862,10 @@ export class ComposerDraft extends LitElement {
       return false;
     }
     if (event.defaultPrevented || event.isComposing || view.composing) return false;
+    if (event.metaKey) {
+      this.explicitShiftKeyActive = false;
+      return false;
+    }
     if (event.key !== "Enter") {
       // Keep a genuinely held Shift armed: typed capitals report shiftKey, and
       // Android IMEs interleave placeholder keydowns (keyCode 229) between real

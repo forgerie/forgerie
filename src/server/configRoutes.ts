@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { agentDirEnvSource, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, parseAgentConfig, parseUploadsConfig, resolveEffectivePiWebConfig, savePiWebConfig, type AgentPathHost, type LoadOptions, type PiWebConfig } from "../config.js";
 import type { PiWebAgentDirEnvSource, PiWebConfigEnvOverrides, PiWebConfigResponse, PiWebConfigValues } from "../shared/apiTypes.js";
 import { isPiWebPluginId } from "../shared/pluginIds.js";
+import { isLegacyDefaultShortcutPreference } from "../shared/shortcutMigrations.js";
+import { parseStoredShortcutValue } from "../shared/shortcutSyntax.js";
 
 export interface PiWebConfigService {
   read: () => PiWebConfigResponse | Promise<PiWebConfigResponse>;
@@ -193,9 +195,11 @@ function parseAllowedHostsRequest(value: unknown): string[] | true {
 
 function parseShortcutsRequest(value: unknown): Record<string, string | null> {
   if (!isRecord(value)) throw new Error("Forgerie config shortcuts must be an object");
-  return Object.fromEntries(Object.entries(value).map(([actionId, shortcut]) => {
-    if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) throw new Error("Forgerie config shortcut values must be non-empty strings or null");
-    return [actionId, shortcut];
+  return Object.fromEntries(Object.entries(value).flatMap(([actionId, shortcut]): [string, string | null][] => {
+    if (isLegacyDefaultShortcutPreference(actionId, shortcut)) return [];
+    const parsed = parseStoredShortcutValue(shortcut);
+    if (!parsed.ok) throw new Error(`Forgerie config shortcut ${actionId} is invalid: ${parsed.message}`);
+    return [[actionId, parsed.value]];
   }));
 }
 

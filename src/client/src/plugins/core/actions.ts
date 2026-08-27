@@ -1,4 +1,5 @@
 import { isSessionActive } from "../../../../shared/activity";
+import { KEYBOARD_SHORTCUT_CONTEXTS } from "../../../../shared/shortcutContexts";
 import type { AppState } from "../../appState";
 import { isArchivableSessionInfo, isTransientNewSessionInfo } from "../../sessionPersistence";
 import { isWorkspaceDeletionPending } from "../../workspaceDeletion";
@@ -10,7 +11,8 @@ export function createCoreActions(): PluginAction[] {
       id: "actions.show",
       title: "Show Actions",
       description: "Open the command palette",
-      shortcut: "mod+k",
+      shortcut: "ctrl+shift+p",
+      shortcutContexts: APP_WIDE_SHORTCUT_CONTEXTS,
       group: "General",
       run: (context) => { context.openActionPalette(); },
     },
@@ -18,7 +20,8 @@ export function createCoreActions(): PluginAction[] {
       id: "prompt.focus",
       title: "Focus Prompt",
       description: "Move keyboard focus to the message composer",
-      shortcut: "mod+g c",
+      shortcut: "ctrl+alt+i",
+      shortcutContexts: APP_WIDE_SHORTCUT_CONTEXTS,
       group: "General",
       run: (context) => { context.focusPrompt(); },
     },
@@ -90,9 +93,18 @@ export function createCoreActions(): PluginAction[] {
       id: "settings.open",
       title: "Open Settings",
       description: "Manage Forgerie configuration and keyboard shortcuts",
-      shortcut: "mod+,",
+      shortcut: "ctrl+,",
+      shortcutContexts: APP_WIDE_SHORTCUT_CONTEXTS,
       group: "Preferences",
       run: (context) => { context.piWebUnstable?.openSettings?.(); },
+    },
+    {
+      id: "settings.shortcuts",
+      title: "Open Keyboard Shortcuts",
+      description: "Manage Forgerie keyboard shortcuts",
+      shortcut: "ctrl+k ctrl+s",
+      group: "Preferences",
+      run: (context) => { context.piWebUnstable?.openSettings?.("shortcuts"); },
     },
     {
       id: "app.reload-page",
@@ -104,7 +116,6 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "view.chat",
       title: "Go to Chat",
-      shortcut: "mod+1",
       group: "Navigation",
       // Shows the transcript without raising the on-screen keyboard.
       // "Focus Prompt" is the action that moves focus into the composer.
@@ -113,7 +124,8 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "view.files",
       title: "Go to Files",
-      shortcut: "mod+2",
+      shortcut: "ctrl+shift+e",
+      shortcutContexts: APP_WIDE_SHORTCUT_CONTEXTS,
       group: "Navigation",
       enabled: hasWorkspace,
       run: (context) => { context.selectMainView("core:workspace.files"); },
@@ -121,7 +133,8 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "view.git",
       title: "Go to Git",
-      shortcut: "mod+3",
+      shortcut: "ctrl+shift+g",
+      shortcutContexts: APP_WIDE_SHORTCUT_CONTEXTS,
       group: "Navigation",
       enabled: hasGitWorkspace,
       run: (context) => { context.selectMainView("core:workspace.git"); },
@@ -129,7 +142,8 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "view.terminal",
       title: "Go to Terminal",
-      shortcut: "mod+4",
+      shortcut: "ctrl+`",
+      shortcutContexts: APP_WIDE_SHORTCUT_CONTEXTS,
       group: "Navigation",
       enabled: hasWorkspace,
       run: (context) => { context.selectMainView("core:workspace.terminal"); },
@@ -137,7 +151,6 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "workspace.refresh-files",
       title: "Refresh Files",
-      shortcut: "mod+shift+f",
       group: "Workspace",
       enabled: hasWorkspace,
       run: (context) => context.refreshFiles(),
@@ -145,7 +158,6 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "workspace.refresh-git",
       title: "Refresh Git",
-      shortcut: "mod+shift+g",
       group: "Workspace",
       enabled: hasGitWorkspace,
       run: (context) => context.refreshGit(),
@@ -153,7 +165,6 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "workspace.refresh-current",
       title: "Refresh Current Panel",
-      shortcut: "mod+shift+r",
       group: "Workspace",
       enabled: hasWorkspace,
       run: (context) => context.state.workspaceTool === "core:workspace.git" && context.state.selectedWorkspace?.isGitRepo === true ? context.refreshGit() : context.refreshFiles(),
@@ -170,7 +181,8 @@ export function createCoreActions(): PluginAction[] {
       id: "session.start",
       title: "New session",
       description: "Compose a first prompt for a new session",
-      shortcut: "mod+enter",
+      shortcut: "ctrl+enter",
+      shortcutContexts: SESSION_CREATION_SHORTCUT_CONTEXTS,
       group: "Session",
       run: (context) => { context.openNewSessionComposer(); },
     },
@@ -178,7 +190,8 @@ export function createCoreActions(): PluginAction[] {
       id: "session.start-rapidfire",
       title: "New Rapidfire session",
       description: "Compose a first prompt with Rapidfire enabled",
-      shortcut: "mod+shift+enter",
+      shortcut: "ctrl+shift+enter",
+      shortcutContexts: SESSION_CREATION_SHORTCUT_CONTEXTS,
       group: "Session",
       run: (context) => { context.openNewSessionComposer("rapidfire"); },
     },
@@ -194,7 +207,6 @@ export function createCoreActions(): PluginAction[] {
       id: "model.cycle",
       title: "Cycle Model",
       description: "Use the next Pi scoped model for the selected session",
-      shortcut: "mod+p",
       group: "Session",
       enabled: hasSelectableSession,
       run: (context) => context.cycleModel(),
@@ -234,13 +246,15 @@ export function createCoreActions(): PluginAction[] {
     {
       id: "session.stop",
       title: "Stop Active Work",
-      shortcut: "mod+.",
       group: "Session",
       enabled: (context) => context.state.selectedSession !== undefined && isSessionActive(context.state.status, context.state.activity),
       run: (context) => context.stopActiveWork(),
     },
   ];
 }
+
+const APP_WIDE_SHORTCUT_CONTEXTS = KEYBOARD_SHORTCUT_CONTEXTS;
+const SESSION_CREATION_SHORTCUT_CONTEXTS = ["workbench", "composer"] as const;
 
 function hasWorkspace(context: { state: AppState }): boolean {
   return context.state.selectedWorkspace !== undefined;

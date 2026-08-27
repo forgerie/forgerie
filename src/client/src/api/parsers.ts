@@ -5,6 +5,8 @@ import type { DoubleEscapeAction, ManagedProcessEndReason, ManagedProcessInfo, M
 import type { MachineSessionListingSnapshot, SessionAskCatalogEntry, SessionAskCatalogSnapshot } from "../../../shared/apiTypes";
 import { parseActiveAgentProfileDescriptor } from "../../../shared/activeAgentProfile";
 import { parseKnownPiWebCapabilities } from "../../../shared/capabilities";
+import { isLegacyDefaultShortcutPreference } from "../../../shared/shortcutMigrations";
+import { parseStoredShortcutValue } from "../../../shared/shortcutSyntax";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -1667,9 +1669,11 @@ function isNonEmptyStringArray(value: unknown): value is string[] {
 function optionalShortcuts(value: unknown): PiWebShortcutConfig | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid Forgerie shortcuts field");
-  return Object.fromEntries(Object.entries(value).map(([actionId, shortcut]) => {
-    if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) throw new Error("Invalid Forgerie shortcut field");
-    return [actionId, shortcut];
+  return Object.fromEntries(Object.entries(value).flatMap(([actionId, shortcut]): [string, string | null][] => {
+    if (isLegacyDefaultShortcutPreference(actionId, shortcut)) return [];
+    const parsed = parseStoredShortcutValue(shortcut);
+    if (!parsed.ok) throw new Error(`Invalid Forgerie shortcut field: ${parsed.message}`);
+    return [[actionId, parsed.value]];
   }));
 }
 

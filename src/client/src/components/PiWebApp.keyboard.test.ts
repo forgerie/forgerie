@@ -4,6 +4,7 @@ import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
+import { keyboardShortcutContextForEvent } from "../keyboardContext";
 import { textMessage } from "../chatMessages";
 import { SessionController } from "../controllers/sessionController";
 import { selectedChatLiveReady, selectedChatTarget } from "../selectedChatLoad";
@@ -22,6 +23,7 @@ afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
   sessionStorage.clear();
+  window.history.replaceState({}, "", "/");
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -41,7 +43,7 @@ describe("PiWebApp global shortcut modality boundary", () => {
     expect(targetKeyDown).not.toHaveBeenCalled();
   });
 
-  it("opens New session with Mod+Enter even when no workspace is selected", () => {
+  it("opens New session with Ctrl+Enter even when no workspace is selected", () => {
     const app = new PiWebApp();
     const target = appendKeyTarget();
 
@@ -68,10 +70,7 @@ describe("PiWebApp global shortcut modality boundary", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it.each([
-    { modifier: "Control", keys: { ctrlKey: true } },
-    { modifier: "Meta", keys: { metaKey: true } },
-  ])("opens New session before CodeMirror handles Mod+Enter with $modifier and preserves the chat draft", async ({ keys }) => {
+  it("opens New session before CodeMirror handles Ctrl+Enter and preserves the chat draft", async () => {
     const { app, editor } = await renderChatEditor({});
     const onSend = vi.fn();
     const editorKeyDown = vi.fn();
@@ -79,13 +78,38 @@ describe("PiWebApp global shortcut modality boundary", () => {
     editor.replaceText("keep this chat draft");
     editor.view?.contentDOM.addEventListener("keydown", editorKeyDown);
 
-    const event = dispatchEditorKeyThroughApp(app, editor, "Enter", keys);
+    const event = dispatchEditorKeyThroughApp(app, editor, "Enter", { ctrlKey: true });
 
     expect(newSessionComposerIsOpen(app)).toBe(true);
     expect(onSend).not.toHaveBeenCalled();
     expect(editorKeyDown).not.toHaveBeenCalled();
     expect(editor.view?.state.doc.toString()).toBe("keep this chat draft");
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("leaves Meta+Enter with CodeMirror and does not open a session", async () => {
+    const { app, editor } = await renderChatEditor({});
+    const editorKeyDown = vi.fn();
+    editor.replaceText("keep this chat draft");
+    editor.view?.contentDOM.addEventListener("keydown", editorKeyDown);
+
+    const event = dispatchEditorKeyThroughApp(app, editor, "Enter", { metaKey: true });
+
+    expect(newSessionComposerIsOpen(app)).toBe(false);
+    expect(editorKeyDown).toHaveBeenCalledOnce();
+    expect(editor.view?.state.doc.toString()).toBe("keep this chat draft");
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("keeps the Keyboard settings chord leader out of the composer", async () => {
+    const { app, editor } = await renderChatEditor({});
+    const editorKeyDown = vi.fn();
+    editor.view?.contentDOM.addEventListener("keydown", editorKeyDown);
+
+    dispatchEditorKeyThroughApp(app, editor, "k", { ctrlKey: true });
+
+    expect(editorKeyDown).toHaveBeenCalledOnce();
+    expect(new URL(window.location.href).searchParams.get("settings")).toBeNull();
   });
 
   it.each([
@@ -118,6 +142,17 @@ describe("PiWebApp global shortcut modality boundary", () => {
     expect(runCommand).toHaveBeenCalledExactlyOnceWith("/fork");
   });
 
+  it("does not run a composer-scoped shortcut from a generic text field", () => {
+    const app = new PiWebApp();
+    const input = document.createElement("input");
+    document.body.append(input);
+
+    const event = dispatchKeyThroughApp(app, input, "Enter", { ctrlKey: true });
+
+    expect(newSessionComposerIsOpen(app)).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it("opens New session through the global dispatcher with a configured alternate shortcut", async () => {
     const { app, editor } = await renderChatEditor({ "core:session.start": "alt+n" });
     const onSend = vi.fn();
@@ -125,13 +160,76 @@ describe("PiWebApp global shortcut modality boundary", () => {
     editor.onSend = onSend;
     editor.replaceText("alternate shortcut draft");
     editor.view?.contentDOM.addEventListener("keydown", editorKeyDown);
+    let context: ReturnType<typeof keyboardShortcutContextForEvent> | undefined;
+    const readContext = (keyboardEvent: KeyboardEvent) => { context = keyboardShortcutContextForEvent(keyboardEvent); };
+    window.addEventListener("keydown", readContext, { capture: true, once: true });
 
     const event = dispatchEditorKeyThroughApp(app, editor, "n", { altKey: true });
 
+    expect(context).toBe("composer");
     expect(newSessionComposerIsOpen(app)).toBe(true);
     expect(onSend).not.toHaveBeenCalled();
     expect(editorKeyDown).not.toHaveBeenCalled();
     expect(editor.view?.state.doc.toString()).toBe("alternate shortcut draft");
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("opens Keyboard settings with the VS Code chord", () => {
+    const app = new PiWebApp();
+    const target = appendKeyTarget();
+
+    const first = dispatchKeyThroughApp(app, target, "k", { ctrlKey: true });
+    const second = dispatchKeyThroughApp(app, target, "s", { ctrlKey: true });
+
+    expect(first.defaultPrevented).toBe(true);
+    expect(second.defaultPrevented).toBe(true);
+    expect(new URL(window.location.href).searchParams.get("settings")).toBe("shortcuts");
+  });
+
+  it("keeps workbench-only custom shortcuts out of terminal input", () => {
+    const app = new PiWebApp();
+    Reflect.set(app, "shortcutConfig", { "app.navigation.focus-sessions": "ctrl+c" });
+    const terminal = document.createElement("div");
+    terminal.setAttribute("data-keyboard-shortcut-context", "terminal");
+    const input = document.createElement("textarea");
+    terminal.append(input);
+    document.body.append(terminal);
+    const terminalKeyDown = vi.fn();
+    input.addEventListener("keydown", terminalKeyDown);
+
+    const event = dispatchKeyThroughApp(app, input, "c", { ctrlKey: true });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(terminalKeyDown).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Keyboard settings chord leader out of terminal input", () => {
+    const app = new PiWebApp();
+    const terminal = document.createElement("div");
+    terminal.setAttribute("data-keyboard-shortcut-context", "terminal");
+    const input = document.createElement("textarea");
+    terminal.append(input);
+    document.body.append(terminal);
+    const terminalKeyDown = vi.fn();
+    input.addEventListener("keydown", terminalKeyDown);
+
+    const event = dispatchKeyThroughApp(app, input, "k", { ctrlKey: true });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(terminalKeyDown).toHaveBeenCalledOnce();
+  });
+
+  it("runs declared app-wide shortcuts from terminal input", () => {
+    const app = new PiWebApp();
+    const terminal = document.createElement("div");
+    terminal.setAttribute("data-keyboard-shortcut-context", "terminal");
+    const input = document.createElement("textarea");
+    terminal.append(input);
+    document.body.append(terminal);
+
+    const event = dispatchShortcutThroughApp(app, input);
+
+    expect(actionPaletteIsOpen(app)).toBe(true);
     expect(event.defaultPrevented).toBe(true);
   });
 
@@ -146,6 +244,23 @@ describe("PiWebApp global shortcut modality boundary", () => {
     expect(actionPaletteIsOpen(app)).toBe(false);
     expect(event.defaultPrevented).toBe(false);
     expect(targetKeyDown).toHaveBeenCalledOnce();
+  });
+
+  it("does not carry a pending chord across a rendered modal", async () => {
+    const app = new PiWebApp();
+    const target = appendKeyTarget();
+
+    expect(dispatchKeyThroughApp(app, target, "k", { ctrlKey: true }).defaultPrevented).toBe(true);
+    const modalTarget = await openAuthenticationDialog(app);
+    expect(dispatchKeyThroughApp(app, modalTarget, "s", { ctrlKey: true }).defaultPrevented).toBe(false);
+
+    document.body.replaceChildren();
+    await Promise.resolve();
+    const afterModal = appendKeyTarget();
+    const event = dispatchKeyThroughApp(app, afterModal, "s", { ctrlKey: true });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(new URL(window.location.href).searchParams.get("settings")).toBeNull();
   });
 
   it.each([
@@ -262,7 +377,7 @@ type AppKeyDownHandler = (event: KeyboardEvent) => void;
 type PromptFocusBoundary = (this: PiWebApp) => Promise<void>;
 
 function dispatchShortcutThroughApp(app: PiWebApp, target: HTMLElement): KeyboardEvent {
-  return dispatchKeyThroughApp(app, target, "k");
+  return dispatchKeyThroughApp(app, target, "p", { ctrlKey: true, shiftKey: true });
 }
 
 function dispatchKeyThroughApp(app: PiWebApp, target: HTMLElement, key: string, modifiers: Partial<KeyboardEventInit> = { ctrlKey: true }): KeyboardEvent {

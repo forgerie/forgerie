@@ -4,6 +4,8 @@ import { basename, dirname, isAbsolute, join, normalize, resolve } from "node:pa
 import type { PiWebAgentDirEnvSource, PiWebConfigValues } from "./shared/apiTypes.js";
 import { isPiCompanionCommand, usesPiCodingAgentStateCompatibility } from "./shared/activeAgentProfile.js";
 import { isPiWebPluginId, piWebPluginIdPattern } from "./shared/pluginIds.js";
+import { isLegacyDefaultShortcutPreference } from "./shared/shortcutMigrations.js";
+import { parseStoredShortcutValue } from "./shared/shortcutSyntax.js";
 
 export { isPiCompanionCommand };
 
@@ -491,11 +493,11 @@ function isAbsoluteLike(value: string): boolean {
 
 function parseShortcuts(value: unknown, path: string): Record<string, string | null> {
   if (!isRecord(value)) throw new Error(`Forgerie config shortcuts must be an object: ${path}`);
-  return Object.fromEntries(Object.entries(value).map(([actionId, shortcut]) => {
-    if (shortcut !== null && (typeof shortcut !== "string" || shortcut === "")) {
-      throw new Error(`Forgerie config shortcut values must be non-empty strings or null: ${path}`);
-    }
-    return [actionId, shortcut];
+  return Object.fromEntries(Object.entries(value).flatMap(([actionId, shortcut]): [string, string | null][] => {
+    if (isLegacyDefaultShortcutPreference(actionId, shortcut)) return [];
+    const parsed = parseStoredShortcutValue(shortcut);
+    if (!parsed.ok) throw new Error(`Forgerie config shortcut ${actionId} is invalid: ${parsed.message}: ${path}`);
+    return [[actionId, parsed.value]];
   }));
 }
 

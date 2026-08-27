@@ -55,7 +55,7 @@ describe("settings config drafts", () => {
       allowedHostsMode: "all",
       allowedHostsText: "ignored.local",
     }, {
-      shortcuts: { "core:view.chat": "mod+1" },
+      shortcuts: { "core:view.chat": "ctrl+1" },
       plugins: { info: { enabled: false } },
       pathAccess: { allowedPaths: ["/old"] },
       uploads: { defaultFolder: "old/uploads" },
@@ -67,7 +67,7 @@ describe("settings config drafts", () => {
       host: "gateway.local",
       port: 9000,
       allowedHosts: true,
-      shortcuts: { "core:view.chat": "mod+1" },
+      shortcuts: { "core:view.chat": "ctrl+1" },
       plugins: { info: { enabled: false } },
       pathAccess: { allowedPaths: ["/old"] },
       uploads: { defaultFolder: "old/uploads" },

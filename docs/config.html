@@ -101,6 +101,7 @@
             <a href="#catalog-refresh">Model catalog refresh</a>
             <a href="#session-tools">Session tools</a>
             <a href="#extension-dialogs">Extension dialogs</a>
+            <a href="#keyboard-shortcuts">Keyboard shortcuts</a>
             <a href="#prompt-completions">Prompt completions</a>
             <a href="#completion-tools">Completion tools</a>
           </aside>
@@ -215,9 +216,10 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
               </p>
               <p>
                 In active-session and new-session composers, tap the microphone once to start and again to transcribe. A
-                held press listens until release. In the current session composer, Ctrl+Space also starts and stops
-                dictation. Permission denial, missing microphone hardware, model failures, status failures, and timeouts
-                release the microphone and keep existing draft text unchanged.
+                held press listens until release. The <strong>Toggle Speech Dictation</strong> action has no default
+                shortcut, but you can assign one in <strong>Settings → Keyboard</strong>. Permission denial, missing
+                microphone hardware, model failures, status failures, and timeouts release the microphone and keep
+                existing draft text unchanged.
               </p>
             </section>
 
@@ -290,7 +292,7 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
     "info": { "enabled": false }
   },
   "shortcuts": {
-    "core:view.chat": "mod+1",
+    "core:actions.show": "ctrl+alt+p",
     "core:session.stop": null
   }
 }</code></pre>
@@ -1042,6 +1044,59 @@ worktree_path="$1"
               </div>
             </section>
 
+            <section id="keyboard-shortcuts">
+              <h2>Keyboard shortcuts</h2>
+              <p>
+                Shortcut values are keyed by action id. Use physical <code>ctrl</code>, <code>alt</code>, and
+                <code>shift</code> modifiers. Forgerie rejects Meta, Command, GUI, Option, <code>mod</code>, and
+                <code>primary</code>. The first chord must start with Ctrl or Alt. Separate sequence chords with a space,
+                as in <code>ctrl+k ctrl+s</code>. Use <code>null</code> to disable a shortcut.
+              </p>
+              <p>
+                Legacy <code>mod</code> values from older config files are accepted during load. Overrides that only
+                repeated an old built-in default are removed so the new keymap can take effect. Other legacy values are
+                normalized to <code>ctrl</code>. New values and interactive edits must use the current grammar.
+              </p>
+              <div class="code-card">
+                <pre><code>{
+  "shortcuts": {
+    "core:actions.show": "ctrl+alt+p",
+    "core:session.stop": null
+  }
+}</code></pre>
+              </div>
+              <p>
+                Custom shortcuts override defaults. Equal-priority direct or sequence-prefix conflicts stay inactive
+                until you change one binding. <strong>Settings → Keyboard</strong> reports conflicts before saving.
+              </p>
+              <p>
+                The browser keeps control of some shortcuts and does not deliver them to the page. Every Forgerie
+                command remains available through a visible control or the Actions palette.
+              </p>
+              <h3>Default keymap</h3>
+              <div class="table-scroll" role="region" aria-label="Default Forgerie keyboard shortcuts" tabindex="0">
+                <table>
+                  <thead><tr><th>Action</th><th>Action id</th><th>Shortcut</th></tr></thead>
+                  <tbody>
+                    <tr><td>Show Actions</td><td><code>core:actions.show</code></td><td><code>Ctrl+Shift+P</code></td></tr>
+                    <tr><td>Focus Prompt</td><td><code>core:prompt.focus</code></td><td><code>Ctrl+Alt+I</code></td></tr>
+                    <tr><td>Open Settings</td><td><code>core:settings.open</code></td><td><code>Ctrl+,</code></td></tr>
+                    <tr><td>Open Keyboard Shortcuts</td><td><code>core:settings.shortcuts</code></td><td><code>Ctrl+K Ctrl+S</code></td></tr>
+                    <tr><td>Go to Files</td><td><code>core:view.files</code></td><td><code>Ctrl+Shift+E</code></td></tr>
+                    <tr><td>Go to Git</td><td><code>core:view.git</code></td><td><code>Ctrl+Shift+G</code></td></tr>
+                    <tr><td>Go to Terminal</td><td><code>core:view.terminal</code></td><td><code>Ctrl+&#96;</code></td></tr>
+                    <tr><td>New session</td><td><code>core:session.start</code></td><td><code>Ctrl+Enter</code></td></tr>
+                    <tr><td>New Rapidfire session</td><td><code>core:session.start-rapidfire</code></td><td><code>Ctrl+Shift+Enter</code></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                The keymap follows VS Code command meanings where those commands exist in Forgerie. It uses Ctrl on every
+                operating system. Command and GUI keys do not run Forgerie shortcuts. The <code>Ctrl+K Ctrl+S</code>
+                sequence starts only from the workbench, so <code>Ctrl+K</code> remains available to the composer and
+                terminal.
+              </p>
+            </section>
 
             <section id="prompt-completions">
               <h2>Prompt completions</h2>

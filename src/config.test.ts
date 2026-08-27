@@ -22,7 +22,7 @@ describe("Forgerie config persistence", () => {
       host: "0.0.0.0",
       port: 9000,
       allowedHosts: ["example.local"],
-      shortcuts: { "core:view.chat": "mod+1", "core:session.stop": null },
+      shortcuts: { "core:view.chat": "ctrl+1", "core:session.stop": null },
       plugins: { info: { enabled: false, settings: { compact: true } } },
       pathAccess: { allowedPaths: ["/tmp", "~/SDKs"] },
       uploads: { defaultFolder: "manual\\incoming" },
@@ -36,6 +36,28 @@ describe("Forgerie config persistence", () => {
 
     expect(saved).toEqual({ path: configPath, exists: true, config: normalizedConfig });
     expect(loadPiWebConfig(testOptions())).toEqual(saved);
+  });
+
+  it("normalizes legacy Mod shortcuts to physical Ctrl", async () => {
+    await writeFile(configPath, `${JSON.stringify({ shortcuts: { "core:settings.shortcuts": "mod+k mod+s" } }, null, 2)}\n`, "utf8");
+
+    expect(loadPiWebConfig(testOptions()).config.shortcuts).toEqual({ "core:settings.shortcuts": "ctrl+k ctrl+s" });
+
+    savePiWebConfig({ shortcuts: { "core:settings.shortcuts": "mod+k mod+s" } }, testOptions());
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ shortcuts: { "core:settings.shortcuts": "ctrl+k ctrl+s" } });
+  });
+
+  it("drops stored overrides that only repeated the old built-in defaults", async () => {
+    await writeFile(configPath, `${JSON.stringify({ shortcuts: { "core:actions.show": " MOD + K ", "core:custom": "mod+k" } }, null, 2)}\n`, "utf8");
+
+    expect(loadPiWebConfig(testOptions()).config.shortcuts).toEqual({ "core:custom": "ctrl+k" });
+  });
+
+  it("rejects GUI modifiers in shortcut config", async () => {
+    for (const shortcut of ["meta+k", "cmd+k", "gui+k"]) {
+      await writeFile(configPath, `${JSON.stringify({ shortcuts: { "core:actions.show": shortcut } }, null, 2)}\n`, "utf8");
+      expect(() => loadPiWebConfig(testOptions())).toThrow("Only Ctrl, Alt, and Shift modifiers are supported");
+    }
   });
 
   it("preserves unrelated config keys while replacing managed keys", async () => {

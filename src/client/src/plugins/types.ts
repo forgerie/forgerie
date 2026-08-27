@@ -1,5 +1,5 @@
 import type { TemplateResult } from "lit";
-import type { AppAction } from "../actions";
+import type { AppAction, KeyboardShortcutContext } from "../actions";
 import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeEntry, FileTreeResponse, GitDiffResponse, GitStatusResponse, Machine, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, RunTerminalCommandInput, TerminalCommandRun, TerminalCommandRunFilter, TerminalCommandRunHandle, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse, Workspace } from "../api";
 import type { AppState } from "../appState";
 import type { NewSessionLaunchMode } from "../newSessionComposer";
@@ -159,6 +159,7 @@ export interface PluginAction {
   title: string;
   description?: string;
   shortcut?: string;
+  shortcutContexts?: readonly KeyboardShortcutContext[];
   group?: string;
   enabled?: (context: PluginRuntimeContext) => boolean;
   /** Explain why a disabled action is visible but unavailable. */

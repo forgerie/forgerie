@@ -58,6 +58,17 @@ describe("ComposerDraft", () => {
     expect(shiftEnterDraft.view?.state.doc.toString()).toBe("first line\n");
   });
 
+  it("ignores Meta+Enter instead of treating the GUI key as a send modifier", async () => {
+    const onSubmit = vi.fn<(snapshot: ComposerDraftSubmitSnapshot) => ComposerDraftSubmitOutcome>(() => "accepted");
+    const draft = await mountDraft({ onSubmit });
+    draft.replaceText("keep this draft");
+
+    draft.view?.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(draft.getText()).toBe("keep this draft");
+  });
+
   it("inserts a new line when CodeMirror's Android key delay strips Shift from the Enter it re-dispatches", async () => {
     // Replays the sequence captured on the acceptance device: Shift is held
     // (Android auto-repeats its keydown), CodeMirror swallows the real Enter

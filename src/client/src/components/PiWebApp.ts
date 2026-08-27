@@ -31,7 +31,7 @@ import { SessionStorageTerminalSelectionMemory } from "../controllers/terminalSe
 import { SessionStorageWorkspaceSelectionMemory } from "../controllers/workspaceSelection";
 import { KeyboardShortcutDispatcher } from "../keyboardShortcuts";
 import { selectedMachineId } from "../controllers/types";
-import { isKeyEventInEditableContext } from "../keyboardContext";
+import { isKeyEventInEditableContext, keyboardShortcutContextForEvent } from "../keyboardContext";
 import { initialInboxDensity, writeInboxDensityPreference, type InboxDensity } from "../inboxDensity";
 import { observeInputMode } from "../inputMode";
 import { machineSessionKey } from "../machineKeys";
@@ -424,8 +424,16 @@ export class PiWebApp extends LitElement {
     return this.routeRestoreDepth > 0;
   }
 
+  private readonly resetKeyboardShortcutSequence = (): void => { this.keyboard.reset(); };
+  private readonly onVisibilityChange = (): void => {
+    if (document.visibilityState !== "visible") this.keyboard.reset();
+  };
+
   private readonly onKeyDown = (event: KeyboardEvent) => {
-    if (this.isRenderedModalOpen()) return;
+    if (this.isRenderedModalOpen()) {
+      this.keyboard.reset();
+      return;
+    }
     // The wheel is a look too, and it is on top, so it answers Escape first.
     if (event.key === "Escape" && this.radialMenu.state.kind !== "closed") {
       event.preventDefault();
@@ -438,9 +446,14 @@ export class PiWebApp extends LitElement {
       this.panelPeek.close();
       return;
     }
-    if (this.keyboard.handle(event, this.getDefaultActions(), { shortcuts: this.shortcutConfig })) {
+    const shortcutDecision = this.keyboard.decide(event, () => this.getDefaultActions(), {
+      shortcuts: this.shortcutConfig,
+      context: keyboardShortcutContextForEvent(event),
+    });
+    if (shortcutDecision.kind !== "defer") {
       event.preventDefault();
       event.stopPropagation();
+      if (shortcutDecision.kind === "run") void shortcutDecision.action.run();
       return;
     }
     // Keyboard E: archive selected session (same confirm/path as the row action).
@@ -489,6 +502,7 @@ export class PiWebApp extends LitElement {
     this.committedChatIdentity = selectedChatIdentity(this.state);
     this.syncSelectedSessionReadState();
     this.dismissPeekUnderModal();
+    if (this.modalIsOpen()) this.keyboard.reset();
   }
 
   /**
@@ -618,9 +632,13 @@ export class PiWebApp extends LitElement {
     window.addEventListener("pageshow", this.onPageShow);
     if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
       document.addEventListener("fullscreenchange", this.onFullscreenChange);
+      document.addEventListener("visibilitychange", this.onVisibilityChange);
     }
     this.browserResume.connect();
     window.addEventListener("keydown", this.onKeyDown, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
+    window.addEventListener("focusin", this.resetKeyboardShortcutSequence, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
+    window.addEventListener("blur", this.resetKeyboardShortcutSequence);
+    window.addEventListener("compositionstart", this.resetKeyboardShortcutSequence, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
     this.systemLightThemeMedia?.addEventListener("change", this.onSystemLightThemeChange);
     // Controls that differ between a finger and a mouse read the input in use
     // from the root. The watch runs for the life of the app.
@@ -650,9 +668,13 @@ export class PiWebApp extends LitElement {
     window.removeEventListener("pageshow", this.onPageShow);
     if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
       document.removeEventListener("fullscreenchange", this.onFullscreenChange);
+      document.removeEventListener("visibilitychange", this.onVisibilityChange);
     }
     this.browserResume.disconnect();
     window.removeEventListener("keydown", this.onKeyDown, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
+    window.removeEventListener("focusin", this.resetKeyboardShortcutSequence, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
+    window.removeEventListener("blur", this.resetKeyboardShortcutSequence);
+    window.removeEventListener("compositionstart", this.resetKeyboardShortcutSequence, GLOBAL_SHORTCUT_LISTENER_OPTIONS);
     this.systemLightThemeMedia?.removeEventListener("change", this.onSystemLightThemeChange);
     this.keyboard.reset();
     this.auth.dispose();
@@ -2690,7 +2712,7 @@ export class PiWebApp extends LitElement {
         id: "app.session.toggle-dictation",
         title: "Toggle Speech Dictation",
         description: "Start or finish speech dictation in the current session composer",
-        shortcut: "mod+space",
+        shortcutContexts: ["workbench", "composer"],
         repeatable: false,
         group: "Session",
         enabled: this.state.mainView === "chat" && this.promptEditor?.canToggleDictation() === true,
@@ -2739,7 +2761,6 @@ export class PiWebApp extends LitElement {
         id: "app.navigation.focus-machines",
         title: "Focus Machines",
         description: "Move keyboard focus to the machine selector",
-        shortcut: "mod+g m",
         group: "Navigation",
         run: () => this.focusNavigationSection("machines"),
       },
@@ -2747,7 +2768,6 @@ export class PiWebApp extends LitElement {
         id: "app.navigation.focus-projects",
         title: "Focus Projects",
         description: "Move keyboard focus to the projects list",
-        shortcut: "mod+g p",
         group: "Navigation",
         run: () => this.focusNavigationSection("projects"),
       },
@@ -2755,7 +2775,6 @@ export class PiWebApp extends LitElement {
         id: "app.navigation.focus-workspaces",
         title: "Focus Workspaces",
         description: "Move keyboard focus to the workspaces list",
-        shortcut: "mod+g w",
         group: "Navigation",
         run: () => this.focusNavigationSection("workspaces"),
       },
@@ -2763,7 +2782,6 @@ export class PiWebApp extends LitElement {
         id: "app.navigation.focus-sessions",
         title: "Focus Sessions",
         description: "Move keyboard focus to the sessions list",
-        shortcut: "mod+g s",
         group: "Navigation",
         run: () => this.focusNavigationSection("sessions"),
       },

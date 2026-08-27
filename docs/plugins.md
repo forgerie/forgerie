@@ -435,6 +435,7 @@ interface PluginAction {
   title: string;
   description?: string;
   shortcut?: string;
+  shortcutContexts?: readonly ("workbench" | "text-entry" | "composer" | "terminal")[];
   group?: string;
   enabled?: (context: PluginRuntimeContext) => boolean;
   disabledReason?: (context: PluginRuntimeContext) => string | undefined;
@@ -510,12 +511,15 @@ Use `focusPrompt()` on `PluginRuntimeContext` to move focus to the prompt editor
 
 #### Keyboard shortcuts
 
-- App-level keyboard shortcuts must be attached to actions. Forgerie does not support standalone plugin keyboard commands; contribute an action first, then add a `shortcut` if it needs a keybinding.
-- `shortcut` is the action's default keybinding. It is displayed in the action palette and handled by the global shortcut dispatcher when the action is enabled.
-- Use modified shortcuts such as `mod+shift+p`; plain letter shortcuts are intentionally ignored so normal typing is never captured.
-- Future Forgerie versions may allow users to override or disable action shortcuts by action id, so plugins should treat `shortcut` as a default rather than a guaranteed final binding.
-- Choose shortcuts carefully to avoid conflicts. There is no user-facing shortcut override or conflict resolver yet.
-- Local text input, terminal input, list navigation, and dialog keys such as Enter, Escape, and arrow keys do not need to be plugin actions unless they are app-level commands.
+- App-level keyboard shortcuts must be attached to actions. Forgerie does not support standalone plugin keyboard commands. Contribute an action first, then add `shortcut` if it needs a keybinding.
+- `shortcut` is the action's default keybinding. Users can override, disable, or reset it by action id in **Settings → Keyboard**.
+- Write new bindings with physical `ctrl`, `alt`, and `shift` modifiers. Forgerie does not support Meta, Command, GUI, Option, or `primary` modifiers. Hosts translate legacy plugin defaults that use `mod` to `ctrl`, but new plugin code must not use `mod`.
+- The first chord must start with Ctrl or Alt. Plain letters and Shift-only first chords are ignored so normal typing is not captured.
+- Separate sequence chords with a space. For example, use `ctrl+k ctrl+s`.
+- Plugin shortcuts run in `workbench` context by default. Use `shortcutContexts` only when the command must outrank local keys in `text-entry`, `composer`, or `terminal` contexts.
+- Keep terminal and editor contexts narrow. A command allowed there can consume the user's shell or editing key when they assign the same binding.
+- Custom shortcuts override defaults. Equal-priority direct or prefix conflicts stay inactive until the user changes one binding. Settings names every conflict.
+- Local text input, terminal input, list navigation, and dialog keys such as Enter, Escape, and arrow keys do not need plugin actions unless they are app-level commands.
 
 ### Inbox shelves
 

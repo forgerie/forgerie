@@ -4,6 +4,7 @@ import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeResponse
 import { initialAppState, type AppState } from "../appState";
 import { markCachedNewSessionInfo } from "../cachedNewSessions";
 import { machineScopedPluginId } from "../../../shared/machinePluginIds";
+import type { SettingsSection } from "../settingsRoute";
 import { corePlugin } from "./core";
 import { PluginRegistry } from "./registry";
 import { themePackPlugin } from "./themes";
@@ -25,7 +26,7 @@ function createContext(statePatch: Partial<AppState> = {}) {
         getCommandRun: vi.fn(),
         open: vi.fn((options?: { terminalId?: string | undefined }) => { calls.push(`terminal.open:${options?.terminalId ?? ""}`); }),
       },
-      openSettings: vi.fn(() => { calls.push("openSettings"); }),
+      openSettings: vi.fn((section: SettingsSection | undefined) => { calls.push(`openSettings:${section ?? "general"}`); }),
     },
     openActionPalette: vi.fn(() => { calls.push("openActionPalette"); }),
     focusPrompt: vi.fn(() => { calls.push("focusPrompt"); }),
@@ -342,7 +343,8 @@ describe("PluginRegistry", () => {
     const thinkingAction = actions.find((action) => action.id === "core:thinking.select");
     expect(modelAction).toMatchObject({ title: "Select Model", enabled: true });
     expect(modelAction?.shortcut).toBeUndefined();
-    expect(cycleModelAction).toMatchObject({ title: "Cycle Model", shortcut: "mod+p", enabled: true });
+    expect(cycleModelAction).toMatchObject({ title: "Cycle Model", enabled: true });
+    expect(cycleModelAction?.shortcut).toBeUndefined();
     expect(thinkingAction).toMatchObject({ title: "Select Thinking Level", enabled: true });
     expect(thinkingAction?.shortcut).toBeUndefined();
 
@@ -367,7 +369,7 @@ describe("PluginRegistry", () => {
     expect(calls).toEqual(["refreshGit"]);
   });
 
-  it("routes app reload and settings actions through the runtime context", () => {
+  it("routes app reload and both settings actions through the runtime context", () => {
     const registry = new PluginRegistry();
     registry.register({ id: "core", plugin: corePlugin });
     const { context, calls } = createContext();
@@ -376,8 +378,9 @@ describe("PluginRegistry", () => {
     expect(actions.some((candidate) => candidate.id === "core:app.refresh-data")).toBe(false);
     void actions.find((candidate) => candidate.id === "core:app.reload-page")?.run();
     void actions.find((candidate) => candidate.id === "core:settings.open")?.run();
+    void actions.find((candidate) => candidate.id === "core:settings.shortcuts")?.run();
 
-    expect(calls).toEqual(["reloadPage", "openSettings"]);
+    expect(calls).toEqual(["reloadPage", "openSettings:general", "openSettings:shortcuts"]);
   });
 
   it("exposes terminal navigation as a shortcut-backed action", () => {
@@ -386,7 +389,7 @@ describe("PluginRegistry", () => {
     const { context, calls } = createContext({ selectedWorkspace: testWorkspace() });
     const action = registry.getActions(context).find((candidate) => candidate.id === "core:view.terminal");
 
-    expect(action?.shortcut).toBe("mod+4");
+    expect(action?.shortcut).toBe("ctrl+`");
     if (action !== undefined) void action.run();
 
     expect(calls).toEqual(["selectMainView:core:workspace.terminal"]);
@@ -400,22 +403,29 @@ describe("PluginRegistry", () => {
       .map((action) => [action.id, action.shortcut]);
 
     expect(shortcuts).toEqual([
-      ["core:actions.show", "mod+k"],
-      ["core:prompt.focus", "mod+g c"],
-      ["core:settings.open", "mod+,"],
-      ["core:view.chat", "mod+1"],
-      ["core:view.files", "mod+2"],
-      ["core:view.git", "mod+3"],
-      ["core:view.terminal", "mod+4"],
-      ["core:workspace.refresh-files", "mod+shift+f"],
-      ["core:workspace.refresh-git", "mod+shift+g"],
-      ["core:workspace.refresh-current", "mod+shift+r"],
-      ["core:session.start", "mod+enter"],
-      ["core:session.start-rapidfire", "mod+shift+enter"],
-      ["core:model.cycle", "mod+p"],
-      ["core:session.stop", "mod+."],
+      ["core:actions.show", "ctrl+shift+p"],
+      ["core:prompt.focus", "ctrl+alt+i"],
+      ["core:settings.open", "ctrl+,"],
+      ["core:settings.shortcuts", "ctrl+k ctrl+s"],
+      ["core:view.files", "ctrl+shift+e"],
+      ["core:view.git", "ctrl+shift+g"],
+      ["core:view.terminal", "ctrl+`"],
+      ["core:session.start", "ctrl+enter"],
+      ["core:session.start-rapidfire", "ctrl+shift+enter"],
     ]);
     expect(new Set(shortcuts.map(([, shortcut]) => shortcut)).size).toBe(shortcuts.length);
+  });
+
+  it("declares where built-in shortcuts can outrank local keyboard owners", () => {
+    const registry = new PluginRegistry();
+    registry.register({ id: "core", plugin: corePlugin });
+    const actions = registry.getActions(createContext({ selectedWorkspace: testWorkspace() }).context);
+    const contexts = (id: string) => actions.find((action) => action.id === id)?.shortcutContexts;
+
+    expect(contexts("core:actions.show")).toEqual(["workbench", "text-entry", "composer", "terminal"]);
+    expect(contexts("core:settings.shortcuts")).toBeUndefined();
+    expect(contexts("core:session.start")).toEqual(["workbench", "composer"]);
+    expect(contexts("core:session.start-rapidfire")).toEqual(["workbench", "composer"]);
   });
 
   it("collects built-in Forgerie themes from an in-app plugin", () => {

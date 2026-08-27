@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppAction } from "../../actions";
 import type { PiWebConfigResponse, PiWebConfigValues } from "../../api";
+import { SettingsPanelFrame } from "./SettingsPanelFrame";
 import { SettingsShortcutsPanel } from "./SettingsShortcutsPanel";
 
 afterEach(() => {
@@ -17,7 +18,8 @@ describe("settings-shortcuts-panel layout", () => {
       element.savedMessage = "Shortcut settings saved.";
     });
 
-    const frame = required(shadow(panel).querySelector("settings-panel-frame"), "settings-panel-frame");
+    const frame = settingsFrame(panel);
+    await frame.updateComplete;
     expect(frame.getAttribute("heading")).toBe("Keyboard shortcuts");
     expect(noticeTypes(frame)).toEqual(["error", "success"]);
 
@@ -25,6 +27,10 @@ describe("settings-shortcuts-panel layout", () => {
     expect(shadow(panel).querySelectorAll(".type-input").length).toBe(0);
     expect(shadow(panel).querySelectorAll(".row-panel").length).toBe(0);
     expect(rowNames(panel)).toEqual(["Cycle Model", "Open Palette"]);
+    const description = frame.shadowRoot?.querySelector(".description")?.textContent ?? "";
+    expect(description).toContain("ctrl+k ctrl+s");
+    expect(description).not.toContain("mod+");
+    expect(description).not.toContain("⌘");
   });
 
   it("shows the loading state before any config arrives", async () => {
@@ -98,23 +104,23 @@ describe("settings-shortcuts-panel row menu", () => {
   it("disables a shortcut, and resets an override back to the default", async () => {
     const onSave = vi.fn<SaveHandler>();
 
-    const disabling = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:model.cycle": "mod+o" } }), onSave });
+    const disabling = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:model.cycle": "ctrl+o" } }), onSave });
     await clickMore(disabling, "Open Palette");
     await clickVerb(disabling, "Disable this shortcut");
 
-    const resetting = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:actions.show": null, "core:model.cycle": "mod+o" } }), onSave });
+    const resetting = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:actions.show": null, "core:model.cycle": "ctrl+o" } }), onSave });
     await clickMore(resetting, "Open Palette");
     await clickVerb(resetting, "Reset to default");
 
     expect(onSave.mock.calls).toEqual([
-      [{ shortcuts: { "core:model.cycle": "mod+o", "core:actions.show": null } }],
-      [{ shortcuts: { "core:model.cycle": "mod+o" } }],
+      [{ shortcuts: { "core:model.cycle": "ctrl+o", "core:actions.show": null } }],
+      [{ shortcuts: { "core:model.cycle": "ctrl+o" } }],
     ]);
   });
 
   it("drops the shortcuts key entirely when the last override is reset", async () => {
     const onSave = vi.fn<SaveHandler>();
-    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:actions.show": "mod+j" } }), onSave });
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:actions.show": "ctrl+j" } }), onSave });
 
     await clickMore(panel, "Open Palette");
     await clickVerb(panel, "Reset to default");
@@ -136,7 +142,7 @@ describe("settings-shortcuts-panel typed entry", () => {
 
     await clickButton(panel, ".type-row .primary");
 
-    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "mod+shift+p" } });
+    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "ctrl+shift+p" } });
   });
 
   it("seeds the field with the saved binding and explains why an unparseable entry cannot be saved", async () => {
@@ -145,14 +151,25 @@ describe("settings-shortcuts-panel typed entry", () => {
 
     await clickMore(panel, "Open Palette");
     await clickVerb(panel, "Type a shortcut instead");
-    expect(field(panel, ".type-input").value).toBe("mod+k");
+    expect(field(panel, ".type-input").value).toBe("ctrl+k");
 
     await typeInto(panel, ".type-input", "p");
 
     // Save stays disabled, so the hint has to carry the reason.
     expect(required(shadow(panel).querySelector<HTMLButtonElement>(".type-row .primary"), "save").disabled).toBe(true);
-    expect(shadow(panel).querySelector(".hint.warn")?.textContent).toBe("Shortcuts must start with Ctrl/⌘ or Alt.");
+    expect(shadow(panel).querySelector(".hint.warn")?.textContent).toBe("Shortcuts must start with Ctrl or Alt.");
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("rejects GUI modifier names with a direct explanation", async () => {
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }) });
+
+    await clickMore(panel, "Open Palette");
+    await clickVerb(panel, "Type a shortcut instead");
+    await typeInto(panel, ".type-input", "cmd+k");
+
+    expect(shadow(panel).querySelector(".hint.warn")?.textContent).toBe("Only Ctrl, Alt, and Shift modifiers are supported.");
+    expect(required(shadow(panel).querySelector<HTMLButtonElement>(".type-row .primary"), "save").disabled).toBe(true);
   });
 
   it("abandons the edit on Cancel without saving", async () => {
@@ -161,7 +178,7 @@ describe("settings-shortcuts-panel typed entry", () => {
 
     await clickMore(panel, "Open Palette");
     await clickVerb(panel, "Type a shortcut instead");
-    await typeInto(panel, ".type-input", "mod+j");
+    await typeInto(panel, ".type-input", "ctrl+j");
     await clickButton(panel, ".type-row button:not(.primary)");
 
     expect(onSave).not.toHaveBeenCalled();
@@ -184,7 +201,7 @@ describe("settings-shortcuts-panel recording", () => {
 
     await vi.advanceTimersByTimeAsync(1300);
 
-    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "mod+j" } });
+    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "ctrl+j" } });
   });
 
   it("records a two-step sequence before committing", async () => {
@@ -200,7 +217,7 @@ describe("settings-shortcuts-panel recording", () => {
 
     await vi.advanceTimersByTimeAsync(1300);
 
-    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "mod+g p" } });
+    expect(onSave).toHaveBeenCalledWith({ shortcuts: { "core:actions.show": "ctrl+g p" } });
   });
 
   it("refuses a first chord without Ctrl or Alt and keeps recording", async () => {
@@ -213,6 +230,19 @@ describe("settings-shortcuts-panel recording", () => {
 
     expect(onSave).not.toHaveBeenCalled();
     expect(chipLabels(panel)).toEqual(["Ctrl+P", "press keys…"]);
+  });
+
+  it("rejects Meta while recording and keeps the row open", async () => {
+    const onSave = vi.fn<SaveHandler>();
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: {} }), onSave });
+
+    await clickChip(panel, "Open Palette");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+    await panel.updateComplete;
+
+    expect(noticeContents(panel)).toContain("Only Ctrl, Alt, and Shift modifiers are supported. Esc cancels.");
+    expect(chipLabels(panel)).toEqual(["Ctrl+P", "press keys…"]);
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("abandons the recording on Escape", async () => {
@@ -231,13 +261,30 @@ describe("settings-shortcuts-panel recording", () => {
 describe("settings-shortcuts-panel conflicts", () => {
   it("marks the binding that never fires and names the winner", async () => {
     // A custom binding outranks a default one, so the overridden Cycle Model
-    // wins mod+k and Open Palette's default stops firing. Rows sort by title.
-    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:model.cycle": "mod+k" } }) });
+    // wins ctrl+k and Open Palette's default stops firing. Rows sort by title.
+    const panel = await mountPanel({ configResponse: configResponse({ shortcuts: { "core:model.cycle": "ctrl+k" } }) });
 
     const dots = [...shadow(panel).querySelectorAll(".dot")];
     expect(dots.map((dot) => dot.className)).toEqual(["dot shadows", "dot shadowed"]);
     expect(dots[0]?.getAttribute("title")).toBe("Overrides Open Palette");
     expect(dots[1]?.getAttribute("title")).toBe("Never fires — Cycle Model wins this key");
+  });
+
+  it("marks equal-priority conflicts as inactive on both rows", async () => {
+    const panel = await mountPanel({
+      actions: [
+        { id: "plugin:first", title: "First", shortcut: "ctrl+k", run: vi.fn() },
+        { id: "plugin:second", title: "Second", shortcut: "ctrl+k", run: vi.fn() },
+      ],
+      configResponse: configResponse({ shortcuts: {} }),
+    });
+
+    const dots = [...shadow(panel).querySelectorAll(".dot")];
+    expect(dots.map((dot) => dot.className)).toEqual(["dot conflict", "dot conflict"]);
+    expect(dots.map((dot) => dot.getAttribute("title"))).toEqual([
+      "Conflicts with Second. Neither shortcut runs.",
+      "Conflicts with First. Neither shortcut runs.",
+    ]);
   });
 
   it("previews a conflict from a typed draft before it is saved", async () => {
@@ -246,7 +293,7 @@ describe("settings-shortcuts-panel conflicts", () => {
 
     await clickMore(panel, "Cycle Model");
     await clickVerb(panel, "Type a shortcut instead");
-    await typeInto(panel, ".type-input", "mod+k");
+    await typeInto(panel, ".type-input", "ctrl+k");
 
     expect(shadow(panel).querySelector(".hint.warn")?.textContent).toBe("Overrides Open Palette");
     const dots = [...shadow(panel).querySelectorAll(".dot")];
@@ -279,8 +326,8 @@ async function mountPanel(options: PanelOptions, configure?: (panel: SettingsSho
 
 function defaultActions(): AppAction[] {
   return [
-    { id: "core:actions.show", title: "Open Palette", description: "Open the command palette.", shortcut: "mod+k", group: "General", run: vi.fn() },
-    { id: "core:model.cycle", title: "Cycle Model", description: "Cycle the active model.", shortcut: "mod+p", group: "General", run: vi.fn() },
+    { id: "core:actions.show", title: "Open Palette", description: "Open the command palette.", shortcut: "ctrl+k", group: "General", run: vi.fn() },
+    { id: "core:model.cycle", title: "Cycle Model", description: "Cycle the active model.", shortcut: "ctrl+p", group: "General", run: vi.fn() },
   ];
 }
 
@@ -300,13 +347,18 @@ function verbLabels(panel: SettingsShortcutsPanel): string[] {
   return texts(panel, ".row-verbs button");
 }
 
-function noticeTypes(frame: Element): string[] {
-  const notices: unknown = Reflect.get(frame, "notices");
-  if (!Array.isArray(notices)) throw new Error("Expected the frame to receive a notices array");
-  return notices.map((notice: unknown) => {
-    if (typeof notice !== "object" || notice === null) throw new Error("Expected a settings notice object");
-    return String(Reflect.get(notice, "type"));
-  });
+function noticeTypes(frame: SettingsPanelFrame): string[] {
+  return frame.notices.map((notice) => notice.type);
+}
+
+function noticeContents(panel: SettingsShortcutsPanel): string[] {
+  return settingsFrame(panel).notices.map((notice) => typeof notice.content === "string" ? notice.content : "");
+}
+
+function settingsFrame(panel: SettingsShortcutsPanel): SettingsPanelFrame {
+  const frame = shadow(panel).querySelector("settings-panel-frame");
+  if (!(frame instanceof SettingsPanelFrame)) throw new Error("Expected settings-panel-frame");
+  return frame;
 }
 
 async function clickMore(panel: SettingsShortcutsPanel, actionTitle: string): Promise<void> {

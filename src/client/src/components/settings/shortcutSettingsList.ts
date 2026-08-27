@@ -44,13 +44,16 @@ export type ShortcutBindingState =
 export type ShortcutConflictState =
   | { readonly kind: "clear" }
   | { readonly kind: "shadows"; readonly victims: readonly string[] }
-  | { readonly kind: "shadowed"; readonly winner: string };
+  | { readonly kind: "shadowed"; readonly winner: string }
+  | { readonly kind: "conflict"; readonly peers: readonly string[] }
+  | { readonly kind: "partial-conflict"; readonly peers: readonly string[] }
+  | { readonly kind: "partial-shadowed"; readonly winners: readonly string[] };
 
 /**
  * At most one row is open at a time, in exactly one mode.
  *
  * `typing` exists because `recording` cannot work without a hardware keyboard:
- * `isShortcutSequenceStarter` requires `mod` or `alt` in the first chord, and
+ * `isShortcutSequenceStarter` requires `ctrl` or `alt` in the first chord, and
  * on-screen keyboards emit neither. Removing the text field entirely would make
  * this screen read-only on a touch device.
  */
@@ -195,15 +198,22 @@ function buildRow(
 
 /**
  * Conflict resolution reuses the dispatcher's own resolver, so the panel can
- * never disagree with what actually fires — including prefix shadowing, where
- * `mod+g` swallows every `mod+g <key>` sequence.
+ * never disagree with what actually fires, including prefix conflicts.
  */
 function conflictStates(actions: readonly AppAction[], shortcuts: PiWebShortcutConfig): Map<string, ShortcutConflictState> {
   const resolutions = resolveShortcutBindings([...actions], shortcuts, { enabledOnly: true });
   const states = new Map<string, ShortcutConflictState>();
   for (const resolution of resolutions) {
+    if (resolution.conflicts.length > 0) {
+      states.set(resolution.action.id, { kind: resolution.active ? "partial-conflict" : "conflict", peers: resolution.conflicts.map((binding) => binding.action.title) });
+      continue;
+    }
     if (!resolution.active) {
       states.set(resolution.action.id, { kind: "shadowed", winner: resolution.shadowedBy?.action.title ?? "another action" });
+      continue;
+    }
+    if (resolution.partiallyShadowedBy.length > 0) {
+      states.set(resolution.action.id, { kind: "partial-shadowed", winners: resolution.partiallyShadowedBy.map((binding) => binding.action.title) });
       continue;
     }
     if (resolution.shadows.length === 0) continue;

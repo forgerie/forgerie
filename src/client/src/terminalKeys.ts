@@ -52,8 +52,8 @@ export const TERMINAL_SOFT_KEYS: readonly TerminalSoftKeyDefinition[] = [
   { id: "page-down", label: "PgDn", ariaLabel: "Page down", title: "Page down" },
   { id: "delete", label: "Del", ariaLabel: "Delete", title: "Delete forward" },
   { id: "backspace", label: "⌫", ariaLabel: "Backspace", title: "Backspace" },
-  { id: "meta-backward-word", label: "M-B", ariaLabel: "Meta B", title: "Move backward one word" },
-  { id: "meta-forward-word", label: "M-F", ariaLabel: "Meta F", title: "Move forward one word" },
+  { id: "meta-backward-word", label: "Alt+B", ariaLabel: "Alt B", title: "Move backward one word" },
+  { id: "meta-forward-word", label: "Alt+F", ariaLabel: "Alt F", title: "Move forward one word" },
 ];
 
 const ESC = "\x1b";

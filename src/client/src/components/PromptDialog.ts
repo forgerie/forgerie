@@ -124,11 +124,11 @@ export class PromptDialog extends LitElement {
     }
   }
 
-  // Escape and backdrop presses belong to the modal surface. Ctrl/Cmd+Enter
-  // saves from either field, because Enter itself types a newline in the
+  // Escape and backdrop presses belong to the modal surface. Ctrl+Enter saves
+  // from either field, because Enter itself types a newline in the
   // prompt body and must keep doing so.
   private handleKeyDown(event: KeyboardEvent): void {
-    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    if (event.key !== "Enter" || !event.ctrlKey || event.metaKey) return;
     event.preventDefault();
     void this.save();
   }

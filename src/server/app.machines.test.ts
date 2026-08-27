@@ -211,7 +211,7 @@ describe("buildApp machine routes", () => {
     const response = await appTestContext.app.inject({
       method: "PUT",
       url: `/api/machines/${remote.id}/config`,
-      payload: { config: { host: "0.0.0.0", allowedHosts: true, shortcuts: { "core:view.chat": "mod+1" }, spawnSessions: true } },
+      payload: { config: { host: "0.0.0.0", allowedHosts: true, shortcuts: { "core:view.chat": "ctrl+1" }, spawnSessions: true } },
     });
 
     expect(response.statusCode).toBe(400);
