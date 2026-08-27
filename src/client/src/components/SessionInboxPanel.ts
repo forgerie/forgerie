@@ -1025,6 +1025,15 @@ export class SessionInboxPanel extends LitElement {
       --tone-unread: var(--pi-purple, #a89ede);
       --tone-open: var(--pi-dim, #62656b);
       --tone-archived: var(--pi-dim, #62656b);
+
+      /*
+       * What the board keeps when a floor shelf opens: a group header and two
+       * rows. The board is what yields space to an opening shelf, and this is
+       * the point past which it stops yielding. Kept tight on purpose --
+       * opening a shelf is a request to read the shelf, and the board is one
+       * scroll away the whole time.
+       */
+      --inbox-board-floor: 96px;
     }
 
     /*
@@ -1328,9 +1337,15 @@ export class SessionInboxPanel extends LitElement {
 
     /* ---- board scroll ---- */
 
+    /*
+     * Basis 0, not auto: the board asks for the space that is left rather than
+     * for the height of its own list. A floor shelf that opens is then shown
+     * at the height it asks for, and the board -- which already scrolls --
+     * gives up the difference until it reaches its floor.
+     */
     .board-scroll {
-      flex: 1 1 auto;
-      min-height: 0;
+      flex: 1 1 0;
+      min-height: var(--inbox-board-floor);
       overflow-y: auto;
       overscroll-behavior: contain;
       /* Scrollbar style inherits from the document root (index.html). */
@@ -1769,8 +1784,15 @@ export class SessionInboxPanel extends LitElement {
       border-radius: var(--pi-radius-control);
     }
 
+    /*
+     * Shelves open at their content height. They shrink only once the board
+     * sits on its floor, and a shelf that can be compressed is expected to
+     * carry its own scroller -- a column here so it can.
+     */
     .inbox-plugin-shelves {
-      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      flex: 0 1 auto;
       min-width: 0;
       min-height: 0;
     }

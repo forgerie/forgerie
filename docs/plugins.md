@@ -525,6 +525,8 @@ Use `focusPrompt()` on `PluginRuntimeContext` to move focus to the prompt editor
 
 Inbox shelves render below the session scroller. They stay attached to the inbox floor in docked and compact navigation layouts. A shelf owns its internal state, height, scrolling, and controls. Keep its collapsed height small because it always takes space from the session list.
 
+A shelf is shown at the height its content asks for. The session board gives up that space until it reaches `--inbox-board-floor`; past that point the shelf is compressed instead. So a shelf that can grow — an expanded panel, a long list — should be a column (`display: flex; flex-direction: column; min-height: 0`) whose growing part carries its own scroller. Compression then costs reachability and never content. A shelf that cannot be compressed is clipped at the panel floor, where nothing can reach the rest of it. Lay out within the panel's width as well: sideways is never a scroller.
+
 ```js
 inboxShelves: [
   {

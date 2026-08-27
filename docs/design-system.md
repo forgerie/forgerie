@@ -152,6 +152,13 @@ sessions) when it exists.
 **Scrollbars**: inherit the document-root `scrollbar-color`; no per-panel
 overrides.
 
+**Floor shelves open at content height.** A panel that hosts a shelf on its
+floor gives the shelf the height its content asks for, and the scrolling list
+above gives up the difference until it reaches its own floor token (the inbox
+uses `--inbox-board-floor`). Opening a shelf is a request to read it. A shelf
+that can be compressed carries its own scroller, so being squeezed costs
+reachability and never content; sideways is never a scroller.
+
 ---
 
 ## 4. Verification ritual
