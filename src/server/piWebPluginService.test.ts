@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile, mkdir, symlink } from "node:fs/promises";
+import { mkdtemp, rm, utimes, writeFile, mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -46,6 +46,32 @@ describe("PiWebPluginService", () => {
     const asset = await service.readAsset("info", "pi-web-plugin.js");
     expect(asset?.contentType).toBe("application/javascript; charset=utf-8");
     expect(asset?.content.toString("utf8")).toContain("export default");
+  });
+
+  it("versions a plugin by the newest file beside its entry module", async () => {
+    // Plugin assets are served without cache headers, so an edit only reaches
+    // the browser when the module URL changes. A plugin that splits itself
+    // across modules would otherwise serve yesterday's code after a reload.
+    const pluginDir = join(tempDir, "plugins", "split");
+    await writePlugin(pluginDir, {
+      packageJson: { piWeb: { plugins: [{ id: "split", module: "pi-web-plugin.js" }] } },
+      files: {
+        "pi-web-plugin.js": "export default { apiVersion: 1, name: 'Split', activate: () => ({ contributions: {} }) };",
+        "shelf.js": "export const shelf = 1;",
+      },
+    });
+    const old = new Date("2026-01-01T00:00:00Z");
+    for (const file of ["package.json", "pi-web-plugin.js", "shelf.js"]) await utimes(join(pluginDir, file), old, old);
+
+    const service = new PiWebPluginService({ roots: [{ path: join(tempDir, "plugins"), source: "test", scope: "local" }], packageProvider: false });
+    const before = (await service.manifest()).plugins[0]?.module;
+
+    const later = new Date("2026-06-01T00:00:00Z");
+    await utimes(join(pluginDir, "shelf.js"), later, later);
+    const after = (await service.manifest()).plugins[0]?.module;
+
+    expect(after).toBe(`/pi-web-plugins/split/pi-web-plugin.js?v=${String(later.getTime())}`);
+    expect(after).not.toBe(before);
   });
 
   it("preserves content types for extension-only asset names", async () => {

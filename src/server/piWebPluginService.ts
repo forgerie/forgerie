@@ -298,9 +298,34 @@ async function discoverPluginEntries(root: string, config: PiWebPackageConfig): 
     const entryPath = join(root, entry.module);
     const entryStat = await stat(entryPath).catch(() => undefined);
     if (entryStat?.isFile() !== true) throw new Error(`Forgerie plugin module not found for ${entry.id}: ${entry.module}`);
-    plugins.push({ id: entry.id, root, entryFile: entry.module, version: String(Math.floor(entryStat.mtimeMs)), machineSpecific: entry.machineSpecific });
+    plugins.push({ id: entry.id, root, entryFile: entry.module, version: await pluginVersion(entryPath, entryStat.mtimeMs), machineSpecific: entry.machineSpecific });
   }
   return plugins;
+}
+
+/**
+ * The version that busts the browser's cache for a plugin.
+ *
+ * The entry module's own timestamp is not enough. Plugin assets are served
+ * without cache headers, so a plugin only sees an edit when the URL it is
+ * fetched under changes -- and a plugin of any size splits itself across
+ * modules that the entry imports. Versioning by the entry alone means editing
+ * any other file changes nothing the browser can see, and a reload keeps
+ * running yesterday's code with no sign that it is doing so.
+ *
+ * So the newest file beside the entry wins. One directory, not the whole tree:
+ * a package plugin's root can be thousands of files, and this runs on every
+ * manifest request.
+ */
+async function pluginVersion(entryPath: string, entryMtimeMs: number): Promise<string> {
+  const siblings = await readdir(dirname(entryPath), { withFileTypes: true }).catch(() => []);
+  let newest = entryMtimeMs;
+  for (const sibling of siblings) {
+    if (!sibling.isFile()) continue;
+    const siblingStat = await stat(join(dirname(entryPath), sibling.name)).catch(() => undefined);
+    if (siblingStat !== undefined && siblingStat.mtimeMs > newest) newest = siblingStat.mtimeMs;
+  }
+  return String(Math.floor(newest));
 }
 
 async function readPiWebPackageConfig(root: string): Promise<PiWebPackageConfig | undefined> {
