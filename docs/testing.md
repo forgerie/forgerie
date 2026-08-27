@@ -12,7 +12,7 @@ Forgerie uses Vitest for unit, component, route, and integration tests.
 - `npm run test:coverage` runs the complete suite and enforces the coverage thresholds in `vitest.config.ts`.
 - `npm run verify:static` runs type checking, linting, and unused-code checks.
 - `npm run verify` runs all static checks and the complete test suite.
-- `npm run test:layout` measures the transcript in a real browser. See [Layout checks](#layout-checks).
+- `npm run test:layout` measures the transcript and the inbox floor in a real browser. See [Layout checks](#layout-checks).
 - `npm run audit:grid-stretch -- --url http://127.0.0.1:8504/` reports grids that leave row sizing to the engine.
 
 Use watch mode for the shortest edit loop. Use the changed command before pushing a focused change. Run `npm run verify` before merging when CI is unavailable.
@@ -30,18 +30,25 @@ CI runs the complete suite once on each operating system. Linux runs it with cov
 
 The Vitest suite runs under happy-dom, which builds a DOM but does no layout. It can assert that a rule is written down. It cannot assert that the rule produces the right box. Every size, position, and gap is therefore invisible to it.
 
-`npm run test:layout` closes that gap for the transcript. It builds a fixture that mounts the real `ChatView`, injects the app's own design tokens from `src/client/index.html`, and measures the result in headless Chromium at all four Fold 8 postures.
+`npm run test:layout` closes that gap. It builds fixtures that mount the real components, injects the app's own design tokens from `src/client/index.html`, and measures the result in headless Chromium at all four Fold 8 postures.
 
-It asserts four things:
+Of the transcript it asserts four things:
 
 - No grid inside the transcript spreads its rows. This is the general rule, not one instance of it: a grid that does not state `align-content` grows every auto row by an equal share of the unused height, which reads as unexplained padding.
 - No gap between two transcript rows exceeds the authored rhythm.
 - A transcript shorter than its scroller hangs from the composer, and a taller one starts at the scroll origin so no message sits above it.
 - An empty transcript centres itself.
 
+Of the inbox floor — the space contract between an open plugin shelf and the session board — it asserts four more:
+
+- No shelf ends past the panel floor, where nothing can reach it.
+- The board never drops below `--inbox-board-floor`.
+- A shelf opens to the height its content asks for, up to the room the panel can give it.
+- A shelf the panel cannot hold is compressed onto its own scroller, and never sideways.
+
 The run takes about 30 seconds, so it is not part of `npm run verify`. CI runs it on Linux with `--require-browser`, which turns a missing browser into a failure instead of a skip. Without that flag the command skips when no browser is installed.
 
-States live in `scripts/layout/transcript-fixture.ts` and the runner reads the list from the fixture, so a state added there is measured without touching the runner.
+States live in `scripts/layout/transcript-fixture.ts` and `scripts/layout/inbox-fixture.ts`, and the runner reads each list from its fixture, so a state added there is measured without touching the runner.
 
 `npm run audit:grid-stretch` applies the same row-spreading probe to a running instance, across whichever screen the flags drive it to. It separates a spread, where several rows are pulled apart and which is nearly always a defect, from a fill, where a single row grows to its box and which is how a grid centres its content.
 

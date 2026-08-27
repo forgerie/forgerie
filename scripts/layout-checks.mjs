@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Measures the real transcript in a real layout engine, at the Fold postures.
+// Measures real surfaces in a real layout engine, at the Fold postures.
 //
 //   node scripts/layout-checks.mjs
 //   node scripts/layout-checks.mjs --require-browser   # CI: absence is failure
@@ -18,6 +18,7 @@ import { appTokensPlugin } from "./lib/app-token-css.mjs";
 import { evaluate, findChrome, getFreePort, launchChrome, sleep, waitForDebugger } from "./lib/cdp.mjs";
 import { FOLD8_POSTURES } from "./lib/fold8-postures.mjs";
 import { GRID_STRETCH_PROBE } from "./lib/grid-stretch-probe.mjs";
+import { INBOX_FLOOR_PROBE } from "./lib/inbox-floor-probe.mjs";
 import { openPosturePage } from "./lib/posture-page.mjs";
 import { TRANSCRIPT_LAYOUT_PROBE } from "./lib/transcript-layout-probe.mjs";
 
@@ -36,6 +37,9 @@ const MAX_TAIL_SLACK_PX = 8;
 
 /** How far off centre an empty transcript may sit. */
 const MAX_EMPTY_OFFSET_PX = 8;
+
+/** Rounding slack for a box that should match another box exactly. */
+const BOX_SLACK_PX = 1;
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -81,6 +85,20 @@ async function main() {
           failures.push(...check({ where, state, measured, stretched }));
           process.stderr.write(`${where}: checked\n`);
         }
+
+        const inboxStates = JSON.parse(String(await evaluate(cdp, "JSON.stringify(window.inboxStates)")));
+        const shelfContentPx = JSON.parse(String(await evaluate(cdp, "JSON.stringify(window.inboxShelfContentPx)")));
+        for (const state of inboxStates) {
+          await evaluate(cdp, `window.mountInbox(${JSON.stringify(state)})`);
+          await sleep(150);
+          const where = `${posture.name}/inbox-${state}`;
+          const measured = JSON.parse(String(await evaluate(cdp, INBOX_FLOOR_PROBE)));
+          if (args.dump === state || args.dump === "all") {
+            process.stdout.write(`\n--- ${where}\n${JSON.stringify(measured, undefined, 1)}\n`);
+          }
+          failures.push(...checkInboxFloor({ where, contentPx: shelfContentPx[state], measured }));
+          process.stderr.write(`${where}: checked\n`);
+        }
       } finally {
         cdp.close();
       }
@@ -94,7 +112,7 @@ async function main() {
   }
 
   if (failures.length === 0) {
-    process.stdout.write("Transcript layout checks passed.\n");
+    process.stdout.write("Layout checks passed.\n");
     return 0;
   }
   process.stdout.write(`\n${String(failures.length)} layout check failure(s):\n\n`);
@@ -145,6 +163,52 @@ function check({ where, state, measured, stretched }) {
     if (offset > MAX_EMPTY_OFFSET_PX) {
       failures.push(`${where}: empty transcript sits ${String(Math.round(offset))}px off centre (max ${String(MAX_EMPTY_OFFSET_PX)})`);
     }
+  }
+
+  return failures;
+}
+
+/**
+ * The inbox floor: an opened shelf is shown at the height its content asks
+ * for, the board gives up that space until it reaches its floor, and a shelf
+ * the panel cannot hold is compressed onto its own scroller rather than pushed
+ * past the panel's edge where nothing can reach it.
+ */
+function checkInboxFloor({ where, contentPx, measured }) {
+  const failures = [];
+  if (measured.error !== undefined) return [`${where}: ${measured.error}`];
+  const { board, floorPx, panel, shelfScroll, shelves } = measured;
+
+  if (floorPx === undefined) return [`${where}: the panel declares no --inbox-board-floor`];
+
+  if (shelves.bottom > panel.bottom + BOX_SLACK_PX) {
+    failures.push(`${where}: the shelf ends ${String(Math.round(shelves.bottom - panel.bottom))}px past the panel floor`);
+  }
+
+  if (board.height < floorPx - BOX_SLACK_PX) {
+    failures.push(`${where}: the board is ${String(Math.round(board.height))}px tall, under its ${String(floorPx)}px floor`);
+  }
+
+  const room = Math.min(contentPx, panel.bottom - shelves.top);
+  if (shelves.height + BOX_SLACK_PX < room) {
+    failures.push(`${where}: the shelf opened to ${String(Math.round(shelves.height))}px of the ${String(Math.round(room))}px the panel could give it`);
+  }
+
+  // The shelf's own scroller has to reach the bottom of the shelf, or the
+  // shelf is holding space it does not show anything in.
+  if (shelfScroll.bottom + BOX_SLACK_PX < shelves.bottom) {
+    failures.push(`${where}: the shelf's scroller stops ${String(Math.round(shelves.bottom - shelfScroll.bottom))}px above the shelf's own floor`);
+  }
+
+  // Compression is only allowed to cost reachability, never content: a shelf
+  // squeezed under its content height has to be scrollable.
+  if (shelfScroll.clientHeight + BOX_SLACK_PX < contentPx && shelfScroll.scrollHeight <= shelfScroll.clientHeight) {
+    failures.push(`${where}: the shelf is compressed to ${String(Math.round(shelfScroll.clientHeight))}px and cannot be scrolled`);
+  }
+
+  // Sideways is never a scroller: the shelf column takes the panel's width.
+  if (shelfScroll.scrollWidth > shelfScroll.clientWidth + BOX_SLACK_PX) {
+    failures.push(`${where}: the shelf overflows sideways by ${String(Math.round(shelfScroll.scrollWidth - shelfScroll.clientWidth))}px`);
   }
 
   return failures;
