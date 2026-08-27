@@ -32,6 +32,7 @@
   },
   "include": [
     "src/**/*.ts",
+    "scripts/layout/**/*.ts",
     "vite.config.ts",
     "vitest.config.ts",
     "extensions/**/*.ts",

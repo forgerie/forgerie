@@ -156,8 +156,19 @@ overrides.
 
 ## 4. Verification ritual
 
-Every visual slice: `npm run verify` → capture the Fold 8 posture matrix in
-both schemes with `node scripts/capture-postures.mjs` (never raw
-`chromium --window-size`; see AGENTS.md for why) → read and judge the
-captures → build, deploy, commit atomically with a changeset when
+Every visual slice: `npm run verify` → `npm run test:layout` → capture the
+Fold 8 posture matrix in both schemes with `node scripts/capture-postures.mjs`
+(never raw `chromium --window-size`; see AGENTS.md for why) → read and judge
+the captures → build, deploy, commit atomically with a changeset when
 user-visible.
+
+The layout step exists because the unit suite runs under happy-dom and does no
+layout: it can check that a rule is written down, never that the rule produces
+the right box. See [Layout checks](testing.md#layout-checks).
+
+**Grids state their block-axis alignment.** A grid that omits `align-content`
+takes the initial value, which grows every auto row by an equal share of the
+height the content did not use. Nothing in the stylesheet says so, and the
+result reads as mysterious padding. State `start`, `center`, or `end`, or keep
+the stretch on purpose and say why. `npm run audit:grid-stretch` finds the
+ones that do not.

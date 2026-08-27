@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Forgerie transcript layout fixture</title>
+    <!-- The design tokens are injected from the app's own index.html at build
+         time. Restating them here would let the harness drift into measuring a
+         layout the app does not have. -->
+    <style>
+      /* The app frame sizes the transcript; here the viewport stands in for it,
+         because the measurements are about the transcript's own boxes. */
+      html, body { margin: 0; height: 100%; }
+      body { display: flex; }
+      chat-view { flex: 1 1 auto; min-height: 0; }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="./transcript-fixture.ts"></script>
+  </body>
+</html>
