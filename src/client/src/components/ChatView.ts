@@ -10,17 +10,11 @@ import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
 import "./TranscriptLivenessView";
-import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
-import { selectLiveGrowthAnchor, scrollDeltaForLiveGrowth, type LiveGrowthAnchorMeasurement } from "../chatLiveGrowthAnchoring";
-import { ChatScrollCoordinator, type ChatReaderGesture } from "../chatScrollCoordinator";
-import { SessionStorageChatReadingPositionStore, chatLineReadingAnchorToken, type ChatAnchorReadingPosition, type ChatReadingIdentity } from "../chatReadingPosition";
-import { anchoredReadingPosition, anchoredTurnKey, followAnchor, FOLLOW_FREE, FOLLOW_TAIL } from "../chatFollowMode";
-import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
+import { ChatScrollCoordinator } from "../chatScrollCoordinator";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
-import { isNearScrollBottom } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
-import { selectedChatCanUseRuntime, selectedChatHasReadableHistory, selectedChatIsOpening, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
+import { selectedChatCanUseRuntime, selectedChatHasReadableHistory, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
 import type { PendingSessionLaunchView, SessionLaunchRecovery } from "../controllers/sessionController";
 import type { ChatLine, ChatPart, ToolExecutionPart } from "./shared";
@@ -33,7 +27,6 @@ import "./ImageLightbox";
 import type { ImageLightbox, ImageLightboxItem } from "./ImageLightbox";
 import "./ToolExecutionView";
 import "./TurnRailLedger";
-import type { TurnRailLedger } from "./TurnRailLedger";
 import "./TurnRailSummary";
 
 const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
@@ -48,7 +41,7 @@ export interface QueuedMessageSection {
 
 type RailChronologyEntry =
   | { kind: "tools"; rows: TurnLedgerRow[] }
-  | { kind: "activity"; message: ChatLine; index: number; firstActivityInMessage: boolean };
+  | { kind: "activity"; message: ChatLine; index: number };
 
 /** Preserve wire order while reducing consecutive tool executions to compact ledger segments. */
 function railChronologyEntries(
@@ -60,17 +53,14 @@ function railChronologyEntries(
 
   messages.forEach((message, messageOffset) => {
     let activityParts: ChatPart[] = [];
-    let activityCount = 0;
     const flushActivity = () => {
       if (activityParts.length === 0) return;
       entries.push({
         kind: "activity",
         message: inheritChatLineTranscriptPosition(message, { ...message, parts: activityParts }),
         index: startIndex + messageOffset,
-        firstActivityInMessage: activityCount === 0,
       });
       activityParts = [];
-      activityCount += 1;
     };
 
     for (const part of message.parts) {
@@ -204,24 +194,14 @@ export function chatToolOutputLabel(toolName?: string): string {
   return toolName === undefined || toolName === "" ? "tool output" : `${toolName} output`;
 }
 
-/** The stable scroll-anchor/render key for a top-level message at `index`. */
-export function chatMessageAnchorKey(index: number): string {
+/** The stable render key for a top-level message at `index`. */
+export function chatMessageRenderKey(index: number): string {
   return `m:${String(index)}`;
 }
 
-/** The stable scroll-anchor/render key for a collapsed event group starting at `startIndex`. */
-export function chatGroupAnchorKey(startIndex: number): string {
+/** The stable render key for a collapsed event group starting at `startIndex`. */
+export function chatGroupRenderKey(startIndex: number): string {
   return `g:${String(startIndex)}`;
-}
-
-/** The stable scroll-anchor key for an event inside a group at `index`. */
-export function chatEventAnchorKey(index: number): string {
-  return `e:${String(index)}`;
-}
-
-/** The stable scroll-marker id emitted before an event group ending at `endIndex`. */
-export function chatGroupScrollMarkerId(endIndex: number): string {
-  return `g:${String(endIndex)}`;
 }
 
 /** The CSS class list for an event-group `<details>`, distinguishing the live tail. */
@@ -343,14 +323,6 @@ export class ChatView extends LitElement {
   @query(".chat") private chat?: HTMLDivElement;
   @query(".chat-load-retry") private retryButton?: HTMLButtonElement;
   @query("image-lightbox") private imageLightbox?: ImageLightbox;
-  /**
-   * The turn whose reserved space is still standing.
-   *
-   * It outlives the anchor on purpose. Taking the space back the moment the
-   * reader returns to the tail would pull the reply they are reading up the
-   * screen; the space is only reclaimed when the next turn opens and takes it.
-   */
-  @state() private reservedTurnKey: string | undefined;
   @state() private expandedMetaKey: string | undefined;
   /**
    * Rails the reader has opened, by rail key. Expansion is per-turn state that
@@ -362,14 +334,6 @@ export class ChatView extends LitElement {
   @state() private livenessClock: LivenessClock | undefined;
   private readonly disclosures = new ChatDisclosureController();
   private readonly scrolling = new ChatScrollCoordinator();
-  private readonly readingPositions = new SessionStorageChatReadingPositionStore();
-  private pendingReadingPosition: ChatAnchorReadingPosition | undefined;
-  private pendingReadingIdentity: ChatReadingIdentity | undefined;
-  private readingPositionLoadStart: number | undefined;
-  private readingPositionLoadBlockedAtStart: number | undefined;
-  private loadMoreCheckFrame: number | undefined;
-  /** Invalidates an older deferred anchor restore when another render wins. */
-  private liveGrowthRestoreEpoch = 0;
   private groupedMessagesInput?: ChatLine[];
   private renderedPendingSessionLaunch: PendingSessionLaunchView | undefined;
   private renderedPendingSessionLaunchSource: ChatLine[] | undefined;
@@ -381,27 +345,9 @@ export class ChatView extends LitElement {
   private selectedLoadPaintToken = 0;
   private selectedLoadPaintFrame: number | undefined;
   private selectedLoadPaintTask: number | undefined;
-  private lastSeenTurnKey: string | undefined;
-  private lastSeenTurnCount = 0;
-  private turnTrackingReady = false;
-  private sentFromHere = false;
-  private loadingScrollReaderOwned = false;
-  private readerHistoryPagingEnabled = false;
-  private sessionOpeningStartedThisUpdate = false;
-  private sessionOpeningHistoryThisUpdate = false;
+  private scrollPointerActive = false;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
-  private readonly onViewportResize = () => {
-    // A resize reshapes the canvas, and the reservation tracks the viewport
-    // height, so an idle turn's leftover space would grow with it instead of
-    // handing the new area to content. Reclaim it; a turn whose reply is still
-    // arriving keeps its space, because the reply is streaming into it.
-    if (!this.isSessionLive()) this.reservedTurnKey = undefined;
-    if (this.scrolling.mode.kind === "tail") this.scrollToBottom();
-    else if (this.scrolling.mode.kind === "turn") this.alignAnchoredTurn();
-    else if (this.scrolling.mode.kind === "anchor") this.scheduleCurrentFollowTarget();
-    else if (this.chat !== undefined) this.scrolling.syncViewportSize(this.chat);
-  };
   private readonly openImageZoom = (images: readonly ImageLightboxItem[], index = 0): void => {
     this.imageLightbox?.open(images, index);
   };
@@ -411,30 +357,14 @@ export class ChatView extends LitElement {
   private readonly handleToggleWarnings = (): void => {
     this.onToggleWarnings?.();
   };
-  private readonly onPageHide = (): void => {
-    this.rememberReadingPosition();
-  };
-
-  override connectedCallback(): void {
-    super.connectedCallback();
-    window.addEventListener("resize", this.onViewportResize);
-    window.addEventListener("pagehide", this.onPageHide);
-    window.visualViewport?.addEventListener("resize", this.onViewportResize);
-  }
 
   protected override firstUpdated(): void {
-    if (this.chat !== undefined) this.scrolling.syncViewportSize(this.chat);
     this.scheduleSelectedLoadPaintReport();
   }
 
   override disconnectedCallback(): void {
-    this.rememberReadingPosition();
     this.scrolling.dispose();
-    if (this.loadMoreCheckFrame !== undefined) cancelAnimationFrame(this.loadMoreCheckFrame);
     this.cancelSelectedLoadPaintReport();
-    window.removeEventListener("resize", this.onViewportResize);
-    window.removeEventListener("pagehide", this.onPageHide);
-    window.visualViewport?.removeEventListener("resize", this.onViewportResize);
     super.disconnectedCallback();
   }
 
@@ -442,149 +372,36 @@ export class ChatView extends LitElement {
     return changed.has("sessionId") || changed.has("selectedMachineId") || changed.has("sessionCwd");
   }
 
-  private readingIdentity(): ChatReadingIdentity {
-    return { machineId: this.selectedMachineId, cwd: this.sessionCwd, sessionId: this.sessionId };
-  }
-
-  private previousReadingIdentity(changed: PropertyValues<this>): ChatReadingIdentity {
-    const machineId = changed.has("selectedMachineId") ? changed.get("selectedMachineId") : this.selectedMachineId;
-    const cwd = changed.has("sessionCwd") ? changed.get("sessionCwd") : this.sessionCwd;
-    const sessionId = changed.has("sessionId") ? changed.get("sessionId") : this.sessionId;
-    return {
-      machineId: typeof machineId === "string" ? machineId : "",
-      cwd: typeof cwd === "string" ? cwd : "",
-      sessionId: typeof sessionId === "string" ? sessionId : "",
-    };
-  }
-
-  private rememberReadingPosition(identity = this.readingIdentity()): void {
-    if (!this.hasUpdated || identity.sessionId === "") return;
-    this.readingPositions.remember(identity, this.chat, this.scrollAnchorElements());
-  }
-
-  private currentPendingReadingPosition(): ChatAnchorReadingPosition | undefined {
-    const identity = this.pendingReadingIdentity;
-    return identity?.machineId === this.selectedMachineId
-      && identity.cwd === this.sessionCwd
-      && identity.sessionId === this.sessionId
-      ? this.pendingReadingPosition
-      : undefined;
-  }
-
   private prepareSessionUiState(): void {
     this.disclosures.syncSession(this.sessionId);
-    this.prepareSessionOpeningScrollState();
-    this.clearPendingReadingPosition();
-    const identity = this.readingIdentity();
-    this.pendingReadingPosition = this.readingPositions.read(identity);
-    this.pendingReadingIdentity = this.pendingReadingPosition === undefined ? undefined : identity;
+    this.scrolling.reset();
+    this.scrollPointerActive = false;
     this.retryFocusPending = false;
     this.cancelSelectedLoadPaintReport();
   }
 
-  private prepareSessionOpeningScrollState(): void {
-    this.scrolling.reset();
-    this.loadingScrollReaderOwned = false;
-    this.readerHistoryPagingEnabled = false;
-    this.turnTrackingReady = false;
-    this.lastSeenTurnCount = 0;
-    this.sentFromHere = false;
-    this.reservedTurnKey = undefined;
-  }
-
   protected override willUpdate(changed: PropertyValues<this>): void {
-    const identityChanged = this.sessionIdentityChanged(changed);
-    if (identityChanged) {
-      this.rememberReadingPosition(this.previousReadingIdentity(changed));
+    if (this.sessionIdentityChanged(changed)) {
       this.livenessClock = undefined;
       this.prepareSessionUiState();
     }
     this.trackLivenessClock();
-    if (changed.has("isSendingPrompt") && this.isSendingPrompt) this.sentFromHere = true;
-    const previousSelectedLoad = changed.get("selectedLoad");
-    const currentSelectedLoad = this.currentSelectedLoad();
-    const beginsOpeningAttempt = currentSelectedLoad.kind === "loading-without-content" || currentSelectedLoad.kind === "cached-readable";
-    const openingStarted = changed.has("selectedLoad")
-      && selectedChatIsOpening(currentSelectedLoad)
-      && (beginsOpeningAttempt || previousSelectedLoad === undefined || !selectedChatIsOpening(previousSelectedLoad));
-    this.sessionOpeningStartedThisUpdate = openingStarted;
-    if (openingStarted && !identityChanged) this.prepareSessionOpeningScrollState();
-    if (changed.has("selectedLoad") && selectedChatIsOpening(this.currentSelectedLoad())) this.readerHistoryPagingEnabled = false;
-    const openingHistory = selectedChatIsOpening(this.selectedLoad)
-      || (previousSelectedLoad !== undefined && selectedChatIsOpening(previousSelectedLoad));
-    this.sessionOpeningHistoryThisUpdate = openingHistory;
-    this.trackOpenedTurn(!openingHistory);
-  }
-
-  /**
-   * A turn opening at the foot of the transcript takes the reading position.
-   *
-   * A transcript arriving all at once is not a turn opening. Only growth from
-   * a transcript that was already on screen counts, or the first turn of a
-   * session that had none.
-   */
-  private trackOpenedTurn(allowAnchor = true): void {
-    const turns = this.turns();
-    const last = turns[turns.length - 1];
-    const key = last === undefined ? undefined : this.turnRenderKey(last);
-    const seen = this.lastSeenTurnCount;
-    if (!this.turnTrackingReady) {
-      this.turnTrackingReady = true;
-      this.lastSeenTurnKey = key;
-      this.lastSeenTurnCount = turns.length;
-      return;
-    }
-    if (key === undefined || key === this.lastSeenTurnKey) return;
-    this.lastSeenTurnKey = key;
-    this.lastSeenTurnCount = turns.length;
-    if (last?.openedByIndex === undefined) return;
-    const sentFromHere = this.sentFromHere;
-    this.sentFromHere = false;
-    if (!sentFromHere && (!allowAnchor || (seen === 0 && turns.length > 1))) return;
-    if (!this.scrolling.followOpenedTurn(key, sentFromHere)) return;
-    this.reservedTurnKey = key;
-  }
-
-  protected override update(changed: Map<string, unknown>): void {
-    const prepending = this.isPrependingMessages(changed);
-    const prependAnchor = prepending ? this.capturePrependScrollAnchor() : undefined;
-    const liveGrowthAnchor = !prepending && this.shouldAnchorLiveLedgerGrowth(changed)
-      ? this.captureLiveGrowthAnchor()
-      : undefined;
-    super.update(changed);
-    if (prependAnchor !== undefined) this.restorePrependScrollAnchor(prependAnchor);
-    else if (liveGrowthAnchor !== undefined) this.restoreLiveGrowthAnchor(liveGrowthAnchor);
   }
 
   protected override updated(changed: Map<string, unknown>): void {
-    if (changed.has("loadingMore") && !this.loadingMore) {
-      this.loadMoreRequested = false;
-      this.finishReadingPositionHistoryLoad();
-    }
+    if (changed.has("loadingMore") && !this.loadingMore) this.loadMoreRequested = false;
     if (changed.has("hasMore") && !this.hasMore) this.loadMoreRequested = false;
     const identityChanged = this.sessionIdentityChanged(changed);
-    if (identityChanged || this.sessionOpeningStartedThisUpdate) {
+    const previousMessageStart = changed.get("messageStart");
+    const historyPrepended = typeof previousMessageStart === "number" && this.messageStart < previousMessageStart;
+    if (identityChanged) {
       this.cancelSelectedLoadPaintReport();
-      if (this.currentPendingReadingPosition() !== undefined) this.continuePendingReadingPosition();
-      else this.openAtBottom();
+      this.openAtBottom();
+    } else if (historyPrepended) {
+      this.onReaderIntent();
+    } else if (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) {
+      this.scheduleTailPlacement();
     }
-    const openedAsk = changed.has("pendingAsk") && this.isNewPendingAsk(changed.get("pendingAsk"));
-    const openedDialog = changed.has("pendingDialogs") && this.isNewOpenDialog(changed.get("pendingDialogs"));
-    const followingLiveTail = this.scrolling.mode.kind === "tail" || this.scrolling.mode.kind === "turn";
-    const contentChanged = changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs");
-    // The form uses the transcript scroller. Start a new long form at question
-    // one rather than applying the usual live-tail scroll and landing at its end.
-    // During session opening, however, every arriving fragment keeps the tail:
-    // an opening prompt must not turn a layout race into a saved reading place.
-    if (!identityChanged && !this.sessionOpeningHistoryThisUpdate && openedAsk && followingLiveTail) {
-      this.scrollToOpenAsk();
-    } else if (!identityChanged && !this.sessionOpeningHistoryThisUpdate && openedDialog && followingLiveTail) {
-      this.scrollToOpenDialog();
-    } else if (!identityChanged && contentChanged) {
-      this.scheduleCurrentFollowTarget();
-    }
-    if (changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("selectedLoad") || changed.has("status") || changed.has("onLoadMore")) this.continuePendingReadingPosition();
-    if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
     if (changed.has("selectedMachineId") || changed.has("sessionCwd")) {
       this.cancelSelectedLoadPaintReport();
       if (!changed.has("selectedLoad")) this.scheduleSelectedLoadPaintReport();
@@ -639,7 +456,7 @@ export class ChatView extends LitElement {
       ${this.renderTopNotices()}
       ${this.renderNotificationLiveRegions()}
       <div class="chat-wrap">
-        <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }} @keydown=${(event: KeyboardEvent) => { this.onScrollKeyDown(event); }} @pointerdown=${(event: PointerEvent) => { this.onScrollPointerDown(event); }}>
+        <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${() => { this.onReaderIntent(); }} @touchmove=${() => { this.onReaderIntent(); }} @keydown=${(event: KeyboardEvent) => { this.onScrollKeyDown(event); }} @pointerdown=${(event: PointerEvent) => { this.onScrollPointerDown(event); }} @pointerup=${() => { this.onScrollPointerEnd(); }} @pointercancel=${() => { this.onScrollPointerEnd(); }}>
           ${this.renderEmptyLoadState(turns.length)}
           ${this.renderHistoryBoundary()}
           ${this.renderReadableLoadNotice()}
@@ -846,14 +663,9 @@ export class ChatView extends LitElement {
     return this.turnsCache;
   }
 
-  /**
-   * A turn is a box, not just a run of siblings, so the reading position has
-   * something to hold at the top of the viewport and the last turn can reserve
-   * the space its reply streams into.
-   */
+  /** One human message and its reply render as one stable keyed turn. */
   private renderTurn(turn: ChatTurn, liveTailGroup: ChatGroup | undefined, last: boolean) {
     const key = this.turnRenderKey(turn);
-    const readingAnchor = this.turnReadingAnchor(turn);
     const turnClosed = !(last && this.isSessionLive());
     const replySettled = !(last && this.latestReplyIsStreaming());
     const flow = chatTurnFlow(turn, replySettled);
@@ -862,8 +674,8 @@ export class ChatView extends LitElement {
     const galleryImages = chatTurnGalleryImages(turn);
     const continuationClosesTurn = turnClosed && continuation.length > 0;
     return html`
-      <section class="turn" data-turn-key=${key} data-scroll-anchor-id=${readingAnchor.id} data-scroll-anchor-aliases=${readingAnchor.aliases.length === 0 ? undefined : JSON.stringify(readingAnchor.aliases)}>
-        <div class=${last && key === this.reservedTurnKey ? "turn-body reserved" : "turn-body"}>
+      <section class="turn" data-turn-key=${key}>
+        <div class="turn-body">
           ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup)}
           ${this.renderTurnRail(work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined, !turnClosed && continuation.length === 0, `${key}:work`)}
           ${flow.answer === undefined ? null : this.renderGroup(flow.answer, flow.answer === liveTailGroup)}
@@ -882,9 +694,7 @@ export class ChatView extends LitElement {
     const visible = hasOverflow ? images.slice(0, 4) : images;
     const overflow = hasOverflow ? images.length - visible.length : 0;
     const label = `${String(images.length)} ${images.length === 1 ? "image" : "images"} from this turn`;
-    const uniqueMessageIndexes = [...new Set(images.map((image) => image.messageIndex))];
     return html`
-      ${uniqueMessageIndexes.map((index) => this.renderScrollMarker(this.messageScrollMarkerId(index)))}
       <section class="turn-image-gallery" aria-label=${label}>
         <div class="turn-image-gallery-head">
           <strong>${String(images.length)} ${images.length === 1 ? "image" : "images"}</strong>
@@ -955,9 +765,8 @@ export class ChatView extends LitElement {
         <div class=${rows.length === 0 ? "rail-ledger" : "rail-ledger flat"} ?hidden=${!open}>
           ${rows.length === 0
             ? repeat(groups, (group) => this.groupRenderKeyFor(group), (group) => this.renderGroup(group, group === liveTailGroup, true))
-            : this.renderChronologicalRailActivity(groups, liveTailGroup, rows)}
+            : this.renderChronologicalRailActivity(groups, rows)}
         </div>
-        <span class="rail-growth-anchor" data-rail-growth-anchor=${railKey} aria-hidden="true"></span>
         ${meta === undefined ? null : this.renderRailMeta(meta.turn, meta.key)}
       </div>
     `;
@@ -972,7 +781,6 @@ export class ChatView extends LitElement {
   /** Tool and non-tool activity share one stream in the order the wire delivered it. */
   private renderChronologicalRailActivity(
     groups: readonly ChatGroup[],
-    liveTailGroup: ChatGroup | undefined,
     rows: readonly TurnLedgerRow[],
   ) {
     const rowsByExecution = new Map(rows.map((row) => [row.execution, row]));
@@ -982,42 +790,24 @@ export class ChatView extends LitElement {
         ? railChronologyEntries(group.messages, group.startIndex, rowsByExecution)
         : railChronologyEntries([group.message], group.index, rowsByExecution),
     }));
-    // Match the previous reading-position contract: once a rail has any
-    // non-tool activity, every group in that rail keeps its marker and anchor.
-    const hasActivity = chronology.some(({ entries }) => entries.some((entry) => entry.kind === "activity"));
     return html`
       <div class="rail-flat-activity">
-        ${chronology.map(({ group, entries }) => html`
-            ${hasActivity
-              ? group.kind === "group"
-                ? html`
-                  ${this.renderScrollMarker(this.groupScrollMarkerId(group.endIndex))}
-                  <span class="rail-flat-group-anchor" data-scroll-anchor-id=${this.groupReadingAnchorKey(group.messages, group.startIndex, group === liveTailGroup)}></span>
-                `
-                : this.renderScrollMarker(this.messageScrollMarkerId(group.index))
-              : null}
-            ${entries.map((entry) => {
-              if (entry.kind === "tools") return html`
-                <div class="rail-tool-segment">
-                  <turn-rail-ledger .rows=${entry.rows}></turn-rail-ledger>
-                </div>
-              `;
-              const readingAnchorId = entry.firstActivityInMessage
-                ? group.kind === "group"
-                  ? this.eventReadingAnchorKey(entry.message, entry.index)
-                  : this.messageReadingAnchorKey(entry.message, entry.index)
-                : undefined;
-              return this.renderRailActivityRow(entry.message, entry.index, readingAnchorId);
-            })}
-          `)}
+        ${chronology.map(({ entries }) => entries.map((entry) => {
+          if (entry.kind === "tools") return html`
+            <div class="rail-tool-segment">
+              <turn-rail-ledger .rows=${entry.rows}></turn-rail-ledger>
+            </div>
+          `;
+          return this.renderRailActivityRow(entry.message, entry.index);
+        }))}
       </div>
     `;
   }
 
-  private renderRailActivityRow(message: ChatLine, index: number, readingAnchorId: string | undefined) {
+  private renderRailActivityRow(message: ChatLine, index: number) {
     const roleClass = message.role === "assistant" ? "msg assistant interim rail-activity-row" : `msg ${message.role} rail-activity-row`;
     return html`
-      <article class=${roleClass} data-index=${index} data-scroll-anchor-id=${readingAnchorId}>
+      <article class=${roleClass} data-index=${index}>
         ${message.parts.map((part) => this.renderRailActivityPart(part, message))}
       </article>
     `;
@@ -1034,15 +824,7 @@ export class ChatView extends LitElement {
     return this.renderPart(part, message);
   }
 
-  /**
-   * What the running turn is still doing, and what it is waiting on.
-   *
-   * These belong to the turn above them, so they render inside it rather than
-   * after it. Outside, the space an opening turn reserves fell between the
-   * question and its own status line, stranding the line against the foot of the
-   * screen. Queued prompts ride along: they are the only thing left that would
-   * have been marooned down there.
-   */
+  /** What the running turn is still doing, and what it is waiting on. */
   private renderRunningTurnTail() {
     return html`
       ${this.renderQueuedMessages()}
@@ -1185,7 +967,6 @@ export class ChatView extends LitElement {
     return html`
       <ask-user-card
         class="open-ask-card"
-        data-scroll-anchor-id=${`ask:${this.pendingAsk.askId}`}
         .ask=${this.pendingAsk}
         .draftSessionId=${this.askDraftSessionId}
         .onSubmit=${this.onSubmitAsk}
@@ -1204,7 +985,6 @@ export class ChatView extends LitElement {
         (closed) => html`
           <extension-dialog-card
             class="closed-dialog-card"
-            data-scroll-anchor-id=${`closed-dialog:${closed.dialog.dialogId}`}
             .outcome=${closed}
             .onDismiss=${this.onDismissClosedDialog}
           ></extension-dialog-card>
@@ -1213,7 +993,6 @@ export class ChatView extends LitElement {
       ${open === undefined ? null : html`
         <extension-dialog-card
           class="open-dialog-card"
-          data-scroll-anchor-id=${`dialog:${open.dialogId}`}
           .dialog=${open}
           .onAnswer=${this.onAnswerDialog}
           .onCancel=${this.onCancelDialog}
@@ -1293,7 +1072,7 @@ export class ChatView extends LitElement {
       return html`
         <div class="history-boundary">
           <button type="button" class="history-load-button" ?disabled=${this.loadMoreRequested || sessionLive} @click=${() => { this.requestLoadMore(); }}>Load earlier messages</button>
-          <span>${sessionLive ? "Earlier messages are available when current work finishes" : "Scroll up to load earlier messages"}</span>
+          <span>${sessionLive ? "Earlier messages are available when current work finishes" : "Earlier messages load only when you choose them"}</span>
           ${range}
         </div>
       `;
@@ -1330,8 +1109,7 @@ export class ChatView extends LitElement {
         ? "msg assistant interim"
         : `msg ${message.role}`;
     return html`
-      ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      <article class=${toolOnly || askUserRecordOnly ? shellClass : roleClass} data-index=${index} data-scroll-anchor-id=${this.messageReadingAnchorKey(message, index)}>
+      <article class=${toolOnly || askUserRecordOnly ? shellClass : roleClass} data-index=${index}>
         ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message)}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
@@ -1341,8 +1119,7 @@ export class ChatView extends LitElement {
   private renderToolImageOutput(message: ChatLine, index: number, toolName?: string) {
     const label = chatToolOutputLabel(toolName);
     return html`
-      ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      <article class="msg tool-image-output" data-index=${index} data-scroll-anchor-id=${this.messageReadingAnchorKey(message, index)}>
+      <article class="msg tool-image-output" data-index=${index}>
         ${this.renderMessageHeader(message, label)}
         ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
@@ -1381,8 +1158,7 @@ export class ChatView extends LitElement {
     const disclosureKey = this.groupDisclosureKey(startIndex, endIndex, live);
     const open = this.disclosures.isOpen(disclosureKey, false);
     return html`
-      ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
-      <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} data-scroll-anchor-id=${this.groupReadingAnchorKey(messages, startIndex, live)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
+      <details class=${chatMessageGroupClassName(live)} data-index=${startIndex} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event); }}>
         <summary><span>${summarizeChatGroup(messages)}</span></summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
       </details>
@@ -1404,7 +1180,7 @@ export class ChatView extends LitElement {
           const toolOnly = this.isToolExecutionOnlyMessage(message);
           const selfLabelling = this.isSelfLabellingMessage(message);
           return html`
-            <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventReadingAnchorKey(message, startIndex + offset)}>
+            <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset}>
               ${toolOnly || selfLabelling ? null : this.renderMessageHeader(message)}
               ${message.parts.map((part) => this.renderRailActivityPart(part, message))}
             </section>
@@ -1412,11 +1188,6 @@ export class ChatView extends LitElement {
         })}
       </div>
     `;
-  }
-
-  private renderScrollMarker(markerId: string) {
-
-    return html`<span class="scroll-marker" data-marker-id=${markerId} aria-hidden="true"></span>`;
   }
 
   /** A failure reads as a short signal phrase plus plain detail, not a red block. */
@@ -1516,8 +1287,8 @@ export class ChatView extends LitElement {
     }
     if (part.type === "image") {
       const { src, alt } = chatImagePartSource(part);
-      // No `@load` re-pin: the band reserves its height in CSS, so a late
-      // decode changes nothing the reading position depends on.
+      // The band reserves its height in CSS, so a late decode does not shift
+      // the surrounding transcript layout.
       return html`<img class="part chat-image" src=${src} alt=${alt} loading="lazy" role="button" tabindex="0" title="Open full-screen image" @click=${() => { this.openImageZoom([{ src, alt }]); }} @keydown=${(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.openImageZoom([{ src, alt }]); } }} />`;
     }
     if (part.type === "toolCall") return html`<div class="part tool-line">▶ ${part.toolName}<span class="summary">${part.summary}</span></div>`;
@@ -1537,363 +1308,59 @@ export class ChatView extends LitElement {
     if (this.disclosures.applyToggle(key, details.open, false)) this.requestUpdate();
   }
 
-  private onScroll() {
-    this.requestLoadMoreIfNeeded();
+  private onScroll(): void {
     const chat = this.chat;
-    if (chat !== undefined) {
-      const update = this.scrolling.recordScroll(chat, false);
-      if (this.scrolling.mode.kind !== "free") this.readerHistoryPagingEnabled = false;
-      if (update.viewportChanged) this.scheduleCurrentFollowTarget();
-    }
+    if (chat !== undefined) this.scrolling.recordScroll(chat);
+  }
+
+  private onReaderIntent(): void {
+    const chat = this.chat;
+    if (chat !== undefined) this.scrolling.readerIntent(chat);
   }
 
   private onScrollKeyDown(event: KeyboardEvent): void {
     if (!CHAT_SCROLL_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-    this.acceptDirectReaderScrollIntent();
+    this.onReaderIntent();
   }
 
   private onScrollPointerDown(event: PointerEvent): void {
     const chat = this.chat;
     if (chat === undefined || event.target !== chat) return;
-    const gutterWidth = Math.max(0, chat.offsetWidth - chat.clientWidth);
-    if (gutterWidth === 0) return;
-    const bounds = chat.getBoundingClientRect();
-    const inScrollbarGutter = event.clientX <= bounds.left + gutterWidth || event.clientX >= bounds.right - gutterWidth;
-    if (inScrollbarGutter) this.acceptDirectReaderScrollIntent();
+    this.scrollPointerActive = true;
+    this.scrolling.holdPosition();
   }
 
-  private acceptDirectReaderScrollIntent(): void {
-    this.scrolling.cancelAutomaticMotion();
-    this.scrolling.follow(FOLLOW_FREE);
-    this.clearPendingReadingPosition();
-  }
-
-  private onWheel(event: WheelEvent) {
-    const forceTakeover = this.shouldForceReaderScrollTakeover();
-    const gesture = this.scrolling.readerWheel(event.deltaY, this.canScrollUp(), forceTakeover);
-    if (gesture === undefined) return;
-    if (forceTakeover) {
-      this.readerHistoryPagingEnabled = false;
-      if (gesture.readerOwned) this.acceptReaderScrollTakeover();
-      return;
-    }
-    this.applyReaderHistoryPagingGesture(gesture);
-  }
-
-  private onTouchStart(event: TouchEvent) {
-    this.scrolling.readerTouchStart(event.touches[0]?.clientY);
-  }
-
-  private onTouchMove(event: TouchEvent) {
-    const forceTakeover = this.shouldForceReaderScrollTakeover();
-    const gesture = this.scrolling.readerTouchMove(event.touches[0]?.clientY, this.canScrollUp(), forceTakeover);
-    if (gesture === undefined) return;
-    if (forceTakeover) {
-      this.readerHistoryPagingEnabled = false;
-      if (gesture.readerOwned) this.acceptReaderScrollTakeover();
-      return;
-    }
-    this.applyReaderHistoryPagingGesture(gesture);
-  }
-
-  private applyReaderHistoryPagingGesture(gesture: ChatReaderGesture): void {
-    if (gesture.readerOwned) this.clearPendingReadingPosition();
-    this.readerHistoryPagingEnabled = gesture.direction === "older" && gesture.readerOwned;
-    if (this.readerHistoryPagingEnabled) this.requestLoadMoreIfNeeded();
-  }
-
-  private shouldForceReaderScrollTakeover(): boolean {
-    if (this.loadingScrollReaderOwned) return false;
-    return selectedChatIsOpening(this.currentSelectedLoad());
-  }
-
-  private acceptReaderScrollTakeover(): void {
-    this.loadingScrollReaderOwned = true;
-    this.clearPendingReadingPosition();
-  }
-
-  private isPrependingMessages(changed: Map<string, unknown>): boolean {
-    const oldMessageStart = changed.get("messageStart");
-    return typeof oldMessageStart === "number" && this.messageStart < oldMessageStart;
-  }
-
-  /**
-   * Only free readers with an open ledger need this anchor. Tail and turn modes
-   * already place themselves after every content change; closed ledgers have a
-   * fixed height; history prepends use the older, broader anchor contract.
-   */
-  private shouldAnchorLiveLedgerGrowth(changed: Map<string, unknown>): boolean {
-    return changed.has("messages")
-      && this.expandedRails.size > 0
-      && this.scrolling.mode.kind === "free";
-  }
-
-  private captureLiveGrowthAnchor(): LiveGrowthAnchorMeasurement | undefined {
+  private onScrollPointerEnd(): void {
+    if (!this.scrollPointerActive) return;
+    this.scrollPointerActive = false;
     const chat = this.chat;
-    if (chat === undefined) return undefined;
-    const chatTop = chat.getBoundingClientRect().top;
-    const measurements = Array.from(this.renderRoot.querySelectorAll<HTMLElement>("[data-rail-growth-anchor]"))
-      .flatMap((element) => {
-        const id = element.dataset["railGrowthAnchor"];
-        if (id === undefined || !this.expandedRails.has(id)) return [];
-        return [{ id, offset: element.getBoundingClientRect().top - chatTop }];
-      });
-    return selectLiveGrowthAnchor(measurements);
-  }
-
-  private restoreLiveGrowthAnchor(anchor: LiveGrowthAnchorMeasurement): void {
-    const element = this.renderRoot.querySelector<HTMLElement>(`[data-rail-growth-anchor="${CSS.escape(anchor.id)}"]`);
-    if (element === null) return;
-    const ledger = element.closest(".turn-rail")?.querySelector<TurnRailLedger>("turn-rail-ledger");
-    const epoch = this.liveGrowthRestoreEpoch + 1;
-    this.liveGrowthRestoreEpoch = epoch;
-    // A Lit child commits after its parent. Measuring immediately after
-    // ChatView's update sees the old ledger height and produces a zero delta.
-    // Wait for the compact ledger itself, then restore the seam after its rows
-    // have entered layout. A newer render invalidates this deferred correction.
-    void (ledger?.updateComplete ?? Promise.resolve()).then(() => {
-      if (epoch !== this.liveGrowthRestoreEpoch) return;
-      const chat = this.chat;
-      const current = this.renderRoot.querySelector<HTMLElement>(`[data-rail-growth-anchor="${CSS.escape(anchor.id)}"]`);
-      if (chat === undefined || current === null) return;
-      const currentOffset = current.getBoundingClientRect().top - chat.getBoundingClientRect().top;
-      const delta = scrollDeltaForLiveGrowth(currentOffset, anchor.offset);
-      this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop += delta; });
-      this.scrolling.sync(chat);
-    });
-  }
-
-  private requestLoadMoreIfNeeded(): void {
-    // Earlier history follows a meaningful wheel or touch gesture. Layout,
-    // keyboard, and scrollbar movement do not take reading control or turn an
-    // opening-time reflow into an automatic history request.
-    if (!this.readerHistoryPagingEnabled || this.scrolling.mode.kind !== "free") return;
-    if (this.loadMoreCheckFrame !== undefined) return;
-    this.loadMoreCheckFrame = requestAnimationFrame(() => {
-      this.loadMoreCheckFrame = undefined;
-      if (!this.readerHistoryPagingEnabled || this.scrolling.mode.kind !== "free" || !this.scrolling.canLoadMore || this.isSessionLive()) return;
-      const chat = this.chat;
-      if (!chat) return;
-      if (shouldRequestEarlierMessages({
-        hasMore: this.hasMore,
-        loadingMore: this.loadingMore || this.loadMoreRequested,
-        canRequest: this.onLoadMore !== undefined,
-        scrollTop: chat.scrollTop,
-        scrollHeight: chat.scrollHeight,
-        clientHeight: chat.clientHeight,
-      })) this.requestLoadMore();
-    });
+    if (chat !== undefined) this.scrolling.recordScroll(chat);
   }
 
   private requestLoadMore(): void {
     if (this.loadMoreRequested) return;
     if (this.isSessionLive() || !this.hasMore || this.loadingMore || this.onLoadMore === undefined) return;
+    this.scrolling.holdPosition();
     this.loadMoreRequested = true;
     this.onLoadMore();
   }
 
-  private isNearBottom(): boolean {
+  private scheduleTailPlacement(): void {
+    this.scrolling.scheduleTailPlacement(() => { this.placeTailNow(); });
+  }
+
+  private placeTailNow(): void {
     const chat = this.chat;
-    if (!chat) return true;
-    return isNearScrollBottom(chat);
-  }
-
-  private canScrollUp(): boolean {
-    const chat = this.chat;
-    return chat !== undefined && chat.scrollTop > 0;
-  }
-
-  private scheduleCurrentFollowTarget(): void {
-    if (this.scrolling.mode.kind === "free") return;
-    this.scrolling.schedulePlacement(() => { this.alignCurrentFollowTargetNow(); });
-  }
-
-  private scrollToBottom(): void {
-    this.scrolling.schedulePlacement(() => {
-      if (this.scrolling.mode.kind === "tail") this.alignCurrentFollowTargetNow();
-    });
-  }
-
-  /** Keep the current turn's opening line fixed while its reply changes. */
-  private alignAnchoredTurn(): void {
-    this.scrolling.schedulePlacement(() => {
-      if (this.scrolling.mode.kind === "turn") this.alignCurrentFollowTargetNow();
-    });
-  }
-
-  private alignCurrentFollowTargetNow(): boolean {
-    const chat = this.chat;
-    if (chat === undefined) return false;
-    const mode = this.scrolling.mode;
-    if (mode.kind === "tail") {
-      this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop = chat.scrollHeight; });
-      return true;
-    }
-    if (mode.kind === "turn") {
-      const turn = this.anchoredTurnElement();
-      if (turn === undefined) return false;
-      this.scrolling.withProgrammaticScroll(chat, () => { this.alignElementToTopNow(turn); });
-      return true;
-    }
-    const position = anchoredReadingPosition(mode);
-    return position === undefined ? false : this.restoreReadingPositionNow(position);
-  }
-
-  private alignElementToTopNow(element: HTMLElement): void {
-    const chat = this.chat;
-    if (chat === undefined) return;
-    chat.scrollTop += element.getBoundingClientRect().top - chat.getBoundingClientRect().top;
-  }
-
-  private anchoredTurnElement(): HTMLElement | undefined {
-    const turnKey = anchoredTurnKey(this.scrolling.mode);
-    if (turnKey === undefined) return undefined;
-    return this.renderRoot.querySelector<HTMLElement>(`.turn[data-turn-key="${CSS.escape(turnKey)}"]`) ?? undefined;
-  }
-
-  private isNewPendingAsk(previous: unknown): boolean {
-    return this.pendingAsk !== undefined
-      && (typeof previous !== "object" || previous === null || Reflect.get(previous, "askId") !== this.pendingAsk.askId);
-  }
-
-  private isNewOpenDialog(previous: unknown): boolean {
-    const oldest = this.pendingDialogs[0];
-    if (oldest === undefined) return false;
-    if (!Array.isArray(previous)) return true;
-    const previousOldest: unknown = previous[0];
-    return typeof previousOldest !== "object" || previousOldest === null || Reflect.get(previousOldest, "dialogId") !== oldest.dialogId;
-  }
-
-  private scrollToOpenAsk(): void {
-    this.scrolling.schedulePlacement(() => { this.alignOpenAskToTop(); });
-  }
-
-  private alignOpenAskToTop(): boolean {
-    return this.alignOpenCardToTop(".chat ask-user-card.open-ask-card");
-  }
-
-  private scrollToOpenDialog(): void {
-    this.scrolling.schedulePlacement(() => { this.alignOpenDialogToTop(); });
-  }
-
-  private alignOpenDialogToTop(): boolean {
-    return this.alignOpenCardToTop(".chat extension-dialog-card.open-dialog-card");
-  }
-
-  private alignOpenCardToTop(selector: string): boolean {
-    const chat = this.chat;
-    const card = this.renderRoot.querySelector<HTMLElement>(selector);
-    if (chat === undefined || card === null) return false;
-    this.scrolling.withProgrammaticScroll(chat, () => { this.alignElementToTopNow(card); });
-    this.scrolling.follow(this.isNearBottom() ? FOLLOW_TAIL : FOLLOW_FREE);
-    return true;
-  }
-
-  private continuePendingReadingPosition(): void {
-    const position = this.currentPendingReadingPosition();
-    if (position === undefined || this.loadingMore || !selectedChatHasReadableHistory(this.currentSelectedLoad())) return;
-    this.scrolling.schedulePlacement(() => { this.restoreReadingPositionNow(position); });
-  }
-
-  private restoreReadingPositionNow(position: ChatAnchorReadingPosition): boolean {
-    const chat = this.chat;
-    if (chat === undefined) return false;
-    const result = this.scrolling.withProgrammaticScroll(chat, () => this.readingPositions.restore(
-      position,
-      chat,
-      this.scrollAnchorElements(),
-      { fallbackToBottom: !this.hasMore },
-    ));
-    if (result.status === "restored") {
-      this.clearPendingReadingPosition();
-      this.scrolling.follow(followAnchor(position));
-      return true;
-    }
-    if (result.status === "bottom") {
-      this.readingPositions.forget(this.readingIdentity());
-      this.clearPendingReadingPosition();
-      this.scrolling.follow(FOLLOW_TAIL);
-      return true;
-    }
-    if (result.status === "missing") {
-      this.pendingReadingPosition = result.position;
-      this.pendingReadingIdentity = this.readingIdentity();
-      this.scrolling.follow(FOLLOW_FREE);
-      this.requestEarlierMessagesForReadingPosition(chat);
-    }
-    return false;
-  }
-
-  private requestEarlierMessagesForReadingPosition(chat: HTMLDivElement): boolean {
-    if (this.loadMoreRequested
-      || this.loadingMore
-      || this.isSessionLive()
-      || !this.hasMore
-      || this.onLoadMore === undefined
-      || this.readingPositionLoadBlockedAtStart === this.messageStart) return false;
-    this.loadMoreRequested = true;
-    this.readingPositionLoadStart = this.messageStart;
-    this.scrolling.withProgrammaticScroll(chat, () => { chat.scrollTop = 0; });
-    this.onLoadMore();
-    return true;
-  }
-
-  private finishReadingPositionHistoryLoad(): void {
-    const requestedStart = this.readingPositionLoadStart;
-    if (requestedStart === undefined) return;
-    this.readingPositionLoadStart = undefined;
-    this.readingPositionLoadBlockedAtStart = this.messageStart < requestedStart ? undefined : requestedStart;
-  }
-
-  private clearPendingReadingPosition(): void {
-    this.pendingReadingPosition = undefined;
-    this.pendingReadingIdentity = undefined;
-    this.readingPositionLoadStart = undefined;
-    this.readingPositionLoadBlockedAtStart = undefined;
+    if (chat !== undefined) chat.scrollTop = chat.scrollHeight;
   }
 
   private openAtBottom(): void {
-    this.scrolling.cancelAutomaticMotion();
-    this.scrolling.follow(FOLLOW_TAIL);
     // Preview content is already rendered here. Move before paint, then repeat
     // next frame for content whose layout finishes after this update.
-    this.alignCurrentFollowTargetNow();
-    this.scrollToBottom();
-  }
-
-  capturePrependScrollAnchor(): PrependScrollAnchor | undefined {
-    const chat = this.chat;
-    if (!chat) return undefined;
-    return capturePrependScrollAnchor(chat, this.scrollMarkers());
-  }
-
-  restorePrependScrollAnchor(anchor: PrependScrollAnchor | undefined): void {
-    if (!this.chat || !anchor) return;
-    this.scrolling.settle({
-      frames: PREPEND_RESTORE_SETTLE_FRAMES,
-      immediate: true,
-      suppressLoadMore: true,
-      apply: () => {
-        const chat = this.chat;
-        if (chat === undefined) return;
-        restorePrependScrollAnchor(chat, anchor, anchor.markerId === undefined ? undefined : this.scrollMarkerAt(anchor.markerId));
-        this.scrolling.sync(chat);
-      },
-    });
-  }
-
-  private scrollMarkers(): HTMLElement[] {
-    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".scroll-marker"));
-  }
-
-  private scrollAnchorElements(): HTMLElement[] {
-    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>("[data-scroll-anchor-id]"));
-  }
-
-  private scrollMarkerAt(markerId: string): HTMLElement | undefined {
-    return this.scrollMarkers().find((marker) => marker.dataset["markerId"] === markerId);
+    this.placeTailNow();
+    this.scheduleTailPlacement();
   }
 
   /** The live tail keys on its start, which is stable while events stream in. */
@@ -1901,67 +1368,14 @@ export class ChatView extends LitElement {
     return live ? `${this.sessionId}:live:${String(startIndex)}` : `${this.sessionId}:${String(endIndex)}`;
   }
 
-  private messageAnchorKey(index: number): string {
-    return chatMessageAnchorKey(index);
-  }
-
-  private messageReadingAnchorKey(message: ChatLine, index: number): string | undefined {
-    return this.lineReadingAnchorKey("message", message, this.messageAnchorKey(index));
-  }
-
-  private groupReadingAnchorKey(messages: readonly ChatLine[], startIndex: number, live: boolean): string | undefined {
-    if (live) return undefined;
-    const last = messages.at(-1);
-    return last === undefined ? this.groupAnchorKey(startIndex) : this.lineReadingAnchorKey("group", last, this.groupAnchorKey(startIndex));
-  }
-
-  private eventReadingAnchorKey(message: ChatLine, index: number): string | undefined {
-    return this.lineReadingAnchorKey("event", message, this.eventAnchorKey(index));
-  }
-
-  private turnReadingAnchor(turn: ChatTurn): { id: string; aliases: string[] } {
-    const fallback = this.turnRenderKey(turn);
-    const ids = [...new Set(turn.groups.flatMap((group) => {
-      const message = group.kind === "group" ? group.messages.at(-1) : group.message;
-      if (message === undefined) return [];
-      return [this.lineReadingAnchorKey("turn", message, fallback) ?? fallback];
-    }))];
-    const id = (turn.openedByIndex === undefined ? ids.at(-1) : ids[0]) ?? fallback;
-    return { id, aliases: ids.filter((candidate) => candidate !== id) };
-  }
-
-  private lineReadingAnchorKey(kind: "message" | "group" | "event" | "turn", message: ChatLine, fallback: string): string | undefined {
-    const token = chatLineReadingAnchorToken(message);
-    if (token !== undefined) return `${kind}:${token}`;
-    const position = message.transcriptPosition;
-    if (position !== undefined) return `${kind}:${String(position.messageIndex)}:${String(position.lineIndex)}:${String(position.segmentIndex)}`;
-    return kind === "turn" ? fallback : undefined;
-  }
-
   private groupRenderKeyFor(group: ChatGroup): string {
-    return group.kind === "group" ? chatGroupAnchorKey(group.startIndex) : chatMessageAnchorKey(group.index);
+    return group.kind === "group" ? chatGroupRenderKey(group.startIndex) : chatMessageRenderKey(group.index);
   }
 
   /** A turn is named by its opening group, which is stable while the turn grows. */
   private turnRenderKey(turn: ChatTurn): string {
     const first = turn.groups[0];
     return first === undefined ? "turn:empty" : `turn:${this.groupRenderKeyFor(first)}`;
-  }
-
-  private groupAnchorKey(startIndex: number): string {
-    return chatGroupAnchorKey(startIndex);
-  }
-
-  private eventAnchorKey(index: number): string {
-    return chatEventAnchorKey(index);
-  }
-
-  private messageScrollMarkerId(index: number): string {
-    return chatMessageAnchorKey(index);
-  }
-
-  private groupScrollMarkerId(endIndex: number): string {
-    return chatGroupScrollMarkerId(endIndex);
   }
 
   static override styles = chatStyles;

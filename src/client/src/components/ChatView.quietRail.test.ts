@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
-import { setChatLineTranscriptPosition } from "../chatLinePosition";
 import { ChatView } from "./ChatView";
 import type { ChatLine, ToolExecutionPart } from "./shared";
 import { TurnRailLedger } from "./TurnRailLedger";
@@ -181,52 +180,6 @@ describe("ChatView quiet rail", () => {
       "thinking:checking the result",
       "tool:bash:npm test",
     ]);
-  });
-
-  it("preserves grouped activity anchors without adding a duplicate message marker", async () => {
-    const positionedWork = setChatLineTranscriptPosition<ChatLine>({
-      role: "assistant",
-      parts: [
-        { type: "thinking", text: "checking the implementation" },
-        { type: "toolExecution", toolName: "read", summary: "", status: "success", args: { path: "/repo/file.ts" } },
-      ],
-    }, { messageIndex: 4, lineIndex: 0, segmentIndex: 0 });
-    const view = await transcript([said("user", "q"), positionedWork, said("assistant", "the answer")]);
-    const disclosure = summary(view).shadowRoot?.querySelector("button.disclosure");
-    if (!(disclosure instanceof HTMLButtonElement)) throw new Error("The register rendered no disclosure");
-
-    disclosure.click();
-    await view.updateComplete;
-    await view.updateComplete;
-
-    expect(ledger(view).querySelector<HTMLElement>(".rail-activity-row")?.dataset["scrollAnchorId"]).toBe("event:4:0:0");
-    const markerIds = [...shadow(view).querySelectorAll<HTMLElement>(".scroll-marker")].map((marker) => marker.dataset["markerId"]);
-    expect(markerIds.filter((id) => id === "g:1")).toHaveLength(1);
-    expect(markerIds).not.toContain("m:1");
-  });
-
-  it("keeps markers for tool-only groups inside a mixed rail", async () => {
-    const positionedTool = setChatLineTranscriptPosition<ChatLine>(
-      ran("read", "success", { path: "/repo/first.ts" }),
-      { messageIndex: 4, lineIndex: 0, segmentIndex: 0 },
-    );
-    const view = await transcript([
-      said("user", "q"),
-      positionedTool,
-      said("assistant", "checking between tools"),
-      succeededEdit,
-      said("assistant", "the answer"),
-    ]);
-    const disclosure = summary(view).shadowRoot?.querySelector("button.disclosure");
-    if (!(disclosure instanceof HTMLButtonElement)) throw new Error("The register rendered no disclosure");
-
-    disclosure.click();
-    await view.updateComplete;
-    await view.updateComplete;
-
-    const markerIds = [...shadow(view).querySelectorAll<HTMLElement>(".scroll-marker")].map((marker) => marker.dataset["markerId"]);
-    expect(markerIds).toContain("g:1");
-    expect(markerIds).toContain("g:3");
   });
 
   it("reports unresolved work in the same form while the turn is active", async () => {

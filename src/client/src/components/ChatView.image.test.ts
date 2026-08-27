@@ -4,14 +4,14 @@ import { chatStyles, type ChatLine } from "./shared";
 import {
   ChatView,
   chatImagePartSource,
-  chatMessageAnchorKey,
+  chatMessageRenderKey,
   chatToolOutputLabel,
 } from "./ChatView";
 import { findOptionalTemplateEventHandlerNearMarker } from "../templateInspection.testSupport";
 
 describe("ChatView image content derivation", () => {
   // Content/attribute derivation (image src/alt, the tool-output header label,
-  // and the scroll-anchor key) lives in pure exported seams rather than being
+  // and the stable render key) lives in pure exported seams rather than being
   // scraped from rendered `TemplateResult` markup, per the testing-guide rule
   // that TemplateResult inspection is not for general content assertions.
   it("derives the image data URL and alt text from an image part", () => {
@@ -27,16 +27,14 @@ describe("ChatView image content derivation", () => {
     expect(chatToolOutputLabel("")).toBe("tool output");
   });
 
-  it("keys a tool image message to its stable scroll anchor", () => {
-    expect(chatMessageAnchorKey(7)).toBe("m:7");
+  it("keys a tool image message with a stable render key", () => {
+    expect(chatMessageRenderKey(7)).toBe("m:7");
   });
 });
 
 describe("inline transcript image", () => {
-  // A late image decode used to grow the transcript and then trigger a re-pin,
-  // which moved the reader's position. The band removes the growth, so the
-  // re-pin has nothing to correct and must not exist.
-  it("reserves a fixed band height, so a late decode cannot move the reading position", () => {
+  // The fixed band prevents a late image decode from growing the transcript.
+  it("reserves a fixed band height, so a late decode cannot shift the transcript", () => {
     expect(chatStyles.cssText).toMatch(/\.chat-image\s*{[^}]*block-size:\s*clamp\(/);
     expect(chatStyles.cssText).not.toMatch(/\.chat-image\s*{[^}]*max-height:/);
   });

@@ -594,12 +594,8 @@ const commandMarkStyles = css`
 export const chatStyles = css`
   ${commandMarkStyles}
   :host { position: relative; z-index: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; }
-  /* Size container for the transcript. Lives on the wrapper rather than the
-     scroller so containment cannot interact with sticky headers or scroll
-     anchoring inside .chat. Resolves --calm-measure for the reading column from
-     its inline size, and the reserved height of an opening turn from its block
-     size. The wrapper is sized by the flex column above it, never by its own
-     contents, so size containment costs it nothing. */
+  /* Size container for the transcript. The wrapper is sized by the flex column
+     above it, never by its own contents, so size containment costs it nothing. */
   .chat-wrap { container-type: size; position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   .top-notices { box-sizing: border-box; flex: 0 0 auto; max-height: 40%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-bottom: 1px solid var(--pi-border); background: var(--pi-bg-overlay); }
   .session-warnings { flex: 0 1 auto; display: grid; gap: 8px; max-height: 50%; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 10px 16px; border-bottom: 1px solid var(--pi-border-muted); }
@@ -655,39 +651,16 @@ export const chatStyles = css`
     -webkit-touch-callout: default;
   }
 
-  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
-  /* One human message and its reply share a box. The box is what the reading
-     position holds at the top of the viewport when a turn opens, and what
-     reserves the space a streaming reply arrives into. It adds no spacing of
-     its own: the turn gap still comes from the human message inside it. */
+  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: auto; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
+  /* One human message and its reply share a stable keyed box. */
   .turn { min-width: 0; display: block; }
-  /* An opening turn reserves a screenful so its first line can sit at the top
-     of the viewport with the reply arriving underneath it, instead of the reply
-     pushing the question up the screen as it streams. The reservation belongs to
-     the turn rather than to a trailing spacer, so it disappears exactly as the
-     turn's own content grows to fill the screen and leaves no dead space behind
-     a long answer.
-
-     It sits on an inner block rather than on the turn itself. The turn is a grid
-     item, and a grid row sized from its item's own minimum stops tracking that
-     item's content: a long reply then overflowed its row and drew on top of the
-     liveness line below it. A block box inside the item has no such trouble, and
-     the turn goes back to being sized by what it holds.
-
-     Only the end padding comes off the screenful. The turn has to be able to
-     scroll past the scroller's start padding to reach the top edge, so that
-     padding is height the reservation must supply rather than height it can
-     assume is already there. */
   .turn-body { min-width: 0; }
-  .turn-body.reserved { min-block-size: calc(100cqb - var(--pi-chat-pad-block-end)); }
-  .scroll-marker { display: block; height: 0; overflow: hidden; pointer-events: none; }
   /* Transcript messages carry no card. Roles are told apart by weight and
      tone, not by a border and fill per role: colour is reserved for things
      that need attention, and a colour per role spends it on everything. */
   /* Paragraph rhythm by default; the wide gap is added back only at a turn
-     boundary below. Spacing keys on what an element is rather than what follows
-     it, because a zero-height scroll marker sits between every pair of messages
-     and defeats sibling adjacency. */
+     boundary below. Spacing keys on the message role so group wrappers do not
+     change the transcript rhythm. */
   /* Full ink. Tone no longer separates prose from prose -- it only separates
      language from machinery, which is the job it can actually do. Muting the
      reply was the worst of it: the reply is the thing being read, and it was
@@ -757,7 +730,6 @@ export const chatStyles = css`
   .rail-ledger.flat { gap: 0; }
   .rail-ledger[hidden] { display: none; }
   .rail-flat-activity { min-width: 0; display: grid; }
-  .rail-flat-group-anchor { display: block; width: 100%; height: 0; }
   .rail-tool-segment { min-width: 0; border-bottom: 1px solid var(--pi-border-muted); }
   .rail-activity-row { min-width: 0; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--pi-border-muted); }
   .rail-tool-segment:last-child, .rail-activity-row:last-child { border-bottom: 0; }
@@ -769,9 +741,6 @@ export const chatStyles = css`
   .rail-activity-row .part:is(details) > summary { display: flex; align-items: baseline; gap: 7px; list-style: none; }
   .rail-activity-row .part:is(details) > summary::-webkit-details-marker { display: none; }
   .rail-activity-row .part:is(details) > summary::before { content: "●"; flex: 0 0 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); }
-  /* Zero-height seam after the ledger. Free readers who have already scrolled
-     past it anchor here while live rows append above them. */
-  .rail-growth-anchor { display: block; width: 100%; height: 0; }
   /* Interim narration is the agent working, not the agent answering. It keeps
      reading order but drops to the interface's small muted voice, so the
      promoted answer is the only assistant prose at full size. */
@@ -821,7 +790,7 @@ export const chatStyles = css`
   .group-msg { max-width: 100%; min-width: 0; box-sizing: border-box; padding: 0 0 0 12px; border-top: 0; border-left: 1px solid var(--calm-rule); color: var(--calm-ink-dim); overflow: visible; }
   .group-msg.tool, .group-msg.tool-execution-shell, .group-msg.bash { color: var(--calm-ink-dim); }
   .group-msg.system { color: var(--calm-ink-muted); }
-  .history-boundary { position: relative; z-index: 5; display: grid; gap: 3px; justify-items: center; margin: 0 0 14px; color: var(--pi-muted); font-size: var(--pi-text-sm); text-align: center; }
+  .history-boundary { position: relative; z-index: 5; display: grid; gap: 3px; justify-items: center; margin: 0 0 14px; overflow-anchor: none; color: var(--pi-muted); font-size: var(--pi-text-sm); text-align: center; }
   .chat-empty-state, .chat-load-state { color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.45; }
   .chat-empty-state strong, .chat-load-state strong { color: var(--pi-text-secondary); font-weight: 600; }
   .chat-empty-state { box-sizing: border-box; width: min(100%, 380px); margin: auto; padding: 24px; display: grid; gap: 4px; justify-items: center; text-align: center; }

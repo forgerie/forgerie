@@ -4,9 +4,7 @@ import type { QueuedSessionMessage, SessionStatus, SessionWarning } from "../api
 import type { ChatLine } from "./shared";
 import {
   ChatView,
-  chatEventAnchorKey,
-  chatGroupAnchorKey,
-  chatGroupScrollMarkerId,
+  chatGroupRenderKey,
   chatMessageGroupClassName,
   chatMessageMetadataLabel,
   chatQueuedGhostActionLabel,
@@ -250,14 +248,8 @@ describe("chatMessageMetadataLabel", () => {
 });
 
 describe("chat event-group content seams", () => {
-  // Group scroll-anchor keys, marker ids, class list, and disclosure label are
-  // content/structure derived from pure exported seams rather than scraped from
-  // rendered markup.
-  it("derives stable group and event scroll-anchor keys and marker ids", () => {
-    expect(chatGroupAnchorKey(40)).toBe("g:40");
-    expect(chatEventAnchorKey(40)).toBe("e:40");
-    expect(chatEventAnchorKey(41)).toBe("e:41");
-    expect(chatGroupScrollMarkerId(41)).toBe("g:41");
+  it("derives a stable group render key", () => {
+    expect(chatGroupRenderKey(40)).toBe("g:40");
   });
 
   it("distinguishes the live tail group by class", () => {

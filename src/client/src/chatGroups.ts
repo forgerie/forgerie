@@ -104,9 +104,8 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
  *
  * `groupChatMessages` already pools a turn's steps at the foot of the turn, so
  * the run of groups from one human message up to the next is exactly the unit a
- * reader scans. Naming that run lets the transcript give it a box, which is
- * what the reading position anchors to and what reserves the space a reply
- * streams into.
+ * reader scans. Naming that run gives rendering, liveness, dialogs, and image
+ * galleries one stable keyed box to compose inside.
  */
 export interface ChatTurn {
   /** The turn's groups, in render order, starting with the human message when there is one. */
