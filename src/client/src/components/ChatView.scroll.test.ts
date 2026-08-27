@@ -21,6 +21,35 @@ describe("ChatView native scroll behavior", () => {
   it("keeps the fixed history control out of browser anchor selection", () => {
     expect(chatStyles.cssText).toMatch(/\.history-boundary\s*{[^}]*overflow-anchor:\s*none/);
   });
+
+  // A grid without a stated align-content stretches its auto rows, which spread
+  // a short transcript over the whole pane and inflated the history button into
+  // a full-height pill. The property has to stay stated for the rows to keep
+  // the height of what is in them.
+  it("sizes transcript rows to their content rather than to the scroller", () => {
+    expect(chatStyles.cssText).toMatch(/\.chat\s*{[^}]*align-content:\s*start/);
+  });
+
+  // The slack a short transcript leaves belongs above it, so the reading edge
+  // stays against the composer.
+  it("gives the slack to a leading spacer row", () => {
+    expect(chatStyles.cssText).toMatch(/\.chat\s*{[^}]*grid-template-rows:\s*minmax\(0, 1fr\)/);
+    expect(chatStyles.cssText).toMatch(/\.chat::before\s*{\s*content:\s*""/);
+  });
+
+  // A spacer that cannot collapse would push the first message above the scroll
+  // origin, where scrolling never reaches it.
+  it("lets the spacer collapse so no message sits above the scroll origin", () => {
+    expect(chatStyles.cssText).not.toMatch(/\.chat\s*{[^}]*grid-template-rows:\s*1fr/);
+  });
+
+  // Content-sized rows leave an auto margin nothing to divide, so the empty
+  // screen has to centre itself.
+  it("centres an empty transcript without relying on an auto margin", () => {
+    expect(chatStyles.cssText).toMatch(/\.chat-empty-state[^{]*{[^}]*align-content:\s*center/);
+    expect(chatStyles.cssText).not.toMatch(/\.chat-empty-state\s*{[^}]*margin:\s*auto/);
+    expect(chatStyles.cssText).not.toMatch(/\.chat-load-state\.empty\s*{[^}]*margin:\s*auto/);
+  });
 });
 
 describe("ChatView tail ownership", () => {

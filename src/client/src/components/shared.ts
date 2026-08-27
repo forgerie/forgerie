@@ -651,7 +651,22 @@ export const chatStyles = css`
     -webkit-touch-callout: default;
   }
 
-  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: auto; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
+  /* The transcript hangs from the composer, and its rows are the height of
+     what is in them.
+
+     A grid without a stated align-content stretches every auto row by an equal
+     share of the leftover height. A transcript with less content than scroller
+     was therefore spread across the whole pane: bands of dead space between the
+     history control, the range line, and the first message, and a pill button
+     grown into a full-height capsule. Reading rhythm belongs to the messages,
+     so the rows are packed to their content instead.
+
+     The slack goes to one leading spacer row, sized minmax(0, 1fr) so it
+     collapses to nothing as soon as the transcript is taller than the scroller.
+     A spacer that could not collapse would push the first message above the
+     scroll origin, where no amount of scrolling reaches it. */
+  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); grid-template-rows: minmax(0, 1fr); align-content: start; justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: auto; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
+  .chat::before { content: ""; }
   /* One human message and its reply share a stable keyed box. */
   .turn { min-width: 0; display: block; }
   .turn-body { min-width: 0; }
@@ -793,8 +808,14 @@ export const chatStyles = css`
   .history-boundary { position: relative; z-index: 5; display: grid; gap: 3px; justify-items: center; margin: 0 0 14px; overflow-anchor: none; color: var(--pi-muted); font-size: var(--pi-text-sm); text-align: center; }
   .chat-empty-state, .chat-load-state { color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.45; }
   .chat-empty-state strong, .chat-load-state strong { color: var(--pi-text-secondary); font-weight: 600; }
-  .chat-empty-state { box-sizing: border-box; width: min(100%, 380px); margin: auto; padding: 24px; display: grid; gap: 4px; justify-items: center; text-align: center; }
-  .chat-load-state.empty { box-sizing: border-box; width: min(100%, 420px); margin: auto; padding: 24px; display: grid; gap: 6px; justify-items: center; text-align: center; }
+  /* A screen with no transcript centres its one line of text, and says so
+     itself. An auto margin cannot do it any more: that needs free space inside
+     the grid area to divide, and a content-sized row has none. The box claims
+     the scroller's inner height from the sizing container above it, which also
+     collapses the leading spacer, so the text lands in the middle of the pane. */
+  .chat-empty-state, .chat-load-state.empty { min-block-size: calc(100cqb - var(--pi-chat-pad-block-start) - var(--pi-chat-pad-block-end)); align-content: center; }
+  .chat-empty-state { box-sizing: border-box; width: min(100%, 380px); margin-inline: auto; padding: 24px; display: grid; gap: 4px; justify-items: center; text-align: center; }
+  .chat-load-state.empty { box-sizing: border-box; width: min(100%, 420px); margin-inline: auto; padding: 24px; display: grid; gap: 6px; justify-items: center; text-align: center; }
   .chat-load-state.inline { position: relative; z-index: 5; box-sizing: border-box; margin: 0 0 14px; padding: 8px 11px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; border: 1px solid var(--pi-border-muted); border-radius: var(--pi-radius-surface); background: var(--pi-bg-overlay); }
   .chat-load-state.failure { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 8%, var(--pi-surface)); color: var(--pi-text); }
   .chat-load-state.failure strong { color: var(--pi-text-bright); }
