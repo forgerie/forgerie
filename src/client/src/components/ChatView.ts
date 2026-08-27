@@ -1363,11 +1363,12 @@ export class ChatView extends LitElement {
    * A process notification leads with its process name and a skill read leads
    * with the skill's, so the role label above them contributed only the word
    * SYSTEM or ASSISTANT -- a heading that names nothing the reader cannot
-   * already see one line below it.
+   * already see one line below it. Thinking joins them: on the rail it renders
+   * as a labelled activity row, so ASSISTANT above it repeats the row.
    */
   private isSelfLabellingMessage(message: ChatLine): boolean {
     return message.parts.length > 0
-      && message.parts.every((part) => part.type === "processNotification" || part.type === "skillRead");
+      && message.parts.every((part) => part.type === "processNotification" || part.type === "skillRead" || part.type === "thinking");
   }
 
   /**
@@ -1388,6 +1389,14 @@ export class ChatView extends LitElement {
     `;
   }
 
+  /**
+   * The fold is the disclosure.
+   *
+   * Steps render in the same flat register the tool-bearing rail uses, so
+   * thinking is a row rather than a second `<details>`. Nesting one fold inside
+   * another cost two clicks to read one thought and stacked a step count, a
+   * role label, and the word "thinking" above the text itself.
+   */
   private renderMessageGroupBody(messages: ChatLine[], startIndex: number) {
     return html`
       <div class="group-body">
@@ -1397,7 +1406,7 @@ export class ChatView extends LitElement {
           return html`
             <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventReadingAnchorKey(message, startIndex + offset)}>
               ${toolOnly || selfLabelling ? null : this.renderMessageHeader(message)}
-              ${message.parts.map((part) => this.renderPart(part, message))}
+              ${message.parts.map((part) => this.renderRailActivityPart(part, message))}
             </section>
           `;
         })}
