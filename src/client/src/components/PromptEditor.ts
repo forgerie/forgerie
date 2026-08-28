@@ -63,6 +63,8 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) capabilities: ComposerCapabilities = {};
   /** Supplied by a pre-session host; the session surface builds its own. */
   @property({ attribute: false }) composerRuntime?: ComposerRuntime;
+  /** `null` gives an embedded editor no independent draft record. */
+  @property({ attribute: false }) draftStorageKeyOverride?: string | null;
   @property() placeholderText?: string;
   @property() editorLabel?: string;
   /**
@@ -87,6 +89,10 @@ export class PromptEditor extends LitElement {
    */
   @property({ type: Boolean }) sendAvailable = true;
   @property({ type: Boolean }) runtimeControlsAvailable = true;
+  /** Structured hosts can keep the writing tools while another control submits the whole form. */
+  @property({ type: Boolean }) primaryActionVisible = true;
+  @property({ attribute: "surface", reflect: true }) surfaceMode: "island" | "embedded" = "island";
+  @property({ attribute: false }) forcedAttachmentDelivery?: PromptAttachmentDelivery;
   @property() sessionId?: string;
   @property() cwd?: string;
   @property() machineId = "local";
@@ -231,6 +237,7 @@ export class PromptEditor extends LitElement {
           .runtime=${this.runtime()}
           .promptHistory=${this.promptHistory}
           .storageKey=${this.draftStorageKey()}
+          .forcedAttachmentDelivery=${this.forcedAttachmentDelivery}
           .placeholderText=${this.placeholderText ?? DEFAULT_COMPOSER_PLACEHOLDER}
           .editorLabel=${this.editorLabel ?? DEFAULT_COMPOSER_EDITOR_LABEL}
           .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => this.sendSnapshot(snapshot, streamingBehavior)}
@@ -257,7 +264,7 @@ export class PromptEditor extends LitElement {
           `}
           ${this.renderRapidfireAction()}
           ${this.renderDismissAction()}
-          ${this.renderPrimaryAction(rail)}
+          ${this.primaryActionVisible ? this.renderPrimaryAction(rail) : nothing}
           ${this.renderQueueAction(rail)}
         </div>
       </footer>
@@ -283,6 +290,7 @@ export class PromptEditor extends LitElement {
   }
 
   private draftStorageKey(): string | undefined {
+    if (this.draftStorageKeyOverride !== undefined) return this.draftStorageKeyOverride ?? undefined;
     // A first prompt belongs to its host's recovery record, not to a durable
     // per-session draft that no session owns yet.
     if (this.sessionId === undefined) return undefined;
@@ -340,6 +348,10 @@ export class PromptEditor extends LitElement {
 
   getText(): string {
     return this.draftElement?.getText() ?? "";
+  }
+
+  currentSnapshot(): ComposerDraftSubmitSnapshot {
+    return this.draftElement?.currentSnapshot() ?? { text: "" };
   }
 
   getSelection(): { start: number; end: number; text: string } | null {

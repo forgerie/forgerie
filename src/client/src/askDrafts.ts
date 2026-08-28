@@ -1,4 +1,4 @@
-import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type AskUserAnswer, type AskUserQuestion, type AskUserSubmission } from "../../shared/apiTypes";
+import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type AskUserAnswer, type AskUserQuestion, type PromptAttachment } from "../../shared/apiTypes";
 
 /**
  * What the user has entered for one question but has not submitted yet. Kept in
@@ -8,6 +8,16 @@ import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type AskUserAnswer, type AskUserQuestio
 export interface AskDraftAnswer {
   values: string[];
   otherText?: string;
+  /** Kept in memory only. Browser storage persists text and selections, not binary payloads. */
+  attachments?: PromptAttachment[];
+}
+
+export interface AskDraftSubmissionAnswer extends AskUserAnswer {
+  attachments?: PromptAttachment[];
+}
+
+export interface AskDraftSubmission {
+  answers: AskDraftSubmissionAnswer[];
 }
 
 /** Draft answers of one ask, keyed by question id. */
@@ -43,7 +53,12 @@ export function loadAskDraft(sessionId: string, askId: string, storage = browser
 
 export function saveAskDraft(sessionId: string, askId: string, answers: AskDraftAnswers, storage = browserStorage()): void {
   try {
-    const entries = Object.entries(answers).filter(([, answer]) => answer.values.length > 0 || (answer.otherText ?? "") !== "");
+    const entries = Object.entries(answers)
+      .filter(([, answer]) => answer.values.length > 0 || (answer.otherText ?? "") !== "")
+      .map(([id, answer]) => [id, {
+        values: answer.values,
+        ...(answer.otherText === undefined ? {} : { otherText: answer.otherText }),
+      }]);
     if (entries.length === 0) storage?.removeItem(draftStorageKey(sessionId, askId));
     else storage?.setItem(draftStorageKey(sessionId, askId), JSON.stringify(Object.fromEntries(entries)));
   } catch {
@@ -99,8 +114,8 @@ export function unansweredQuestions(questions: readonly AskUserQuestion[], answe
  * nothing for the untouched ones, since an empty answer and an untouched
  * question mean the same thing to the daemon.
  */
-export function toSubmission(questions: readonly AskUserQuestion[], answers: AskDraftAnswers): AskUserSubmission {
-  const submitted: AskUserAnswer[] = [];
+export function toSubmission(questions: readonly AskUserQuestion[], answers: AskDraftAnswers): AskDraftSubmission {
+  const submitted: AskDraftSubmissionAnswer[] = [];
   for (const question of questions) {
     const answer = submittableAnswer(question, answers[question.id]);
     if (answer !== undefined) submitted.push(answer);
@@ -116,18 +131,29 @@ export function toSubmission(questions: readonly AskUserQuestion[], answers: Ask
  * single-select question keeps only its first selection rather than sending a
  * submission the daemon would reject as a whole.
  */
-function submittableAnswer(question: AskUserQuestion, answer: AskDraftAnswer | undefined): AskUserAnswer | undefined {
+function submittableAnswer(question: AskUserQuestion, answer: AskDraftAnswer | undefined): AskDraftSubmissionAnswer | undefined {
   if (answer === undefined) return undefined;
   const offered = new Set(question.options.map((option) => option.value));
   const values = [...new Set(answer.values)].filter((value) => offered.has(value));
   const otherText = normalizedOtherText(answer.otherText);
-  if (question.multiple !== true && values.length + (otherText === undefined ? 0 : 1) > 1) {
+  const attachments = answer.attachments === undefined || answer.attachments.length === 0
+    ? undefined
+    : answer.attachments.map((attachment) => ({ ...attachment }));
+  const hasCustomAnswer = otherText !== undefined || attachments !== undefined;
+  if (question.multiple !== true && values.length + (hasCustomAnswer ? 1 : 0) > 1) {
     const single = values[0];
     if (single !== undefined) return { id: question.id, values: [single] };
-    return otherText === undefined ? undefined : { id: question.id, values: [], otherText };
+    return hasCustomAnswer
+      ? { id: question.id, values: [], ...(otherText === undefined ? {} : { otherText }), ...(attachments === undefined ? {} : { attachments }) }
+      : undefined;
   }
-  if (values.length === 0 && otherText === undefined) return undefined;
-  return { id: question.id, values, ...(otherText === undefined ? {} : { otherText }) };
+  if (values.length === 0 && !hasCustomAnswer) return undefined;
+  return {
+    id: question.id,
+    values,
+    ...(otherText === undefined ? {} : { otherText }),
+    ...(attachments === undefined ? {} : { attachments }),
+  };
 }
 
 function normalizedOtherText(otherText: string | undefined): string | undefined {

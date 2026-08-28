@@ -369,6 +369,7 @@ export const composerDraftStyles = css`
   .attachment-delivery label { display: inline-flex; align-items: center; gap: 5px; color: var(--pi-text); font-size: var(--pi-text-sm); }
   .attachment-delivery input { margin: 0; accent-color: var(--pi-accent); }
   .attachment-delivery input:disabled + span { color: var(--pi-dim); }
+  .attachment-delivery-fixed { color: var(--pi-muted); font-size: var(--pi-text-sm); }
   .attachment-error { flex-basis: 100%; color: var(--pi-danger); font-size: var(--pi-text-sm); }
   .markdown-editor-disabled .cm-editor { opacity: .5; cursor: not-allowed; }
 `;
@@ -1084,6 +1085,12 @@ export const promptEditorStyles = css`
   context-usage-meter { position: absolute; top: 0; inset-inline: var(--composer-island-radius); }
   footer.shell-mode { border-color: var(--pi-success); background: var(--pi-success-bg); }
   .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
+  :host([surface="embedded"]) footer {
+    inline-size: 100%;
+    margin-inline: 0;
+    box-shadow: none;
+  }
+  :host([surface="embedded"]) .actions { justify-content: flex-start; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: var(--pi-text-sm); flex: 1 1 0; }
   .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; overflow: hidden; }
   .model-capsule .select-model { box-sizing: border-box; height: 36px; max-width: min(64cqi, 460px); border-start-end-radius: 0; border-end-end-radius: 0; }

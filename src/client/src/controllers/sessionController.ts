@@ -1,11 +1,11 @@
 import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type MessagePage, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
-import type { NewSessionAgentChoices } from "../../../shared/apiTypes";
+import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type NewSessionAgentChoices } from "../../../shared/apiTypes";
 import type { AppState, ClosedExtensionDialog } from "../appState";
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
 import { normalizeMessages, textMessage } from "../chatMessages";
 import { machineSessionKey } from "../machineKeys";
 import { clearDraft, loadDraft, moveDraft, saveDraft } from "../promptDraftStorage";
-import { clearAskDraft } from "../askDrafts";
+import { clearAskDraft, type AskDraftSubmission } from "../askDrafts";
 import { ChatTranscriptStore, transcriptViewFromHistory, type ChatTranscriptView } from "../chatTranscriptStore";
 import { isShellInput } from "../inputModes";
 import { fileCompletionInsertText } from "../promptCompletions";
@@ -1687,8 +1687,30 @@ export class SessionController {
   }
 
   /** Send the answers the user entered for the session's open ask. */
-  submitAsk(askId: string, submission: AskUserSubmission): Promise<void> {
-    return this.closeOpenAsk(askId, (session, machineId) => this.api.submitAsk(session, askId, submission, machineId));
+  submitAsk(askId: string, submission: AskDraftSubmission): Promise<void> {
+    return this.closeOpenAsk(askId, async (session, machineId) => {
+      const prepared = await this.prepareAskSubmission(session, machineId, submission);
+      return this.api.submitAsk(session, askId, prepared, machineId);
+    });
+  }
+
+  private async prepareAskSubmission(session: SessionInfo, machineId: string, submission: AskDraftSubmission): Promise<AskUserSubmission> {
+    const answers: AskUserSubmission["answers"] = [];
+    for (const answer of submission.answers) {
+      const { attachments, ...wireAnswer } = answer;
+      if (attachments === undefined || attachments.length === 0) {
+        answers.push(wireAnswer);
+        continue;
+      }
+      const saved = await this.api.saveAttachments(session, attachments, machineId);
+      const references = appendSavedAttachmentReferences("", saved.map((file) => file.path));
+      if (references.length > ASK_USER_OTHER_TEXT_MAX_LENGTH) throw new Error("Attached file references exceed the custom answer limit");
+      const separatorLength = wireAnswer.otherText === undefined || wireAnswer.otherText.trim() === "" ? 0 : 2;
+      const textBudget = ASK_USER_OTHER_TEXT_MAX_LENGTH - references.length - separatorLength;
+      const text = wireAnswer.otherText?.trim().slice(0, Math.max(0, textBudget)) ?? "";
+      answers.push({ ...wireAnswer, otherText: appendSavedAttachmentReferences(text, saved.map((file) => file.path)) });
+    }
+    return { answers };
   }
 
   /** Close the session's open ask without answering it. */

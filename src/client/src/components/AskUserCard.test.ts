@@ -2,8 +2,12 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AskUserOutcome, AskUserQuestion, PendingAskUser } from "../../../shared/apiTypes";
+import type { ComposerDictationCapability } from "../composerCapabilities";
 import { saveAskDraft } from "../askDrafts";
 import { AskUserCard, type AskUserSubmitCallback } from "./AskUserCard";
+import type { AskUserTextComposer } from "./AskUserTextComposer";
+import type { ComposerDraft } from "./ComposerDraft";
+import type { PromptEditor } from "./PromptEditor";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -67,7 +71,7 @@ describe("ask-user-card live form", () => {
     });
   });
 
-  it("always offers and focuses a labelled custom field while preserving multi-select options", async () => {
+  it("uses the chat editor and its writing tools for a custom answer", async () => {
     const onSubmit = vi.fn<AskUserSubmitCallback>();
     const card = await mountOpenAsk(openAsk([
       question("stack", "Pick the stack", [option("lit", "Lit"), option("react", "React")], { multiple: true }),
@@ -77,37 +81,58 @@ describe("ask-user-card live form", () => {
     inputWithValue(root, "lit").click();
     inputWithValue(root, "__pi_web_other__").click();
     await card.updateComplete;
-    await Promise.resolve();
 
-    const textarea = requiredElement(root.querySelector("textarea"), "custom textarea");
-    const label = requiredElement(textarea.closest("label"), "custom label");
-    expect(label.textContent).toContain("Custom answer");
-    expect(getComputedStyle(textarea).fontSize).toBe("16px");
-    expect(root.activeElement).toBe(textarea);
+    const composer = requiredElement(root.querySelector<AskUserTextComposer>("ask-user-text-composer"), "custom answer composer");
+    await composer.updateComplete;
+    const editor = requiredElement(composer.shadowRoot?.querySelector<PromptEditor>("prompt-editor"), "shared prompt editor");
+    await editor.updateComplete;
+    const draft = requiredElement(editor.shadowRoot?.querySelector<ComposerDraft>("composer-draft"), "shared rich editor");
+    await draft.updateComplete;
 
-    textarea.value = "Svelte";
-    textarea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    expect(composer.shadowRoot?.textContent).not.toContain("Custom answer");
+    expect(editor.editorLabel).toBe("Custom answer");
+    expect(editor.shadowRoot?.querySelector(".composer-commands")).not.toBeNull();
+    expect(editor.shadowRoot?.querySelector(".composer-attach")).not.toBeNull();
+    expect(editor.shadowRoot?.querySelector(".dictation-button")).not.toBeNull();
+    expect(editor.shadowRoot?.querySelector(".send-button")).toBeNull();
+    expect(editor.surfaceMode).toBe("embedded");
+    expect(editor.getAttribute("surface")).toBe("embedded");
+    expect(draft.forcedAttachmentDelivery).toBe("folder");
+    expect(draft.storageKey).toBeUndefined();
+
+    setComposerText(draft, "Svelte");
+    await attachFile(draft, new File(["ship"], "notes.txt", { type: "text/plain" }));
     await card.updateComplete;
     buttonWithText(root, "Send answers").click();
     await Promise.resolve();
 
     expect(onSubmit).toHaveBeenCalledWith("ask-1", {
-      answers: [{ id: "stack", values: ["lit"], otherText: "Svelte" }],
+      answers: [{
+        id: "stack",
+        values: ["lit"],
+        otherText: "Svelte",
+        attachments: [{ kind: "file", mimeType: "text/plain", data: "c2hpcA==", name: "notes.txt" }],
+      }],
     });
   });
 
-  it("shows and submits the custom field directly when no options were supplied", async () => {
+  it("shows and submits the rich answer editor directly when no options were supplied", async () => {
     const onSubmit = vi.fn<AskUserSubmitCallback>();
     const card = await mountOpenAsk(openAsk([
-      question("notes", "Anything else?", []),
+      question("notes", "Anything else?", [], { detail: "Add any supporting context." }),
     ]), onSubmit);
     const root = renderRoot(card);
-    const textarea = requiredElement(root.querySelector("textarea"), "custom textarea");
+    const composer = requiredElement(root.querySelector<AskUserTextComposer>("ask-user-text-composer"), "custom answer composer");
+    await composer.updateComplete;
+    const editor = requiredElement(composer.shadowRoot?.querySelector<PromptEditor>("prompt-editor"), "shared prompt editor");
+    await editor.updateComplete;
+    const draft = requiredElement(editor.shadowRoot?.querySelector<ComposerDraft>("composer-draft"), "shared rich editor");
+    await draft.updateComplete;
 
     expect(root.querySelector("input")).toBeNull();
-    expect(requiredElement(textarea.closest("label"), "custom label").textContent).toContain("Custom answer");
-    textarea.value = "Keep the first version small.";
-    textarea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    expect(root.querySelector(".question-detail")).toBeNull();
+    expect(root.querySelector("fieldset")?.hasAttribute("aria-describedby")).toBe(false);
+    setComposerText(draft, "Keep the first version small.");
     await card.updateComplete;
     buttonWithText(root, "Send answers").click();
     await Promise.resolve();
@@ -189,6 +214,10 @@ async function mountOpenAsk(ask: PendingAskUser, onSubmit?: AskUserSubmitCallbac
   const card = new AskUserCard();
   card.ask = ask;
   card.draftSessionId = "local:session-1";
+  card.sessionId = "session-1";
+  card.sessionCwd = "/repo";
+  card.machineId = "local";
+  card.dictation = dictationCapability();
   if (onSubmit !== undefined) card.onSubmit = onSubmit;
   document.body.append(card);
   await card.updateComplete;
@@ -202,6 +231,35 @@ function renderRoot(card: AskUserCard): ShadowRoot {
 function inputWithValue(root: ShadowRoot, value: string): HTMLInputElement {
   const input = [...root.querySelectorAll("input")].find((candidate) => candidate.value === value);
   return requiredElement(input, `input with value ${value}`);
+}
+
+function setComposerText(draft: ComposerDraft, text: string): void {
+  const view = requiredElement(draft.view, "CodeMirror editor");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+}
+
+async function attachFile(draft: ComposerDraft, file: File): Promise<void> {
+  const input = requiredElement(draft.querySelector<HTMLInputElement>(".attachment-input"), "attachment input");
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new Event("change"));
+  await vi.waitFor(() => { expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1); });
+}
+
+function dictationCapability(): ComposerDictationCapability {
+  return {
+    getStatus: () => Promise.resolve({
+      smartTurn: "ready",
+      whisper: "ready",
+      capability: "ready",
+      limits: { sampleRateHz: 16_000, maxTurnSeconds: 60, maxTurnBytes: 3_840_000, endpointWindowSeconds: 8, endpointWindowBytes: 512_000 },
+    }),
+    createCaptureSession: () => Promise.reject(new Error("not used")),
+    speechApi: {
+      checkTurn: () => Promise.reject(new Error("not used")),
+      transcribe: () => Promise.reject(new Error("not used")),
+    },
+    statusPollIntervalMs: 60_000,
+  };
 }
 
 function buttonWithText(root: ShadowRoot, text: string): HTMLButtonElement {

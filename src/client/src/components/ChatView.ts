@@ -7,12 +7,14 @@ import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summ
 import { advanceLivenessClock, livenessBeatMs, livenessPhase, livenessStep, replyIsStreaming, type LivenessClock } from "../chatLiveness";
 import { turnLedgerRows, turnRailState, type TurnLedgerRow } from "../turnRail";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
+import type { ComposerDictationCapability } from "../composerCapabilities";
 import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
 import "./TranscriptLivenessView";
 import { ChatScrollCoordinator } from "../chatScrollCoordinator";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
-import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
+import type { PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
+import type { AskDraftSubmission } from "../askDrafts";
 import type { ClosedExtensionDialog } from "../appState";
 import { selectedChatCanUseRuntime, selectedChatHasReadableHistory, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
@@ -305,7 +307,8 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) activity?: SessionActivity;
   @property({ attribute: false }) pendingAsk?: PendingAskUser;
   @property({ attribute: false }) askDraftSessionId = "";
-  @property({ attribute: false }) onSubmitAsk?: (askId: string, submission: AskUserSubmission) => void | Promise<void>;
+  @property({ attribute: false }) askComposerDictation?: ComposerDictationCapability;
+  @property({ attribute: false }) onSubmitAsk?: (askId: string, submission: AskDraftSubmission) => void | Promise<void>;
   @property({ attribute: false }) pendingDialogs: PendingExtensionDialog[] = [];
   @property({ attribute: false }) closedDialogs: ClosedExtensionDialog[] = [];
   @property({ attribute: false }) onAnswerDialog?: ExtensionDialogAnswerCallback;
@@ -969,6 +972,10 @@ export class ChatView extends LitElement {
         class="open-ask-card"
         .ask=${this.pendingAsk}
         .draftSessionId=${this.askDraftSessionId}
+        .sessionId=${this.sessionId}
+        .sessionCwd=${this.sessionCwd}
+        .machineId=${this.selectedMachineId}
+        .dictation=${this.askComposerDictation}
         .onSubmit=${this.onSubmitAsk}
       ></ask-user-card>
     `;

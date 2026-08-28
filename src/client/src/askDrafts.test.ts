@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type AskUserQuestion } from "../../shared/apiTypes";
+import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type AskUserQuestion, type PromptAttachment } from "../../shared/apiTypes";
 import { answeredCount, clearAskDraft, loadAskDraft, saveAskDraft, toSubmission, unansweredQuestions, type AskDraftAnswers } from "./askDrafts";
 
 class MemoryStorage implements Storage {
@@ -154,6 +154,16 @@ describe("ask answer state", () => {
 
     expect(toSubmission(questions, answers)).toEqual({
       answers: [{ id: "q2", values: ["metrics", "tracing"], otherText: "profiling" }],
+    });
+  });
+
+  it("treats an attached file as a custom answer and carries it to the controller", () => {
+    const attachment: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
+    const answers: AskDraftAnswers = { q3: { values: [], attachments: [attachment] } };
+
+    expect(answeredCount(questions, answers)).toBe(1);
+    expect(toSubmission(questions, answers)).toEqual({
+      answers: [{ id: "q3", values: [], attachments: [attachment] }],
     });
   });
 

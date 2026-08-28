@@ -75,6 +75,8 @@ export class ComposerDraft extends LitElement {
   @property({ attribute: false }) runtime?: ComposerRuntime;
   @property({ attribute: false }) promptHistory: readonly string[] = [];
   @property() storageKey?: string;
+  /** A host can require one honest delivery path when its transport cannot carry inline images. */
+  @property({ attribute: false }) forcedAttachmentDelivery?: PromptAttachmentDelivery;
   @property({ attribute: false }) onSubmit?: (snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome>;
   @property({ attribute: false }) onEscape?: (context: ComposerDraftEscapeContext) => boolean;
   @property({ attribute: false }) onDisplayStateChange?: (state: ComposerDraftDisplayState) => void;
@@ -154,6 +156,9 @@ export class ComposerDraft extends LitElement {
       this.requestVersion += 1;
     }
     if (changed.has("promptHistory")) this.promptHistoryState = createPromptHistory(this.promptHistory);
+    if (changed.has("forcedAttachmentDelivery") && this.forcedAttachmentDelivery !== undefined) {
+      this.attachmentDelivery = this.forcedAttachmentDelivery;
+    }
     if (changed.has("runtime")) {
       this.requestVersion += 1;
       this.completions = [];
@@ -460,32 +465,36 @@ export class ComposerDraft extends LitElement {
             </div>
           `;
         })}
-        ${this.attachments.length > 0 ? html`
-          <fieldset class="attachment-delivery" aria-label="Attachment delivery">
-            <legend>Attachment delivery</legend>
-            <label>
-              <input
-                type="radio"
-                name=${this.attachmentDeliveryGroupName}
-                value="inline"
-                ?checked=${delivery === "inline"}
-                ?disabled=${!canUseInlineDelivery}
-                @change=${(event: Event) => { this.changeDelivery(event); }}
-              />
-              <span>Attach to message${canUseInlineDelivery ? "" : " (images only)"}</span>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name=${this.attachmentDeliveryGroupName}
-                value="folder"
-                ?checked=${delivery === "folder"}
-                @change=${(event: Event) => { this.changeDelivery(event); }}
-              />
-              <span>Save to .forgerie/attachments</span>
-            </label>
-          </fieldset>
-        ` : null}
+        ${this.attachments.length > 0
+          ? this.forcedAttachmentDelivery === undefined
+            ? html`
+                <fieldset class="attachment-delivery" aria-label="Attachment delivery">
+                  <legend>Attachment delivery</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name=${this.attachmentDeliveryGroupName}
+                      value="inline"
+                      ?checked=${delivery === "inline"}
+                      ?disabled=${!canUseInlineDelivery}
+                      @change=${(event: Event) => { this.changeDelivery(event); }}
+                    />
+                    <span>Attach to message${canUseInlineDelivery ? "" : " (images only)"}</span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name=${this.attachmentDeliveryGroupName}
+                      value="folder"
+                      ?checked=${delivery === "folder"}
+                      @change=${(event: Event) => { this.changeDelivery(event); }}
+                    />
+                    <span>Save to .forgerie/attachments</span>
+                  </label>
+                </fieldset>
+              `
+            : html`<p class="attachment-delivery attachment-delivery-fixed">Files will be saved to .forgerie/attachments.</p>`
+          : null}
         ${this.attachmentError !== undefined ? html`<div class="attachment-error" role="alert">${this.attachmentError}</div>` : null}
       </div>
     `;
@@ -639,6 +648,7 @@ export class ComposerDraft extends LitElement {
   }
 
   private effectiveAttachmentDelivery(): PromptAttachmentDelivery {
+    if (this.forcedAttachmentDelivery !== undefined) return this.forcedAttachmentDelivery;
     return effectivePromptAttachmentDelivery(this.attachmentDelivery, this.attachments);
   }
 
@@ -733,7 +743,8 @@ export class ComposerDraft extends LitElement {
     this.draft = snapshot.text;
     this.attachmentGeneration += 1;
     this.attachments = (snapshot.attachments ?? []).map((attachment) => restoredPendingAttachment(attachment, `attachment-${String(++this.attachmentSeq)}`));
-    if (snapshot.delivery !== undefined) this.attachmentDelivery = snapshot.delivery;
+    if (this.forcedAttachmentDelivery !== undefined) this.attachmentDelivery = this.forcedAttachmentDelivery;
+    else if (snapshot.delivery !== undefined) this.attachmentDelivery = snapshot.delivery;
     this.attachmentError = undefined;
     this.completionError = undefined;
     if (persist && this.storageKey !== undefined && this.storageKey !== "") saveDraft(this.storageKey, this.draft);

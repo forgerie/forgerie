@@ -6,7 +6,6 @@ import {
   type AskUserOutcome,
   type AskUserQuestion,
   type AskUserQuestionRecord,
-  type AskUserSubmission,
   type PendingAskUser,
 } from "../../../shared/apiTypes";
 import {
@@ -17,9 +16,13 @@ import {
   unansweredQuestions,
   type AskDraftAnswer,
   type AskDraftAnswers,
+  type AskDraftSubmission,
 } from "../askDrafts";
+import type { ComposerDictationCapability } from "../composerCapabilities";
+import type { ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import "./AskUserTextComposer";
 
-export type AskUserSubmitCallback = (askId: string, submission: AskUserSubmission) => void | Promise<void>;
+export type AskUserSubmitCallback = (askId: string, submission: AskDraftSubmission) => void | Promise<void>;
 
 interface DisplayedRecordAnswer {
   values: string[];
@@ -42,6 +45,10 @@ export class AskUserCard extends LitElement {
   /** Machine-scoped session cache key used by the ask draft store. */
   @property({ attribute: false }) draftSessionId = "";
   @property({ attribute: false }) onSubmit?: AskUserSubmitCallback;
+  @property() sessionId?: string;
+  @property() sessionCwd?: string;
+  @property() machineId = "local";
+  @property({ attribute: false }) dictation?: ComposerDictationCapability;
 
   @state() private answers: AskDraftAnswers = {};
   @state() private confirmingPartialSubmit = false;
@@ -96,8 +103,8 @@ export class AskUserCard extends LitElement {
   private renderQuestion(ask: PendingAskUser, question: AskUserQuestion, index: number): TemplateResult {
     const answer = this.answers[question.id];
     const answered = answeredCount([question], this.answers) === 1;
-    const detailId = question.detail === undefined ? undefined : this.questionDetailId(index);
     const freeTextOnly = question.options.length === 0;
+    const detailId = question.detail === undefined || freeTextOnly ? undefined : this.questionDetailId(index);
     const customSelected = freeTextOnly || this.isOtherSelected(question, answer);
     const inputType = question.multiple === true ? "checkbox" : "radio";
     return html`
@@ -111,7 +118,7 @@ export class AskUserCard extends LitElement {
           <span class="question-number">${String(index + 1)}.</span>
           <span>${question.question}</span>
         </legend>
-        ${question.detail === undefined ? null : html`<p class="question-detail" id=${detailId}>${question.detail}</p>`}
+        ${detailId === undefined ? null : html`<p class="question-detail" id=${detailId}>${question.detail}</p>`}
         <div class="options">
           ${question.options.map((option) => html`
             <label class="option">
@@ -141,16 +148,20 @@ export class AskUserCard extends LitElement {
             </label>
           `}
           ${customSelected ? html`
-            <label class="other-answer" for=${this.otherInputId(index)}>
-              <span>Custom answer</span>
-              <textarea
+            <div class="other-answer">
+              <ask-user-text-composer
                 id=${this.otherInputId(index)}
-                rows="3"
-                maxlength=${String(ASK_USER_OTHER_TEXT_MAX_LENGTH)}
-                .value=${answer?.otherText ?? ""}
-                @input=${(event: Event) => { this.changeOtherText(question, event); }}
-              ></textarea>
-            </label>
+                .seedKey=${`${ask.askId}:${question.id}`}
+                .initialSnapshot=${this.answerSnapshot(answer)}
+                .sessionId=${this.sessionId}
+                .cwd=${this.sessionCwd}
+                .machineId=${this.machineId}
+                .dictation=${this.dictation}
+                .disabled=${this.submitting}
+                editorLabel="Custom answer"
+                .onChange=${(snapshot: ComposerDraftSubmitSnapshot) => { this.changeOtherSnapshot(question, snapshot); }}
+              ></ask-user-text-composer>
+            </div>
           ` : null}
         </div>
       </fieldset>
@@ -238,6 +249,7 @@ export class AskUserCard extends LitElement {
     this.setAnswer(question, {
       values,
       ...(current?.otherText === undefined ? {} : { otherText: current.otherText }),
+      ...(current?.attachments === undefined ? {} : { attachments: current.attachments }),
     });
   }
 
@@ -249,25 +261,38 @@ export class AskUserCard extends LitElement {
       this.setAnswer(question, {
         values: [...(current?.values ?? [])],
         ...(input.checked ? { otherText: current?.otherText ?? "" } : {}),
+        ...(input.checked && current?.attachments !== undefined ? { attachments: current.attachments } : {}),
       });
     } else if (input.checked) {
-      this.setAnswer(question, { values: [], otherText: this.isOtherSelected(question, current) ? current?.otherText ?? "" : "" });
+      this.setAnswer(question, {
+        values: [],
+        otherText: this.isOtherSelected(question, current) ? current?.otherText ?? "" : "",
+        ...(current?.attachments === undefined ? {} : { attachments: current.attachments }),
+      });
     }
     if (input.checked) void this.focusOtherInput(index);
   }
 
-  private changeOtherText(question: AskUserQuestion, event: Event): void {
-    const input = event.currentTarget;
-    if (!(input instanceof HTMLTextAreaElement)) return;
+  private changeOtherSnapshot(question: AskUserQuestion, snapshot: ComposerDraftSubmitSnapshot): void {
     const current = this.answers[question.id];
     this.setAnswer(question, {
       values: [...(current?.values ?? [])],
-      otherText: input.value.slice(0, ASK_USER_OTHER_TEXT_MAX_LENGTH),
+      otherText: snapshot.text.slice(0, ASK_USER_OTHER_TEXT_MAX_LENGTH),
+      ...(snapshot.attachments === undefined || snapshot.attachments.length === 0 ? {} : { attachments: snapshot.attachments }),
     });
   }
 
+  private answerSnapshot(answer: AskDraftAnswer | undefined): ComposerDraftSubmitSnapshot {
+    return {
+      text: answer?.otherText ?? "",
+      ...(answer?.attachments === undefined ? {} : { attachments: answer.attachments, delivery: "folder" as const }),
+    };
+  }
+
   private setAnswer(question: AskUserQuestion, answer: AskDraftAnswer): void {
-    const next: AskDraftAnswers = answer.values.length === 0 && answer.otherText === undefined
+    const next: AskDraftAnswers = answer.values.length === 0
+      && answer.otherText === undefined
+      && (answer.attachments === undefined || answer.attachments.length === 0)
       ? Object.fromEntries(Object.entries(this.answers).filter(([id]) => id !== question.id))
       : { ...this.answers, [question.id]: answer };
     this.answers = next;
@@ -321,7 +346,7 @@ export class AskUserCard extends LitElement {
     if (index < 0) return;
     void this.updateComplete.then(() => {
       const fieldset = this.renderRoot.querySelector<HTMLElement>(`#${this.questionFieldsetId(index)}`);
-      const firstControl = fieldset?.querySelector<HTMLElement>("input, textarea");
+      const firstControl = fieldset?.querySelector<HTMLElement>("input, ask-user-text-composer");
       (firstControl ?? fieldset)?.focus();
     });
   }
@@ -332,7 +357,7 @@ export class AskUserCard extends LitElement {
   }
 
   private isOtherSelected(question: AskUserQuestion, answer: AskDraftAnswer | undefined): boolean {
-    if (answer?.otherText === undefined) return false;
+    if (answer?.otherText === undefined && (answer?.attachments === undefined || answer.attachments.length === 0)) return false;
     return question.multiple === true || answer.values.length === 0;
   }
 
@@ -476,24 +501,13 @@ export class AskUserCard extends LitElement {
     .option:hover { border-color: var(--pi-border-muted); background: var(--pi-surface-hover); }
     .option:has(input:checked) { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
     input { margin: 2px 0 0; accent-color: var(--pi-accent); }
-    input:focus-visible, textarea:focus-visible, button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
+    input:focus-visible, button:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
     .option-copy { min-width: 0; display: grid; gap: 2px; }
     .option-label { line-height: 1.35; }
     .option-detail { color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.35; }
-    .other-answer { display: grid; gap: 5px; color: var(--pi-muted); font-size: var(--pi-text-sm); padding: 4px 8px 4px 32px; }
+    .other-answer { min-width: 0; padding: var(--pi-space-md) 8px 4px 32px; }
     .other-answer:only-child { padding-left: 0; padding-right: 0; }
-    textarea {
-      box-sizing: border-box;
-      width: 100%;
-      min-height: 68px;
-      resize: vertical;
-      border: 1px solid var(--pi-border);
-      border-radius: var(--pi-radius-control);
-      background: var(--pi-bg);
-      color: var(--pi-text);
-      padding: 8px;
-      font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif);
-    }
+    ask-user-text-composer { min-width: 0; }
     .form-footer {
       display: flex;
       align-items: center;
