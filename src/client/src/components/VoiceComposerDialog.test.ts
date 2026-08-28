@@ -6,11 +6,17 @@ import type { SpeechCaptureSession } from "../speechCapture";
 import { SPEECH_POLICY } from "../../../shared/speechPolicy";
 import { VOICE_SEND_COUNTDOWN_MS } from "../appShell/voiceComposerState";
 import { VOICE_HEARING_WINDOW_MS } from "../appShell/voiceCaptureProgress";
-import { VoiceComposerDialog } from "./VoiceComposerDialog";
+import { ComposerDraft } from "./ComposerDraft";
+import type { PromptEditor } from "./PromptEditor";
+import { VoiceComposerDialog, voiceComposerDialogStyles } from "./VoiceComposerDialog";
+
+function dialogStyles(): string {
+  return voiceComposerDialogStyles.cssText.replaceAll(/\s+/gu, " ");
+}
 
 const SAMPLES = new Float32Array([0.2, 0.4, 0.2]);
 
-/** Mirrors LISTEN_TICK_MS in the dialog: the rate a silence is noticed at. */
+/** Mirrors LISTEN_TICK_MS in the voice turn: the rate a silence is noticed at. */
 const LISTEN_TICK_MS = 150;
 
 /**
@@ -71,40 +77,69 @@ function speechCapability(options: { transcript?: string; captureError?: Error; 
     async voice(dialog: VoiceComposerDialog, seconds: number): Promise<void> {
       const sampleCount = SPEECH_POLICY.audio.sampleRateHz * seconds;
       speechActivity?.({ startSample: 0, endSample: sampleCount, sampleCount });
-      await dialog.updateComplete;
+      await settle(dialog);
     },
     /** Say a sentence and let the turn finish, exactly as a pause would. */
     async speak(dialog: VoiceComposerDialog): Promise<void> {
       pauseCandidate?.({ samples: SAMPLES, endSample: SAMPLES.length });
       await vi.advanceTimersByTimeAsync(SPEECH_POLICY.timing.endpointCompletionGraceMs + 1);
       await vi.advanceTimersByTimeAsync(0);
-      await dialog.updateComplete;
+      await settle(dialog);
     },
   };
 }
 
 async function openDialog(capability: ComposerDictationCapability) {
   let dismissed = false;
-  const onSendText = vi.fn<(text: string) => void>();
+  const onSendPrompt = vi.fn<(text: string) => void>();
   const dialog = new VoiceComposerDialog();
-  dialog.capability = capability;
-  dialog.ownerKey = "local:session-1";
-  dialog.onSendText = onSendText;
+  dialog.capabilities = { dictation: capability };
+  dialog.sessionId = "session-1";
+  dialog.machineId = "local";
+  dialog.cwd = "/repo";
+  dialog.onSendPrompt = onSendPrompt;
   dialog.onDismiss = () => { dismissed = true; };
   document.body.append(dialog);
-  await dialog.updateComplete;
-  // The microphone is acquired asynchronously; let acquisition settle so the
-  // controller is listening rather than still opening.
+  await settle(dialog);
+  // The status read and the microphone acquisition are both asynchronous; let
+  // them settle so the composer is listening rather than still opening.
   await vi.advanceTimersByTimeAsync(0);
-  await dialog.updateComplete;
-  return { dialog, onSendText, dismissed: () => dismissed };
+  await settle(dialog);
+  return { dialog, onSendPrompt, dismissed: () => dismissed };
 }
 
-const transcriptBox = (dialog: VoiceComposerDialog): HTMLTextAreaElement | null =>
-  dialog.shadowRoot?.querySelector("textarea") ?? null;
+/** The dialog, its composer, and its draft all redraw before an assertion. */
+async function settle(dialog: VoiceComposerDialog): Promise<void> {
+  await dialog.updateComplete;
+  const editorElement = editor(dialog);
+  if (editorElement !== null) {
+    await editorElement.updateComplete;
+    await draft(dialog)?.updateComplete;
+  }
+  await dialog.updateComplete;
+}
 
-const button = (dialog: VoiceComposerDialog, name: string): HTMLButtonElement | null =>
-  dialog.shadowRoot?.querySelector<HTMLButtonElement>(`button.${name}`) ?? null;
+function editor(dialog: VoiceComposerDialog): PromptEditor | null {
+  return dialog.shadowRoot?.querySelector<PromptEditor>("prompt-editor") ?? null;
+}
+
+function draft(dialog: VoiceComposerDialog): ComposerDraft | null {
+  const element = editor(dialog)?.shadowRoot?.querySelector("composer-draft");
+  return element instanceof ComposerDraft ? element : null;
+}
+
+/** What the reader would send: the composer's own draft text. */
+function draftText(dialog: VoiceComposerDialog): string {
+  return draft(dialog)?.getText() ?? "";
+}
+
+function composerButton(dialog: VoiceComposerDialog, selector: string): HTMLButtonElement | null {
+  return editor(dialog)?.shadowRoot?.querySelector<HTMLButtonElement>(selector) ?? null;
+}
+
+function dialogText(dialog: VoiceComposerDialog): string {
+  return `${dialog.shadowRoot?.textContent ?? ""} ${editor(dialog)?.shadowRoot?.textContent ?? ""}`;
+}
 
 describe("VoiceComposerDialog", () => {
   beforeEach(() => { vi.useFakeTimers(); });
@@ -113,11 +148,49 @@ describe("VoiceComposerDialog", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     document.body.replaceChildren();
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("hosts the shared composer rather than a second one", async () => {
+    // The whole point of this dialog. A spoken message needs attachments,
+    // commands, and a model picker exactly as often as a typed one does,
+    // because it is the same message going to the same place.
+    const speech = speechCapability();
+    const { dialog } = await openDialog(speech.capability);
+
+    const composer = editor(dialog);
+    expect(composer).not.toBeNull();
+    expect(composer?.voiceMode).toBe("voice-first");
+    expect(draft(dialog)).not.toBeNull();
+    expect(composerButton(dialog, ".composer-attach")).not.toBeNull();
+    expect(composerButton(dialog, ".composer-commands")).not.toBeNull();
+    expect(composerButton(dialog, ".dictation-button")).not.toBeNull();
+    expect(composerButton(dialog, "[data-action='cancel']")).not.toBeNull();
+    // No dialog chrome of its own: the composer is the surface, exactly as it
+    // is in the new-session pop-up.
+    expect(dialog.shadowRoot?.querySelector("header")).toBeNull();
+  });
+
+  it("lets the island be the only surface, with no dialog box around it", () => {
+    // A dialog box here would draw a second border, background, and shadow
+    // around a composer that already carries all three, and would take width
+    // from a control row that needs every pixel at the folded size.
+    const styles = dialogStyles();
+
+    expect(styles).toContain("--modal-surface-background: transparent;");
+    expect(styles).toContain("--modal-surface-border: none;");
+    expect(styles).toContain("--modal-surface-shadow: none;");
+    // The model and command menus open above the island and must not be clipped.
+    expect(styles).toContain("--modal-surface-overflow: visible;");
+    // Sized against its own container, never the viewport.
+    expect(styles).toContain("--modal-surface-width: min(42rem, calc(100% - clamp(1rem, 4cqi, 2rem)));");
+    expect(styles).toContain("container-type: size;");
   });
 
   it("opens the microphone without being asked", async () => {
-    // The wheel's release is the start of recording. A dialog that waited for
-    // a tap would turn the gesture into a request to record instead.
+    // Voice-first means the reader already asked to talk. Waiting for a tap
+    // would turn the request into a request to make a request.
     const speech = speechCapability();
     await openDialog(speech.capability);
     expect(speech.captureCount()).toBe(1);
@@ -127,73 +200,79 @@ describe("VoiceComposerDialog", () => {
     // The reason this dialog exists. `modal-surface` focuses its initialFocus
     // target when it has one, so this dialog must never name a text field.
     const speech = speechCapability();
-    const { dialog } = await openDialog(speech.capability);
-    expect(transcriptBox(dialog)).toBeNull();
+    await openDialog(speech.capability);
     expect(document.activeElement?.tagName).not.toBe("TEXTAREA");
+    expect(document.activeElement?.tagName).not.toBe("INPUT");
   });
 
   it("sends a heard sentence by itself once the countdown runs out", async () => {
     const speech = speechCapability({ transcript: "put the indicator on the turn rail" });
-    const { dialog, onSendText, dismissed } = await openDialog(speech.capability);
+    const { dialog, onSendPrompt, dismissed } = await openDialog(speech.capability);
 
     await speech.speak(dialog);
-    expect(transcriptBox(dialog)?.value).toBe("put the indicator on the turn rail");
-    expect(onSendText).not.toHaveBeenCalled();
+    expect(draftText(dialog)).toBe("put the indicator on the turn rail");
+    expect(onSendPrompt).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(VOICE_SEND_COUNTDOWN_MS);
-    expect(onSendText).toHaveBeenCalledWith("put the indicator on the turn rail");
+    await settle(dialog);
+
+    expect(onSendPrompt).toHaveBeenCalledWith("put the indicator on the turn rail", undefined, undefined, undefined);
     expect(dismissed()).toBe(true);
   });
 
-  it("stops the countdown when a thumb touches the text, and never sends itself after that", async () => {
-    // Whisper mishears. This is the gate that makes a wrong sentence catchable.
+  it("stops the countdown when a hand touches the composer, and never sends itself after that", async () => {
+    // Whisper mishears, and a spoken message is often the one you most want to
+    // add a file to. Both need the timer to yield to a hand.
     const speech = speechCapability({ transcript: "put it on the turn real" });
-    const { dialog, onSendText } = await openDialog(speech.capability);
+    const { dialog, onSendPrompt } = await openDialog(speech.capability);
     await speech.speak(dialog);
 
-    transcriptBox(dialog)?.dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }));
-    await dialog.updateComplete;
+    draft(dialog)?.dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }));
+    await settle(dialog);
 
     await vi.advanceTimersByTimeAsync(VOICE_SEND_COUNTDOWN_MS * 10);
-    expect(onSendText).not.toHaveBeenCalled();
-    expect(transcriptBox(dialog)?.value).toBe("put it on the turn real");
+    await settle(dialog);
+
+    expect(onSendPrompt).not.toHaveBeenCalled();
+    expect(draftText(dialog)).toBe("put it on the turn real");
   });
 
   it("sends the edited sentence rather than the heard one", async () => {
     const speech = speechCapability({ transcript: "put it on the turn real" });
-    const { dialog, onSendText } = await openDialog(speech.capability);
+    const { dialog, onSendPrompt } = await openDialog(speech.capability);
     await speech.speak(dialog);
 
-    const box = transcriptBox(dialog);
-    if (box === null) throw new Error("the dialog rendered no transcript to edit");
-    box.value = "put it on the turn rail";
-    box.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    await dialog.updateComplete;
+    draft(dialog)?.replaceText("put it on the turn rail");
+    await settle(dialog);
 
-    button(dialog, "send")?.click();
-    expect(onSendText).toHaveBeenCalledWith("put it on the turn rail");
+    composerButton(dialog, ".send-button")?.click();
+    await settle(dialog);
+
+    expect(onSendPrompt).toHaveBeenCalledWith("put it on the turn rail", undefined, undefined, undefined);
   });
 
   it("keeps listening rather than offering an empty sentence to send", async () => {
     const speech = speechCapability({ transcript: "   " });
-    const { dialog, onSendText } = await openDialog(speech.capability);
+    const { dialog, onSendPrompt } = await openDialog(speech.capability);
     await speech.speak(dialog);
 
-    expect(transcriptBox(dialog)).toBeNull();
+    expect(draftText(dialog)).toBe("");
     await vi.advanceTimersByTimeAsync(VOICE_SEND_COUNTDOWN_MS * 2);
-    expect(onSendText).not.toHaveBeenCalled();
+    expect(onSendPrompt).not.toHaveBeenCalled();
   });
 
   it("leaves on request without sending anything", async () => {
     const speech = speechCapability({ transcript: "never mind" });
-    const { dialog, onSendText, dismissed } = await openDialog(speech.capability);
+    const { dialog, onSendPrompt, dismissed } = await openDialog(speech.capability);
     await speech.speak(dialog);
 
-    button(dialog, "discard")?.click();
-    await dialog.updateComplete;
+    // The way out is the composer's own dismiss control, where the
+    // new-session pop-up puts it, not a dialog title bar of this one's own.
+    composerButton(dialog, "[data-action='cancel']")?.click();
+    await settle(dialog);
 
     expect(dismissed()).toBe(true);
-    expect(onSendText).not.toHaveBeenCalled();
+    expect(onSendPrompt).not.toHaveBeenCalled();
   });
 
   it("shows a voice arriving, so a reader is not talking into a still screen", async () => {
@@ -201,13 +280,13 @@ describe("VoiceComposerDialog", () => {
     // voiced-audio reports the capture session already emits.
     const speech = speechCapability();
     const { dialog } = await openDialog(speech.capability);
-    expect(dialog.shadowRoot?.querySelector(".dot.hearing")).toBeNull();
+    expect(editor(dialog)?.shadowRoot?.querySelector(".voice-dot.hearing")).toBeNull();
 
     await speech.voice(dialog, 2);
 
-    expect(dialog.shadowRoot?.querySelector(".dot.hearing")).not.toBeNull();
-    expect(dialog.shadowRoot?.textContent).toContain("Hearing you");
-    expect(dialog.shadowRoot?.textContent).toContain("0:02");
+    expect(editor(dialog)?.shadowRoot?.querySelector(".voice-dot.hearing")).not.toBeNull();
+    expect(dialogText(dialog)).toContain("Hearing you");
+    expect(dialogText(dialog)).toContain("0:02");
   });
 
   it("notices a silence that no event reports, and keeps what was said", async () => {
@@ -216,37 +295,38 @@ describe("VoiceComposerDialog", () => {
     await speech.voice(dialog, 3);
 
     await vi.advanceTimersByTimeAsync(VOICE_HEARING_WINDOW_MS + LISTEN_TICK_MS);
-    await dialog.updateComplete;
+    await settle(dialog);
 
-    expect(dialog.shadowRoot?.querySelector(".dot.hearing")).toBeNull();
-    expect(dialog.shadowRoot?.textContent).toContain("Gone quiet");
-    expect(dialog.shadowRoot?.textContent).toContain("0:03");
+    expect(editor(dialog)?.shadowRoot?.querySelector(".voice-dot.hearing")).toBeNull();
+    expect(dialogText(dialog)).toContain("Gone quiet");
+    expect(dialogText(dialog)).toContain("0:03");
   });
 
   it("says up front that nothing will end the turn, rather than promising it will", async () => {
     // `liveSpeechService.ts` disables automatic turn detection on purpose:
     // "explicit completion is the product policy". The controller assumes
-    // ready until told otherwise, so a dialog that skipped the status read
+    // ready until told otherwise, so a surface that skipped the status read
     // would promise a pause ends the turn and take it back a second later.
     const speech = speechCapability({ transcript: "end this turn by hand", turnDetection: "unavailable" });
     const { dialog } = await openDialog(speech.capability);
 
-    expect(dialog.shadowRoot?.textContent).toContain("Nothing will end this turn but you");
-    expect(dialog.shadowRoot?.textContent).not.toContain("sends itself");
+    expect(dialogText(dialog)).toContain("Nothing will end this turn but you");
+    expect(dialogText(dialog)).not.toContain("sends itself");
   });
 
   it("can still end a turn when nothing on the server will end it", async () => {
     const speech = speechCapability({ transcript: "end this turn by hand", turnDetection: "unavailable" });
-    const { dialog, onSendText } = await openDialog(speech.capability);
+    const { dialog, onSendPrompt } = await openDialog(speech.capability);
 
-    expect(transcriptBox(dialog)).toBeNull();
-    button(dialog, "finish")?.click();
+    expect(draftText(dialog)).toBe("");
+    composerButton(dialog, "[data-action='voice-finish']")?.click();
     await vi.advanceTimersByTimeAsync(0);
-    await dialog.updateComplete;
+    await settle(dialog);
 
-    expect(transcriptBox(dialog)?.value).toBe("end this turn by hand");
+    expect(draftText(dialog)).toBe("end this turn by hand");
     await vi.advanceTimersByTimeAsync(VOICE_SEND_COUNTDOWN_MS);
-    expect(onSendText).toHaveBeenCalledWith("end this turn by hand");
+    await settle(dialog);
+    expect(onSendPrompt).toHaveBeenCalledWith("end this turn by hand", undefined, undefined, undefined);
   });
 
   it("says what went wrong in the service's own words rather than closing on the reader", async () => {
@@ -256,6 +336,6 @@ describe("VoiceComposerDialog", () => {
     const { dialog, dismissed } = await openDialog(speech.capability);
 
     expect(dismissed()).toBe(false);
-    expect(dialog.shadowRoot?.textContent).toContain("no microphone");
+    expect(dialogText(dialog)).toContain("no microphone");
   });
 });

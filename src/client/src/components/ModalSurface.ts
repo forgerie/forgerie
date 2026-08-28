@@ -172,10 +172,15 @@ export class ModalSurface extends LitElement {
          --modal-surface-background     dialog fill; set to transparent when the
                                         slotted content is itself the surface
          --modal-surface-overflow       clipping; set to visible when the content
-                                        anchors a layer that must leave the box */
+                                        anchors a layer that must leave the box
+         --modal-surface-section-outline outline on the dialog section itself;
+                                        set to none for a dialog that focuses
+                                        the section rather than a control, where
+                                        a ring around the whole surface says
+                                        nothing a reader can act on */
     :host { display: block; width: 100%; height: 100%; }
     .backdrop { box-sizing: border-box; width: 100%; height: 100%; display: grid; place-items: var(--modal-surface-place-items, center); padding: var(--modal-surface-backdrop-padding, 0); background: var(--pi-overlay); overflow: var(--modal-surface-overflow, hidden); }
-    section[role="dialog"] { box-sizing: border-box; width: var(--modal-surface-width, min(720px, 100%)); max-width: var(--modal-surface-max-width, 100%); height: var(--modal-surface-height, auto); max-height: var(--modal-surface-max-height, 100%); min-height: var(--modal-surface-min-height, auto); display: flex; flex-direction: column; border: var(--modal-surface-border, 1px solid var(--pi-border)); border-radius: var(--modal-surface-radius, var(--pi-radius-surface)); background: var(--modal-surface-background, var(--pi-bg)); box-shadow: var(--modal-surface-shadow, 0 20px 60px var(--pi-shadow-strong)); overflow: var(--modal-surface-overflow, hidden); }
+    section[role="dialog"] { outline: var(--modal-surface-section-outline, revert); box-sizing: border-box; width: var(--modal-surface-width, min(720px, 100%)); max-width: var(--modal-surface-max-width, 100%); height: var(--modal-surface-height, auto); max-height: var(--modal-surface-max-height, 100%); min-height: var(--modal-surface-min-height, auto); display: flex; flex-direction: column; border: var(--modal-surface-border, 1px solid var(--pi-border)); border-radius: var(--modal-surface-radius, var(--pi-radius-surface)); background: var(--modal-surface-background, var(--pi-bg)); box-shadow: var(--modal-surface-shadow, 0 20px 60px var(--pi-shadow-strong)); overflow: var(--modal-surface-overflow, hidden); }
   `;
 }
 

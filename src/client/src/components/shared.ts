@@ -1093,8 +1093,11 @@ export const promptEditorStyles = css`
   :host([surface="embedded"]) .actions { justify-content: flex-start; }
   .compact-status { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--pi-muted); font-size: var(--pi-text-sm); flex: 1 1 0; }
   .model-capsule { flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; overflow: hidden; }
-  .model-capsule .select-model { box-sizing: border-box; height: 36px; max-width: min(64cqi, 460px); border-start-end-radius: 0; border-end-end-radius: 0; }
-  .model-capsule .select-thinking { width: auto; min-width: 34px; margin-inline-start: -1px; padding-inline: 6px; border-start-start-radius: 0; border-end-start-radius: 0; }
+  .model-capsule .select-model { box-sizing: border-box; height: 36px; max-width: min(64cqi, 460px); border-start-end-radius: 0; border-end-end-radius: 0; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* When the capsule runs out of room the name gives way, never the gauge. The
+     name is still readable when shortened; a clipped gauge is a control the
+     hand cannot reach, and a truncated model name is not. */
+  .model-capsule .select-thinking { width: auto; min-width: 34px; flex: 0 0 auto; margin-inline-start: -1px; padding-inline: 6px; border-start-start-radius: 0; border-end-start-radius: 0; }
   /* The gauge carries the level; the word joins it only where the rail has room. */
   @container (min-width: 560px) {
   }

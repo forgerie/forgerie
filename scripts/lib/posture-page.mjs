@@ -103,7 +103,27 @@ export async function drivePage(cdp, options) {
   }
 }
 
-/** Dispatches a combo such as "ctrl+k" or "shift+meta+p" as real key input. */
+/**
+ * Named keys, which do not follow the `KeyA` / charCode pattern letters do.
+ *
+ * A shortcut bound to Enter is dispatched as `KeyENTER` with the virtual key
+ * code of "E" without this table, so the page receives an entirely different
+ * key and the surface under test never opens.
+ */
+const CDP_NAMED_KEYS = {
+  enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  escape: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+  tab: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+  space: { key: " ", code: "Space", windowsVirtualKeyCode: 32 },
+  backspace: { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+  delete: { key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 },
+  arrowup: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+  arrowdown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+  arrowleft: { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
+  arrowright: { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+};
+
+/** Dispatches a combo such as "ctrl+k", "shift+meta+p", or "ctrl+alt+enter". */
 export async function pressCombo(cdp, combo) {
   const parts = combo.split("+").map((part) => part.trim().toLowerCase()).filter((part) => part !== "");
   const key = parts.pop();
@@ -114,7 +134,10 @@ export async function pressCombo(cdp, combo) {
     if (bit === undefined) throw new Error(`Unknown modifier ${JSON.stringify(part)} in ${JSON.stringify(combo)}`);
     modifiers |= bit;
   }
-  const base = { modifiers, key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0) };
+  const named = CDP_NAMED_KEYS[key];
+  const base = named === undefined
+    ? { modifiers, key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0) }
+    : { modifiers, ...named };
   await cdp.send("Input.dispatchKeyEvent", { ...base, type: "keyDown" });
   await cdp.send("Input.dispatchKeyEvent", { ...base, type: "keyUp" });
 }

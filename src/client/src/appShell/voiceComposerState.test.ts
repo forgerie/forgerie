@@ -10,6 +10,7 @@ import {
   voiceComposerHeard,
   voiceComposerHold,
   voiceComposerRemainingMs,
+  voiceComposerStatusLine,
   voiceComposerTranscript,
   type VoiceComposerState,
 } from "./voiceComposerState";
@@ -162,5 +163,40 @@ describe("voiceComposerBusy", () => {
   it("lets Escape close the modal once nothing is running", () => {
     expect(voiceComposerBusy(voiceComposerHold(counting()))).toBe(false);
     expect(voiceComposerBusy({ kind: "failed", message: "no", retryable: true })).toBe(false);
+  });
+});
+
+describe("voiceComposerStatusLine", () => {
+  const silent = { hearing: false, seconds: 0 };
+
+  it("never promises a pause will end a turn that nothing will end", () => {
+    // The service disables automatic turn detection by policy. Saying "it
+    // sends itself" there would be a promise the surface cannot keep.
+    expect(voiceComposerStatusLine({ kind: "listening", endsItself: true }, silent)).toContain("sends itself");
+    expect(voiceComposerStatusLine({ kind: "listening", endsItself: false }, silent)).toBe("Listening. Nothing will end this turn but you.");
+  });
+
+  it("reports a voice arriving over the standing contract", () => {
+    expect(voiceComposerStatusLine({ kind: "listening", endsItself: true }, { hearing: true, seconds: 2 })).toBe("Hearing you.");
+  });
+
+  it("distinguishes a silence after speech from a silence before it", () => {
+    const quiet = { hearing: false, seconds: 3 };
+    expect(voiceComposerStatusLine({ kind: "listening", endsItself: true }, quiet)).toBe("Gone quiet.");
+    expect(voiceComposerStatusLine({ kind: "listening", endsItself: false }, quiet)).toBe("Gone quiet. Finish when you are done.");
+  });
+
+  it("tells the reader the countdown is theirs to stop", () => {
+    expect(voiceComposerStatusLine(counting(), silent)).toBe("Sending. Touch anything to stop it.");
+  });
+
+  it("names the composer's other tools once the turn is held", () => {
+    // The reason this dialog hosts the real composer: a held transcript is the
+    // moment a reader reaches for an attachment or a command.
+    expect(voiceComposerStatusLine(voiceComposerHold(counting()), silent)).toBe("Held. Edit, attach, or send when you are ready.");
+  });
+
+  it("gives a failure the service's own words", () => {
+    expect(voiceComposerStatusLine({ kind: "failed", message: "no microphone", retryable: false }, silent)).toBe("no microphone");
   });
 });

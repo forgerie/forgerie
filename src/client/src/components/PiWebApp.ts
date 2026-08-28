@@ -2396,14 +2396,22 @@ export class PiWebApp extends LitElement {
    */
   private renderVoiceComposer() {
     if (!this.voiceComposerOpen) return null;
-    const session = this.state.selectedSession;
+    const state = this.state;
+    const session = state.selectedSession;
     if (session === undefined) return null;
-    const ownerKey = machineSessionKey(selectedMachineId(this.state), session.id);
+    const runtimeAvailable = selectedChatCanUseRuntime(state.selectedChatLoad);
     return html`
       <voice-composer-dialog
-        .capability=${this.sessionDictationCapability()}
-        .ownerKey=${ownerKey}
-        .onSendText=${(text: string) => { this.sendPrompt(text); }}
+        .capabilities=${this.sessionComposerCapabilities(state, runtimeAvailable)}
+        .sessionId=${session.id}
+        .machineId=${selectedMachineId(state)}
+        .cwd=${state.selectedWorkspace?.path ?? session.cwd}
+        .projectId=${state.selectedWorkspace?.projectId}
+        .workspaceId=${state.selectedWorkspace?.id}
+        .promptHistory=${this.selectedPromptHistory(state)}
+        .disabled=${session.archived === true}
+        .sending=${state.sendingPrompts[session.id] === true}
+        .onSendPrompt=${this.handleSendPrompt}
         .onDismiss=${() => { this.voiceComposerOpen = false; }}
       ></voice-composer-dialog>
     `;

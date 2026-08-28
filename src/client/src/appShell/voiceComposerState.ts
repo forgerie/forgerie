@@ -15,6 +15,7 @@
  */
 
 import type { PromptDictationState } from "../controllers/promptDictationController";
+import type { VoiceCaptureDisplay } from "./voiceCaptureProgress";
 
 /**
  * How long a finished transcript waits before it sends.
@@ -142,4 +143,34 @@ export function voiceComposerDue(state: VoiceComposerState, nowMs: number): bool
  */
 export function voiceComposerBusy(state: VoiceComposerState): boolean {
   return state.kind === "listening" || state.kind === "working" || state.kind === "counting";
+}
+
+/**
+ * One line telling the reader what is happening and what is theirs to do.
+ *
+ * It reads both models because both matter and neither is enough alone. The
+ * turn state says what the surface will do next; the capture readout says
+ * whether a voice is actually arriving. "Listening" while nothing is heard and
+ * "Listening" while a voice is arriving are different facts, and a reader
+ * talking into a still screen needs to be told which one is true.
+ */
+export function voiceComposerStatusLine(state: VoiceComposerState, capture: VoiceCaptureDisplay): string {
+  switch (state.kind) {
+    case "listening":
+      if (capture.hearing) return "Hearing you.";
+      if (capture.seconds > 0) return state.endsItself ? "Gone quiet." : "Gone quiet. Finish when you are done.";
+      // Before a first word there is nothing to report but the contract, and
+      // whether the turn ends itself is the part a reader has to know.
+      return state.endsItself
+        ? "Listening. Stop talking and it sends itself."
+        : "Listening. Nothing will end this turn but you.";
+    case "working":
+      return "Working out what you said.";
+    case "counting":
+      return "Sending. Touch anything to stop it.";
+    case "held":
+      return "Held. Edit, attach, or send when you are ready.";
+    case "failed":
+      return state.message;
+  }
 }

@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { html, LitElement, nothing, type PropertyValues } from "lit";
+import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
@@ -7,6 +7,10 @@ import { thinkingGauge, thinkingLevelLabel } from "../../../shared/thinkingLevel
 import { createSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
 import { PromptDictationController, type PromptDictationCapability, type PromptDictationState } from "../controllers/promptDictationController";
 import { PromptDictationGesture } from "../controllers/promptDictationGesture";
+import { VoiceTurnController } from "../controllers/voiceTurnController";
+import { VOICE_SEND_COUNTDOWN_MS, voiceComposerStatusLine, type VoiceComposerState } from "../appShell/voiceComposerState";
+import { voiceCaptureClock } from "../appShell/voiceCaptureProgress";
+import { SPEECH_POLICY } from "../../../shared/speechPolicy";
 import { composerRail, type ComposerRail } from "../composerRail";
 import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointerPress, isQueueHoldKey, readComposerQueuePress } from "../composerQueuePress";
 import { inputModeForDraft, type InputMode } from "../inputModes";
@@ -50,6 +54,68 @@ type PendingDictationStatus =
 type DictationGestureSource =
   | { readonly tag: "pointer"; readonly pointerId: number; readonly target: HTMLElement | undefined }
   | { readonly tag: "space" };
+
+/**
+ * Whether a voice is driving this composer.
+ *
+ * `voice-first` is not a second composer. It is this one with the microphone
+ * already open, a turn readout above the draft, and a transcript that sends
+ * itself unless a hand interrupts. Every other control stays exactly where it
+ * was, which is the entire point: attaching a file, choosing a command, or
+ * changing the model in the middle of a spoken message must not mean leaving
+ * voice mode and finding a different composer on the other side.
+ */
+export type PromptEditorVoiceMode = "off" | "voice-first";
+
+/**
+ * The spoken-turn readout.
+ *
+ * Deliberately small and quiet. It sits above a composer that already has a
+ * full control row, and it is a status line, not a second toolbar.
+ */
+const voiceTurnStyles = css`
+  .voice-turn {
+    display: flex; align-items: center; gap: var(--pi-space-md);
+    margin: 0 0 var(--pi-space-sm); min-height: 34px;
+    color: var(--pi-text); font-size: var(--pi-text-md);
+  }
+  .voice-turn-text { flex: 1 1 auto; min-width: 0; }
+  .voice-turn-clock { color: var(--pi-text-secondary); font-size: var(--pi-text-sm); font-variant-numeric: tabular-nums; }
+  .voice-turn-finish {
+    flex: 0 0 auto; min-height: 34px; padding: 0 var(--pi-space-md);
+    font-family: inherit; font-size: var(--pi-text-sm); font-weight: 650;
+    border: none; border-radius: var(--pi-radius-control);
+    background: var(--pi-accent); color: var(--pi-bg); cursor: pointer;
+  }
+  .voice-turn-finish:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
+
+  .voice-dot { width: 10px; height: 10px; border-radius: var(--pi-radius-pill); flex: 0 0 auto; background: var(--pi-accent); }
+  .voice-dot.working { background: var(--pi-muted); }
+  .voice-dot.held, .voice-dot.failed { background: none; border: 1px solid var(--pi-border); }
+  /* Waiting for a voice: the app's ambient status pulse, which says the
+     microphone is open without claiming anything is arriving. */
+  .voice-dot.listening { background: var(--pi-muted); animation: voice-listening 1.6s ease-in-out infinite; }
+  /* A voice is arriving. Driven by voiced-audio reports, so it is evidence
+     rather than decoration, and it stops pulsing because there is now
+     something real to show. */
+  .voice-dot.listening.hearing {
+    background: var(--pi-accent); animation: none;
+    transform: scale(1.5); transition: transform var(--pi-motion-fast) ease-out;
+  }
+  @keyframes voice-listening { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) {
+    .voice-dot.listening { animation: none; }
+    .voice-dot.listening.hearing { transform: none; }
+  }
+
+  /* The number sits inside the ring, so the ring needs to be its containing
+     block. Without the wrapper it would position against the host. */
+  .voice-ring-wrap { position: relative; display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .voice-ring { position: absolute; inset: 0; width: 34px; height: 34px; transform: rotate(-90deg); }
+  .voice-ring-track { fill: none; stroke: var(--pi-border-muted); stroke-width: 2.5; }
+  .voice-ring-value { fill: none; stroke: var(--pi-accent); stroke-width: 2.5; stroke-linecap: round; }
+  .voice-ring-number { position: relative; font-size: var(--pi-text-xs); color: var(--pi-text-secondary); font-variant-numeric: tabular-nums; }
+`;
 
 @customElement("prompt-editor")
 export class PromptEditor extends LitElement {
@@ -111,6 +177,10 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) onDoubleEscapeAction?: (action: Exclude<DoubleEscapeAction, "none">) => void;
   /** Set when the shell keeps its navigation chrome on request instead of resident. */
   @property({ type: Boolean }) chromeSummoned = false;
+  /** Whether a voice drives this composer. See {@link PromptEditorVoiceMode}. */
+  @property({ attribute: false }) voiceMode: PromptEditorVoiceMode = "off";
+  /** Reports the spoken turn, for hosts that gate dismissal on a live microphone. */
+  @property({ attribute: false }) onVoiceStateChange?: (state: VoiceComposerState) => void;
 
   @query("composer-draft") private draftElement?: ComposerDraft | null;
   @query(".select-model") private modelTrigger?: HTMLButtonElement;
@@ -139,6 +209,12 @@ export class PromptEditor extends LitElement {
   private pendingDictationStatus: PendingDictationStatus | undefined;
   private dictationGesture = this.createDictationGesture();
   private dictationGestureSource: DictationGestureSource | undefined;
+  private readonly voiceTurn = new VoiceTurnController(this, {
+    onSend: () => { this.sendVoiceTurn(); },
+    onStateChange: (state) => { this.onVoiceStateChange?.(state); },
+  });
+  private voiceTurnStarted = false;
+  private dictationSampleRateHz = SPEECH_POLICY.audio.sampleRateHz;
   private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
   private pendingReplacement: { kind: "text"; text: string } | { kind: "snapshot"; snapshot: ComposerDraftSubmitSnapshot } | undefined;
@@ -195,6 +271,26 @@ export class PromptEditor extends LitElement {
   protected override updated(): void {
     this.flushPendingReplacement();
     this.syncDictationCapability();
+    this.startVoiceTurnWhenReady();
+  }
+
+  /**
+   * Open the microphone as soon as the surface can honestly do it.
+   *
+   * Voice-first means the reader already asked to talk, so waiting for a
+   * second gesture would be asking twice. The only wait here is for the speech
+   * service to report itself usable. Pressing while it is still warming puts
+   * the composer straight into an unavailable state, which would make a liar
+   * of the surface that just opened saying it was listening.
+   */
+  private startVoiceTurnWhenReady(): void {
+    if (this.voiceMode !== "voice-first" || this.voiceTurnStarted) return;
+    if (this.dictationCapability !== "ready" && this.dictationCapability !== "manual-only") return;
+    if (this.dictationController === undefined || !this.canToggleDictation()) return;
+    this.voiceTurnStarted = true;
+    // press then release is the tap the controller already models, and it
+    // lands in the open-microphone state a spoken turn needs.
+    this.activateDictationShortTap();
   }
 
   override disconnectedCallback(): void {
@@ -229,7 +325,10 @@ export class PromptEditor extends LitElement {
         class=${this.footerClass(shellMode, resting)}
         @focusin=${() => { this.composerFocused = true; }}
         @focusout=${(event: FocusEvent) => { this.releaseComposerFocus(event); }}
+        @pointerdown=${() => { this.holdVoiceTurn(); }}
+        @keydown=${() => { this.holdVoiceTurn(); }}
       >
+        ${this.renderVoiceTurn()}
         ${this.capabilities.contextUsage === undefined ? nothing : html`<context-usage-meter .contextUsage=${this.capabilities.contextUsage}></context-usage-meter>`}
         <composer-draft
           data-keyboard-shortcut-context="composer"
@@ -248,7 +347,7 @@ export class PromptEditor extends LitElement {
           .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => this.sendSnapshot(snapshot, streamingBehavior)}
           .onEscape=${(context: ComposerDraftEscapeContext) => this.handleDraftEscape(context)}
           .onDisplayStateChange=${(state: ComposerDraftDisplayState) => { this.updateDraftDisplayState(state); }}
-          .onDraftEdited=${this.onDraftEdited}
+          .onDraftEdited=${() => { this.handleDraftEdited(); }}
           .onCompletionError=${this.onCompletionError}
         ></composer-draft>
         <div class="actions">
@@ -451,6 +550,91 @@ export class PromptEditor extends LitElement {
   private isCompactDraft(): boolean {
     const parsed = parseLeadingSlashCommand(this.draftElement?.getText() ?? "");
     return parsed.kind === "command" && parsed.name === "compact";
+  }
+
+  /**
+   * What the spoken turn is doing, above the draft it is writing into.
+   *
+   * Only rendered in voice-first mode. The inline microphone reports itself
+   * through the button and the status line beside it, and does not want a
+   * second readout or a countdown it never runs.
+   */
+  private renderVoiceTurn() {
+    if (this.voiceMode !== "voice-first") return nothing;
+    const state = this.voiceTurn.state;
+    const capture = this.voiceTurn.capture;
+    return html`
+      <p class="voice-turn" role="status" aria-live="polite">
+        ${this.renderVoiceIndicator(state, capture.hearing)}
+        <span class="voice-turn-text">${voiceComposerStatusLine(state, capture)}</span>
+        ${capture.seconds === 0 ? nothing : html`<span class="voice-turn-clock">${voiceCaptureClock(capture)}</span>`}
+        ${state.kind !== "listening" ? nothing : html`<button
+          type="button"
+          class="voice-turn-finish"
+          data-action="voice-finish"
+          @click=${() => { this.finishVoiceTurn(); }}
+        >Finish</button>`}
+      </p>
+    `;
+  }
+
+  /**
+   * The ring, or the reason there is no ring.
+   *
+   * The remaining time is read at render rather than stored, so the deadline
+   * stays the single fact and a late redraw cannot send early.
+   */
+  private renderVoiceIndicator(state: VoiceComposerState, hearing: boolean) {
+    if (state.kind === "listening") {
+      // Bright while a voice is arriving, dim between words. This is the only
+      // honest liveness signal available: the pipeline reports voiced audio,
+      // never amplitude, so there is nothing here to draw a level from.
+      return html`<span class=${`voice-dot listening ${hearing ? "hearing" : ""}`} aria-hidden="true"></span>`;
+    }
+    if (state.kind !== "counting") return html`<span class=${`voice-dot ${state.kind}`} aria-hidden="true"></span>`;
+    const remaining = this.voiceTurn.remainingMs();
+    const left = Math.max(0, Math.min(1, remaining / VOICE_SEND_COUNTDOWN_MS));
+    const circumference = 2 * Math.PI * 20;
+    return html`
+      <span class="voice-ring-wrap">
+        <svg class="voice-ring" viewBox="0 0 46 46" aria-hidden="true">
+          <circle cx="23" cy="23" r="20" class="voice-ring-track"></circle>
+          <circle cx="23" cy="23" r="20" class="voice-ring-value" stroke-dasharray=${`${String(circumference * left)} ${String(circumference)}`}></circle>
+        </svg>
+        <span class="voice-ring-number">${(remaining / 1000).toFixed(1)}</span>
+      </span>
+    `;
+  }
+
+  /**
+   * End the turn now and transcribe what was said.
+   *
+   * Not a fallback. Automatic turn detection is disabled by product policy, so
+   * nothing else will ever decide a turn is over, and without this the
+   * microphone would run to the capture limit with no way out but discarding.
+   */
+  private finishVoiceTurn(): void {
+    this.dictationController?.press();
+  }
+
+  /** A hand on the composer stops the countdown and keeps the words. */
+  private holdVoiceTurn(): void {
+    if (this.voiceMode !== "voice-first") return;
+    this.voiceTurn.hold();
+  }
+
+  private handleDraftEdited(): void {
+    if (this.voiceMode === "voice-first") {
+      this.voiceTurn.hold();
+      this.voiceTurn.edited(this.draftElement?.getText() ?? "");
+    }
+    this.onDraftEdited?.();
+  }
+
+  /** The countdown ran out. Send the draft, exactly as the Send button does. */
+  private sendVoiceTurn(): void {
+    if (this.voiceMode !== "voice-first") return;
+    this.submitDraft();
   }
 
   private renderDictationAction() {
@@ -1137,13 +1321,33 @@ export class PromptEditor extends LitElement {
         get ownerKey() { return ownerKey(); },
         beginDictation: () => this.draftElement?.beginDictationEdit() ?? false,
         commitTranscript: (transcript) => this.draftElement?.commitDictationTranscript(transcript) ?? false,
-        finishDictation: () => { this.draftElement?.finishDictationEdit(); },
+        // The lock is released here, which is the one moment the transcript is
+        // in the draft and the draft is the reader's again. A voice turn
+        // starts counting from exactly that point.
+        finishDictation: () => {
+          this.draftElement?.finishDictationEdit();
+          if (this.voiceMode === "voice-first") this.voiceTurn.heard(this.draftElement?.getText() ?? "");
+        },
         abortDictation: () => { this.draftElement?.abortDictationEdit(); },
       },
       speechApi: capability.speechApi,
-      createCaptureSession: capability.createCaptureSession,
+      // Everything the controller asked for is forwarded untouched; the tap is
+      // additive. It exists so a listening reader can see that the microphone
+      // is getting their voice, which no status wording can substitute for.
+      createCaptureSession: async (options) => {
+        const session = await capability.createCaptureSession({
+          ...options,
+          onSpeechActivity: (activity) => {
+            this.voiceTurn.noteSpeech(activity, this.dictationSampleRateHz);
+            options.onSpeechActivity(activity);
+          },
+        });
+        this.dictationSampleRateHz = session.actualSampleRateHz;
+        return session;
+      },
       onStateChange: (state) => {
         this.dictationState = state;
+        if (this.voiceMode === "voice-first") this.voiceTurn.noteDictation(state);
         if (this.dictationBlocksComposer()) {
           this.closeChoice(false);
           this.resetSteerDisclosure();
@@ -1425,7 +1629,7 @@ export class PromptEditor extends LitElement {
     this.composerFocused = state.focused || this.composerFocused;
   }
 
-  static override styles = promptEditorStyles;
+  static override styles = [promptEditorStyles, voiceTurnStyles];
 }
 
 function promptHistoryChanged(value: readonly string[], previous: readonly string[] | undefined): boolean {
