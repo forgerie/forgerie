@@ -165,6 +165,62 @@ describe("SessionController ask submission", () => {
     expect(state.status).toEqual(closedStatus);
   });
 
+  it("rejects over-limit custom text instead of silently truncating it", async () => {
+    let submitCalled = false;
+    let state = selectedSessionState({ pendingAsk: ask("ask-1") });
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      submitAsk: () => {
+        submitCalled = true;
+        return Promise.resolve(closeResponse(status(oldSession.id)));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.submitAsk("ask-1", {
+      answers: [{ id: "q1", values: [], otherText: "a".repeat(4_001) }],
+    });
+
+    expect(submitCalled).toBe(false);
+    expect(state.pendingAsk?.askId).toBe("ask-1");
+    expect(state.error).toContain("4,000-character limit");
+  });
+
+  it("rejects text that no longer fits after attachment references are added", async () => {
+    const attachment: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
+    let submitCalled = false;
+    let state = selectedSessionState({ pendingAsk: ask("ask-1") });
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      saveAttachments: () => Promise.resolve([{ path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 }]),
+      submitAsk: () => {
+        submitCalled = true;
+        return Promise.resolve(closeResponse(status(oldSession.id)));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.submitAsk("ask-1", {
+      answers: [{ id: "q1", values: [], otherText: "a".repeat(4_000), attachments: [attachment] }],
+    });
+
+    expect(submitCalled).toBe(false);
+    expect(state.pendingAsk?.askId).toBe("ask-1");
+    expect(state.error).toContain("attached file references exceed the 4,000-character limit");
+  });
+
   it("saves all answer attachments in one rollback-safe request and partitions their workspace references", async () => {
     const notes: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
     const diagram: PromptAttachment = { kind: "file", mimeType: "image/svg+xml", data: "PHN2Zz4=", name: "diagram.svg" };

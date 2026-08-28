@@ -1706,17 +1706,19 @@ export class SessionController {
     for (const answer of submission.answers) {
       const { attachments: answerAttachments, ...wireAnswer } = answer;
       const attachmentCount = answerAttachments?.length ?? 0;
+      const text = wireAnswer.otherText?.trim() ?? "";
       if (attachmentCount === 0) {
-        answers.push(wireAnswer);
+        if (text.length > ASK_USER_OTHER_TEXT_MAX_LENGTH) throw new Error(`Custom answer exceeds the ${ASK_USER_OTHER_TEXT_MAX_LENGTH.toLocaleString()}-character limit`);
+        answers.push({ ...wireAnswer, ...(wireAnswer.otherText === undefined ? {} : { otherText: text }) });
         continue;
       }
       const paths = saved.slice(savedOffset, savedOffset + attachmentCount).map((file) => file.path);
       savedOffset += attachmentCount;
       const references = appendSavedAttachmentReferences("", paths);
       if (references.length > ASK_USER_OTHER_TEXT_MAX_LENGTH) throw new Error("Attached file references exceed the custom answer limit");
-      const separatorLength = wireAnswer.otherText === undefined || wireAnswer.otherText.trim() === "" ? 0 : 2;
+      const separatorLength = text === "" ? 0 : 2;
       const textBudget = ASK_USER_OTHER_TEXT_MAX_LENGTH - references.length - separatorLength;
-      const text = wireAnswer.otherText?.trim().slice(0, Math.max(0, textBudget)) ?? "";
+      if (text.length > textBudget) throw new Error(`Custom answer and attached file references exceed the ${ASK_USER_OTHER_TEXT_MAX_LENGTH.toLocaleString()}-character limit`);
       answers.push({ ...wireAnswer, otherText: appendSavedAttachmentReferences(text, paths) });
     }
     return { answers };

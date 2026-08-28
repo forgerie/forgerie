@@ -1,4 +1,4 @@
-import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type AskUserAnswer, type AskUserQuestion, type PromptAttachment } from "../../shared/apiTypes";
+import type { AskUserAnswer, AskUserQuestion, PromptAttachment } from "../../shared/apiTypes";
 
 /**
  * What the user has entered for one question but has not submitted yet. Kept in
@@ -158,6 +158,6 @@ function submittableAnswer(question: AskUserQuestion, answer: AskDraftAnswer | u
 
 function normalizedOtherText(otherText: string | undefined): string | undefined {
   if (otherText === undefined) return undefined;
-  const trimmed = otherText.trim().slice(0, ASK_USER_OTHER_TEXT_MAX_LENGTH);
+  const trimmed = otherText.trim();
   return trimmed === "" ? undefined : trimmed;
 }

@@ -85,6 +85,7 @@ export class AskUserCard extends LitElement {
     const unanswered = unansweredQuestions(ask.questions, this.answers);
     const attachmentCapturePending = this.attachmentCapturePending();
     const excessAttachments = Math.max(0, this.answerAttachmentCount() - MAX_PROMPT_ATTACHMENTS);
+    const answerTextLimitExceeded = this.answerTextLimitExceeded();
     return html`
       <article class="card open-card" aria-labelledby="ask-user-heading">
         <header class="card-header">
@@ -106,7 +107,7 @@ export class AskUserCard extends LitElement {
             ${this.confirmingPartialSubmit && unanswered.length > 0
               ? this.renderPartialSubmitConfirmation(ask, unanswered)
               : html`
-                  <button class="primary-action" type="submit" ?disabled=${this.submitting || attachmentCapturePending || excessAttachments > 0}>
+                  <button class="primary-action" type="submit" ?disabled=${this.submitting || attachmentCapturePending || excessAttachments > 0 || answerTextLimitExceeded}>
                     ${attachmentCapturePending ? "Attaching…" : this.submitting ? "Sending…" : "Send answers"}
                   </button>
                 `}
@@ -121,13 +122,16 @@ export class AskUserCard extends LitElement {
     const answered = answeredCount([question], this.answers) === 1;
     const freeTextOnly = question.options.length === 0;
     const detailId = question.detail === undefined ? undefined : this.questionDetailId(index);
+    const customTextExcess = Math.max(0, (answer?.otherText?.trim().length ?? 0) - ASK_USER_OTHER_TEXT_MAX_LENGTH);
+    const answerLimitId = customTextExcess === 0 ? undefined : this.answerLimitId(index);
+    const describedBy = [detailId, answerLimitId].filter((id): id is string => id !== undefined).join(" ") || undefined;
     const customSelected = freeTextOnly || this.isOtherSelected(question, answer);
     const inputType = question.multiple === true ? "checkbox" : "radio";
     return html`
       <fieldset
         id=${this.questionFieldsetId(index)}
         class=${`question${answered ? " answered" : ""}`}
-        aria-describedby=${ifDefined(detailId)}
+        aria-describedby=${ifDefined(describedBy)}
         tabindex="-1"
       >
         <legend>
@@ -178,6 +182,11 @@ export class AskUserCard extends LitElement {
                 .onChange=${(snapshot: ComposerDraftSubmitSnapshot) => { this.changeOtherSnapshot(question, snapshot); }}
                 .onDisplayStateChange=${(source: AskUserTextComposer, display: ComposerDraftDisplayState) => { this.changeOtherDisplayState(question, source, display); }}
               ></ask-user-text-composer>
+              ${customTextExcess === 0 ? null : html`
+                <p class="answer-limit" id=${answerLimitId} role="alert">
+                  Custom answer is ${customTextExcess} ${customTextExcess === 1 ? "character" : "characters"} over the ${ASK_USER_OTHER_TEXT_MAX_LENGTH.toLocaleString()}-character limit.
+                </p>
+              `}
             </div>
           ` : null}
         </div>
@@ -198,7 +207,7 @@ export class AskUserCard extends LitElement {
         </p>
         <div class="confirmation-actions">
           <button class="secondary-action" type="button" @click=${() => { this.keepEditing(ask, unanswered); }}>Keep editing</button>
-          <button class="primary-action send-anyway" type="button" ?disabled=${this.submitting || this.attachmentCapturePending() || this.answerAttachmentCount() > MAX_PROMPT_ATTACHMENTS} @click=${() => { this.submitAnswers(ask); }}>
+          <button class="primary-action send-anyway" type="button" ?disabled=${this.submissionBlocked()} @click=${() => { this.submitAnswers(ask); }}>
             ${this.attachmentCapturePending() ? "Attaching…" : this.submitting ? "Sending…" : "Send anyway"}
           </button>
         </div>
@@ -298,7 +307,7 @@ export class AskUserCard extends LitElement {
     const current = this.answers[question.id];
     this.setAnswer(question, {
       values: [...(current?.values ?? [])],
-      otherText: snapshot.text.slice(0, ASK_USER_OTHER_TEXT_MAX_LENGTH),
+      otherText: snapshot.text,
       ...(snapshot.attachments === undefined || snapshot.attachments.length === 0 ? {} : { attachments: snapshot.attachments }),
     });
   }
@@ -374,7 +383,14 @@ export class AskUserCard extends LitElement {
   }
 
   private submissionBlocked(): boolean {
-    return this.submitting || this.attachmentCapturePending() || this.answerAttachmentCount() > MAX_PROMPT_ATTACHMENTS;
+    return this.submitting
+      || this.attachmentCapturePending()
+      || this.answerAttachmentCount() > MAX_PROMPT_ATTACHMENTS
+      || this.answerTextLimitExceeded();
+  }
+
+  private answerTextLimitExceeded(): boolean {
+    return Object.values(this.answers).some((answer) => (answer.otherText?.trim().length ?? 0) > ASK_USER_OTHER_TEXT_MAX_LENGTH);
   }
 
   private async showPartialSubmitConfirmation(): Promise<void> {
@@ -452,6 +468,10 @@ export class AskUserCard extends LitElement {
 
   private questionDetailId(index: number): string {
     return `ask-user-question-detail-${String(index)}`;
+  }
+
+  private answerLimitId(index: number): string {
+    return `ask-user-answer-limit-${String(index)}`;
   }
 
   private otherInputId(index: number): string {
@@ -573,6 +593,7 @@ export class AskUserCard extends LitElement {
       cursor: pointer;
     }
     .attachment-limit { min-width: 0; margin: 0 auto 0 0; color: var(--pi-danger); font-size: var(--pi-text-sm); line-height: 1.4; }
+    .answer-limit { margin: 6px 0 0; color: var(--pi-danger); font-size: var(--pi-text-sm); line-height: 1.4; }
     button:hover:not(:disabled) { background: var(--pi-surface-hover); }
     button:disabled { cursor: wait; opacity: .65; }
     .primary-action { border-color: var(--pi-accent); background: var(--pi-accent); color: var(--pi-bg, #111214); font-weight: 650; }

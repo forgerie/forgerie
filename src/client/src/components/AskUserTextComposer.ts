@@ -42,6 +42,7 @@ export class AskUserTextComposer extends LitElement {
         .runtimeControlsAvailable=${false}
         .primaryActionVisible=${false}
         .surfaceMode=${"embedded"}
+        .enterKeyBehavior=${"newline"}
         .forcedAttachmentDelivery=${"folder"}
         .capabilities=${this.dictation === undefined ? {} : { dictation: this.dictation }}
         placeholderText="Type an answer…"

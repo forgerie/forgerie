@@ -72,6 +72,7 @@ export class ComposerDraft extends LitElement {
   @property({ type: Boolean }) resting = false;
   @property() placeholderText = DEFAULT_COMPOSER_PLACEHOLDER;
   @property() editorLabel = DEFAULT_COMPOSER_EDITOR_LABEL;
+  @property() enterKeyBehavior: "submit" | "newline" = "submit";
   @property({ attribute: false }) runtime?: ComposerRuntime;
   /** The visible surface that an upward-opening completion menu must stay inside. */
   @property({ attribute: false }) completionBoundary?: HTMLElement;
@@ -912,7 +913,7 @@ export class ComposerDraft extends LitElement {
       if (completion !== undefined) this.pick(completion);
       return true;
     }
-    if (!shouldSendPromptOnEnterShortcut(shiftKey)) {
+    if (this.enterKeyBehavior === "newline" || !shouldSendPromptOnEnterShortcut(shiftKey)) {
       return completeComposerCodeFence(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
     }
     this.submit(this.working ? "followUp" : undefined);

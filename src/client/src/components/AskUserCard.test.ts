@@ -117,6 +117,38 @@ describe("ask-user-card live form", () => {
     });
   });
 
+  it("uses Enter for a newline instead of a disabled send attempt", async () => {
+    const onSubmit = vi.fn<AskUserSubmitCallback>();
+    const card = await mountOpenAsk(openAsk([
+      question("notes", "Anything else?", []),
+    ]), onSubmit);
+    const draft = await customAnswerDraft(renderRoot(card));
+
+    draft.focusInput();
+    requiredElement(draft.view?.contentDOM, "CodeMirror content").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await card.updateComplete;
+
+    expect(draft.view?.state.doc.toString()).toBe("\n");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("shows an error and blocks submission when custom text exceeds the wire limit", async () => {
+    const onSubmit = vi.fn<AskUserSubmitCallback>();
+    const card = await mountOpenAsk(openAsk([
+      question("notes", "Anything else?", []),
+    ]), onSubmit);
+    const root = renderRoot(card);
+    const draft = await customAnswerDraft(root);
+
+    setComposerText(draft, "a".repeat(4_001));
+    await card.updateComplete;
+
+    expect(root.querySelector(".answer-limit")?.textContent).toContain("1 character over");
+    expect(buttonWithText(root, "Send answers").disabled).toBe(true);
+    buttonWithText(root, "Send answers").click();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("blocks submission while the rich editor is still reading an attachment", async () => {
     const onSubmit = vi.fn<AskUserSubmitCallback>();
     const card = await mountOpenAsk(openAsk([

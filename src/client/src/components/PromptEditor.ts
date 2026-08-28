@@ -69,6 +69,7 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) draftStorageKeyOverride?: string | null;
   @property() placeholderText?: string;
   @property() editorLabel?: string;
+  @property() enterKeyBehavior: "submit" | "newline" = "submit";
   /**
    * Snapshot-level submission for hosts that must accept or reject a draft.
    *
@@ -243,6 +244,7 @@ export class PromptEditor extends LitElement {
           .forcedAttachmentDelivery=${this.forcedAttachmentDelivery}
           .placeholderText=${this.placeholderText ?? DEFAULT_COMPOSER_PLACEHOLDER}
           .editorLabel=${this.editorLabel ?? DEFAULT_COMPOSER_EDITOR_LABEL}
+          .enterKeyBehavior=${this.enterKeyBehavior}
           .onSubmit=${(snapshot: ComposerDraftSubmitSnapshot, streamingBehavior?: "steer" | "followUp") => this.sendSnapshot(snapshot, streamingBehavior)}
           .onEscape=${(context: ComposerDraftEscapeContext) => this.handleDraftEscape(context)}
           .onDisplayStateChange=${(state: ComposerDraftDisplayState) => { this.updateDraftDisplayState(state); }}

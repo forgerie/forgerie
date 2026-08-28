@@ -192,9 +192,9 @@ describe("ask answer state", () => {
     });
   });
 
-  it("bounds custom text at the shared limit", () => {
+  it("preserves over-limit custom text so the submission boundary can reject it visibly", () => {
     const answers: AskDraftAnswers = { q3: { values: [], otherText: "a".repeat(ASK_USER_OTHER_TEXT_MAX_LENGTH + 10) } };
 
-    expect(toSubmission(questions, answers).answers[0]?.otherText).toHaveLength(ASK_USER_OTHER_TEXT_MAX_LENGTH);
+    expect(toSubmission(questions, answers).answers[0]?.otherText).toHaveLength(ASK_USER_OTHER_TEXT_MAX_LENGTH + 10);
   });
 });
