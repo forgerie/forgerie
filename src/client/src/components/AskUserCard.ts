@@ -8,6 +8,7 @@ import {
   type AskUserQuestionRecord,
   type PendingAskUser,
 } from "../../../shared/apiTypes";
+import { MAX_PROMPT_ATTACHMENTS } from "../../../shared/promptAttachments";
 import {
   answeredCount,
   loadAskDraft,
@@ -20,6 +21,7 @@ import {
 } from "../askDrafts";
 import type { ComposerDictationCapability } from "../composerCapabilities";
 import type { ComposerDraftDisplayState, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import type { AskUserTextComposer } from "./AskUserTextComposer";
 import "./AskUserTextComposer";
 
 export type AskUserSubmitCallback = (askId: string, submission: AskDraftSubmission) => void | Promise<void>;
@@ -28,6 +30,11 @@ interface DisplayedRecordAnswer {
   values: string[];
   otherText?: string;
   fromDraft: boolean;
+}
+
+interface AnswerComposerDisplay {
+  source: AskUserTextComposer;
+  state: ComposerDraftDisplayState;
 }
 
 /**
@@ -53,7 +60,7 @@ export class AskUserCard extends LitElement {
   @state() private answers: AskDraftAnswers = {};
   @state() private confirmingPartialSubmit = false;
   @state() private submitting = false;
-  @state() private attachmentCaptureQuestionIds: ReadonlySet<string> = new Set();
+  @state() private answerComposerDisplays: ReadonlyMap<string, AnswerComposerDisplay> = new Map();
   private modelIdentity: string | undefined;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
@@ -64,7 +71,7 @@ export class AskUserCard extends LitElement {
     this.answers = this.loadCurrentDraft();
     this.confirmingPartialSubmit = false;
     this.submitting = false;
-    this.attachmentCaptureQuestionIds = new Set();
+    this.answerComposerDisplays = new Map();
   }
 
   override render(): TemplateResult | null {
@@ -76,7 +83,8 @@ export class AskUserCard extends LitElement {
   private renderOpenAsk(ask: PendingAskUser): TemplateResult {
     const count = answeredCount(ask.questions, this.answers);
     const unanswered = unansweredQuestions(ask.questions, this.answers);
-    const attachmentCapturePending = this.attachmentCaptureQuestionIds.size > 0;
+    const attachmentCapturePending = this.attachmentCapturePending();
+    const excessAttachments = Math.max(0, this.answerAttachmentCount() - MAX_PROMPT_ATTACHMENTS);
     return html`
       <article class="card open-card" aria-labelledby="ask-user-heading">
         <header class="card-header">
@@ -90,10 +98,15 @@ export class AskUserCard extends LitElement {
             ${ask.questions.map((question, index) => this.renderQuestion(ask, question, index))}
           </div>
           <footer class="form-footer">
+            ${excessAttachments === 0 ? null : html`
+              <p class="attachment-limit" role="alert">
+                Answers can include up to ${MAX_PROMPT_ATTACHMENTS} files. Remove ${excessAttachments} ${excessAttachments === 1 ? "file" : "files"} to send.
+              </p>
+            `}
             ${this.confirmingPartialSubmit && unanswered.length > 0
               ? this.renderPartialSubmitConfirmation(ask, unanswered)
               : html`
-                  <button class="primary-action" type="submit" ?disabled=${this.submitting || attachmentCapturePending}>
+                  <button class="primary-action" type="submit" ?disabled=${this.submitting || attachmentCapturePending || excessAttachments > 0}>
                     ${attachmentCapturePending ? "Attaching…" : this.submitting ? "Sending…" : "Send answers"}
                   </button>
                 `}
@@ -163,7 +176,7 @@ export class AskUserCard extends LitElement {
                 .disabled=${this.submitting}
                 editorLabel="Custom answer"
                 .onChange=${(snapshot: ComposerDraftSubmitSnapshot) => { this.changeOtherSnapshot(question, snapshot); }}
-                .onDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.changeOtherDisplayState(question, display); }}
+                .onDisplayStateChange=${(source: AskUserTextComposer, display: ComposerDraftDisplayState) => { this.changeOtherDisplayState(question, source, display); }}
               ></ask-user-text-composer>
             </div>
           ` : null}
@@ -185,8 +198,8 @@ export class AskUserCard extends LitElement {
         </p>
         <div class="confirmation-actions">
           <button class="secondary-action" type="button" @click=${() => { this.keepEditing(ask, unanswered); }}>Keep editing</button>
-          <button class="primary-action send-anyway" type="button" ?disabled=${this.submitting || this.attachmentCaptureQuestionIds.size > 0} @click=${() => { this.submitAnswers(ask); }}>
-            ${this.attachmentCaptureQuestionIds.size > 0 ? "Attaching…" : this.submitting ? "Sending…" : "Send anyway"}
+          <button class="primary-action send-anyway" type="button" ?disabled=${this.submitting || this.attachmentCapturePending() || this.answerAttachmentCount() > MAX_PROMPT_ATTACHMENTS} @click=${() => { this.submitAnswers(ask); }}>
+            ${this.attachmentCapturePending() ? "Attaching…" : this.submitting ? "Sending…" : "Send anyway"}
           </button>
         </div>
       </div>
@@ -244,7 +257,7 @@ export class AskUserCard extends LitElement {
     if (!(input instanceof HTMLInputElement)) return;
     if (question.multiple !== true) {
       if (input.checked) {
-        this.clearAttachmentCapturePending(question.id);
+        this.clearAnswerComposerDisplay(question.id);
         this.setAnswer(question, { values: [value] });
       }
       return;
@@ -265,7 +278,7 @@ export class AskUserCard extends LitElement {
     if (!(input instanceof HTMLInputElement)) return;
     const current = this.answers[question.id];
     if (question.multiple === true) {
-      if (!input.checked) this.clearAttachmentCapturePending(question.id);
+      if (!input.checked) this.clearAnswerComposerDisplay(question.id);
       this.setAnswer(question, {
         values: [...(current?.values ?? [])],
         ...(input.checked ? { otherText: current?.otherText ?? "" } : {}),
@@ -290,20 +303,26 @@ export class AskUserCard extends LitElement {
     });
   }
 
-  private changeOtherDisplayState(question: AskUserQuestion, display: ComposerDraftDisplayState): void {
-    const wasPending = this.attachmentCaptureQuestionIds.has(question.id);
-    if (wasPending === display.attachmentCapturePending) return;
-    const next = new Set(this.attachmentCaptureQuestionIds);
-    if (display.attachmentCapturePending) next.add(question.id);
-    else next.delete(question.id);
-    this.attachmentCaptureQuestionIds = next;
+  private changeOtherDisplayState(question: AskUserQuestion, source: AskUserTextComposer, display: ComposerDraftDisplayState): void {
+    if (!source.isConnected) return;
+    const next = new Map(this.answerComposerDisplays);
+    next.set(question.id, { source, state: display });
+    this.answerComposerDisplays = next;
   }
 
-  private clearAttachmentCapturePending(questionId: string): void {
-    if (!this.attachmentCaptureQuestionIds.has(questionId)) return;
-    const next = new Set(this.attachmentCaptureQuestionIds);
+  private clearAnswerComposerDisplay(questionId: string): void {
+    if (!this.answerComposerDisplays.has(questionId)) return;
+    const next = new Map(this.answerComposerDisplays);
     next.delete(questionId);
-    this.attachmentCaptureQuestionIds = next;
+    this.answerComposerDisplays = next;
+  }
+
+  private attachmentCapturePending(): boolean {
+    return [...this.answerComposerDisplays.values()].some(({ state }) => state.attachmentCapturePending);
+  }
+
+  private answerAttachmentCount(): number {
+    return [...this.answerComposerDisplays.values()].reduce((total, { state }) => total + state.attachmentCount, 0);
   }
 
   private answerSnapshot(answer: AskDraftAnswer | undefined): ComposerDraftSubmitSnapshot {
@@ -326,7 +345,7 @@ export class AskUserCard extends LitElement {
 
   private handleSubmit(event: SubmitEvent, ask: PendingAskUser): void {
     event.preventDefault();
-    if (this.submitting || this.attachmentCaptureQuestionIds.size > 0) return;
+    if (this.submissionBlocked()) return;
     if (unansweredQuestions(ask.questions, this.answers).length > 0) {
       void this.showPartialSubmitConfirmation();
       return;
@@ -335,7 +354,7 @@ export class AskUserCard extends LitElement {
   }
 
   private submitAnswers(ask: PendingAskUser): void {
-    if (this.submitting || this.attachmentCaptureQuestionIds.size > 0) return;
+    if (this.submissionBlocked()) return;
     this.submitting = true;
     const callback = this.onSubmit;
     if (callback === undefined) {
@@ -352,6 +371,10 @@ export class AskUserCard extends LitElement {
       .finally(() => {
         if (this.ask?.askId === askId) this.submitting = false;
       });
+  }
+
+  private submissionBlocked(): boolean {
+    return this.submitting || this.attachmentCapturePending() || this.answerAttachmentCount() > MAX_PROMPT_ATTACHMENTS;
   }
 
   private async showPartialSubmitConfirmation(): Promise<void> {
@@ -549,6 +572,7 @@ export class AskUserCard extends LitElement {
       font: inherit;
       cursor: pointer;
     }
+    .attachment-limit { min-width: 0; margin: 0 auto 0 0; color: var(--pi-danger); font-size: var(--pi-text-sm); line-height: 1.4; }
     button:hover:not(:disabled) { background: var(--pi-surface-hover); }
     button:disabled { cursor: wait; opacity: .65; }
     .primary-action { border-color: var(--pi-accent); background: var(--pi-accent); color: var(--pi-bg, #111214); font-weight: 650; }

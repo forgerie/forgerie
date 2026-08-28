@@ -1,5 +1,6 @@
 import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type MessagePage, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
 import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type NewSessionAgentChoices } from "../../../shared/apiTypes";
+import { MAX_PROMPT_ATTACHMENTS } from "../../../shared/promptAttachments";
 import type { AppState, ClosedExtensionDialog } from "../appState";
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
 import { normalizeMessages, textMessage } from "../chatMessages";
@@ -1696,6 +1697,7 @@ export class SessionController {
 
   private async prepareAskSubmission(session: SessionInfo, machineId: string, submission: AskDraftSubmission): Promise<AskUserSubmission> {
     const attachments = submission.answers.flatMap((answer) => answer.attachments ?? []);
+    if (attachments.length > MAX_PROMPT_ATTACHMENTS) throw new Error(`Ask answers can include up to ${String(MAX_PROMPT_ATTACHMENTS)} files`);
     const saved = attachments.length === 0 ? [] : await this.api.saveAttachments(session, attachments, machineId);
     if (saved.length !== attachments.length) throw new Error("Attachment save returned an unexpected file count");
 

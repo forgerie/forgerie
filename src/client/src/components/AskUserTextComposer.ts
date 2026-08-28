@@ -15,7 +15,7 @@ export class AskUserTextComposer extends LitElement {
   @property() machineId = "local";
   @property({ attribute: false }) dictation?: ComposerDictationCapability;
   @property({ attribute: false }) onChange?: (snapshot: ComposerDraftSubmitSnapshot) => void;
-  @property({ attribute: false }) onDisplayStateChange?: (state: ComposerDraftDisplayState) => void;
+  @property({ attribute: false }) onDisplayStateChange?: (source: AskUserTextComposer, state: ComposerDraftDisplayState) => void;
   @property({ type: Boolean }) disabled = false;
   @property() editorLabel = "Custom answer";
 
@@ -47,7 +47,7 @@ export class AskUserTextComposer extends LitElement {
         placeholderText="Type an answer…"
         .editorLabel=${this.editorLabel}
         .onDraftEdited=${() => { this.publishSnapshot(); }}
-        .onDraftDisplayStateChange=${this.onDisplayStateChange}
+        .onDraftDisplayStateChange=${(state: ComposerDraftDisplayState) => { this.onDisplayStateChange?.(this, state); }}
         .onDraftSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.retainSnapshot(snapshot)}
       ></prompt-editor>
     `;

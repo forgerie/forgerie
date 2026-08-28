@@ -216,6 +216,45 @@ describe("SessionController ask submission", () => {
     ]);
   });
 
+  it("rejects more attachments than one rollback-safe ask batch can carry", async () => {
+    const attachments: PromptAttachment[] = Array.from({ length: 17 }, (_, index) => ({
+      kind: "file",
+      mimeType: "text/plain",
+      data: "QQ==",
+      name: `file-${String(index)}.txt`,
+    }));
+    let saveCalled = false;
+    let submitCalled = false;
+    let state = selectedSessionState({ pendingAsk: ask("ask-1") });
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      saveAttachments: (_session, sent) => {
+        saveCalled = true;
+        return Promise.resolve(sent.map((attachment, index) => ({ path: `.forgerie/attachments/${attachment.name ?? String(index)}`, mimeType: attachment.mimeType, size: 1 })));
+      },
+      submitAsk: () => {
+        submitCalled = true;
+        return Promise.resolve(closeResponse(status(oldSession.id)));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.submitAsk("ask-1", {
+      answers: [{ id: "q1", values: [], attachments }],
+    });
+
+    expect(saveCalled).toBe(false);
+    expect(submitCalled).toBe(false);
+    expect(state.pendingAsk?.askId).toBe("ask-1");
+    expect(state.error).toContain("up to 16 files");
+  });
+
   it("keeps the ask open when the attachment response cannot be partitioned safely", async () => {
     const attachment: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
     let submitCalled = false;

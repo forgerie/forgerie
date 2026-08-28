@@ -155,6 +155,89 @@ describe("ask-user-card live form", () => {
     });
   });
 
+  it("ignores a detached editor finishing after a replacement editor starts another attachment", async () => {
+    const card = await mountOpenAsk(openAsk([
+      question("stack", "Pick the stack", [option("lit", "Lit")], { multiple: true }),
+    ]));
+    const root = renderRoot(card);
+    inputWithValue(root, "__pi_web_other__").click();
+    await card.updateComplete;
+    const oldDraft = await customAnswerDraft(root);
+    const finishOldRead = startPendingAttachment(oldDraft, new File(["old"], "old.txt", { type: "text/plain" }));
+
+    inputWithValue(root, "__pi_web_other__").click();
+    await card.updateComplete;
+    inputWithValue(root, "__pi_web_other__").click();
+    await card.updateComplete;
+    const replacementDraft = await customAnswerDraft(root);
+    expect(replacementDraft).not.toBe(oldDraft);
+    const finishReplacementRead = startPendingAttachment(replacementDraft, new File(["new"], "new.txt", { type: "text/plain" }));
+
+    finishOldRead();
+    await Promise.resolve();
+    expect(buttonWithText(root, "Attaching…").disabled).toBe(true);
+
+    finishReplacementRead();
+    await vi.waitFor(() => {
+      expect(buttonWithText(root, "Send answers").disabled).toBe(false);
+    });
+  });
+
+  it("blocks partial submission while an attachment is still being read", async () => {
+    const onSubmit = vi.fn<AskUserSubmitCallback>();
+    const card = await mountOpenAsk(openAsk([
+      question("notes", "Anything else?", []),
+      question("deploy", "Choose a deployment target", [option("cloud", "Cloud")]),
+    ]), onSubmit);
+    const root = renderRoot(card);
+    const draft = await customAnswerDraft(root);
+    setComposerText(draft, "Supporting context");
+    await card.updateComplete;
+    buttonWithText(root, "Send answers").click();
+    await card.updateComplete;
+
+    const finishRead = startPendingAttachment(draft, new File(["ship"], "notes.txt", { type: "text/plain" }));
+    await vi.waitFor(() => {
+      expect(buttonWithText(root, "Attaching…").disabled).toBe(true);
+    });
+    buttonWithText(root, "Attaching…").click();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    finishRead();
+    await vi.waitFor(() => {
+      expect(buttonWithText(root, "Send answers").disabled).toBe(false);
+    });
+    buttonWithText(root, "Send answers").click();
+    await card.updateComplete;
+    buttonWithText(root, "Send anyway").click();
+    await Promise.resolve();
+
+    expect(onSubmit).toHaveBeenCalledWith("ask-1", {
+      answers: [{
+        id: "notes",
+        values: [],
+        otherText: "Supporting context",
+        attachments: [{ kind: "file", mimeType: "text/plain", data: "c2hpcA==", name: "notes.txt" }],
+      }],
+    });
+  });
+
+  it("shows the aggregate attachment limit before submission", async () => {
+    const card = await mountOpenAsk(openAsk([
+      question("first", "First answer", []),
+      question("second", "Second answer", []),
+    ]));
+    const root = renderRoot(card);
+    const drafts = await customAnswerDrafts(root);
+
+    await attachFiles(drafts[0], Array.from({ length: 9 }, (_, index) => new File(["a"], `first-${String(index)}.txt`, { type: "text/plain" })));
+    await attachFiles(drafts[1], Array.from({ length: 9 }, (_, index) => new File(["b"], `second-${String(index)}.txt`, { type: "text/plain" })));
+    await card.updateComplete;
+
+    expect(root.querySelector(".attachment-limit")?.textContent).toContain("Remove 2 files");
+    expect(buttonWithText(root, "Send answers").disabled).toBe(true);
+  });
+
   it("shows and submits the rich answer editor directly when no options were supplied", async () => {
     const onSubmit = vi.fn<AskUserSubmitCallback>();
     const card = await mountOpenAsk(openAsk([
@@ -278,10 +361,29 @@ function setComposerText(draft: ComposerDraft, text: string): void {
 }
 
 async function attachFile(draft: ComposerDraft, file: File): Promise<void> {
-  const input = requiredElement(draft.querySelector<HTMLInputElement>(".attachment-input"), "attachment input");
-  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  await attachFiles(draft, [file]);
+}
+
+async function attachFiles(draft: ComposerDraft | undefined, files: File[]): Promise<void> {
+  const found = requiredElement(draft, "shared rich editor");
+  const input = requiredElement(found.querySelector<HTMLInputElement>(".attachment-input"), "attachment input");
+  Object.defineProperty(input, "files", { configurable: true, value: files });
   input.dispatchEvent(new Event("change"));
-  await vi.waitFor(() => { expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1); });
+  await vi.waitFor(() => { expect(found.querySelectorAll(".attachment-chip")).toHaveLength(files.length); });
+}
+
+async function customAnswerDraft(root: ShadowRoot): Promise<ComposerDraft> {
+  return requiredElement((await customAnswerDrafts(root))[0], "custom answer draft");
+}
+
+async function customAnswerDrafts(root: ShadowRoot): Promise<ComposerDraft[]> {
+  const composers = [...root.querySelectorAll<AskUserTextComposer>("ask-user-text-composer")];
+  await Promise.all(composers.map((composer) => composer.updateComplete));
+  const editors = composers.map((composer) => requiredElement(composer.shadowRoot?.querySelector<PromptEditor>("prompt-editor"), "shared prompt editor"));
+  await Promise.all(editors.map((editor) => editor.updateComplete));
+  const drafts = editors.map((editor) => requiredElement(editor.shadowRoot?.querySelector<ComposerDraft>("composer-draft"), "shared rich editor"));
+  await Promise.all(drafts.map((draft) => draft.updateComplete));
+  return drafts;
 }
 
 function startPendingAttachment(draft: ComposerDraft, file: File): () => void {
