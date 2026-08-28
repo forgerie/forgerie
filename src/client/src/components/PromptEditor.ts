@@ -63,6 +63,8 @@ export class PromptEditor extends LitElement {
   @property({ attribute: false }) capabilities: ComposerCapabilities = {};
   /** Supplied by a pre-session host; the session surface builds its own. */
   @property({ attribute: false }) composerRuntime?: ComposerRuntime;
+  /** A transient host can supply the surface its completion menu may cover. */
+  @property({ attribute: false }) completionBoundary?: HTMLElement;
   /** `null` gives an embedded editor no independent draft record. */
   @property({ attribute: false }) draftStorageKeyOverride?: string | null;
   @property() placeholderText?: string;
@@ -235,6 +237,7 @@ export class PromptEditor extends LitElement {
           .working=${rail.kind === "queueCapable"}
           .resting=${resting}
           .runtime=${this.runtime()}
+          .completionBoundary=${this.completionBoundary}
           .promptHistory=${this.promptHistory}
           .storageKey=${this.draftStorageKey()}
           .forcedAttachmentDelivery=${this.forcedAttachmentDelivery}

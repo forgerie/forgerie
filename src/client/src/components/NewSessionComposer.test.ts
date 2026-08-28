@@ -898,6 +898,13 @@ describe("new-session-composer presentation contracts", () => {
     expect(styles).toContain("composer-draft { display: block; min-width: 0;");
     expect(styles).not.toContain("textarea { box-sizing: border-box; width: 100%; min-height");
   });
+
+  it("gives the shared composer the full transient surface as its completion boundary", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+
+    expect(promptEditor(composer).completionBoundary).toBe(composer);
+  });
 });
 
 describe("new-session-composer modal lifetime", () => {

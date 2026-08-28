@@ -165,6 +165,7 @@ export class NewSessionComposer extends LitElement {
               .editorLabel=${"First prompt"}
               .placeholderText=${this.placeholderForState(state)}
               .composerRuntime=${this.runtime}
+              .completionBoundary=${this}
               .machineId=${destination?.machine.id ?? "local"}
               .cwd=${destination?.workspace.path}
               .projectId=${destination?.project.id}

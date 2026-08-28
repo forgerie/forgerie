@@ -73,6 +73,8 @@ export class ComposerDraft extends LitElement {
   @property() placeholderText = DEFAULT_COMPOSER_PLACEHOLDER;
   @property() editorLabel = DEFAULT_COMPOSER_EDITOR_LABEL;
   @property({ attribute: false }) runtime?: ComposerRuntime;
+  /** The visible surface that an upward-opening completion menu must stay inside. */
+  @property({ attribute: false }) completionBoundary?: HTMLElement;
   @property({ attribute: false }) promptHistory: readonly string[] = [];
   @property() storageKey?: string;
   /** A host can require one honest delivery path when its transport cannot carry inline images. */
@@ -1004,7 +1006,7 @@ export class ComposerDraft extends LitElement {
   private completionMenuBlockSize(): number | undefined {
     const editorHost = this.editorHost;
     if (editorHost === undefined || this.completions.length === 0) return undefined;
-    const boundary = completionMenuBoundary(this) ?? this.parentElement;
+    const boundary = this.completionBoundary ?? completionMenuBoundary(this) ?? this.parentElement;
     if (!(boundary instanceof HTMLElement)) return undefined;
     const boundaryRect = boundary.getBoundingClientRect();
     const editorRect = editorHost.getBoundingClientRect();

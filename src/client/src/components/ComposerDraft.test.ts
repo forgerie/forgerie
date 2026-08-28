@@ -563,6 +563,31 @@ describe("ComposerDraft", () => {
     expect(menu(draft)?.style.getPropertyValue("--composer-completion-menu-max-block-size")).toBe("660px");
   });
 
+  it("uses an explicit transient-surface boundary instead of a small local composer wrapper", async () => {
+    const viewport = document.createElement("section");
+    const composer = document.createElement("div");
+    composer.className = "composer";
+    viewport.append(composer);
+    document.body.append(viewport);
+    const draft = await mountDraft({
+      host: composer,
+      runtime: runtimeWith(({ kind, from, to }) => kind === "command"
+        ? Array.from({ length: 12 }, (_, index) => ({ kind: "command", replaceFrom: from, replaceTo: to, insertText: `/command-${String(index + 1)}`, detail: "skill" }))
+        : []),
+    });
+    draft.completionBoundary = viewport;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 932, 553));
+    vi.spyOn(composer, "getBoundingClientRect").mockReturnValue(new DOMRect(130, 212.5, 672, 128));
+    const editorHost = draft.querySelector<HTMLElement>(".markdown-editor");
+    if (editorHost === null) throw new Error("Expected markdown editor host");
+    vi.spyOn(editorHost, "getBoundingClientRect").mockReturnValue(new DOMRect(169, 223.5, 594, 54));
+
+    setEditorText(draft, "/");
+    await waitForMenuItems(draft, 12);
+
+    expect(menu(draft)?.style.getPropertyValue("--composer-completion-menu-max-block-size")).toBe("215px");
+  });
+
   it("keeps completion navigation ahead of prompt history and updates combobox state", async () => {
     const draft = await mountDraft({
       promptHistory: ["previous"],
