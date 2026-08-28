@@ -10,6 +10,7 @@ import { createInboxLocationResolver } from "../inboxLocation";
 import { completeNewSessionDestination, createApiNewSessionDestinationCatalog, isNewSessionMachineAvailable, type NewSessionCompleteDestination, type NewSessionDestinationCatalog, type NewSessionLaunchIntent, type NewSessionLaunchMode, type NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { sessionPathsEqual } from "../sessionPaths";
 import { isSessionActive } from "../../../shared/activity";
+import { KEYBOARD_SHORTCUT_CONTEXTS } from "../../../shared/shortcutContexts";
 import { PI_WEB_CAPABILITIES, supportsPiWebCapability } from "../../../shared/capabilities";
 import type { ManagedProcessesSnapshot } from "../../../shared/apiTypes";
 import { ActivityController } from "../controllers/activityController";
@@ -337,7 +338,7 @@ export class PiWebApp extends LitElement {
    * peek, a hold is a wheel, and the peek's still-timer gives up at exactly the
    * moment this one arms.
    */
-  /** Whether the wheel's dictate bearing has been released and not yet dismissed. */
+  /** Whether the voice composer has been asked for and not yet dismissed. */
   @state() private voiceComposerOpen = false;
 
   private readonly radialMenu = new RadialMenuController(this, {
@@ -2388,7 +2389,7 @@ export class PiWebApp extends LitElement {
   }
 
   /**
-   * The wheel's one bearing, once released.
+   * The wheel's one bearing, once released, and what Ctrl+Alt+Enter opens.
    *
    * Keyed on the session so switching destinations tears the dialog down
    * rather than quietly re-pointing a live microphone at somewhere else.
@@ -2718,6 +2719,29 @@ export class PiWebApp extends LitElement {
         group: "Session",
         enabled: this.state.mainView === "chat" && this.promptEditor?.canToggleDictation() === true,
         run: () => { this.promptEditor?.toggleDictation(); },
+      },
+      {
+        /**
+         * One key into a live microphone.
+         *
+         * The wheel's west bearing is a thumb gesture, so a keyboard had no
+         * way to reach the same dialog. This is declared in every context on
+         * purpose: the moment worth catching is the one where a reader is
+         * already typing and decides to talk instead, and a binding that only
+         * worked from the workbench would miss exactly that moment.
+         *
+         * The dialog opens already listening, so this key is the whole
+         * gesture. It needs a session to speak to, and nothing else.
+         */
+        id: "app.session.speak",
+        title: "Speak to Session",
+        description: "Open the voice composer with the microphone already listening",
+        shortcut: "ctrl+alt+enter",
+        shortcutContexts: KEYBOARD_SHORTCUT_CONTEXTS,
+        repeatable: false,
+        group: "Session",
+        enabled: this.state.selectedSession !== undefined,
+        run: () => { this.voiceComposerOpen = true; },
       },
       {
         id: "app.sessions.cleanup",

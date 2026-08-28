@@ -57,6 +57,8 @@ Speech uses fixed limits. Audio is 16 kHz mono float32 PCM, with a 60-second max
 
 In active-session and new-session composers, tap the microphone once to start and again to transcribe. A held press listens until release. The **Toggle Speech Dictation** action has no default shortcut, but you can assign one in **Settings → Keyboard**. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
 
+`Ctrl+Alt+Enter` opens the voice composer for the selected session. The microphone is already listening when it opens. The shortcut works while you type in the composer and while a terminal has the keyboard. Use the left Alt key: Forgerie ignores Ctrl+Alt chords that carry AltGr, so that international text input is never read as a shortcut.
+
 ## Precedence and reloads
 
 Machine-global runtime values are resolved as:
@@ -431,6 +433,7 @@ The browser keeps control of some shortcuts and does not deliver them to the pag
 | Go to Terminal | `core:view.terminal` | <code>Ctrl+&#96;</code> |
 | New session | `core:session.start` | `Ctrl+Enter` |
 | New Rapidfire session | `core:session.start-rapidfire` | `Ctrl+Shift+Enter` |
+| Speak to Session | `app.session.speak` | `Ctrl+Alt+Enter` |
 
 The keymap follows VS Code command meanings where those commands exist in Forgerie. It uses Ctrl on every operating system. Command and GUI keys do not run Forgerie shortcuts. The `Ctrl+K Ctrl+S` sequence starts only from the workbench, so `Ctrl+K` remains available to the composer and terminal.
 

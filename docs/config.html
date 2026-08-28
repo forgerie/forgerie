@@ -221,6 +221,12 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
                 microphone hardware, model failures, status failures, and timeouts release the microphone and keep
                 existing draft text unchanged.
               </p>
+              <p>
+                <code>Ctrl+Alt+Enter</code> opens the voice composer for the selected session. The microphone is
+                already listening when it opens. The shortcut works while you type in the composer and while a terminal
+                has the keyboard. Use the left Alt key: Forgerie ignores Ctrl+Alt chords that carry AltGr, so that
+                international text input is never read as a shortcut.
+              </p>
             </section>
 
             <section id="precedence">
@@ -1087,6 +1093,7 @@ worktree_path="$1"
                     <tr><td>Go to Terminal</td><td><code>core:view.terminal</code></td><td><code>Ctrl+&#96;</code></td></tr>
                     <tr><td>New session</td><td><code>core:session.start</code></td><td><code>Ctrl+Enter</code></td></tr>
                     <tr><td>New Rapidfire session</td><td><code>core:session.start-rapidfire</code></td><td><code>Ctrl+Shift+Enter</code></td></tr>
+                    <tr><td>Speak to Session</td><td><code>app.session.speak</code></td><td><code>Ctrl+Alt+Enter</code></td></tr>
                   </tbody>
                 </table>
               </div>
