@@ -20,6 +20,36 @@ export const MAX_INLINE_IMAGE_BASE64_BYTES = Math.round(4.5 * 1024 * 1024);
 /** Maximum number of attachments allowed on a single prompt. */
 export const MAX_PROMPT_ATTACHMENTS = 16;
 
+/** Workspace-relative folder used for saved prompt attachments. */
+export const DEFAULT_SAVED_ATTACHMENT_FOLDER = ".forgerie/attachments";
+
+/** Long names are truncated before the saved attachment prefix is added. */
+export const MAX_SAVED_ATTACHMENT_ORIGINAL_NAME_LENGTH = 96;
+
+/** The collision-safe writer tries the base name, then suffixes through `-100`. */
+export const MAX_SAVED_ATTACHMENT_COLLISION_ATTEMPTS = 100;
+
+const savedAttachmentTimestampLength = "YYYYMMDD-HHmmss-SSS".length;
+const maxSavedAttachmentIndexLength = String(MAX_PROMPT_ATTACHMENTS).length;
+const maxSavedAttachmentCollisionSuffixLength = `-${String(MAX_SAVED_ATTACHMENT_COLLISION_ATTEMPTS)}`.length;
+const maxSavedAttachmentFilenameLength = "attachment-".length
+  + savedAttachmentTimestampLength
+  + 1
+  + maxSavedAttachmentIndexLength
+  + 1
+  + MAX_SAVED_ATTACHMENT_ORIGINAL_NAME_LENGTH
+  + maxSavedAttachmentCollisionSuffixLength;
+
+/** Hard bound enforced by the workspace writer and used for pre-save text budgeting. */
+export const MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH = DEFAULT_SAVED_ATTACHMENT_FOLDER.length + 1 + maxSavedAttachmentFilenameLength;
+
+/** Maximum text used by `@path` references separated with one space. */
+export function maximumSavedAttachmentReferencesLength(attachmentCount: number): number {
+  if (attachmentCount <= 0) return 0;
+  const referenceLength = 1 + MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH;
+  return attachmentCount * referenceLength + attachmentCount - 1;
+}
+
 export function isSupportedImageMimeType(value: unknown): value is SupportedImageMimeType {
   return typeof value === "string" && supportedImageMimeTypes.has(value);
 }

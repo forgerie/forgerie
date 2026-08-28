@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { base64ByteLength, extensionForImageMimeType, isSupportedImageMimeType, MAX_INLINE_IMAGE_BASE64_BYTES, parsePromptAttachments } from "./promptAttachments.js";
+import { base64ByteLength, extensionForImageMimeType, isSupportedImageMimeType, MAX_INLINE_IMAGE_BASE64_BYTES, MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH, maximumSavedAttachmentReferencesLength, parsePromptAttachments } from "./promptAttachments.js";
 
 const validImageBase64 = "QUJD";
 
@@ -34,6 +34,15 @@ describe("base64ByteLength", () => {
     expect(base64ByteLength("QQ==")).toBe(1);
     expect(base64ByteLength("QUI=")).toBe(2);
     expect(base64ByteLength("QUJD")).toBe(3);
+  });
+});
+
+describe("saved attachment reference budget", () => {
+  it("bounds generated paths and the text needed to mention a batch", () => {
+    expect(MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH).toBe(156);
+    expect(maximumSavedAttachmentReferencesLength(0)).toBe(0);
+    expect(maximumSavedAttachmentReferencesLength(1)).toBe(157);
+    expect(maximumSavedAttachmentReferencesLength(16)).toBe(2_527);
   });
 });
 

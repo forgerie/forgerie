@@ -3,14 +3,14 @@ import { basename, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { formatDimensionNote, resizeImage } from "@earendil-works/pi-coding-agent";
 import type { PromptAttachment, PromptImageAttachment, SavedPromptAttachment } from "../../shared/apiTypes.js";
-import { extensionForImageMimeType } from "../../shared/promptAttachments.js";
+import { DEFAULT_SAVED_ATTACHMENT_FOLDER, extensionForImageMimeType, MAX_SAVED_ATTACHMENT_COLLISION_ATTEMPTS, MAX_SAVED_ATTACHMENT_ORIGINAL_NAME_LENGTH, MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH } from "../../shared/promptAttachments.js";
 import { ensureInside, isNodeErrorWithCode, resolveParentInsideWorkspace } from "../workspaces/pathSafety.js";
 
 /**
  * Default workspace-relative folder used when saving pasted/dropped
  * attachments for the agent to read with its own tools.
  */
-export const DEFAULT_ATTACHMENT_FOLDER = ".forgerie/attachments";
+export const DEFAULT_ATTACHMENT_FOLDER = DEFAULT_SAVED_ATTACHMENT_FOLDER;
 
 export interface InlineImage {
   image: ImageContent;
@@ -81,6 +81,9 @@ export async function saveAttachmentsToWorkspace(
       const filename = await writeUniqueAttachmentFile(folderTarget, attachmentFilename(attachment, stamp, index), bytes, fileWriter);
       writtenPaths.push(join(folderTarget, filename));
       const relativePath = normalizedFolder === "" ? filename : `${normalizedFolder}/${filename}`;
+      if (folder === DEFAULT_ATTACHMENT_FOLDER && relativePath.length > MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH) {
+        throw new Error("Saved attachment path exceeded its declared length bound");
+      }
       saved.push({ path: relativePath, mimeType: attachment.mimeType, size: bytes.byteLength });
     }
     return saved;
@@ -91,7 +94,7 @@ export async function saveAttachmentsToWorkspace(
 }
 
 async function writeUniqueAttachmentFile(folderTarget: string, filename: string, bytes: Buffer, fileWriter: AttachmentFileWriter): Promise<string> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < MAX_SAVED_ATTACHMENT_COLLISION_ATTEMPTS; attempt += 1) {
     const candidate = attempt === 0 ? filename : addCollisionSuffix(filename, attempt + 1);
     try {
       await fileWriter(join(folderTarget, candidate), bytes, { flag: "wx" });
@@ -119,8 +122,6 @@ function fallbackAttachmentFilename(attachment: PromptAttachment): string {
   return "file.bin";
 }
 
-const MAX_ORIGINAL_FILENAME_LENGTH = 96;
-
 function sanitizeOriginalFilename(name: string | undefined): string | undefined {
   const trimmed = name?.trim();
   if (trimmed === undefined || trimmed === "") return undefined;
@@ -133,7 +134,7 @@ function sanitizeOriginalFilename(name: string | undefined): string | undefined 
     .replace(/^\.+/, "")
     .replace(/[.-]+$/, "");
   if (sanitized === "") return undefined;
-  return truncateFilename(sanitized, MAX_ORIGINAL_FILENAME_LENGTH);
+  return truncateFilename(sanitized, MAX_SAVED_ATTACHMENT_ORIGINAL_NAME_LENGTH);
 }
 
 function stripControlCharacters(value: string): string {

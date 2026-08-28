@@ -8,7 +8,7 @@ import {
   type AskUserQuestionRecord,
   type PendingAskUser,
 } from "../../../shared/apiTypes";
-import { MAX_PROMPT_ATTACHMENTS } from "../../../shared/promptAttachments";
+import { MAX_PROMPT_ATTACHMENTS, maximumSavedAttachmentReferencesLength } from "../../../shared/promptAttachments";
 import {
   answeredCount,
   loadAskDraft,
@@ -122,7 +122,8 @@ export class AskUserCard extends LitElement {
     const answered = answeredCount([question], this.answers) === 1;
     const freeTextOnly = question.options.length === 0;
     const detailId = question.detail === undefined ? undefined : this.questionDetailId(index);
-    const customTextExcess = Math.max(0, (answer?.otherText?.trim().length ?? 0) - ASK_USER_OTHER_TEXT_MAX_LENGTH);
+    const customTextLimit = this.answerTextLimit(answer);
+    const customTextExcess = this.answerTextExcess(answer);
     const answerLimitId = customTextExcess === 0 ? undefined : this.answerLimitId(index);
     const describedBy = [detailId, answerLimitId].filter((id): id is string => id !== undefined).join(" ") || undefined;
     const customSelected = freeTextOnly || this.isOtherSelected(question, answer);
@@ -184,7 +185,7 @@ export class AskUserCard extends LitElement {
               ></ask-user-text-composer>
               ${customTextExcess === 0 ? null : html`
                 <p class="answer-limit" id=${answerLimitId} role="alert">
-                  Custom answer is ${customTextExcess} ${customTextExcess === 1 ? "character" : "characters"} over the ${ASK_USER_OTHER_TEXT_MAX_LENGTH.toLocaleString()}-character limit.
+                  Custom answer is ${customTextExcess} ${customTextExcess === 1 ? "character" : "characters"} over the ${customTextLimit.toLocaleString()}-character limit${(answer?.attachments?.length ?? 0) === 0 ? "." : " with its attached files."}
                 </p>
               `}
             </div>
@@ -390,7 +391,18 @@ export class AskUserCard extends LitElement {
   }
 
   private answerTextLimitExceeded(): boolean {
-    return Object.values(this.answers).some((answer) => (answer.otherText?.trim().length ?? 0) > ASK_USER_OTHER_TEXT_MAX_LENGTH);
+    return Object.values(this.answers).some((answer) => this.answerTextExcess(answer) > 0);
+  }
+
+  private answerTextExcess(answer: AskDraftAnswer | undefined): number {
+    return Math.max(0, (answer?.otherText?.trim().length ?? 0) - this.answerTextLimit(answer));
+  }
+
+  private answerTextLimit(answer: AskDraftAnswer | undefined): number {
+    const attachmentCount = answer?.attachments?.length ?? 0;
+    const referencesLength = maximumSavedAttachmentReferencesLength(attachmentCount);
+    const separatorLength = (answer?.otherText?.trim().length ?? 0) === 0 || attachmentCount === 0 ? 0 : 2;
+    return Math.max(0, ASK_USER_OTHER_TEXT_MAX_LENGTH - referencesLength - separatorLength);
   }
 
   private async showPartialSubmitConfirmation(): Promise<void> {

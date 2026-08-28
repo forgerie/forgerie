@@ -1,6 +1,6 @@
 import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type MessagePage, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
 import { ASK_USER_OTHER_TEXT_MAX_LENGTH, type NewSessionAgentChoices } from "../../../shared/apiTypes";
-import { MAX_PROMPT_ATTACHMENTS } from "../../../shared/promptAttachments";
+import { MAX_PROMPT_ATTACHMENTS, maximumSavedAttachmentReferencesLength } from "../../../shared/promptAttachments";
 import type { AppState, ClosedExtensionDialog } from "../appState";
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
 import { normalizeMessages, textMessage } from "../chatMessages";
@@ -1698,6 +1698,7 @@ export class SessionController {
   private async prepareAskSubmission(session: SessionInfo, machineId: string, submission: AskDraftSubmission): Promise<AskUserSubmission> {
     const attachments = submission.answers.flatMap((answer) => answer.attachments ?? []);
     if (attachments.length > MAX_PROMPT_ATTACHMENTS) throw new Error(`Ask answers can include up to ${String(MAX_PROMPT_ATTACHMENTS)} files`);
+    this.validateAskSubmissionTextBudgets(submission);
     const saved = attachments.length === 0 ? [] : await this.api.saveAttachments(session, attachments, machineId);
     if (saved.length !== attachments.length) throw new Error("Attachment save returned an unexpected file count");
 
@@ -1722,6 +1723,22 @@ export class SessionController {
       answers.push({ ...wireAnswer, otherText: appendSavedAttachmentReferences(text, paths) });
     }
     return { answers };
+  }
+
+  private validateAskSubmissionTextBudgets(submission: AskDraftSubmission): void {
+    for (const answer of submission.answers) {
+      const attachmentCount = answer.attachments?.length ?? 0;
+      const text = answer.otherText?.trim() ?? "";
+      const referencesLength = maximumSavedAttachmentReferencesLength(attachmentCount);
+      const separatorLength = text === "" || attachmentCount === 0 ? 0 : 2;
+      const textBudget = ASK_USER_OTHER_TEXT_MAX_LENGTH - referencesLength - separatorLength;
+      if (text.length > textBudget) {
+        const message = attachmentCount === 0
+          ? `Custom answer exceeds the ${ASK_USER_OTHER_TEXT_MAX_LENGTH.toLocaleString()}-character limit`
+          : `Custom answer and attached file references exceed the ${ASK_USER_OTHER_TEXT_MAX_LENGTH.toLocaleString()}-character limit`;
+        throw new Error(message);
+      }
+    }
   }
 
   /** Close the session's open ask without answering it. */

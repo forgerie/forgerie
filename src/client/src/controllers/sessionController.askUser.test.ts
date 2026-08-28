@@ -192,13 +192,17 @@ describe("SessionController ask submission", () => {
     expect(state.error).toContain("4,000-character limit");
   });
 
-  it("rejects text that no longer fits after attachment references are added", async () => {
+  it("rejects text that cannot fit beside attachment references before saving files", async () => {
     const attachment: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
+    let saveCalled = false;
     let submitCalled = false;
     let state = selectedSessionState({ pendingAsk: ask("ask-1") });
     const api: typeof defaultApi = {
       ...defaultApi,
-      saveAttachments: () => Promise.resolve([{ path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 }]),
+      saveAttachments: () => {
+        saveCalled = true;
+        return Promise.resolve([{ path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 }]);
+      },
       submitAsk: () => {
         submitCalled = true;
         return Promise.resolve(closeResponse(status(oldSession.id)));
@@ -216,6 +220,7 @@ describe("SessionController ask submission", () => {
       answers: [{ id: "q1", values: [], otherText: "a".repeat(4_000), attachments: [attachment] }],
     });
 
+    expect(saveCalled).toBe(false);
     expect(submitCalled).toBe(false);
     expect(state.pendingAsk?.askId).toBe("ask-1");
     expect(state.error).toContain("attached file references exceed the 4,000-character limit");

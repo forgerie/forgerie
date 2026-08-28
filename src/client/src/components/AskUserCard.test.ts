@@ -149,6 +149,24 @@ describe("ask-user-card live form", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("shows the reduced text limit before saving attached files", async () => {
+    const onSubmit = vi.fn<AskUserSubmitCallback>();
+    const card = await mountOpenAsk(openAsk([
+      question("notes", "Anything else?", []),
+    ]), onSubmit);
+    const root = renderRoot(card);
+    const draft = await customAnswerDraft(root);
+
+    await attachFile(draft, new File(["ship"], "notes.txt", { type: "text/plain" }));
+    setComposerText(draft, "a".repeat(3_842));
+    await card.updateComplete;
+
+    expect(root.querySelector(".answer-limit")?.textContent).toContain("1 character over the 3,841-character limit with its attached files");
+    expect(buttonWithText(root, "Send answers").disabled).toBe(true);
+    buttonWithText(root, "Send answers").click();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("blocks submission while the rich editor is still reading an attachment", async () => {
     const onSubmit = vi.fn<AskUserSubmitCallback>();
     const card = await mountOpenAsk(openAsk([
