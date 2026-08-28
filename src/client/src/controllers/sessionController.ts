@@ -1695,20 +1695,27 @@ export class SessionController {
   }
 
   private async prepareAskSubmission(session: SessionInfo, machineId: string, submission: AskDraftSubmission): Promise<AskUserSubmission> {
+    const attachments = submission.answers.flatMap((answer) => answer.attachments ?? []);
+    const saved = attachments.length === 0 ? [] : await this.api.saveAttachments(session, attachments, machineId);
+    if (saved.length !== attachments.length) throw new Error("Attachment save returned an unexpected file count");
+
     const answers: AskUserSubmission["answers"] = [];
+    let savedOffset = 0;
     for (const answer of submission.answers) {
-      const { attachments, ...wireAnswer } = answer;
-      if (attachments === undefined || attachments.length === 0) {
+      const { attachments: answerAttachments, ...wireAnswer } = answer;
+      const attachmentCount = answerAttachments?.length ?? 0;
+      if (attachmentCount === 0) {
         answers.push(wireAnswer);
         continue;
       }
-      const saved = await this.api.saveAttachments(session, attachments, machineId);
-      const references = appendSavedAttachmentReferences("", saved.map((file) => file.path));
+      const paths = saved.slice(savedOffset, savedOffset + attachmentCount).map((file) => file.path);
+      savedOffset += attachmentCount;
+      const references = appendSavedAttachmentReferences("", paths);
       if (references.length > ASK_USER_OTHER_TEXT_MAX_LENGTH) throw new Error("Attached file references exceed the custom answer limit");
       const separatorLength = wireAnswer.otherText === undefined || wireAnswer.otherText.trim() === "" ? 0 : 2;
       const textBudget = ASK_USER_OTHER_TEXT_MAX_LENGTH - references.length - separatorLength;
       const text = wireAnswer.otherText?.trim().slice(0, Math.max(0, textBudget)) ?? "";
-      answers.push({ ...wireAnswer, otherText: appendSavedAttachmentReferences(text, saved.map((file) => file.path)) });
+      answers.push({ ...wireAnswer, otherText: appendSavedAttachmentReferences(text, paths) });
     }
     return { answers };
   }

@@ -19,7 +19,7 @@ import {
   type AskDraftSubmission,
 } from "../askDrafts";
 import type { ComposerDictationCapability } from "../composerCapabilities";
-import type { ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import type { ComposerDraftDisplayState, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./AskUserTextComposer";
 
 export type AskUserSubmitCallback = (askId: string, submission: AskDraftSubmission) => void | Promise<void>;
@@ -53,6 +53,7 @@ export class AskUserCard extends LitElement {
   @state() private answers: AskDraftAnswers = {};
   @state() private confirmingPartialSubmit = false;
   @state() private submitting = false;
+  @state() private attachmentCaptureQuestionIds: ReadonlySet<string> = new Set();
   private modelIdentity: string | undefined;
 
   protected override willUpdate(changed: PropertyValues<this>): void {
@@ -63,6 +64,7 @@ export class AskUserCard extends LitElement {
     this.answers = this.loadCurrentDraft();
     this.confirmingPartialSubmit = false;
     this.submitting = false;
+    this.attachmentCaptureQuestionIds = new Set();
   }
 
   override render(): TemplateResult | null {
@@ -74,6 +76,7 @@ export class AskUserCard extends LitElement {
   private renderOpenAsk(ask: PendingAskUser): TemplateResult {
     const count = answeredCount(ask.questions, this.answers);
     const unanswered = unansweredQuestions(ask.questions, this.answers);
+    const attachmentCapturePending = this.attachmentCaptureQuestionIds.size > 0;
     return html`
       <article class="card open-card" aria-labelledby="ask-user-heading">
         <header class="card-header">
@@ -90,8 +93,8 @@ export class AskUserCard extends LitElement {
             ${this.confirmingPartialSubmit && unanswered.length > 0
               ? this.renderPartialSubmitConfirmation(ask, unanswered)
               : html`
-                  <button class="primary-action" type="submit" ?disabled=${this.submitting}>
-                    ${this.submitting ? "Sending…" : "Send answers"}
+                  <button class="primary-action" type="submit" ?disabled=${this.submitting || attachmentCapturePending}>
+                    ${attachmentCapturePending ? "Attaching…" : this.submitting ? "Sending…" : "Send answers"}
                   </button>
                 `}
           </footer>
@@ -104,7 +107,7 @@ export class AskUserCard extends LitElement {
     const answer = this.answers[question.id];
     const answered = answeredCount([question], this.answers) === 1;
     const freeTextOnly = question.options.length === 0;
-    const detailId = question.detail === undefined || freeTextOnly ? undefined : this.questionDetailId(index);
+    const detailId = question.detail === undefined ? undefined : this.questionDetailId(index);
     const customSelected = freeTextOnly || this.isOtherSelected(question, answer);
     const inputType = question.multiple === true ? "checkbox" : "radio";
     return html`
@@ -160,6 +163,7 @@ export class AskUserCard extends LitElement {
                 .disabled=${this.submitting}
                 editorLabel="Custom answer"
                 .onChange=${(snapshot: ComposerDraftSubmitSnapshot) => { this.changeOtherSnapshot(question, snapshot); }}
+                .onDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.changeOtherDisplayState(question, display); }}
               ></ask-user-text-composer>
             </div>
           ` : null}
@@ -181,8 +185,8 @@ export class AskUserCard extends LitElement {
         </p>
         <div class="confirmation-actions">
           <button class="secondary-action" type="button" @click=${() => { this.keepEditing(ask, unanswered); }}>Keep editing</button>
-          <button class="primary-action send-anyway" type="button" ?disabled=${this.submitting} @click=${() => { this.submitAnswers(ask); }}>
-            ${this.submitting ? "Sending…" : "Send anyway"}
+          <button class="primary-action send-anyway" type="button" ?disabled=${this.submitting || this.attachmentCaptureQuestionIds.size > 0} @click=${() => { this.submitAnswers(ask); }}>
+            ${this.attachmentCaptureQuestionIds.size > 0 ? "Attaching…" : this.submitting ? "Sending…" : "Send anyway"}
           </button>
         </div>
       </div>
@@ -239,7 +243,10 @@ export class AskUserCard extends LitElement {
     const input = event.currentTarget;
     if (!(input instanceof HTMLInputElement)) return;
     if (question.multiple !== true) {
-      if (input.checked) this.setAnswer(question, { values: [value] });
+      if (input.checked) {
+        this.clearAttachmentCapturePending(question.id);
+        this.setAnswer(question, { values: [value] });
+      }
       return;
     }
     const current = this.answers[question.id];
@@ -258,6 +265,7 @@ export class AskUserCard extends LitElement {
     if (!(input instanceof HTMLInputElement)) return;
     const current = this.answers[question.id];
     if (question.multiple === true) {
+      if (!input.checked) this.clearAttachmentCapturePending(question.id);
       this.setAnswer(question, {
         values: [...(current?.values ?? [])],
         ...(input.checked ? { otherText: current?.otherText ?? "" } : {}),
@@ -282,6 +290,22 @@ export class AskUserCard extends LitElement {
     });
   }
 
+  private changeOtherDisplayState(question: AskUserQuestion, display: ComposerDraftDisplayState): void {
+    const wasPending = this.attachmentCaptureQuestionIds.has(question.id);
+    if (wasPending === display.attachmentCapturePending) return;
+    const next = new Set(this.attachmentCaptureQuestionIds);
+    if (display.attachmentCapturePending) next.add(question.id);
+    else next.delete(question.id);
+    this.attachmentCaptureQuestionIds = next;
+  }
+
+  private clearAttachmentCapturePending(questionId: string): void {
+    if (!this.attachmentCaptureQuestionIds.has(questionId)) return;
+    const next = new Set(this.attachmentCaptureQuestionIds);
+    next.delete(questionId);
+    this.attachmentCaptureQuestionIds = next;
+  }
+
   private answerSnapshot(answer: AskDraftAnswer | undefined): ComposerDraftSubmitSnapshot {
     return {
       text: answer?.otherText ?? "",
@@ -302,7 +326,7 @@ export class AskUserCard extends LitElement {
 
   private handleSubmit(event: SubmitEvent, ask: PendingAskUser): void {
     event.preventDefault();
-    if (this.submitting) return;
+    if (this.submitting || this.attachmentCaptureQuestionIds.size > 0) return;
     if (unansweredQuestions(ask.questions, this.answers).length > 0) {
       void this.showPartialSubmitConfirmation();
       return;
@@ -311,7 +335,7 @@ export class AskUserCard extends LitElement {
   }
 
   private submitAnswers(ask: PendingAskUser): void {
-    if (this.submitting) return;
+    if (this.submitting || this.attachmentCaptureQuestionIds.size > 0) return;
     this.submitting = true;
     const callback = this.onSubmit;
     if (callback === undefined) {

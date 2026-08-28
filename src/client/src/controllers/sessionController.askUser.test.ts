@@ -165,16 +165,20 @@ describe("SessionController ask submission", () => {
     expect(state.status).toEqual(closedStatus);
   });
 
-  it("saves answer attachments and submits workspace references with the custom text", async () => {
-    const attachment: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
+  it("saves all answer attachments in one rollback-safe request and partitions their workspace references", async () => {
+    const notes: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
+    const diagram: PromptAttachment = { kind: "file", mimeType: "image/svg+xml", data: "PHN2Zz4=", name: "diagram.svg" };
     const calls: string[] = [];
     let submittedAnswers: unknown;
     let state = selectedSessionState({ pendingAsk: ask("ask-1") });
     const api: typeof defaultApi = {
       ...defaultApi,
       saveAttachments: (_session, attachments) => {
-        calls.push(`save:${attachments[0]?.name ?? ""}`);
-        return Promise.resolve([{ path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 }]);
+        calls.push(`save:${attachments.map((attachment) => attachment.name).join(",")}`);
+        return Promise.resolve([
+          { path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 },
+          { path: ".forgerie/attachments/diagram.svg", mimeType: "image/svg+xml", size: 5 },
+        ]);
       },
       submitAsk: (_session, _askId, submission) => {
         calls.push("submit");
@@ -191,15 +195,54 @@ describe("SessionController ask submission", () => {
     );
 
     await controller.submitAsk("ask-1", {
-      answers: [{ id: "q1", values: [], otherText: "See the notes", attachments: [attachment] }],
+      answers: [
+        { id: "q1", values: [], otherText: "See the notes", attachments: [notes] },
+        { id: "q2", values: ["metrics"], attachments: [diagram] },
+      ],
     });
 
-    expect(calls).toEqual(["save:notes.txt", "submit"]);
-    expect(submittedAnswers).toEqual([{
-      id: "q1",
-      values: [],
-      otherText: "See the notes\n\n@.forgerie/attachments/notes.txt",
-    }]);
+    expect(calls).toEqual(["save:notes.txt,diagram.svg", "submit"]);
+    expect(submittedAnswers).toEqual([
+      {
+        id: "q1",
+        values: [],
+        otherText: "See the notes\n\n@.forgerie/attachments/notes.txt",
+      },
+      {
+        id: "q2",
+        values: ["metrics"],
+        otherText: "@.forgerie/attachments/diagram.svg",
+      },
+    ]);
+  });
+
+  it("keeps the ask open when the attachment response cannot be partitioned safely", async () => {
+    const attachment: PromptAttachment = { kind: "file", mimeType: "text/plain", data: "SGVsbG8=", name: "notes.txt" };
+    let submitCalled = false;
+    let state = selectedSessionState({ pendingAsk: ask("ask-1") });
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      saveAttachments: () => Promise.resolve([]),
+      submitAsk: () => {
+        submitCalled = true;
+        return Promise.resolve(closeResponse(status(oldSession.id)));
+      },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.submitAsk("ask-1", {
+      answers: [{ id: "q1", values: [], attachments: [attachment] }],
+    });
+
+    expect(submitCalled).toBe(false);
+    expect(state.pendingAsk?.askId).toBe("ask-1");
+    expect(state.error).toContain("Attachment save returned an unexpected file count");
   });
 
   it("cancels an ask through its own route and clears the draft", async () => {

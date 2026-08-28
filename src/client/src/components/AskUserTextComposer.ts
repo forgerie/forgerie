@@ -1,7 +1,7 @@
 import { LitElement, css, html, type PropertyValues } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import type { ComposerDictationCapability } from "../composerCapabilities";
-import type { ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import type { ComposerDraftDisplayState, ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import type { PromptEditor } from "./PromptEditor";
 import "./PromptEditor";
 
@@ -15,6 +15,7 @@ export class AskUserTextComposer extends LitElement {
   @property() machineId = "local";
   @property({ attribute: false }) dictation?: ComposerDictationCapability;
   @property({ attribute: false }) onChange?: (snapshot: ComposerDraftSubmitSnapshot) => void;
+  @property({ attribute: false }) onDisplayStateChange?: (state: ComposerDraftDisplayState) => void;
   @property({ type: Boolean }) disabled = false;
   @property() editorLabel = "Custom answer";
 
@@ -46,6 +47,7 @@ export class AskUserTextComposer extends LitElement {
         placeholderText="Type an answer…"
         .editorLabel=${this.editorLabel}
         .onDraftEdited=${() => { this.publishSnapshot(); }}
+        .onDraftDisplayStateChange=${this.onDisplayStateChange}
         .onDraftSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.retainSnapshot(snapshot)}
       ></prompt-editor>
     `;

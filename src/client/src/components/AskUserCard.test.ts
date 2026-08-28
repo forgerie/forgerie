@@ -12,6 +12,7 @@ import type { PromptEditor } from "./PromptEditor";
 afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 describe("ask-user-card live form", () => {
@@ -116,6 +117,44 @@ describe("ask-user-card live form", () => {
     });
   });
 
+  it("blocks submission while the rich editor is still reading an attachment", async () => {
+    const onSubmit = vi.fn<AskUserSubmitCallback>();
+    const card = await mountOpenAsk(openAsk([
+      question("notes", "Anything else?", []),
+    ]), onSubmit);
+    const root = renderRoot(card);
+    const composer = requiredElement(root.querySelector<AskUserTextComposer>("ask-user-text-composer"), "custom answer composer");
+    await composer.updateComplete;
+    const editor = requiredElement(composer.shadowRoot?.querySelector<PromptEditor>("prompt-editor"), "shared prompt editor");
+    await editor.updateComplete;
+    const draft = requiredElement(editor.shadowRoot?.querySelector<ComposerDraft>("composer-draft"), "shared rich editor");
+    await draft.updateComplete;
+
+    const finishRead = startPendingAttachment(draft, new File(["ship"], "notes.txt", { type: "text/plain" }));
+
+    await vi.waitFor(() => {
+      expect(buttonWithText(root, "Attaching…").disabled).toBe(true);
+    });
+    buttonWithText(root, "Attaching…").click();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    finishRead();
+    await vi.waitFor(() => {
+      expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1);
+      expect(buttonWithText(root, "Send answers").disabled).toBe(false);
+    });
+    buttonWithText(root, "Send answers").click();
+    await Promise.resolve();
+
+    expect(onSubmit).toHaveBeenCalledWith("ask-1", {
+      answers: [{
+        id: "notes",
+        values: [],
+        attachments: [{ kind: "file", mimeType: "text/plain", data: "c2hpcA==", name: "notes.txt" }],
+      }],
+    });
+  });
+
   it("shows and submits the rich answer editor directly when no options were supplied", async () => {
     const onSubmit = vi.fn<AskUserSubmitCallback>();
     const card = await mountOpenAsk(openAsk([
@@ -130,8 +169,8 @@ describe("ask-user-card live form", () => {
     await draft.updateComplete;
 
     expect(root.querySelector("input")).toBeNull();
-    expect(root.querySelector(".question-detail")).toBeNull();
-    expect(root.querySelector("fieldset")?.hasAttribute("aria-describedby")).toBe(false);
+    expect(root.querySelector(".question-detail")?.textContent).toBe("Add any supporting context.");
+    expect(root.querySelector("fieldset")?.getAttribute("aria-describedby")).toBe("ask-user-question-detail-0");
     setComposerText(draft, "Keep the first version small.");
     await card.updateComplete;
     buttonWithText(root, "Send answers").click();
@@ -243,6 +282,20 @@ async function attachFile(draft: ComposerDraft, file: File): Promise<void> {
   Object.defineProperty(input, "files", { configurable: true, value: [file] });
   input.dispatchEvent(new Event("change"));
   await vi.waitFor(() => { expect(draft.querySelectorAll(".attachment-chip")).toHaveLength(1); });
+}
+
+function startPendingAttachment(draft: ComposerDraft, file: File): () => void {
+  const finishes: (() => void)[] = [];
+  vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (this: FileReader) {
+    finishes.push(() => {
+      Object.defineProperty(this, "result", { configurable: true, value: "data:text/plain;base64,c2hpcA==" });
+      this.dispatchEvent(new ProgressEvent("load"));
+    });
+  });
+  const input = requiredElement(draft.querySelector<HTMLInputElement>(".attachment-input"), "attachment input");
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new Event("change"));
+  return () => { requiredElement(finishes[0], "pending file reader")(); };
 }
 
 function dictationCapability(): ComposerDictationCapability {
