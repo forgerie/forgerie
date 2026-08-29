@@ -67,6 +67,9 @@ export class ComposerPopover extends LitElement {
     // A ceiling only. The panel takes its width from its content, so it is
     // never measured into a smaller and smaller box on each update.
     panel.style.maxWidth = `${String(placement.maxWidth)}px`;
+    panel.style.maxHeight = `${String(placement.maxHeight)}px`;
+    panel.style.top = placement.side === "below" && placement.verticalOffset !== undefined ? `${String(placement.verticalOffset)}px` : "";
+    panel.style.bottom = placement.side === "above" && placement.verticalOffset !== undefined ? `${String(placement.verticalOffset)}px` : "";
   }
 
   private measurement(panel: HTMLElement): ComposerPopoverMeasurement | undefined {
@@ -79,9 +82,14 @@ export class ComposerPopover extends LitElement {
     const hostRect = host.getBoundingClientRect();
     const panelRect = panel.getBoundingClientRect();
     return {
-      anchor: { left: anchorRect.left - hostRect.left, width: anchorRect.width },
+      anchor: {
+        left: anchorRect.left - hostRect.left,
+        width: anchorRect.width,
+        top: anchorRect.top - hostRect.top,
+        bottom: anchorRect.bottom - hostRect.top,
+      },
       space: { above: anchorRect.top, below: window.innerHeight - anchorRect.bottom },
-      host: { width: hostRect.width },
+      host: { width: hostRect.width, height: hostRect.height },
       panel: { height: panelRect.height },
     };
   }
@@ -108,18 +116,14 @@ export class ComposerPopover extends LitElement {
   };
 
   static override styles = css`
-    :host { position: absolute; inset-inline: 0; z-index: 20; display: block; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; pointer-events: none; }
-    :host([data-side="above"]) { bottom: calc(100% + 8px); }
-    :host([data-side="below"]) { top: calc(100% + 8px); }
+    :host { position: absolute; inset: 0; z-index: 20; display: block; color: var(--pi-text); font: var(--pi-text-md) system-ui, sans-serif; pointer-events: none; }
     .popover-panel {
       /* Sized by content, capped by placement. A minimum keeps a short list
          from collapsing to the width of its longest word. */
-      position: absolute; width: max-content; min-width: 220px; max-height: 320px; overflow-y: auto; pointer-events: auto;
+      position: absolute; width: max-content; min-width: 220px; overflow-y: auto; pointer-events: auto;
       border: 1px solid var(--pi-border); border-radius: var(--pi-radius-surface); background: var(--pi-surface);
       box-shadow: 0 10px 30px var(--pi-shadow-strong);
     }
-    :host([data-side="below"]) .popover-panel { top: 0; }
-    :host([data-side="above"]) .popover-panel { bottom: 0; }
   `;
 }
 

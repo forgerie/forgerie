@@ -7,6 +7,7 @@ import { composerPopoverPlacement } from "./composerPopoverPlacement";
  */
 describe("composerPopoverPlacement", () => {
   const island = { width: 680 };
+  const positionedIsland = { width: 680, height: 600 };
 
   it("opens above the rail, left edge aligned with its control", () => {
     const placement = composerPopoverPlacement({
@@ -16,7 +17,25 @@ describe("composerPopoverPlacement", () => {
       panel: { height: 180 },
     });
 
-    expect(placement).toEqual({ side: "above", left: 216, maxWidth: 348 });
+    expect(placement).toEqual({ side: "above", left: 216, maxWidth: 348, maxHeight: 320 });
+  });
+
+  it("positions the panel from the trigger rather than the whole editor", () => {
+    const above = composerPopoverPlacement({
+      anchor: { left: 216, width: 120, top: 500, bottom: 544 },
+      space: { above: 500, below: 56 },
+      host: positionedIsland,
+      panel: { height: 180 },
+    });
+    const below = composerPopoverPlacement({
+      anchor: { left: 216, width: 120, top: 20, bottom: 64 },
+      space: { above: 20, below: 536 },
+      host: positionedIsland,
+      panel: { height: 180 },
+    });
+
+    expect(above).toMatchObject({ side: "above", verticalOffset: 108 });
+    expect(below).toMatchObject({ side: "below", verticalOffset: 72 });
   });
 
   it("caps the panel without ever sizing it, so it cannot collapse", () => {
@@ -29,6 +48,17 @@ describe("composerPopoverPlacement", () => {
 
     expect(placement).not.toHaveProperty("width");
     expect(placement.maxWidth).toBe(348);
+  });
+
+  it("caps height to the selected viewport side so every choice stays reachable", () => {
+    const placement = composerPopoverPlacement({
+      anchor: { left: 216, width: 120 },
+      space: { above: 120, below: 60 },
+      host: island,
+      panel: { height: 400 },
+    });
+
+    expect(placement).toMatchObject({ side: "above", maxHeight: 104 });
   });
 
   it("flips below when there is not enough room above", () => {

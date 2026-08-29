@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PromptDictationState } from "../controllers/promptDictationController";
 import {
   VOICE_COMPOSER_LISTENING,
+  VOICE_COMPOSER_WAITING,
   VOICE_SEND_COUNTDOWN_MS,
   voiceComposerBusy,
   voiceComposerDue,
@@ -22,8 +23,9 @@ function counting(transcript = "ship the turn rail", at = NOW): VoiceComposerSta
 }
 
 describe("voiceComposerFromDictation", () => {
-  it("reads an open microphone as listening", () => {
-    expect(voiceComposerFromDictation({ tag: "auto" }, VOICE_COMPOSER_LISTENING)).toEqual(VOICE_COMPOSER_LISTENING);
+  it("waits through microphone acquisition, then reads an open microphone as listening", () => {
+    expect(voiceComposerFromDictation({ tag: "acquiring", gesture: "pressing" }, VOICE_COMPOSER_WAITING)).toEqual(VOICE_COMPOSER_WAITING);
+    expect(voiceComposerFromDictation({ tag: "auto" }, VOICE_COMPOSER_WAITING)).toEqual(VOICE_COMPOSER_LISTENING);
   });
 
   it("says so when nothing will decide the turn is over", () => {
@@ -83,9 +85,11 @@ describe("voiceComposerFromDictation", () => {
     expect(voiceComposerFromDictation({ tag: "idle" }, state)).toBe(state);
   });
 
-  it("leaves held text alone whatever the microphone does next", () => {
+  it("preserves held text only through the controller's trailing idle state", () => {
     const held = voiceComposerHold(counting());
-    expect(voiceComposerFromDictation({ tag: "auto" }, held)).toBe(held);
+    expect(voiceComposerFromDictation({ tag: "idle" }, held)).toBe(held);
+    expect(voiceComposerFromDictation({ tag: "acquiring", gesture: "pressing" }, held)).toEqual(VOICE_COMPOSER_WAITING);
+    expect(voiceComposerFromDictation({ tag: "empty" }, held)).toEqual({ kind: "failed", message: "Nothing was heard.", retryable: true });
   });
 });
 
@@ -155,6 +159,7 @@ describe("voiceComposerTranscript", () => {
 
 describe("voiceComposerBusy", () => {
   it("refuses a casual dismissal while something can still be lost", () => {
+    expect(voiceComposerBusy(VOICE_COMPOSER_WAITING)).toBe(true);
     expect(voiceComposerBusy(VOICE_COMPOSER_LISTENING)).toBe(true);
     expect(voiceComposerBusy({ kind: "working" })).toBe(true);
     expect(voiceComposerBusy(counting())).toBe(true);
@@ -168,6 +173,10 @@ describe("voiceComposerBusy", () => {
 
 describe("voiceComposerStatusLine", () => {
   const silent = { hearing: false, seconds: 0 };
+
+  it("does not claim the microphone is listening before capture starts", () => {
+    expect(voiceComposerStatusLine(VOICE_COMPOSER_WAITING, silent)).toBe("Starting microphone.");
+  });
 
   it("never promises a pause will end a turn that nothing will end", () => {
     // The service disables automatic turn detection by policy. Saying "it

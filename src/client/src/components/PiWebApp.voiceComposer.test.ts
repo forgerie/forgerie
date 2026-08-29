@@ -51,6 +51,38 @@ describe("PiWebApp voice composer shortcut", () => {
     expect(app.shadowRoot?.querySelector("voice-composer-dialog")).not.toBeNull();
   });
 
+  it("recreates the voice surface when the selected session changes", async () => {
+    const app = await mountChat();
+    dispatchSpeakKey(promptEditor(app).view?.contentDOM ?? document.body);
+    await app.updateComplete;
+    const first = app.shadowRoot?.querySelector("voice-composer-dialog");
+    expect(first).not.toBeNull();
+
+    const nextSession = session("session-next");
+    Reflect.set(app, "state", {
+      ...initialAppState(),
+      selectedSession: nextSession,
+      sessions: [nextSession],
+      selectedChatLoad: selectedChatLiveReady(selectedChatTarget("local", nextSession)),
+      mainView: "chat",
+    });
+    app.requestUpdate();
+    await app.updateComplete;
+
+    const second = app.shadowRoot?.querySelector("voice-composer-dialog");
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+  });
+
+  it("does not open voice capture for an archived session", async () => {
+    const app = await mountChat({ ...session("session-archived"), archived: true });
+    const event = dispatchSpeakKey(promptEditor(app).view?.contentDOM ?? document.body);
+    await app.updateComplete;
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(app.shadowRoot?.querySelector("voice-composer-dialog")).toBeNull();
+  });
+
   it("leaves Ctrl+Alt+Enter to the page when there is no session to speak to", async () => {
     const app = new PiWebApp();
     Reflect.set(app, "state", initialAppState());
@@ -68,9 +100,8 @@ describe("PiWebApp voice composer shortcut", () => {
   });
 });
 
-async function mountChat(): Promise<PiWebApp> {
+async function mountChat(selectedSession: SessionInfo = session("session-speak")): Promise<PiWebApp> {
   const app = new PiWebApp();
-  const selectedSession = session("session-speak");
   Reflect.set(app, "state", {
     ...initialAppState(),
     selectedSession,

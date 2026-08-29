@@ -1,7 +1,7 @@
 /** Where an anchored composer popover sits, in the host island's own pixels. */
 export interface ComposerPopoverPlacementInput {
   /** The control that opened the panel, relative to the host's left edge. */
-  readonly anchor: { readonly left: number; readonly width: number };
+  readonly anchor: { readonly left: number; readonly width: number; readonly top?: number; readonly bottom?: number };
   /**
    * Room the panel has outside the island, in viewport pixels.
    *
@@ -10,7 +10,7 @@ export interface ComposerPopoverPlacementInput {
    */
   readonly space: { readonly above: number; readonly below: number };
   /** The island the panel is anchored to. */
-  readonly host: { readonly width: number };
+  readonly host: { readonly width: number; readonly height?: number };
   /**
    * The panel's own height, used only to decide which side it opens on.
    *
@@ -25,6 +25,8 @@ export interface ComposerPopoverPlacementInput {
   readonly inset?: number;
   /** The widest a panel may ever be, whatever its content. */
   readonly maxWidth?: number;
+  /** The tallest a panel may ever be before its choices scroll. */
+  readonly maxHeight?: number;
 }
 
 export interface ComposerPopoverPlacement {
@@ -32,11 +34,16 @@ export interface ComposerPopoverPlacement {
   readonly left: number;
   /** A ceiling, not a size. The panel is sized by its own content. */
   readonly maxWidth: number;
+  /** Viewport-capped height; content scrolls inside this ceiling. */
+  readonly maxHeight: number;
+  /** Distance from the host edge on the selected side, when vertical geometry is available. */
+  readonly verticalOffset?: number;
 }
 
 const DEFAULT_GAP = 8;
 const DEFAULT_INSET = 8;
 const DEFAULT_MAX_WIDTH = 348;
+const DEFAULT_MAX_HEIGHT = 320;
 
 /**
  * Decide where an anchored panel goes.
@@ -50,6 +57,7 @@ export function composerPopoverPlacement(input: ComposerPopoverPlacementInput): 
   const gap = input.gap ?? DEFAULT_GAP;
   const inset = input.inset ?? DEFAULT_INSET;
   const maxWidth = input.maxWidth ?? DEFAULT_MAX_WIDTH;
+  const maxHeight = input.maxHeight ?? DEFAULT_MAX_HEIGHT;
 
   const available = Math.max(0, input.host.width - inset * 2);
   const ceiling = Math.min(maxWidth, available);
@@ -61,5 +69,13 @@ export function composerPopoverPlacement(input: ComposerPopoverPlacementInput): 
 
   const needed = input.panel.height + gap;
   const side = input.space.above >= needed || input.space.above >= input.space.below ? "above" : "below";
-  return { side, left, maxWidth: ceiling };
+  const selectedSpace = side === "above" ? input.space.above : input.space.below;
+  const heightCeiling = Math.min(maxHeight, Math.max(0, selectedSpace - gap - inset));
+  const anchorEdge = side === "above" ? input.anchor.top : input.anchor.bottom;
+  const verticalOffset = anchorEdge === undefined || input.host.height === undefined
+    ? undefined
+    : side === "above"
+      ? input.host.height - anchorEdge + gap
+      : anchorEdge + gap;
+  return { side, left, maxWidth: ceiling, maxHeight: heightCeiling, ...(verticalOffset === undefined ? {} : { verticalOffset }) };
 }

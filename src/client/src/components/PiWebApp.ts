@@ -1,4 +1,5 @@
 import { LitElement, html, type TemplateResult } from "lit";
+import { keyed } from "lit/directives/keyed.js";
 
 import { customElement, query, state } from "lit/decorators.js";
 import { configApi, effectiveWorkspaceUploadFolder, sessionsApi, terminalsApi, workspacesApi, workspaceEffectiveUploadFolder, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type TerminalUiEvent, type Workspace } from "../api";
@@ -2357,7 +2358,7 @@ export class PiWebApp extends LitElement {
         // Enabled only with a session to speak to. Releasing here opens a live
         // microphone, and a microphone with nowhere to send is a recording the
         // reader cannot use.
-        return { slot, label: "Dictate", icon: undefined, enabled: this.state.selectedSession !== undefined };
+        return { slot, label: "Dictate", icon: undefined, enabled: this.state.selectedSession !== undefined && this.state.selectedSession.archived !== true };
       }
 
       const panel = panels.find((candidate) => candidate.id === target.tool);
@@ -2398,23 +2399,26 @@ export class PiWebApp extends LitElement {
     if (!this.voiceComposerOpen) return null;
     const state = this.state;
     const session = state.selectedSession;
-    if (session === undefined) return null;
+    if (session === undefined || session.archived === true) return null;
+    const machineId = selectedMachineId(state);
     const runtimeAvailable = selectedChatCanUseRuntime(state.selectedChatLoad);
-    return html`
+    return keyed(machineSessionKey(machineId, session.id), html`
       <voice-composer-dialog
         .capabilities=${this.sessionComposerCapabilities(state, runtimeAvailable)}
         .sessionId=${session.id}
-        .machineId=${selectedMachineId(state)}
+        .machineId=${machineId}
         .cwd=${state.selectedWorkspace?.path ?? session.cwd}
         .projectId=${state.selectedWorkspace?.projectId}
         .workspaceId=${state.selectedWorkspace?.id}
         .promptHistory=${this.selectedPromptHistory(state)}
-        .disabled=${session.archived === true}
         .sending=${state.sendingPrompts[session.id] === true}
+        .canSteer=${runtimeAvailable && state.status?.isStreaming === true}
+        .isCompacting=${runtimeAvailable && state.status?.isCompacting === true}
+        .queuedCompactionAvailable=${supportsPiWebCapability(this.selectedMachineRuntime(), PI_WEB_CAPABILITIES.queuedCompaction)}
         .onSendPrompt=${this.handleSendPrompt}
         .onDismiss=${() => { this.voiceComposerOpen = false; }}
       ></voice-composer-dialog>
-    `;
+    `);
   }
 
   private renderRadialMenu() {
@@ -2748,7 +2752,7 @@ export class PiWebApp extends LitElement {
         shortcutContexts: KEYBOARD_SHORTCUT_CONTEXTS,
         repeatable: false,
         group: "Session",
-        enabled: this.state.selectedSession !== undefined,
+        enabled: this.state.selectedSession !== undefined && this.state.selectedSession.archived !== true,
         run: () => { this.voiceComposerOpen = true; },
       },
       {

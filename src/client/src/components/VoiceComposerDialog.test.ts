@@ -27,19 +27,20 @@ const LISTEN_TICK_MS = 150;
  * returns text. Nothing about the controller is replaced, so a test that passes
  * here is a statement about the shipped wiring.
  */
-function speechCapability(options: { transcript?: string; captureError?: Error; turnDetection?: "ready" | "unavailable" } = {}) {
+function speechCapability(options: { transcript?: string; captureError?: Error; turnDetection?: "ready" | "unavailable"; actualSampleRateHz?: number } = {}) {
   let captureCount = 0;
+  let abortCount = 0;
   let pauseCandidate: PromptDictationCaptureOptions["onPauseCandidate"] | undefined;
   let speechActivity: PromptDictationCaptureOptions["onSpeechActivity"] | undefined;
 
   const capture: SpeechCaptureSession = {
-    actualSampleRateHz: SPEECH_POLICY.audio.sampleRateHz,
+    actualSampleRateHz: options.actualSampleRateHz ?? SPEECH_POLICY.audio.sampleRateHz,
     failure: undefined,
     endpointWindow: () => SAMPLES,
     finalize: () => SAMPLES,
     synchronize: () => Promise.resolve(),
     stopAndFinalize: () => Promise.resolve(SAMPLES),
-    abort: () => Promise.resolve(),
+    abort: () => { abortCount += 1; return Promise.resolve(); },
   };
 
   const capability: ComposerDictationCapability = {
@@ -73,6 +74,7 @@ function speechCapability(options: { transcript?: string; captureError?: Error; 
   return {
     capability,
     captureCount: () => captureCount,
+    abortCount: () => abortCount,
     /** Report voiced audio, the way the capture worklet does while you talk. */
     async voice(dialog: VoiceComposerDialog, seconds: number): Promise<void> {
       const sampleCount = SPEECH_POLICY.audio.sampleRateHz * seconds;
@@ -89,7 +91,7 @@ function speechCapability(options: { transcript?: string; captureError?: Error; 
   };
 }
 
-async function openDialog(capability: ComposerDictationCapability) {
+async function openDialog(capability: ComposerDictationCapability, options: { canSteer?: boolean; isCompacting?: boolean; queuedCompactionAvailable?: boolean } = {}) {
   let dismissed = false;
   const onSendPrompt = vi.fn<(text: string) => void>();
   const dialog = new VoiceComposerDialog();
@@ -97,6 +99,9 @@ async function openDialog(capability: ComposerDictationCapability) {
   dialog.sessionId = "session-1";
   dialog.machineId = "local";
   dialog.cwd = "/repo";
+  dialog.canSteer = options.canSteer ?? false;
+  dialog.isCompacting = options.isCompacting ?? false;
+  dialog.queuedCompactionAvailable = options.queuedCompactionAvailable ?? true;
   dialog.onSendPrompt = onSendPrompt;
   dialog.onDismiss = () => { dismissed = true; };
   document.body.append(dialog);
@@ -196,6 +201,33 @@ describe("VoiceComposerDialog", () => {
     expect(speech.captureCount()).toBe(1);
   });
 
+  it("does not claim to listen while speech status is still pending", async () => {
+    const baseCapability = speechCapability().capability;
+    const capability: ComposerDictationCapability = { ...baseCapability, getStatus: () => new Promise(() => undefined) };
+    const { dialog } = await openDialog(capability);
+
+    expect(dialogText(dialog)).toContain("Starting microphone");
+    expect(dialogText(dialog)).not.toContain("Stop talking and it sends itself");
+  });
+
+  it("restarts listening after the page returns from the background", async () => {
+    const speech = speechCapability();
+    const { dialog } = await openDialog(speech.capability);
+    expect(speech.captureCount()).toBe(1);
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    await settle(dialog);
+    expect(speech.abortCount()).toBe(1);
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    await settle(dialog);
+    expect(speech.captureCount()).toBe(2);
+  });
+
   it("focuses nothing that would raise the keyboard", async () => {
     // The reason this dialog exists. `modal-surface` focuses its initialFocus
     // target when it has one, so this dialog must never name a text field.
@@ -251,6 +283,31 @@ describe("VoiceComposerDialog", () => {
     expect(onSendPrompt).toHaveBeenCalledWith("put it on the turn rail", undefined, undefined, undefined);
   });
 
+  it("queues an automatic voice send behind active work", async () => {
+    const speech = speechCapability({ transcript: "send after the active turn" });
+    const { dialog, onSendPrompt } = await openDialog(speech.capability, { canSteer: true });
+    await speech.speak(dialog);
+
+    await vi.advanceTimersByTimeAsync(VOICE_SEND_COUNTDOWN_MS);
+    await settle(dialog);
+
+    expect(onSendPrompt).toHaveBeenCalledWith("send after the active turn", "followUp", undefined, undefined);
+  });
+
+  it("holds the transcript when the countdown reaches a closed send gate", async () => {
+    const speech = speechCapability({ transcript: "keep this sentence" });
+    const { dialog, onSendPrompt } = await openDialog(speech.capability);
+    await speech.speak(dialog);
+    dialog.sending = true;
+    await settle(dialog);
+
+    await vi.advanceTimersByTimeAsync(VOICE_SEND_COUNTDOWN_MS);
+    await settle(dialog);
+
+    expect(onSendPrompt).not.toHaveBeenCalled();
+    expect(dialogText(dialog)).toContain("Held. Edit, attach, or send when you are ready.");
+  });
+
   it("keeps listening rather than offering an empty sentence to send", async () => {
     const speech = speechCapability({ transcript: "   " });
     const { dialog, onSendPrompt } = await openDialog(speech.capability);
@@ -287,6 +344,15 @@ describe("VoiceComposerDialog", () => {
     expect(editor(dialog)?.shadowRoot?.querySelector(".voice-dot.hearing")).not.toBeNull();
     expect(dialogText(dialog)).toContain("Hearing you");
     expect(dialogText(dialog)).toContain("0:02");
+  });
+
+  it("uses the downsampled speech rate for the voiced clock", async () => {
+    const speech = speechCapability({ actualSampleRateHz: 48_000 });
+    const { dialog } = await openDialog(speech.capability);
+
+    await speech.voice(dialog, 3);
+
+    expect(dialogText(dialog)).toContain("0:03");
   });
 
   it("notices a silence that no event reports, and keeps what was said", async () => {

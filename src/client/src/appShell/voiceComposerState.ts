@@ -28,6 +28,8 @@ import type { VoiceCaptureDisplay } from "./voiceCaptureProgress";
 export const VOICE_SEND_COUNTDOWN_MS = 2_000;
 
 export type VoiceComposerState =
+  /** Speech status is still loading, so no microphone claim is valid yet. */
+  | { readonly kind: "waiting" }
   /**
    * The microphone is open and nothing has been heard worth showing yet.
    *
@@ -45,6 +47,7 @@ export type VoiceComposerState =
   /** Capture or transcription failed, with the reason in words. */
   | { readonly kind: "failed"; readonly message: string; readonly retryable: boolean };
 
+export const VOICE_COMPOSER_WAITING: VoiceComposerState = { kind: "waiting" };
 export const VOICE_COMPOSER_LISTENING: VoiceComposerState = { kind: "listening", endsItself: true };
 const VOICE_COMPOSER_LISTENING_MANUAL: VoiceComposerState = { kind: "listening", endsItself: false };
 
@@ -70,11 +73,12 @@ export function voiceComposerFromDictation(
   dictation: PromptDictationState,
   current: VoiceComposerState,
 ): VoiceComposerState {
-  if (current.kind === "counting" || current.kind === "held") return current;
+  if ((current.kind === "counting" || current.kind === "held") && dictation.tag === "idle") return current;
 
   switch (dictation.tag) {
     case "idle":
     case "acquiring":
+      return VOICE_COMPOSER_WAITING;
     case "pressed":
     case "auto":
     case "held":
@@ -142,7 +146,7 @@ export function voiceComposerDue(state: VoiceComposerState, nowMs: number): bool
  * both refuse the casual dismissals and route through an explicit control.
  */
 export function voiceComposerBusy(state: VoiceComposerState): boolean {
-  return state.kind === "listening" || state.kind === "working" || state.kind === "counting";
+  return state.kind === "waiting" || state.kind === "listening" || state.kind === "working" || state.kind === "counting";
 }
 
 /**
@@ -156,6 +160,8 @@ export function voiceComposerBusy(state: VoiceComposerState): boolean {
  */
 export function voiceComposerStatusLine(state: VoiceComposerState, capture: VoiceCaptureDisplay): string {
   switch (state.kind) {
+    case "waiting":
+      return "Starting microphone.";
     case "listening":
       if (capture.hearing) return "Hearing you.";
       if (capture.seconds > 0) return state.endsItself ? "Gone quiet." : "Gone quiet. Finish when you are done.";

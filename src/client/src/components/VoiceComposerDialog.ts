@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import type { ComposerCapabilities } from "../composerCapabilities";
-import { VOICE_COMPOSER_LISTENING, voiceComposerBusy, type VoiceComposerState } from "../appShell/voiceComposerState";
+import { VOICE_COMPOSER_WAITING, voiceComposerBusy, type VoiceComposerState } from "../appShell/voiceComposerState";
 import "./ModalSurface";
 import "./PromptEditor";
 
@@ -76,10 +76,13 @@ export class VoiceComposerDialog extends LitElement {
   @property({ attribute: false }) promptHistory: readonly string[] = [];
   @property({ type: Boolean }) sending = false;
   @property({ type: Boolean }) disabled = false;
+  @property({ type: Boolean }) canSteer = false;
+  @property({ type: Boolean }) isCompacting = false;
+  @property({ type: Boolean }) queuedCompactionAvailable = true;
   @property({ attribute: false }) onSendPrompt?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => void;
   @property({ attribute: false }) onDismiss?: () => void;
 
-  @state() private voiceState: VoiceComposerState = VOICE_COMPOSER_LISTENING;
+  @state() private voiceState: VoiceComposerState = VOICE_COMPOSER_WAITING;
 
   override render(): TemplateResult {
     return html`
@@ -112,6 +115,9 @@ export class VoiceComposerDialog extends LitElement {
             .promptHistory=${this.promptHistory}
             .disabled=${this.disabled}
             .sending=${this.sending}
+            .canSteer=${this.canSteer}
+            .isCompacting=${this.isCompacting}
+            .queuedCompactionAvailable=${this.queuedCompactionAvailable}
             .editorLabel=${"Spoken message"}
             .placeholderText=${"Speak, or type here."}
             .draftStorageKeyOverride=${null}

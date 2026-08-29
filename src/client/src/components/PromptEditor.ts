@@ -79,10 +79,10 @@ const voiceTurnStyles = css`
     margin: 0 0 var(--pi-space-sm); min-height: 34px;
     color: var(--pi-text); font-size: var(--pi-text-md);
   }
-  .voice-turn-text { flex: 1 1 auto; min-width: 0; }
+  .voice-turn-text { display: flex; align-items: center; gap: var(--pi-space-md); flex: 1 1 auto; min-width: 0; }
   .voice-turn-clock { color: var(--pi-text-secondary); font-size: var(--pi-text-sm); font-variant-numeric: tabular-nums; }
   .voice-turn-finish {
-    flex: 0 0 auto; min-height: 34px; padding: 0 var(--pi-space-md);
+    flex: 0 0 auto; min-height: 44px; padding: 0 var(--pi-space-md);
     font-family: inherit; font-size: var(--pi-text-sm); font-weight: 650;
     border: none; border-radius: var(--pi-radius-control);
     background: var(--pi-accent); color: var(--pi-bg); cursor: pointer;
@@ -90,7 +90,7 @@ const voiceTurnStyles = css`
   .voice-turn-finish:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
 
   .voice-dot { width: 10px; height: 10px; border-radius: var(--pi-radius-pill); flex: 0 0 auto; background: var(--pi-accent); }
-  .voice-dot.working { background: var(--pi-muted); }
+  .voice-dot.waiting, .voice-dot.working { background: var(--pi-muted); }
   .voice-dot.held, .voice-dot.failed { background: none; border: 1px solid var(--pi-border); }
   /* Waiting for a voice: the app's ambient status pulse, which says the
      microphone is open without claiming anything is arriving. */
@@ -214,7 +214,6 @@ export class PromptEditor extends LitElement {
     onStateChange: (state) => { this.onVoiceStateChange?.(state); },
   });
   private voiceTurnStarted = false;
-  private dictationSampleRateHz = SPEECH_POLICY.audio.sampleRateHz;
   private choiceRequestVersion = 0;
   private lastEscapeTime = 0;
   private pendingReplacement: { kind: "text"; text: string } | { kind: "snapshot"; snapshot: ComposerDraftSubmitSnapshot } | undefined;
@@ -242,7 +241,10 @@ export class PromptEditor extends LitElement {
     window.addEventListener("freeze", this.handlePageHidden);
     window.addEventListener("resize", this.handleResizeOrOrientation);
     window.addEventListener("orientationchange", this.handleResizeOrOrientation);
-    if (this.hasUpdated) this.syncDictationCapability();
+    if (this.hasUpdated) {
+      if (this.voiceMode === "voice-first") this.voiceTurnStarted = false;
+      this.syncDictationCapability();
+    }
   }
 
   protected override willUpdate(changed: PropertyValues<this>): void {
@@ -252,6 +254,15 @@ export class PromptEditor extends LitElement {
       this.resetSteerDisclosure();
       this.resetDictationGesture();
       this.dictationController?.ownerChanged();
+      if (this.voiceMode === "voice-first") {
+        this.voiceTurnStarted = false;
+        this.voiceTurn.reset();
+      }
+    }
+    if (changed.has("voiceMode")) {
+      this.voiceTurnStarted = false;
+      this.voiceTurn.reset();
+      if (changed.get("voiceMode") === "voice-first" && this.voiceMode !== "voice-first") this.dictationController?.surfaceDisabled();
     }
     if (changed.has("disabled") && this.disabled) {
       this.resetDictationGesture();
@@ -285,6 +296,8 @@ export class PromptEditor extends LitElement {
    */
   private startVoiceTurnWhenReady(): void {
     if (this.voiceMode !== "voice-first" || this.voiceTurnStarted) return;
+    if (this.voiceTurn.state.kind !== "waiting" && this.voiceTurn.state.kind !== "listening") return;
+    if (document.visibilityState !== "visible") return;
     if (this.dictationCapability !== "ready" && this.dictationCapability !== "manual-only") return;
     if (this.dictationController === undefined || !this.canToggleDictation()) return;
     this.voiceTurnStarted = true;
@@ -300,6 +313,7 @@ export class PromptEditor extends LitElement {
     document.removeEventListener("keyup", this.handleQueueKeyUpDocument, { capture: true });
     this.cancelQueuePress({ clearSuppression: true });
     this.steerOpen = false;
+    this.voiceTurnStarted = false;
     this.disposeDictation();
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     window.removeEventListener("pagehide", this.handlePageHidden);
@@ -564,17 +578,19 @@ export class PromptEditor extends LitElement {
     const state = this.voiceTurn.state;
     const capture = this.voiceTurn.capture;
     return html`
-      <p class="voice-turn" role="status" aria-live="polite">
-        ${this.renderVoiceIndicator(state, capture.hearing)}
-        <span class="voice-turn-text">${voiceComposerStatusLine(state, capture)}</span>
-        ${capture.seconds === 0 ? nothing : html`<span class="voice-turn-clock">${voiceCaptureClock(capture)}</span>`}
+      <div class="voice-turn">
+        <span role="status" aria-live="polite" class="voice-turn-text">
+          ${this.renderVoiceIndicator(state, capture.hearing)}
+          <span>${voiceComposerStatusLine(state, capture)}</span>
+          ${capture.seconds === 0 ? nothing : html`<span class="voice-turn-clock">${voiceCaptureClock(capture)}</span>`}
+        </span>
         ${state.kind !== "listening" ? nothing : html`<button
           type="button"
           class="voice-turn-finish"
           data-action="voice-finish"
           @click=${() => { this.finishVoiceTurn(); }}
         >Finish</button>`}
-      </p>
+      </div>
     `;
   }
 
@@ -631,10 +647,19 @@ export class PromptEditor extends LitElement {
     this.onDraftEdited?.();
   }
 
-  /** The countdown ran out. Send the draft, exactly as the Send button does. */
+  /** The countdown ran out. Send when the current rail can accept the draft. */
   private sendVoiceTurn(): void {
     if (this.voiceMode !== "voice-first") return;
-    this.submitDraft();
+    const rail = this.rail();
+    if (rail.kind === "idle" && rail.canInvokePrimary) {
+      this.submitDraft();
+      return;
+    }
+    if (rail.kind === "queueCapable" && rail.canInvokeQueue) {
+      this.submitDraft("followUp");
+      return;
+    }
+    this.voiceTurn.hold();
   }
 
   private renderDictationAction() {
@@ -1338,16 +1363,18 @@ export class PromptEditor extends LitElement {
         const session = await capability.createCaptureSession({
           ...options,
           onSpeechActivity: (activity) => {
-            this.voiceTurn.noteSpeech(activity, this.dictationSampleRateHz);
+            if (this.voiceMode === "voice-first") this.voiceTurn.noteSpeech(activity, SPEECH_POLICY.audio.sampleRateHz);
             options.onSpeechActivity(activity);
           },
         });
-        this.dictationSampleRateHz = session.actualSampleRateHz;
         return session;
       },
       onStateChange: (state) => {
         this.dictationState = state;
-        if (this.voiceMode === "voice-first") this.voiceTurn.noteDictation(state);
+        if (this.voiceMode === "voice-first") {
+          if (this.dictationCapability === "warming" && state.tag === "unavailable") this.voiceTurn.reset();
+          else this.voiceTurn.noteDictation(state);
+        }
         if (this.dictationBlocksComposer()) {
           this.closeChoice(false);
           this.resetSteerDisclosure();
@@ -1605,14 +1632,27 @@ export class PromptEditor extends LitElement {
   }
 
   private readonly handleVisibilityChange = (): void => {
-    if (document.visibilityState !== "visible") {
-      this.resetDictationGesture();
-      this.dictationController?.pageBackgrounded();
+    if (document.visibilityState === "visible") {
+      if (this.voiceMode === "voice-first") {
+        this.voiceTurnStarted = false;
+        this.requestUpdate();
+      }
+      return;
     }
+    this.resetDictationGesture();
+    if (this.voiceMode === "voice-first") {
+      this.voiceTurn.hold();
+      this.voiceTurnStarted = false;
+    }
+    this.dictationController?.pageBackgrounded();
   };
 
   private readonly handlePageHidden = (): void => {
     this.resetDictationGesture();
+    if (this.voiceMode === "voice-first") {
+      this.voiceTurn.hold();
+      this.voiceTurnStarted = false;
+    }
     this.dictationController?.pageBackgrounded();
   };
 

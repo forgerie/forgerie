@@ -21,7 +21,10 @@ describe("composer-popover", () => {
 
     expect(popover.dataset["side"]).toBe("above");
     expect(panel.style.left).toBe("216px");
+    expect(panel.style.bottom).toBe("108px");
+    expect(panel.style.top).toBe("");
     expect(panel.style.maxWidth).toBe("348px");
+    expect(panel.style.maxHeight).toBe("320px");
   });
 
   it("caps its width without setting one, and holds that across updates", async () => {
@@ -43,6 +46,8 @@ describe("composer-popover", () => {
     const panel = required(popover, ".popover-panel");
 
     expect(popover.dataset["side"]).toBe("below");
+    expect(panel.style.top).toBe("72px");
+    expect(panel.style.bottom).toBe("");
     expect(panel.style.maxWidth).toBe("348px");
   });
 
@@ -120,10 +125,12 @@ async function mount(options: {
 } = {}): Promise<ComposerPopover> {
   const popover = new ComposerPopover();
   popover.label = options.label ?? "Model";
+  const space = options.space ?? { above: 400, below: 120 };
+  const verticalAnchor = space.above < space.below ? { top: 20, bottom: 64 } : { top: 500, bottom: 544 };
   popover.measure = () => ({
-    anchor: { left: 216, width: 120 },
-    space: options.space ?? { above: 400, below: 120 },
-    host: { width: 680 },
+    anchor: { left: 216, width: 120, ...verticalAnchor },
+    space,
+    host: { width: 680, height: 600 },
     panel: { height: 180 },
   });
   if (options.onClose !== undefined) popover.onClose = options.onClose;

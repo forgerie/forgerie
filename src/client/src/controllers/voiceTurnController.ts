@@ -15,7 +15,7 @@
 
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import {
-  VOICE_COMPOSER_LISTENING,
+  VOICE_COMPOSER_WAITING,
   voiceComposerDue,
   voiceComposerEdited,
   voiceComposerFromDictation,
@@ -68,7 +68,7 @@ export interface VoiceTurnOptions {
  * is the part a pure function cannot hold.
  */
 export class VoiceTurnController implements ReactiveController {
-  private stateValue: VoiceComposerState = VOICE_COMPOSER_LISTENING;
+  private stateValue: VoiceComposerState = VOICE_COMPOSER_WAITING;
   private captureValue: VoiceCaptureDisplay = { hearing: false, seconds: 0 };
   private progress: VoiceCaptureProgress = VOICE_CAPTURE_NONE;
   private ticker: number | undefined;
@@ -135,15 +135,20 @@ export class VoiceTurnController implements ReactiveController {
     this.setState(next);
   }
 
-  /** Back to an open microphone with nothing heard yet. */
+  /** Back to the state before capture has started. */
   public reset(): void {
     this.progress = VOICE_CAPTURE_NONE;
     this.captureValue = { hearing: false, seconds: 0 };
-    this.setState(VOICE_COMPOSER_LISTENING);
+    this.setState(VOICE_COMPOSER_WAITING);
   }
 
   public hostDisconnected(): void {
+    this.hold();
     this.stopTicking();
+  }
+
+  public hostConnected(): void {
+    this.syncTicker();
   }
 
   private setState(next: VoiceComposerState): void {
