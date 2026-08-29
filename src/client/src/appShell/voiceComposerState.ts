@@ -177,6 +177,6 @@ export function voiceComposerStatusLine(state: VoiceComposerState, capture: Voic
     case "held":
       return "Held. Edit, attach, or send when you are ready.";
     case "failed":
-      return state.message;
+      return state.retryable ? `${state.message} Press the microphone to try again.` : state.message;
   }
 }

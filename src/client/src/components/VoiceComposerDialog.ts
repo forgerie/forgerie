@@ -1,4 +1,4 @@
-import { LitElement, css, html, nothing, type TemplateResult } from "lit";
+import { LitElement, css, html, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import type { ComposerCapabilities } from "../composerCapabilities";
@@ -40,7 +40,6 @@ export const voiceComposerDialogStyles = css`
     }
     .voice { box-sizing: border-box; max-height: calc(100cqb - clamp(1rem, 4cqb, 2rem)); min-height: 0; display: flex; flex-direction: column; }
     prompt-editor { display: block; min-width: 0; }
-    .voice-hint { margin: var(--pi-space-sm) 0 0; color: var(--pi-text-secondary); font-size: var(--pi-text-sm); }
   `;
 
 /**
@@ -125,9 +124,6 @@ export class VoiceComposerDialog extends LitElement {
             .onVoiceStateChange=${(state: VoiceComposerState) => { this.voiceState = state; }}
             .onSend=${(text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => { this.send(text, streamingBehavior, attachments, delivery); }}
           ></prompt-editor>
-          ${this.voiceState.kind !== "failed" || !this.voiceState.retryable ? nothing : html`
-            <p class="voice-hint">Press the microphone to try again.</p>
-          `}
         </div>
       </modal-surface>
     `;

@@ -205,7 +205,8 @@ describe("voiceComposerStatusLine", () => {
     expect(voiceComposerStatusLine(voiceComposerHold(counting()), silent)).toBe("Held. Edit, attach, or send when you are ready.");
   });
 
-  it("gives a failure the service's own words", () => {
+  it("gives a failure the service's own words and keeps retry guidance inside the status", () => {
     expect(voiceComposerStatusLine({ kind: "failed", message: "no microphone", retryable: false }, silent)).toBe("no microphone");
+    expect(voiceComposerStatusLine({ kind: "failed", message: "network error", retryable: true }, silent)).toBe("network error Press the microphone to try again.");
   });
 });
