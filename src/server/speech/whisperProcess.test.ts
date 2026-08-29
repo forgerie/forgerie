@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { SPEECH_POLICY } from "../../shared/speechPolicy.js";
 import { validateSpeechPcm, type ValidatedSpeechPcm } from "./speechAudio.js";
+import { DEFAULT_MAX_TRANSCRIPT_CHARS } from "./speechProcess.js";
 import { WhisperProcess } from "./whisperProcess.js";
 
 const execFileAsync = promisify(execFile);
@@ -82,6 +83,24 @@ describe("WhisperProcess", () => {
     await whisper.close();
   });
 
+  it("counts transcript limits by Unicode code point", async () => {
+    const script = await helperScript(framedWorkerScript(`
+      console.log(JSON.stringify({ requestId: header.requestId, status: 'ready', text: '😀😀' }));
+    `));
+    const whisper = new WhisperProcess({
+      commandPath: process.execPath,
+      args: [script],
+      sandbox: { enabled: false },
+      startupTimeoutMs: 1_000,
+      operationTimeoutMs: 1_000,
+      maxTranscriptChars: 2,
+    });
+    await whisper.start();
+
+    await expect(whisper.transcribe(pcm())).resolves.toEqual({ text: "😀😀" });
+    await whisper.close();
+  });
+
   it("starts single-flight when warmup and transcription race", async () => {
     const dir = await mkdtemp(join(tmpdir(), "forgerie-whisper-single-flight-test-"));
     helpers.push(dir);
@@ -114,8 +133,9 @@ describe("WhisperProcess", () => {
     expect(wrapper).toContain("name = \"forgerie-whisper-stt-worker\"");
     expect(wrapper).toContain("--unshare-net");
     expect(wrapper).toContain("WHISPER_SERVER");
-    expect(wrapper).toContain("WHISPER_MAX_WAV_BYTES 1920044");
-    expect(wrapper).toContain("WHISPER_REQUEST_TIMEOUT_MS 10000");
+    expect(wrapper).toContain("WHISPER_MAX_WAV_BYTES 19200044");
+    expect(wrapper).toContain(`WHISPER_MAX_TRANSCRIPT_CHARS ${String(DEFAULT_MAX_TRANSCRIPT_CHARS)}`);
+    expect(wrapper).toContain("WHISPER_REQUEST_TIMEOUT_MS 120000");
     expect(wrapper).toContain("speech/whisper_worker.py");
     expect(wrapper).not.toContain("''${1");
   });
@@ -124,6 +144,8 @@ describe("WhisperProcess", () => {
     const worker = await readFile("speech/whisper_worker.py", "utf8");
 
     expect(worker).toContain("type(wav_bytes) is not int");
+    expect(worker).toContain("DEFAULT_MAX_TRANSCRIPT_CHARS = 12_000");
+    expect(worker).toContain("json.dumps(record, separators=(\",\", \":\"), ensure_ascii=False)");
     expect(worker).toContain("secrets.token_hex(16)");
     expect(worker).toContain('boundary = f"forgerie-speech-boundary-{secrets.token_hex(16)}"');
   });

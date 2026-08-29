@@ -1,6 +1,7 @@
 export const SPEECH_SAMPLE_RATE_HZ = 16_000;
 export const SPEECH_PCM_BYTES_PER_SAMPLE = 4;
 export const SPEECH_CHANNELS = 1;
+export const SPEECH_MAX_TRANSCRIPT_CHARS = 12_000;
 
 export interface SpeechAudioPolicy {
   readonly sampleRateHz: number;
@@ -78,15 +79,15 @@ export function speechPcmBytesForSeconds(seconds: number): number {
 const minRequestMs = 100;
 const minRequestSeconds = minRequestMs / 1_000;
 const endpointWindowSeconds = 8;
-const maxTurnSeconds = 60;
+const maxTurnSeconds = 10 * 60;
 const minRequestBytes = speechPcmBytesForSeconds(minRequestSeconds);
 const endpointWindowBytes = speechPcmBytesForSeconds(endpointWindowSeconds);
 const maxTurnBytes = speechPcmBytesForSeconds(maxTurnSeconds);
 const endpointMaxRequestsPerTurn = 16;
 const pauseAfterSpeechMs = 650;
 const endpointCompletionGraceMs = 60;
-const bodyUploadDeadlineMs = 10_000;
-const operationDeadlineMs = 10_000;
+const bodyUploadDeadlineMs = 60_000;
+const operationDeadlineMs = 120_000;
 const persistentWarmthMaxMemoryFraction = 0.75;
 
 export const SPEECH_POLICY: SpeechRuntimePolicy = {

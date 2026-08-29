@@ -80,6 +80,7 @@ describe("speech capture browser lifecycle", () => {
     const session = await promise;
     expect(session.actualSampleRateHz).toBe(48_000);
     expect(host.audioContextCreatedBeforeWorklet).toBe(true);
+    expect(host.workletOptions?.processorOptions).toMatchObject({ maxSamples: 9_600_000 });
   });
 
   it("rejects a pre-aborted capture before requesting microphone permission", async () => {
@@ -505,6 +506,7 @@ class RecordingSpeechHost implements SpeechCaptureBrowserHost {
   public deferContextClose = false;
   public createAudioContextCalls = 0;
   public workletCreated = false;
+  public workletOptions: AudioWorkletNodeOptions | undefined;
   private userMediaResolve: ((stream: SpeechMediaStreamLike) => void) | undefined;
   public readonly mediaDevices = {
     getUserMedia: (constraints: MediaStreamConstraints): Promise<SpeechMediaStreamLike> => {
@@ -519,8 +521,9 @@ class RecordingSpeechHost implements SpeechCaptureBrowserHost {
     return this.context;
   }
 
-  public createAudioWorkletNode(): SpeechAudioWorkletNodeLike {
+  public createAudioWorkletNode(_context?: SpeechAudioContextLike, _name?: string, options?: AudioWorkletNodeOptions): SpeechAudioWorkletNodeLike {
     this.workletCreated = true;
+    this.workletOptions = options;
     return this.worklet;
   }
 

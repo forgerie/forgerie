@@ -29,11 +29,11 @@ pkgs.writeShellApplication {
       --setenv WHISPER_MODEL ${model} \
       --setenv WHISPER_SERVER ${pkgs.whisper-cpp}/bin/whisper-server \
       --setenv WHISPER_IP_COMMAND ${pkgs.iproute2}/bin/ip \
-      --setenv WHISPER_MAX_WAV_BYTES 1920044 \
+      --setenv WHISPER_MAX_WAV_BYTES 19200044 \
       --setenv WHISPER_MAX_RESPONSE_BYTES 65536 \
-      --setenv WHISPER_MAX_TRANSCRIPT_CHARS 4096 \
+      --setenv WHISPER_MAX_TRANSCRIPT_CHARS 12000 \
       --setenv WHISPER_WARMUP_TIMEOUT_MS 60000 \
-      --setenv WHISPER_REQUEST_TIMEOUT_MS 10000 \
+      --setenv WHISPER_REQUEST_TIMEOUT_MS 120000 \
       --chdir /tmp \
       ${python}/bin/python ${../speech/whisper_worker.py}
   '';

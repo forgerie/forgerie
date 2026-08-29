@@ -1,6 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
+import { SPEECH_MAX_TRANSCRIPT_CHARS, SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
 
 export const SpeechComponentStatusSchema = Type.Union([
   Type.Literal("warming"),
@@ -37,7 +37,7 @@ export const SpeechTurnDecisionResponseSchema = Type.Object({
 }, { additionalProperties: false });
 
 export const SpeechTranscriptionResponseSchema = Type.Object({
-  text: Type.String({ minLength: 1, maxLength: 4096 }),
+  text: Type.String({ minLength: 1, maxLength: SPEECH_MAX_TRANSCRIPT_CHARS }),
 }, { additionalProperties: false });
 
 export const SpeechErrorKindSchema = Type.Union([

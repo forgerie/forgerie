@@ -28,7 +28,7 @@ For a nested deployment, redirect the slashless prefix to the trailing-slash URL
 
 Composer dictation is optional and gateway-local. The browser captures bounded mono float32 PCM and sends it to the Forgerie web/API process that served the page. That gateway performs Whisper transcription, then inserts final text into the current active-session or new-session draft. Audio is not proxied to the selected federated machine, even when the prompt text will later be sent to a remote machine.
 
-Automatic turn detection is disabled. After speech starts, a pause does not end the recording. The user must stop dictation explicitly, or the 60-second capture limit stops it.
+Automatic turn detection is disabled. After speech starts, a pause does not end the recording. The user must stop dictation explicitly, or the 10-minute capture limit stops it.
 
 The current runtime packages Whisper with Nix for `x86_64-linux` only:
 
@@ -53,7 +53,7 @@ The web/API process warms Whisper after the HTTP listener starts. Readiness is r
 
 Browser-classified speech POSTs also pass a gateway Host allowlist. `FORGERIE_SPEECH_ALLOWED_HOSTS` is a comma-separated list of allowed browser `Host` values for speech requests, such as `forgerie.example.ts.net:8504,forgerie.example.ts.net`. When unset, Forgerie allows the configured web/API host and localhost variants for the configured port. Set this when a reverse proxy or VPN hostname serves the browser, and restart the web/API service after changing it.
 
-Speech uses fixed limits. Audio is 16 kHz mono float32 PCM, with a 60-second maximum turn. Body uploads and operations have 10-second deadlines. The gateway admits one active and one queued transcription, up to 12 transcriptions per minute. Whisper has a 60-second warmup deadline. Raw microphone audio stays in memory for the active bounded turn and 30-second retry buffer. Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session behavior.
+Speech uses fixed limits. Audio is 16 kHz mono float32 PCM, with a 10-minute maximum turn. Body uploads have a 60-second deadline. Transcription operations have a 120-second deadline. The gateway admits one active and one queued transcription, up to 12 transcriptions per minute. Whisper has a 60-second warmup deadline. Raw microphone audio stays in memory for the active bounded turn and 30-second retry buffer. Forgerie does not store raw audio as durable application data. Final text follows the normal draft/session behavior.
 
 In active-session and new-session composers, tap the microphone once to start and again to transcribe. A held press listens until release. The **Toggle Speech Dictation** action has no default shortcut, but you can assign one in **Settings → Keyboard**. Permission denial, missing microphone hardware, model failures, status failures, and timeouts release the microphone and keep existing draft text unchanged.
 

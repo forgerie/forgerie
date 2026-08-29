@@ -26,11 +26,11 @@ PROTOCOL = "forgerie-whisper-worker-v1"
 HOST = "127.0.0.1"
 PORT = 8790
 MAX_HEADER_BYTES = 4096
-DEFAULT_MAX_WAV_BYTES = 1_920_044
+DEFAULT_MAX_WAV_BYTES = 19_200_044
 DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
-DEFAULT_MAX_TRANSCRIPT_CHARS = 4096
+DEFAULT_MAX_TRANSCRIPT_CHARS = 12_000
 DEFAULT_WARMUP_TIMEOUT_MS = 60_000
-DEFAULT_REQUEST_TIMEOUT_MS = 10_000
+DEFAULT_REQUEST_TIMEOUT_MS = 120_000
 
 
 def env_int(name: str, default: int) -> int:
@@ -185,7 +185,7 @@ def read_exact(stream: BinaryIO, length: int) -> bytes:
 
 
 def response(record: dict[str, object]) -> None:
-    sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
+    sys.stdout.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 

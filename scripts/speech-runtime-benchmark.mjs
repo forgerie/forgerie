@@ -9,7 +9,7 @@ import readline from "node:readline";
 
 const SAMPLE_RATE = 16_000;
 const BYTES_PER_SAMPLE = 4;
-const DEFAULT_DURATIONS = [3, 10, 30, 60];
+const DEFAULT_DURATIONS = [3, 10, 30, 60, 600];
 const DEFAULT_REPEATS = 20;
 const SMART_TURN_PROTOCOL = "forgerie-smart-turn-worker-v2";
 const WHISPER_PROTOCOL = "forgerie-whisper-worker-v1";
@@ -92,7 +92,8 @@ async function main() {
 
     result.smartTurn.firstInference = await measureProcessOperation([process.pid, smartTurnProcess.child.pid], async () => smartTurnRequest(smartTurnProcess.child, smartLines, fixtures.get(durations[0]), "smart-first"));
     result.smartTurn.fixtures = [];
-    for (const seconds of durations) {
+    const smartTurnDurations = [...new Set([...durations.filter((seconds) => seconds <= 8), 8])];
+    for (const seconds of smartTurnDurations) {
       result.smartTurn.fixtures.push({ seconds, ...(await measureProcessOperation([process.pid, smartTurnProcess.child.pid], async () => smartTurnRequest(smartTurnProcess.child, smartLines, fixtures.get(seconds), `smart-${String(seconds)}`))) });
     }
     result.smartTurn.repeatedThreeSecondTurns = await repeatedMeasurements(repeats, [process.pid, smartTurnProcess.child.pid], async (index) => smartTurnRequest(smartTurnProcess.child, smartLines, fixtures.get(3), `smart-repeat-${String(index)}`));

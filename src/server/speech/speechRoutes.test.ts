@@ -160,7 +160,7 @@ describe("speech routes", () => {
       expect(response.headers["cache-control"]).toBe("no-store");
       const status = parseSpeechServiceStatusResponse(response.json());
       expect(status).toMatchObject({ smartTurn: "unavailable", whisper: "ready", capability: "manual-only" });
-      expect(status.limits).toMatchObject({ sampleRateHz: 16_000, maxTurnSeconds: 60, endpointWindowSeconds: 8 });
+      expect(status.limits).toMatchObject({ sampleRateHz: 16_000, maxTurnSeconds: 600, maxTurnBytes: 38_400_000, endpointWindowSeconds: 8 });
 
       const machineAlias = await app.inject({ method: "GET", url: "/api/machines/local/speech/status" });
       expect(machineAlias.statusCode).toBe(404);

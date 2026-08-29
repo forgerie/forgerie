@@ -1,9 +1,9 @@
 import { type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { isAbsolute } from "node:path";
-import { type SpeechRestartPolicy } from "../../shared/speechPolicy.js";
+import { SPEECH_MAX_TRANSCRIPT_CHARS, type SpeechRestartPolicy } from "../../shared/speechPolicy.js";
 
 export const DEFAULT_MAX_CHILD_RESPONSE_BYTES = 64 * 1024;
-export const DEFAULT_MAX_TRANSCRIPT_CHARS = 4_096;
+export const DEFAULT_MAX_TRANSCRIPT_CHARS = SPEECH_MAX_TRANSCRIPT_CHARS;
 const DEFAULT_MAX_QUEUED_JSON_LINES = 16;
 
 export type SpeechComponentStatus = "warming" | "ready" | "unavailable";

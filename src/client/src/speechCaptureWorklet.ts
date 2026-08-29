@@ -15,7 +15,7 @@ interface SpeechCaptureWorkletControlMessage {
 
 const defaultTargetSampleRateHz = 16_000;
 const defaultBatchSamples = 800;
-const defaultMaxSamples = defaultTargetSampleRateHz * 60;
+const defaultMaxSamples = defaultTargetSampleRateHz * 10 * 60;
 const defaultRmsThreshold = 0.012;
 
 class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {

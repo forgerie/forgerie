@@ -192,7 +192,7 @@ function parseWhisperResponse(response: unknown, requestId: string, maxTranscrip
   if (response["status"] !== "ready") throw new SpeechProcessError("protocol", "Whisper response status is invalid.");
   const text = response["text"];
   if (typeof text !== "string") throw new SpeechProcessError("protocol", "Whisper response shape is invalid.");
-  if (text.length > maxTranscriptChars) throw new SpeechProcessError("protocol", "Whisper transcript exceeded the text limit.");
+  if (Array.from(text).length > maxTranscriptChars) throw new SpeechProcessError("protocol", "Whisper transcript exceeded the text limit.");
   const trimmed = text.trim();
   if (trimmed === "") throw new SpeechProcessError("empty", "Whisper returned empty text.");
   return { text: trimmed };

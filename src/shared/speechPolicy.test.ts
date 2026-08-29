@@ -20,8 +20,8 @@ describe("speech runtime policy", () => {
 
   it("keeps every request and queued body below the existing app body ceiling", () => {
     const appBodyLimitBytes = 64 * 1024 * 1024;
-    expect(SPEECH_POLICY.audio.maxTurnSeconds).toBe(60);
-    expect(SPEECH_POLICY.audio.maxTurnBytes).toBe(3_840_000);
+    expect(SPEECH_POLICY.audio.maxTurnSeconds).toBe(600);
+    expect(SPEECH_POLICY.audio.maxTurnBytes).toBe(38_400_000);
     expect(SPEECH_POLICY.audio.maxTurnBytes).toBeLessThan(appBodyLimitBytes);
     expect(SPEECH_POLICY.audio.endpointWindowBytes).toBeLessThan(appBodyLimitBytes);
     expect(SPEECH_POLICY.admission.maxQueuedPcmBytes).toBe(SPEECH_POLICY.audio.maxTurnBytes);
@@ -39,9 +39,9 @@ describe("speech runtime policy", () => {
 
   it("admits one queued operation per backend under one queue-inclusive operation deadline", () => {
     expect(SPEECH_POLICY.admission.queuedOperationsPerBackend).toBe(1);
-    expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBe(10_000);
-    expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBe(SPEECH_POLICY.timing.operationDeadlineMs);
-    expect(SPEECH_POLICY.timing.operationDeadlineMs).toBe(10_000);
+    expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBe(60_000);
+    expect(SPEECH_POLICY.timing.bodyUploadDeadlineMs).toBeLessThanOrEqual(SPEECH_POLICY.timing.operationDeadlineMs);
+    expect(SPEECH_POLICY.timing.operationDeadlineMs).toBe(120_000);
     expect(SPEECH_POLICY.timing.endpointDeadlineMs).toBeLessThan(SPEECH_POLICY.timing.operationDeadlineMs);
     expect(SPEECH_POLICY.timing.initialSpeechTimeoutMs).toBeLessThan(SPEECH_POLICY.audio.maxTurnSeconds * 1_000);
     expect(SPEECH_POLICY.timing.endpointCompletionGraceMs).toBe(60);
@@ -55,12 +55,12 @@ describe("speech runtime policy", () => {
   it("records generated-speech measurements and avoids transcript text", () => {
     expect(SPEECH_POLICY_EVIDENCE.measuredWith).toBe("scripts/speech-runtime-benchmark.mjs");
     expect(SPEECH_POLICY_EVIDENCE.fixtureKind).toBe("generated-non-sensitive-tts-speech");
-    expect(SPEECH_POLICY_EVIDENCE.sampleDurationsSeconds).toEqual([3, 10, 30, 60]);
+    expect(SPEECH_POLICY_EVIDENCE.sampleDurationsSeconds).toEqual([3, 10, 30, 60, 600]);
     expect(SPEECH_POLICY_EVIDENCE.repeatedTurns).toBe(20);
     expect(SPEECH_POLICY_EVIDENCE.contentionTurns).toBe(20);
-    expect(SPEECH_POLICY_EVIDENCE.whisperSixtySecondFixtureMs).toBe(SPEECH_POLICY_EVIDENCE.whisperMaxTurnFixtureMs);
+    expect(SPEECH_POLICY_EVIDENCE.whisperSixtySecondFixtureMs).toBeLessThan(SPEECH_POLICY_EVIDENCE.whisperMaxTurnFixtureMs);
     expect(SPEECH_POLICY_EVIDENCE.whisperWarmTranscriptionP95Ms).toBeLessThan(2_000);
-    expect(SPEECH_POLICY_EVIDENCE.whisperMaxTurnFixtureMs).toBeLessThan(5_000);
+    expect(SPEECH_POLICY_EVIDENCE.whisperMaxTurnFixtureMs).toBeLessThan(SPEECH_POLICY.timing.operationDeadlineMs);
     expect(SPEECH_POLICY_EVIDENCE.activeQueuedContentionP95Ms).toBeLessThan(SPEECH_POLICY.timing.operationDeadlineMs);
     expect(SPEECH_POLICY_EVIDENCE.benchmarkNodePeakCopyRssBytes).toBeGreaterThan(0);
     const serializedEvidence = JSON.stringify(SPEECH_POLICY_EVIDENCE).toLowerCase();

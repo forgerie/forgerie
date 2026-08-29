@@ -289,7 +289,7 @@
                 <li><strong>Timeout, busy, or network error:</strong> the composer may offer a 30-second retry from retained in-memory audio. Press the microphone to retry before the timer expires, or discard it.</li>
               </ul>
               <p>
-                Dictation accepts one bounded turn: 16 kHz mono float32 PCM, up to 60 seconds, with an eight-second Smart
+                Dictation accepts one bounded turn: 16 kHz mono float32 PCM, up to 10 minutes, with an eight-second Smart
                 Turn endpoint window. A tap starts hands-free capture, a hold keeps listening until release, and a second
                 press during capture transcribes immediately. Raw microphone audio is kept only in memory for the active
                 bounded turn and 30-second retry buffer; it is not stored durably.
