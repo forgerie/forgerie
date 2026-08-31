@@ -34,7 +34,9 @@ still dictated or given a file. So the takeover carries them.
 | `session` | tree, archive, new session, rapidfire, dismiss | 1st |
 
 Groups move whole. A session menu missing two of its five entries reads as a
-bug, and a pager without its forward arrow is worse than no pager.
+bug, and a pager without its forward arrow is worse than no pager. Dictation
+still fits and overflows with the `answer` group, but the microphone renders
+after the primary commit action so it stays docked to the composer's right edge.
 
 Three controls are absent rather than overflowed: slash commands, queue, and
 steer. All three act on a free-form draft, which takeover has already ruled out,

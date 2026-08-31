@@ -209,6 +209,7 @@ export class ComposerTakeover extends HTMLElement {
     this.#footBuilt = signature;
 
     const parts = [];
+    const docked = [];
     if (layout.inline.includes("pager")) {
       parts.push(`
         <div class="ct-pager">
@@ -224,16 +225,21 @@ export class ComposerTakeover extends HTMLElement {
         continue;
       }
       const label = CONTROL_LABELS.get(id) ?? id;
-      parts.push(`
+      const control = `
         <button class="ct-icon" data-act="${id}" type="button" title="${label}" aria-label="${label}">
           <svg viewBox="0 0 20 20" aria-hidden="true">${ICONS[id] ?? ""}</svg>
-        </button>`);
+        </button>`;
+      // The microphone is the composer's handhold, not another utility in the
+      // left cluster. Keep it after the primary commit action at the right edge.
+      if (id === "dictate") docked.push(control);
+      else parts.push(control);
     }
     parts.push(`<span class="ct-draft-chip" hidden>Draft saved</span>`);
     if (layout.overflow.length > 0) {
       parts.push(`<button class="ct-text-action ct-more" data-act="more" type="button" aria-haspopup="menu">More</button>`);
     }
     parts.push(`<button class="ct-submit" data-act="submit" type="button">Send answers</button>`);
+    parts.push(...docked);
     this.#foot.innerHTML = parts.join("");
   }
 
