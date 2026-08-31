@@ -1,0 +1,433 @@
+/* Tokens copied from src/client/index.html (dark theme) so the morph is judged
+   in the shipped palette rather than an approximation of it. */
+:root {
+  --pi-text-xs: clamp(0.6875rem, 0.67rem + 0.1cqi, 0.75rem);
+  --pi-text-sm: clamp(0.75rem, 0.73rem + 0.1cqi, 0.8125rem);
+  --pi-text-md: clamp(0.875rem, 0.86rem + 0.1cqi, 0.9375rem);
+  --pi-text-lg: clamp(1.0625rem, 1.04rem + 0.15cqi, 1.125rem);
+  --pi-space-xs: 0.25rem;
+  --pi-space-sm: clamp(0.375rem, 0.35rem + 0.15cqi, 0.5rem);
+  --pi-space-md: clamp(0.625rem, 0.58rem + 0.25cqi, 0.75rem);
+  --pi-space-lg: clamp(0.875rem, 0.8rem + 0.4cqi, 1.125rem);
+  --pi-radius-inline: 4px;
+  --pi-radius-control: 8px;
+  --pi-radius-surface: 12px;
+  --pi-radius-pill: 999px;
+  --pi-motion-move: 180ms;
+  --pi-focus-ring: 2px solid var(--pi-accent);
+  --pi-control-font-size: 16px;
+
+  --pi-bg: #111214;
+  --pi-surface: #191a1d;
+  --pi-surface-hover: #202225;
+  --pi-border: #2a2c30;
+  --pi-border-muted: #202225;
+  --pi-text: #e6e7e9;
+  --pi-text-secondary: #a9abb0;
+  --pi-text-bright: #ffffff;
+  --pi-muted: #85888e;
+  --pi-dim: #62656b;
+  --pi-accent: #6699e0;
+  --pi-accent-border: #4a7cc4;
+  --pi-selection-bg: #1d2331;
+  --pi-warning: #d0a04a;
+  --pi-warning-border: #8a6420;
+  --pi-warning-surface: #221c11;
+  --pi-shadow-strong: #00000090;
+
+  /* Minimum comfortable hit target. Drawn size may go below it; the rect never does. */
+  --ct-touch: 44px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  /* The page itself never scrolls. Every overflow is owned by a named region
+     inside the frame, which is the whole point of the exercise. */
+  overflow: hidden;
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font: var(--pi-control-font-size) / 1.5 system-ui, sans-serif;
+  overscroll-behavior: none;
+}
+
+/* Height comes from the visual viewport, set by index.html, so an open keyboard
+   shrinks the frame instead of pushing the composer under the keys. */
+.frame {
+  height: var(--app-h, 100dvh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.transcript {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--pi-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pi-space-md);
+}
+
+.turn { max-width: 60ch; font-size: var(--pi-text-md); color: var(--pi-text-secondary); }
+.turn.user { align-self: flex-end; background: var(--pi-selection-bg); padding: var(--pi-space-sm) var(--pi-space-md); border-radius: var(--pi-radius-surface); color: var(--pi-text); }
+.turn .who { display: block; font-size: var(--pi-text-xs); color: var(--pi-dim); margin-bottom: 2px; }
+
+/* The passive record of a question. No inputs live here: the composer owns
+   every control, so there is only ever one place to type. */
+.ask-record {
+  border-left: 2px solid var(--pi-warning-border);
+  padding-left: var(--pi-space-md);
+  font-size: var(--pi-text-sm);
+  color: var(--pi-muted);
+}
+.ask-record strong { color: var(--pi-text-secondary); font-weight: 500; }
+
+.composer-slot {
+  flex: 0 0 auto;
+  container-type: inline-size;
+  border-top: 1px solid var(--pi-border);
+  background: var(--pi-surface);
+}
+
+/* ---------- the composer, both modes ---------- */
+
+.ct {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--pi-space-sm) var(--pi-space-md);
+  gap: var(--pi-space-sm);
+  transition: max-height var(--pi-motion-move) ease;
+}
+
+.ct[data-mode="ask"] {
+  /* The budget from plan(). A cap, never a fixed height: a short question set
+     still renders short. */
+  max-height: var(--ct-budget, 60%);
+  background: linear-gradient(var(--pi-warning-surface), var(--pi-surface) 64px);
+}
+
+.ct-draft { display: flex; gap: var(--pi-space-sm); align-items: flex-end; }
+.ct-draft[hidden] { display: none; }
+.ct-draft-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  field-sizing: content;
+  max-height: 30vh;
+  padding: var(--pi-space-sm) var(--pi-space-md);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font: inherit;
+  font-size: var(--pi-control-font-size);
+}
+
+.ct-ask { display: flex; flex-direction: column; min-height: 0; gap: var(--pi-space-sm); }
+.ct-ask[hidden] { display: none; }
+
+.ct-head { display: flex; align-items: baseline; gap: var(--pi-space-sm); flex: 0 0 auto; }
+.ct-badge {
+  font-size: var(--pi-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pi-warning);
+  white-space: nowrap;
+}
+.ct-readout { font-size: var(--pi-text-xs); color: var(--pi-muted); margin-left: auto; white-space: nowrap; }
+.ct[data-readout="pager"] .ct-readout { display: none; }
+
+/* The scrolling region. This is the only thing that grows, and it is bounded by
+   the budget, so nothing ever pushes the submit row off-screen. */
+.ct-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pi-space-sm);
+}
+
+/* Content that continues past the budget fades at the edge, so a capped region
+   reads as scrollable rather than cut off. The fade lifts at the end of the
+   scroll, which is how you tell "more below" from "that was all". */
+.ct[data-overflowing="true"][data-at-end="false"] .ct-body {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+/* Question and its detail-opener share row one; the detail line, when it is
+   shown inline, takes a full row of its own. Laying these three out as one flex
+   row put a 150px question beside a 150px detail at 320px wide. */
+.ct-prompt {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--pi-space-xs) var(--pi-space-sm);
+}
+.ct-question { grid-column: 1; grid-row: 1; }
+.ct-detail-btn { grid-column: 2; grid-row: 1; }
+.ct-detail { grid-column: 1 / -1; }
+.ct-question { margin: 0; font-size: var(--pi-text-md); color: var(--pi-text-bright); font-weight: 500; }
+.ct-detail { margin: 0; font-size: var(--pi-text-sm); color: var(--pi-muted); }
+.ct-detail[hidden] { display: none; }
+.ct-detail-btn {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  /* Drawn small, hit large. The 44px rect is pushed outward so it never eats
+     into a neighbouring control's rect. */
+  outline-offset: 0;
+  border-radius: var(--pi-radius-pill);
+  border: 1px solid var(--pi-border);
+  background: var(--pi-surface-hover);
+  color: var(--pi-text-secondary);
+  font-size: var(--pi-text-xs);
+  position: relative;
+}
+.ct-detail-btn::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--ct-touch) - 22px) / -2);
+}
+.ct-detail-btn[hidden] { display: none; }
+
+.ct-options { display: flex; flex-direction: column; gap: var(--pi-space-md); }
+.ct-question-block { display: flex; flex-direction: column; gap: var(--pi-space-sm); }
+.ct-question-inline { margin: 0; font-size: var(--pi-text-md); color: var(--pi-text); }
+.ct-num { color: var(--pi-dim); margin-right: 0.4ch; }
+.ct-question-detail { margin: 0; font-size: var(--pi-text-sm); color: var(--pi-muted); }
+
+/* In paged and strip structures the head already shows the question, so the
+   block must not repeat it. Never say the same thing twice on a small screen. */
+.ct[data-paged="true"] .ct-question-inline,
+.ct[data-paged="true"] .ct-question-detail { display: none; }
+.ct[data-paged="true"] .ct-block-free { display: none; }
+.ct[data-paged="false"] .ct-free { display: none; }
+.ct[data-structure="strip"] .ct-question-inline,
+.ct[data-structure="strip"] .ct-question-detail { display: none; }
+
+.ct-option-band { display: flex; flex-direction: column; gap: var(--pi-space-xs); }
+
+.ct-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  min-height: var(--ct-touch);
+  padding: var(--pi-space-sm) var(--pi-space-md);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font: inherit;
+  font-size: var(--pi-text-md);
+  cursor: pointer;
+}
+.ct-option[aria-checked="true"] {
+  border-color: var(--pi-accent-border);
+  background: var(--pi-selection-bg);
+  color: var(--pi-text-bright);
+}
+.ct-option-detail { font-size: var(--pi-text-xs); color: var(--pi-muted); }
+
+/* Width decides how options are laid out. The track comes from the longest
+   label, so a wide-short pane spends its width on columns instead of stacking
+   three full-width rows into a height it does not have. */
+.ct[data-options="grid"] .ct-option-band {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--ct-track, 180px), 100%), 1fr));
+  gap: var(--pi-space-xs);
+}
+
+/* Chips: the height-starved form. Options wrap and the band scrolls inside its
+   own budget, so twelve options cost the same structure as three. */
+.ct[data-options="chips"] .ct-option-band {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--pi-space-xs);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+.ct[data-options="chips"] .ct-option {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: var(--pi-space-xs) var(--pi-space-md);
+  border-radius: var(--pi-radius-pill);
+  font-size: var(--pi-text-sm);
+  position: relative;
+}
+.ct[data-options="chips"] .ct-option::after {
+  content: "";
+  position: absolute;
+  inset-block: calc((var(--ct-touch) - 36px) / -2);
+  inset-inline: 0;
+}
+.ct[data-options="chips"] .ct-option-detail { display: none; }
+
+.ct-free { flex: 0 0 auto; }
+.ct-free-field, .ct-block-free {
+  width: 100%;
+  resize: none;
+  field-sizing: content;
+  max-height: 22vh;
+  padding: var(--pi-space-sm) var(--pi-space-md);
+  border: 1px dashed var(--pi-border);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font: inherit;
+  font-size: var(--pi-control-font-size);
+}
+.ct[data-inline-free-text="false"] .ct-free { display: none; }
+
+/* Wrapping is the safety net that makes the invariant true at every width: the
+   submit button is never pushed off the edge, it moves to its own row instead.
+   Costing height is allowed. Losing a control is not. */
+.ct-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--pi-space-xs) var(--pi-space-sm);
+}
+.ct-pager { display: flex; align-items: center; gap: var(--pi-space-xs); }
+.ct[data-paged="false"] .ct-pager { display: none; }
+/* Position is a readout, so it yields before the arrows do. Under this width
+   the arrows and their aria-labels still carry the whole capability. */
+.ct-page-label { font-size: var(--pi-text-xs); color: var(--pi-muted); min-width: 5ch; text-align: center; }
+.ct[data-page-label="false"] .ct-page-label { display: none; }
+.ct-page-prev, .ct-page-next {
+  width: var(--ct-touch); height: 36px;
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-surface-hover);
+  color: var(--pi-text-secondary);
+  font-size: var(--pi-text-lg);
+  cursor: pointer;
+}
+
+.ct-draft-chip {
+  font-size: var(--pi-text-xs);
+  color: var(--pi-muted);
+  border: 1px dashed var(--pi-border);
+  border-radius: var(--pi-radius-pill);
+  padding: 2px var(--pi-space-sm);
+  white-space: nowrap;
+}
+.ct-draft-chip[hidden], .ct[data-inline-draft-peek="false"] .ct-draft-chip { display: none; }
+
+.ct-skip, .ct-more {
+  min-height: 36px;
+  padding: 0 var(--pi-space-md);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-control);
+  background: transparent;
+  color: var(--pi-text-secondary);
+  font: inherit;
+  font-size: var(--pi-text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ct[data-inline-skip="false"] .ct-skip { display: none; }
+.ct[data-has-overflow="false"] .ct-more { display: none; }
+
+.ct-primary {
+  min-height: 36px;
+  margin-left: auto;
+  padding: 0 var(--pi-space-lg);
+  border: 1px solid var(--pi-accent-border);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-accent);
+  color: #0d1117;
+  font: inherit;
+  font-size: var(--pi-text-md);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* ---------- strip: the shape a keyboard leaves behind ---------- */
+
+.ct[data-structure="strip"] { gap: var(--pi-space-xs); padding: var(--pi-space-xs) var(--pi-space-md); }
+.ct[data-structure="strip"] .ct-badge { display: none; }
+.ct[data-structure="strip"] .ct-question {
+  font-size: var(--pi-text-sm);
+  /* The question truncates rather than pushing controls off. The full text is
+     one tap away in the detail popover, never gone. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* A wide strip has width to spend, so the question moves beside the options
+   instead of stacking above them. */
+.ct[data-structure="strip"][data-prompt="inline"] .ct-body {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--pi-space-md);
+}
+.ct[data-structure="strip"][data-prompt="inline"] .ct-prompt {
+  flex: 0 1 34%;
+  min-width: 0;
+  align-self: center;
+}
+.ct[data-structure="strip"][data-prompt="inline"] .ct-options { flex: 1 1 auto; min-width: 0; }
+.ct[data-structure="strip"][data-prompt="inline"] .ct-question { -webkit-line-clamp: 3; }
+
+/* ---------- overflow, in the top layer ---------- */
+
+.ct-sheet {
+  width: min(28rem, 100vw - 2rem);
+  max-height: 80dvh;
+  overflow-y: auto;
+  margin: auto auto 0;
+  padding: var(--pi-space-lg);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-surface) var(--pi-radius-surface) 0 0;
+  background: var(--pi-surface);
+  color: var(--pi-text);
+  box-shadow: 0 -8px 32px var(--pi-shadow-strong);
+}
+.ct-sheet::backdrop { background: #0009; }
+.ct-sheet-title { margin: 0 0 var(--pi-space-md); font-size: var(--pi-text-md); color: var(--pi-text-bright); }
+.ct-sheet-body { display: flex; flex-direction: column; gap: var(--pi-space-sm); }
+.ct-sheet-item {
+  min-height: var(--ct-touch);
+  padding: 0 var(--pi-space-md);
+  text-align: left;
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font: inherit;
+  font-size: var(--pi-text-md);
+  cursor: pointer;
+}
+.ct-sheet-text { margin: 0; font-size: var(--pi-text-md); color: var(--pi-text-secondary); }
+.ct-sheet-field {
+  width: 100%;
+  resize: none;
+  padding: var(--pi-space-sm) var(--pi-space-md);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font: inherit;
+  font-size: var(--pi-control-font-size);
+}
+
+:focus-visible { outline: var(--pi-focus-ring); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ct { transition: none; }
+}
