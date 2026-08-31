@@ -1,6 +1,14 @@
 # skills
 
-Distributable agent skills developed alongside pi-web.
+Distributable agent skills developed alongside Forgerie.
+
+## handoff
+
+Compact the current conversation into a handoff document, then immediately
+spawn the continuation session via `spawn_session`.
+
+Local install: symlink `skills/handoff` into `~/.pi/agent/skills/handoff` so
+the TUI and Forgerie sessions share one copy.
 
 ## relay
 
