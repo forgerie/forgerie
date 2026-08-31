@@ -1,6 +1,9 @@
-/* Tokens copied from src/client/index.html (dark theme) so the morph is judged
-   in the shipped palette rather than an approximation of it. */
+/* Forgerie Light ("Paper"), copied from src/client/src/plugins/themes/index.ts.
+   Light only, on purpose: this prototype argues about layout, and carrying two
+   palettes would mean judging every size twice for no extra answer. */
 :root {
+  color-scheme: light;
+
   --pi-text-xs: clamp(0.6875rem, 0.67rem + 0.1cqi, 0.75rem);
   --pi-text-sm: clamp(0.75rem, 0.73rem + 0.1cqi, 0.8125rem);
   --pi-text-md: clamp(0.875rem, 0.86rem + 0.1cqi, 0.9375rem);
@@ -17,25 +20,27 @@
   --pi-focus-ring: 2px solid var(--pi-accent);
   --pi-control-font-size: 16px;
 
-  --pi-bg: #111214;
-  --pi-surface: #191a1d;
-  --pi-surface-hover: #202225;
-  --pi-border: #2a2c30;
-  --pi-border-muted: #202225;
-  --pi-text: #e6e7e9;
-  --pi-text-secondary: #a9abb0;
-  --pi-text-bright: #ffffff;
-  --pi-muted: #85888e;
-  --pi-dim: #62656b;
-  --pi-accent: #6699e0;
-  --pi-accent-border: #4a7cc4;
-  --pi-selection-bg: #1d2331;
-  --pi-warning: #d0a04a;
-  --pi-warning-border: #8a6420;
-  --pi-warning-surface: #221c11;
-  --pi-shadow-strong: #00000090;
+  --pi-bg: #fafaf8;
+  --pi-surface: #ffffff;
+  --pi-surface-hover: #f1f1ee;
+  --pi-border: #e0dfdb;
+  --pi-border-muted: #ebeae6;
+  --pi-text: #1b1c1f;
+  --pi-text-secondary: #53565c;
+  --pi-text-bright: #000000;
+  --pi-muted: #6d7076;
+  --pi-dim: #8a8d93;
+  --pi-accent: #3563c4;
+  --pi-accent-border: #2f57ad;
+  --pi-selection-bg: #e8eefb;
+  --pi-success: #1d7a4f;
+  --pi-warning: #92610f;
+  --pi-danger: #c13a49;
+  --pi-shadow-soft: #1b1c1f14;
+  --pi-shadow: #1b1c1f1f;
+  --pi-shadow-strong: #1b1c1f2e;
 
-  /* Minimum comfortable hit target. Drawn size may go below it; the rect never does. */
+  /* Minimum comfortable hit target. Drawn size may go under it; the rect never does. */
   --ct-touch: 44px;
 }
 
@@ -44,8 +49,8 @@
 html, body {
   height: 100%;
   margin: 0;
-  /* The page itself never scrolls. Every overflow is owned by a named region
-     inside the frame, which is the whole point of the exercise. */
+  /* The page never scrolls. Every overflow belongs to a named region inside the
+     frame, which is the whole point of the exercise. */
   overflow: hidden;
   background: var(--pi-bg);
   color: var(--pi-text);
@@ -73,246 +78,232 @@ html, body {
 }
 
 .turn { max-width: 60ch; font-size: var(--pi-text-md); color: var(--pi-text-secondary); }
-.turn.user { align-self: flex-end; background: var(--pi-selection-bg); padding: var(--pi-space-sm) var(--pi-space-md); border-radius: var(--pi-radius-surface); color: var(--pi-text); }
+.turn.user {
+  align-self: flex-end;
+  background: var(--pi-selection-bg);
+  padding: var(--pi-space-sm) var(--pi-space-md);
+  border-radius: var(--pi-radius-surface);
+  color: var(--pi-text);
+}
 .turn .who { display: block; font-size: var(--pi-text-xs); color: var(--pi-dim); margin-bottom: 2px; }
 
-/* The passive record of a question. No inputs live here: the composer owns
-   every control, so there is only ever one place to type. */
+/* The passive record. No inputs live here: the composer owns every control, so
+   there is only ever one place to type. */
 .ask-record {
-  border-left: 2px solid var(--pi-warning-border);
+  border-left: 2px solid var(--pi-border);
   padding-left: var(--pi-space-md);
   font-size: var(--pi-text-sm);
   color: var(--pi-muted);
 }
-.ask-record strong { color: var(--pi-text-secondary); font-weight: 500; }
+.ask-record strong { color: var(--pi-text-secondary); font-weight: 650; }
 
 .composer-slot {
   flex: 0 0 auto;
   container-type: inline-size;
-  border-top: 1px solid var(--pi-border);
-  background: var(--pi-surface);
+  padding: var(--pi-space-sm) var(--pi-space-md) var(--pi-space-md);
+  background: var(--pi-bg);
 }
 
 /* ---------- the composer, both modes ---------- */
 
-.ct {
+.ct { display: flex; flex-direction: column; min-height: 0; }
+
+/* The same card the transcript used to show, docked to the bottom of the frame
+   and bounded by the budget from plan(). */
+.ct-card {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: var(--pi-space-sm) var(--pi-space-md);
-  gap: var(--pi-space-sm);
-  transition: max-height var(--pi-motion-move) ease;
-}
-
-.ct[data-mode="ask"] {
-  /* The budget from plan(). A cap, never a fixed height: a short question set
-     still renders short. */
   max-height: var(--ct-budget, 60%);
-  background: linear-gradient(var(--pi-warning-surface), var(--pi-surface) 64px);
-}
-
-.ct-draft { display: flex; gap: var(--pi-space-sm); align-items: flex-end; }
-.ct-draft[hidden] { display: none; }
-.ct-draft-field {
-  flex: 1 1 auto;
-  min-width: 0;
-  resize: none;
-  field-sizing: content;
-  max-height: 30vh;
-  padding: var(--pi-space-sm) var(--pi-space-md);
   border: 1px solid var(--pi-border);
-  border-radius: var(--pi-radius-control);
-  background: var(--pi-bg);
-  color: var(--pi-text);
-  font: inherit;
-  font-size: var(--pi-control-font-size);
+  border-radius: var(--pi-radius-surface);
+  background: var(--pi-surface);
+  box-shadow: 0 2px 10px var(--pi-shadow-soft);
 }
+.ct-card[hidden] { display: none; }
 
-.ct-ask { display: flex; flex-direction: column; min-height: 0; gap: var(--pi-space-sm); }
-.ct-ask[hidden] { display: none; }
-
-.ct-head { display: flex; align-items: baseline; gap: var(--pi-space-sm); flex: 0 0 auto; }
-.ct-badge {
-  font-size: var(--pi-text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--pi-warning);
-  white-space: nowrap;
-}
-.ct-readout { font-size: var(--pi-text-xs); color: var(--pi-muted); margin-left: auto; white-space: nowrap; }
-.ct[data-readout="pager"] .ct-readout { display: none; }
-
-/* The scrolling region. This is the only thing that grows, and it is bounded by
-   the budget, so nothing ever pushes the submit row off-screen. */
-.ct-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+.ct-head {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: var(--pi-space-sm);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 22px;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--pi-border-muted) 35%, transparent);
+  border-radius: calc(var(--pi-radius-surface) - 1px) calc(var(--pi-radius-surface) - 1px) 0 0;
+  background: var(--pi-surface);
 }
+.ct-head h2 {
+  margin: 0;
+  color: var(--pi-accent);
+  font-size: var(--pi-text-sm);
+  line-height: 1.3;
+  text-transform: uppercase;
+  font-weight: 650;
+}
+.ct-status { flex: 0 1 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); text-align: end; }
+.ct[data-readout="pager"] .ct-status { display: none; }
 
-/* Content that continues past the budget fades at the edge, so a capped region
-   reads as scrollable rather than cut off. The fade lifts at the end of the
-   scroll, which is how you tell "more below" from "that was all". */
+/* The only region that grows, bounded by the budget, so nothing can push the
+   submit row past the bottom of the frame. */
+.ct-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Content continuing past the budget fades at the edge, so a capped region
+   reads as scrollable rather than cut off. The fade lifts at the end. */
 .ct[data-overflowing="true"][data-at-end="false"] .ct-body {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
 }
 
-/* Question and its detail-opener share row one; the detail line, when it is
-   shown inline, takes a full row of its own. Laying these three out as one flex
-   row put a 150px question beside a 150px detail at 320px wide. */
-.ct-prompt {
-  flex: 0 0 auto;
+.ct-questions { display: grid; }
+
+.question {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  background: transparent;
+  /* An inset shadow, not a border: the divider then runs the full width of the
+     card instead of being notched by the question label. */
+  box-shadow: inset 0 1px 0 var(--pi-border-muted);
+}
+.question:first-child { box-shadow: none; }
+
+.question-head {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: var(--pi-space-xs) var(--pi-space-sm);
-}
-.ct-question { grid-column: 1; grid-row: 1; }
-.ct-detail-btn { grid-column: 2; grid-row: 1; }
-.ct-detail { grid-column: 1 / -1; }
-.ct-question { margin: 0; font-size: var(--pi-text-md); color: var(--pi-text-bright); font-weight: 500; }
-.ct-detail { margin: 0; font-size: var(--pi-text-sm); color: var(--pi-muted); }
-.ct-detail[hidden] { display: none; }
-.ct-detail-btn {
-  flex: 0 0 auto;
-  width: 22px; height: 22px;
-  /* Drawn small, hit large. The 44px rect is pushed outward so it never eats
-     into a neighbouring control's rect. */
-  outline-offset: 0;
-  border-radius: var(--pi-radius-pill);
-  border: 1px solid var(--pi-border);
-  background: var(--pi-surface-hover);
-  color: var(--pi-text-secondary);
-  font-size: var(--pi-text-xs);
-  position: relative;
-}
-.ct-detail-btn::after {
-  content: "";
-  position: absolute;
-  inset: calc((var(--ct-touch) - 22px) / -2);
-}
-.ct-detail-btn[hidden] { display: none; }
-
-.ct-options { display: flex; flex-direction: column; gap: var(--pi-space-md); }
-.ct-question-block { display: flex; flex-direction: column; gap: var(--pi-space-sm); }
-.ct-question-inline { margin: 0; font-size: var(--pi-text-md); color: var(--pi-text); }
-.ct-num { color: var(--pi-dim); margin-right: 0.4ch; }
-.ct-question-detail { margin: 0; font-size: var(--pi-text-sm); color: var(--pi-muted); }
-
-/* In paged and strip structures the head already shows the question, so the
-   block must not repeat it. Never say the same thing twice on a small screen. */
-.ct[data-paged="true"] .ct-question-inline,
-.ct[data-paged="true"] .ct-question-detail { display: none; }
-.ct[data-paged="true"] .ct-block-free { display: none; }
-.ct[data-paged="false"] .ct-free { display: none; }
-.ct[data-structure="strip"] .ct-question-inline,
-.ct[data-structure="strip"] .ct-question-detail { display: none; }
-
-.ct-option-band { display: flex; flex-direction: column; gap: var(--pi-space-xs); }
-
-.ct-option {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: left;
-  min-height: var(--ct-touch);
-  padding: var(--pi-space-sm) var(--pi-space-md);
-  border: 1px solid var(--pi-border);
-  border-radius: var(--pi-radius-control);
-  background: var(--pi-bg);
+  gap: 5px;
+  padding: 0;
   color: var(--pi-text);
+  font-weight: 650;
+  line-height: 1.35;
+}
+.question-number { color: var(--pi-muted); }
+.question.answered .question-number { color: var(--pi-success); }
+/* In paged and strip structures only one question is on screen, so its ordinal
+   is already in the pager and repeating it here says nothing. */
+.ct[data-paged="true"] .question-number { display: none; }
+
+.question-detail { margin: 4px 0 10px; color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.4; }
+.ct[data-detail="popover"] .question-detail { display: none; }
+
+/* The same inline underlined control the shipped card uses for question jumps. */
+.question-detail-open {
+  display: none;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--pi-muted);
+  padding: 0;
+  margin: 4px 0 0;
   font: inherit;
-  font-size: var(--pi-text-md);
+  font-size: var(--pi-text-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
   cursor: pointer;
 }
-.ct-option[aria-checked="true"] {
-  border-color: var(--pi-accent-border);
-  background: var(--pi-selection-bg);
-  color: var(--pi-text-bright);
-}
-.ct-option-detail { font-size: var(--pi-text-xs); color: var(--pi-muted); }
+.ct[data-detail="popover"] .question-detail-open.has-detail { display: inline; }
 
-/* Width decides how options are laid out. The track comes from the longest
-   label, so a wide-short pane spends its width on columns instead of stacking
-   three full-width rows into a height it does not have. */
-.ct[data-options="grid"] .ct-option-band {
+.options { display: grid; gap: 7px; }
+
+.option {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--pi-radius-control);
+  padding: 7px 8px;
+  cursor: pointer;
+}
+.option:hover { border-color: var(--pi-border-muted); background: var(--pi-surface-hover); }
+.option:has(input:checked) { border-color: var(--pi-accent); background: var(--pi-selection-bg); }
+.option input { margin: 2px 0 0; accent-color: var(--pi-accent); }
+.option-copy { min-width: 0; display: grid; gap: 2px; }
+.option-label { line-height: 1.35; }
+.option-detail { color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.35; }
+
+/* Width buys columns. The track grows with the longest label and auto-fit picks
+   the count, so a wide-short pane spends width instead of stacking rows into a
+   height it does not have. */
+.ct[data-options="grid"] .options {
   grid-template-columns: repeat(auto-fit, minmax(min(var(--ct-track, 180px), 100%), 1fr));
-  gap: var(--pi-space-xs);
 }
 
-/* Chips: the height-starved form. Options wrap and the band scrolls inside its
-   own budget, so twelve options cost the same structure as three. */
-.ct[data-options="chips"] .ct-option-band {
+/* The height-starved form. Same option, same radio, sized to its content and
+   flowing in a wrap rather than claiming a row each. */
+.ct[data-options="inline"] .options {
   display: flex;
-  flex-direction: row;
   flex-wrap: wrap;
-  gap: var(--pi-space-xs);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  min-height: 0;
+  gap: var(--pi-space-xs) var(--pi-space-sm);
 }
-.ct[data-options="chips"] .ct-option {
-  flex: 0 0 auto;
-  min-height: 36px;
-  padding: var(--pi-space-xs) var(--pi-space-md);
-  border-radius: var(--pi-radius-pill);
-  font-size: var(--pi-text-sm);
-  position: relative;
+.ct[data-options="inline"] .option {
+  flex: 0 1 auto;
+  align-items: center;
+  padding: 5px 8px;
+  border-color: var(--pi-border-muted);
 }
-.ct[data-options="chips"] .ct-option::after {
-  content: "";
-  position: absolute;
-  inset-block: calc((var(--ct-touch) - 36px) / -2);
-  inset-inline: 0;
-}
-.ct[data-options="chips"] .ct-option-detail { display: none; }
+.ct[data-options="inline"] .option input { margin: 0; }
+.ct[data-options="inline"] .option-detail { display: none; }
 
-.ct-free { flex: 0 0 auto; }
-.ct-free-field, .ct-block-free {
+.other-answer { min-width: 0; padding: var(--pi-space-md) 8px 0 32px; }
+.other-answer:has(.ct-block-free:only-child) { padding-left: 32px; }
+.ct[data-inline-free-text="false"] .other-answer { display: none; }
+
+.ct-block-free {
   width: 100%;
   resize: none;
   field-sizing: content;
   max-height: 22vh;
   padding: var(--pi-space-sm) var(--pi-space-md);
-  border: 1px dashed var(--pi-border);
+  border: 1px solid var(--pi-border);
   border-radius: var(--pi-radius-control);
-  background: var(--pi-bg);
+  background: var(--pi-surface);
   color: var(--pi-text);
   font: inherit;
   font-size: var(--pi-control-font-size);
 }
-.ct[data-inline-free-text="false"] .ct-free { display: none; }
+.ct-block-free::placeholder { color: var(--pi-dim); }
 
-/* Wrapping is the safety net that makes the invariant true at every width: the
-   submit button is never pushed off the edge, it moves to its own row instead.
-   Costing height is allowed. Losing a control is not. */
+/* ---------- footer ---------- */
+
+/* Wrapping is what makes the invariant true at every width: the submit button is
+   never pushed off the edge, it takes its own row instead. Costing height is
+   allowed. Losing a control is not. */
 .ct-foot {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--pi-space-xs) var(--pi-space-sm);
+  gap: var(--pi-space-xs) 10px;
+  border-top: 1px solid var(--pi-border-muted);
+  padding: 12px 16px;
 }
-.ct-pager { display: flex; align-items: center; gap: var(--pi-space-xs); }
-.ct[data-paged="false"] .ct-pager { display: none; }
-/* Position is a readout, so it yields before the arrows do. Under this width
-   the arrows and their aria-labels still carry the whole capability. */
-.ct-page-label { font-size: var(--pi-text-xs); color: var(--pi-muted); min-width: 5ch; text-align: center; }
-.ct[data-page-label="false"] .ct-page-label { display: none; }
-.ct-page-prev, .ct-page-next {
-  width: var(--ct-touch); height: 36px;
+.ct[data-structure="strip"] .ct-foot { padding: 8px 10px; }
+
+.ct-foot button {
   border: 1px solid var(--pi-border);
   border-radius: var(--pi-radius-control);
-  background: var(--pi-surface-hover);
-  color: var(--pi-text-secondary);
-  font-size: var(--pi-text-lg);
+  background: var(--pi-surface);
+  color: var(--pi-text);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: var(--pi-text-md);
+  white-space: nowrap;
   cursor: pointer;
 }
+.ct-foot button:hover { background: var(--pi-surface-hover); }
+
+.ct-pager { display: flex; align-items: center; gap: var(--pi-space-xs); }
+.ct[data-paged="false"] .ct-pager { display: none; }
+.ct-page-label { font-size: var(--pi-text-xs); color: var(--pi-muted); min-width: 5ch; text-align: center; }
+/* Position is a readout, so it yields before the arrows do. */
+.ct[data-page-label="false"] .ct-page-label { display: none; }
+.ct-page-prev, .ct-page-next { min-width: var(--ct-touch); }
 
 .ct-draft-chip {
   font-size: var(--pi-text-xs);
@@ -324,65 +315,92 @@ html, body {
 }
 .ct-draft-chip[hidden], .ct[data-inline-draft-peek="false"] .ct-draft-chip { display: none; }
 
-.ct-skip, .ct-more {
-  min-height: 36px;
-  padding: 0 var(--pi-space-md);
-  border: 1px solid var(--pi-border);
-  border-radius: var(--pi-radius-control);
-  background: transparent;
-  color: var(--pi-text-secondary);
-  font: inherit;
-  font-size: var(--pi-text-sm);
-  white-space: nowrap;
-  cursor: pointer;
-}
 .ct[data-inline-skip="false"] .ct-skip { display: none; }
 .ct[data-has-overflow="false"] .ct-more { display: none; }
 
-.ct-primary {
-  min-height: 36px;
+.ct-foot .ct-submit {
   margin-left: auto;
-  padding: 0 var(--pi-space-lg);
-  border: 1px solid var(--pi-accent-border);
-  border-radius: var(--pi-radius-control);
+  border-color: var(--pi-accent);
   background: var(--pi-accent);
-  color: #0d1117;
-  font: inherit;
-  font-size: var(--pi-text-md);
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
+  color: var(--pi-surface);
+  font-weight: 650;
 }
+.ct-foot .ct-submit:hover { background: color-mix(in srgb, var(--pi-accent) 86%, black); }
 
 /* ---------- strip: the shape a keyboard leaves behind ---------- */
 
-.ct[data-structure="strip"] { gap: var(--pi-space-xs); padding: var(--pi-space-xs) var(--pi-space-md); }
-.ct[data-structure="strip"] .ct-badge { display: none; }
-.ct[data-structure="strip"] .ct-question {
-  font-size: var(--pi-text-sm);
-  /* The question truncates rather than pushing controls off. The full text is
-     one tap away in the detail popover, never gone. */
+/* The title yields at strip height: the card is self-evidently a question with
+   a Send button, and those ~22px buy another row of options. The count stays. */
+.ct[data-structure="strip"] .ct-head { padding: 3px 10px; }
+.ct[data-structure="strip"] .ct-head h2 { display: none; }
+
+.ct[data-structure="strip"] .question { padding: 8px 12px; }
+.ct[data-structure="strip"] .question-head {
+  /* The question truncates rather than pushing controls out. The full text is
+     one tap away behind the detail control, never gone. */
   overflow: hidden;
-  text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+/* Denser, not different: same option, same radio, one step down the type ramp
+   so more of the set survives inside a 150px card. */
+.ct[data-structure="strip"] .option { padding: 3px 7px; font-size: var(--pi-text-sm); }
+.ct[data-structure="strip"] .other-answer { padding: 8px 0 0; }
 
-/* A wide strip has width to spend, so the question moves beside the options
-   instead of stacking above them. */
-.ct[data-structure="strip"][data-prompt="inline"] .ct-body {
-  flex-direction: row;
-  align-items: center;
-  gap: var(--pi-space-md);
+/* A wide strip has width to spend, so the question sits beside its options
+   instead of above them. */
+.ct[data-structure="strip"][data-prompt="inline"] .question {
+  display: grid;
+  grid-template-columns: minmax(0, 30%) minmax(0, 1fr);
+  align-items: start;
+  gap: 0 var(--pi-space-lg);
 }
-.ct[data-structure="strip"][data-prompt="inline"] .ct-prompt {
-  flex: 0 1 34%;
+.ct[data-structure="strip"][data-prompt="inline"] .question-head { grid-column: 1; -webkit-line-clamp: 3; }
+.ct[data-structure="strip"][data-prompt="inline"] .options { grid-column: 2; grid-row: 1 / span 3; }
+.ct[data-structure="strip"][data-prompt="inline"] .question-detail-open { grid-column: 1; }
+.ct[data-structure="strip"][data-prompt="inline"] .other-answer { grid-column: 2; }
+
+/* ---------- draft mode ---------- */
+
+.ct-draft {
+  display: flex;
+  gap: var(--pi-space-sm);
+  align-items: flex-end;
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-surface);
+  background: var(--pi-surface);
+  padding: var(--pi-space-sm);
+  box-shadow: 0 2px 10px var(--pi-shadow-soft);
+}
+.ct-draft[hidden] { display: none; }
+.ct-draft-field {
+  flex: 1 1 auto;
   min-width: 0;
-  align-self: center;
+  resize: none;
+  field-sizing: content;
+  max-height: 30vh;
+  border: 0;
+  background: transparent;
+  padding: var(--pi-space-sm);
+  color: var(--pi-text);
+  font: inherit;
+  font-size: var(--pi-control-font-size);
 }
-.ct[data-structure="strip"][data-prompt="inline"] .ct-options { flex: 1 1 auto; min-width: 0; }
-.ct[data-structure="strip"][data-prompt="inline"] .ct-question { -webkit-line-clamp: 3; }
+.ct-draft-field:focus { outline: none; }
+.ct-draft-field::placeholder { color: var(--pi-dim); }
+.ct-send {
+  flex: 0 0 auto;
+  border: 1px solid var(--pi-accent);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-accent);
+  color: var(--pi-surface);
+  padding: 7px 14px;
+  font: inherit;
+  font-size: var(--pi-text-md);
+  font-weight: 650;
+  cursor: pointer;
+}
 
 /* ---------- overflow, in the top layer ---------- */
 
@@ -398,8 +416,8 @@ html, body {
   color: var(--pi-text);
   box-shadow: 0 -8px 32px var(--pi-shadow-strong);
 }
-.ct-sheet::backdrop { background: #0009; }
-.ct-sheet-title { margin: 0 0 var(--pi-space-md); font-size: var(--pi-text-md); color: var(--pi-text-bright); }
+.ct-sheet::backdrop { background: #1b1c1f55; }
+.ct-sheet-title { margin: 0 0 var(--pi-space-md); font-size: var(--pi-text-md); font-weight: 650; }
 .ct-sheet-body { display: flex; flex-direction: column; gap: var(--pi-space-sm); }
 .ct-sheet-item {
   min-height: var(--ct-touch);
@@ -407,12 +425,13 @@ html, body {
   text-align: left;
   border: 1px solid var(--pi-border);
   border-radius: var(--pi-radius-control);
-  background: var(--pi-bg);
+  background: var(--pi-surface);
   color: var(--pi-text);
   font: inherit;
   font-size: var(--pi-text-md);
   cursor: pointer;
 }
+.ct-sheet-item:hover { background: var(--pi-surface-hover); }
 .ct-sheet-text { margin: 0; font-size: var(--pi-text-md); color: var(--pi-text-secondary); }
 .ct-sheet-field {
   width: 100%;
@@ -420,14 +439,20 @@ html, body {
   padding: var(--pi-space-sm) var(--pi-space-md);
   border: 1px solid var(--pi-border);
   border-radius: var(--pi-radius-control);
-  background: var(--pi-bg);
+  background: var(--pi-surface);
   color: var(--pi-text);
   font: inherit;
   font-size: var(--pi-control-font-size);
 }
+.ct-sheet-done {
+  border: 1px solid var(--pi-accent);
+  border-radius: var(--pi-radius-control);
+  background: var(--pi-accent);
+  color: var(--pi-surface);
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
 
 :focus-visible { outline: var(--pi-focus-ring); outline-offset: 2px; }
-
-@media (prefers-reduced-motion: reduce) {
-  .ct { transition: none; }
-}

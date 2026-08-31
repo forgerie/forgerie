@@ -5,6 +5,12 @@
  * question set opens it morphs in place: same element, same position, new job.
  * There is never a second place to type.
  *
+ * The markup deliberately mirrors the shipped AskUserCard: a card, an uppercase
+ * accent heading, fieldsets with legends, real radio and checkbox inputs, a
+ * per-question free-text field. Nothing here is a new visual language. The only
+ * thing being proposed is where the card lives and how it survives a small
+ * container.
+ *
  * Layout is not decided here. Every structural choice comes from `plan()`, and
  * this file only applies the result as data attributes so CSS can respond. That
  * keeps the policy testable and keeps the DOM stable enough that a caret in a
@@ -63,24 +69,15 @@ export class ComposerTakeover extends HTMLElement {
   #buildFrame() {
     this.innerHTML = `
       <div class="ct" data-mode="draft">
-        <div class="ct-ask" hidden>
-          <div class="ct-head">
-            <span class="ct-badge">Answer to continue</span>
-            <span class="ct-readout" role="status" aria-live="polite"></span>
-          </div>
+        <section class="ct-card" hidden aria-labelledby="ct-heading">
+          <header class="ct-head">
+            <h2 id="ct-heading">Questions</h2>
+            <span class="ct-status" role="status" aria-live="polite" aria-atomic="true"></span>
+          </header>
           <div class="ct-body">
-            <div class="ct-prompt">
-              <p class="ct-question"></p>
-              <p class="ct-detail"></p>
-              <button class="ct-detail-btn" type="button" aria-label="Show detail">i</button>
-            </div>
-            <div class="ct-options" role="group"></div>
-            <div class="ct-free">
-              <textarea class="ct-free-field" rows="2" maxlength="4000"
-                placeholder="Write my own answer"></textarea>
-            </div>
+            <div class="ct-questions"></div>
           </div>
-          <div class="ct-foot">
+          <footer class="ct-foot">
             <div class="ct-pager">
               <button class="ct-page-prev" type="button" aria-label="Previous question">&lsaquo;</button>
               <span class="ct-page-label"></span>
@@ -89,13 +86,13 @@ export class ComposerTakeover extends HTMLElement {
             <span class="ct-draft-chip" hidden>Draft saved</span>
             <button class="ct-skip" type="button">Skip</button>
             <button class="ct-more" type="button" aria-haspopup="menu">More</button>
-            <button class="ct-submit ct-primary" type="button">Send answers</button>
-          </div>
-        </div>
+            <button class="ct-submit" type="button">Send answers</button>
+          </footer>
+        </section>
 
         <div class="ct-draft">
           <textarea class="ct-draft-field" rows="1" placeholder="Message the agent"></textarea>
-          <button class="ct-send ct-primary" type="button">Send</button>
+          <button class="ct-send" type="button">Send</button>
         </div>
       </div>
 
@@ -106,39 +103,37 @@ export class ComposerTakeover extends HTMLElement {
     `;
 
     this.#root = this.querySelector(".ct");
+    this.#card = this.querySelector(".ct-card");
+    this.#body = this.querySelector(".ct-body");
+    this.#questionsBox = this.querySelector(".ct-questions");
     this.#draftField = this.querySelector(".ct-draft-field");
-    this.#freeField = this.querySelector(".ct-free-field");
-    this.#optionsBox = this.querySelector(".ct-options");
     this.#sheet = this.querySelector(".ct-sheet");
 
     this.querySelector(".ct-page-prev").addEventListener("click", () => { this.#turnPage(-1); });
     this.querySelector(".ct-page-next").addEventListener("click", () => { this.#turnPage(1); });
     this.querySelector(".ct-submit").addEventListener("click", () => { this.#submit(); });
     this.querySelector(".ct-skip").addEventListener("click", () => { this.#turnPage(1, true); });
-    this.querySelector(".ct-more").addEventListener("click", (event) => { this.#openOverflow(event); });
-    this.querySelector(".ct-detail-btn").addEventListener("click", () => { this.#openDetail(); });
-    this.#body = this.querySelector(".ct-body");
-    // A capped region that scrolls must say so. Without this the content simply
-    // stops at the budget line and reads as clipped, which is the failure the
-    // whole exercise is meant to avoid.
+    this.querySelector(".ct-more").addEventListener("click", () => { this.#openOverflow(); });
+
+    // A capped region that scrolls must say so, or content stopping at the
+    // budget line reads as clipped.
     this.#body.addEventListener("scroll", () => { this.#syncScrollHint(); }, { passive: true });
-    this.#freeField.addEventListener("input", () => { this.#recordFreeText(); });
-    this.#optionsBox.addEventListener("click", (event) => { this.#toggleOption(event); });
-    // Delegated so per-question fields survive a rebuild without rebinding.
-    this.#optionsBox.addEventListener("input", (event) => { this.#recordBlockText(event); });
+    // Delegated, so per-question controls survive a rebuild without rebinding.
+    this.#questionsBox.addEventListener("change", () => { this.#recordSelection(); });
+    this.#questionsBox.addEventListener("input", (event) => { this.#recordBlockText(event); });
+    this.#questionsBox.addEventListener("click", (event) => { this.#maybeOpenDetail(event); });
   }
 
   /**
    * Measure the container, never the window. The composer's own slot decides
-   * width; the app frame's live height decides structure, which is what makes
-   * the keyboard opening a layout input rather than a scroll problem.
+   * width; the frame's live height decides structure, which is what makes the
+   * keyboard opening a layout input rather than a scroll problem.
    */
   #observe() {
     const slot = this.parentElement ?? this;
     const observer = new ResizeObserver(() => { this.#render(); });
     observer.observe(slot);
-    const frame = this.closest(".frame") ?? document.documentElement;
-    observer.observe(frame);
+    observer.observe(this.closest(".frame") ?? document.documentElement);
   }
 
   #render() {
@@ -148,10 +143,10 @@ export class ComposerTakeover extends HTMLElement {
     const height = Math.round(frame.getBoundingClientRect().height);
 
     this.#root.dataset.mode = this.#mode;
-    this.querySelector(".ct-ask").hidden = this.#mode !== "ask";
+    this.#card.hidden = this.#mode !== "ask";
     this.querySelector(".ct-draft").hidden = this.#mode === "ask";
     if (this.#mode !== "ask") {
-      this.#root.style.removeProperty("--ct-budget");
+      this.#card.style.removeProperty("--ct-budget");
       this.#reportPlan(undefined, width, height);
       return;
     }
@@ -173,8 +168,8 @@ export class ComposerTakeover extends HTMLElement {
       );
     }
     this.#root.dataset.hasOverflow = String(layout.overflow.length > 0);
-    this.#root.style.setProperty("--ct-budget", `${String(layout.heightBudget)}px`);
-    this.#root.style.setProperty("--ct-track", `${String(layout.optionTrack)}px`);
+    this.#card.style.setProperty("--ct-budget", `${String(layout.heightBudget)}px`);
+    this.#card.style.setProperty("--ct-track", `${String(layout.optionTrack)}px`);
 
     this.#renderQuestions(layout);
     this.#renderStatus(layout);
@@ -184,26 +179,20 @@ export class ComposerTakeover extends HTMLElement {
 
   /**
    * Rebuild the question DOM only when the visible set changes. Re-rendering on
-   * every resize would drop the caret out of the free-text field mid-rotation.
+   * every resize would drop the caret out of a free-text field mid-rotation.
    */
   #renderQuestions(layout) {
-    const visible = layout.paged ? [this.#questions[this.#page]] : this.#questions;
     const signature = `${layout.paged ? String(this.#page) : "all"}:${String(this.#questions.length)}`;
-    if (this.#built !== signature) {
-      this.#built = signature;
-      this.#optionsBox.innerHTML = visible
-        .map((question, index) => this.#questionMarkup(question, layout.paged ? this.#page : index))
-        .join("");
+    if (this.#built === signature) {
+      this.#markAnswered();
+      return;
     }
-    this.#syncSelection();
-
-    const head = visible[0];
-    this.querySelector(".ct-question").textContent = layout.paged ? head.question : "Questions";
-    const detail = this.querySelector(".ct-detail");
-    detail.textContent = layout.paged ? (head.detail ?? "") : "";
-    detail.hidden = !layout.paged || head.detail === undefined || layout.detail !== "inline";
-    this.querySelector(".ct-detail-btn").hidden = !(layout.detail === "popover" && head.detail !== undefined);
-    this.#freeField.value = this.#answers.get(this.#currentQuestion().id)?.otherText ?? "";
+    this.#built = signature;
+    const visible = layout.paged ? [this.#questions[this.#page]] : this.#questions;
+    this.#questionsBox.innerHTML = visible
+      .map((question, index) => this.#questionMarkup(question, layout.paged ? this.#page : index))
+      .join("");
+    this.#restoreAnswers();
   }
 
   #questionMarkup(question, index) {
@@ -211,78 +200,61 @@ export class ComposerTakeover extends HTMLElement {
     const options = question.options
       .map(
         (option) => `
-        <button class="ct-option" type="button" role="${type}" aria-checked="false"
-          data-question="${question.id}" data-value="${option.value}"
-          data-multiple="${String(question.multiple === true)}">
-          <span class="ct-option-label">${escapeHtml(option.label)}</span>
-          ${option.detail === undefined ? "" : `<span class="ct-option-detail">${escapeHtml(option.detail)}</span>`}
-        </button>`,
+        <label class="option">
+          <input type="${type}" name="ask-${question.id}" value="${option.value}">
+          <span class="option-copy">
+            <span class="option-label">${escapeHtml(option.label)}</span>
+            ${option.detail === undefined ? "" : `<span class="option-detail">${escapeHtml(option.detail)}</span>`}
+          </span>
+        </label>`,
       )
       .join("");
+    const hasDetail = question.detail !== undefined;
+    const labelId = `ask-label-${question.id}`;
+    // A labelled group rather than fieldset/legend. A legend does not take part
+    // in its fieldset's grid, which silently collapsed the wide-strip layout,
+    // and its notch cuts a hole in the border used as a row divider. Radio
+    // grouping comes from the shared `name`, not from the fieldset.
     return `
-      <section class="ct-question-block" data-question="${question.id}">
-        <p class="ct-question-inline"><span class="ct-num">${String(index + 1)}.</span>${escapeHtml(question.question)}</p>
-        ${question.detail === undefined ? "" : `<p class="ct-question-detail">${escapeHtml(question.detail)}</p>`}
-        <div class="ct-option-band">${options}</div>
-        <textarea class="ct-block-free" data-question="${question.id}" rows="1" maxlength="4000"
-          placeholder="Write my own answer"></textarea>
+      <section class="question" role="group" aria-labelledby="${labelId}" data-question="${question.id}">
+        <p class="question-head" id="${labelId}">
+          <span class="question-number">${String(index + 1)}.</span>
+          <span class="question-text">${escapeHtml(question.question)}</span>
+        </p>
+        ${hasDetail ? `<p class="question-detail">${escapeHtml(question.detail)}</p>` : ""}
+        <button class="question-detail-open${hasDetail ? " has-detail" : ""}" type="button"
+          data-detail="${hasDetail ? escapeHtml(question.detail) : ""}">Detail</button>
+        <div class="options">${options}</div>
+        <div class="other-answer">
+          <textarea class="ct-block-free" data-question="${question.id}" rows="1" maxlength="4000"
+            placeholder="Write my own answer"></textarea>
+        </div>
       </section>`;
   }
 
-  #syncSelection() {
-    for (const button of this.#optionsBox.querySelectorAll(".ct-option")) {
-      const chosen = this.#answers.get(button.dataset.question)?.values ?? new Set();
-      button.setAttribute("aria-checked", String(chosen.has(button.dataset.value)));
+  #restoreAnswers() {
+    for (const input of this.#questionsBox.querySelectorAll(".option input")) {
+      const chosen = this.#answers.get(input.closest(".question").dataset.question)?.values ?? new Set();
+      input.checked = chosen.has(input.value);
     }
-    for (const field of this.#optionsBox.querySelectorAll(".ct-block-free")) {
+    for (const field of this.#questionsBox.querySelectorAll(".ct-block-free")) {
       if (field === document.activeElement) continue;
       field.value = this.#answers.get(field.dataset.question)?.otherText ?? "";
     }
+    this.#markAnswered();
   }
 
-  #renderStatus(layout) {
-    const answered = [...this.#answers.values()].filter(
-      (answer) => answer.values.size > 0 || (answer.otherText ?? "") !== "",
-    ).length;
-    const total = this.#questions.length;
-    const readout = this.querySelector(".ct-readout");
-    readout.textContent =
-      layout.readout === "full"
-        ? `${String(answered)} of ${String(total)} answered`
-        : layout.readout === "short"
-          ? `${String(answered)}/${String(total)}`
-          : "";
-    this.querySelector(".ct-page-label").textContent = layout.paged
-      ? `${String(this.#page + 1)} / ${String(total)}`
-      : "";
-    this.querySelector(".ct-draft-chip").hidden = this.#stashedDraft === "";
-    // Only name the blanks once the user has actually answered something.
-    // Labelling an untouched set "Send blank" reads as a warning about a choice
-    // nobody has made yet, and the readout beside it already says 0 of 3.
-    const blank = total - answered;
-    this.querySelector(".ct-submit").textContent =
-      blank > 0 && answered > 0 ? `Send (${String(blank)} blank)` : "Send answers";
-  }
-
-  #currentQuestion() {
-    return this.#questions[this.#plan?.paged === true ? this.#page : 0] ?? this.#questions[0];
-  }
-
-  #toggleOption(event) {
-    const button = event.target.closest(".ct-option");
-    if (button === null) return;
-    const id = button.dataset.question;
-    const value = button.dataset.value;
-    const multiple = button.dataset.multiple === "true";
-    const answer = this.#answers.get(id) ?? { values: new Set(), otherText: "" };
-    if (multiple) {
-      if (answer.values.has(value)) answer.values.delete(value);
-      else answer.values.add(value);
-    } else {
-      answer.values = answer.values.has(value) ? new Set() : new Set([value]);
+  /** Native inputs own selection; this only mirrors them into the answer map. */
+  #recordSelection() {
+    for (const group of this.#questionsBox.querySelectorAll(".question")) {
+      const id = group.dataset.question;
+      const answer = this.#answers.get(id) ?? { values: new Set(), otherText: "" };
+      answer.values = new Set(
+        [...group.querySelectorAll(".option input")].filter((input) => input.checked).map((input) => input.value),
+      );
+      this.#answers.set(id, answer);
     }
-    this.#answers.set(id, answer);
-    this.#syncSelection();
+    this.#markAnswered();
     this.#renderStatus(this.#plan);
   }
 
@@ -292,15 +264,44 @@ export class ComposerTakeover extends HTMLElement {
     const answer = this.#answers.get(field.dataset.question) ?? { values: new Set(), otherText: "" };
     answer.otherText = field.value;
     this.#answers.set(field.dataset.question, answer);
+    this.#markAnswered();
     this.#renderStatus(this.#plan);
   }
 
-  #recordFreeText() {
-    const id = this.#currentQuestion().id;
-    const answer = this.#answers.get(id) ?? { values: new Set(), otherText: "" };
-    answer.otherText = this.#freeField.value;
-    this.#answers.set(id, answer);
-    this.#renderStatus(this.#plan);
+  #markAnswered() {
+    for (const group of this.#questionsBox.querySelectorAll(".question")) {
+      group.classList.toggle("answered", this.#isAnswered(group.dataset.question));
+    }
+  }
+
+  #isAnswered(id) {
+    const answer = this.#answers.get(id);
+    if (answer === undefined) return false;
+    return answer.values.size > 0 || (answer.otherText ?? "") !== "";
+  }
+
+  #renderStatus(layout) {
+    const answered = this.#questions.filter((question) => this.#isAnswered(question.id)).length;
+    const total = this.#questions.length;
+    this.querySelector(".ct-status").textContent =
+      layout.readout === "full"
+        ? `${String(answered)} of ${String(total)} answered`
+        : layout.readout === "short"
+          ? `${String(answered)}/${String(total)}`
+          : "";
+    this.querySelector(".ct-page-label").textContent = layout.paged
+      ? `${String(this.#page + 1)} / ${String(total)}`
+      : "";
+    this.querySelector(".ct-draft-chip").hidden = this.#stashedDraft === "";
+    // Only name the blanks once something has been answered. Labelling an
+    // untouched set "Send blank" warns about a choice nobody has made yet.
+    const blank = total - answered;
+    this.querySelector(".ct-submit").textContent =
+      blank > 0 && answered > 0 ? `Send (${String(blank)} blank)` : "Send answers";
+  }
+
+  #currentQuestion() {
+    return this.#questions[this.#plan?.paged === true ? this.#page : 0] ?? this.#questions[0];
   }
 
   /** Advancing past a question without touching it is how a blank answer happens. */
@@ -327,9 +328,9 @@ export class ComposerTakeover extends HTMLElement {
   }
 
   /**
-   * The overflow menu opens in the top layer, not inside the composer. A strip
-   * 150px tall cannot contain a usable menu, and does not need to: it only
-   * needs to summon one with full-size targets.
+   * The overflow menu opens in the top layer, not inside the card. A strip 150px
+   * tall cannot contain a usable menu and does not need to: it only needs to
+   * summon one with full-size targets.
    */
   #openOverflow() {
     const layout = this.#plan;
@@ -353,32 +354,35 @@ export class ComposerTakeover extends HTMLElement {
     this.querySelector(".ct-sheet-title").textContent = question.question;
     this.querySelector(".ct-sheet-body").innerHTML =
       `<textarea class="ct-sheet-field" rows="4" maxlength="4000" placeholder="Write my own answer"></textarea>
-       <button class="ct-sheet-done ct-primary" type="button">Done</button>`;
+       <button class="ct-sheet-done" type="button">Done</button>`;
     const field = this.#sheet.querySelector(".ct-sheet-field");
     field.value = this.#answers.get(question.id)?.otherText ?? "";
     field.addEventListener("input", () => {
       const answer = this.#answers.get(question.id) ?? { values: new Set(), otherText: "" };
       answer.otherText = field.value;
       this.#answers.set(question.id, answer);
+      this.#markAnswered();
       this.#renderStatus(this.#plan);
     });
     this.#sheet.querySelector(".ct-sheet-done").addEventListener("click", () => { this.#sheet.hidePopover(); });
     field.focus();
   }
 
-  #openDetail() {
-    const question = this.#currentQuestion();
-    this.querySelector(".ct-sheet-title").textContent = question.question;
-    this.querySelector(".ct-sheet-body").innerHTML = `<p class="ct-sheet-text">${escapeHtml(question.detail ?? "")}</p>`;
+  #maybeOpenDetail(event) {
+    const opener = event.target.closest(".question-detail-open");
+    if (opener === null) return;
+    this.querySelector(".ct-sheet-title").textContent =
+      opener.closest(".question").querySelector(".question-text").textContent ?? "";
+    this.querySelector(".ct-sheet-body").innerHTML =
+      `<p class="ct-sheet-text">${escapeHtml(opener.dataset.detail ?? "")}</p>`;
     this.#sheet.showPopover();
   }
 
   #syncScrollHint() {
     requestAnimationFrame(() => {
-      const box = this.#body;
-      const room = box.scrollHeight - box.clientHeight;
+      const room = this.#body.scrollHeight - this.#body.clientHeight;
       this.#root.dataset.overflowing = String(room > 2);
-      this.#root.dataset.atEnd = String(room <= 2 || box.scrollTop >= room - 2);
+      this.#root.dataset.atEnd = String(room <= 2 || this.#body.scrollTop >= room - 2);
     });
   }
 
@@ -389,10 +393,10 @@ export class ComposerTakeover extends HTMLElement {
   }
 
   #root;
+  #card;
   #body;
+  #questionsBox;
   #draftField;
-  #freeField;
-  #optionsBox;
   #sheet;
 }
 

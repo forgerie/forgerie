@@ -16,6 +16,17 @@ folded screen you could not tell which one wanted your text.
 - The transcript keeps a passive record with no inputs.
 - Leaving a question blank stays reachable at every size.
 
+## What is not being proposed
+
+A new visual language. The card, the uppercase accent heading, the numbered
+questions, the radio and checkbox options that fill on check, the primary Send
+button: all copied from the shipped `AskUserCard`. Only the position and the
+adaptation are new. Where a size forces a change it is a change of density or
+arrangement, never of style.
+
+Light only (Forgerie Light, "Paper"). This prototype argues about layout, and
+carrying both palettes would mean judging every size twice for one answer.
+
 ## Running it
 
 ```bash
@@ -47,7 +58,7 @@ Height decides structure, because height is what the keyboard takes:
 |---|---|---|
 | >= 520 | `sheet` | Whole set, scrolls inside its budget |
 | 300-519 | `paged` | One question, pager, full block |
-| < 300 | `strip` | One question, chips, everything on two rows |
+| < 300 | `strip` | One question, options packed inline, title yields |
 
 Width decides content: option columns, whether the question sits beside the
 options, how much of the progress readout survives, and whether skip and free
@@ -79,6 +90,13 @@ Each of these was invisible in the code and obvious in a render.
    It exists only while paged.
 5. **A capped region read as clipped.** Content stopping at the budget line
    looked broken, so the body fades at the edge while more remains.
+6. **The row divider had holes in it.** Drawing it as the fieldset's `border-top`
+   let the `<legend>` notch cut through, leaving stubs at both edges. It is an
+   inset box-shadow now, which nothing notches.
+7. **The wide strip collapsed to a narrow column.** A `<legend>` does not take
+   part in its fieldset's grid, so the question kept the full width and the
+   options were squeezed into the right third. Questions are labelled groups
+   now, and the two-column strip works.
 
 ## Open question
 

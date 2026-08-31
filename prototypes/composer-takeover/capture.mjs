@@ -8,7 +8,7 @@
  * viewport, and the difference previously produced clipped-control reports the
  * device did not actually have.
  *
- *   node capture.mjs --out /tmp/ct --fixture few --color-scheme dark
+ *   node capture.mjs --out /tmp/ct --fixture few
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -75,7 +75,9 @@ function parse(argv) {
     url: "http://127.0.0.1:8600/composer-takeover/index.html",
     out: "/tmp/composer-takeover",
     fixture: "few",
-    colorScheme: "dark",
+    // Light only: the prototype ships one palette, so capturing dark would only
+    // photograph tokens that are not in the stylesheet.
+    colorScheme: "light",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];

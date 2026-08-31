@@ -107,7 +107,7 @@ export function plan(width, height, model) {
   // caught: at 932x300 a long label forced every option to a full-width row, so
   // two options ate the whole height while 900px of width sat empty. The track
   // grows with the label instead, and auto-fit decides the column count.
-  const options = structure === "strip" ? "chips" : width >= THRESHOLDS.GRID_MIN_WIDTH ? "grid" : "rows";
+  const options = structure === "strip" ? "inline" : width >= THRESHOLDS.GRID_MIN_WIDTH ? "grid" : "rows";
   const optionTrack = Math.round(
     Math.min(THRESHOLDS.TRACK_MAX, Math.max(THRESHOLDS.TRACK_MIN, model.longestOptionLabel * THRESHOLDS.TRACK_CH)),
   );
