@@ -3766,7 +3766,11 @@ export class PiWebApp extends LitElement {
       <div
         class=${`${this.panelIntent.shellClass(state.mainView)} ${shellLayoutModeClass(this.appShell.layoutMode)} ${chromeDisclosureClass(this.appShell.disclosure)}`}
         style=${`${this.panelResize.shellStyle({ navigation: this.resizablePanelConstraints("navigation"), workspace: this.resizablePanelConstraints("workspace") })} ${this.dockedWidthStyle()}`}
-        @pointerdown=${(event: PointerEvent) => { this.panelPeek.onPointerDown(event); this.radialMenu.onPointerDown(event); }}
+        @pointerdown=${(event: PointerEvent) => {
+          this.panelPeek.onPointerDown(event);
+          // TEMPORARILY DISABLED (2026-08-31): the long-press radial menu over
+          // the chat. Restore by re-adding: this.radialMenu.onPointerDown(event);
+        }}
         @pointermove=${(event: PointerEvent) => { this.panelPeek.onPointerMove(event); this.radialMenu.onPointerMove(event); }}
         @pointerup=${(event: PointerEvent) => { this.panelPeek.onPointerUp(event); this.radialMenu.onPointerUp(event); }}
         @pointercancel=${() => { this.panelPeek.onPointerCancel(); this.radialMenu.onPointerCancel(); }}
