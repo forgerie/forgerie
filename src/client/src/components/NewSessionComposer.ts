@@ -1,6 +1,6 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
-import type { PromptResourceCatalogResponse } from "../../../shared/promptResourceCommand";
+import type { PromptResourceCatalogResponse, PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
 import { workspacesApi, type Machine, type Project, type Workspace } from "../api";
 import { createPreSessionComposerRuntime, type ComposerRuntime } from "../composerRuntime";
@@ -35,7 +35,7 @@ import type { ModalSurface } from "./ModalSurface";
 import "./ComposerDraft";
 import "./PromptEditor";
 import type { PromptEditor } from "./PromptEditor";
-import type { ComposerDraft, ComposerDraftDisplayState, ComposerDraftSeed, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
+import type { ComposerDraft, ComposerDraftDisplayState, ComposerDraftSeed, ComposerDraftSubmitOutcome, ComposerDraftSubmitSnapshot } from "./ComposerDraft";
 import "./ModalSurface";
 import { newSessionComposerStyles } from "./shared";
 
@@ -45,8 +45,19 @@ interface SlashValidationError {
 }
 
 type SlashValidationResult =
-  | { readonly kind: "valid"; readonly submission: NewSessionFirstPromptSubmission }
+  | { readonly kind: "valid"; readonly identity: PromptResourceCommandIdentity }
   | { readonly kind: "invalid"; readonly error: SlashValidationError };
+
+type PromptResourceCommandValidation =
+  | { readonly kind: "idle" }
+  | { readonly kind: "pending"; readonly commandName: string; readonly requestId: number; readonly runtimeGeneration: number }
+  | { readonly kind: "valid"; readonly commandName: string; readonly identity: PromptResourceCommandIdentity; readonly runtimeGeneration: number }
+  | { readonly kind: "invalid"; readonly commandName: string; readonly error: SlashValidationError; readonly runtimeGeneration: number };
+
+interface PromptResourceCatalogRequest {
+  readonly runtimeGeneration: number;
+  readonly promise: Promise<PromptResourceCatalogResponse>;
+}
 
 @customElement("new-session-composer")
 export class NewSessionComposer extends LitElement {
@@ -67,7 +78,7 @@ export class NewSessionComposer extends LitElement {
   @state() private composerState: NewSessionComposerState = createNewSessionComposerState();
   @state() private draftDisplay: ComposerDraftDisplayState = { inputMode: { kind: "normal" }, empty: true, focused: false, attachmentCount: 0, attachmentCapturePending: false };
   @state() private slashValidationError: SlashValidationError | undefined;
-  @state() private validationPending = false;
+  @state() private promptResourceCommandValidation: PromptResourceCommandValidation = { kind: "idle" };
   @state() private launchMode: NewSessionLaunchMode = "switch";
   @query("modal-surface") private modalSurface?: ModalSurface;
   @query("prompt-editor") private editor?: PromptEditor;
@@ -88,6 +99,8 @@ export class NewSessionComposer extends LitElement {
   private requestGeneration = 0;
   private runtimeGeneration = 0;
   private submissionGeneration = 0;
+  private promptResourceCommandValidationGeneration = 0;
+  private promptResourceCatalogRequest: PromptResourceCatalogRequest | undefined;
   private focusRegion = "";
   private runtime: ComposerRuntime = createPreSessionComposerRuntime({ machineId: "local" });
   private claimedRecoverySeedId: string | undefined;
@@ -118,6 +131,10 @@ export class NewSessionComposer extends LitElement {
   override connectedCallback(): void {
     this.connectionGeneration += 1;
     super.connectedCallback();
+    if (!this.hasUpdated) return;
+    void this.updateComplete.then(() => {
+      if (this.isConnected) this.preparePromptResourceCommandValidation();
+    });
   }
 
   override disconnectedCallback(): void {
@@ -125,7 +142,9 @@ export class NewSessionComposer extends LitElement {
     this.runtimeGeneration += 1;
     this.submissionGeneration += 1;
     this.defaultsRequestGeneration += 1;
-    this.validationPending = false;
+    this.promptResourceCommandValidationGeneration += 1;
+    this.promptResourceCatalogRequest = undefined;
+    this.promptResourceCommandValidation = { kind: "idle" };
     const generation = ++this.connectionGeneration;
     queueMicrotask(() => { void this.returnDisconnectedRecoveryDraftWhenSettled(generation); });
     super.disconnectedCallback();
@@ -141,7 +160,7 @@ export class NewSessionComposer extends LitElement {
     const destination = this.currentDestination();
     const submitting = state.kind === "submitting";
     const attachmentCapturePending = this.draftDisplay.attachmentCapturePending;
-    const busy = submitting || this.validationPending || attachmentCapturePending;
+    const busy = submitting || attachmentCapturePending;
     return html`
       <modal-surface
         .label=${"New session"}
@@ -171,12 +190,12 @@ export class NewSessionComposer extends LitElement {
               .projectId=${destination?.project.id}
               .workspaceId=${destination?.workspace.id}
               .disabled=${submitting}
-              .sending=${submitting || this.validationPending}
+              .sending=${submitting}
               .submissionAvailable=${this.composerDraftAvailable()}
               .sendAvailable=${this.composerSendAvailable(state)}
               .onDraftSubmit=${(snapshot: ComposerDraftSubmitSnapshot) => this.handleDraftSubmit(snapshot)}
               .onDraftDisplayStateChange=${(display: ComposerDraftDisplayState) => { this.draftDisplay = display; }}
-              .onDraftEdited=${() => { this.invalidatePendingSubmission(); this.clearValidationError(); }}
+              .onDraftEdited=${() => { this.handleDraftEdited(); }}
               .onCompletionError=${() => { this.clearValidationError(); }}
             ></prompt-editor>
 
@@ -189,7 +208,7 @@ export class NewSessionComposer extends LitElement {
           ${state.kind === "editing" && state.submissionError !== undefined
             ? html`<p class="submission-error" role="alert">${state.submissionError.message}</p>`
             : nothing}
-          ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : this.validationPending ? "Validating prompt…" : "Starting session…"}</span>` : nothing}
+          ${busy ? html`<span class="busy-label" role="status">${attachmentCapturePending ? "Attaching files…" : "Starting session…"}</span>` : nothing}
         </div>
       </modal-surface>
     `;
@@ -301,6 +320,9 @@ export class NewSessionComposer extends LitElement {
 
   private replaceRuntimeForDestination(destination = this.composerState.destination): void {
     this.runtimeGeneration += 1;
+    this.promptResourceCommandValidationGeneration += 1;
+    this.promptResourceCatalogRequest = undefined;
+    this.promptResourceCommandValidation = { kind: "idle" };
     if (destination.kind !== "complete") {
       this.runtime = createPreSessionComposerRuntime({ machineId: "local" });
       return;
@@ -309,7 +331,7 @@ export class NewSessionComposer extends LitElement {
       machineId: destination.machine.id,
       projectId: destination.project.id,
       workspaceId: destination.workspace.id,
-      promptResourceCatalog: this.promptResourceCatalog,
+      promptResourceCatalog: (projectId, workspaceId, machineId) => this.loadPromptResourceCatalog(projectId, workspaceId, machineId),
     });
   }
 
@@ -347,14 +369,14 @@ export class NewSessionComposer extends LitElement {
         title: label,
         action: {
           label: chosen === undefined ? "Choose" : "Change",
-          disabled: state.kind === "submitting" || this.launchMode === "rapidfire",
+          disabled: state.kind === "submitting" || (this.launchMode === "rapidfire" && chosen !== undefined),
           onActivate: () => { this.openDestinationChoice(); },
         },
       }],
       ...(this.recoverySeedId === undefined ? {
         rapidfire: {
           active: this.launchMode === "rapidfire",
-          disabled: state.kind !== "editing" || this.validationPending || this.draftDisplay.attachmentCapturePending,
+          disabled: state.kind !== "editing" || this.draftDisplay.attachmentCapturePending,
           onToggle: () => { this.toggleLaunchMode(); },
         },
       } : {}),
@@ -388,6 +410,7 @@ export class NewSessionComposer extends LitElement {
   private composerSendAvailable(state: NewSessionComposerState): boolean {
     return state.kind === "editing"
       && state.destination.kind === "complete"
+      && this.promptResourceCommandReadyForSend()
       && !this.draftDisplay.attachmentCapturePending;
   }
 
@@ -428,9 +451,9 @@ export class NewSessionComposer extends LitElement {
     return Object.keys(choices).length === 0 ? undefined : choices;
   }
 
-  /** Blocks the draft itself, so it stays clear of destination questions. */
+  /** Blocks the draft itself only after a validation error needs author action. */
   private composerDraftAvailable(): boolean {
-    return this.slashValidationError === undefined && !this.validationPending;
+    return this.slashValidationError === undefined;
   }
 
   private handleFooterSubmit(event: SubmitEvent): void {
@@ -438,21 +461,41 @@ export class NewSessionComposer extends LitElement {
     this.draft?.submit();
   }
 
-  private async handleDraftSubmit(snapshot: ComposerDraftSubmitSnapshot): Promise<"accepted" | "rejected"> {
-    if (this.validationPending) return "rejected";
+  /** All accepted prompts keep the host's synchronous outcome so Rapidfire can clear in the Send event. */
+  private handleDraftSubmit(snapshot: ComposerDraftSubmitSnapshot): ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome> {
     const destination = this.currentDestination();
     if (destination === undefined) return "rejected";
     const runtimeGeneration = this.runtimeGeneration;
     const submissionGeneration = ++this.submissionGeneration;
-    this.validationPending = true;
-    const validation = await this.validatePromptResourceCommand(snapshot, destination);
-    if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
-    this.validationPending = false;
+    const parsed = parseLeadingSlashCommand(snapshot.text);
+    if (parsed.kind === "not-command") {
+      return this.submitValidatedDraft(snapshot, destination, submissionGeneration, runtimeGeneration);
+    }
+    if (parsed.kind !== "command") {
+      this.slashValidationError = { message: "Enter a prompt resource command name after / before starting a session.", retryable: false };
+      return "rejected";
+    }
+
+    const validation = this.promptResourceCommandValidationFor(parsed.name, runtimeGeneration);
+    if (validation === undefined || validation.kind === "pending") {
+      this.preparePromptResourceCommandValidation();
+      return "rejected";
+    }
     if (validation.kind === "invalid") {
       this.slashValidationError = validation.error;
       return "rejected";
     }
-    const next = beginNewSessionSubmission(this.composerState, validation.submission);
+    return this.submitValidatedDraft({ ...snapshot, promptResourceCommandIdentity: { ...validation.identity } }, destination, submissionGeneration, runtimeGeneration);
+  }
+
+  private submitValidatedDraft(
+    submission: NewSessionFirstPromptSubmission,
+    destination: NewSessionCompleteDestination,
+    submissionGeneration: number,
+    runtimeGeneration: number,
+  ): ComposerDraftSubmitOutcome | Promise<ComposerDraftSubmitOutcome> {
+    if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
+    const next = beginNewSessionSubmission(this.composerState, submission);
     if (next.kind !== "submitting" || next === this.composerState) return "rejected";
     this.requestGeneration += 1;
     this.composerState = next;
@@ -461,66 +504,164 @@ export class NewSessionComposer extends LitElement {
       this.composerState = rejectNewSessionSubmission(next, { kind: "rejected", reason: "launch-rejected", message: "New session could not be started." });
       return "rejected";
     }
+
+    const mode = this.launchMode;
+    const agentChoices = this.agentChoices();
     try {
-      const mode = this.launchMode;
-      const agentChoices = this.agentChoices();
-      const outcome = await callback({
+      const outcome = callback({
         mode,
         destination: next.destination,
-        firstPrompt: validation.submission,
+        firstPrompt: submission,
         ...(agentChoices === undefined ? {} : { agentChoices }),
       });
-      if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
-      if (outcome.kind === "accepted") {
-        this.completedRecoverySeedId = this.claimedRecoverySeedId;
-        this.claimedRecoverySeedId = undefined;
-        if (mode === "rapidfire") {
-          this.composerState = createNewSessionComposerState(next.destination);
-          this.refocusRapidfireDraft();
-        }
-        return "accepted";
-      }
-      this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
-      return "rejected";
+      return outcome instanceof Promise
+        ? outcome
+          .then((resolved) => this.resolveSubmissionOutcome(resolved, mode, next, submissionGeneration, runtimeGeneration))
+          .catch((error: unknown) => this.rejectSubmissionError(error, submissionGeneration, runtimeGeneration))
+        : this.resolveSubmissionOutcome(outcome, mode, next, submissionGeneration, runtimeGeneration);
     } catch (error) {
-      if (this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) {
-        this.composerState = rejectNewSessionSubmission(this.composerState, {
-          kind: "rejected",
-          reason: "launch-rejected",
-          message: errorMessage(error),
-        });
-      }
-      return "rejected";
+      return this.rejectSubmissionError(error, submissionGeneration, runtimeGeneration);
     }
   }
 
-  private async validatePromptResourceCommand(snapshot: ComposerDraftSubmitSnapshot, destination: NewSessionCompleteDestination): Promise<SlashValidationResult> {
-    const parsed = parseLeadingSlashCommand(snapshot.text);
-    if (parsed.kind === "not-command") return { kind: "valid", submission: snapshot };
-    if (parsed.kind !== "command") {
-      return { kind: "invalid", error: { message: "Enter a prompt resource command name after / before starting a session.", retryable: false } };
+  private resolveSubmissionOutcome(
+    outcome: NewSessionSubmissionOutcome,
+    mode: NewSessionLaunchMode,
+    submitted: Extract<NewSessionComposerState, { kind: "submitting" }>,
+    submissionGeneration: number,
+    runtimeGeneration: number,
+  ): ComposerDraftSubmitOutcome {
+    if (!this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) return "rejected";
+    if (outcome.kind === "accepted") {
+      this.completedRecoverySeedId = this.claimedRecoverySeedId;
+      this.claimedRecoverySeedId = undefined;
+      this.promptResourceCatalogRequest = undefined;
+      this.invalidatePromptResourceCommandValidation();
+      if (mode === "rapidfire") {
+        this.composerState = createNewSessionComposerState(submitted.destination);
+        this.refocusRapidfireDraft();
+      }
+      return "accepted";
     }
+    this.composerState = rejectNewSessionSubmission(this.composerState, outcome);
+    this.promptResourceCatalogRequest = undefined;
+    this.invalidatePromptResourceCommandValidation();
+    this.preparePromptResourceCommandValidation();
+    return "rejected";
+  }
+
+  private rejectSubmissionError(error: unknown, submissionGeneration: number, runtimeGeneration: number): ComposerDraftSubmitOutcome {
+    if (this.submissionIsCurrent(submissionGeneration, runtimeGeneration)) {
+      this.composerState = rejectNewSessionSubmission(this.composerState, {
+        kind: "rejected",
+        reason: "launch-rejected",
+        message: errorMessage(error),
+      });
+      this.promptResourceCatalogRequest = undefined;
+      this.invalidatePromptResourceCommandValidation();
+      this.preparePromptResourceCommandValidation();
+    }
+    return "rejected";
+  }
+
+  private loadPromptResourceCatalog(projectId: string, workspaceId: string, machineId: string): Promise<PromptResourceCatalogResponse> {
+    const runtimeGeneration = this.runtimeGeneration;
+    const cached = this.promptResourceCatalogRequest;
+    if (cached?.runtimeGeneration === runtimeGeneration) return cached.promise;
+    const promise = this.promptResourceCatalog(projectId, workspaceId, machineId);
+    this.promptResourceCatalogRequest = { runtimeGeneration, promise };
+    return promise;
+  }
+
+  private promptResourceCommandReadyForSend(): boolean {
+    const parsed = parseLeadingSlashCommand(this.draft?.getText() ?? "");
+    if (parsed.kind !== "command") return true;
+    const validation = this.promptResourceCommandValidationFor(parsed.name, this.runtimeGeneration);
+    return validation?.kind === "valid" || validation?.kind === "invalid";
+  }
+
+  private promptResourceCommandValidationFor(
+    commandName: string,
+    runtimeGeneration: number,
+  ): Exclude<PromptResourceCommandValidation, { kind: "idle" }> | undefined {
+    const validation = this.promptResourceCommandValidation;
+    if (validation.kind === "idle" || validation.commandName !== commandName || validation.runtimeGeneration !== runtimeGeneration) return undefined;
+    return validation;
+  }
+
+  private preparePromptResourceCommandValidation(force = false, submitWhenValid = false): void {
+    const destination = this.currentDestination();
+    const parsed = parseLeadingSlashCommand(this.draft?.getText() ?? "");
+    if (destination === undefined || parsed.kind !== "command") {
+      if (this.promptResourceCommandValidation.kind !== "idle") {
+        this.promptResourceCommandValidationGeneration += 1;
+        this.promptResourceCommandValidation = { kind: "idle" };
+      }
+      return;
+    }
+
+    const runtimeGeneration = this.runtimeGeneration;
+    const existing = this.promptResourceCommandValidationFor(parsed.name, runtimeGeneration);
+    if (!force && existing !== undefined) return;
+    if (force) this.promptResourceCatalogRequest = undefined;
+    const requestId = ++this.promptResourceCommandValidationGeneration;
+    this.promptResourceCommandValidation = { kind: "pending", commandName: parsed.name, requestId, runtimeGeneration };
+    void this.validatePromptResourceCommand(destination, parsed.name).then((validation) => {
+      if (!this.isConnected || requestId !== this.promptResourceCommandValidationGeneration || runtimeGeneration !== this.runtimeGeneration) return;
+      const current = parseLeadingSlashCommand(this.draft?.getText() ?? "");
+      if (current.kind !== "command" || current.name !== parsed.name) return;
+      this.promptResourceCommandValidation = validation.kind === "valid"
+        ? { kind: "valid", commandName: parsed.name, identity: validation.identity, runtimeGeneration }
+        : { kind: "invalid", commandName: parsed.name, error: validation.error, runtimeGeneration };
+      if (validation.kind === "invalid") this.promptResourceCatalogRequest = undefined;
+      if (!submitWhenValid) return;
+      if (validation.kind === "invalid") {
+        this.slashValidationError = validation.error;
+        return;
+      }
+      void this.updateComplete.then(async () => {
+        await this.editor?.updateComplete;
+        this.draft?.submit();
+      });
+    });
+  }
+
+  private async validatePromptResourceCommand(destination: NewSessionCompleteDestination, commandName: string): Promise<SlashValidationResult> {
     let catalog: PromptResourceCatalogResponse;
     try {
-      catalog = await this.promptResourceCatalog(destination.project.id, destination.workspace.id, destination.machine.id);
+      catalog = await this.loadPromptResourceCatalog(destination.project.id, destination.workspace.id, destination.machine.id);
     } catch (error) {
       return { kind: "invalid", error: { message: errorMessage(error, "Prompt-resource catalog unavailable. Retry before sending a slash command."), retryable: true } };
     }
     if (!catalog.available) return { kind: "invalid", error: { message: catalog.message, retryable: true } };
-    const matches = catalog.commands.filter((command) => command.name === parsed.name);
+    const matches = catalog.commands.filter((command) => command.name === commandName);
     const match = matches[0];
     if (matches.length !== 1 || match === undefined) {
       return {
         kind: "invalid",
         error: {
           message: matches.length === 0
-            ? `/${parsed.name} is not available as a first-prompt command in this destination.`
-            : `/${parsed.name} is ambiguous in this destination. Refresh resources and choose the command again.`,
-          retryable: false,
+            ? `/${commandName} is not available as a first-prompt command in this destination.`
+            : `/${commandName} is ambiguous in this destination. Refresh resources and choose the command again.`,
+          retryable: true,
         },
       };
     }
-    return { kind: "valid", submission: { ...snapshot, promptResourceCommandIdentity: { ...match.identity } } };
+    return { kind: "valid", identity: { ...match.identity } };
+  }
+
+  private handleDraftEdited(): void {
+    this.invalidatePendingSubmission();
+    const parsed = parseLeadingSlashCommand(this.draft?.getText() ?? "");
+    if (this.promptResourceCommandValidation.kind === "valid" || parsed.kind !== "command") this.promptResourceCatalogRequest = undefined;
+    this.invalidatePromptResourceCommandValidation();
+    this.clearValidationError();
+    this.preparePromptResourceCommandValidation();
+  }
+
+  private invalidatePromptResourceCommandValidation(): void {
+    this.promptResourceCommandValidationGeneration += 1;
+    this.promptResourceCommandValidation = { kind: "idle" };
   }
 
   private clearValidationError(): void {
@@ -532,6 +673,7 @@ export class NewSessionComposer extends LitElement {
   }
 
   private refocusRapidfireDraft(): void {
+    this.editor?.focusInput();
     void this.updateComplete.then(async () => {
       const editor = this.editor;
       await editor?.updateComplete;
@@ -543,7 +685,7 @@ export class NewSessionComposer extends LitElement {
 
   private retryPromptResourceValidation(): void {
     this.clearValidationError();
-    void this.updateComplete.then(() => { this.draft?.submit(); });
+    this.preparePromptResourceCommandValidation(true, true);
   }
 
   private openDestinationChoice(): void {
@@ -595,6 +737,7 @@ export class NewSessionComposer extends LitElement {
     this.clearValidationError();
     this.replaceRuntimeForDestination(next.destination);
     this.refreshDestinationDefaults(next.destination);
+    this.preparePromptResourceCommandValidation();
   }
 
   private backToMachines(): void {
@@ -673,7 +816,6 @@ export class NewSessionComposer extends LitElement {
 
   private invalidatePendingSubmission(): void {
     this.submissionGeneration += 1;
-    this.validationPending = false;
   }
 
   private claimRecoveryDraftOnce(): void {
@@ -690,6 +832,7 @@ export class NewSessionComposer extends LitElement {
       this.claimedRecoverySeedId = seedId;
       this.recoveryClaimRetryAttemptedFor = undefined;
       this.draft.restoreSeed(seed);
+      this.preparePromptResourceCommandValidation();
       return;
     }
     if (this.recoveryClaimRetryScheduled || this.recoveryClaimRetryAttemptedFor === seedId) return;

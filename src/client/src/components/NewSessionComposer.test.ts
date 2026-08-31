@@ -117,8 +117,9 @@ function promptText(composer: NewSessionComposer): string {
 }
 
 async function enterPrompt(composer: NewSessionComposer, value: string): Promise<void> {
-  draft(composer).replaceText(value);
+  setEditorText(composer, value);
   await composer.updateComplete;
+  await promptEditor(composer).updateComplete;
 }
 
 function setEditorText(composer: NewSessionComposer, text: string): void {
@@ -136,6 +137,12 @@ async function waitForMenuItems(composer: NewSessionComposer, count: number): Pr
   if (found === null || found === undefined) throw new Error("Expected autocomplete menu");
   await vi.waitFor(() => { expect(found.items).toHaveLength(count); });
   await found.updateComplete;
+}
+
+async function waitForSendEnabled(composer: NewSessionComposer): Promise<void> {
+  await composer.updateComplete;
+  await promptEditor(composer).updateComplete;
+  await vi.waitFor(() => { expect(sendButton(composer).disabled).toBe(false); });
 }
 
 function pressPrompt(composer: NewSessionComposer, key: string): void {
@@ -288,6 +295,33 @@ describe("new-session-composer editing and submission", () => {
     expect(destinationAction(composer).disabled).toBe(false);
   });
 
+  it("keeps destination choice available when Rapidfire has no destination yet", async () => {
+    const composer = await mountComposer();
+
+    rapidfireToggle(composer).click();
+    await composer.updateComplete;
+    await promptEditor(composer).updateComplete;
+
+    expect(rapidfireToggle(composer).getAttribute("aria-pressed")).toBe("true");
+    expect(destinationAction(composer).disabled).toBe(false);
+  });
+
+  it("clears and refocuses an accepted Rapidfire prompt in the Send event", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const onSubmit = vi.fn((): NewSessionSubmissionOutcome => ({ kind: "accepted" }));
+    const composer = await mountComposer({ initialDestination: destination, initialPrompt: "Launch immediately", onSubmit });
+    rapidfireToggle(composer).click();
+    await composer.updateComplete;
+    const send = sendButton(composer);
+    send.focus();
+
+    send.click();
+
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "rapidfire", destination, firstPrompt: { text: "Launch immediately" } });
+    expect(promptText(composer)).toBe("");
+    expect(deepActiveElement()).toBe(promptField(composer));
+  });
+
   it("waits for the nested prompt to become editable before restoring Rapidfire focus", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     let resolveSubmission: ((outcome: NewSessionSubmissionOutcome) => void) | undefined;
@@ -382,6 +416,93 @@ describe("new-session-composer editing and submission", () => {
     expect(dialogSurface(composer).busy).toBe(false);
   });
 
+  it("prevalidates Rapidfire slash commands before Send, then clears in the Send event", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "a".repeat(64) };
+    const validation = deferredPromptResourceCatalog();
+    const onSubmit = vi.fn((): NewSessionSubmissionOutcome => ({ kind: "accepted" }));
+    const composer = await mountComposer({
+      initialDestination: destination,
+      onSubmit,
+      promptResourceCatalog: () => validation.promise,
+    });
+    rapidfireToggle(composer).click();
+    await composer.updateComplete;
+
+    await enterPrompt(composer, "/review now");
+    await vi.waitFor(() => { expect(sendButton(composer).disabled).toBe(true); });
+
+    validation.resolve({
+      available: true,
+      diagnostics: [],
+      commands: [{ name: "review", source: "prompt", identity }],
+    });
+    await vi.waitFor(() => { expect(sendButton(composer).disabled).toBe(false); });
+    const send = sendButton(composer);
+    send.focus();
+
+    send.click();
+
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "rapidfire", destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
+    expect(promptText(composer)).toBe("");
+    expect(deepActiveElement()).toBe(promptField(composer));
+  });
+
+  it("refreshes slash-command identity between accepted Rapidfire prompts", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identities = ["a", "b"].map((value) => ({ source: "prompt" as const, name: "review", fingerprint: value.repeat(64) }));
+    let loads = 0;
+    const promptResourceCatalog = vi.fn(() => {
+      const identity = identities[loads];
+      loads += 1;
+      if (identity === undefined) throw new Error("Unexpected catalog load");
+      return Promise.resolve({ available: true as const, diagnostics: [], commands: [{ name: "review", source: "prompt" as const, identity }] });
+    });
+    const onSubmit = vi.fn((): NewSessionSubmissionOutcome => ({ kind: "accepted" }));
+    const composer = await mountComposer({ initialDestination: destination, onSubmit, promptResourceCatalog });
+    rapidfireToggle(composer).click();
+    await composer.updateComplete;
+
+    await enterPrompt(composer, "/review first");
+    await waitForSendEnabled(composer);
+    sendButton(composer).click();
+    expect(promptText(composer)).toBe("");
+
+    await enterPrompt(composer, "/review second");
+    await waitForSendEnabled(composer);
+    sendButton(composer).click();
+
+    expect(promptResourceCatalog).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenNthCalledWith(1, { mode: "rapidfire", destination, firstPrompt: { text: "/review first", promptResourceCommandIdentity: identities[0] } });
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { mode: "rapidfire", destination, firstPrompt: { text: "/review second", promptResourceCommandIdentity: identities[1] } });
+  });
+
+  it("refreshes slash-command identity after a rejected launch", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identities = ["c", "d"].map((value) => ({ source: "prompt" as const, name: "review", fingerprint: value.repeat(64) }));
+    let loads = 0;
+    const promptResourceCatalog = vi.fn(() => {
+      const identity = identities[loads];
+      loads += 1;
+      if (identity === undefined) throw new Error("Unexpected catalog load");
+      return Promise.resolve({ available: true as const, diagnostics: [], commands: [{ name: "review", source: "prompt" as const, identity }] });
+    });
+    const onSubmit = vi.fn()
+      .mockReturnValueOnce({ kind: "rejected", reason: "launch-rejected", message: "Queue unavailable" } satisfies NewSessionSubmissionOutcome)
+      .mockReturnValueOnce({ kind: "accepted" } satisfies NewSessionSubmissionOutcome);
+    const composer = await mountComposer({ initialDestination: destination, onSubmit, promptResourceCatalog });
+
+    await enterPrompt(composer, "/review retry");
+    await waitForSendEnabled(composer);
+    sendButton(composer).click();
+    await waitForSendEnabled(composer);
+    sendButton(composer).click();
+
+    expect(promptResourceCatalog).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenNthCalledWith(1, { mode: "switch", destination, firstPrompt: { text: "/review retry", promptResourceCommandIdentity: identities[0] } });
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { mode: "switch", destination, firstPrompt: { text: "/review retry", promptResourceCommandIdentity: identities[1] } });
+  });
+
   it("uses the shared draft runtime for prompt-resource and file completions, then sends the validated command identity", async () => {
     const destination = completeNewSessionDestination(machine("remote"), project("forge"), workspace("main", "forge"));
     const identity = { source: "prompt" as const, name: "review", fingerprint: "a".repeat(64) };
@@ -407,6 +528,7 @@ describe("new-session-composer editing and submission", () => {
     expect(menu(composer)?.items[0]).toMatchObject({ insertText: "@src/app.ts" });
 
     setEditorText(composer, "/review now");
+    await waitForSendEnabled(composer);
     sendButton(composer).click();
     await settleCatalog(composer);
     expect(onSubmit).toHaveBeenCalledWith({ mode: "switch", destination, firstPrompt: { text: "/review now", promptResourceCommandIdentity: identity } });
@@ -418,6 +540,7 @@ describe("new-session-composer editing and submission", () => {
     const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
     const composer = await mountComposer({ initialDestination: destination, initialPrompt: "/tree", onSubmit });
 
+    await waitForSendEnabled(composer);
     sendButton(composer).click();
     await settleCatalog(composer);
 
@@ -430,70 +553,85 @@ describe("new-session-composer editing and submission", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("ignores stale slash validation after editing, destination change, or cancel", async () => {
-    const firstDestination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
-    const replacementDestination = completeNewSessionDestination(machine("remote"), project("other"), workspace("feature", "other"));
+  it("drops a pending command catalog after the draft leaves slash mode", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const validations: ReturnType<typeof deferredPromptResourceCatalog>[] = [];
     const promptResourceCatalog = vi.fn(() => {
       const validation = deferredPromptResourceCatalog();
       validations.push(validation);
       return validation.promise;
     });
-    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
-    const onCancel = vi.fn<() => void>();
+    const composer = await mountComposer({ initialDestination: destination, promptResourceCatalog });
+
+    await enterPrompt(composer, "/review");
+    await vi.waitFor(() => { expect(validations).toHaveLength(1); });
+    await enterPrompt(composer, "plain text");
+    validations[0]?.resolve({ available: false, reason: "error", message: "Stale catalog" });
+    await settleCatalog(composer);
+    await enterPrompt(composer, "/review");
+
+    await vi.waitFor(() => { expect(validations).toHaveLength(2); });
+  });
+
+  it("ignores stale slash prevalidation after editing, destination change, or cancel", async () => {
+    const firstDestination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const replacementDestination = completeNewSessionDestination(machine("remote"), project("other"), workspace("feature", "other"));
     const catalog = new InMemoryNewSessionDestinationCatalog({
       machines: [replacementDestination.machine],
       projectsByMachine: { remote: [replacementDestination.project] },
       workspacesByMachineAndProject: { "remote:other": [replacementDestination.workspace] },
     });
-    const composer = await mountComposer({ initialDestination: firstDestination, initialPrompt: "/review", catalog, onSubmit, onCancel, promptResourceCatalog });
+    const onSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
 
-    await vi.waitFor(() => { expect(validations).toHaveLength(1); });
-    validations[0]?.resolve({
-      available: true,
-      diagnostics: [],
-      commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "b".repeat(64) } }],
+    const editedValidation = deferredPromptResourceCatalog();
+    const edited = await mountComposer({ initialDestination: firstDestination, onSubmit, promptResourceCatalog: () => editedValidation.promise });
+    await enterPrompt(edited, "/review");
+    await vi.waitFor(() => { expect(sendButton(edited).disabled).toBe(true); });
+    await enterPrompt(edited, "plain replacement");
+    editedValidation.resolve({ available: false, reason: "error", message: "Stale edit error" });
+    await settleCatalog(edited);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(root(edited).querySelector("[role='alert']")).toBeNull();
+    expect(promptText(edited)).toBe("plain replacement");
+
+    document.body.replaceChildren();
+    const destinationValidation = deferredPromptResourceCatalog();
+    const destinationComposer = await mountComposer({
+      initialDestination: firstDestination,
+      catalog,
+      onSubmit,
+      promptResourceCatalog: () => destinationValidation.promise,
     });
-    await settleCatalog(composer);
-    const editedValidationIndex = validations.length;
-    sendButton(composer).click();
-    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(editedValidationIndex); });
-    await enterPrompt(composer, "plain replacement");
-    validations[editedValidationIndex]?.resolve({ available: false, reason: "error", message: "Old destination unavailable" });
-    await settleCatalog(composer);
+    await enterPrompt(destinationComposer, "/review");
+    await vi.waitFor(() => { expect(sendButton(destinationComposer).disabled).toBe(true); });
+    destinationAction(destinationComposer).click();
+    await settleCatalog(destinationComposer);
+    button(destinationComposer, "[data-machine-id='remote']").click();
+    await settleCatalog(destinationComposer);
+    button(destinationComposer, "[data-project-id='other']").click();
+    await settleCatalog(destinationComposer);
+    button(destinationComposer, "[data-workspace-id='feature']").click();
+    await destinationComposer.updateComplete;
+    destinationValidation.resolve({ available: false, reason: "error", message: "Stale destination error" });
+    await settleCatalog(destinationComposer);
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(root(composer).querySelector("[role='alert']")).toBeNull();
-    expect(promptText(composer)).toBe("plain replacement");
+    expect(root(destinationComposer).querySelector("[role='alert']")).toBeNull();
 
-    await enterPrompt(composer, "/review");
-    const destinationValidationIndex = validations.length;
-    sendButton(composer).click();
-    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(destinationValidationIndex); });
-    destinationAction(composer).click();
-    await settleCatalog(composer);
-    button(composer, "[data-machine-id='remote']").click();
-    await settleCatalog(composer);
-    button(composer, "[data-project-id='other']").click();
-    await settleCatalog(composer);
-    button(composer, "[data-workspace-id='feature']").click();
-    await composer.updateComplete;
-    validations[destinationValidationIndex]?.resolve({ available: false, reason: "error", message: "Stale validation error" });
-    await settleCatalog(composer);
-
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(root(composer).querySelector("[role='alert']")).toBeNull();
-
-    const cancelValidationIndex = validations.length;
-    sendButton(composer).click();
-    await vi.waitFor(() => { expect(validations.length).toBeGreaterThan(cancelValidationIndex); });
-    cancelButton(composer).click();
-    validations[cancelValidationIndex]?.resolve({
+    document.body.replaceChildren();
+    const cancelValidation = deferredPromptResourceCatalog();
+    const onCancel = vi.fn<() => void>();
+    const cancelled = await mountComposer({ initialDestination: firstDestination, onSubmit, onCancel, promptResourceCatalog: () => cancelValidation.promise });
+    await enterPrompt(cancelled, "/review");
+    await vi.waitFor(() => { expect(sendButton(cancelled).disabled).toBe(true); });
+    cancelButton(cancelled).click();
+    cancelValidation.resolve({
       available: true,
       diagnostics: [],
       commands: [{ name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "c".repeat(64) } }],
     });
-    await settleCatalog(composer);
+    await settleCatalog(cancelled);
 
     expect(onCancel).toHaveBeenCalledOnce();
     expect(onSubmit).not.toHaveBeenCalled();
@@ -510,11 +648,12 @@ describe("new-session-composer editing and submission", () => {
       onSubmit,
       promptResourceCatalog: () => {
         loads += 1;
-        if (loads === 2) return Promise.reject(new Error("Catalog offline"));
+        if (loads === 1) return Promise.reject(new Error("Catalog offline"));
         return Promise.resolve({ available: true, diagnostics: [], commands: [{ name: "review", source: "prompt", identity }] });
       },
     });
 
+    await waitForSendEnabled(composer);
     sendButton(composer).click();
     await settleCatalog(composer);
     button(composer, "[data-action='retry-prompt-resource-validation']").click();
@@ -540,9 +679,40 @@ describe("new-session-composer editing and submission", () => {
         ],
       }),
     });
+    await waitForSendEnabled(ambiguous);
     sendButton(ambiguous).click();
     await settleCatalog(ambiguous);
     expect(root(ambiguous).querySelector("[role='alert']")?.textContent).toContain("ambiguous");
+  });
+
+  it("cancels Retry auto-submit when the command draft changes", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "f".repeat(64) };
+    const retryValidation = deferredPromptResourceCatalog();
+    let loads = 0;
+    const onSubmit = vi.fn((): NewSessionSubmissionOutcome => ({ kind: "accepted" }));
+    const composer = await mountComposer({
+      initialDestination: destination,
+      initialPrompt: "/review original",
+      onSubmit,
+      promptResourceCatalog: () => {
+        loads += 1;
+        return loads === 1 ? Promise.reject(new Error("Catalog offline")) : retryValidation.promise;
+      },
+    });
+    await waitForSendEnabled(composer);
+    sendButton(composer).click();
+    await settleCatalog(composer);
+    button(composer, "[data-action='retry-prompt-resource-validation']").click();
+    await vi.waitFor(() => { expect(loads).toBe(2); });
+
+    await enterPrompt(composer, "/review edited");
+    retryValidation.resolve({ available: true, diagnostics: [], commands: [{ name: "review", source: "prompt", identity }] });
+    await waitForSendEnabled(composer);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    sendButton(composer).click();
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "switch", destination, firstPrompt: { text: "/review edited", promptResourceCommandIdentity: identity } });
   });
 
   it("lets plain text and attachment-only launches proceed when the prompt-resource catalog fails", async () => {
@@ -569,6 +739,7 @@ describe("new-session-composer editing and submission", () => {
     document.body.replaceChildren();
     const slashSubmit = vi.fn((): Promise<NewSessionSubmissionOutcome> => Promise.resolve({ kind: "accepted" }));
     const slashComposer = await mountComposer({ initialDestination: destination, initialPrompt: "/review", onSubmit: slashSubmit });
+    await waitForSendEnabled(slashComposer);
     sendButton(slashComposer).click();
     await settleCatalog(slashComposer);
     expect(slashSubmit).not.toHaveBeenCalled();
@@ -998,6 +1169,28 @@ describe("new-session-composer modal lifetime", () => {
     expect(claim).toHaveBeenCalledOnce();
   });
 
+  it("prevalidates a restored slash-command recovery draft", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "a".repeat(64) };
+    const validation = deferredPromptResourceCatalog();
+    const onSubmit = vi.fn((): NewSessionSubmissionOutcome => ({ kind: "accepted" }));
+    const composer = new NewSessionComposer();
+    composer.initialDestination = destination;
+    composer.recoverySeedId = "recovery-command";
+    composer.onClaimRecoveryDraft = (id: string) => ({ id, snapshot: { text: "/review recovered" } });
+    composer.promptResourceCatalog = () => validation.promise;
+    composer.onSubmit = onSubmit;
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await vi.waitFor(() => { expect(sendButton(composer).disabled).toBe(true); });
+
+    validation.resolve({ available: true, diagnostics: [], commands: [{ name: "review", source: "prompt", identity }] });
+    await waitForSendEnabled(composer);
+    sendButton(composer).click();
+
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "switch", destination, firstPrompt: { text: "/review recovered", promptResourceCommandIdentity: identity } });
+  });
+
   it("returns the current claimed recovery snapshot on cancel before discarding the draft", async () => {
     const attachment = { kind: "image" as const, mimeType: "image/png", data: "QUJD", name: "shot.png" };
     const returned = vi.fn<NonNullable<NewSessionComposer["onReturnRecoveryDraft"]>>();
@@ -1125,6 +1318,28 @@ describe("new-session-composer modal lifetime", () => {
 
     expect(deepActiveElement()).toBe(promptField(composer));
     expect(promptText(composer)).toBe("edited locally");
+  });
+
+  it("restarts slash-command prevalidation after reconnecting the same composer", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const identity = { source: "prompt" as const, name: "review", fingerprint: "a".repeat(64) };
+    const promptResourceCatalog = vi.fn(() => Promise.resolve({
+      available: true as const,
+      diagnostics: [],
+      commands: [{ name: "review", source: "prompt" as const, identity }],
+    }));
+    const composer = await mountComposer({ initialDestination: destination, promptResourceCatalog });
+    await enterPrompt(composer, "/review reconnect");
+    await waitForSendEnabled(composer);
+    expect(promptResourceCatalog).toHaveBeenCalledOnce();
+
+    composer.remove();
+    document.body.append(composer);
+    await settleRenderedDialog(composer);
+    await waitForSendEnabled(composer);
+
+    expect(promptResourceCatalog).toHaveBeenCalledTimes(2);
+    expect(promptText(composer)).toBe("/review reconnect");
   });
 
   it("preserves the local prompt and destination across ordinary responsive rerenders", async () => {

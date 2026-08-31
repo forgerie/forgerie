@@ -5,7 +5,7 @@ import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Machine, Project, SessionInfo, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
-import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination, type NewSessionLaunchIntent, type NewSessionSubmissionOutcome } from "../newSessionComposer";
+import { InMemoryNewSessionDestinationCatalog, completeNewSessionDestination, type NewSessionDestinationCatalog, type NewSessionLaunchIntent, type NewSessionSubmissionOutcome } from "../newSessionComposer";
 import { PiWebApp } from "./PiWebApp";
 import type { AppNavigationPanel } from "./appShell/AppNavigationPanel";
 import { ComposerDraft } from "./ComposerDraft";
@@ -520,6 +520,44 @@ describe("PiWebApp New session composer root", () => {
     expect(replaceText).toHaveBeenCalledExactlyOnceWith("Restore me");
   });
 
+  it("accepts Rapidfire synchronously without destination revalidation", () => {
+    const app = new PiWebApp();
+    const destination = completeNewSessionDestination(localMachine, project, mainWorkspace);
+    const selectedSession = session("selected", mainWorkspace.path);
+    const loadMachines = vi.fn(() => Promise.resolve<readonly Machine[]>([localMachine]));
+    Reflect.set(app, "newSessionDestinationCatalog", {
+      loadMachines,
+      loadProjects: () => Promise.resolve<readonly Project[]>([project]),
+      loadWorkspaces: () => Promise.resolve<readonly Workspace[]>([mainWorkspace]),
+    } satisfies NewSessionDestinationCatalog);
+    setAppState(app, {
+      machines: [localMachine],
+      selectedMachine: localMachine,
+      projects: [project],
+      selectedProject: project,
+      workspaces: [mainWorkspace],
+      workspacesByProjectId: { [project.id]: [mainWorkspace] },
+      selectedWorkspace: mainWorkspace,
+      selectedSession,
+      sessions: [selectedSession],
+    });
+    const controller = sessionController(app);
+    const api: unknown = Reflect.get(controller, "api");
+    if (!isSessionTransport(api)) throw new Error("Expected SessionController transport");
+    Reflect.set(controller, "api", { ...api, startSession: () => new Promise<SessionInfo>(() => undefined) });
+    invoke(app, "openNewSessionComposer", "rapidfire");
+
+    const outcome = invoke(app, "submitNewSession", {
+      mode: "rapidfire",
+      destination,
+      firstPrompt: { text: "Queue without waiting" },
+    } satisfies NewSessionLaunchIntent);
+
+    expect(outcome).toEqual({ kind: "accepted" });
+    expect(loadMachines).not.toHaveBeenCalled();
+    expect(appState(app).sessions.some(isClientPendingSession)).toBe(true);
+  });
+
   it("queues Rapidfire in the current workspace without changing the current location or session", async () => {
     const app = new PiWebApp();
     const destination = completeNewSessionDestination(localMachine, project, mainWorkspace);
@@ -552,7 +590,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(controller, "api", { ...api, startSession });
     invoke(app, "openNewSessionComposer");
 
-    const outcome = await invokeAsync(app, "submitNewSession", {
+    const outcome = invoke(app, "submitNewSession", {
       mode: "rapidfire",
       destination,
       firstPrompt: { text: "Review the current workspace" },
@@ -607,7 +645,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(controller, "api", { ...api, startSession: () => Promise.reject(new Error("backend unavailable")) });
     invoke(app, "openNewSessionComposer");
 
-    const outcome = await invokeAsync(app, "submitNewSession", {
+    const outcome = invoke(app, "submitNewSession", {
       mode: "rapidfire",
       destination,
       firstPrompt: { text: "Review the current workspace" },
@@ -626,7 +664,7 @@ describe("PiWebApp New session composer root", () => {
     expect(appState(app).sessions.some(isClientPendingSession)).toBe(true);
   });
 
-  it("refuses Rapidfire for a different workspace without losing the prompt to a hidden start", async () => {
+  it("refuses Rapidfire for a different workspace without losing the prompt to a hidden start", () => {
     const app = new PiWebApp();
     const destination = completeNewSessionDestination(remoteMachine, remoteProject, remoteWorkspace);
     const selectedSession = session("selected", mainWorkspace.path);
@@ -650,7 +688,7 @@ describe("PiWebApp New session composer root", () => {
     Reflect.set(controller, "api", { ...api, startSession });
     invoke(app, "openNewSessionComposer");
 
-    const outcome = await invokeAsync(app, "submitNewSession", {
+    const outcome = invoke(app, "submitNewSession", {
       mode: "rapidfire",
       destination,
       firstPrompt: { text: "Keep this prompt" },
