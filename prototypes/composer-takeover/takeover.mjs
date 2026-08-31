@@ -17,13 +17,27 @@
  * textarea survives a fold, a rotate, and the keyboard opening.
  */
 
-import { FIXTURES, plan, summarize } from "./plan.mjs";
+import { CHAT_CAPABILITIES, FIXTURES, FOOTER_CONTROLS, plan, summarize } from "./plan.mjs";
 
-const OVERFLOW_LABELS = {
-  freeText: "Write my own answer",
-  skip: "Leave this unanswered",
-  attach: "Attach a file",
-  draftPeek: "Show my saved draft",
+/** Labels used in the overflow menu, where there is room to say the whole thing. */
+const CONTROL_LABELS = new Map([
+  ...FOOTER_CONTROLS.map((control) => [control.id, control.label]),
+  ["freeText", "Write my own answer"],
+]);
+
+/**
+ * Icons drawn at 16px inside a 34px button, so the mark stays quiet while the
+ * hit rect stays at the touch minimum.
+ */
+const ICONS = {
+  stop: `<rect x="5" y="5" width="10" height="10" rx="1.5"/>`,
+  dictate: `<rect x="7.5" y="2.5" width="5" height="9" rx="2.5"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5"/>`,
+  attach: `<path d="M13.5 7.5 8 13a2.5 2.5 0 0 1-3.5-3.5l6-6a4 4 0 0 1 5.5 5.5l-6 6"/>`,
+  tree: `<circle cx="5" cy="5" r="2"/><circle cx="15" cy="10" r="2"/><circle cx="5" cy="15" r="2"/><path d="M5 7v6M7 5h3a3 3 0 0 1 3 3v0M7 15h3a3 3 0 0 0 3-3v0"/>`,
+  archive: `<rect x="3" y="4" width="14" height="4" rx="1"/><path d="M4.5 8v7a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V8M8 11h4"/>`,
+  newSession: `<path d="M10 4.5v11M4.5 10h11"/>`,
+  rapidfire: `<path d="M11 2.5 5 11h4l-1 6.5L15 9h-4z"/>`,
+  dismiss: `<path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>`,
 };
 
 export class ComposerTakeover extends HTMLElement {
@@ -49,6 +63,7 @@ export class ComposerTakeover extends HTMLElement {
     this.#page = 0;
     this.#mode = "ask";
     this.#built = "";
+    this.#footBuilt = "";
     this.#render();
   }
 
@@ -66,28 +81,28 @@ export class ComposerTakeover extends HTMLElement {
     return this.#mode;
   }
 
+  /** Re-plan after a host changes what it declares. */
+  refit() {
+    this.#footBuilt = "";
+    this.#render();
+  }
+
   #buildFrame() {
     this.innerHTML = `
       <div class="ct" data-mode="draft">
         <section class="ct-card" hidden aria-labelledby="ct-heading">
+          <!-- The context meter is the card's own top edge, the way the composer
+               island draws it, rather than a widget competing for a row. -->
+          <div class="ct-usage" role="img"><span class="ct-usage-fill"></span></div>
           <header class="ct-head">
             <h2 id="ct-heading">Questions</h2>
+            <span class="ct-chips"></span>
             <span class="ct-status" role="status" aria-live="polite" aria-atomic="true"></span>
           </header>
           <div class="ct-body">
             <div class="ct-questions"></div>
           </div>
-          <footer class="ct-foot">
-            <div class="ct-pager">
-              <button class="ct-page-prev" type="button" aria-label="Previous question">&lsaquo;</button>
-              <span class="ct-page-label"></span>
-              <button class="ct-page-next" type="button" aria-label="Next question">&rsaquo;</button>
-            </div>
-            <span class="ct-draft-chip" hidden>Draft saved</span>
-            <button class="ct-skip" type="button">Skip</button>
-            <button class="ct-more" type="button" aria-haspopup="menu">More</button>
-            <button class="ct-submit" type="button">Send answers</button>
-          </footer>
+          <footer class="ct-foot"></footer>
         </section>
 
         <div class="ct-draft">
@@ -110,11 +125,9 @@ export class ComposerTakeover extends HTMLElement {
     this.#draftField = this.querySelector(".ct-draft-field");
     this.#sheet = this.querySelector(".ct-sheet");
 
-    this.querySelector(".ct-page-prev").addEventListener("click", () => { this.#turnPage(-1); });
-    this.querySelector(".ct-page-next").addEventListener("click", () => { this.#turnPage(1); });
-    this.querySelector(".ct-submit").addEventListener("click", () => { this.#submit(); });
-    this.querySelector(".ct-skip").addEventListener("click", () => { this.#turnPage(1, true); });
-    this.querySelector(".ct-more").addEventListener("click", () => { this.#openOverflow(); });
+    this.#foot = this.querySelector(".ct-foot");
+    // One delegated listener for a row that is rebuilt whenever the fit changes.
+    this.#foot.addEventListener("click", (event) => { this.#runFooterAction(event); });
 
     // A capped region that scrolls must say so, or content stopping at the
     // budget line reads as clipped.
@@ -155,7 +168,7 @@ export class ComposerTakeover extends HTMLElement {
     }
 
     const model = summarize(this.#questions);
-    const layout = plan(width, height, model);
+    const layout = plan(width, height, model, this.capabilities);
     this.#plan = layout;
 
     this.#root.dataset.structure = layout.structure;
@@ -174,6 +187,8 @@ export class ComposerTakeover extends HTMLElement {
     this.#card.style.setProperty("--ct-budget", `${String(layout.heightBudget)}px`);
     this.#card.style.setProperty("--ct-track", `${String(layout.optionTrack)}px`);
 
+    this.#renderFooter(layout);
+    this.#renderChrome(layout);
     this.#renderQuestions(layout);
     this.#renderStatus(layout);
     this.#syncScrollHint();
@@ -184,6 +199,82 @@ export class ComposerTakeover extends HTMLElement {
    * Rebuild the question DOM only when the visible set changes. Re-rendering on
    * every resize would drop the caret out of a free-text field mid-rotation.
    */
+  /**
+   * Rebuild the control row only when the fitted set changes, so a resize that
+   * changes nothing does not replace buttons under the user's finger.
+   */
+  #renderFooter(layout) {
+    const signature = `${layout.inline.join(",")}|${String(layout.overflow.length)}|${String(layout.pageLabel)}`;
+    if (this.#footBuilt === signature) return;
+    this.#footBuilt = signature;
+
+    const parts = [];
+    if (layout.inline.includes("pager")) {
+      parts.push(`
+        <div class="ct-pager">
+          <button data-act="prev" type="button" aria-label="Previous question">&lsaquo;</button>
+          ${layout.pageLabel ? `<span class="ct-page-label"></span>` : ""}
+          <button data-act="next" type="button" aria-label="Next question">&rsaquo;</button>
+        </div>`);
+    }
+    for (const id of layout.inline) {
+      if (id === "pager" || id === "submit" || id === "freeText") continue;
+      if (id === "skip") {
+        parts.push(`<button class="ct-text-action" data-act="skip" type="button">Skip</button>`);
+        continue;
+      }
+      const label = CONTROL_LABELS.get(id) ?? id;
+      parts.push(`
+        <button class="ct-icon" data-act="${id}" type="button" title="${label}" aria-label="${label}">
+          <svg viewBox="0 0 20 20" aria-hidden="true">${ICONS[id] ?? ""}</svg>
+        </button>`);
+    }
+    parts.push(`<span class="ct-draft-chip" hidden>Draft saved</span>`);
+    if (layout.overflow.length > 0) {
+      parts.push(`<button class="ct-text-action ct-more" data-act="more" type="button" aria-haspopup="menu">More</button>`);
+    }
+    parts.push(`<button class="ct-submit" data-act="submit" type="button">Send answers</button>`);
+    this.#foot.innerHTML = parts.join("");
+  }
+
+  #runFooterAction(event) {
+    const button = event.target.closest("button[data-act]");
+    if (button === null) return;
+    const action = button.dataset.act;
+    if (action === "prev") this.#turnPage(-1);
+    else if (action === "next") this.#turnPage(1);
+    else if (action === "skip") this.#turnPage(1, true);
+    else if (action === "submit") this.#submit();
+    else if (action === "more") this.#openOverflow();
+    else this.#invokeCapability(action);
+  }
+
+  /**
+   * A prototype stands in for the real capability here. What matters is that the
+   * control exists, is reachable at every size, and reports which one was hit.
+   */
+  #invokeCapability(id) {
+    this.dispatchEvent(new CustomEvent("capability-invoked", { detail: { id }, bubbles: true }));
+  }
+
+  #renderChrome(layout) {
+    const usage = this.capabilities.contextUsage;
+    const meter = this.querySelector(".ct-usage");
+    meter.hidden = usage === undefined;
+    if (usage !== undefined) {
+      meter.querySelector(".ct-usage-fill").style.inlineSize = `${String(usage.usedPercent)}%`;
+      meter.setAttribute("aria-label", `Context ${String(usage.usedPercent)}% used`);
+    }
+    const chips = this.querySelector(".ct-chips");
+    const declared = this.capabilities.chips ?? [];
+    chips.hidden = !layout.contextChips || declared.length === 0;
+    if (!chips.hidden) {
+      chips.innerHTML = declared
+        .map((chip) => `<span class="ct-chip${chip.kind === "branch" ? " branch" : ""}">${escapeHtml(chip.label)}</span>`)
+        .join("");
+    }
+  }
+
   #renderQuestions(layout) {
     const signature = `${layout.paged ? String(this.#page) : "all"}:${String(this.#questions.length)}`;
     if (this.#built === signature) {
@@ -292,15 +383,19 @@ export class ComposerTakeover extends HTMLElement {
         : layout.readout === "short"
           ? `${String(answered)}/${String(total)}`
           : "";
-    this.querySelector(".ct-page-label").textContent = layout.paged
-      ? `${String(this.#page + 1)} / ${String(total)}`
-      : "";
-    this.querySelector(".ct-draft-chip").hidden = this.#stashedDraft === "";
+    // Every footer node is optional: the row is fitted, so any of these may have
+    // moved into the overflow menu at this size.
+    const pageLabel = this.querySelector(".ct-page-label");
+    if (pageLabel !== null) pageLabel.textContent = `${String(this.#page + 1)} / ${String(total)}`;
+    const draftChip = this.querySelector(".ct-draft-chip");
+    if (draftChip !== null) draftChip.hidden = this.#stashedDraft === "";
     // Only name the blanks once something has been answered. Labelling an
     // untouched set "Send blank" warns about a choice nobody has made yet.
     const blank = total - answered;
-    this.querySelector(".ct-submit").textContent =
-      blank > 0 && answered > 0 ? `Send (${String(blank)} blank)` : "Send answers";
+    const submit = this.querySelector(".ct-submit");
+    if (submit !== null) {
+      submit.textContent = blank > 0 && answered > 0 ? `Send (${String(blank)} blank)` : "Send answers";
+    }
   }
 
   #currentQuestion() {
@@ -340,12 +435,19 @@ export class ComposerTakeover extends HTMLElement {
     if (layout === undefined) return;
     this.querySelector(".ct-sheet-title").textContent = "More";
     this.querySelector(".ct-sheet-body").innerHTML = layout.overflow
-      .map((control) => `<button class="ct-sheet-item" type="button" data-control="${control}">${OVERFLOW_LABELS[control]}</button>`)
+      .map((control) => `
+        <button class="ct-sheet-item" type="button" data-control="${control}">
+          <svg viewBox="0 0 20 20" aria-hidden="true">${ICONS[control] ?? ""}</svg>
+          <span>${CONTROL_LABELS.get(control) ?? control}</span>
+        </button>`)
       .join("");
     for (const item of this.#sheet.querySelectorAll(".ct-sheet-item")) {
       item.addEventListener("click", () => {
-        if (item.dataset.control === "freeText") this.#openFreeTextSheet();
-        else this.#sheet.hidePopover();
+        const control = item.dataset.control;
+        if (control === "freeText") { this.#openFreeTextSheet(); return; }
+        this.#sheet.hidePopover();
+        if (control === "skip") this.#turnPage(1, true);
+        else this.#invokeCapability(control);
       });
     }
     this.#sheet.showPopover();
@@ -395,6 +497,11 @@ export class ComposerTakeover extends HTMLElement {
     );
   }
 
+  /** Declared host capabilities, mirroring ComposerCapabilities. */
+  capabilities = CHAT_CAPABILITIES;
+
+  #footBuilt = "";
+  #foot;
   #column;
   #root;
   #card;

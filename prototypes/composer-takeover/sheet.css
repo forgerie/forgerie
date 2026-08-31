@@ -149,11 +149,34 @@ html, body {
 }
 .ct-card[hidden] { display: none; }
 
+/* The context meter is the card's top edge, not a widget in a row. It costs 2px
+   of height and no width, which is why it survives every size. */
+.ct-usage {
+  flex: 0 0 auto;
+  height: 2px;
+  border-radius: calc(var(--pi-radius-surface) - 1px) calc(var(--pi-radius-surface) - 1px) 0 0;
+  background: var(--pi-border-muted);
+  overflow: hidden;
+}
+.ct-usage[hidden] { display: none; }
+.ct-usage-fill { display: block; height: 100%; background: var(--pi-accent); }
+
+.ct-chips { display: flex; gap: var(--pi-space-xs); min-width: 0; overflow: hidden; }
+.ct-chips[hidden] { display: none; }
+.ct-chip {
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-pill);
+  padding: 1px 8px;
+  color: var(--pi-muted);
+  font-size: var(--pi-text-xs);
+  white-space: nowrap;
+}
+.ct-chip.branch { border-style: dashed; color: var(--pi-warning); }
+
 .ct-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   min-height: 22px;
   padding: 7px 10px 6px;
@@ -169,7 +192,7 @@ html, body {
   text-transform: uppercase;
   font-weight: 650;
 }
-.ct-status { flex: 0 1 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); text-align: end; }
+.ct-status { flex: 0 0 auto; margin-left: auto; color: var(--pi-muted); font-size: var(--pi-text-xs); text-align: end; }
 .ct[data-readout="pager"] .ct-status { display: none; }
 
 /* The only region that grows, bounded by the budget, so nothing can push the
@@ -325,6 +348,36 @@ html, body {
 }
 .ct-foot button:hover { background: var(--pi-surface-hover); }
 
+/* Inherited composer controls. Drawn at 34px so the row stays quiet, with the
+   touch minimum restored by an invisible rect that reaches past the border. */
+.ct-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--pi-text-secondary);
+}
+.ct-icon::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--ct-touch) - 34px) / -2);
+}
+.ct-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ct-icon[data-act="stop"] svg { fill: currentColor; stroke: none; }
+.ct-icon[data-act="rapidfire"] svg { stroke-width: 1.3; }
+.ct-text-action { font-size: var(--pi-text-sm); }
+
 .ct-pager { display: flex; align-items: center; gap: var(--pi-space-xs); }
 .ct[data-paged="false"] .ct-pager { display: none; }
 .ct-page-label { font-size: var(--pi-text-xs); color: var(--pi-muted); min-width: 5ch; text-align: center; }
@@ -448,7 +501,12 @@ html, body {
 .ct-sheet::backdrop { background: #1b1c1f55; }
 .ct-sheet-title { margin: 0 0 var(--pi-space-md); font-size: var(--pi-text-md); font-weight: 650; }
 .ct-sheet-body { display: flex; flex-direction: column; gap: var(--pi-space-sm); }
+/* Overflow entries carry the icon and the whole label. A control in here is one
+   tap further away, not harder to recognise. */
 .ct-sheet-item {
+  display: flex;
+  align-items: center;
+  gap: var(--pi-space-md);
   min-height: var(--ct-touch);
   padding: 0 var(--pi-space-md);
   text-align: left;
@@ -460,6 +518,18 @@ html, body {
   font-size: var(--pi-text-md);
   cursor: pointer;
 }
+.ct-sheet-item svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--pi-muted);
+}
+.ct-sheet-item[data-control="stop"] svg { fill: currentColor; stroke: none; }
 .ct-sheet-item:hover { background: var(--pi-surface-hover); }
 .ct-sheet-text { margin: 0; font-size: var(--pi-text-md); color: var(--pi-text-secondary); }
 .ct-sheet-field {

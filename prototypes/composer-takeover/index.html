@@ -76,6 +76,7 @@
     </div>
     <div class="probe-row">
       <button type="button" id="keyToggle" aria-pressed="false">keyboard</button>
+      <button type="button" id="stopToggle" aria-pressed="false">stoppable</button>
     </div>
     <div class="probe-plan" id="planOut">draft mode</div>
   </div>
@@ -111,9 +112,10 @@
       return;
     }
     planOut.textContent =
-      `${String(width)}x${String(height)} · ${plan.structure} · ${plan.options}` +
+      `col ${String(width)} · h ${String(height)} · ${plan.structure} · ${plan.options}` +
       ` · budget ${String(plan.heightBudget)}px` +
-      (plan.overflow.length === 0 ? " · all inline" : ` · overflow: ${plan.overflow.join(",")}`);
+      (plan.droppedGroups.length === 0 ? " · row intact" : ` · dropped: ${plan.droppedGroups.join(",")}`) +
+      (plan.overflow.length === 0 ? "" : ` · in More: ${plan.overflow.join(",")}`);
   });
 
   composer.addEventListener("ask-submitted", (event) => {
@@ -136,6 +138,20 @@
     });
   }
   document.getElementById("closeAsk").addEventListener("click", () => { composer.close(); });
+
+  composer.addEventListener("capability-invoked", (event) => {
+    planOut.textContent = `invoked ${event.detail.id}`;
+  });
+
+  // The composer renders a control because a host declared it. Toggling one
+  // declaration shows the row refit rather than a dead button appearing.
+  const stopToggle = document.getElementById("stopToggle");
+  stopToggle.addEventListener("click", () => {
+    const on = stopToggle.getAttribute("aria-pressed") === "true";
+    stopToggle.setAttribute("aria-pressed", String(!on));
+    composer.capabilities = { ...composer.capabilities, stop: on ? false : { stoppable: true } };
+    composer.refit();
+  });
 
   const keyToggle = document.getElementById("keyToggle");
   keyToggle.addEventListener("click", () => {

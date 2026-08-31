@@ -45,8 +45,11 @@ export const THRESHOLDS = {
   SHORT_READOUT_MIN_WIDTH: 240,
   /** Width at which the skip action can sit beside submit rather than in the overflow menu. */
   SKIP_INLINE_MIN_WIDTH: 380,
-  /** Width at which the "3 / 20" position readout can stay beside the pager arrows. */
-  PAGE_LABEL_MIN_WIDTH: 360,
+  /** Width at which the context chips can sit in the header. */
+  CONTEXT_CHIPS_MIN_WIDTH: 420,
+  /** Card chrome either side of the footer row, plus the gap between controls. */
+  FOOTER_CHROME: 32,
+  FOOTER_GAP: 10,
   /** Share of the container the tool may eat, per structure. The rest keeps transcript visible. */
   SHARE_SHEET: 0.62,
   SHARE_PAGED: 0.66,
@@ -56,13 +59,54 @@ export const THRESHOLDS = {
 };
 
 /**
- * Controls the tool owns, in the order they may leave the surface.
+ * The footer's controls, in the order their groups leave the surface.
  *
- * Order matters and is deliberate. `submit` and `options` never overflow: a
- * question you cannot answer or send is not a smaller product, it is a broken
- * one. Everything after them degrades to one extra tap, never to absence.
+ * Taking the composer over means inheriting the composer's whole rail, not just
+ * its Send button. Everything the host declares in ComposerCapabilities is still
+ * declared while a question is open, so hiding it would take a capability away
+ * from the user for the duration of the ask rather than adapting to the space.
+ *
+ * Costs are rough inline widths in px, used to fit the row. They are guesses
+ * until measured, and they only decide ordering, never whether something exists.
+ *
+ * Groups move whole. Half a session menu is worse than none of it, and a pager
+ * missing its forward arrow is worse than no pager.
  */
-export const CONTROL_PRIORITY = ["submit", "options", "freeText", "skip", "attach", "draftPeek"];
+export const FOOTER_CONTROLS = [
+  { id: "submit", group: "commit", cost: 132, label: "Send answers" },
+  // Two costs: with the "3 / 20" readout beside the arrows, and without it.
+  { id: "pager", group: "page", cost: 134, costWithoutLabel: 98, label: "Move between questions" },
+  { id: "stop", group: "interrupt", cost: 42, label: "Stop" },
+  { id: "dictate", group: "answer", cost: 42, label: "Dictate an answer" },
+  { id: "attach", group: "answer", cost: 42, label: "Attach a file" },
+  { id: "skip", group: "defer", cost: 64, label: "Leave this unanswered" },
+  { id: "tree", group: "session", cost: 42, label: "Session tree" },
+  { id: "archive", group: "session", cost: 42, label: "Archive and next" },
+  { id: "newSession", group: "session", cost: 42, label: "New session" },
+  { id: "rapidfire", group: "session", cost: 42, label: "Rapidfire" },
+  { id: "dismiss", group: "session", cost: 42, label: "Close" },
+];
+
+/**
+ * Which group gives up its place first.
+ *
+ * `commit` and `page` are pinned: a question you cannot send, or cannot page
+ * away from, is broken rather than adapted. `interrupt` outranks the answer
+ * aids because stopping runaway work matters more than dictating into it.
+ * `session` goes first because a menu is a natural home for it.
+ */
+export const GROUP_DROP_ORDER = ["session", "defer", "answer", "interrupt"];
+export const PINNED_GROUPS = ["commit", "page"];
+
+/**
+ * Controls that an open ask genuinely has no target for.
+ *
+ * Slash commands, queue, and steer all act on a free-form draft that takeover
+ * has already ruled out, so they are absent rather than overflowed. This is the
+ * same reasoning that removes Skip when there is nothing to page to: absence is
+ * honest only when the capability has nothing to act on.
+ */
+export const NOT_APPLICABLE_WHILE_ASKING = ["commands", "queue", "steer"];
 
 /**
  * Reduce a question set to the few facts that change layout.
@@ -84,6 +128,27 @@ export function summarize(questions) {
 }
 
 /**
+ * The capability set a chat session declares, mirroring ComposerCapabilities.
+ *
+ * Every one of these is still declared while a question is open: the session can
+ * still be archived, the tree can still be walked, an answer can still be
+ * dictated or carry a file. Only the controls that act on a free-form draft lose
+ * their target, and those are named in NOT_APPLICABLE_WHILE_ASKING.
+ */
+export const CHAT_CAPABILITIES = {
+  stop: false,
+  dictate: true,
+  attach: true,
+  tree: true,
+  archive: true,
+  newSession: true,
+  rapidfire: true,
+  dismiss: false,
+  contextUsage: { usedPercent: 61 },
+  chips: [{ id: "cwd", label: "forgerie" }, { id: "branch", kind: "branch", label: "main" }],
+};
+
+/**
  * Decide the whole layout from container width, container height, and the set.
  *
  * Height decides structure, because height is what runs out when the on-screen
@@ -92,7 +157,7 @@ export function summarize(questions) {
  * strip is not a smaller 420x400 column, it is a different shape, and it can
  * afford things the column cannot.
  */
-export function plan(width, height, model) {
+export function plan(width, height, model, capabilities = {}) {
   const structure =
     height >= THRESHOLDS.SHEET_MIN_HEIGHT ? "sheet" : height >= THRESHOLDS.PAGED_MIN_HEIGHT ? "paged" : "strip";
 
@@ -134,26 +199,16 @@ export function plan(width, height, model) {
   // One question at a time whenever the whole set cannot be seen at once.
   const paged = structure !== "sheet" && model.questionCount > 1;
 
-  const inline = [];
-  const overflow = [];
-  const place = (control, condition) => {
-    (condition ? inline : overflow).push(control);
-  };
+  const footer = fitFooter(width, { ...capabilities, paged });
+  const inline = [...footer.inline];
+  const overflow = [...footer.overflow];
 
-  place("submit", true);
-  place("options", true);
-  // Inside a capped reading column, width is never plentiful enough to pay for
-  // a text field beside the options in a strip. It opens full size from the
-  // overflow menu instead, which is one tap, not one fewer capability.
-  place("freeText", structure !== "strip");
-  // Skip is navigation, so it exists only while questions arrive one at a time.
-  // With the whole set on screen, leaving a question alone is already the skip
-  // and the submit label reports the count, so an explicit control would name a
-  // capability that has no target. It is not overflowed here, it is absent,
-  // which is the one case where absence is honest rather than a smaller product.
-  if (paged) place("skip", width >= THRESHOLDS.SKIP_INLINE_MIN_WIDTH);
-  place("attach", structure === "sheet" && width >= THRESHOLDS.SKIP_INLINE_MIN_WIDTH);
-  place("draftPeek", structure === "sheet");
+  // Free text is a field in the body, not a button in the row, so it answers to
+  // height rather than to the footer's width budget. Inside a capped reading
+  // column no width buys it a place beside the options in a strip; it opens full
+  // size from the overflow menu instead. One tap, not one fewer capability.
+  if (structure === "strip") overflow.unshift("freeText");
+  else inline.push("freeText");
 
   return {
     structure,
@@ -166,10 +221,70 @@ export function plan(width, height, model) {
     // at window level, unclipped, rather than being cropped by a short tool.
     detail: structure === "strip" ? "popover" : "inline",
     paged,
-    pageLabel: width >= THRESHOLDS.PAGE_LABEL_MIN_WIDTH,
+    pageLabel: footer.pageLabel,
+    // Readouts yield before any control does. The context chips go first, then
+    // the answered count shortens, then it leaves. None of them is a capability.
+    contextChips: width >= THRESHOLDS.CONTEXT_CHIPS_MIN_WIDTH && structure !== "strip",
+    contextUsage: capabilities.contextUsage !== undefined,
+    droppedGroups: footer.droppedGroups,
     inline,
     overflow,
   };
+}
+
+/**
+ * Fit the footer row, dropping whole groups from the tail until it fits.
+ *
+ * Deliberately not a measurement of the real DOM. A layout that measures itself
+ * and then resizes itself on the result oscillates; this decides from the
+ * container width alone, and the CSS keeps a wrapping row as the safety net for
+ * the case where even the pinned controls do not fit.
+ */
+export function fitFooter(width, context) {
+  const present = FOOTER_CONTROLS.filter((control) => isPresent(control, context));
+  const budget = width - THRESHOLDS.FOOTER_CHROME;
+  const droppedGroups = [];
+
+  const costOf = (control, pageLabel) =>
+    control.costWithoutLabel !== undefined && !pageLabel ? control.costWithoutLabel : control.cost;
+  const totalOf = (controls, pageLabel) =>
+    controls.reduce((sum, control) => sum + costOf(control, pageLabel), 0) +
+    Math.max(0, controls.length - 1) * THRESHOLDS.FOOTER_GAP;
+
+  let kept = present;
+  // The position readout goes before any control does. It is information, and
+  // the arrows carry the whole capability without it; dropping a control first
+  // would trade a capability for a number.
+  let pageLabel = totalOf(kept, true) <= budget;
+
+  for (const group of GROUP_DROP_ORDER) {
+    if (totalOf(kept, pageLabel) <= budget) break;
+    if (!kept.some((control) => control.group === group)) continue;
+    // One more control from the tail would be cheaper, but it would also split a
+    // group. A session menu missing two of its five entries reads as a bug.
+    kept = kept.filter((control) => control.group !== group);
+    droppedGroups.push(group);
+  }
+
+  // Once the row fits again, the readout comes back if it can be afforded.
+  if (!pageLabel && totalOf(kept, true) <= budget) pageLabel = true;
+
+  const keptIds = new Set(kept.map((control) => control.id));
+  return {
+    inline: present.filter((control) => keptIds.has(control.id)).map((control) => control.id),
+    overflow: present.filter((control) => !keptIds.has(control.id)).map((control) => control.id),
+    droppedGroups,
+    pageLabel,
+  };
+}
+
+function isPresent(control, context) {
+  if (control.id === "pager") return context.paged === true;
+  if (control.id === "skip") return context.paged === true;
+  if (control.id === "submit") return true;
+  // Everything else is a declared host capability. The composer renders a
+  // control because a host declared it, never because a field happened to be set.
+  return context[control.id] !== undefined && context[control.id] !== false;
 }
 
 /**

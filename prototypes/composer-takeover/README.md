@@ -16,6 +16,35 @@ folded screen you could not tell which one wanted your text.
 - The transcript keeps a passive record with no inputs.
 - Leaving a question blank stays reachable at every size.
 
+## It carries the whole rail
+
+Taking the composer over means inheriting the composer's controls, not just its
+Send button. `ComposerCapabilities` says a control is rendered because a host
+declared it, and every one of those declarations is still true while a question
+is open: the session can still be archived, the tree still walked, an answer
+still dictated or given a file. So the takeover carries them.
+
+| Group | Controls | Drops |
+|---|---|---|
+| `commit` | Send answers | never |
+| `page` | prev, position, next | never |
+| `interrupt` | Stop | 4th |
+| `answer` | dictate, attach | 3rd |
+| `defer` | Skip | 2nd |
+| `session` | tree, archive, new session, rapidfire, dismiss | 1st |
+
+Groups move whole. A session menu missing two of its five entries reads as a
+bug, and a pager without its forward arrow is worse than no pager.
+
+Three controls are absent rather than overflowed: slash commands, queue, and
+steer. All three act on a free-form draft, which takeover has already ruled out,
+so they have nothing to act on. This is the same test that removes Skip when
+there is nothing to page to. Absence is honest only when the capability has no
+target.
+
+The context-usage meter is the card's top edge, the way the composer island
+draws it. It costs 2px of height and no width, so it survives every size.
+
 ## What is not being proposed
 
 A new visual language. The card, the uppercase accent heading, the numbered
@@ -39,9 +68,9 @@ node serve.mjs . 8600 0.0.0.0
 
 `?fixture=single|few|many` opens a set on load. `many` is the worst case the
 contract allows: 20 questions of 12 options. The floating probe switches sets,
-fakes a keyboard for desktop judging, and prints the live plan output. On a real
-phone the keyboard needs no faking, because the layout reads the visual
-viewport.
+fakes a keyboard for desktop judging, toggles the `stop` declaration so the row
+refits, and prints the live plan with the groups it had to drop. On a real phone
+the keyboard needs no faking, because the layout reads the visual viewport.
 
 ## It lays out on the reading column
 
@@ -125,6 +154,11 @@ Each of these was invisible in the code and obvious in a render.
    through a zero-height probe rather than the card, because the card's padding
    changes with the plan and measuring it would feed the layout into its own
    input.
+9. **The row traded a control for a number.** At a 411px column the fit dropped
+   dictate and attach while keeping the "1 / 3" position readout, losing by one
+   pixel. Readouts yield before controls, so the fit now drops the readout
+   first and takes it back if the row fits again afterwards. Dictation survives
+   on a folded phone with the keyboard up, which is where it matters most.
 
 ## Open questions
 
