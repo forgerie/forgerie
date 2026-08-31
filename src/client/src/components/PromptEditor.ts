@@ -701,7 +701,7 @@ export class PromptEditor extends LitElement {
     const title = rapidfire.active ? "Turn off Rapidfire" : "Turn on Rapidfire for the current workspace";
     return html`
       <button
-        class="rapidfire-button"
+        class="icon-button rapidfire-button"
         type="button"
         data-action="rapidfire"
         title=${title}
@@ -718,7 +718,6 @@ export class PromptEditor extends LitElement {
         <svg class="rapidfire-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path d="M2.5 4h8M8.5 2l2 2-2 2M2.5 8h8M8.5 6l2 2-2 2M2.5 12h8M8.5 10l2 2-2 2"></path>
         </svg>
-        <span>Rapidfire</span>
       </button>
     `;
   }

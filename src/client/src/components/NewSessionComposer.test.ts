@@ -309,6 +309,7 @@ describe("new-session-composer editing and submission", () => {
     const toggle = rapidfireToggle(composer);
 
     expect(toggle.getAttribute("aria-label")).toBe("Rapidfire for current workspace");
+    expect(toggle.textContent.trim()).toBe("");
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
     toggle.click();
     await composer.updateComplete;

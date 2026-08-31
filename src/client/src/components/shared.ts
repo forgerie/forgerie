@@ -1133,8 +1133,6 @@ export const promptEditorStyles = css`
   .icon-button:hover:not(:disabled), .icon-button:focus-visible { background: var(--pi-surface-hover); color: var(--pi-text); }
   .dictation-button { touch-action: none; user-select: none; -webkit-user-select: none; }
   .dictation-button[aria-pressed="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-accent); }
-  .rapidfire-button { flex: 0 0 auto; min-height: 36px; display: inline-flex; align-items: center; gap: 5px; border-color: transparent; background: transparent; color: var(--pi-muted); padding: 0 8px; font-size: var(--pi-text-sm); }
-  .rapidfire-button:hover:not(:disabled), .rapidfire-button:focus-visible { background: var(--pi-surface-hover); color: var(--pi-text); }
   .rapidfire-button[aria-pressed="true"] { border-color: var(--pi-accent); background: var(--pi-selection-bg); color: var(--pi-accent); }
   .rapidfire-icon { flex: 0 0 auto; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .dictation-held[aria-pressed="true"], .dictation-manual-only[aria-pressed="true"] { border-color: var(--pi-warning-border, var(--pi-accent)); color: var(--pi-warning); }
