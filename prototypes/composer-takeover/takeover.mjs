@@ -102,6 +102,7 @@ export class ComposerTakeover extends HTMLElement {
       </div>
     `;
 
+    this.#column = this.parentElement?.querySelector(".column-probe") ?? undefined;
     this.#root = this.querySelector(".ct");
     this.#card = this.querySelector(".ct-card");
     this.#body = this.querySelector(".ct-body");
@@ -125,20 +126,22 @@ export class ComposerTakeover extends HTMLElement {
   }
 
   /**
-   * Measure the container, never the window. The composer's own slot decides
-   * width; the frame's live height decides structure, which is what makes the
-   * keyboard opening a layout input rather than a scroll problem.
+   * Measure the container, never the window.
+   *
+   * Width comes from the column probe, which carries the app's reading measure
+   * and nothing else. Measuring the card instead would feed the layout back
+   * into its own input, because the plan changes the card's padding. Height
+   * comes from the frame, which is what shrinks when the keyboard opens.
    */
   #observe() {
-    const slot = this.parentElement ?? this;
     const observer = new ResizeObserver(() => { this.#render(); });
-    observer.observe(slot);
+    observer.observe(this.#column ?? this.parentElement ?? this);
     observer.observe(this.closest(".frame") ?? document.documentElement);
   }
 
   #render() {
-    const slot = this.parentElement ?? this;
-    const width = Math.round(slot.getBoundingClientRect().width);
+    const column = this.#column ?? this.parentElement ?? this;
+    const width = Math.round(column.getBoundingClientRect().width);
     const frame = this.closest(".frame") ?? document.documentElement;
     const height = Math.round(frame.getBoundingClientRect().height);
 
@@ -392,6 +395,7 @@ export class ComposerTakeover extends HTMLElement {
     );
   }
 
+  #column;
   #root;
   #card;
   #body;

@@ -43,6 +43,26 @@ fakes a keyboard for desktop judging, and prints the live plan output. On a real
 phone the keyboard needs no faking, because the layout reads the visual
 viewport.
 
+## It lays out on the reading column
+
+The card is not full-bleed. It takes `--calm-measure` (`min(36rem, 100cqi - 2 *
+--calm-gutter)`), the same column the transcript uses, and lets its own chrome
+hang into the 32px gutter so the question text starts on the same edge as the
+prose above it. At 932px wide the column is 576px and the question text lands at
+x=178, which is exactly where the transcript prose starts.
+
+This is the shipped rule, not a new one. `src/client/index.html` says every
+surface laying out on this column has to arrive at one number, and records what
+happened when the composer and the transcript each computed their own: they
+disagreed by 26px on a folded phone, and the alignment came apart where the
+screen is tightest.
+
+The consequence for layout is larger than it looks. `plan()` is handed the
+column width, not the viewport width, so the honest range is about 256px on a
+320px screen up to 576px on anything wider. Every width threshold was recalibrated
+against that range. The old numbers had been chosen against viewport widths this
+layout never sees, which made two of them unreachable.
+
 ## The layout is one function
 
 `plan(width, height, model)` in [`plan.mjs`](./plan.mjs) returns the whole
@@ -60,9 +80,11 @@ Height decides structure, because height is what the keyboard takes:
 | 300-519 | `paged` | One question, pager, full block |
 | < 300 | `strip` | One question, options packed inline, title yields |
 
-Width decides content: option columns, whether the question sits beside the
-options, how much of the progress readout survives, and whether skip and free
-text stay inline.
+Width decides content: option tracks, whether the question sits beside the
+options, how much of the progress readout survives, and whether skip stays
+inline. Inside a capped column, width is never plentiful enough to buy a text
+field beside the options in a strip, so free text opens full size from the
+overflow menu there. One tap, not one fewer capability.
 
 ## Capture
 
@@ -97,9 +119,20 @@ Each of these was invisible in the code and obvious in a render.
    part in its fieldset's grid, so the question kept the full width and the
    options were squeezed into the right third. Questions are labelled groups
    now, and the two-column strip works.
+8. **The card ignored the reading column.** It ran the full width of the frame,
+   so at 932px it was 300px wider than the transcript above it and started on a
+   different edge. It takes the column now, and `plan()` measures the column
+   through a zero-height probe rather than the card, because the card's padding
+   changes with the plan and measuring it would feed the layout into its own
+   input.
 
-## Open question
+## Open questions
 
 The height budget shares (62% / 66% / 82%) are guesses. They decide how much
 transcript survives beside an open question, and nothing here proves those are
 the right numbers on a real device in a real conversation.
+
+At 320x480 with a long question and a detail line, the prose eats the body and
+only one option is visible before scrolling. Everything stays reachable, but the
+detail may deserve to move behind its opener whenever the column is narrow, not
+only at strip height.

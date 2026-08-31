@@ -44,6 +44,22 @@
   --ct-touch: 44px;
 }
 
+/* The reading column, copied from src/client/index.html. 36rem is about 71
+   characters at the transcript's prose size. The composer is not exempt from
+   it: the shipped comment is explicit that every surface laying out on this
+   column must arrive at one number, and that the composer aligns the first
+   character of the draft to the column while the box it is drawn in hangs into
+   the gutter. A full-bleed ask card would break that alignment at exactly the
+   width where it matters most. */
+.frame {
+  container-type: inline-size;
+  --calm-gutter: 32px;
+  --calm-measure: min(36rem, 100cqi - 2 * var(--calm-gutter));
+  /* The card's own chrome, which is what hangs into the gutter so the question
+     text still starts on the column. */
+  --ct-chrome: 17px;
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -71,15 +87,17 @@ html, body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--pi-space-md);
-  display: flex;
-  flex-direction: column;
+  padding: var(--pi-space-md) var(--calm-gutter);
+  display: grid;
+  grid-template-columns: minmax(0, var(--calm-measure));
+  justify-content: center;
+  align-content: start;
   gap: var(--pi-space-md);
 }
 
-.turn { max-width: 60ch; font-size: var(--pi-text-md); color: var(--pi-text-secondary); }
+.turn { min-width: 0; font-size: var(--pi-text-md); color: var(--pi-text-secondary); }
 .turn.user {
-  align-self: flex-end;
+  justify-self: end;
   background: var(--pi-selection-bg);
   padding: var(--pi-space-sm) var(--pi-space-md);
   border-radius: var(--pi-radius-surface);
@@ -99,10 +117,19 @@ html, body {
 
 .composer-slot {
   flex: 0 0 auto;
-  container-type: inline-size;
-  padding: var(--pi-space-sm) var(--pi-space-md) var(--pi-space-md);
+  display: grid;
+  /* The card box is the column plus its own chrome, so the question text inside
+     lands on the same edge as the transcript prose above it. */
+  grid-template-columns: minmax(0, calc(var(--calm-measure) + 2 * var(--ct-chrome)));
+  justify-content: center;
+  padding: var(--pi-space-sm) calc(var(--calm-gutter) - var(--ct-chrome)) var(--pi-space-md);
   background: var(--pi-bg);
 }
+
+/* Zero-height probe carrying exactly the column width. plan() measures this
+   rather than the card, because the card's own padding changes with the plan
+   and measuring it would feed the layout back into its own input. */
+.column-probe { grid-column: 1; height: 0; margin: 0 var(--ct-chrome); }
 
 /* ---------- the composer, both modes ---------- */
 
@@ -334,7 +361,9 @@ html, body {
 .ct[data-structure="strip"] .ct-head { padding: 3px 10px; }
 .ct[data-structure="strip"] .ct-head h2 { display: none; }
 
-.ct[data-structure="strip"] .question { padding: 8px 12px; }
+/* Vertical padding gives way at strip height; horizontal padding does not,
+   because it is what keeps the question text on the column. */
+.ct[data-structure="strip"] .question { padding: 8px 16px; }
 .ct[data-structure="strip"] .question-head {
   /* The question truncates rather than pushing controls out. The full text is
      one tap away behind the detail control, never gone. */

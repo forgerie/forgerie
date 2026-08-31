@@ -8,6 +8,12 @@
  * plus a summary of the question set. No device checks, no user-agent, no
  * orientation. A 711x374 folded landscape phone and a 711x374 pane on a
  * desktop get the same layout, because they are the same shape.
+ *
+ * The width passed in is the reading column, not the viewport. The app caps
+ * that column at 36rem and the composer aligns to it, so the honest width range
+ * is roughly 256px on a 320px screen up to 576px on anything wider. Thresholds
+ * calibrated against viewport widths were calibrated against a number this
+ * layout never sees.
  */
 
 /**
@@ -23,22 +29,20 @@ export const THRESHOLDS = {
   SHEET_MIN_HEIGHT: 520,
   /** Below this height even a single question block is too tall; the tool becomes a strip. */
   PAGED_MIN_HEIGHT: 300,
-  /** Width at which options can sit in more than one column. */
-  GRID_MIN_WIDTH: 560,
+  /** Column width at which options can sit in more than one track. */
+  GRID_MIN_WIDTH: 380,
   /** Column track bounds. The longest label sets the track inside these, so long
       labels widen their column instead of forcing every option to a full row. */
   TRACK_MIN: 160,
   TRACK_MAX: 320,
   /** Rough advance width per character at the option font size, in px. */
   TRACK_CH: 8.5,
-  /** In a strip, the width at which the question text can sit beside the options instead of above. */
-  INLINE_PROMPT_MIN_WIDTH: 700,
-  /** In a strip, the width at which a one-line free-text field earns its place back inline. */
-  STRIP_FREE_TEXT_MIN_WIDTH: 900,
-  /** Width at which the progress readout can spell itself out. */
-  FULL_READOUT_MIN_WIDTH: 420,
-  /** Width at which the readout survives as "3/5" before folding into the pager. */
-  SHORT_READOUT_MIN_WIDTH: 300,
+  /** In a strip, the column width at which the question can sit beside the options. */
+  INLINE_PROMPT_MIN_WIDTH: 520,
+  /** Column width at which the progress readout can spell itself out. */
+  FULL_READOUT_MIN_WIDTH: 380,
+  /** Column width at which the readout survives as "3/5" before folding away. */
+  SHORT_READOUT_MIN_WIDTH: 240,
   /** Width at which the skip action can sit beside submit rather than in the overflow menu. */
   SKIP_INLINE_MIN_WIDTH: 380,
   /** Width at which the "3 / 20" position readout can stay beside the pager arrows. */
@@ -138,9 +142,10 @@ export function plan(width, height, model) {
 
   place("submit", true);
   place("options", true);
-  // In a strip there is no room for a multi-line field, but a wide strip can
-  // still host a one-line one. Width pays for what height cannot.
-  place("freeText", structure !== "strip" || width >= THRESHOLDS.STRIP_FREE_TEXT_MIN_WIDTH);
+  // Inside a capped reading column, width is never plentiful enough to pay for
+  // a text field beside the options in a strip. It opens full size from the
+  // overflow menu instead, which is one tap, not one fewer capability.
+  place("freeText", structure !== "strip");
   // Skip is navigation, so it exists only while questions arrive one at a time.
   // With the whole set on screen, leaving a question alone is already the skip
   // and the submit label reports the count, so an explicit control would name a
