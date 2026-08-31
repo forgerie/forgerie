@@ -269,6 +269,25 @@ describe("new-session-composer editing and submission", () => {
     expect(deepActiveElement()).toBe(promptField(composer));
   });
 
+  it("locks the destination while Rapidfire is active and restores it when Rapidfire turns off", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+
+    expect(destinationAction(composer).disabled).toBe(false);
+
+    rapidfireToggle(composer).click();
+    await composer.updateComplete;
+    await promptEditor(composer).updateComplete;
+
+    expect(destinationAction(composer).disabled).toBe(true);
+
+    rapidfireToggle(composer).click();
+    await composer.updateComplete;
+    await promptEditor(composer).updateComplete;
+
+    expect(destinationAction(composer).disabled).toBe(false);
+  });
+
   it("waits for the nested prompt to become editable before restoring Rapidfire focus", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     let resolveSubmission: ((outcome: NewSessionSubmissionOutcome) => void) | undefined;
@@ -558,6 +577,23 @@ describe("new-session-composer editing and submission", () => {
 });
 
 describe("new-session-composer destination choice", () => {
+  it("does not let Rapidfire activate while the destination chooser is open", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const catalog = new InMemoryNewSessionDestinationCatalog({ machines: [machine("remote")] });
+    const composer = await mountComposer({ initialDestination: destination, catalog });
+
+    destinationAction(composer).click();
+    await settleCatalog(composer);
+
+    const rapidfire = rapidfireToggle(composer);
+    expect(rapidfire.disabled).toBe(true);
+    rapidfire.click();
+    await composer.updateComplete;
+
+    expect(rapidfireToggle(composer).getAttribute("aria-pressed")).toBe("false");
+    expect(root(composer).querySelector("[data-machine-id='remote']")).not.toBeNull();
+  });
+
   it("cancels dictation before each chooser destination transition", async () => {
     const catalog = new InMemoryNewSessionDestinationCatalog({
       machines: [machine("remote")],

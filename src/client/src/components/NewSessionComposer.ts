@@ -343,14 +343,14 @@ export class NewSessionComposer extends LitElement {
         title: label,
         action: {
           label: chosen === undefined ? "Choose" : "Change",
-          disabled: state.kind === "submitting",
+          disabled: state.kind === "submitting" || this.launchMode === "rapidfire",
           onActivate: () => { this.openDestinationChoice(); },
         },
       }],
       ...(this.recoverySeedId === undefined ? {
         rapidfire: {
           active: this.launchMode === "rapidfire",
-          disabled: state.kind === "submitting" || this.validationPending || this.draftDisplay.attachmentCapturePending,
+          disabled: state.kind !== "editing" || this.validationPending || this.draftDisplay.attachmentCapturePending,
           onToggle: () => { this.toggleLaunchMode(); },
         },
       } : {}),
