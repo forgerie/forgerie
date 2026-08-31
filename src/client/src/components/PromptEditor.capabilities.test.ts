@@ -144,7 +144,12 @@ describe("PromptEditor capabilities", () => {
 
     const chip = query(editor, ".composer-context-chip");
     expect(chip?.textContent).toContain("forge · main");
-    button(editor, "[data-action='change-destination']").click();
+    expect(chip?.classList.contains("actionable")).toBe(true);
+    const action = button(editor, "[data-action='change-destination']");
+    expect(action.textContent.trim()).toBe("");
+    expect(action.querySelector(".prompt-context-action-icon")).not.toBeNull();
+    expect(action.getAttribute("aria-label")).toBe("Change destination");
+    action.click();
 
     expect(onActivate).toHaveBeenCalledTimes(1);
   });

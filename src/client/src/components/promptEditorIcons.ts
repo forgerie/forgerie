@@ -85,6 +85,16 @@ export function renderTreeIcon(): TemplateResult {
   `;
 }
 
+/** Changes the destination named by a composer context chip. */
+export function renderChangeIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-context-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="m4.5 19.5 4.25-1 9.5-9.5-3.25-3.25-9.5 9.5-1 4.25Z"></path>
+      <path d="m13.75 7 3.25 3.25"></path>
+    </svg>
+  `;
+}
+
 /** Marks a place that is not the project's main worktree. */
 export function renderBranchIcon(): TemplateResult {
   return svg`

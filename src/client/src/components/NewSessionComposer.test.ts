@@ -856,14 +856,24 @@ describe("new-session-composer presentation contracts", () => {
     expect(root(composer).querySelector(".dialog-header, h1, [data-action='close']")).toBeNull();
   });
 
-  it("states one concise destination in the composer row, without status or path detail", async () => {
+  it("states one concise destination in the composer row, without a main branch, status, or path detail", async () => {
     const destination = completeNewSessionDestination(machine("remote"), project("forge"), workspace("main", "forge"));
     const composer = await mountComposer({ initialDestination: destination });
     const chip = destinationChip(composer);
 
-    expect(chip.textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge · main · Machine remote Change");
+    expect(chip.textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge · Machine remote");
+    expect(chip.textContent).not.toContain("main");
+    expect(chip.textContent).not.toContain("Change");
     expect(chip.textContent).not.toContain("Online");
     expect(chip.textContent).not.toContain("/repos/forge/main");
+    expect(destinationAction(composer).querySelector(".prompt-context-action-icon")).not.toBeNull();
+  });
+
+  it("keeps a non-main branch in the destination summary", async () => {
+    const destination = completeNewSessionDestination(machine("remote"), project("forge"), workspace("feature", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+
+    expect(destinationChip(composer).textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge · feature · Machine remote");
   });
 
   it("uses semantic button lists, keeps the summary to one line, and lets chooser detail wrap", async () => {

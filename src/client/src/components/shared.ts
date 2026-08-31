@@ -1112,17 +1112,25 @@ export const promptEditorStyles = css`
    * appears only when the island's own width can carry it.
    */
   .composer-context-chip { display: none; align-items: center; gap: 4px; }
-  /* A chip states where the composer points; its action is a quiet aside, not
-     a second button competing with the row's real controls. */
-  .composer-context-chip-action { min-height: 0; padding: 0 4px; border: 0; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-accent); font: inherit; font-size: inherit; cursor: pointer; }
-  .composer-context-chip-action:hover:not(:disabled), .composer-context-chip-action:focus-visible { text-decoration: underline; }
+  /* An actionable chip keeps its control at every width. Its readout yields
+     until the rail has room, because information must give way before a control. */
+  .composer-context-chip.actionable { display: inline-flex; flex: 0 0 auto; overflow: visible; }
+  .composer-context-chip.actionable .context-chip-name { display: none; }
+  /* A chip states where the composer points; its action is a quiet icon, not
+     a second text label competing with the row's real controls. The mark draws
+     at 28px, while the pseudo-element restores the rail's 36px hit target. */
+  .composer-context-chip-action { position: relative; flex: 0 0 auto; width: 28px; height: 28px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-accent); cursor: pointer; }
+  .composer-context-chip-action::after { content: ""; position: absolute; inset: -4px; }
+  .composer-context-chip-action:hover:not(:disabled), .composer-context-chip-action:focus-visible { background: var(--pi-surface-hover); color: var(--pi-text); }
   .composer-context-chip-action:disabled { color: var(--pi-muted); cursor: default; }
+  .prompt-context-action-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .context-chip-name { min-width: 0; max-width: min(26cqi, 168px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prompt-branch-icon { flex: 0 0 auto; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
   @container (min-width: 560px) {
     .session-identity { display: inline; }
     .composer-context-chip { display: inline-flex; }
+    .composer-context-chip.actionable .context-chip-name { display: inline; }
   }
   /*
    * The rail carries one filled control: the primary action. Everything else

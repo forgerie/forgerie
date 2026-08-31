@@ -16,7 +16,7 @@ import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointer
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderSlashIcon, renderStopIcon, renderThinkingGauge, renderTreeIcon } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderChangeIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderSlashIcon, renderStopIcon, renderThinkingGauge, renderTreeIcon } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerDictationCapability, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
@@ -893,7 +893,7 @@ export class PromptEditor extends LitElement {
   private renderContextChip(chip: ComposerContextChip) {
     const action = chip.action;
     return html`
-      <span class="composer-context-chip session-identity summoned-secondary" title=${chip.title ?? chip.label}>
+      <span class=${`composer-context-chip session-identity summoned-secondary${action === undefined ? "" : " actionable"}`} title=${chip.title ?? chip.label}>
         ${chip.kind === "branch" ? renderBranchIcon() : nothing}<span class="context-chip-name">${chip.label}</span>
         ${action === undefined ? nothing : html`<button
           class="composer-context-chip-action"
@@ -902,7 +902,7 @@ export class PromptEditor extends LitElement {
           title=${action.label}
           aria-label=${action.label}
           @click=${() => { if (!this.dictationBlocksComposer()) action.onActivate(); }}
-        >${action.label}</button>`}
+        >${renderChangeIcon()}</button>`}
       </span>
     `;
   }
