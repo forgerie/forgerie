@@ -35,6 +35,13 @@ export const ROW_ACTIONS_DISPLAY_PROPERTY = "--pi-row-actions-display";
  *
  * A mouse is unaffected. It has no long-press gesture to protect, and a drag
  * to select is the only way it has to copy anything.
+ *
+ * TEMPORARILY SUSPENDED (2026-08-31): the long-press radial menu is disabled
+ * in PiWebApp, so there is no application gesture left to protect and the
+ * platform may have every hold. Touch therefore selects prose like a mouse
+ * does. Restore by setting the touch value below back to "none" at the same
+ * time the wheel is re-armed — the two are one decision, and re-arming the
+ * wheel without this makes every hold over prose read as broken.
  */
 export const PROSE_USER_SELECT_PROPERTY = "--pi-prose-user-select";
 
@@ -52,7 +59,7 @@ const ROW_ACTIONS_DISPLAY: Readonly<Record<InputMode, string>> = {
 
 const PROSE_USER_SELECT: Readonly<Record<InputMode, string>> = {
   mouse: "text",
-  touch: "none",
+  touch: "text",
 };
 
 export interface InputModeTarget {

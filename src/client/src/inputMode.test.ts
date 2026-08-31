@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { observeInputMode, ROW_ACTIONS_DISPLAY_PROPERTY } from "./inputMode";
+import { observeInputMode, PROSE_USER_SELECT_PROPERTY, ROW_ACTIONS_DISPLAY_PROPERTY } from "./inputMode";
 
 interface Listener {
   readonly type: string;
@@ -47,6 +47,49 @@ function send(listeners: readonly Listener[], type: string, event: unknown): voi
     if (entry.type === type) entry.listener(mkEvent(event));
   }
 }
+
+/** Records the prose property instead of the action-row one. */
+function mkProseRoot(): { root: Parameters<typeof observeInputMode>[0]; written: string[] } {
+  const written: string[] = [];
+  return {
+    root: {
+      style: {
+        setProperty(property: string, value: string): void {
+          if (property === PROSE_USER_SELECT_PROPERTY) written.push(value);
+        },
+      },
+    },
+    written,
+  };
+}
+
+describe("observeInputMode prose selection", () => {
+  // While the long-press radial menu is disabled there is no application
+  // gesture competing for a hold, so a finger selects prose exactly like a
+  // mouse does. This test fails the moment touch goes back to "none", which is
+  // the reminder that the wheel and the selection are one decision.
+  it("keeps prose selectable under a finger while no hold gesture is armed", () => {
+    const { source, listeners } = mkSource();
+    const { root, written } = mkProseRoot();
+    observeInputMode(root, source);
+
+    // Two writes: the mouse start value, then the switch to touch. Both are
+    // "text" -- the switch to a finger no longer takes the selection away.
+    send(listeners, "pointerdown", { pointerType: "touch" });
+
+    expect(written).toEqual(["text", "text"]);
+  });
+
+  it("keeps prose selectable for a mouse", () => {
+    const { source, listeners } = mkSource();
+    const { root, written } = mkProseRoot();
+    observeInputMode(root, source);
+
+    send(listeners, "pointerdown", { pointerType: "mouse" });
+
+    expect(written).toEqual(["text"]);
+  });
+});
 
 describe("observeInputMode", () => {
   it("starts in mouse mode, so the action row exists before any input", () => {

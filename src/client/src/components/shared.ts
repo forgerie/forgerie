@@ -644,8 +644,13 @@ export const chatStyles = css`
    * gesture stands aside over it for the same reason.
    *
    * A mouse is unaffected -- observeInputMode sets the property to 'text'.
+   *
+   * TEMPORARILY SUSPENDED (2026-08-31): the long-press radial menu is disabled,
+   * so observeInputMode gives touch 'text' as well and the callout is allowed
+   * back. A hold over prose now raises the platform's own select/copy menu.
+   * Restore the callout to 'none' here when the wheel is re-armed.
    */
-  .chat { -webkit-user-select: var(--pi-prose-user-select, text); user-select: var(--pi-prose-user-select, text); -webkit-touch-callout: none; }
+  .chat { -webkit-user-select: var(--pi-prose-user-select, text); user-select: var(--pi-prose-user-select, text); -webkit-touch-callout: default; }
   .chat pre, .chat code, .chat textarea, .chat input {
     -webkit-user-select: text;
     user-select: text;
