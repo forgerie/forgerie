@@ -905,7 +905,21 @@ describe("new-session-composer presentation contracts", () => {
     expect(destinationAction(composer).querySelector(".prompt-context-action-icon")).not.toBeNull();
   });
 
-  it("keeps a non-main branch in the destination summary", async () => {
+  it("omits the local machine from the destination summary", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+
+    expect(destinationChip(composer).textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge");
+  });
+
+  it("keeps a non-main branch when omitting the local machine", async () => {
+    const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("feature", "forge"));
+    const composer = await mountComposer({ initialDestination: destination });
+
+    expect(destinationChip(composer).textContent.replaceAll(/\s+/g, " ").trim()).toBe("Project forge · feature");
+  });
+
+  it("keeps a non-main branch in the remote destination summary", async () => {
     const destination = completeNewSessionDestination(machine("remote"), project("forge"), workspace("feature", "forge"));
     const composer = await mountComposer({ initialDestination: destination });
 

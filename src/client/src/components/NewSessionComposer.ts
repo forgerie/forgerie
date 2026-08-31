@@ -330,7 +330,11 @@ export class NewSessionComposer extends LitElement {
     const chosen = destination?.kind === "complete" ? destination : undefined;
     const label = chosen === undefined
       ? "Destination required"
-      : [chosen.project.name, ...(chosen.workspace.isMain ? [] : [chosen.workspace.label]), chosen.machine.name].join(" · ");
+      : [
+        chosen.project.name,
+        ...(chosen.workspace.isMain ? [] : [chosen.workspace.label]),
+        ...(chosen.machine.kind === "local" ? [] : [chosen.machine.name]),
+      ].join(" · ");
     return {
       dismiss: {
         label: "Cancel",
