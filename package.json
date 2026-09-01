@@ -25,6 +25,7 @@
     "nix",
     "speech",
     "extensions",
+    "skills",
     "docs/plugins.md",
     "docs/config.md",
     "docs/assets",

@@ -1,0 +1,11 @@
+{
+  "name": "forgerie-session-skills",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "skills": [
+      "./handoff",
+      "./relay"
+    ]
+  }
+}

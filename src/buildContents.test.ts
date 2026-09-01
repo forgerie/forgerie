@@ -25,7 +25,8 @@ describe("production build contents", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "forgerie-package-contents-"));
     try {
       const fixtureDist = join(fixtureRoot, "dist", "server");
-      await mkdir(fixtureDist, { recursive: true });
+      const fixtureSkill = join(fixtureRoot, "skills", "handoff");
+      await Promise.all([mkdir(fixtureDist, { recursive: true }), mkdir(fixtureSkill, { recursive: true })]);
       await Promise.all([
         // Lifecycle hooks do not affect which files are packed, and npm 10 runs
         // `prepare` during `npm pack` even with `--ignore-scripts`, so strip
@@ -34,6 +35,7 @@ describe("production build contents", () => {
         writeFile(join(fixtureDist, "app.js"), "export {};\n", "utf8"),
         writeFile(join(fixtureDist, "app.testSupport.js"), "export {};\n", "utf8"),
         writeFile(join(fixtureDist, "app.testSupport.js.map"), "{}\n", "utf8"),
+        writeFile(join(fixtureSkill, "SKILL.md"), "---\nname: handoff\ndescription: Continue in a new session\n---\n", "utf8"),
       ]);
 
       const npmExecPath = process.env["npm_execpath"];
@@ -44,6 +46,7 @@ describe("production build contents", () => {
       const packagedFiles = packageFilePaths(stdout);
 
       expect(packagedFiles).toContain("dist/server/app.js");
+      expect(packagedFiles).toContain("skills/handoff/SKILL.md");
       expect(packagedFiles.filter(isTestSupportPath)).toEqual([]);
     } finally {
       await rm(fixtureRoot, { recursive: true, force: true });
