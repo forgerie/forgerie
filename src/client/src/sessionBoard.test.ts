@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGE_BANDS,
   BOARD_GROUPS,
+  DEFAULT_COLLAPSED_AGE_BANDS,
+  ageBandKind,
   attentionCount,
   deriveSessionBoard,
   deriveSessionInboxBoard,
+  groupIdleSessionsByAge,
   groupSessionsByProject,
   relativeTime,
   sessionBoardState,
@@ -684,6 +688,84 @@ describe("relativeTime", () => {
     // using a fixed UTC epoch so any local-clock-dependent path fails the boundary.
     const utcNow = Date.parse("2026-03-08T03:30:00.000Z"); // near US DST change
     expect(relativeTime("2026-03-08T02:30:00.000Z", utcNow)).toBe("1h");
+  });
+});
+
+describe("age bands", () => {
+  // Local noon, so every band boundary in these cases sits well away from the
+  // local midnight the classifier uses.
+  const now = new Date(2026, 7, 31, 12, 0, 0).getTime();
+  const daysBack = (days: number, hour = 12) => new Date(2026, 7, 31 - days, hour, 0, 0).toISOString();
+
+  it("names each band from the reader's calendar, not from elapsed hours", () => {
+    expect(ageBandKind(new Date(now - 30 * 60 * 1000).toISOString(), now)).toBe("hour");
+    expect(ageBandKind(new Date(2026, 7, 31, 2, 0, 0).toISOString(), now)).toBe("today");
+    expect(ageBandKind(daysBack(1), now)).toBe("yesterday");
+    expect(ageBandKind(daysBack(3), now)).toBe("week");
+    expect(ageBandKind(daysBack(20), now)).toBe("month");
+    expect(ageBandKind(daysBack(90), now)).toBe("older");
+  });
+
+  it("puts a session one minute past local midnight in yesterday, not in today", () => {
+    const justBeforeMidnight = new Date(2026, 7, 30, 23, 59, 0).toISOString();
+    const justAfterMidnight = new Date(2026, 7, 31, 0, 1, 0).toISOString();
+
+    expect(ageBandKind(justBeforeMidnight, now)).toBe("yesterday");
+    expect(ageBandKind(justAfterMidnight, now)).toBe("today");
+  });
+
+  it("keeps a clock that runs ahead in the newest band instead of the oldest", () => {
+    expect(ageBandKind(new Date(now + 5 * 60 * 1000).toISOString(), now)).toBe("hour");
+  });
+
+  it("reads its collapse defaults from the band list rather than a second copy", () => {
+    expect(DEFAULT_COLLAPSED_AGE_BANDS).toEqual(["week", "month", "older"]);
+    expect(AGE_BANDS.map((band) => band.kind)).toEqual([
+      "hour",
+      "today",
+      "yesterday",
+      "week",
+      "month",
+      "older",
+    ]);
+  });
+
+  it("bands the idle pile and leaves every other state where it was", () => {
+    const board = mkBoard(
+      [
+        mkSession("idle-today", { modified: new Date(2026, 7, 31, 2, 0, 0).toISOString() }),
+        mkSession("idle-week", { modified: daysBack(3) }),
+        mkSession("working", { modified: daysBack(3) }),
+        mkSession("archived", { modified: daysBack(3), archived: true }),
+      ],
+      { statuses: { working: mkStatus({ isStreaming: true }) } },
+    );
+
+    const bands = groupIdleSessionsByAge(board, now);
+    const populated = bands.filter((band) => band.rows.length > 0);
+
+    expect(populated.map((band) => band.kind)).toEqual(["today", "week"]);
+    expect(populated.flatMap((band) => band.rows.map((row) => row.session.id)))
+      .toEqual(["idle-today", "idle-week"]);
+  });
+
+  it("sorts pinned rows to the top of their own band", () => {
+    const board = mkBoard([
+      mkSession("newer", { modified: daysBack(3, 18) }),
+      mkSession("pinned-older", { modified: daysBack(5), pinned: true }),
+      mkSession("older", { modified: daysBack(4) }),
+    ]);
+
+    const week = groupIdleSessionsByAge(board, now).find((band) => band.kind === "week");
+
+    expect(week?.rows.map((row) => row.session.id)).toEqual(["pinned-older", "newer", "older"]);
+  });
+
+  it("returns every band so the caller decides what an empty one means", () => {
+    const bands = groupIdleSessionsByAge(mkBoard([]), now);
+
+    expect(bands).toHaveLength(AGE_BANDS.length);
+    expect(bands.every((band) => band.rows.length === 0)).toBe(true);
   });
 });
 

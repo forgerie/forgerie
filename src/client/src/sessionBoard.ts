@@ -150,6 +150,114 @@ export const BOARD_GROUPS: readonly BoardGroupDescriptor[] = [
 const GROUP_KINDS: readonly BoardGroupKind[] = BOARD_GROUPS.map((g) => g.kind);
 
 // ---------------------------------------------------------------------------
+// AGE_BANDS — the single source of truth for the idle case list
+// ---------------------------------------------------------------------------
+
+export type AgeBandKind = "hour" | "today" | "yesterday" | "week" | "month" | "older";
+
+export interface AgeBandDescriptor {
+  readonly kind: AgeBandKind;
+  readonly label: string;
+  readonly hint: string;
+  /** Bands past yesterday open collapsed; the pile they hold is the one nobody asked to see. */
+  readonly collapsedByDefault: boolean;
+  /**
+   * Local midnights back from today that this band starts at, or `"hour"` for
+   * the rolling window, or `undefined` for the band that catches everything
+   * older. Read only by `ageBandKind`.
+   */
+  readonly daysBack: number | "hour" | undefined;
+}
+
+/**
+ * How old an idle session is, in the words a reader would use.
+ *
+ * Boundaries are **local calendar days**, not elapsed hours: someone reading at
+ * 09:00 means "yesterday", not "19 hours ago". The one consequence is that the
+ * band a session sits in depends on the reading device's time zone, and a row
+ * changes band at local midnight rather than 24 h after its last turn.
+ *
+ * This is the single source of truth for the case list. Labels, order, counts,
+ * collapse defaults, and the rendering loop all read from here.
+ */
+export const AGE_BANDS: readonly AgeBandDescriptor[] = [
+  {
+    kind: "hour",
+    label: "Last hour",
+    hint: "Touched within the hour.",
+    collapsedByDefault: false,
+    daysBack: "hour",
+  },
+  {
+    kind: "today",
+    label: "Earlier today",
+    hint: "Touched today, more than an hour ago.",
+    collapsedByDefault: false,
+    daysBack: 0,
+  },
+  {
+    kind: "yesterday",
+    label: "Yesterday",
+    hint: "Touched on the previous local day.",
+    collapsedByDefault: false,
+    daysBack: 1,
+  },
+  {
+    kind: "week",
+    label: "Earlier this week",
+    hint: "Two to seven days back.",
+    collapsedByDefault: true,
+    daysBack: 7,
+  },
+  {
+    kind: "month",
+    label: "This month",
+    hint: "Eight to thirty days back.",
+    collapsedByDefault: true,
+    daysBack: 30,
+  },
+  {
+    kind: "older",
+    label: "Older",
+    hint: "More than thirty days back.",
+    collapsedByDefault: true,
+    daysBack: undefined,
+  },
+] as const;
+
+/** Band kinds that open collapsed the first time a machine's inbox is read. */
+export const DEFAULT_COLLAPSED_AGE_BANDS: readonly AgeBandKind[] = AGE_BANDS
+  .filter((band) => band.collapsedByDefault)
+  .map((band) => band.kind);
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** Epoch ms of local midnight `daysBack` days before the local day containing `now`. */
+function localMidnightBack(now: number, daysBack: number): number {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - daysBack);
+  return date.getTime();
+}
+
+/**
+ * Which band an ISO timestamp falls in, relative to `now`.
+ *
+ * A timestamp in the future — a session modified by a machine whose clock runs
+ * ahead — lands in `hour` rather than falling through to `older`.
+ */
+export function ageBandKind(iso: string, now: number): AgeBandKind {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "older";
+  for (const band of AGE_BANDS) {
+    if (band.daysBack === undefined) return band.kind;
+    const from = band.daysBack === "hour" ? now - HOUR_MS : localMidnightBack(now, band.daysBack);
+    if (at >= from) return band.kind;
+  }
+  return "older";
+}
+
+// ---------------------------------------------------------------------------
 // sessionBoardState — classify one session
 // ---------------------------------------------------------------------------
 
@@ -386,6 +494,35 @@ export function groupSessionsByProject<S extends SessionBoardSessionInput>(
   );
 
   return { groups, rows: board.rows, counts: board.counts };
+}
+
+// ---------------------------------------------------------------------------
+// groupIdleSessionsByAge — the Open pile, split by age
+// ---------------------------------------------------------------------------
+
+export interface AgeBandGroup<S extends SessionBoardSessionInput> extends AgeBandDescriptor {
+  readonly rows: readonly SessionBoardRow<S>[];
+}
+
+/**
+ * The `open` group's rows, split into age bands.
+ *
+ * Only idle rows are banded. Blocked, errored, working and unread rows keep
+ * their own groups above: those states say what a session wants from you now,
+ * and age cannot say that. Empty bands are returned so the caller decides what
+ * to do with them, matching `deriveSessionBoard`.
+ */
+export function groupIdleSessionsByAge<S extends SessionBoardSessionInput>(
+  board: SessionBoard<S>,
+  now: number,
+): readonly AgeBandGroup<S>[] {
+  const idle = board.rows.filter((row) => row.state.kind === "open");
+  return AGE_BANDS.map((band) => ({
+    ...band,
+    rows: idle
+      .filter((row) => ageBandKind(row.session.modified, now) === band.kind)
+      .sort(byPinnedThenRecency),
+  }));
 }
 
 // ---------------------------------------------------------------------------

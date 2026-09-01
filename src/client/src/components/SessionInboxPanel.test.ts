@@ -24,13 +24,22 @@ import { SessionWorkingRuntime } from "./SessionWorkingRuntime";
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Recent enough to land in the `hour` age band, which is open by default.
+ * Idle rows are grouped by age now, so a fixture pinned to a fixed date would
+ * drift into a collapsed band as the calendar moves and stop rendering.
+ */
+function minutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
 function mkSession(id: string, overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
     id,
     cwd: "/repo",
     path: `/tmp/${id}.jsonl`,
     created: "2026-08-07T10:00:00.000Z",
-    modified: "2026-08-07T10:00:00.000Z",
+    modified: minutesAgo(5),
     messageCount: 0,
     firstMessage: `Message from ${id}`,
     ...overrides,
@@ -212,8 +221,6 @@ describe("update-cycle derivation ownership", () => {
       globalSessions: mkGlobalSessions(sessions),
       onSelectSession: (session) => { selected.push(session.id); },
     });
-    clickSelector(shadowRoot(panel), "[data-group='open'] button");
-    await panel.updateComplete;
 
     panel.globalSessions = mkGlobalSessions(sessions, { status: "loading" });
     await panel.updateComplete;
@@ -274,8 +281,8 @@ describe("update-cycle derivation ownership", () => {
 
 describe("group rendering", () => {
   it("renders only non-empty groups, in BOARD_GROUPS order", async () => {
-    // Provide sessions in open and archived; those are the only groups that
-    // should render. Empty groups (blocked, errored, working, unread) are omitted.
+    // Provide sessions in open and archived. The idle one is dated rather than
+    // filed under "open", so its band renders in Open's place.
     const sessions: SessionInfo[] = [
       mkSession("open-one"),
       mkSession("archived-one", { archived: true }),
@@ -288,16 +295,28 @@ describe("group rendering", () => {
     const kinds = Array.from(headers).map((el) => el.getAttribute("data-group"));
 
     // Only the two populated groups appear.
-    expect(kinds).toContain("open");
+    expect(kinds).toContain("hour");
     expect(kinds).toContain("archived");
-    // Empty groups are hidden.
+    // Empty groups and empty bands are hidden.
+    expect(kinds).not.toContain("open");
     expect(kinds).not.toContain("blocked");
     expect(kinds).not.toContain("errored");
     expect(kinds).not.toContain("working");
     expect(kinds).not.toContain("unread");
+    expect(kinds).not.toContain("yesterday");
 
-    // open comes before archived.
-    expect(kinds.indexOf("open")).toBeLessThan(kinds.indexOf("archived"));
+    // The idle bands come before archived.
+    expect(kinds.indexOf("hour")).toBeLessThan(kinds.indexOf("archived"));
+  });
+
+  it("labels the run of bands as the idle pile they replace", async () => {
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([mkSession("open-one"), mkSession("open-two")]),
+    });
+
+    const label = shadowRoot(panel).querySelector("[data-band-label]");
+
+    expect(label?.textContent.trim()).toBe("Open · 2 · by age");
   });
 
   it("shows the correct count badge for each group", async () => {
@@ -310,10 +329,34 @@ describe("group rendering", () => {
     await revealArchived(panel);
     const root = shadowRoot(panel);
 
-    const openGroup = root.querySelector("[data-group='open']");
+    const bandGroup = root.querySelector("[data-group='hour']");
     const archivedGroup = root.querySelector("[data-group='archived']");
-    expect(openGroup?.querySelector("[data-group-count]")?.textContent).toBe("2");
+    expect(bandGroup?.querySelector("[data-group-count]")?.textContent).toBe("2");
     expect(archivedGroup?.querySelector("[data-group-count]")?.textContent).toBe("1");
+  });
+
+  it("files an idle session in its age band and leaves the rest of the board alone", async () => {
+    const sessions: SessionInfo[] = [
+      mkSession("open-one"),
+      mkSession("stale-one", { modified: minutesAgo(60 * 24 * 10) }),
+      mkSession("working-one", { modified: minutesAgo(60 * 24 * 10) }),
+    ];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions(sessions, {
+        statuses: { "working-one": mkWorkingStatus("working-one") },
+      }),
+    });
+    const root = shadowRoot(panel);
+
+    // A ten-day-old idle row bands by age; a ten-day-old working row does not.
+    expect(root.querySelector("[data-group='hour'] [data-session='open-one']")).not.toBeNull();
+    expect(root.querySelector("[data-group='month']")?.getAttribute("aria-expanded")).toBe("false");
+    expect(root.querySelector("[data-group='working'] [data-session='working-one']")).not.toBeNull();
+
+    clickSelector(root, "[data-group='month'] button");
+    await panel.updateComplete;
+
+    expect(root.querySelector("[data-group='month'] [data-session='stale-one']")).not.toBeNull();
   });
 
   it("shows a row for each session in the correct group", async () => {
@@ -324,9 +367,6 @@ describe("group rendering", () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    // Expand Open and reveal Archived so rows are visible.
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
     await revealArchived(panel);
 
     const openRow = root.querySelector("[data-session='open-one']");
@@ -341,13 +381,18 @@ describe("group rendering", () => {
 // ---------------------------------------------------------------------------
 
 describe("default collapse", () => {
-  it("Open group is collapsed by default", async () => {
-    const sessions = [mkSession("open-one")];
+  it("opens the recent bands and collapses the ones nobody asked to see", async () => {
+    const sessions = [
+      mkSession("recent"),
+      mkSession("this-week", { modified: minutesAgo(60 * 24 * 3) }),
+      mkSession("this-month", { modified: minutesAgo(60 * 24 * 10) }),
+    ];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    const openGroup = root.querySelector("[data-group='open']");
-    expect(openGroup?.getAttribute("aria-expanded")).toBe("false");
+    expect(root.querySelector("[data-group='hour']")?.getAttribute("aria-expanded")).toBe("true");
+    expect(root.querySelector("[data-group='week']")?.getAttribute("aria-expanded")).toBe("false");
+    expect(root.querySelector("[data-group='month']")?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("keeps the archive hidden behind the overflow menu until it is asked to open", async () => {
@@ -424,23 +469,21 @@ describe("default collapse", () => {
 
 describe("localStorage persistence", () => {
   it("expanding a group persists across component re-creation", async () => {
-    const sessions = [mkSession("open-one")];
+    // The month band starts collapsed, so opening it is a real preference.
+    const sessions = [mkSession("stale-one", { modified: minutesAgo(60 * 24 * 10) })];
     const gs = mkGlobalSessions(sessions);
 
-    // Mount, expand Open.
     const panel = await mountPanel({ globalSessions: gs });
-    const root = shadowRoot(panel);
-    clickSelector(root, "[data-group='open'] button");
+    clickSelector(shadowRoot(panel), "[data-group='month'] button");
     await panel.updateComplete;
 
-    // Confirm expanded.
-    expect(shadowRoot(panel).querySelector("[data-group='open']")?.getAttribute("aria-expanded")).toBe("true");
+    expect(shadowRoot(panel).querySelector("[data-group='month']")?.getAttribute("aria-expanded")).toBe("true");
 
     // Unmount and recreate.
     panel.remove();
     const panel2 = await mountPanel({ globalSessions: gs });
-    const openGroup2 = shadowRoot(panel2).querySelector("[data-group='open']");
-    expect(openGroup2?.getAttribute("aria-expanded")).toBe("true");
+
+    expect(shadowRoot(panel2).querySelector("[data-group='month']")?.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("group-by toggle persists across re-creation", async () => {
@@ -475,9 +518,6 @@ describe("row callbacks", () => {
     });
     const root = shadowRoot(panel);
 
-    // Expand Open to see the row.
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const row = root.querySelector("[data-session='open-one']");
     expect(row).not.toBeNull();
@@ -501,8 +541,6 @@ describe("row callbacks", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const archiveBtn = root.querySelector("[data-session='open-one'] [data-action='archive']");
     expect(archiveBtn).not.toBeNull();
@@ -545,8 +583,6 @@ describe("archive action accessibility", () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const archiveBtn = root.querySelector("[data-session='open-one'] [data-action='archive']");
     expect(archiveBtn).not.toBeNull();
@@ -561,17 +597,16 @@ describe("archive action accessibility", () => {
 
 describe("selected session group auto-expand", () => {
   it("auto-expands a group when the selected session is assigned to it", async () => {
-    // Open is collapsed by default; set selectedSession to a session in Open.
-    const sessions = [mkSession("open-one")];
+    // The month band is collapsed by default; select a session inside it.
+    const sessions = [mkSession("stale-one", { modified: minutesAgo(60 * 24 * 10) })];
     const panel = await mountPanel({
       globalSessions: mkGlobalSessions(sessions),
       selectedSession: sessions[0],
     });
     const root = shadowRoot(panel);
 
-    // Open should be auto-expanded because the selected session is in it.
-    const openGroup = root.querySelector("[data-group='open']");
-    expect(openGroup?.getAttribute("aria-expanded")).toBe("true");
+    // The band holding the selection is auto-expanded, collapsed default or not.
+    expect(root.querySelector("[data-group='month']")?.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("does not reveal the archive when the selected session is archived", async () => {
@@ -592,7 +627,7 @@ describe("selected session group auto-expand", () => {
 
   it("expands the destination group when the same selected id moves via live activity", async () => {
     const session = mkSession("moving-one");
-    localStorage.setItem("forgerie:inbox:local:collapsed", JSON.stringify(["open", "working"]));
+    localStorage.setItem("forgerie:inbox:local:collapsed-bands", JSON.stringify(["hour", "working"]));
     const panel = await mountPanel({
       globalSessions: mkGlobalSessions([session]),
       selectedSession: session,
@@ -615,7 +650,7 @@ describe("selected session group auto-expand", () => {
   it("uses projectId to expand a collapsed project containing the selected session", async () => {
     const session = mkSession("project-selected");
     localStorage.setItem("forgerie:inbox:local:groupBy", "project");
-    localStorage.setItem("forgerie:inbox:local:collapsed", JSON.stringify(["proj-1"]));
+    localStorage.setItem("forgerie:inbox:local:collapsed-bands", JSON.stringify(["proj-1"]));
 
     const panel = await mountPanel({
       globalSessions: mkGlobalSessions([session]),
@@ -723,8 +758,6 @@ describe("unresolved-workspace rows", () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions([session]) });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const row = root.querySelector("[data-session='orphan-one']");
     const chip = row?.querySelector("[data-location-chip]");
@@ -742,8 +775,6 @@ describe("unresolved-workspace rows", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const row = root.querySelector("[data-session='orphan-one']");
     if (row instanceof HTMLElement) row.click();
@@ -770,8 +801,6 @@ describe("unavailableCwds prop", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const row = root.querySelector("[data-session='known-ws-session']");
     expect(row?.getAttribute("aria-disabled")).toBe("true");
@@ -791,8 +820,6 @@ describe("unavailableCwds prop", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const chip = root.querySelector("[data-session='unavail-session'] [data-location-chip]");
     expect(chip?.textContent).toContain("workspace removed");
@@ -805,16 +832,16 @@ describe("unavailableCwds prop", () => {
 
 describe("accessibility", () => {
   it("group section header has aria-expanded reflecting collapse state", async () => {
-    const sessions = [mkSession("open-one")];
+    const sessions = [mkSession("stale-one", { modified: minutesAgo(60 * 24 * 10) })];
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    const openGroup = root.querySelector("[data-group='open']");
-    expect(openGroup?.getAttribute("aria-expanded")).toBe("false");
+    expect(root.querySelector("[data-group='month']")?.getAttribute("aria-expanded")).toBe("false");
 
-    clickSelector(root, "[data-group='open'] button");
+    clickSelector(root, "[data-group='month'] button");
     await panel.updateComplete;
-    expect(root.querySelector("[data-group='open']")?.getAttribute("aria-expanded")).toBe("true");
+
+    expect(root.querySelector("[data-group='month']")?.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("selected row has aria-selected='true'", async () => {
@@ -825,7 +852,6 @@ describe("accessibility", () => {
     });
     const root = shadowRoot(panel);
 
-    // Open group auto-expands because selected session is in it.
     const row = root.querySelector("[data-session='open-one']");
     expect(row?.getAttribute("aria-selected")).toBe("true");
   });
@@ -863,8 +889,6 @@ describe("location chip", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const chip = root.querySelector("[data-session='open-one'] [data-location-chip]");
     expect(chip?.textContent).toContain("My Repo");
@@ -889,8 +913,6 @@ describe("location chip", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const chip = root.querySelector("[data-session='feat-one'] [data-location-chip]");
     expect(chip?.textContent).toContain("feat/inbox");
@@ -1143,8 +1165,6 @@ describe("location metadata", () => {
     });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const chip = root.querySelector("[data-session='open-one'] [data-location-chip]");
     expect(chip?.textContent.replace(/\s+/gu, " ").trim()).toBe("Repo · session-inbox");
@@ -1155,8 +1175,6 @@ describe("location metadata", () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
     const root = shadowRoot(panel);
 
-    clickSelector(root, "[data-group='open'] button");
-    await panel.updateComplete;
 
     const chip = root.querySelector("[data-session='open-one'] [data-location-chip]");
     expect(chip?.textContent.trim()).toBe("scratch");
@@ -1176,8 +1194,6 @@ describe("board shortcuts", () => {
       globalSessions: mkGlobalSessions(sessions),
       onSelectSession: (s) => { selected.push(s.id); },
     });
-    clickSelector(shadowRoot(panel), "[data-group='open'] button");
-    await panel.updateComplete;
 
     await pressKey(panel, "j");
     expect(selected).toEqual(["open-one"]);
@@ -1196,7 +1212,8 @@ describe("board shortcuts", () => {
   it("does not walk rows hidden inside a collapsed group", async () => {
     const selected: string[] = [];
     const panel = await mountPanel({
-      globalSessions: mkGlobalSessions([mkSession("open-one")]),
+      // Only row on the board, and its band starts collapsed.
+      globalSessions: mkGlobalSessions([mkSession("stale-one", { modified: minutesAgo(60 * 24 * 10) })]),
       onSelectSession: (s) => { selected.push(s.id); },
     });
 
@@ -1409,7 +1426,6 @@ describe("live work indicator", () => {
 describe("row density", () => {
   it("gives an ordinary row one line when dense", async () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
-    await expandOpenGroup(panel);
 
     expect(rowShape(panel, "open-one")).toBe("one-line");
   });
@@ -1431,14 +1447,12 @@ describe("row density", () => {
       density: "comfortable",
       globalSessions: mkGlobalSessions([mkSession("open-one")]),
     });
-    await expandOpenGroup(panel);
 
     expect(rowShape(panel, "open-one")).toBe("two-line");
   });
 
   it("keeps the location on a dense row rather than dropping it", async () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("open-one")]) });
-    await expandOpenGroup(panel);
 
     const chip = rowElement(panel, "open-one").querySelector("[data-location-chip]");
     expect(chip?.textContent).toContain("Repo");
@@ -1446,7 +1460,6 @@ describe("row density", () => {
 
   it("puts the pinned marker in the trailing mark slot, not before the title", async () => {
     const panel = await mountPanel({ globalSessions: mkGlobalSessions([mkSession("pinned-one", { pinned: true })]) });
-    await expandOpenGroup(panel);
     const row = rowElement(panel, "pinned-one");
 
     // Leading the title indented every pinned row's title away from the rows
@@ -1462,7 +1475,6 @@ describe("row density", () => {
     const panel = await mountPanel({
       globalSessions: mkGlobalSessions([mkSession("plain-one"), mkSession("pinned-one", { pinned: true })]),
     });
-    await expandOpenGroup(panel);
 
     for (const id of ["plain-one", "pinned-one"]) {
       expect(rowElement(panel, id).querySelector(".row-mark")).not.toBeNull();
@@ -1479,12 +1491,6 @@ function rowElement(panel: SessionInboxPanel, sessionId: string): HTMLElement {
 
 function rowShape(panel: SessionInboxPanel, sessionId: string): string | null {
   return rowElement(panel, sessionId).getAttribute("data-shape");
-}
-
-/** Open is collapsed by default, so a test that wants its rows must open it. */
-async function expandOpenGroup(panel: SessionInboxPanel): Promise<void> {
-  clickSelector(shadowRoot(panel), "[data-group='open'] button");
-  await panel.updateComplete;
 }
 
 // ---------------------------------------------------------------------------

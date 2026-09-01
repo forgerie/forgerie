@@ -6,8 +6,9 @@
  * project→workspace→session drill-down as the primary navigation pane content.
  *
  * Design rules (from AGENTS.md + plan):
- *  - Six groups in BOARD_GROUPS order; Open collapsed by default, Archived hidden
- *    behind the inbox overflow menu so the archive is opt-in rather than ambient.
+ *  - BOARD_GROUPS order, with Open replaced by the AGE_BANDS split: the states
+ *    that want something keep the top, and only the idle pile is dated. Archived
+ *    stays hidden behind the inbox overflow menu so the archive is opt-in.
  *  - Archive action ≥44px hit area via min-height.
  *  - Theme tokens only; pane-level container query so rows respond to pane width.
  *  - Group-by and collapsed-groups persist per machine in localStorage
@@ -32,13 +33,15 @@ import { ROW_PRESS, pressTravel, readRowPress } from "../rowPress";
 
 import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
 import {
+  DEFAULT_COLLAPSED_AGE_BANDS,
+  ageBandKind,
   attentionCount,
   deriveSessionInboxBoard,
+  groupIdleSessionsByAge,
   groupSessionsByProject,
   relativeTime,
   type BoardGroupKind,
   type SessionBoard,
-  type SessionBoardGroup,
   type SessionBoardRow,
 } from "../sessionBoard";
 
@@ -59,6 +62,13 @@ function browserStorage(): Storage | undefined {
   }
 }
 
+/**
+ * Bumped when Open became the age bands. The stored set from the old board
+ * collapsed `open`, a group that no longer exists; re-reading it would leave
+ * every band expanded, including the widest one.
+ */
+const COLLAPSED_STORAGE_SUFFIX = "collapsed-bands";
+
 function readGroupBy(machineId: string): "state" | "project" {
   const raw = browserStorage()?.getItem(storageKey(machineId, "groupBy"));
   if (raw === "project") return "project";
@@ -69,7 +79,7 @@ function writeGroupBy(machineId: string, groupBy: "state" | "project"): void {
   browserStorage()?.setItem(storageKey(machineId, "groupBy"), groupBy);
 }
 
-const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["open", "archived"]);
+const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set([...DEFAULT_COLLAPSED_AGE_BANDS, "archived"]);
 
 /** Where a finger went down on a row, and when. */
 interface RowPressOrigin {
@@ -82,7 +92,7 @@ interface RowPressOrigin {
 }
 
 function readCollapsedGroups(machineId: string): Set<string> {
-  const raw = browserStorage()?.getItem(storageKey(machineId, "collapsed"));
+  const raw = browserStorage()?.getItem(storageKey(machineId, COLLAPSED_STORAGE_SUFFIX));
   if (raw !== null && raw !== undefined) {
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -93,7 +103,7 @@ function readCollapsedGroups(machineId: string): Set<string> {
 }
 
 function writeCollapsedGroups(machineId: string, collapsed: ReadonlySet<string>): void {
-  browserStorage()?.setItem(storageKey(machineId, "collapsed"), JSON.stringify([...collapsed]));
+  browserStorage()?.setItem(storageKey(machineId, COLLAPSED_STORAGE_SUFFIX), JSON.stringify([...collapsed]));
 }
 
 // ---------------------------------------------------------------------------
@@ -132,9 +142,21 @@ function pinGlyph(): TemplateResult {
   return html`<svg class="pin-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z" /><path d="M12 15v5" /></svg>`;
 }
 
-type InboxGroup =
-  | SessionBoardGroup<SessionInfo>
-  | { readonly kind: string; readonly label: string; readonly tone: string; readonly rows: readonly SessionBoardRow<SessionInfo>[] };
+/** The least a board group has to be for the panel to draw it. */
+interface InboxGroup {
+  readonly kind: string;
+  readonly label: string;
+  readonly rows: readonly SessionBoardRow<SessionInfo>[];
+}
+
+/**
+ * The scroller's contents in order. A label is not a group: it names the run of
+ * bands that follows it, so a reader does not take "Yesterday" for a peer of
+ * "Blocked on you".
+ */
+type InboxSection =
+  | { readonly kind: "label"; readonly text: string }
+  | { readonly kind: "group"; readonly group: InboxGroup };
 
 interface InboxPanelDerivation {
   readonly board: SessionBoard<SessionInfo>;
@@ -349,7 +371,10 @@ export class SessionInboxPanel extends LitElement {
       ? undefined
       : this.groupBy === "project"
         ? row.location.projectId
-        : row.state.kind;
+        // An idle row's visible destination is its age band, not "open".
+        : row.state.kind === "open"
+          ? ageBandKind(row.session.modified, Date.now())
+          : row.state.kind;
     const selectedGroupKey = groupKind === undefined ? undefined : `${this.groupBy}:${groupKind}`;
     if (selectedGroupKey !== this.previousSelectedGroupKey) {
       this.previousSelectedGroupKey = selectedGroupKey;
@@ -639,24 +664,53 @@ export class SessionInboxPanel extends LitElement {
     `;
   }
 
+  /**
+   * The scroller's contents in order.
+   *
+   * In state mode the Open group is replaced in place by its age bands, under a
+   * label that says the bands belong to it. Everything above Open is untouched:
+   * blocked, errored, working and unread say what a session wants from you now,
+   * and age cannot say that.
+   */
+  private inboxSections(board: SessionBoard<SessionInfo>, now: number): readonly InboxSection[] {
+    if (this.groupBy === "project") {
+      return groupSessionsByProject(board, { includeArchived: this.showArchived }).groups
+        .filter((group) => group.rows.length > 0)
+        .map((group) => ({ kind: "group", group }));
+    }
+
+    const bands = groupIdleSessionsByAge(board, now).filter((band) => band.rows.length > 0);
+    const sections: InboxSection[] = [];
+    for (const group of board.groups) {
+      // The archive stays out of the list until the overflow command reveals it.
+      if (group.kind === "archived" && !this.showArchived) continue;
+      if (group.kind === "open") {
+        if (bands.length === 0) continue;
+        sections.push({ kind: "label", text: `Open · ${String(board.counts.open)} · by age` });
+        for (const band of bands) sections.push({ kind: "group", group: band });
+        continue;
+      }
+      if (group.rows.length === 0) continue;
+      sections.push({ kind: "group", group });
+    }
+    return sections;
+  }
+
   private renderBoardScroll(board: SessionBoard<SessionInfo>, resolveLocation: InboxLocationResolver): TemplateResult {
     // Compute once per render so every row in this frame shares the same timestamp.
     const now = Date.now();
+    const sections = this.inboxSections(board, now);
 
-    // The archive stays out of the list until the overflow command reveals it.
-    const groups: readonly InboxGroup[] = this.groupBy === "project"
-      ? groupSessionsByProject(board, { includeArchived: this.showArchived }).groups
-      : board.groups.filter((group) => group.kind !== "archived" || this.showArchived);
-
-    const visibleGroups = groups.filter((g) => g.rows.length > 0);
     // Keyboard J/K walks exactly what the eye can walk: expanded groups only.
-    this.navigableSessions = visibleGroups
-      .filter((group) => !this.collapsedGroups.has(group.kind))
-      .flatMap((group) => group.rows.map((row) => row.session));
+    this.navigableSessions = sections
+      .filter((section) => section.kind === "group" && !this.collapsedGroups.has(section.group.kind))
+      .flatMap((section) => (section.kind === "group" ? section.group.rows.map((row) => row.session) : []));
 
     return html`
       <div class="board-scroll" role="listbox" aria-label="Sessions">
-        ${visibleGroups.map((group) => this.renderGroup(group, resolveLocation, now))}
+        ${sections.map((section) => section.kind === "label"
+          ? html`<div class="band-label" data-band-label>${section.text}</div>`
+          : this.renderGroup(section.group, resolveLocation, now))}
       </div>
       ${this.renderUndoToast()}
     `;
@@ -1355,6 +1409,27 @@ export class SessionInboxPanel extends LitElement {
 
     .group + .group {
       margin-top: 4px;
+    }
+
+    /*
+     * The one mark that says the bands below are all Open. Without it five
+     * dated headers sit at the same level as "Blocked on you" and read as five
+     * more states. It is a caption, not a control: no chevron, no hit area, and
+     * it does not stick -- the band header that follows it does, and two sticky
+     * strips would eat the short panes twice over.
+     */
+    .band-label {
+      margin-top: 10px;
+      padding: 4px 12px 2px;
+      font-size: var(--pi-text-xs);
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--pi-dim, #62656b);
+    }
+
+    .band-label + .group {
+      margin-top: 0;
     }
 
     .group-header {
