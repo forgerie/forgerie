@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { css, html, LitElement, nothing, type PropertyValues } from "lit";
+import { css, html, LitElement, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { DoubleEscapeAction, PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import { parseLeadingSlashCommand } from "../../../shared/promptResourceCommand";
@@ -10,6 +10,7 @@ import { PromptDictationGesture } from "../controllers/promptDictationGesture";
 import { VoiceTurnController } from "../controllers/voiceTurnController";
 import { VOICE_SEND_COUNTDOWN_MS, voiceComposerStatusLine, type VoiceComposerState } from "../appShell/voiceComposerState";
 import { voiceCaptureClock } from "../appShell/voiceCaptureProgress";
+import { DictationLevelReservoir, dictationReadout } from "../appShell/dictationReadout";
 import { SPEECH_POLICY } from "../../../shared/speechPolicy";
 import { composerRail, type ComposerRail } from "../composerRail";
 import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointerPress, isQueueHoldKey, readComposerQueuePress } from "../composerQueuePress";
@@ -46,6 +47,37 @@ interface QueueKeyboardPress {
 }
 
 const DICTATION_STATUS_TIMEOUT_MS = 5_000;
+
+/**
+ * Bars the waveform keeps for one turn.
+ *
+ * 240 bars is two minutes at one bar per 50 ms batch, and about 480 px of
+ * drawing at 2 px plus a 2 px gap -- wider than the draft box in any posture,
+ * so the box clips rather than the turn being cut short. Past that the
+ * reservoir folds neighbours together and keeps the whole turn in view.
+ */
+const DICTATION_WAVE_BARS = 240;
+
+/** How often the wait clock redraws. Fast enough that tenths look continuous. */
+const DICTATION_TICK_MS = 100;
+
+/** Drawn height of a full-scale bar, matching the waveform's row height. */
+const DICTATION_WAVE_HEIGHT_PX = 20;
+
+/**
+ * The turn, as the capture worklet measured it.
+ *
+ * A bar per batch, its height the batch's loudness. Silence keeps a bar at the
+ * baseline instead of a gap, so a pause reads as part of the recording rather
+ * than as the end of it. Marked aria-hidden: the clock and the state words
+ * carry this for a reader who cannot see it.
+ */
+function renderDictationWave(bars: readonly number[]) {
+  return html`<span class="dictation-wave" aria-hidden="true">${bars.map((height) => html`<i
+    class=${height <= 0 ? "quiet" : ""}
+    style=${`height:${String(Math.max(2, Math.round(DICTATION_WAVE_HEIGHT_PX * height)))}px`}
+  ></i>`)}</span>`;
+}
 
 type PendingDictationStatus =
   | { readonly kind: "status"; readonly status: SpeechServiceStatusResponse }
@@ -209,6 +241,20 @@ export class PromptEditor extends LitElement {
   private pendingDictationStatus: PendingDictationStatus | undefined;
   private dictationGesture = this.createDictationGesture();
   private dictationGestureSource: DictationGestureSource | undefined;
+  /**
+   * What the locked draft box is showing, and the measurements behind it.
+   *
+   * The reservoir keeps the whole turn rather than a rolling window, so the
+   * waveform a reader watches is the message they are about to send. The two
+   * clocks are separate facts: voiced audio captured, and time spent waiting on
+   * the gateway, which is the wait that used to be invisible.
+   */
+  private readonly dictationLevels = new DictationLevelReservoir(DICTATION_WAVE_BARS);
+  @state() private dictationBars: readonly number[] = [];
+  private dictationVoicedMs = 0;
+  private dictationWaitStartedAtMs: number | undefined;
+  @state() private dictationWaitMs = 0;
+  private dictationTicker: number | undefined;
   private readonly voiceTurn = new VoiceTurnController(this, {
     onSend: () => { this.sendVoiceTurn(); },
     onStateChange: (state) => { this.onVoiceStateChange?.(state); },
@@ -363,6 +409,7 @@ export class PromptEditor extends LitElement {
           .onDisplayStateChange=${(state: ComposerDraftDisplayState) => { this.updateDraftDisplayState(state); }}
           .onDraftEdited=${() => { this.handleDraftEdited(); }}
           .onCompletionError=${this.onCompletionError}
+          .dictationReadout=${this.renderDictationReadout()}
         ></composer-draft>
         <div class="actions">
           ${this.renderCommandsAction()}
@@ -660,6 +707,93 @@ export class PromptEditor extends LitElement {
       return;
     }
     this.voiceTurn.hold();
+  }
+
+  /**
+   * The draft box, reporting on itself.
+   *
+   * Rendered here and handed to the draft, because the words and the waveform
+   * belong to dictation while the box belongs to the draft. Returns undefined
+   * when there is nothing to say, so the draft renders its own placeholder and
+   * nothing about the composer changes shape.
+   */
+  private renderDictationReadout(): TemplateResult | undefined {
+    if (this.capabilities.dictation === undefined) return undefined;
+    const readout = dictationReadout(this.dictationState, {
+      bars: this.dictationBars,
+      voicedMs: this.dictationVoicedMs,
+      waitMs: this.dictationWaitMs,
+    });
+    if (readout.kind === "none") return undefined;
+    if (readout.kind === "stated") {
+      return html`<div class="dictation-readout dictation-stated"><span class="dictation-words">${readout.words}</span></div>`;
+    }
+    const working = readout.kind === "working";
+    return html`
+      <div class=${`dictation-readout${working ? " dictation-working" : ""}`}>
+        ${working ? html`<span class="dictation-words">${readout.words}</span>` : nothing}
+        ${renderDictationWave(readout.bars)}
+        <span class="dictation-clock">${readout.clock}</span>
+        ${working ? html`<button
+          type="button"
+          class="dictation-cancel"
+          data-action="dictation-cancel"
+          @click=${() => { this.cancelDictationWait(); }}
+        >Cancel</button>` : nothing}
+      </div>
+    `;
+  }
+
+  /** Abandon a transcription the reader is no longer waiting for. */
+  private cancelDictationWait(): void {
+    this.resetDictationGesture();
+    this.dictationController?.cancel();
+  }
+
+  /**
+   * Fold one measured batch into the turn.
+   *
+   * Called for every batch, silent ones included, because the gaps between
+   * words are part of the shape. The voiced clock only counts the voiced ones.
+   */
+  private noteDictationLevel(level: { readonly rms: number; readonly voiced: boolean; readonly sampleCount: number }): void {
+    this.dictationLevels.push(level);
+    if (level.voiced) this.dictationVoicedMs += (level.sampleCount / SPEECH_POLICY.audio.sampleRateHz) * 1000;
+    this.dictationBars = this.dictationLevels.bars();
+  }
+
+  /** A new turn starts with an empty waveform and both clocks at zero. */
+  private resetDictationAudio(): void {
+    this.dictationLevels.clear();
+    this.dictationBars = [];
+    this.dictationVoicedMs = 0;
+    this.dictationWaitStartedAtMs = undefined;
+    this.dictationWaitMs = 0;
+  }
+
+  /**
+   * Keep the wait honest while the gateway holds the audio.
+   *
+   * Only the transcribing state needs a ticker: the listening clock advances on
+   * the audio reports themselves, which is what makes it evidence that a voice
+   * is arriving rather than evidence that time is passing.
+   */
+  private syncDictationWaitTicker(): void {
+    const waiting = this.dictationState.tag === "transcribing";
+    if (waiting && this.dictationTicker === undefined) {
+      this.dictationWaitStartedAtMs ??= Date.now();
+      this.dictationTicker = window.setInterval(() => {
+        const startedAt = this.dictationWaitStartedAtMs;
+        if (startedAt === undefined) return;
+        this.dictationWaitMs = Date.now() - startedAt;
+      }, DICTATION_TICK_MS);
+      return;
+    }
+    if (!waiting && this.dictationTicker !== undefined) {
+      window.clearInterval(this.dictationTicker);
+      this.dictationTicker = undefined;
+      this.dictationWaitStartedAtMs = undefined;
+    }
   }
 
   private renderDictationAction() {
@@ -1359,17 +1493,20 @@ export class PromptEditor extends LitElement {
       // additive. It exists so a listening reader can see that the microphone
       // is getting their voice, which no status wording can substitute for.
       createCaptureSession: async (options) => {
+        this.resetDictationAudio();
         const session = await capability.createCaptureSession({
           ...options,
           onSpeechActivity: (activity) => {
             if (this.voiceMode === "voice-first") this.voiceTurn.noteSpeech(activity, SPEECH_POLICY.audio.sampleRateHz);
             options.onSpeechActivity(activity);
           },
+          onLevel: (level) => { this.noteDictationLevel(level); },
         });
         return session;
       },
       onStateChange: (state) => {
         this.dictationState = state;
+        this.syncDictationWaitTicker();
         if (this.voiceMode === "voice-first") {
           if (this.dictationCapability === "warming" && state.tag === "unavailable") this.voiceTurn.reset();
           else this.voiceTurn.noteDictation(state);
@@ -1398,6 +1535,8 @@ export class PromptEditor extends LitElement {
     this.dictationController?.dispose();
     this.dictationController = undefined;
     this.dictationState = { tag: "idle" };
+    this.resetDictationAudio();
+    this.syncDictationWaitTicker();
     this.pendingDictationStatus = undefined;
     this.resetDictationGesture();
     this.stopDictationStatusPolling();
@@ -1591,6 +1730,11 @@ export class PromptEditor extends LitElement {
     this.dictationGestureSource = undefined;
     this.dictationGesture.dispose();
     this.dictationGesture = this.createDictationGesture();
+  }
+
+  /** The draft box is dictation's while it holds the microphone or the wait. */
+  private dictationOwnsDraftBox(): boolean {
+    return this.dictationBlocksComposer() && this.dictationState.tag !== "retained-retry";
   }
 
   private dictationCanCompleteFromKey(): boolean {

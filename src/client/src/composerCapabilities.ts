@@ -2,7 +2,7 @@ import type { SessionStatus } from "../../shared/apiTypes";
 import type { SpeechServiceStatusResponse } from "../../shared/speechContracts";
 import type { PromptDictationCaptureOptions, PromptDictationSpeechApi } from "./controllers/promptDictationController";
 import type { SpeechApiRequestOptions } from "./api/speech";
-import type { SpeechCaptureSession } from "./speechCapture";
+import type { SpeechCaptureOptions, SpeechCaptureSession } from "./speechCapture";
 
 /**
  * What a composer host can actually do.
@@ -103,9 +103,18 @@ export interface ComposerDismissCapability {
   readonly onDismiss: () => void;
 }
 
+/**
+ * What a composer asks a capture session for.
+ *
+ * The speech controller's own needs plus the per-batch loudness the capture
+ * already measures: the controller does not use it, and the composer draws it,
+ * so the option travels with the request rather than through the controller.
+ */
+export type ComposerDictationCaptureOptions = PromptDictationCaptureOptions & Pick<SpeechCaptureOptions, "onLevel">;
+
 export interface ComposerDictationCapability {
   readonly getStatus: (options?: SpeechApiRequestOptions) => Promise<SpeechServiceStatusResponse>;
-  readonly createCaptureSession: (options: PromptDictationCaptureOptions) => Promise<SpeechCaptureSession>;
+  readonly createCaptureSession: (options: ComposerDictationCaptureOptions) => Promise<SpeechCaptureSession>;
   readonly speechApi: PromptDictationSpeechApi;
   readonly statusPollIntervalMs?: number;
 }

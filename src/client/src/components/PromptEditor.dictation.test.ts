@@ -4,8 +4,7 @@ import { EditorSelection } from "@codemirror/state";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpeechApiError } from "../api/speech";
 import type { SpeechServiceStatusResponse } from "../../../shared/speechContracts";
-import type { ComposerDictationCapability } from "../composerCapabilities";
-import type { PromptDictationCaptureOptions } from "../controllers/promptDictationController";
+import type { ComposerDictationCapability, ComposerDictationCaptureOptions } from "../composerCapabilities";
 import type { SpeechCaptureSession } from "../speechCapture";
 import { SPEECH_POLICY } from "../../../shared/speechPolicy";
 import { PromptEditor } from "./PromptEditor";
@@ -65,6 +64,65 @@ describe("PromptEditor local dictation", () => {
     expect(statusText(editor)).toContain("This gateway, not the selected machine · raw audio not stored.");
   });
 
+  it("draws the turn in the locked draft box, counts the wait, and cancels it from there", async () => {
+    const dictation = fakeDictation();
+    const editor = await mount({ dictation: dictation.capability });
+
+    requiredMic(editor).click();
+    dictation.captureReady();
+    await settle(editor);
+
+    // Listening: the waveform and the voiced clock are the whole report, and
+    // the box the reader cannot type into says so.
+    expect(readout(editor)?.textContent).toContain("0:00");
+    expect(readout(editor)?.querySelector(".dictation-wave")).not.toBeNull();
+    expect(editorBox(editor)?.classList.contains("dictation-live")).toBe(true);
+
+    dictation.emitLevel({ rms: 0.09, voiced: true, sampleCount: SPEECH_POLICY.audio.sampleRateHz });
+    dictation.emitLevel({ rms: 0.001, voiced: false, sampleCount: SPEECH_POLICY.audio.sampleRateHz });
+    await settle(editor);
+
+    // One bar per reported batch, silence included, and the clock counts only
+    // the voiced second.
+    expect(waveBars(editor)).toHaveLength(2);
+    expect(waveBars(editor)[1]?.classList.contains("quiet")).toBe(true);
+    expect(readout(editor)?.textContent).toContain("0:01");
+
+    dictation.emitSpeech();
+    requiredMic(editor).click();
+    dictation.resolveStop(capturedTurn(0.3));
+    await settle(editor);
+
+    expect(readout(editor)?.textContent).toContain("Transcribing");
+    await vi.advanceTimersByTimeAsync(2_400);
+    await settle(editor);
+    expect(readout(editor)?.textContent).toContain("2.4s");
+
+    cancelWaitButton(editor).click();
+    await settle(editor);
+
+    expect(readout(editor)).toBeNull();
+    expect(editorBox(editor)?.classList.contains("dictation-live")).toBe(false);
+  });
+
+  it("states a turn the gateway would reject as too short, and never sends it", async () => {
+    const dictation = fakeDictation();
+    const editor = await mount({ dictation: dictation.capability });
+
+    requiredMic(editor).click();
+    dictation.captureReady();
+    await settle(editor);
+    dictation.emitSpeech();
+    requiredMic(editor).click();
+    // 99 ms of audio. The route answers HTTP 400 too_short below 100 ms.
+    dictation.resolveStop(new Float32Array(SPEECH_POLICY.audio.minRequestSamples - 1).fill(0.2));
+    await settle(editor);
+
+    expect(dictation.transcribeCalls).toBe(0);
+    expect(readout(editor)?.textContent).toContain("Too short to transcribe.");
+    expect(requiredMic(editor).disabled).toBe(false);
+  });
+
   it("covers tap auto-completion: pointerdown/up captures, transcribes, replaces the selected draft, and never sends", async () => {
     const dictation = fakeDictation();
     const onSend = vi.fn();
@@ -93,7 +151,7 @@ describe("PromptEditor local dictation", () => {
     await settle(editor);
     await vi.advanceTimersByTimeAsync(SPEECH_POLICY.timing.endpointCompletionGraceMs);
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.3, 0.4, 0.5]));
+    dictation.resolveStop(capturedTurn(0.3));
     await settle(editor);
     dictation.resolveTranscribe({ text: "local speech" });
     await settle(editor);
@@ -130,7 +188,7 @@ describe("PromptEditor local dictation", () => {
     await settle(editor);
     await vi.advanceTimersByTimeAsync(SPEECH_POLICY.timing.endpointCompletionGraceMs);
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.4]));
+    dictation.resolveStop(capturedTurn(0.4));
     await settle(editor);
     dictation.resolveTranscribe({ text: "later complete" });
     await settle(editor);
@@ -153,7 +211,7 @@ describe("PromptEditor local dictation", () => {
     await settle(editor);
     await vi.advanceTimersByTimeAsync(SPEECH_POLICY.timing.endpointCompletionGraceMs);
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.3]));
+    dictation.resolveStop(capturedTurn(0.3));
     await settle(editor);
     dictation.resolveTranscribe({ text: "   " });
     await settle(editor);
@@ -187,7 +245,7 @@ describe("PromptEditor local dictation", () => {
 
     pointer(requiredMic(editor), "pointerup");
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.6]));
+    dictation.resolveStop(capturedTurn(0.6));
     await settle(editor);
     dictation.resolveTranscribe({ text: "held turn" });
     await settle(editor);
@@ -208,7 +266,7 @@ describe("PromptEditor local dictation", () => {
 
     key(button, "keydown", "Enter");
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.4]));
+    dictation.resolveStop(capturedTurn(0.4));
     await settle(editor);
     dictation.resolveTranscribe({ text: "enter turn" });
     await settle(editor);
@@ -236,7 +294,7 @@ describe("PromptEditor local dictation", () => {
     expect(statusText(editor)).toContain("Listening");
 
     key(button, "keydown", "Enter");
-    dictation.resolveStop(new Float32Array([0.7]));
+    dictation.resolveStop(capturedTurn(0.7));
     await settle(editor);
     dictation.resolveTranscribe({ text: "first turn" });
     await settle(editor);
@@ -267,7 +325,7 @@ describe("PromptEditor local dictation", () => {
 
     key(button, "keydown", "Enter");
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.7]));
+    dictation.resolveStop(capturedTurn(0.7));
     await settle(editor);
     dictation.resolveTranscribe({ text: "manual done" });
     await settle(editor);
@@ -343,7 +401,7 @@ describe("PromptEditor local dictation", () => {
     await settle(editor);
     await vi.advanceTimersByTimeAsync(SPEECH_POLICY.timing.endpointCompletionGraceMs);
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.8]));
+    dictation.resolveStop(capturedTurn(0.8));
     await settle(editor);
     dictation.rejectTranscribe(new SpeechApiError("overloaded", "busy", { retryable: true }));
     await settle(editor);
@@ -367,7 +425,7 @@ describe("PromptEditor local dictation", () => {
     await settle(editor);
     await vi.advanceTimersByTimeAsync(SPEECH_POLICY.timing.endpointCompletionGraceMs);
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.9]));
+    dictation.resolveStop(capturedTurn(0.9));
     await settle(editor);
     dictation.rejectTranscribe(new SpeechApiError("timeout", "timeout", { retryable: true }));
     await settle(editor);
@@ -400,7 +458,7 @@ describe("PromptEditor local dictation", () => {
     await settle(editor);
     await vi.advanceTimersByTimeAsync(SPEECH_POLICY.timing.endpointCompletionGraceMs);
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.5]));
+    dictation.resolveStop(capturedTurn(0.5));
     await settle(editor);
     dictation.resolveTranscribe({ text: "kept turn" });
     await settle(editor);
@@ -427,7 +485,7 @@ describe("PromptEditor local dictation", () => {
     dictation.emitSpeech();
     dictation.emitPause(new Float32Array([0.1]));
     dictation.resolveCheck({ complete: true, probability: 0.9, samples: 1 });
-    dictation.resolveStop(new Float32Array([0.8]));
+    dictation.resolveStop(capturedTurn(0.8));
     dictation.resolveTranscribe({ text: "late text" });
     await settle(editor);
 
@@ -455,7 +513,7 @@ describe("PromptEditor local dictation", () => {
     await settle(editor);
     key(requiredMic(editor), "keydown", "Enter");
     await settle(editor);
-    dictation.resolveStop(new Float32Array([0.8]));
+    dictation.resolveStop(capturedTurn(0.8));
     await settle(editor);
     dictation.resolveTranscribe({ text: "connected again" });
     await settle(editor);
@@ -590,6 +648,16 @@ describe("PromptEditor local dictation", () => {
   });
 });
 
+/**
+ * A captured turn long enough for the transcription route to accept it.
+ *
+ * The route rejects anything under 100 ms of audio with HTTP 400 too_short, so
+ * a one-sample fixture would only ever exercise the failure path.
+ */
+function capturedTurn(level = 0.2): Float32Array {
+  return new Float32Array(SPEECH_POLICY.audio.minRequestSamples).fill(level);
+}
+
 async function mount(options: { dictation?: ComposerDictationCapability; onSend?: (...args: unknown[]) => void; capabilities?: Partial<PromptEditor["capabilities"]> } = {}): Promise<PromptEditor> {
   const editor = new PromptEditor();
   editor.machineId = "local";
@@ -605,7 +673,7 @@ async function mount(options: { dictation?: ComposerDictationCapability; onSend?
 function fakeDictation(status: Partial<Awaited<ReturnType<ComposerDictationCapability["getStatus"]>>> = {}) {
   let currentStatus: SpeechServiceStatusResponse = speechStatus(status);
   const statusDeferreds: Deferred<SpeechServiceStatusResponse>[] = [];
-  let captureOptions: PromptDictationCaptureOptions | undefined;
+  let captureOptions: ComposerDictationCaptureOptions | undefined;
   let captureDeferred = deferred<SpeechCaptureSession>();
   let stopDeferred = deferred<Float32Array>();
   let checkDeferred = deferred<{ complete: boolean; probability: number; samples: number }>();
@@ -615,6 +683,7 @@ function fakeDictation(status: Partial<Awaited<ReturnType<ComposerDictationCapab
   let pauseEndSample = 2;
   let checkCalls = 0;
   let abortCalls = 0;
+  let transcribeCalls = 0;
   const session: SpeechCaptureSession = {
     actualSampleRateHz: 16_000,
     failure: undefined,
@@ -629,20 +698,21 @@ function fakeDictation(status: Partial<Awaited<ReturnType<ComposerDictationCapab
     get captureCalls() { return captureCalls; },
     get checkCalls() { return checkCalls; },
     get abortCalls() { return abortCalls; },
+    get transcribeCalls() { return transcribeCalls; },
     capability: {
       getStatus: () => {
         statusCalls += 1;
         const next = statusDeferreds.shift();
         return next?.promise ?? Promise.resolve(currentStatus);
       },
-      createCaptureSession: (options: PromptDictationCaptureOptions) => {
+      createCaptureSession: (options: ComposerDictationCaptureOptions) => {
         captureCalls += 1;
         captureOptions = options;
         return captureDeferred.promise;
       },
       speechApi: {
         checkTurn: () => { checkCalls += 1; return checkDeferred.promise; },
-        transcribe: () => transcribeDeferred.promise,
+        transcribe: () => { transcribeCalls += 1; return transcribeDeferred.promise; },
       },
       statusPollIntervalMs: 60_000,
     } satisfies ComposerDictationCapability,
@@ -652,6 +722,8 @@ function fakeDictation(status: Partial<Awaited<ReturnType<ComposerDictationCapab
       ready.resolve(session);
     },
     emitSpeech: () => { captureOptions?.onSpeechActivity({ startSample: 0, endSample: pauseEndSample, sampleCount: 16_000 }); },
+    /** One measured batch, exactly as the capture worklet reports it. */
+    emitLevel: (level: { rms: number; voiced: boolean; sampleCount: number }) => { captureOptions?.onLevel?.(level); },
     emitPause: (samples: Float32Array) => {
       pauseEndSample += 16_000;
       captureOptions?.onPauseCandidate({ samples, endSample: pauseEndSample });
@@ -747,6 +819,24 @@ function button(editor: PromptEditor, selector: string): HTMLButtonElement {
 
 function statusText(editor: PromptEditor): string {
   return editor.shadowRoot?.querySelector(".dictation-status")?.textContent ?? "";
+}
+
+function readout(editor: PromptEditor): HTMLElement | null {
+  return editor.draft?.querySelector<HTMLElement>(".dictation-readout") ?? null;
+}
+
+function waveBars(editor: PromptEditor): HTMLElement[] {
+  return [...(readout(editor)?.querySelectorAll<HTMLElement>(".dictation-wave i") ?? [])];
+}
+
+function editorBox(editor: PromptEditor): HTMLElement | null {
+  return editor.draft?.querySelector<HTMLElement>(".cm-editor") ?? null;
+}
+
+function cancelWaitButton(editor: PromptEditor): HTMLButtonElement {
+  const found = readout(editor)?.querySelector<HTMLButtonElement>(".dictation-cancel");
+  if (found === null || found === undefined) throw new Error("Expected a cancel control in the dictation readout");
+  return found;
 }
 
 function pointer(target: HTMLElement, type: string, pointerId = 1): void {

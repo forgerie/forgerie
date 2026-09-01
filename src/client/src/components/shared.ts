@@ -1146,6 +1146,49 @@ export const promptEditorStyles = css`
   .dictation-held[aria-pressed="true"], .dictation-manual-only[aria-pressed="true"] { border-color: var(--pi-warning-border, var(--pi-accent)); color: var(--pi-warning); }
   .dictation-transcribing { color: var(--pi-accent); }
   .dictation-status { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-muted); font-size: var(--pi-text-sm); text-align: right; }
+  /*
+   * Dictation reports from inside the draft box.
+   *
+   * It has already locked that box, so the space is taken and unused. A strip
+   * above the composer would spend 40px of height on an island that is 110px
+   * tall on a folded phone, and would duplicate a reserved surface. One signal
+   * per fact: the border says the box is not the reader's to type in, the
+   * waveform says audio is arriving, the number says it is still happening.
+   */
+  .markdown-editor .cm-editor.dictation-live { border-color: var(--pi-accent-border); transition: border-color var(--pi-motion-fast) ease-out; }
+  .dictation-readout { position: absolute; inset: 0; display: flex; align-items: center; gap: var(--pi-space-md); padding: 0 var(--pi-space-md); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); color: var(--pi-text-secondary); pointer-events: none; }
+  .dictation-readout > * { pointer-events: auto; }
+  /* Only states that need explaining carry words: a live waveform beside a
+     running clock says listening on its own, and the microphone below it is
+     the control that ends the turn. */
+  .dictation-readout .dictation-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
+  .dictation-readout.dictation-stated { justify-content: center; }
+  /*
+   * The waveform is measured, not decorative: one bar per 50ms batch, height
+   * from the RMS the capture worklet already computes for its own voicing
+   * decision. It takes the width, so the whole turn stays legible.
+   */
+  .dictation-readout .dictation-wave { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 2px; height: 20px; overflow: hidden; }
+  .dictation-readout .dictation-wave::before { content: ""; position: absolute; inset-inline: 0; top: 50%; height: 1px; background: var(--pi-border-muted); }
+  .dictation-readout .dictation-wave i { position: relative; flex: 0 0 auto; width: 2px; min-height: 2px; border-radius: 1px; background: var(--pi-accent); transition: height var(--pi-motion-fast) ease-out; }
+  .dictation-readout .dictation-wave i.quiet { background: var(--pi-border); }
+  /* Working, not live: the audio is with the gateway now. The sweep travels at
+     a constant rate and maps to nothing, because no progress is reported. */
+  .dictation-readout.dictation-working .dictation-wave { opacity: .55; }
+  .dictation-readout.dictation-working .dictation-wave::after { content: ""; position: absolute; inset-block: 0; inset-inline-start: 0; width: 45%; background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--pi-accent) 18%, transparent) 50%, transparent 100%); animation: dictation-sweep 1.8s ease-in-out infinite; }
+  @keyframes dictation-sweep { from { transform: translateX(-100%); } to { transform: translateX(322%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .dictation-readout .dictation-wave i { transition: none; }
+    .dictation-readout.dictation-working .dictation-wave::after { animation: none; opacity: .35; transform: none; }
+  }
+  /* The number is the proof that something is still happening, so it is the one
+     thing here set in the reader's own ink. */
+  .dictation-readout .dictation-clock { flex: 0 0 auto; color: var(--pi-text); font-variant-numeric: tabular-nums; }
+  /* Capability, so it never yields: the only way to abandon a transcription
+     that would otherwise hold the draft for its full deadline. Drawn as a word,
+     hit as a full touch target, taken back out of the line's height. */
+  .dictation-readout .dictation-cancel { flex: 0 0 auto; min-height: 44px; padding: 0 4px; margin-block: -13px; border: 0; background: none; color: var(--pi-muted); font: inherit; font-size: var(--pi-text-sm); cursor: pointer; }
+  .dictation-readout .dictation-cancel:hover, .dictation-readout .dictation-cancel:focus-visible { color: var(--pi-text); }
   .dictation-privacy { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
   .dictation-retry-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; }
   .dictation-retry-actions button { min-height: 28px; padding: 4px 7px; font-size: var(--pi-text-sm); }

@@ -14,7 +14,9 @@ function dialogStyles(): string {
   return voiceComposerDialogStyles.cssText.replaceAll(/\s+/gu, " ");
 }
 
-const SAMPLES = new Float32Array([0.2, 0.4, 0.2]);
+// A turn the transcription route accepts: it rejects anything under 100 ms of
+// audio, so a three-sample fixture would only ever exercise the failure path.
+const SAMPLES = new Float32Array(SPEECH_POLICY.audio.minRequestSamples).fill(0.2);
 
 /** Mirrors LISTEN_TICK_MS in the voice turn: the rate a silence is noticed at. */
 const LISTEN_TICK_MS = 150;

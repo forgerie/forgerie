@@ -4,7 +4,7 @@ import { indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/langu
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { classHighlighter } from "@lezer/highlight";
-import { html, LitElement, type PropertyValues } from "lit";
+import { html, LitElement, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { PromptAttachment, PromptAttachmentDelivery } from "../../../shared/apiTypes";
 import { base64ByteLength } from "../../../shared/promptAttachments";
@@ -85,6 +85,14 @@ export class ComposerDraft extends LitElement {
   @property({ attribute: false }) onDisplayStateChange?: (state: ComposerDraftDisplayState) => void;
   @property({ attribute: false }) onCompletionError?: (error: ComposerDraftCompletionError) => void;
   @property({ attribute: false }) onDraftEdited?: () => void;
+  /**
+   * What dictation is doing, drawn inside the box it has locked.
+   *
+   * The draft owns this space and stops accepting keys the moment dictation
+   * starts, so the state belongs here rather than in a strip above the
+   * composer. The host supplies the drawing; the draft only makes room.
+   */
+  @property({ attribute: false }) dictationReadout?: TemplateResult;
 
   @query(".markdown-editor") private editorHost?: HTMLDivElement;
   @query(".attachment-input") private attachmentInput?: HTMLInputElement;
@@ -179,6 +187,7 @@ export class ComposerDraft extends LitElement {
     if (changed.has("disabled")) this.updateEditorDisabledState();
     if (changed.has("placeholderText")) this.updateEditorPlaceholder();
     if (changed.has("storageKey")) this.syncEditorDoc();
+    if (changed.has("dictationReadout")) this.syncDictationBox();
     this.syncEditorAccessibility();
     this.syncCompletionMenuBoundary();
     this.publishDisplayState();
@@ -235,7 +244,10 @@ export class ComposerDraft extends LitElement {
         @dragover=${(event: DragEvent) => { this.handleDragOver(event); }}
         @drop=${(event: DragEvent) => { void this.handleDrop(event); }}
       >
-        <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label=${this.editorLabel} aria-disabled=${this.disabled ? "true" : "false"}></div>
+        <div class="editor-box">
+          <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label=${this.editorLabel} aria-disabled=${this.disabled ? "true" : "false"}></div>
+          ${this.dictationReadout ?? nothing}
+        </div>
         <input class="attachment-input" type="file" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
         ${shellMode ? html`<div class="mode-hint">Shell command${shellInputMode.excludeFromContext ? " · excluded from context" : ""}</div>` : null}
         <div class="composer-live-region" aria-live="polite" aria-atomic="true" data-live="attachments">${this.politeAnnouncement}</div>
@@ -1021,6 +1033,18 @@ export class ComposerDraft extends LitElement {
   private isDictationActive(): boolean {
     const editor = this.editor;
     return editor !== undefined && isComposerDraftDictationActive(editor.state);
+  }
+
+  /**
+   * Mark the box the reader cannot type into.
+   *
+   * CodeMirror owns this element, so the class goes on rather than a rewrite of
+   * its DOM. It is set from the readout the host supplies rather than from the
+   * dictation lock, so the outline and the drawing inside it can never disagree.
+   */
+  private syncDictationBox(): void {
+    const box = this.editorHost?.querySelector(".cm-editor");
+    box?.classList.toggle("dictation-live", this.dictationReadout !== undefined);
   }
 
   private announcePolite(message: string): void {

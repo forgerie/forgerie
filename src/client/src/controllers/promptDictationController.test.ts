@@ -22,7 +22,7 @@ describe("PromptDictationController", () => {
     expect(harness.controller.release()).toBe(true);
     expect(harness.state()).toEqual({ tag: "acquiring", gesture: "released" });
 
-    const capture = fakeCapture([1, 2, 3]);
+    const capture = fakeCapture(turn(1, 2, 3));
     captureReady.resolve(capture);
     await flushPromises();
     expect(harness.state()).toEqual({ tag: "auto" });
@@ -53,7 +53,7 @@ describe("PromptDictationController", () => {
     harness.controller.release();
     expect(harness.state()).toEqual({ tag: "acquiring", gesture: "released" });
 
-    const capture = fakeCapture([9]);
+    const capture = fakeCapture(turn(9));
     captureReady.resolve(capture);
     await flushPromises();
 
@@ -69,7 +69,7 @@ describe("PromptDictationController", () => {
 
     harness.controller.press();
     harness.controller.cancel();
-    const lateCapture = fakeCapture([1]);
+    const lateCapture = fakeCapture(turn(1));
     captureReady.resolve(lateCapture);
     await flushPromises();
 
@@ -90,7 +90,7 @@ describe("PromptDictationController", () => {
     ownerLost.controller.press();
     ownerLost.draft.ownerKeyValue = "owner-b";
     ownerLost.controller.ownerChanged();
-    ownerCapture.resolve(fakeCapture([1]));
+    ownerCapture.resolve(fakeCapture(turn(1)));
     await flushPromises();
     expect(ownerLost.draft.events).toEqual(["begin:owner-a", "abort"]);
     expect(ownerLost.state()).toEqual({ tag: "idle" });
@@ -123,7 +123,7 @@ describe("PromptDictationController", () => {
 
   it("covers AE3: hold suppresses endpointing until release and transcribes the full turn once", async () => {
     const harness = createHarness();
-    const capture = fakeCapture([1, 2, 3, 4]);
+    const capture = fakeCapture(turn(1, 2, 3, 4));
     harness.createCaptureSession.mockResolvedValue(capture);
     harness.controller.press();
     await flushPromises();
@@ -139,7 +139,7 @@ describe("PromptDictationController", () => {
     await flushPromises();
 
     expect(capture.stopCalls).toBe(1);
-    expect(harness.transcribe.mock.calls[0]?.[0]).toEqual(new Float32Array([1, 2, 3, 4]));
+    expect(harness.transcribe.mock.calls[0]?.[0]).toEqual(new Float32Array(turn(1, 2, 3, 4)));
     expect(harness.draft.events).toEqual(["begin:owner-a", "commit:held turn", "finish"]);
   });
 
@@ -166,7 +166,7 @@ describe("PromptDictationController", () => {
   });
 
   it("covers AE5: detector/backend failure enters manual-only without audio loss; manual completion still transcribes", async () => {
-    const harness = await startedAutoHarness([7, 8]);
+    const harness = await startedAutoHarness(turn(7, 8));
     harness.checkTurn.mockRejectedValue(new SpeechApiError("overloaded", "busy", { retryable: true }));
 
     harness.pause([7, 8]);
@@ -178,12 +178,12 @@ describe("PromptDictationController", () => {
     await flushPromises();
     await flushPromises();
 
-    expect(harness.transcribe.mock.calls[0]?.[0]).toEqual(new Float32Array([7, 8]));
+    expect(harness.transcribe.mock.calls[0]?.[0]).toEqual(new Float32Array(turn(7, 8)));
     expect(harness.draft.events).toContain("commit:kept audio");
   });
 
   it("covers AE6: late endpoint and transcription callbacks are rejected after owner change", async () => {
-    const harness = await startedAutoHarness([1, 2]);
+    const harness = await startedAutoHarness(turn(1, 2));
     const decision = deferred<SpeechTurnDecisionResponse>();
     harness.checkTurn.mockReturnValue(decision.promise);
 
@@ -198,7 +198,7 @@ describe("PromptDictationController", () => {
     expect(harness.transcribe).not.toHaveBeenCalled();
     expect(harness.draft.events).toEqual(["begin:owner-a", "abort"]);
 
-    const transcribing = await startedAutoHarness([3]);
+    const transcribing = await startedAutoHarness(turn(3));
     const transcript = deferred<SpeechTranscriptionResponse>();
     transcribing.checkTurn.mockResolvedValue({ complete: true, probability: 1, samples: 1 });
     transcribing.transcribe.mockReturnValue(transcript.promise);
@@ -215,7 +215,7 @@ describe("PromptDictationController", () => {
   });
 
   it("aborts a pending endpoint check when voiced speech resumes and ignores stale completion", async () => {
-    const harness = await startedAutoHarness([1, 2, 3]);
+    const harness = await startedAutoHarness(turn(1, 2, 3));
     const decision = deferred<SpeechTurnDecisionResponse>();
     harness.checkTurn.mockReturnValue(decision.promise);
 
@@ -234,7 +234,7 @@ describe("PromptDictationController", () => {
   });
 
   it("cancels provisional endpoint completion when queued voiced speech arrives during the grace window", async () => {
-    const harness = await startedAutoHarness([1, 2, 3]);
+    const harness = await startedAutoHarness(turn(1, 2, 3));
     harness.checkTurn.mockResolvedValue({ complete: true, probability: 1, samples: 1 });
 
     harness.pause([1]);
@@ -251,7 +251,7 @@ describe("PromptDictationController", () => {
   });
 
   it("lets a second press in checking abort the endpoint signal, finalize once, and ignore late completion", async () => {
-    const harness = await startedAutoHarness([1, 2]);
+    const harness = await startedAutoHarness(turn(1, 2));
     const decision = deferred<SpeechTurnDecisionResponse>();
     harness.checkTurn.mockReturnValue(decision.promise);
     harness.transcribe.mockResolvedValue({ text: "manual checking" });
@@ -276,7 +276,7 @@ describe("PromptDictationController", () => {
 
   it("enforces endpoint request and byte budgets by degrading to manual-only", async () => {
     const policy = smallEndpointPolicy();
-    const harness = await startedAutoHarness([1, 2], policy);
+    const harness = await startedAutoHarness(turn(1, 2), policy);
     harness.checkTurn.mockResolvedValue({ complete: false, probability: 0.1, samples: 1 });
 
     harness.pause([1]);
@@ -289,19 +289,46 @@ describe("PromptDictationController", () => {
   });
 
   it("covers AE7: limit terminal forces one transcription; other capture failures abort", async () => {
-    const limitHarness = await startedAutoHarness([1, 2]);
+    const limitHarness = await startedAutoHarness(turn(1, 2));
     limitHarness.transcribe.mockResolvedValue({ text: "limit" });
-    limitHarness.terminal({ kind: "failed", error: new SpeechCaptureError("limit_reached", "limit"), samples: new Float32Array([1, 2]) });
+    limitHarness.terminal({ kind: "failed", error: new SpeechCaptureError("limit_reached", "limit"), samples: new Float32Array(turn(1, 2)) });
     await flushPromises();
     expect(limitHarness.transcribe).toHaveBeenCalledOnce();
     expect(limitHarness.draft.events).toContain("commit:limit");
 
-    const failedHarness = await startedAutoHarness([1, 2]);
+    const failedHarness = await startedAutoHarness(turn(1, 2));
     failedHarness.terminal({ kind: "failed", error: new SpeechCaptureError("worklet_failed", "worklet failed"), samples: new Float32Array() });
     await flushPromises();
     expect(failedHarness.transcribe).not.toHaveBeenCalled();
     expect(failedHarness.state()).toMatchObject({ tag: "error", reason: "capture-failed" });
     expect(failedHarness.draft.events).toEqual(["begin:owner-a", "abort"]);
+  });
+
+  it("refuses a turn the transcription route would reject as too short, without spending a request", async () => {
+    // 99 ms of audio: one sample under the route's own minimum, which answers
+    // HTTP 400 too_short. Twelve of forty-two real requests in one day were this.
+    const harness = await startedAutoHarness(new Array<number>(SPEECH_POLICY.audio.minRequestSamples - 1).fill(0.2));
+
+    harness.controller.press();
+    await flushPromises();
+    await flushPromises();
+
+    expect(harness.transcribe).not.toHaveBeenCalled();
+    expect(harness.state()).toMatchObject({ tag: "error", reason: "too-short", retryable: true });
+    // The draft lock is released rather than aborted: there was no transcript
+    // to insert, and whatever the reader had typed is still theirs.
+    expect(harness.draft.events).toEqual(["begin:owner-a", "finish"]);
+
+    // The microphone works again straight away.
+    harness.installCapture(turn(1, 2));
+    harness.transcribe.mockResolvedValue({ text: "second try" });
+    expect(harness.controller.press()).toBe(true);
+    await flushPromises();
+    harness.controller.release();
+    harness.controller.press();
+    await flushPromises();
+    await flushPromises();
+    expect(harness.draft.events).toContain("commit:second try");
   });
 
   it("initial-speech timeout aborts an empty turn and unlocks the draft", async () => {
@@ -321,7 +348,7 @@ describe("PromptDictationController", () => {
   });
 
   it("retains one owner-bound final PCM after retryable transcription failures and supports retry, discard, and expiry", async () => {
-    const harness = await startedAutoHarness([5, 6]);
+    const harness = await startedAutoHarness(turn(5, 6));
     harness.transcribe.mockRejectedValueOnce(new SpeechApiError("network", "offline", { retryable: true })).mockResolvedValueOnce({ text: "retry text" });
 
     harness.controller.press();
@@ -335,10 +362,10 @@ describe("PromptDictationController", () => {
     expect(harness.controller.retryRetained()).toBe(false);
     await flushPromises();
     expect(harness.transcribe).toHaveBeenCalledTimes(2);
-    expect(harness.transcribe.mock.calls[1]?.[0]).toEqual(new Float32Array([5, 6]));
+    expect(harness.transcribe.mock.calls[1]?.[0]).toEqual(new Float32Array(turn(5, 6)));
     expect(harness.draft.events).toEqual(["begin:owner-a", "commit:retry text", "finish"]);
 
-    const expiring = await startedAutoHarness([8]);
+    const expiring = await startedAutoHarness(turn(8));
     expiring.transcribe.mockRejectedValue(new SpeechApiError("timeout", "slow", { retryable: true }));
     expiring.controller.press();
     await flushPromises();
@@ -348,7 +375,7 @@ describe("PromptDictationController", () => {
     expect(expiring.state()).toEqual({ tag: "idle" });
     expect(expiring.draft.events).toEqual(["begin:owner-a", "abort"]);
 
-    const discarded = await startedAutoHarness([9]);
+    const discarded = await startedAutoHarness(turn(9));
     discarded.transcribe.mockRejectedValue(new SpeechApiError("overloaded", "busy", { retryable: true }));
     discarded.controller.press();
     await flushPromises();
@@ -359,7 +386,7 @@ describe("PromptDictationController", () => {
   });
 
   it("empty and nonretryable transcription results preserve the old draft and unlock", async () => {
-    const empty = await startedAutoHarness([1]);
+    const empty = await startedAutoHarness(turn(1));
     empty.transcribe.mockResolvedValue({ text: "   " });
     empty.controller.press();
     await flushPromises();
@@ -367,7 +394,7 @@ describe("PromptDictationController", () => {
     expect(empty.draft.events).toEqual(["begin:owner-a", "finish"]);
     expect(empty.state()).toEqual({ tag: "empty" });
 
-    const failed = await startedAutoHarness([1]);
+    const failed = await startedAutoHarness(turn(1));
     failed.transcribe.mockRejectedValue(new SpeechApiError("transcription_empty", "empty", { retryable: false }));
     failed.controller.press();
     await flushPromises();
@@ -377,7 +404,7 @@ describe("PromptDictationController", () => {
   });
 
   it("disconnect, archived/disabled, page background, and dispose abort; resize/orientation preserves active capture", async () => {
-    const harness = await startedAutoHarness([1]);
+    const harness = await startedAutoHarness(turn(1));
     harness.controller.resizeOrOrientationChanged();
     expect(harness.state()).toEqual({ tag: "auto" });
     harness.controller.pageBackgrounded();
@@ -385,12 +412,12 @@ describe("PromptDictationController", () => {
     expect(harness.capture?.abortCalls).toBe(1);
     expect(harness.state()).toEqual({ tag: "idle" });
 
-    const disabled = await startedAutoHarness([1]);
+    const disabled = await startedAutoHarness(turn(1));
     disabled.controller.surfaceDisabled();
     await flushPromises();
     expect(disabled.capture?.abortCalls).toBe(1);
 
-    const disposed = await startedAutoHarness([1]);
+    const disposed = await startedAutoHarness(turn(1));
     disposed.controller.dispose();
     await flushPromises();
     expect(disposed.capture?.abortCalls).toBe(1);
@@ -440,7 +467,7 @@ describe("PromptDictationController", () => {
   });
 
   it("lets limit terminal samples win once when manual finalization is pending", async () => {
-    const harness = await startedAutoHarness([9]);
+    const harness = await startedAutoHarness(turn(9));
     const stopped = deferred<Float32Array>();
     if (harness.capture !== undefined) harness.capture.stopImpl = () => stopped.promise;
     harness.transcribe.mockResolvedValue({ text: "limit samples" });
@@ -448,10 +475,10 @@ describe("PromptDictationController", () => {
     harness.controller.press();
     expect(harness.state()).toEqual({ tag: "transcribing" });
 
-    harness.terminal({ kind: "failed", error: new SpeechCaptureError("limit_reached", "limit"), samples: new Float32Array([1, 2]) });
+    harness.terminal({ kind: "failed", error: new SpeechCaptureError("limit_reached", "limit"), samples: new Float32Array(turn(1, 2)) });
     await flushPromises();
     expect(harness.transcribe).toHaveBeenCalledOnce();
-    expect(harness.transcribe.mock.calls[0]?.[0]).toEqual(new Float32Array([1, 2]));
+    expect(harness.transcribe.mock.calls[0]?.[0]).toEqual(new Float32Array(turn(1, 2)));
 
     stopped.resolve(new Float32Array([]));
     await flushPromises();
@@ -460,7 +487,7 @@ describe("PromptDictationController", () => {
   });
 
   it("invalidates pending endpoint checks before limit transcription", async () => {
-    const harness = await startedAutoHarness([1, 2]);
+    const harness = await startedAutoHarness(turn(1, 2));
     const decision = deferred<SpeechTurnDecisionResponse>();
     harness.checkTurn.mockReturnValue(decision.promise);
     harness.transcribe.mockResolvedValue({ text: "limit won" });
@@ -469,7 +496,7 @@ describe("PromptDictationController", () => {
     const signal = harness.checkTurn.mock.calls[0]?.[1]?.signal;
     expect(harness.state()).toEqual({ tag: "checking" });
 
-    harness.terminal({ kind: "failed", error: new SpeechCaptureError("limit_reached", "limit"), samples: new Float32Array([1, 2]) });
+    harness.terminal({ kind: "failed", error: new SpeechCaptureError("limit_reached", "limit"), samples: new Float32Array(turn(1, 2)) });
     expect(signal?.aborted).toBe(true);
     await flushPromises();
     expect(harness.state()).toEqual({ tag: "idle" });
@@ -481,7 +508,7 @@ describe("PromptDictationController", () => {
   });
 
   it("keeps latest capability readiness when unavailable cleanup resolves late", async () => {
-    const harness = await startedAutoHarness([1]);
+    const harness = await startedAutoHarness(turn(1));
     const abortDone = deferred<undefined>();
     if (harness.capture !== undefined) harness.capture.abortImpl = () => abortDone.promise;
 
@@ -502,7 +529,7 @@ describe("PromptDictationController", () => {
   });
 
   it("uses manual-only capability without aborting active capture or running endpoint checks", async () => {
-    const harness = await startedAutoHarness([4, 5]);
+    const harness = await startedAutoHarness(turn(4, 5));
 
     harness.controller.setCapability("manual-only", "smart-turn-unavailable");
     expect(harness.capture?.abortCalls).toBe(0);
@@ -520,13 +547,13 @@ describe("PromptDictationController", () => {
   });
 
   it("surfaces explicit smart-turn-unavailable and detector-failed manual-only reasons", async () => {
-    const unavailable = await startedAutoHarness([1]);
+    const unavailable = await startedAutoHarness(turn(1));
     unavailable.checkTurn.mockRejectedValue(new SpeechApiError("speech_unavailable", "smart turn unavailable", { retryable: true }));
     unavailable.pause([1], 1);
     await flushPromises();
     expect(unavailable.state()).toEqual({ tag: "manual-only", reason: "smart-turn-unavailable" });
 
-    const detector = await startedAutoHarness([1]);
+    const detector = await startedAutoHarness(turn(1));
     detector.checkTurn.mockRejectedValue(new SpeechApiError("speech_failed", "detector failed", { retryable: true }));
     detector.pause([1], 1);
     await flushPromises();
@@ -534,7 +561,7 @@ describe("PromptDictationController", () => {
   });
 
   it("treats rejected nonempty transcript insertion as a nonretryable transcription error", async () => {
-    const harness = await startedAutoHarness([1]);
+    const harness = await startedAutoHarness(turn(1));
     harness.transcribe.mockResolvedValue({ text: "cannot insert" });
     harness.draft.commitResult = false;
 
@@ -553,7 +580,7 @@ describe("PromptDictationController", () => {
       audio: { ...SPEECH_POLICY.audio, sampleRateHz: 1_000 },
       endpoint: { ...SPEECH_POLICY.endpoint, minIntervalMs: 10, minNewVoicedAudioMs: 5, maxRequestsPerTurn: 10, maxBytesPerTurn: 1_000_000 },
     };
-    const harness = await startedAutoHarness([1], policy);
+    const harness = await startedAutoHarness(turn(1), policy);
     harness.checkTurn.mockResolvedValue({ complete: false, probability: 0.1, samples: 1 });
 
     harness.pause([1], 100);
@@ -573,7 +600,7 @@ describe("PromptDictationController", () => {
   });
 
   it("aborts capture, endpoint, transcription, and retained buffers on owner loss", async () => {
-    const checking = await startedAutoHarness([1, 2]);
+    const checking = await startedAutoHarness(turn(1, 2));
     const decision = deferred<SpeechTurnDecisionResponse>();
     checking.checkTurn.mockReturnValue(decision.promise);
     checking.pause([1], 1);
@@ -588,7 +615,7 @@ describe("PromptDictationController", () => {
     expect(checking.transcribe).not.toHaveBeenCalled();
     expect(checking.state()).toEqual({ tag: "idle" });
 
-    const transcribing = await startedAutoHarness([3]);
+    const transcribing = await startedAutoHarness(turn(3));
     const transcript = deferred<SpeechTranscriptionResponse>();
     transcribing.transcribe.mockReturnValue(transcript.promise);
     transcribing.controller.press();
@@ -601,7 +628,7 @@ describe("PromptDictationController", () => {
     await flushPromises();
     expect(transcribing.draft.events).toEqual(["begin:owner-a", "abort"]);
 
-    const retained = await startedAutoHarness([4]);
+    const retained = await startedAutoHarness(turn(4));
     retained.transcribe.mockRejectedValue(new SpeechApiError("network", "offline", { retryable: true }));
     retained.controller.press();
     await flushPromises();
@@ -620,7 +647,7 @@ describe("PromptDictationController", () => {
     await flushPromises();
     expect(noDevice.draft.events).toEqual(["begin:owner-a", "abort"]);
     expect(noDevice.state()).toMatchObject({ tag: "error", reason: "capture-failed", retryable: true });
-    noDevice.createCaptureSession.mockResolvedValue(fakeCapture([1]));
+    noDevice.createCaptureSession.mockResolvedValue(fakeCapture(turn(1)));
     expect(noDevice.controller.press()).toBe(true);
 
     const generic = createHarness();
@@ -632,7 +659,7 @@ describe("PromptDictationController", () => {
   });
 
   it("does not notify state changes after dispose waits for delayed cleanup", async () => {
-    const harness = await startedAutoHarness([1]);
+    const harness = await startedAutoHarness(turn(1));
     const abortDone = deferred<undefined>();
     if (harness.capture !== undefined) harness.capture.abortImpl = () => abortDone.promise;
     const before = harness.states.length;
@@ -648,7 +675,20 @@ describe("PromptDictationController", () => {
 
 });
 
-async function startedAutoHarness(finalSamples = [1], policy: SpeechRuntimePolicy = SPEECH_POLICY): Promise<ReturnType<typeof createHarness>> {
+/**
+ * A captured turn long enough for the transcription route to accept it.
+ *
+ * The route rejects anything under 100 ms of audio with HTTP 400 too_short, so
+ * a fixture of one or two samples would agree with a production path that only
+ * ever fails. The marks stay at the front, where assertions can still see them.
+ */
+function turn(...marks: number[]): number[] {
+  const samples = new Array<number>(SPEECH_POLICY.audio.minRequestSamples).fill(0);
+  marks.forEach((value, index) => { samples[index] = value; });
+  return samples;
+}
+
+async function startedAutoHarness(finalSamples = turn(1), policy: SpeechRuntimePolicy = SPEECH_POLICY): Promise<ReturnType<typeof createHarness>> {
   const harness = createHarness(policy);
   harness.installCapture(finalSamples);
   harness.controller.press();
@@ -670,7 +710,7 @@ function createHarness(policy: SpeechRuntimePolicy = SPEECH_POLICY) {
   let capture: ReturnType<typeof fakeCapture> | undefined;
   createCaptureSession.mockImplementation((options) => {
     captureOptions = options;
-    capture = fakeCapture([1]);
+    capture = fakeCapture(turn(1));
     return Promise.resolve(capture);
   });
   const states: PromptDictationState[] = [];

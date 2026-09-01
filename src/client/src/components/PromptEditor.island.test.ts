@@ -9,7 +9,9 @@ describe("composer island styles", () => {
     expect(islandCss).toContain("@container");
     // A width breakpoint here would land inside the Fold posture range, where
     // AGENTS.md forbids one; the composer must morph with the space it is given.
-    expect(islandCss).not.toContain("@media");
+    // A preference query is not a breakpoint: it asks about the reader, not the
+    // screen, so reduced motion is allowed and any viewport feature is not.
+    expect(islandCss).not.toMatch(/@media[^{]*\b(width|height|aspect-ratio|orientation)\b/);
     expect(islandCss).not.toMatch(/\d(vw|vh)\b/);
   });
 

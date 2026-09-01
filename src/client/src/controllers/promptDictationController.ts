@@ -21,7 +21,7 @@ export type PromptDictationState =
   | { readonly tag: "error"; readonly reason: PromptDictationErrorReason; readonly message: string; readonly retryable: boolean };
 
 export type PromptDictationManualReason = "detector-failed" | "endpoint-busy" | "endpoint-budget" | "endpoint-failed" | "smart-turn-unavailable";
-export type PromptDictationErrorReason = "capture-failed" | "permission-denied" | "initial-speech-timeout" | "transcription-failed" | "cancelled";
+export type PromptDictationErrorReason = "capture-failed" | "permission-denied" | "initial-speech-timeout" | "too-short" | "transcription-failed" | "cancelled";
 
 export interface PromptDictationDraftOwner {
   readonly ownerKey: string;
@@ -57,6 +57,19 @@ export interface PromptDictationCaptureOptions {
   readonly onPauseCandidate: (candidate: { readonly samples: Float32Array; readonly endSample: number }) => void;
   readonly onSpeechActivity: (activity: { readonly startSample: number; readonly endSample: number; readonly sampleCount: number }) => void;
   readonly onTerminal: (terminal: SpeechCaptureTerminal) => void;
+}
+
+/**
+ * A turn the gateway would reject, refused here instead.
+ *
+ * The transcription route requires at least `minRequestBytes` of audio and
+ * answers HTTP 400 `too_short` below it. Sending anyway spends a request to be
+ * told what the sample count already says, and the reader sees a failed turn
+ * with no cause. Measured on this instance: 12 of 42 transcription requests in
+ * 24 hours were this, every one of them silent on screen.
+ */
+function hasEnoughAudio(samples: Float32Array, policy: SpeechRuntimePolicy): boolean {
+  return samples.length >= policy.audio.minRequestSamples;
 }
 
 const idleState: PromptDictationState = { tag: "idle" };
@@ -451,6 +464,13 @@ export class PromptDictationController {
 
   private async transcribeFinalSamples(samples: Float32Array, generation: number, ownerKey: string, options: { readonly retainedRetry: boolean }): Promise<void> {
     if (!this.accepts(generation, ownerKey)) return;
+    if (!hasEnoughAudio(samples, this.policy)) {
+      this.clearRetained();
+      this.finishDraftLock();
+      this.completing = false;
+      this.setState({ tag: "error", reason: "too-short", message: "The recording was too short to transcribe.", retryable: true });
+      return;
+    }
     this.setState({ tag: "transcribing" });
     this.transcriptionAbort?.abort();
     const abort = new AbortController();
