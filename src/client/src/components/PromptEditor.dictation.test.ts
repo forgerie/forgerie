@@ -88,6 +88,15 @@ describe("PromptEditor local dictation", () => {
     expect(waveBars(editor)[1]?.classList.contains("quiet")).toBe(true);
     expect(readout(editor)?.textContent).toContain("0:01");
 
+    // A long turn folds into the bars the waveform has room for rather than
+    // running past the box, where the newest audio would be the part hidden.
+    for (let batch = 0; batch < 600; batch += 1) {
+      dictation.emitLevel({ rms: batch % 3 === 0 ? 0.08 : 0.001, voiced: batch % 3 === 0, sampleCount: 800 });
+    }
+    await settle(editor);
+    expect(waveBars(editor).length).toBeLessThanOrEqual(48);
+    expect(waveBars(editor).some((bar) => !bar.classList.contains("quiet"))).toBe(true);
+
     dictation.emitSpeech();
     requiredMic(editor).click();
     dictation.resolveStop(capturedTurn(0.3));

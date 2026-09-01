@@ -10,7 +10,7 @@ import { PromptDictationGesture } from "../controllers/promptDictationGesture";
 import { VoiceTurnController } from "../controllers/voiceTurnController";
 import { VOICE_SEND_COUNTDOWN_MS, voiceComposerStatusLine, type VoiceComposerState } from "../appShell/voiceComposerState";
 import { voiceCaptureClock } from "../appShell/voiceCaptureProgress";
-import { DictationLevelReservoir, dictationReadout } from "../appShell/dictationReadout";
+import { DictationLevelReservoir, dictationReadout, fitBars } from "../appShell/dictationReadout";
 import { SPEECH_POLICY } from "../../../shared/speechPolicy";
 import { composerRail, type ComposerRail } from "../composerRail";
 import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointerPress, isQueueHoldKey, readComposerQueuePress } from "../composerQueuePress";
@@ -49,14 +49,25 @@ interface QueueKeyboardPress {
 const DICTATION_STATUS_TIMEOUT_MS = 5_000;
 
 /**
- * Bars the waveform keeps for one turn.
+ * Batches the reservoir keeps for one turn.
  *
- * 240 bars is two minutes at one bar per 50 ms batch, and about 480 px of
- * drawing at 2 px plus a 2 px gap -- wider than the draft box in any posture,
- * so the box clips rather than the turn being cut short. Past that the
- * reservoir folds neighbours together and keeps the whole turn in view.
+ * This is the resolution the drawing can ask for, not the number of bars drawn:
+ * how many fit is measured from the waveform itself. 480 batches is 24 seconds
+ * at one per 50 ms, past which neighbours merge and the whole turn stays in
+ * view at half the detail.
  */
-const DICTATION_WAVE_BARS = 240;
+const DICTATION_WAVE_BATCHES = 480;
+
+/** A bar and the gap after it. The waveform's pitch, in CSS pixels. */
+const DICTATION_BAR_PITCH_PX = 4;
+
+/**
+ * Bars assumed before the waveform has been measured.
+ *
+ * Only used for the first frame and in environments with no ResizeObserver;
+ * the measurement replaces it as soon as the element exists.
+ */
+const DICTATION_WAVE_FALLBACK_BARS = 48;
 
 /** How often the wait clock redraws. Fast enough that tenths look continuous. */
 const DICTATION_TICK_MS = 100;
@@ -249,12 +260,22 @@ export class PromptEditor extends LitElement {
    * clocks are separate facts: voiced audio captured, and time spent waiting on
    * the gateway, which is the wait that used to be invisible.
    */
-  private readonly dictationLevels = new DictationLevelReservoir(DICTATION_WAVE_BARS);
+  private readonly dictationLevels = new DictationLevelReservoir(DICTATION_WAVE_BATCHES);
   @state() private dictationBars: readonly number[] = [];
   private dictationVoicedMs = 0;
   private dictationWaitStartedAtMs: number | undefined;
   @state() private dictationWaitMs = 0;
   private dictationTicker: number | undefined;
+  /**
+   * How many bars the waveform has room for, measured from the waveform.
+   *
+   * The turn is folded to this before it is drawn. Drawing every batch and
+   * letting the box clip would hide the newest audio behind the right edge,
+   * which is the part a reader is watching.
+   */
+  @state() private dictationWaveBars = DICTATION_WAVE_FALLBACK_BARS;
+  private dictationWaveObserver: ResizeObserver | undefined;
+  private observedDictationWave: Element | undefined;
   private readonly voiceTurn = new VoiceTurnController(this, {
     onSend: () => { this.sendVoiceTurn(); },
     onStateChange: (state) => { this.onVoiceStateChange?.(state); },
@@ -328,6 +349,7 @@ export class PromptEditor extends LitElement {
   protected override updated(): void {
     this.flushPendingReplacement();
     this.syncDictationCapability();
+    this.syncDictationWaveMeasurement();
     this.startVoiceTurnWhenReady();
   }
 
@@ -720,7 +742,7 @@ export class PromptEditor extends LitElement {
   private renderDictationReadout(): TemplateResult | undefined {
     if (this.capabilities.dictation === undefined) return undefined;
     const readout = dictationReadout(this.dictationState, {
-      bars: this.dictationBars,
+      bars: fitBars(this.dictationBars, this.dictationWaveBars),
       voicedMs: this.dictationVoicedMs,
       waitMs: this.dictationWaitMs,
     });
@@ -760,6 +782,35 @@ export class PromptEditor extends LitElement {
     this.dictationLevels.push(level);
     if (level.voiced) this.dictationVoicedMs += (level.sampleCount / SPEECH_POLICY.audio.sampleRateHz) * 1000;
     this.dictationBars = this.dictationLevels.bars();
+  }
+
+  /**
+   * Keep the bar count tied to the space the waveform actually has.
+   *
+   * The waveform grows to fill whatever the words, the clock and Cancel leave,
+   * so its width does not depend on how many bars are in it and this cannot
+   * feed back on itself. State is only written when the count changes.
+   */
+  private syncDictationWaveMeasurement(): void {
+    const wave = this.draftElement?.querySelector(".dictation-wave") ?? undefined;
+    if (wave === this.observedDictationWave) return;
+    this.dictationWaveObserver?.disconnect();
+    this.observedDictationWave = wave;
+    if (wave === undefined) return;
+    this.measureDictationWave(wave);
+    if (typeof ResizeObserver === "undefined") return;
+    this.dictationWaveObserver ??= new ResizeObserver((entries) => {
+      const observed = entries[0]?.target;
+      if (observed !== undefined) this.measureDictationWave(observed);
+    });
+    this.dictationWaveObserver.observe(wave);
+  }
+
+  private measureDictationWave(wave: Element): void {
+    const width = wave.getBoundingClientRect().width;
+    if (width <= 0) return;
+    const bars = Math.max(1, Math.floor((width + DICTATION_BAR_PITCH_PX) / DICTATION_BAR_PITCH_PX) - 1);
+    if (bars !== this.dictationWaveBars) this.dictationWaveBars = bars;
   }
 
   /** A new turn starts with an empty waveform and both clocks at zero. */
@@ -1537,6 +1588,8 @@ export class PromptEditor extends LitElement {
     this.dictationState = { tag: "idle" };
     this.resetDictationAudio();
     this.syncDictationWaitTicker();
+    this.dictationWaveObserver?.disconnect();
+    this.observedDictationWave = undefined;
     this.pendingDictationStatus = undefined;
     this.resetDictationGesture();
     this.stopDictationStatusPolling();

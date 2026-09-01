@@ -1163,7 +1163,7 @@ export const promptEditorStyles = css`
      box and the text is given room above it rather than being covered. */
   .markdown-editor .cm-editor.dictation-live.dictation-over-text .cm-content { padding-bottom: 30px; }
   .dictation-readout.dictation-over-text { align-items: flex-end; padding-bottom: 6px; }
-  .dictation-readout { position: absolute; inset: 0; display: flex; align-items: center; gap: var(--pi-space-md); padding: 0 var(--pi-space-md); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); color: var(--pi-text-secondary); pointer-events: none; }
+  .dictation-readout { position: absolute; inset: 0; display: flex; align-items: center; gap: var(--pi-space-md); padding: 0 var(--pi-space-md); overflow: hidden; font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); color: var(--pi-text-secondary); pointer-events: none; }
   .dictation-readout > * { pointer-events: auto; }
   /* Only states that need explaining carry words: a live waveform beside a
      running clock says listening on its own, and the microphone below it is

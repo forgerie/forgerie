@@ -6,6 +6,7 @@ import {
   dictationReadout,
   dictationVoicedClock,
   dictationWaitClock,
+  fitBars,
 } from "./dictationReadout";
 import type { PromptDictationState } from "../controllers/promptDictationController";
 
@@ -34,6 +35,18 @@ describe("dictation readout", () => {
     // The loud batches survive the fold; the shape is kept, the resolution is not.
     expect(Math.max(...folded)).toBe(1);
     expect(folded[0]).toBe(1);
+  });
+
+  it("folds a turn into the bars a surface can draw, keeping the loud parts", () => {
+    expect(fitBars([0.2, 0.9, 0.1, 0.4], 4)).toEqual([0.2, 0.9, 0.1, 0.4]);
+    expect(fitBars([0.2, 0.9, 0.1, 0.4], 2)).toEqual([0.9, 0.4]);
+    // A turn far past the space folds repeatedly rather than spilling out of it.
+    expect(fitBars(Array.from({ length: 240 }, (_unused, index) => index / 240), 30)).toHaveLength(30);
+    expect(fitBars([0.5], 0)).toEqual([0.5]);
+    expect(fitBars([], 10)).toEqual([]);
+    // The loudest moment of the turn survives every fold.
+    const spike = Array.from({ length: 100 }, (_unused, index) => (index === 61 ? 1 : 0.05));
+    expect(Math.max(...fitBars(spike, 8))).toBe(1);
   });
 
   it("draws nothing for a batch the pipeline judged silent", () => {

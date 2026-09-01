@@ -42,12 +42,35 @@ export const DICTATION_FULL_SCALE_RMS = 0.14;
 const MIN_VOICED_BAR = 0.12;
 
 /**
- * The whole turn, folded to the bars that fit.
+ * Fold a turn into the bars a surface can actually draw.
+ *
+ * Neighbours merge by taking the louder of the pair, so a loud syllable never
+ * disappears into an average and the shape of the turn survives the fold. The
+ * alternative -- drawing every batch and letting the box clip -- hides the
+ * newest audio behind the edge, which is the half a reader is watching.
+ */
+export function fitBars(bars: readonly number[], slots: number): readonly number[] {
+  const limit = Math.max(1, Math.floor(slots));
+  let folded = bars;
+  while (folded.length > limit) {
+    const next: number[] = [];
+    for (let index = 0; index < folded.length; index += 2) {
+      next.push(Math.max(folded[index] ?? 0, folded[index + 1] ?? 0));
+    }
+    folded = next;
+  }
+  return folded;
+}
+
+/**
+ * The whole turn, at the resolution the pipeline reports it.
  *
  * A rolling window would show a message with no beginning, so the reservoir
  * keeps the turn end to end: once it is full, neighbouring batches merge by
  * taking the louder of the pair and every later batch counts for twice as
  * much. The shape stays honest as the turn grows; only its resolution drops.
+ * How many of these bars a surface can draw is the surface's business — see
+ * {@link fitBars}.
  */
 export class DictationLevelReservoir {
   private readonly buckets: number[] = [];
