@@ -84,8 +84,9 @@ function mkBoard(
 // ---------------------------------------------------------------------------
 
 describe("BOARD_GROUPS", () => {
-  it("lists exactly the six kinds in triage order", () => {
+  it("lists exactly the seven kinds in triage order, pinned first", () => {
     expect(BOARD_GROUPS.map((g) => g.kind)).toEqual([
+      "pinned",
       "blocked",
       "errored",
       "working",
@@ -353,7 +354,7 @@ describe("deriveSessionBoard", () => {
     expect(openGroup?.rows.map((r) => r.session.id)).toEqual(["newer", "middle", "older"]);
   });
 
-  it("sorts pinned rows to the top of their group, then by recency", () => {
+  it("collects every pinned row into Pinned, most recent first", () => {
     const sessions = [
       mkSession("plain-newest", { modified: "2026-08-07T10:00:00.000Z" }),
       mkSession("pinned-old", { modified: "2026-08-01T10:00:00.000Z", pinned: true }),
@@ -361,25 +362,55 @@ describe("deriveSessionBoard", () => {
       mkSession("plain-old", { modified: "2026-08-02T10:00:00.000Z" }),
     ];
     const board = mkBoard(sessions);
-    const openGroup = board.groups.find((g) => g.kind === "open");
-    expect(openGroup?.rows.map((r) => r.session.id)).toEqual([
-      "pinned-newer",
-      "pinned-old",
-      "plain-newest",
-      "plain-old",
-    ]);
+
+    expect(board.groups.find((g) => g.kind === "pinned")?.rows.map((r) => r.session.id))
+      .toEqual(["pinned-newer", "pinned-old"]);
+    expect(board.groups.find((g) => g.kind === "open")?.rows.map((r) => r.session.id))
+      .toEqual(["plain-newest", "plain-old"]);
   });
 
-  it("keeps a pinned row inside its own state group; pinning does not move it across groups", () => {
+  it("lifts a pinned row out of its state group but leaves the state on the row", () => {
     const sessions = [
-      mkSession("pinned-open", { pinned: true }),
+      mkSession("pinned-blocked", { modified: "2026-08-07T10:00:00.000Z", pinned: true }),
       mkSession("blocked", { modified: "2026-08-07T10:00:00.000Z" }),
     ];
     const board = mkBoard(sessions, {
-      statuses: { blocked: mkStatus({ pendingAsk: { questions: [{ question: "?" }] } }) },
+      statuses: {
+        "pinned-blocked": mkStatus({ pendingAsk: { questions: [{ question: "Ship it?" }] } }),
+        blocked: mkStatus({ pendingAsk: { questions: [{ question: "?" }] } }),
+      },
     });
+
+    expect(board.groups.find((g) => g.kind === "pinned")?.rows.map((r) => r.session.id)).toEqual(["pinned-blocked"]);
     expect(board.groups.find((g) => g.kind === "blocked")?.rows.map((r) => r.session.id)).toEqual(["blocked"]);
-    expect(board.groups.find((g) => g.kind === "open")?.rows.map((r) => r.session.id)).toEqual(["pinned-open"]);
+
+    // The row still says what it is waiting on, so the marker and detail hold.
+    const pinnedRow = board.rows.find((row) => row.session.id === "pinned-blocked");
+    expect(pinnedRow?.state).toEqual({ kind: "blocked", reason: "ask", question: "Ship it?" });
+    expect(pinnedRow?.groupKind).toBe("pinned");
+  });
+
+  it("leaves an archived session in Archived even when a stale pin says otherwise", () => {
+    const board = mkBoard([mkSession("gone", { archived: true, pinned: true })]);
+
+    expect(board.groups.find((g) => g.kind === "archived")?.rows.map((r) => r.session.id)).toEqual(["gone"]);
+    expect(board.groups.find((g) => g.kind === "pinned")?.rows).toEqual([]);
+  });
+
+  it("still counts and queues a pinned session that wants you", () => {
+    const board = mkBoard(
+      [
+        mkSession("pinned-blocked", { pinned: true }),
+        mkSession("plain-errored", { modified: "2026-08-06T10:00:00.000Z" }),
+      ],
+      {
+        statuses: { "pinned-blocked": mkStatus({ pendingAsk: { questions: [{ question: "?" }] } }) },
+        activities: { "plain-errored": mkActivity({ phase: "error", label: "tool failed" }) },
+      },
+    );
+
+    expect(attentionCount(board)).toBe(2);
+    expect(triageQueue(board).map((row) => row.session.id)).toEqual(["pinned-blocked", "plain-errored"]);
   });
 
   it("each row carries the location returned by locationOf", () => {
@@ -749,7 +780,7 @@ describe("age bands", () => {
       .toEqual(["idle-today", "idle-week"]);
   });
 
-  it("sorts pinned rows to the top of their own band", () => {
+  it("leaves a pinned idle row out of the bands, because Pinned already holds it", () => {
     const board = mkBoard([
       mkSession("newer", { modified: daysBack(3, 18) }),
       mkSession("pinned-older", { modified: daysBack(5), pinned: true }),
@@ -758,7 +789,8 @@ describe("age bands", () => {
 
     const week = groupIdleSessionsByAge(board, now).find((band) => band.kind === "week");
 
-    expect(week?.rows.map((row) => row.session.id)).toEqual(["pinned-older", "newer", "older"]);
+    expect(week?.rows.map((row) => row.session.id)).toEqual(["newer", "older"]);
+    expect(board.groups.find((g) => g.kind === "pinned")?.rows.map((r) => r.session.id)).toEqual(["pinned-older"]);
   });
 
   it("returns every band so the caller decides what an empty one means", () => {

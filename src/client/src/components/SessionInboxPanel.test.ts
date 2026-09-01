@@ -309,6 +309,44 @@ describe("group rendering", () => {
     expect(kinds.indexOf("hour")).toBeLessThan(kinds.indexOf("archived"));
   });
 
+  it("draws Pinned first and keeps its rows out of the age bands", async () => {
+    const sessions = [
+      mkSession("recent"),
+      mkSession("pinned-stale", { modified: minutesAgo(60 * 24 * 10), pinned: true }),
+    ];
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions(sessions) });
+    const root = shadowRoot(panel);
+
+    const kinds = Array.from(root.querySelectorAll("[data-group]"), (el) => el.getAttribute("data-group"));
+    expect(kinds[0]).toBe("pinned");
+    expect(kinds).not.toContain("month");
+
+    // Pinned opens by default, so a ten-day-old pin is reachable without a tap.
+    expect(root.querySelector("[data-group='pinned'] [data-session='pinned-stale']")).not.toBeNull();
+    expect(root.querySelector("[data-band-label]")?.textContent.trim()).toBe("Open · 1 · by age");
+  });
+
+  it("keeps a pinned working session's marker and count where the reader can see them", async () => {
+    const sessions = [
+      mkSession("pinned-working", { pinned: true }),
+      mkSession("plain-working"),
+    ];
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions(sessions, {
+        statuses: {
+          "pinned-working": mkWorkingStatus("pinned-working"),
+          "plain-working": mkWorkingStatus("plain-working"),
+        },
+      }),
+    });
+    const root = shadowRoot(panel);
+
+    // Pinned owns the row, so Working counts only the session it still holds.
+    expect(root.querySelector("[data-group='working'] [data-group-count]")?.textContent).toBe("1");
+    // The row keeps the working marker, so the state is not lost with the group.
+    expect(root.querySelector("[data-session='pinned-working']")?.getAttribute("data-state")).toBe("working");
+  });
+
   it("labels the run of bands as the idle pile they replace", async () => {
     const panel = await mountPanel({
       globalSessions: mkGlobalSessions([mkSession("open-one"), mkSession("open-two")]),

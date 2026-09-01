@@ -79,7 +79,7 @@ export interface SessionBoardLocation {
 // Tagged union: session board state
 // ---------------------------------------------------------------------------
 
-export type BoardGroupKind = "blocked" | "errored" | "working" | "unread" | "open" | "archived";
+export type BoardGroupKind = "pinned" | "blocked" | "errored" | "working" | "unread" | "open" | "archived";
 
 export type SessionBoardState =
   | { readonly kind: "blocked"; readonly reason: "ask"; readonly question: string }
@@ -102,13 +102,19 @@ export interface BoardGroupDescriptor {
 }
 
 /**
- * The set of states a session can be in, in triage order.
+ * The groups a session can land in, in triage order.
  *
  * This is the single source of truth for the case list. Labels, order,
  * counts, empty states, and the rendering loop all read from here — nothing
  * keeps a second hand-written copy.
  */
 export const BOARD_GROUPS: readonly BoardGroupDescriptor[] = [
+  {
+    kind: "pinned",
+    label: "Pinned",
+    hint: "You put these here. They stay until you unpin them.",
+    tone: "accent",
+  },
   {
     kind: "blocked",
     label: "Blocked on you",
@@ -337,8 +343,29 @@ export function sessionBoardState(
 
 export interface SessionBoardRow<S extends SessionBoardSessionInput> {
   readonly session: S;
+  /** What the session is doing. Drives the row's marker and its detail line. */
   readonly state: SessionBoardState;
+  /** Which group draws the row. Differs from `state.kind` only for pinned rows. */
+  readonly groupKind: BoardGroupKind;
   readonly location: SessionBoardLocation;
+}
+
+/**
+ * Where a row is drawn, as opposed to what it is doing.
+ *
+ * A pin is a fact the reader declared; every other group is one the board
+ * inferred, and a declared fact outranks an inferred one. Archived keeps the
+ * outermost rank because an archived session cannot be pinned at all.
+ *
+ * The row keeps its `state`, so a pinned blocked session still shows the
+ * blocked marker and the question it is waiting on. Only the grouping moves.
+ */
+export function boardGroupKind(
+  session: SessionBoardSessionInput,
+  state: SessionBoardState,
+): BoardGroupKind {
+  if (state.kind === "archived") return "archived";
+  return session.pinned === true ? "pinned" : state.kind;
 }
 
 export interface SessionBoardGroup<S extends SessionBoardSessionInput> extends BoardGroupDescriptor {
@@ -413,13 +440,13 @@ export function deriveSessionBoard<S extends SessionBoardSessionInput>(
       isUnread: input.unreadSessionIds?.has(session.id) === true,
       unreadCompletedAt: input.unreadCompletedAt?.[session.id],
     });
-    return { session, state, location: input.locationOf(session) };
+    return { session, state, groupKind: boardGroupKind(session, state), location: input.locationOf(session) };
   });
 
   const groups: SessionBoardGroup<S>[] = BOARD_GROUPS.map((descriptor) => ({
     ...descriptor,
     rows: rows
-      .filter((row) => row.state.kind === descriptor.kind)
+      .filter((row) => row.groupKind === descriptor.kind)
       .sort(byPinnedThenRecency),
   }));
 
@@ -516,7 +543,9 @@ export function groupIdleSessionsByAge<S extends SessionBoardSessionInput>(
   board: SessionBoard<S>,
   now: number,
 ): readonly AgeBandGroup<S>[] {
-  const idle = board.rows.filter((row) => row.state.kind === "open");
+  // Group kind, not state kind: a pinned idle row was lifted into Pinned, and
+  // dating it a second time here would draw it twice.
+  const idle = board.rows.filter((row) => row.groupKind === "open");
   return AGE_BANDS.map((band) => ({
     ...band,
     rows: idle
@@ -529,29 +558,39 @@ export function groupIdleSessionsByAge<S extends SessionBoardSessionInput>(
 // triageQueue — ordered triage
 // ---------------------------------------------------------------------------
 
+const URGENT_STATES: ReadonlySet<SessionBoardState["kind"]> = new Set(["blocked", "errored", "unread"]);
+
 /**
  * Ordered triage queue: sessions that actually want you, most urgent first.
  *
- * Derived from the same board, so the queue can never disagree with the list.
+ * Reads each row's state rather than its group, so pinning a blocked session
+ * cannot quietly drop it out of triage.
  */
 export function triageQueue<S extends SessionBoardSessionInput>(
   board: SessionBoard<S>,
 ): readonly SessionBoardRow<S>[] {
-  const urgent = new Set<BoardGroupKind>(["blocked", "errored", "unread"]);
-  return board.groups
-    .filter((group) => urgent.has(group.kind))
-    .flatMap((group) => group.rows);
+  const order = BOARD_GROUPS.map((group) => group.kind);
+  return board.rows
+    .filter((row) => URGENT_STATES.has(row.state.kind))
+    .sort((a, b) =>
+      order.indexOf(a.state.kind) - order.indexOf(b.state.kind)
+      || byPinnedThenRecency(a, b));
 }
 
 // ---------------------------------------------------------------------------
 // attentionCount — summary badge count
 // ---------------------------------------------------------------------------
 
-/** Count of sessions that want something from you. Drives the header summary. */
+/**
+ * Count of sessions that want something from you. Drives the header summary.
+ *
+ * Counted from row state, not from group counts: a pinned session that is
+ * blocked still wants you, and `counts.blocked` no longer includes it.
+ */
 export function attentionCount<S extends SessionBoardSessionInput>(
   board: SessionBoard<S>,
 ): number {
-  return board.counts.blocked + board.counts.errored + board.counts.unread;
+  return board.rows.filter((row) => URGENT_STATES.has(row.state.kind)).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,6 +639,7 @@ function countsByKind<S extends SessionBoardSessionInput>(
   rows: readonly SessionBoardRow<S>[],
 ): BoardCounts {
   const counts: BoardCounts = {
+    pinned: 0,
     blocked: 0,
     errored: 0,
     working: 0,
@@ -608,7 +648,7 @@ function countsByKind<S extends SessionBoardSessionInput>(
     archived: 0,
   };
   for (const row of rows) {
-    counts[row.state.kind] += 1;
+    counts[row.groupKind] += 1;
   }
   return counts;
 }

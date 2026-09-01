@@ -372,9 +372,9 @@ export class SessionInboxPanel extends LitElement {
       : this.groupBy === "project"
         ? row.location.projectId
         // An idle row's visible destination is its age band, not "open".
-        : row.state.kind === "open"
+        : row.groupKind === "open"
           ? ageBandKind(row.session.modified, Date.now())
-          : row.state.kind;
+          : row.groupKind;
     const selectedGroupKey = groupKind === undefined ? undefined : `${this.groupBy}:${groupKind}`;
     if (selectedGroupKey !== this.previousSelectedGroupKey) {
       this.previousSelectedGroupKey = selectedGroupKey;
@@ -1076,6 +1076,7 @@ export class SessionInboxPanel extends LitElement {
       --tone-blocked: var(--pi-warning, #d0a04a);
       --tone-errored: var(--pi-danger, #e06c75);
       --tone-working: var(--pi-success, #56b380);
+      --tone-pinned: var(--pi-accent, #6f9bd8);
       --tone-unread: var(--pi-purple, #a89ede);
       --tone-open: var(--pi-dim, #62656b);
       --tone-archived: var(--pi-dim, #62656b);
