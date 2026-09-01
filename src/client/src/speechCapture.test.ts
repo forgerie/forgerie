@@ -189,6 +189,26 @@ describe("speech capture browser lifecycle", () => {
     await session.abort();
   });
 
+  it("reports every batch's measured loudness, including the silence between words", async () => {
+    const host = fakeHost();
+    const levels: { readonly rms: number; readonly voiced: boolean; readonly sampleCount: number }[] = [];
+    const session = await createSpeechCaptureSession({ host, onLevel: (level) => { levels.push(level); } });
+
+    host.emitWorkletMessage(workletBatch(0, [0.09, 0.09], 0.09));
+    host.emitWorkletMessage(workletBatch(2, [0, 0], 0.001));
+
+    // Silence is part of the shape of a turn, so it is reported rather than
+    // dropped the way voiced-only activity is.
+    expect(levels).toEqual([
+      { rms: 0.09, voiced: true, sampleCount: 2 },
+      { rms: 0.001, voiced: false, sampleCount: 2 },
+    ]);
+
+    await session.abort();
+    host.emitWorkletMessage(workletBatch(4, [0.5], 0.5));
+    expect(levels).toHaveLength(2);
+  });
+
   it("uses a worklet barrier to drain delayed batches without stopping capture", async () => {
     const host = fakeHost();
     const session = await createSpeechCaptureSession({ host });
