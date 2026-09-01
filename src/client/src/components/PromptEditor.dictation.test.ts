@@ -102,7 +102,12 @@ describe("PromptEditor local dictation", () => {
     dictation.resolveStop(capturedTurn(0.3));
     await settle(editor);
 
-    expect(readout(editor)?.textContent).toContain("Transcribing");
+    // Marked, not labelled: the icon says which state this is, the number says
+    // it is still running, and the spoken status stays on the live region for a
+    // reader who cannot see either.
+    expect(readout(editor)?.querySelector("[data-state='transcribing']")).not.toBeNull();
+    expect(readout(editor)?.textContent).not.toContain("Transcribing");
+    expect(statusText(editor)).toContain("Transcribing speech");
     await vi.advanceTimersByTimeAsync(2_400);
     await settle(editor);
     expect(readout(editor)?.textContent).toContain("2.4s");

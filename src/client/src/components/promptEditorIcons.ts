@@ -62,6 +62,24 @@ export function renderMicrophoneIcon(): TemplateResult {
   `;
 }
 
+/**
+ * Speech becoming text.
+ *
+ * Written lines, drawn short and unequal the way a transcript wraps. It stands
+ * where the word "Transcribing" stood, beside the waveform of the audio it is
+ * being made from, so the pair reads as sound turning into words and the
+ * waveform keeps the width the word was taking.
+ */
+export function renderTranscribingIcon(): TemplateResult {
+  return svg`
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 7h16"></path>
+      <path d="M4 12h12"></path>
+      <path d="M4 17h7"></path>
+    </svg>
+  `;
+}
+
 /** The command mark itself, miniaturized — a slash in its chip. */
 export function renderSlashIcon(): TemplateResult {
   return svg`

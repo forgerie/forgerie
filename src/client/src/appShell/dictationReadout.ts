@@ -24,8 +24,13 @@ export type DictationReadout =
   | { readonly kind: "none" }
   /** The microphone is open. The waveform and the voiced clock are the report. */
   | { readonly kind: "listening"; readonly bars: readonly number[]; readonly clock: string }
-  /** The audio is with the gateway. The wait is counted; the turn can be abandoned. */
-  | { readonly kind: "working"; readonly words: string; readonly bars: readonly number[]; readonly clock: string }
+  /**
+   * The audio is with the gateway. The wait is counted; the turn can be
+   * abandoned. Carries no words: the surface marks this state with the
+   * transcribing icon, and spending a label here would cost the waveform the
+   * width it needs on a folded phone.
+   */
+  | { readonly kind: "working"; readonly bars: readonly number[]; readonly clock: string }
   /** Nothing to draw, so the box says what happened in words. */
   | { readonly kind: "stated"; readonly words: string };
 
@@ -166,7 +171,7 @@ export function dictationReadout(state: PromptDictationState, input: DictationRe
     case "checking":
       return { kind: "listening", bars: input.bars, clock: dictationVoicedClock(input.voicedMs) };
     case "transcribing":
-      return { kind: "working", words: "Transcribing", bars: input.bars, clock: dictationWaitClock(input.waitMs) };
+      return { kind: "working", bars: input.bars, clock: dictationWaitClock(input.waitMs) };
     case "empty":
       return { kind: "stated", words: "Nothing heard." };
     case "retained-retry":

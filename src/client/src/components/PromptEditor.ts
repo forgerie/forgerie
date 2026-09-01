@@ -17,7 +17,7 @@ import { COMPOSER_QUEUE_HOLD_MS, composerQueuePressTravel, isPrimaryQueuePointer
 import { inputModeForDraft, type InputMode } from "../inputModes";
 import { machineSessionKey } from "../machineKeys";
 import { NEW_SESSION_LABEL, promptEditorStyles, renderNewSessionIcon } from "./shared";
-import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderChangeIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderSlashIcon, renderStopIcon, renderThinkingGauge, renderTreeIcon } from "./promptEditorIcons";
+import { renderArchiveIcon, renderAttachIcon, renderBranchIcon, renderChangeIcon, renderDismissIcon, renderMicrophoneIcon, renderQueueIcon, renderSendIcon, renderSlashIcon, renderStopIcon, renderThinkingGauge, renderTranscribingIcon, renderTreeIcon } from "./promptEditorIcons";
 import { DEFAULT_COMPOSER_EDITOR_LABEL, DEFAULT_COMPOSER_PLACEHOLDER } from "./ComposerDraft";
 import type { ComposerCapabilities, ComposerContextChip, ComposerDictationCapability, ComposerModelCapability, ComposerSelectableModel } from "../composerCapabilities";
 import type { ComposerChoiceGroup, ComposerChoiceItem } from "./ComposerChoiceList";
@@ -753,7 +753,7 @@ export class PromptEditor extends LitElement {
     const working = readout.kind === "working";
     return html`
       <div class=${`dictation-readout${working ? " dictation-working" : ""}${this.draftEmpty ? "" : " dictation-over-text"}`}>
-        ${working ? html`<span class="dictation-words">${readout.words}</span>` : nothing}
+        ${working ? html`<span class="dictation-mark" data-state="transcribing">${renderTranscribingIcon()}</span>` : nothing}
         ${renderDictationWave(readout.bars)}
         <span class="dictation-clock">${readout.clock}</span>
         ${working ? html`<button

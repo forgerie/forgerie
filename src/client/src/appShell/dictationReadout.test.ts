@@ -88,9 +88,11 @@ describe("dictation readout", () => {
     }
   });
 
-  it("counts the wait while the gateway holds the audio", () => {
+  it("counts the wait while the gateway holds the audio, and spends no words on it", () => {
+    // The surface marks this state with the transcribing icon; a label here
+    // would take the width the waveform needs on a folded phone.
     expect(dictationReadout({ tag: "transcribing" }, { bars: [0.5], voicedMs: 12_000, waitMs: 2_400 }))
-      .toEqual({ kind: "working", words: "Transcribing", bars: [0.5], clock: "2.4s" });
+      .toEqual({ kind: "working", bars: [0.5], clock: "2.4s" });
   });
 
   it("says nothing at all when there is nothing to report", () => {

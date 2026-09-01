@@ -1173,6 +1173,11 @@ export const promptEditorStyles = css`
      stated failure is all words, so there it may truncate. */
   .dictation-readout .dictation-words { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
   .dictation-readout.dictation-stated .dictation-words { flex: 0 1 auto; }
+  /* The working state is marked, not labelled: written lines beside the
+      waveform of the audio they are being made from. It costs 18px where the
+      word cost about a hundred, which is waveform on a folded phone. */
+  .dictation-readout .dictation-mark { flex: 0 0 auto; display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--pi-text-secondary); }
+  .dictation-readout .dictation-mark .prompt-action-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .dictation-readout.dictation-stated { justify-content: center; }
   /*
    * The waveform is measured, not decorative: one bar per 50ms batch, height
