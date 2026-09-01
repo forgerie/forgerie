@@ -67,9 +67,11 @@ describe("PiWebApp session tree wiring", () => {
     await expect(onNavigate("side", { mode: "none" })).resolves.toEqual({ cancelled: false, editorText: "edit" });
     expect(navigateTree).toHaveBeenNthCalledWith(1, "side", { mode: "none" });
     expect(openChat).toHaveBeenCalledOnce();
+    expect(Reflect.get(app, "chatOpeningAttempt")).toBe(1);
 
     await expect(onNavigate("root", { mode: "default" })).resolves.toEqual({ cancelled: true, aborted: true });
     expect(openChat).toHaveBeenCalledOnce();
+    expect(Reflect.get(app, "chatOpeningAttempt")).toBe(1);
 
     await onAbort();
     expect(abortTreeNavigation).toHaveBeenCalledOnce();

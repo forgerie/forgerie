@@ -11,12 +11,12 @@ import type { ComposerDictationCapability } from "../composerCapabilities";
 import { splitChatNotice } from "../chatNotices";
 import { leadingSlashCommand } from "../slashCommandText";
 import "./TranscriptLivenessView";
-import { ChatScrollCoordinator } from "../chatScrollCoordinator";
+import { ChatScrollController, type ChatScrollMode } from "../chatScrollController";
 import { sessionActivityIndicator } from "../sessionStatusStrip";
 import type { PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { AskDraftSubmission } from "../askDrafts";
 import type { ClosedExtensionDialog } from "../appState";
-import { selectedChatCanUseRuntime, selectedChatHasReadableHistory, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
+import { selectedChatCanUseRuntime, selectedChatHasReadableHistory, selectedChatIsOpening, selectedChatNoTarget, type SelectedChatLoad } from "../selectedChatLoad";
 import { notificationAnnouncementLabel, type SelectedSessionNotificationView } from "../sessionNotifications";
 import type { PendingSessionLaunchView, SessionLaunchRecovery } from "../controllers/sessionController";
 import type { ChatLine, ChatPart, ToolExecutionPart } from "./shared";
@@ -258,7 +258,6 @@ export function formatMessageTimestamp(timestamp: string, now: Date = new Date()
 }
 
 const MODEL_WORD_CAPS: Record<string, string> = { gpt: "GPT", glm: "GLM", ai: "AI", api: "API" };
-const CHAT_SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 
 /*
  * A transcript answers "which model said this"; the provider route is
@@ -293,6 +292,7 @@ export class ChatView extends LitElement {
   @property() selectedMachineId = "local";
   @property() sessionCwd = "";
   @property({ attribute: false }) selectedLoad: SelectedChatLoad = selectedChatNoTarget();
+  @property({ type: Number }) openingAttempt = 0;
   @property({ type: Number }) messageStart = 0;
   @property({ type: Number }) messageEnd = 0;
   @property({ type: Number }) messageTotal = 0;
@@ -320,10 +320,11 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) onDismissWarning?: (dismissId: string) => void;
   @property({ type: Boolean }) warningsVisible = true;
   @property({ attribute: false }) onToggleWarnings?: () => void;
-  @property({ attribute: false }) onLoadMore?: () => void;
+  @property({ attribute: false }) onLoadMore?: () => Promise<void>;
   @property({ attribute: false }) onRetry?: () => void;
   @property({ attribute: false }) onSelectedLoadPaint?: (load: SelectedChatLoad) => void;
   @query(".chat") private chat?: HTMLDivElement;
+  @query(".chat-content") private chatContent?: HTMLDivElement;
   @query(".chat-load-retry") private retryButton?: HTMLButtonElement;
   @query("image-lightbox") private imageLightbox?: ImageLightbox;
   @state() private expandedMetaKey: string | undefined;
@@ -336,7 +337,9 @@ export class ChatView extends LitElement {
   /** Turn age, step age, and activity silence for the current live phase. */
   @state() private livenessClock: LivenessClock | undefined;
   private readonly disclosures = new ChatDisclosureController();
-  private readonly scrolling = new ChatScrollCoordinator();
+  private readonly scrolling = new ChatScrollController({
+    onModeChange: (mode) => { this.syncScrollOwner(mode); },
+  });
   private groupedMessagesInput?: ChatLine[];
   private renderedPendingSessionLaunch: PendingSessionLaunchView | undefined;
   private renderedPendingSessionLaunchSource: ChatLine[] | undefined;
@@ -348,7 +351,8 @@ export class ChatView extends LitElement {
   private selectedLoadPaintToken = 0;
   private selectedLoadPaintFrame: number | undefined;
   private selectedLoadPaintTask: number | undefined;
-  private scrollPointerActive = false;
+  private chatResizeObserver: ResizeObserver | undefined;
+  private loadMoreGeneration = 0;
   @state() private loadMoreRequested = false;
   private retryFocusPending = false;
   private readonly openImageZoom = (images: readonly ImageLightboxItem[], index = 0): void => {
@@ -361,11 +365,32 @@ export class ChatView extends LitElement {
     this.onToggleWarnings?.();
   };
 
+  override connectedCallback(): void {
+    super.connectedCallback();
+    if (this.hasUpdated) this.connectChatScroll();
+  }
+
   protected override firstUpdated(): void {
+    this.connectChatScroll();
     this.scheduleSelectedLoadPaintReport();
   }
 
+  private connectChatScroll(): void {
+    const chat = this.chat;
+    const content = this.chatContent;
+    if (chat === undefined || content === undefined) return;
+    this.chatResizeObserver?.disconnect();
+    this.scrolling.connect(chat);
+    this.syncScrollOwner(this.scrolling.mode);
+    if (typeof ResizeObserver === "undefined") return;
+    this.chatResizeObserver = new ResizeObserver(() => { this.scrolling.contentChanged(); });
+    this.chatResizeObserver.observe(chat);
+    this.chatResizeObserver.observe(content);
+  }
+
   override disconnectedCallback(): void {
+    this.chatResizeObserver?.disconnect();
+    this.chatResizeObserver = undefined;
     this.scrolling.dispose();
     this.cancelSelectedLoadPaintReport();
     super.disconnectedCallback();
@@ -377,8 +402,9 @@ export class ChatView extends LitElement {
 
   private prepareSessionUiState(): void {
     this.disclosures.syncSession(this.sessionId);
-    this.scrolling.reset();
-    this.scrollPointerActive = false;
+    this.scrolling.beginOpening();
+    this.loadMoreGeneration += 1;
+    this.loadMoreRequested = false;
     this.retryFocusPending = false;
     this.cancelSelectedLoadPaintReport();
   }
@@ -387,24 +413,22 @@ export class ChatView extends LitElement {
     if (this.sessionIdentityChanged(changed)) {
       this.livenessClock = undefined;
       this.prepareSessionUiState();
-    }
+    } else if (changed.has("openingAttempt")) this.scrolling.beginOpening();
     this.trackLivenessClock();
   }
 
-  protected override updated(changed: Map<string, unknown>): void {
-    if (changed.has("loadingMore") && !this.loadingMore) this.loadMoreRequested = false;
+  protected override updated(changed: PropertyValues<this>): void {
     if (changed.has("hasMore") && !this.hasMore) this.loadMoreRequested = false;
     const identityChanged = this.sessionIdentityChanged(changed);
-    const previousMessageStart = changed.get("messageStart");
-    const historyPrepended = typeof previousMessageStart === "number" && this.messageStart < previousMessageStart;
-    if (identityChanged) {
-      this.cancelSelectedLoadPaintReport();
-      this.openAtBottom();
-    } else if (historyPrepended) {
-      this.onReaderIntent();
-    } else if (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) {
-      this.scheduleTailPlacement();
-    }
+    const load = this.currentSelectedLoad();
+    const previousLoad = changed.get("selectedLoad");
+    const openingFinished = changed.has("selectedLoad")
+      && previousLoad !== undefined
+      && selectedChatIsOpening(previousLoad)
+      && !selectedChatIsOpening(load);
+    this.scrolling.contentChanged();
+    if (!selectedChatIsOpening(load) && (identityChanged || changed.has("openingAttempt") || openingFinished)) this.scrolling.completeOpening();
+    if (identityChanged) this.cancelSelectedLoadPaintReport();
     if (changed.has("selectedMachineId") || changed.has("sessionCwd")) {
       this.cancelSelectedLoadPaintReport();
       if (!changed.has("selectedLoad")) this.scheduleSelectedLoadPaintReport();
@@ -459,12 +483,27 @@ export class ChatView extends LitElement {
       ${this.renderTopNotices()}
       ${this.renderNotificationLiveRegions()}
       <div class="chat-wrap">
-        <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${() => { this.onReaderIntent(); }} @touchmove=${() => { this.onReaderIntent(); }} @keydown=${(event: KeyboardEvent) => { this.onScrollKeyDown(event); }} @pointerdown=${(event: PointerEvent) => { this.onScrollPointerDown(event); }} @pointerup=${() => { this.onScrollPointerEnd(); }} @pointercancel=${() => { this.onScrollPointerEnd(); }}>
-          ${this.renderEmptyLoadState(turns.length)}
-          ${this.renderHistoryBoundary()}
-          ${this.renderReadableLoadNotice()}
-          ${repeat(turns, (turn) => this.turnRenderKey(turn), (turn, index) => this.renderTurn(turn, liveTailGroup, index === turns.length - 1))}
-          ${turns.length === 0 ? this.renderRunningTurnTail() : null}
+        <div
+          class="chat"
+          data-scroll-owner=${this.scrolling.mode === "reader" || this.scrolling.mode === "history" ? "reader" : "component"}
+          @scroll=${() => { this.onScroll(); }}
+          @wheel=${(event: WheelEvent) => { this.onScrollWheel(event); }}
+          @touchstart=${(event: TouchEvent) => { this.onScrollTouchStart(event); }}
+          @touchmove=${(event: TouchEvent) => { this.onScrollTouchMove(event); }}
+          @touchend=${() => { this.onScrollTouchEnd(); }}
+          @touchcancel=${() => { this.onScrollTouchEnd(); }}
+          @keydown=${(event: KeyboardEvent) => { this.onScrollKeyDown(event); }}
+          @pointerdown=${(event: PointerEvent) => { this.onScrollPointerDown(event); }}
+          @pointerup=${(event: PointerEvent) => { this.onScrollPointerEnd(event); }}
+          @pointercancel=${(event: PointerEvent) => { this.onScrollPointerEnd(event); }}
+        >
+          <div class="chat-content">
+            ${this.renderEmptyLoadState(turns.length)}
+            ${this.renderHistoryBoundary()}
+            ${this.renderReadableLoadNotice()}
+            ${repeat(turns, (turn) => this.turnRenderKey(turn), (turn, index) => this.renderTurn(turn, liveTailGroup, index === turns.length - 1))}
+            ${turns.length === 0 ? this.renderRunningTurnTail() : null}
+          </div>
         </div>
       </div>
       <image-lightbox></image-lightbox>
@@ -1316,58 +1355,77 @@ export class ChatView extends LitElement {
   }
 
   private onScroll(): void {
-    const chat = this.chat;
-    if (chat !== undefined) this.scrolling.recordScroll(chat);
+    this.scrolling.recordScroll();
+    this.syncScrollOwner(this.scrolling.mode);
   }
 
-  private onReaderIntent(): void {
-    const chat = this.chat;
-    if (chat !== undefined) this.scrolling.readerIntent(chat);
+  private onScrollWheel(event: WheelEvent): void {
+    this.scrolling.readerWheel(event.deltaY);
+    this.syncScrollOwner(this.scrolling.mode);
+  }
+
+  private onScrollTouchStart(event: TouchEvent): void {
+    this.scrolling.readerTouchStart(event.touches[0]?.clientY);
+  }
+
+  private onScrollTouchMove(event: TouchEvent): void {
+    this.scrolling.readerTouchMove(event.touches[0]?.clientY);
+    this.syncScrollOwner(this.scrolling.mode);
+  }
+
+  private onScrollTouchEnd(): void {
+    this.scrolling.readerTouchEnd();
+    this.syncScrollOwner(this.scrolling.mode);
   }
 
   private onScrollKeyDown(event: KeyboardEvent): void {
-    if (!CHAT_SCROLL_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-    this.onReaderIntent();
+    this.scrolling.readerKey(event.key, event.shiftKey);
+    this.syncScrollOwner(this.scrolling.mode);
   }
 
   private onScrollPointerDown(event: PointerEvent): void {
     const chat = this.chat;
     if (chat === undefined || event.target !== chat) return;
-    this.scrollPointerActive = true;
-    this.scrolling.holdPosition();
+    if (typeof chat.setPointerCapture === "function") chat.setPointerCapture(event.pointerId);
+    this.scrolling.readerPointerStart();
+    this.syncScrollOwner(this.scrolling.mode);
   }
 
-  private onScrollPointerEnd(): void {
-    if (!this.scrollPointerActive) return;
-    this.scrollPointerActive = false;
+  private onScrollPointerEnd(event: PointerEvent): void {
     const chat = this.chat;
-    if (chat !== undefined) this.scrolling.recordScroll(chat);
+    if (chat !== undefined && typeof chat.hasPointerCapture === "function" && chat.hasPointerCapture(event.pointerId)) chat.releasePointerCapture(event.pointerId);
+    this.scrolling.readerPointerEnd();
+    this.syncScrollOwner(this.scrolling.mode);
+  }
+
+  private syncScrollOwner(mode: ChatScrollMode): void {
+    const chat = this.chat;
+    if (chat !== undefined) chat.dataset["scrollOwner"] = mode === "reader" || mode === "history" ? "reader" : "component";
   }
 
   private requestLoadMore(): void {
     if (this.loadMoreRequested) return;
     if (this.isSessionLive() || !this.hasMore || this.loadingMore || this.onLoadMore === undefined) return;
     this.scrolling.holdPosition();
+    this.syncScrollOwner(this.scrolling.mode);
     this.loadMoreRequested = true;
-    this.onLoadMore();
+    const generation = ++this.loadMoreGeneration;
+    void this.finishLoadMore(this.onLoadMore(), generation);
   }
 
-  private scheduleTailPlacement(): void {
-    this.scrolling.scheduleTailPlacement(() => { this.placeTailNow(); });
-  }
-
-  private placeTailNow(): void {
-    const chat = this.chat;
-    if (chat !== undefined) chat.scrollTop = chat.scrollHeight;
-  }
-
-  private openAtBottom(): void {
-    // Preview content is already rendered here. Move before paint, then repeat
-    // next frame for content whose layout finishes after this update.
-    this.placeTailNow();
-    this.scheduleTailPlacement();
+  private async finishLoadMore(load: Promise<void>, generation: number): Promise<void> {
+    try {
+      await load;
+    } catch {
+      // The session controller reports the request failure in application state.
+    }
+    if (generation !== this.loadMoreGeneration) return;
+    this.loadMoreRequested = false;
+    this.scrolling.completeHistoryHold();
+    this.syncScrollOwner(this.scrolling.mode);
   }
 
   /** The live tail keys on its start, which is stable while events stream in. */

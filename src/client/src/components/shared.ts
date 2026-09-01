@@ -673,8 +673,10 @@ export const chatStyles = css`
      collapses to nothing as soon as the transcript is taller than the scroller.
      A spacer that could not collapse would push the first message above the
      scroll origin, where no amount of scrolling reaches it. */
-  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); grid-template-rows: minmax(0, 1fr); align-content: start; justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: auto; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
+  .chat { --pi-chat-sticky-top: -26px; --pi-chat-pad-block-start: 26px; --pi-chat-pad-block-end: 16px; display: grid; grid-template-columns: minmax(0, var(--calm-measure)); grid-template-rows: minmax(0, 1fr); align-content: start; justify-content: center; height: 100%; min-height: 0; overflow: auto; overflow-anchor: none; padding: var(--pi-chat-pad-block-start) var(--calm-gutter) var(--pi-chat-pad-block-end); box-sizing: border-box; }
+  .chat[data-scroll-owner="reader"] { overflow-anchor: auto; }
   .chat::before { content: ""; }
+  .chat-content { min-width: 0; }
   /* One human message and its reply share a stable keyed box. */
   .turn { min-width: 0; display: block; }
   .turn-body { min-width: 0; }

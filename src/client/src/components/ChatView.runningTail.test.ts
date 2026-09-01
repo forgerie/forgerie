@@ -75,7 +75,7 @@ describe("ChatView running-turn tail", () => {
     view.pendingAsk = askedQuestion;
     await view.updateComplete;
 
-    expect(view.shadowRoot?.querySelector(".chat > ask-user-card.open-ask-card")).not.toBeNull();
+    expect(view.shadowRoot?.querySelector(".chat-content > ask-user-card.open-ask-card")).not.toBeNull();
   });
 
   it("does not mistake a past question in the transcript for the open one", async () => {

@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { textMessage } from "../chatMessages";
-import { selectedChatFreshReadable, selectedChatLoading, selectedChatTarget } from "../selectedChatLoad";
+import { selectedChatLiveReady, selectedChatLoading, selectedChatTarget } from "../selectedChatLoad";
 import { ChatView } from "./ChatView";
 import { chatStyles } from "./shared";
 
@@ -14,8 +14,9 @@ afterEach(() => {
 });
 
 describe("ChatView native scroll behavior", () => {
-  it("keeps browser scroll anchoring enabled", () => {
-    expect(chatStyles.cssText).toMatch(/\.chat\s*{[^}]*overflow-anchor:\s*auto/);
+  it("gives native scroll anchoring to the reader, not tail placement", () => {
+    expect(chatStyles.cssText).toMatch(/\.chat\s*{[^}]*overflow-anchor:\s*none/);
+    expect(chatStyles.cssText).toMatch(/\.chat\[data-scroll-owner="reader"\]\s*{[^}]*overflow-anchor:\s*auto/);
   });
 
   it("keeps the fixed history control out of browser anchor selection", () => {
@@ -85,6 +86,7 @@ describe("ChatView tail ownership", () => {
     frames.releaseAll();
 
     geometry.scrollTop = 500;
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
     chat.dispatchEvent(new Event("scroll"));
     geometry.scrollHeight = 1_800;
     view.messages = [...view.messages, textMessage("assistant", "more")];
@@ -92,6 +94,7 @@ describe("ChatView tail ownership", () => {
     frames.releaseAll();
 
     expect(geometry.scrollTop).toBe(500);
+    expect(chat.dataset["scrollOwner"]).toBe("reader");
   });
 
   it("resumes following after the reader returns to the bottom", async () => {
@@ -102,6 +105,7 @@ describe("ChatView tail ownership", () => {
     frames.releaseAll();
 
     geometry.scrollTop = 500;
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
     chat.dispatchEvent(new Event("scroll"));
     geometry.scrollTop = 1_000;
     chat.dispatchEvent(new Event("scroll"));
@@ -114,7 +118,7 @@ describe("ChatView tail ownership", () => {
     expect(geometry.scrollTop).toBe(1_400);
   });
 
-  it("does not reclaim reader ownership during a same-session refresh", async () => {
+  it("reclaims the bottom for a same-session opening attempt", async () => {
     const frames = installFrames();
     const view = await mountedView();
     const chat = chatScroller(view);
@@ -122,12 +126,66 @@ describe("ChatView tail ownership", () => {
     frames.releaseAll();
 
     geometry.scrollTop = 500;
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
     chat.dispatchEvent(new Event("scroll"));
+    view.openingAttempt += 1;
     view.selectedLoad = selectedChatLoading(selectedChatTarget("local", session));
     await view.updateComplete;
     frames.releaseAll();
 
+    expect(geometry.scrollTop).toBe(1_000);
+  });
+
+  it("preserves reader ownership during a maintenance refresh", async () => {
+    const frames = installFrames();
+    const view = await mountedView();
+    const chat = chatScroller(view);
+    const geometry = defineMutableScrollGeometry(chat, { scrollHeight: 1_400 });
+    frames.releaseAll();
+
+    geometry.scrollTop = 500;
+    chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    chat.dispatchEvent(new Event("scroll"));
+    view.selectedLoad = selectedChatLoading(selectedChatTarget("local", session), "fresh");
+    await view.updateComplete;
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
+    await view.updateComplete;
+    frames.releaseAll();
+
     expect(geometry.scrollTop).toBe(500);
+    expect(chat.dataset["scrollOwner"]).toBe("reader");
+  });
+
+  it("re-pins after the transcript viewport or content changes size", async () => {
+    const frames = installFrames();
+    const resizes = installResizeObservers();
+    const view = await mountedView();
+    const geometry = defineMutableScrollGeometry(chatScroller(view), { scrollHeight: 1_400 });
+    frames.releaseAll();
+
+    geometry.clientHeight = 200;
+    resizes.emitAll();
+    expect(geometry.scrollTop).toBe(1_200);
+
+    geometry.scrollHeight = 1_800;
+    resizes.emitAll();
+    expect(geometry.scrollTop).toBe(1_600);
+  });
+
+  it("restores resize tracking when the same view reconnects", async () => {
+    const frames = installFrames();
+    const resizes = installResizeObservers();
+    const view = await mountedView();
+    const geometry = defineMutableScrollGeometry(chatScroller(view), { scrollHeight: 1_400 });
+    frames.releaseAll();
+
+    view.remove();
+    document.body.append(view);
+    await view.updateComplete;
+    geometry.clientHeight = 200;
+    resizes.emitAll();
+
+    expect(geometry.scrollTop).toBe(1_200);
   });
 
   it("keeps ownership with a delayed scrollbar drag", async () => {
@@ -169,7 +227,7 @@ describe("ChatView tail ownership", () => {
     expect(geometry.scrollTop).toBe(1_400);
   });
 
-  it("cancels a queued tail placement when reader input arrives first", async () => {
+  it("finishes the current tail placement before later reader input takes control", async () => {
     const frames = installFrames();
     const view = await mountedView();
     const chat = chatScroller(view);
@@ -182,14 +240,14 @@ describe("ChatView tail ownership", () => {
     chat.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
     frames.releaseAll();
 
-    expect(geometry.scrollTop).toBe(1_000);
+    expect(geometry.scrollTop).toBe(1_400);
   });
 });
 
 describe("ChatView earlier history", () => {
   it("loads earlier messages only from the explicit button", async () => {
     const frames = installFrames();
-    const loadMore = vi.fn();
+    const loadMore = vi.fn(() => Promise.resolve());
     const view = await mountedView();
     view.hasMore = true;
     view.onLoadMore = loadMore;
@@ -211,12 +269,56 @@ describe("ChatView earlier history", () => {
     expect(loadMore).toHaveBeenCalledOnce();
   });
 
-  it("keeps an underfilled transcript at the top when earlier messages arrive", async () => {
+  it("ignores an earlier session's stale history completion", async () => {
     const frames = installFrames();
-    const loadMore = vi.fn();
+    const firstLoad = pendingLoadMore();
+    const secondLoad = pendingLoadMore();
     const view = await mountedView();
     view.hasMore = true;
-    view.onLoadMore = loadMore;
+    view.messageStart = 1;
+    view.onLoadMore = firstLoad.run;
+    await view.updateComplete;
+    const geometry = defineMutableScrollGeometry(chatScroller(view), { scrollHeight: 1_400 });
+    frames.releaseAll();
+
+    requiredElement(view.shadowRoot?.querySelector<HTMLButtonElement>(".history-load-button"), "first history load button").click();
+    await view.updateComplete;
+
+    const nextSession = { id: "session-next", cwd: "/next" };
+    view.sessionId = nextSession.id;
+    view.sessionCwd = nextSession.cwd;
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", nextSession));
+    view.messages = [textMessage("assistant", "next session")];
+    view.onLoadMore = secondLoad.run;
+    await view.updateComplete;
+    frames.releaseAll();
+    const secondButton = requiredElement(view.shadowRoot?.querySelector<HTMLButtonElement>(".history-load-button"), "second history load button");
+    secondButton.click();
+    await view.updateComplete;
+
+    firstLoad.resolve();
+    await firstLoad.done;
+    await Promise.resolve();
+    await view.updateComplete;
+    expect(secondButton.disabled).toBe(true);
+
+    geometry.scrollHeight = 1_800;
+    view.messages = [...view.messages, textMessage("assistant", "more next session")];
+    await view.updateComplete;
+    frames.releaseAll();
+    expect(geometry.scrollTop).toBe(1_000);
+
+    secondLoad.resolve();
+    await secondLoad.done;
+    await Promise.resolve();
+  });
+
+  it("keeps an underfilled transcript at the top through refresh and earlier history", async () => {
+    const frames = installFrames();
+    const loadMore = pendingLoadMore();
+    const view = await mountedView();
+    view.hasMore = true;
+    view.onLoadMore = loadMore.run;
     view.messageStart = 1;
     await view.updateComplete;
     const geometry = defineMutableScrollGeometry(chatScroller(view), { scrollHeight: 300, clientHeight: 400 });
@@ -224,21 +326,32 @@ describe("ChatView earlier history", () => {
 
     const button = requiredElement(view.shadowRoot?.querySelector<HTMLButtonElement>(".history-load-button"), "history load button");
     button.click();
+    await view.updateComplete;
+    view.loadingMore = true;
+    view.selectedLoad = selectedChatLoading(selectedChatTarget("local", session), "fresh");
+    await view.updateComplete;
+    expect(geometry.scrollTop).toBe(0);
     geometry.scrollHeight = 1_400;
+    view.loadingMore = false;
+    view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
     view.messageStart = 0;
     view.messages = [textMessage("user", "earlier"), ...view.messages];
     await view.updateComplete;
+    loadMore.resolve();
+    await loadMore.done;
+    await Promise.resolve();
     frames.releaseAll();
 
-    expect(loadMore).toHaveBeenCalledOnce();
+    expect(loadMore.run).toHaveBeenCalledOnce();
     expect(geometry.scrollTop).toBe(0);
   });
 
   it("resumes tail following when loaded history still fits", async () => {
     const frames = installFrames();
+    const loadMore = pendingLoadMore();
     const view = await mountedView();
     view.hasMore = true;
-    view.onLoadMore = vi.fn();
+    view.onLoadMore = loadMore.run;
     view.messageStart = 1;
     await view.updateComplete;
     const geometry = defineMutableScrollGeometry(chatScroller(view), { scrollHeight: 300, clientHeight: 400 });
@@ -246,10 +359,14 @@ describe("ChatView earlier history", () => {
 
     const button = requiredElement(view.shadowRoot?.querySelector<HTMLButtonElement>(".history-load-button"), "history load button");
     button.click();
+    await view.updateComplete;
     geometry.scrollHeight = 350;
     view.messageStart = 0;
     view.messages = [textMessage("user", "earlier"), ...view.messages];
     await view.updateComplete;
+    loadMore.resolve();
+    await loadMore.done;
+    await Promise.resolve();
     frames.releaseAll();
 
     geometry.scrollHeight = 800;
@@ -261,6 +378,19 @@ describe("ChatView earlier history", () => {
   });
 });
 
+function pendingLoadMore(): { done: Promise<void>; resolve: () => void; run: () => Promise<void> } {
+  let resolveLoad: (() => void) | undefined;
+  const done = new Promise<void>((resolve) => { resolveLoad = resolve; });
+  return {
+    done,
+    resolve: () => {
+      if (resolveLoad === undefined) throw new Error("Expected pending history load resolver");
+      resolveLoad();
+    },
+    run: vi.fn(() => done),
+  };
+}
+
 async function mountedView(): Promise<ChatView> {
   const view = new ChatView();
   view.sessionId = session.id;
@@ -269,7 +399,7 @@ async function mountedView(): Promise<ChatView> {
   view.messages = [textMessage("user", "question"), textMessage("assistant", "answer")];
   view.messageEnd = 2;
   view.messageTotal = 2;
-  view.selectedLoad = selectedChatFreshReadable(selectedChatTarget("local", session));
+  view.selectedLoad = selectedChatLiveReady(selectedChatTarget("local", session));
   document.body.append(view);
   await view.updateComplete;
   return view;
@@ -279,6 +409,24 @@ const session = { id: "session-scroll", cwd: "/repo" };
 
 function chatScroller(view: ChatView): HTMLElement {
   return requiredElement(view.shadowRoot?.querySelector<HTMLElement>(".chat"), "chat scroller");
+}
+
+function installResizeObservers(): { emitAll: () => void } {
+  const observers: RecordingResizeObserver[] = [];
+  class RecordingResizeObserver implements ResizeObserver {
+    private active = true;
+    constructor(private readonly callback: ResizeObserverCallback) { observers.push(this); }
+    observe(target: Element, options?: ResizeObserverOptions): void { void target; void options; }
+    unobserve(target: Element): void { void target; }
+    disconnect(): void { this.active = false; }
+    emit(): void { if (this.active) this.callback([], this); }
+  }
+  vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
+  return {
+    emitAll: () => {
+      for (const observer of observers) observer.emit();
+    },
+  };
 }
 
 function installFrames(): { releaseAll: () => void } {
