@@ -15,6 +15,7 @@ afterEach(async () => {
 
 function delegationDeps() {
   const spawn = vi.fn(() => Promise.resolve({ sessionId: "independent-1", cwd: "/workspace" }));
+  const handoff = vi.fn(() => Promise.resolve({ handoffId: "handoff-1", sourceSessionId: "source-1", destinationSessionId: "destination-1", cwd: "/workspace", state: "preparing" as const }));
   const subsessionSpawn = vi.fn(() => Promise.resolve({ sessionId: "child-1", cwd: "/workspace" }));
   const subsessions: SubsessionToolDeps = {
     spawn: subsessionSpawn,
@@ -22,7 +23,7 @@ function delegationDeps() {
     check: vi.fn(() => Promise.resolve({ sessionId: "child-1", cwd: "/workspace", status: "idle" as const, finalText: "", messageCount: 0 })),
     read: vi.fn(() => Promise.resolve({ sessionId: "child-1", cwd: "/workspace", status: "idle" as const, entries: [], total: 0, matched: 0, start: 0, hasMore: false })),
   };
-  return { spawn, subsessions, subsessionSpawn };
+  return { spawn, handoff, subsessions, subsessionSpawn };
 }
 
 function toolNames(definitions: ReturnType<typeof createPiWebCustomToolDefinitions>): string[] {
@@ -53,11 +54,12 @@ function findTool(definitions: ReturnType<typeof createPiWebCustomToolDefinition
 
 describe("delegation tool capability boundary", () => {
   it("provides every globally enabled delegation tool to unrestricted sessions", () => {
-    const { spawn, subsessions } = delegationDeps();
+    const { spawn, handoff, subsessions } = delegationDeps();
 
-    expect(toolNames(createPiWebCustomToolDefinitions("/workspace", true, spawn, subsessions))).toEqual([
+    expect(toolNames(createPiWebCustomToolDefinitions("/workspace", true, spawn, subsessions, undefined, handoff))).toEqual([
       "edit",
       "spawn_session",
+      "handoff_session",
       "spawn_subsession",
       "list_subsessions",
       "check_subsession",
@@ -74,9 +76,9 @@ describe("delegation tool capability boundary", () => {
   });
 
   it("removes every delegation tool but retains ordinary tools for restricted tracked children", () => {
-    const { spawn, subsessions } = delegationDeps();
+    const { spawn, handoff, subsessions } = delegationDeps();
 
-    expect(toolNames(createPiWebCustomToolDefinitions("/workspace", false, spawn, subsessions))).toEqual(["edit"]);
+    expect(toolNames(createPiWebCustomToolDefinitions("/workspace", false, spawn, subsessions, undefined, handoff))).toEqual(["edit"]);
   });
 
   it("wires the dispatching session identity, inherited model, and model spec into spawn_session", async () => {

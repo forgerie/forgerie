@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { statSync, type Stats } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { clampThinkingLevel, type ImageContent } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import {
@@ -98,6 +100,8 @@ import { PendingExtensionDialogStore, type ExtensionDialogCancelReason } from ".
 import { ExtensionDialogWaiters, effectiveExtensionDialogTimeoutMs, extensionDialogCancelValue } from "./extensionDialogWaiters.js";
 import { DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS } from "../../config.js";
 import { createSpawnSessionToolDefinition, type SpawnSessionInvocation, type SpawnSessionResult } from "./spawnSessionTool.js";
+import { createHandoffSessionToolDefinition, type HandoffSessionInvocation, type HandoffSessionResult, type HandoffState } from "./handoffSessionTool.js";
+import { HANDOFF_LIFECYCLE_CUSTOM_TYPE, HANDOFF_STATUS_CUSTOM_TYPE, handoffContinuationPrompt, handoffDocumentPath, handoffPreparationPrompt, handoffStatusContent, handoffTransition, type HandoffLifecycleContext, type HandoffPreparationContext } from "./handoffSession.js";
 import { createSubsessionToolDefinitions, type SpawnSubsessionInvocation, type SpawnSubsessionResult, type SubsessionCheckResult, type SubsessionReadQuery, type SubsessionReadResult, type SubsessionStatus, type SubsessionSummary, type SubsessionToolDeps } from "./spawnSubsessionTool.js";
 import { buildTranscriptView } from "./subsessionTranscript.js";
 import { planSessionCleanup, summarizeSessionCleanupExecution, type NormalizedSessionCleanupRequest, type SessionCleanupPlan } from "./sessionCleanup.js";
@@ -151,6 +155,22 @@ function spawnTargetError(decision: Extract<SpawnTargetDecision, { allowed: fals
 
 function modelSpecOf(model: { provider: string; id: string }): string {
   return `${model.provider}/${model.id}`;
+}
+
+function handoffPreparationCompletion(event: unknown): PromptCompletion | undefined {
+  if (getString(event, "type") !== "message_end") return undefined;
+  const message = getProperty(event, "message");
+  if (getString(message, "role") !== "assistant") return undefined;
+  const stopReason = getString(message, "stopReason");
+  if (stopReason === "stop") return { accepted: true };
+  if (stopReason === "toolUse") return undefined;
+  const detail = getString(message, "errorMessage");
+  return {
+    accepted: false,
+    error: detail === undefined
+      ? `Preparation run ended with stop reason ${stopReason ?? "unknown"}.`
+      : `Preparation run ended with stop reason ${stopReason ?? "unknown"}: ${detail}`,
+  };
 }
 
 /**
@@ -255,7 +275,7 @@ interface PersistedChildSubsessionLink {
   spawnedSessionId: string;
 }
 
-type SessionCreationProvenance = "tracked-subsession";
+type SessionCreationProvenance = "tracked-subsession" | "detached-handoff";
 
 interface StartSessionOptions {
   parentSession?: string;
@@ -750,6 +770,8 @@ function createRuntimeWithOneShotSessionOptions(
 }
 
 type SpawnSessionFn = (input: SpawnSessionInvocation) => Promise<SpawnSessionResult>;
+type HandoffSessionFn = (input: HandoffSessionInvocation) => Promise<HandoffSessionResult>;
+type PromptCompletion = { accepted: true } | { accepted: false; error: string };
 
 export function createPiWebCustomToolDefinitions(
   cwd: string,
@@ -757,10 +779,12 @@ export function createPiWebCustomToolDefinitions(
   spawn?: SpawnSessionFn,
   subsessions?: SubsessionToolDeps,
   askUser?: AskUserToolDeps,
+  handoff?: HandoffSessionFn,
 ) {
   return [
     createPiWebEditToolDefinition(cwd),
     ...(delegationEnabled && spawn !== undefined ? [createSpawnSessionToolDefinition(cwd, { spawn })] : []),
+    ...(delegationEnabled && handoff !== undefined ? [createHandoffSessionToolDefinition(cwd, { handoff })] : []),
     ...(delegationEnabled && subsessions !== undefined ? createSubsessionToolDefinitions(cwd, subsessions) : []),
     // Asking the user is not delegation: the questions land in the session the
     // user is already watching, so tracked children may ask too.
@@ -774,6 +798,7 @@ function createDefaultRuntimeFactory(
   spawn?: SpawnSessionFn,
   subsessions?: SubsessionToolDeps,
   askUser?: AskUserToolDeps,
+  handoff?: HandoffSessionFn,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -794,7 +819,7 @@ function createDefaultRuntimeFactory(
     const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
-    const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser);
+    const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser, handoff);
     const result = await createAgentSessionFromServices({
       services,
       sessionManager,
@@ -918,6 +943,8 @@ export class PiSessionService implements SessionRouteService {
    * on full readiness.
    */
   private readonly startupSessions = new Map<string, PiAgentSession>();
+  /** Handoff destinations whose extension binding must auto-cancel startup dialogs instead of parking creation. */
+  private readonly detachedHandoffStartupSessions = new WeakSet<PiAgentSession>();
   private readonly activities = new Map<string, {
     phase: "active" | "idle" | "error";
     label: string;
@@ -943,6 +970,12 @@ export class PiSessionService implements SessionRouteService {
   private readonly queuedCompactionTimers = new Map<string, NodeJS.Timeout>();
   private readonly compactionStartGates = new Map<string, CompactionStartGate>();
   private readonly authLossWarnings = new Set<string>();
+  /** Handoffs whose preparation reached ready or failed; prevents late prompt callbacks from changing the terminal result. */
+  private readonly completedHandoffs = new Set<string>();
+  /** Destination session ids that must reject user prompts until automatic continuation is accepted. */
+  private readonly preparingHandoffDestinations = new Set<string>();
+  /** Source session ids reserved by a detached handoff until that handoff reaches a terminal state. */
+  private readonly handoffSourceReservations = new Set<string>();
   /** Tracked subsession id -> the parent session id that spawned it. */
   private readonly subsessionParents = new Map<string, string>();
   /** Parent session id -> the set of tracked subsession ids it spawned. */
@@ -1045,6 +1078,7 @@ export class PiSessionService implements SessionRouteService {
         read: (parentSessionId, sessionId, query, parentSessionFile) => this.readSubsession(parentSessionId, sessionId, query, parentSessionFile),
       },
       deps.askUserEnabled === true ? { open: (input) => this.openAsk(input) } : undefined,
+      this.spawnTargets === undefined ? undefined : (input) => this.handoffSession(input),
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
@@ -1527,6 +1561,320 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /**
+   * Create a continuation session immediately, then prepare its context in the
+   * destination while the source turn terminates.
+   */
+  async handoffSession(input: HandoffSessionInvocation): Promise<HandoffSessionResult> {
+    if (this.spawnTargets === undefined) throw new Error("Spawning sessions is disabled");
+    const source = await this.getOrOpen({ id: input.sourceSessionId, cwd: input.spawningCwd });
+    if (source.sessionFile !== input.sourceSessionFile) throw new Error("Source session transcript changed before handoff");
+    const sourceBranch = [...source.sessionManager.getBranch()];
+
+    if (this.handoffSourceReservations.has(input.sourceSessionId)) throw new Error("A handoff is already in progress for this source session");
+    this.handoffSourceReservations.add(input.sourceSessionId);
+
+    const handoffId = randomUUID();
+    const requestedAt = this.now().toISOString();
+    const requestedContext: HandoffLifecycleContext = {
+      handoffId,
+      sourceSessionId: input.sourceSessionId,
+      ...(input.sourceLeafId === undefined ? {} : { sourceLeafId: input.sourceLeafId }),
+      ...(input.focus === undefined ? {} : { focus: input.focus }),
+      requestedAt,
+    };
+    try {
+      this.requireHandoffTransition(source, requestedContext, "requested");
+    } catch (error: unknown) {
+      this.handoffSourceReservations.delete(input.sourceSessionId);
+      throw error;
+    }
+    this.logHandoffTransition(handoffId, "requested", {
+      sourceSessionId: input.sourceSessionId,
+      spawningCwd: input.spawningCwd,
+    });
+
+    let decision: SpawnTargetDecision;
+    let created: ClientSession;
+    try {
+      decision = await this.spawnTargets.resolveSpawnTarget(input.spawningCwd, input.cwd);
+      if (!decision.allowed) throw spawnTargetError(decision);
+      const model = input.modelSpec === undefined
+        ? input.model
+        : await this.resolveSpawnModel({ id: input.sourceSessionId, cwd: input.spawningCwd }, input.modelSpec);
+      created = await this.startSession(decision.cwd, {
+        ...(model === undefined ? {} : { initialModel: model }),
+        ...(input.thinkingLevel === undefined ? {} : { initialThinkingLevel: input.thinkingLevel }),
+        creationProvenance: "detached-handoff",
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.recordHandoffTransition(source, requestedContext, "failed", message);
+      this.logHandoffTransition(handoffId, "failed", { sourceSessionId: input.sourceSessionId, error: message });
+      this.handoffSourceReservations.delete(input.sourceSessionId);
+      throw error;
+    }
+
+    const destination = this.active.get(created.id)?.runtime.session;
+    if (destination === undefined) {
+      const message = "Handoff destination did not become active";
+      this.recordHandoffTransition(source, requestedContext, "failed", message);
+      this.logHandoffTransition(handoffId, "failed", { sourceSessionId: input.sourceSessionId, destinationSessionId: created.id, error: message });
+      this.handoffSourceReservations.delete(input.sourceSessionId);
+      throw new Error(message);
+    }
+    const lifecycleContext: HandoffLifecycleContext = {
+      ...requestedContext,
+      destinationSessionId: created.id,
+      cwd: decision.cwd,
+    };
+
+    this.preparingHandoffDestinations.add(created.id);
+    try {
+      this.requireHandoffTransition(source, lifecycleContext, "destination-created");
+      this.requireHandoffTransition(destination, lifecycleContext, "destination-created");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.preparingHandoffDestinations.delete(created.id);
+      this.handoffSourceReservations.delete(input.sourceSessionId);
+      this.recordHandoffTransition(source, lifecycleContext, "failed", message);
+      this.logHandoffTransition(handoffId, "failed", { sourceSessionId: input.sourceSessionId, destinationSessionId: created.id, error: message });
+      await destination.abort();
+      throw error;
+    }
+    this.logHandoffTransition(handoffId, "destination-created", {
+      sourceSessionId: input.sourceSessionId,
+      destinationSessionId: created.id,
+      cwd: decision.cwd,
+    });
+    await this.publishHandoffStatus(destination, lifecycleContext, "preparing");
+
+    void this.detachSourceAndPrepare(source, destination, lifecycleContext, sourceBranch);
+    const modelUsed = destination.model;
+    return {
+      handoffId,
+      sourceSessionId: input.sourceSessionId,
+      destinationSessionId: created.id,
+      cwd: decision.cwd,
+      ...(modelUsed === undefined ? {} : { model: modelSpecOf(modelUsed) }),
+      state: "preparing",
+    };
+  }
+
+  private async detachSourceAndPrepare(source: PiAgentSession, destination: PiAgentSession, lifecycleContext: HandoffLifecycleContext, sourceBranch: readonly unknown[]): Promise<void> {
+    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+    try {
+      await source.abort();
+    } catch (error: unknown) {
+      const message = `Source termination failed: ${error instanceof Error ? error.message : String(error)}`;
+      await this.failDetachedHandoff(source, destination, lifecycleContext, message);
+      await destination.abort();
+      return;
+    }
+
+    try {
+      this.requireHandoffTransition(source, lifecycleContext, "source-detached");
+      this.requireHandoffTransition(destination, lifecycleContext, "source-detached");
+      this.logHandoffTransition(lifecycleContext.handoffId, "source-detached", {
+        sourceSessionId: lifecycleContext.sourceSessionId,
+        destinationSessionId: lifecycleContext.destinationSessionId,
+      });
+      this.requireHandoffTransition(source, lifecycleContext, "preparing");
+      this.requireHandoffTransition(destination, lifecycleContext, "preparing");
+      this.logHandoffTransition(lifecycleContext.handoffId, "preparing", {
+        sourceSessionId: lifecycleContext.sourceSessionId,
+        destinationSessionId: lifecycleContext.destinationSessionId,
+        cwd: lifecycleContext.cwd,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.failDetachedHandoff(source, destination, lifecycleContext, message);
+      await destination.abort();
+      return;
+    }
+
+    const destinationSessionId = lifecycleContext.destinationSessionId;
+    const cwd = lifecycleContext.cwd;
+    if (destinationSessionId === undefined || cwd === undefined) {
+      await this.failDetachedHandoff(source, destination, lifecycleContext, "Handoff destination context is incomplete.");
+      return;
+    }
+    const sourceSnapshotFile = join(tmpdir(), `forgerie-handoff-${lifecycleContext.handoffId}.json`);
+    const context: HandoffPreparationContext = {
+      ...lifecycleContext,
+      destinationSessionId,
+      cwd,
+      sourceSnapshotFile,
+    };
+    try {
+      await writeFile(sourceSnapshotFile, `${JSON.stringify({
+        version: 1,
+        handoffId: context.handoffId,
+        sourceSessionId: context.sourceSessionId,
+        sourceLeafId: context.sourceLeafId,
+        branch: sourceBranch,
+      }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      let transportCompletion: PromptCompletion | undefined;
+      let runCompletion: PromptCompletion | undefined;
+      const unsubscribe = destination.subscribe((event) => {
+        const observed = handoffPreparationCompletion(event);
+        if (observed !== undefined) runCompletion = observed;
+      });
+      const accepted = await this.submitPrompt(
+        destination,
+        handoffPreparationPrompt(context),
+        undefined,
+        [],
+        false,
+        true,
+        undefined,
+        (result) => { transportCompletion = result; },
+      );
+      unsubscribe();
+      const completion = transportCompletion?.accepted === false
+        ? transportCompletion
+        : runCompletion ?? (accepted
+          ? { accepted: false, error: "Preparation run ended without a successful final assistant message." }
+          : { accepted: false, error: "Preparation prompt failed." });
+      await this.finishDetachedHandoff(source, destination, context, completion);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.finishDetachedHandoff(source, destination, context, { accepted: false, error: message });
+    }
+  }
+
+  private async finishDetachedHandoff(source: PiAgentSession, destination: PiAgentSession, context: HandoffPreparationContext, completion: PromptCompletion): Promise<void> {
+    if (this.completedHandoffs.has(context.handoffId)) return;
+    let result = completion;
+    if (result.accepted) {
+      const documentError = await this.handoffDocumentError(context);
+      if (documentError !== undefined) result = { accepted: false, error: documentError };
+    }
+    if (this.completedHandoffs.has(context.handoffId)) return;
+    this.completedHandoffs.add(context.handoffId);
+
+    try {
+      if (!result.accepted) {
+        await this.failDetachedHandoff(source, destination, context, result.error);
+        return;
+      }
+
+      try {
+        this.requireHandoffTransition(source, context, "ready");
+        this.requireHandoffTransition(destination, context, "ready");
+      } catch (error: unknown) {
+        await this.failDetachedHandoff(source, destination, context, error instanceof Error ? error.message : String(error));
+        return;
+      }
+      this.logHandoffTransition(context.handoffId, "ready", {
+        sourceSessionId: context.sourceSessionId,
+        destinationSessionId: context.destinationSessionId,
+        cwd: context.cwd,
+      });
+      await this.publishHandoffStatus(destination, context, "ready");
+      try {
+        await this.prompt(
+          { id: context.destinationSessionId, cwd: context.cwd },
+          handoffContinuationPrompt(context),
+          undefined,
+          undefined,
+          { echoUserMessage: false, handoffContinuation: true },
+        );
+        this.preparingHandoffDestinations.delete(context.destinationSessionId);
+      } catch (error: unknown) {
+        this.preparingHandoffDestinations.delete(context.destinationSessionId);
+        const message = `Continuation delivery failed: ${error instanceof Error ? error.message : String(error)}`;
+        this.recordHandoffTransition(source, context, "continuation-failed", message);
+        this.recordHandoffTransition(destination, context, "continuation-failed", message);
+        this.logHandoffTransition(context.handoffId, "continuation-failed", {
+          sourceSessionId: context.sourceSessionId,
+          destinationSessionId: context.destinationSessionId,
+          error: message,
+        });
+        await this.publishHandoffStatus(destination, context, "continuation-failed", message);
+      }
+    } finally {
+      this.handoffSourceReservations.delete(context.sourceSessionId);
+      await rm(context.sourceSnapshotFile, { force: true });
+    }
+  }
+
+  private async failDetachedHandoff(source: PiAgentSession, destination: PiAgentSession, context: HandoffLifecycleContext, error: string): Promise<void> {
+    this.completedHandoffs.add(context.handoffId);
+    this.handoffSourceReservations.delete(context.sourceSessionId);
+    if (context.destinationSessionId !== undefined) this.preparingHandoffDestinations.delete(context.destinationSessionId);
+    this.recordHandoffTransition(source, context, "failed", error);
+    this.recordHandoffTransition(destination, context, "failed", error);
+    this.logHandoffTransition(context.handoffId, "failed", {
+      sourceSessionId: context.sourceSessionId,
+      ...(context.destinationSessionId === undefined ? {} : { destinationSessionId: context.destinationSessionId }),
+      error,
+    });
+    await this.publishHandoffStatus(destination, context, "failed", error);
+  }
+
+  private async handoffDocumentError(context: HandoffPreparationContext): Promise<string | undefined> {
+    const path = join(context.cwd, handoffDocumentPath(context));
+    try {
+      const document = await stat(path);
+      if (!document.isFile()) return `Handoff preparation did not create a regular file at ${handoffDocumentPath(context)}.`;
+      if (document.size === 0) return `Handoff preparation created an empty file at ${handoffDocumentPath(context)}.`;
+      return undefined;
+    } catch (error: unknown) {
+      return `Handoff preparation did not create ${handoffDocumentPath(context)}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  private async publishHandoffStatus(destination: PiAgentSession, context: HandoffLifecycleContext, state: "preparing" | "ready" | "failed" | "continuation-failed", error?: string): Promise<void> {
+    try {
+      await destination.sendCustomMessage({
+        customType: HANDOFF_STATUS_CUSTOM_TYPE,
+        content: handoffStatusContent(state, error),
+        display: true,
+        details: handoffTransition(context, state, this.now().toISOString(), error),
+      }, { triggerTurn: false });
+    } catch (publicationError: unknown) {
+      this.logger.info({
+        handoffId: context.handoffId,
+        state,
+        destinationSessionId: context.destinationSessionId,
+        error: publicationError instanceof Error ? publicationError.message : String(publicationError),
+      }, "handoff_session status publication failed");
+    }
+  }
+
+  private requireHandoffTransition(session: PiAgentSession, context: HandoffLifecycleContext, state: HandoffState): void {
+    if (!this.recordHandoffTransition(session, context, state)) {
+      throw new Error(`Could not persist handoff state ${state} for session ${session.sessionId}`);
+    }
+  }
+
+  private recordHandoffTransition(session: PiAgentSession, context: HandoffLifecycleContext, state: HandoffState, error?: string): boolean {
+    if (session.sessionManager.appendCustomEntry === undefined) {
+      this.logger.info({ handoffId: context.handoffId, state, sessionId: session.sessionId }, "handoff_session lifecycle persistence unavailable");
+      return false;
+    }
+    try {
+      session.sessionManager.appendCustomEntry(
+        HANDOFF_LIFECYCLE_CUSTOM_TYPE,
+        handoffTransition(context, state, this.now().toISOString(), error),
+      );
+      return true;
+    } catch (persistenceError: unknown) {
+      this.logger.info({
+        handoffId: context.handoffId,
+        state,
+        sessionId: session.sessionId,
+        error: persistenceError instanceof Error ? persistenceError.message : String(persistenceError),
+      }, "handoff_session lifecycle persistence failed");
+      return false;
+    }
+  }
+
+  private logHandoffTransition(handoffId: string, state: HandoffState, details: Record<string, unknown>): void {
+    this.logger.info({ handoffId, state, ...details }, "handoff_session lifecycle transition");
+  }
+
+  /**
    * Start a *tracked* child session on behalf of a LLM. Identical to
    * {@link spawnSession} in how the target cwd is resolved, but the child
    * records its parent (so it shows in the session tree) and is registered so
@@ -1621,6 +1969,9 @@ export class PiSessionService implements SessionRouteService {
    */
   // eslint-disable-next-line @typescript-eslint/require-await -- async so a rejected question set becomes a rejection rather than a synchronous throw from a promise-returning method.
   async openAsk(input: AskUserInvocation): Promise<PendingAskOpenResult> {
+    if (this.preparingHandoffDestinations.has(input.sessionId)) {
+      throw new Error("Handoff destination cannot ask questions while preparing context.");
+    }
     const result = this.pendingAskStore.open(input);
     // A supersede closes the earlier ask, so the browsers watching it must hear
     // that before they hear about its replacement.
@@ -1641,6 +1992,7 @@ export class PiSessionService implements SessionRouteService {
   async submitAsk(ref: PiSessionRef, askId: string, submission: AskUserSubmission): Promise<AskUserCloseResponse> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     // Checked before the store closes the ask so a refused delivery cannot
     // discard answers the user already submitted.
     this.assertTreeNavigationInactive(session, "answer questions");
@@ -1655,6 +2007,7 @@ export class PiSessionService implements SessionRouteService {
   async cancelAsk(ref: PiSessionRef, askId: string): Promise<AskUserCloseResponse> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "dismiss questions");
     return this.closeAsk(session, this.pendingAskStore.cancel(session.sessionId, askId));
   }
@@ -1707,6 +2060,7 @@ export class PiSessionService implements SessionRouteService {
   async answerDialog(ref: PiSessionRef, dialogId: string, value: ExtensionDialogAnswer): Promise<ExtensionDialogCloseResponse> {
     await this.assertWritable(ref);
     const session = await this.sessionForStatusOrDialogClose(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     const result = this.pendingExtensionDialogStore.answer(session.sessionId, dialogId, value);
     if (result.status === "stale") return { result: "stale", sessionStatus: this.statusFromSession(session) };
     const { outcome } = result;
@@ -1721,6 +2075,7 @@ export class PiSessionService implements SessionRouteService {
   async cancelDialog(ref: PiSessionRef, dialogId: string): Promise<ExtensionDialogCloseResponse> {
     await this.assertWritable(ref);
     const session = await this.sessionForStatusOrDialogClose(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     const result = this.pendingExtensionDialogStore.cancel(session.sessionId, dialogId, "cancelled");
     if (result.status === "stale") return { result: "stale", sessionStatus: this.statusFromSession(session) };
     const { outcome } = result;
@@ -1745,6 +2100,8 @@ export class PiSessionService implements SessionRouteService {
     request: { kind: ExtensionDialogKind; title: string; message?: string | undefined; options?: string[] | undefined; placeholder?: string | undefined },
     opts: ExtensionUIDialogOptions | undefined,
   ): Promise<boolean | string | undefined> {
+    if (this.detachedHandoffStartupSessions.has(session)) return extensionDialogCancelValue(request.kind);
+    this.assertHandoffDestinationAcceptsInput(session);
     const signal = opts?.signal;
     // A pre-aborted signal dismisses the dialog before it ever opens.
     if (signal?.aborted === true) return extensionDialogCancelValue(request.kind);
@@ -2268,6 +2625,7 @@ export class PiSessionService implements SessionRouteService {
   async setModel(ref: PiSessionRef, provider: string, modelId: string): Promise<ClientSessionStatus> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "change models");
     const candidates = await this.sessionModelCandidates(session);
     this.assertTreeNavigationInactive(session, "change models");
@@ -2283,6 +2641,7 @@ export class PiSessionService implements SessionRouteService {
   async cycleModel(ref: PiSessionRef, direction: "forward" | "backward"): Promise<ClientSessionStatus> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     const result = await this.runSessionEntryMutation(session, "change models", () => session.cycleModel(direction));
     if (result === undefined) throw new Error(session.scopedModels.length > 0 ? "Only one model in scope" : "Only one model available");
     this.publishActivity(session, `model: ${result.model.id}`, "idle", result.model.provider);
@@ -2298,6 +2657,7 @@ export class PiSessionService implements SessionRouteService {
   async setThinkingLevel(ref: PiSessionRef, level: string): Promise<ClientSessionStatus> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "change the thinking level");
     // pi owns the valid set; validate against the session's live levels rather
     // than a hardcoded union so this stays correct if pi changes the set.
@@ -2313,6 +2673,7 @@ export class PiSessionService implements SessionRouteService {
   async cycleThinkingLevel(ref: PiSessionRef): Promise<ClientSessionStatus> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "change the thinking level");
     const level = session.cycleThinkingLevel();
     if (level === undefined) throw new Error("Current model does not support thinking");
@@ -2360,7 +2721,7 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
-  async prompt(ref: PiSessionRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown, options?: { echoUserMessage?: boolean }): Promise<void> {
+  async prompt(ref: PiSessionRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown, options?: { echoUserMessage?: boolean; handoffContinuation?: boolean }): Promise<void> {
     const promptText = requirePromptText(text);
     // Command-forwarded prompts (e.g. /skill:*) are expanded by the agent, which
     // streams the canonical message back. The client doesn't render the raw
@@ -2368,10 +2729,11 @@ export class PiSessionService implements SessionRouteService {
     // as a transient line that vanishes on reload.
     const echoUserMessage = options?.echoUserMessage !== false;
     const requestedBehavior = parseStreamingBehavior(streamingBehavior);
-    const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
-    const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session, options?.handoffContinuation === true);
+    const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
+    const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
     this.assertTreeNavigationInactive(session, "send a prompt");
     const isQueued = session.isStreaming || session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
     if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, promptText)) {
@@ -2394,21 +2756,25 @@ export class PiSessionService implements SessionRouteService {
     if (!accepted) throw new Error("Prompt delivery was rejected before agent start.");
   }
 
-  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void): Promise<boolean> {
+  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void, onCompletion?: (completion: PromptCompletion) => void): Promise<boolean> {
     this.publishActivity(session, behavior === "steer" ? "steering queued" : behavior === "followUp" ? "message queued" : "prompt accepted", "active");
     if (behavior === undefined && echoUserMessage) this.events.publish(session.sessionId, { type: "message.append", message: userMessage(text, images) });
     const promptOptions = buildPromptOptions(behavior, images, expandPromptTemplates, preflightResult);
-    const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).then(() => true).catch((error: unknown) => {
+    const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).then(() => {
+      onCompletion?.({ accepted: true });
+      return true;
+    }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       this.publishActivity(session, "error", "error", message);
       this.events.publish(session.sessionId, { type: "session.error", message });
+      onCompletion?.({ accepted: false, error: message });
       return false;
     });
     void promptPromise;
     return promptPromise;
   }
 
-  private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): Promise<boolean> {
+  private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, onCompletion?: (completion: PromptCompletion) => void): Promise<boolean> {
     return await new Promise<boolean>((resolvePreflight, rejectPreflight) => {
       let settled = false;
       const settle = (accepted: boolean) => {
@@ -2422,9 +2788,15 @@ export class PiSessionService implements SessionRouteService {
         settled = true;
         rejectPreflight(new Error("Prompt preflight receipt timed out."));
       }, this.promptPreflightTimeoutMs);
-      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, settle);
+      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, settle, onCompletion);
       void completion.then(settle);
     });
+  }
+
+  private assertHandoffDestinationAcceptsInput(session: PiAgentSession, allowContinuation = false): void {
+    if (this.preparingHandoffDestinations.has(session.sessionId) && !allowContinuation) {
+      throw new Error("Handoff destination is preparing context. Retry after the ready status appears.");
+    }
   }
 
   private enqueuePromptBehindCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): void {
@@ -2436,10 +2808,11 @@ export class PiSessionService implements SessionRouteService {
 
   async runPromptResourceCommand(ref: PiSessionRef, text: string, identity: PromptResourceCommandIdentity, streamingBehavior?: unknown, attachments?: unknown): Promise<{ accepted: true; deliveryFingerprint: string }> {
     const requestedBehavior = parseStreamingBehavior(streamingBehavior);
-    const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
-    const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
+    const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
+    const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
     this.assertTreeNavigationInactive(session, "send a prompt-resource command");
     const catalog = await this.activeCommandCatalog(session);
     const resolved = resolvePromptResourceIdentity(catalog, text, identity);
@@ -2474,6 +2847,7 @@ export class PiSessionService implements SessionRouteService {
     await this.assertWritable(ref);
     const active = await this.getActive(ref);
     const { session } = active.runtime;
+    this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "run a shell command");
     const isExcluded = text.startsWith("!!");
     const command = (isExcluded ? text.slice(2) : text.slice(1)).trim();
@@ -2512,6 +2886,7 @@ export class PiSessionService implements SessionRouteService {
     await this.assertWritable(ref);
     const active = await this.getActive(ref);
     const session = active.runtime.session;
+    this.assertHandoffDestinationAcceptsInput(session);
     const sourceSessionId = session.sessionId;
     const parsed = parseLeadingSlashCommand(text);
     if (parsed.kind === "command" && parsed.name === "compact") {
@@ -2551,6 +2926,7 @@ export class PiSessionService implements SessionRouteService {
     await this.assertWritable(ref);
     const options = sessionTreeNavigationOptions(request);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     if (typeof session.navigateTree !== "function") throw new Error("Session tree navigation is not supported by this Pi runtime");
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before navigating the session tree");
 
@@ -2606,6 +2982,7 @@ export class PiSessionService implements SessionRouteService {
     }
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before forking the session tree");
     if (session.sessionManager.getLeafId() !== request.expectedLeafId) {
       throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
@@ -2976,6 +3353,7 @@ export class PiSessionService implements SessionRouteService {
   async reload(ref: PiSessionRef): Promise<void> {
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before reloading");
 
     const reopenedSession = await this.runTreeExclusiveOperation(
@@ -3654,7 +4032,12 @@ export class PiSessionService implements SessionRouteService {
         await this.recoverSubsessionTrackingForOpenedSession(runtime.session);
       }
       startup.report(STARTUP_PHASE_EXTENSIONS);
-      await this.bindSessionExtensions(runtime.session, notificationGeneration);
+      if (options.creationProvenance === "detached-handoff") this.detachedHandoffStartupSessions.add(runtime.session);
+      try {
+        await this.bindSessionExtensions(runtime.session, notificationGeneration);
+      } finally {
+        this.detachedHandoffStartupSessions.delete(runtime.session);
+      }
       this.bindRuntime(active);
       runtime.setRebindSession(async (session) => {
         const priorGeneration = notificationGeneration;

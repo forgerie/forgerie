@@ -1,64 +1,30 @@
 ---
 name: handoff
-description: "Compact the current conversation into a handoff document, then immediately start the continuation session with spawn_session. Use when the user says \"handoff\", \"hand off\", \"hand this off\", \"continue in a new/fresh session\", or wants to compact context and continue the work in another session."
+description: "Immediately detach the current conversation into a continuation session. Use when the user says \"handoff\", \"hand off\", \"hand this off\", \"continue in a new/fresh session\", or wants to compact context and continue elsewhere without waiting in the current thread."
 argument-hint: "What will the next session focus on?"
 ---
 
 # Handoff
 
-Compact the current conversation into a handoff document, then start the
-continuation session yourself with `spawn_session`. The handoff is done when
-the new session exists — not when a document exists.
+Call `handoff_session` immediately. Do not summarize the conversation, inspect
+files, write a handoff document, or do any other preparation in this session.
+The destination session owns all context preparation.
 
-## 1. Write the handoff document
+Pass the user's arguments as `focus`. Omit `focus` when they only asked to
+continue the current work. Inherit cwd and model unless the user explicitly
+requested another workspace or referenced a model as `#provider/model-id`.
 
-Save it to `.pi-web/handoffs/<UTC yyyy-mm-dd-hhmm>-<slug>.md` in the current
-project. Create the directory if it does not exist. The slug names the
-continuation's focus.
+Call the tool exactly once, alone and last. It creates the destination session,
+records the handoff lifecycle, and ends this run. Do not add a closing message
+after the tool call.
 
-The document gives a fresh agent everything it needs to continue:
+The destination session will:
 
-- The goal, and where the work stands: done, in flight, not started.
-- Decisions made and why — cover the ones a fresh agent would plausibly
-  re-litigate.
-- Next steps, most important first.
-- Skills the next session should load, if any.
-- Pointers to existing artifacts (plans, PRDs, issues, commits, diffs, docs)
-  by path or URL. Do not duplicate content that already lives in them.
+1. Read a private snapshot of the source session's active branch.
+2. Write `.pi-web/handoffs/<handoff-id>.md` with the compact context.
+3. Mark preparation ready or failed through Forgerie's lifecycle records.
+4. Continue the work after preparation succeeds.
 
-If the user passed arguments, treat them as the next session's focus:
-emphasize the context that serves it, and cut what does not.
-
-## 2. Spawn the continuation session
-
-Make all work durable first — the next session can only see what is on disk.
-Uncommitted intent, unsent conclusions, and anything else living only in this
-conversation must be in the document or an artifact it points to.
-
-Then call `spawn_session` exactly once:
-
-```text
-<One natural line stating what this session continues — the UI derives the
-session name from it.>
-
-Read <absolute path to the handoff document> and continue the work it
-describes.
-```
-
-- **cwd**: omit to inherit this session's workspace. Pass another workspace
-  only when the user asked for one.
-- **model**: omit to inherit. If the user referenced a model as
-  `#provider/model-id`, forward it.
-
-`spawn_session` is fire-and-forget: you will not see the new session's output
-and cannot steer it. Anything missing from the document is lost.
-
-## 3. Close out
-
-Tell the user, in a line or two, that the session was spawned and where the
-document lives. Then stop — the handed-off work belongs to the next session
-now, not this one.
-
-If `spawn_session` is unavailable (it can be disabled in settings), stop
-after writing the document, give its path, and tell the user to start the
-next session manually with a prompt pointing at it.
+If `handoff_session` is unavailable, state that detached handoff is disabled in
+this Forgerie session. Do not fall back to doing the slow summary in this
+thread unless the user explicitly asks for a manual handoff document.

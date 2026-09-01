@@ -6,8 +6,9 @@ them.
 
 ## handoff
 
-Compact the current conversation into a handoff document, then immediately
-spawn the continuation session via `spawn_session`.
+Create the continuation session immediately via `handoff_session`. The source
+turn ends at once while the destination prepares its own compact context and
+then continues the work.
 
 ## relay
 
