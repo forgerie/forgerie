@@ -541,7 +541,7 @@ describe("applyTranscriptEvent", () => {
 
     expect(applyTranscriptEvent(messages, { type: "message.append", message: { role: "user", content: "new prompt" } })).toEqual([
       textMessage("user", "stopped prompt"),
-      textMessage("user", "new prompt"),
+      { ...textMessage("user", "new prompt"), projection: "optimistic" },
     ]);
   });
 
@@ -564,6 +564,29 @@ describe("applyTranscriptEvent", () => {
     messages = applyTranscriptEvent(messages, { type: "assistant.delta", text: "answer" }, messageEnd) ?? messages;
 
     expect(messages.map((message) => message.transcriptPosition?.messageIndex)).toEqual([10, 11]);
+  });
+
+  it("replaces all optimistic lines from one finalized skill prompt", () => {
+    const content = `<skill name="se-debug" location="/skills/se-debug">
+Debug this
+</skill>
+
+Find the duplicate chat`;
+    const appended = applyTranscriptEvent([], { type: "message.append", message: { role: "user", content } }, 10) ?? [];
+    const finalized = applyTranscriptEvent(appended, {
+      type: "message.end",
+      message: { role: "user", content, timestamp: "2026-05-09T12:00:00.000Z" },
+    }, 10);
+
+    expect(finalized).toEqual(normalizeMessages([{
+      role: "user",
+      content,
+      timestamp: "2026-05-09T12:00:00.000Z",
+    }], 10));
+    expect(finalized?.map((message) => message.transcriptPosition)).toEqual([
+      { messageIndex: 10, lineIndex: 0, segmentIndex: 0 },
+      { messageIndex: 10, lineIndex: 1, segmentIndex: 0 },
+    ]);
   });
 
   it("seeds a null or undefined partial as a no-op", () => {

@@ -334,7 +334,7 @@ describe("SessionController session tree navigation", () => {
     socket.emit({ type: "message.append", message: { role: "assistant", content: "live after failed refresh" }, seq: 1 });
 
     expect(state.error).toContain("history refresh failed");
-    expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "live after failed refresh" }] }]);
+    expect(state.messages).toEqual([{ role: "assistant", parts: [{ type: "text", text: "live after failed refresh" }], projection: "optimistic" }]);
   });
 
   it("does not reopen a disposed controller when navigation settles late", async () => {

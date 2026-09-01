@@ -131,7 +131,28 @@ function applyFinalMessage(messages: ChatLine[], rawMessage: unknown, messageInd
     .map((line) => line.role === "assistant" ? withoutToolCalls(line) : line)
     .filter((line) => line.parts.length > 0);
   if (displayEnded.length === 0) return messages;
+  const replacedProjection = replaceOptimisticPromptProjection(messages, displayEnded);
+  if (replacedProjection !== undefined) return replacedProjection;
   return displayEnded.reduce((next, line) => applyFinalLine(next, line), messages);
+}
+
+function replaceOptimisticPromptProjection(messages: ChatLine[], finalized: ChatLine[]): ChatLine[] | undefined {
+  const promptText = finalized[0]?.promptText;
+  if (promptText === undefined || !finalized.every((line) => line.promptText === promptText)) return undefined;
+  let start = messages.length;
+  while (start > 0) {
+    const line = messages[start - 1];
+    if (line?.projection !== "optimistic" || line.promptText !== promptText) break;
+    start -= 1;
+  }
+  if (start === messages.length) return undefined;
+  const messageIndex = messages[start]?.transcriptPosition?.messageIndex;
+  const positionedFinalized = messageIndex === undefined
+    ? finalized
+    : finalized.map((line) => line.transcriptPosition === undefined
+      ? line
+      : setChatLineTranscriptPosition(line, { ...line.transcriptPosition, messageIndex }));
+  return [...messages.slice(0, start), ...positionedFinalized];
 }
 
 function applyFinalLine(messages: ChatLine[], displayEnded: ChatLine): ChatLine[] {
@@ -398,7 +419,8 @@ function messageText(message: ChatLine): string {
 }
 
 function appendNewMessage(messages: ChatLine[], rawMessage: unknown, messageIndex: number): ChatLine[] {
-  const lines = normalizeMessages([rawMessage], messageIndex);
+  const lines = normalizeMessages([rawMessage], messageIndex)
+    .map((line) => inheritChatLineTranscriptPosition(line, { ...line, projection: "optimistic" as const }));
   return lines.length === 0 ? messages : [...messages, ...lines];
 }
 

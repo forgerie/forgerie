@@ -81,6 +81,8 @@ export interface ChatLine {
   transcriptPosition?: ChatLineTranscriptPosition;
   /** Original user prompt when normalization splits one prompt into several visible lines. */
   promptText?: string;
+  /** A temporary client projection that a later final event must replace. */
+  projection?: "optimistic";
   source?: "compaction" | "branch_summary";
   meta?: {
     timestamp?: string;
