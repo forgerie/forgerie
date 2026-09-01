@@ -1156,12 +1156,23 @@ export const promptEditorStyles = css`
    * waveform says audio is arriving, the number says it is still happening.
    */
   .markdown-editor .cm-editor.dictation-live { border-color: var(--pi-accent-border); transition: border-color var(--pi-motion-fast) ease-out; }
+  /* The readout stands in for the draft's first line, so the placeholder it
+     replaces must not show through behind the waveform. */
+  .markdown-editor .cm-editor.dictation-live .cm-placeholder { visibility: hidden; }
+  /* A draft with words in it keeps them: the readout drops to the foot of the
+     box and the text is given room above it rather than being covered. */
+  .markdown-editor .cm-editor.dictation-live.dictation-over-text .cm-content { padding-bottom: 30px; }
+  .dictation-readout.dictation-over-text { align-items: flex-end; padding-bottom: 6px; }
   .dictation-readout { position: absolute; inset: 0; display: flex; align-items: center; gap: var(--pi-space-md); padding: 0 var(--pi-space-md); font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif); color: var(--pi-text-secondary); pointer-events: none; }
   .dictation-readout > * { pointer-events: auto; }
   /* Only states that need explaining carry words: a live waveform beside a
      running clock says listening on its own, and the microphone below it is
      the control that ends the turn. */
-  .dictation-readout .dictation-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
+  /* The word keeps its width and the waveform gives ground: a state truncated
+     to "Tran..." costs the reader the one fact the drawing cannot carry. A
+     stated failure is all words, so there it may truncate. */
+  .dictation-readout .dictation-words { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
+  .dictation-readout.dictation-stated .dictation-words { flex: 0 1 auto; }
   .dictation-readout.dictation-stated { justify-content: center; }
   /*
    * The waveform is measured, not decorative: one bar per 50ms batch, height

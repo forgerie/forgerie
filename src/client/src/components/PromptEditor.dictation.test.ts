@@ -105,6 +105,34 @@ describe("PromptEditor local dictation", () => {
     expect(editorBox(editor)?.classList.contains("dictation-live")).toBe(false);
   });
 
+  it("hides the placeholder it stands in for, and steps aside for a draft that has words", async () => {
+    const dictation = fakeDictation();
+    const editor = await mount({ dictation: dictation.capability });
+
+    requiredMic(editor).click();
+    dictation.captureReady();
+    await settle(editor);
+
+    // The readout replaces the first line, so "Message pi…" must not show
+    // through behind the waveform.
+    expect(editorBox(editor)?.classList.contains("dictation-live")).toBe(true);
+    expect(editorBox(editor)?.classList.contains("dictation-over-text")).toBe(false);
+    expect(readout(editor)?.classList.contains("dictation-over-text")).toBe(false);
+
+    editor.cancelDictation();
+    await settle(editor);
+    editor.replaceText("half a typed sentence");
+    await settle(editor);
+    requiredMic(editor).click();
+    dictation.captureReady();
+    await settle(editor);
+
+    // Typed words keep the top of the box; the readout drops to its foot.
+    expect(editor.getText()).toBe("half a typed sentence");
+    expect(editorBox(editor)?.classList.contains("dictation-over-text")).toBe(true);
+    expect(readout(editor)?.classList.contains("dictation-over-text")).toBe(true);
+  });
+
   it("states a turn the gateway would reject as too short, and never sends it", async () => {
     const dictation = fakeDictation();
     const editor = await mount({ dictation: dictation.capability });

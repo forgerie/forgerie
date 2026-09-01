@@ -187,7 +187,9 @@ export class ComposerDraft extends LitElement {
     if (changed.has("disabled")) this.updateEditorDisabledState();
     if (changed.has("placeholderText")) this.updateEditorPlaceholder();
     if (changed.has("storageKey")) this.syncEditorDoc();
-    if (changed.has("dictationReadout")) this.syncDictationBox();
+    // Unconditional: the draft text is not a reactive property, and where the
+    // readout sits depends on whether the reader has words in the box.
+    this.syncDictationBox();
     this.syncEditorAccessibility();
     this.syncCompletionMenuBoundary();
     this.publishDisplayState();
@@ -1045,6 +1047,9 @@ export class ComposerDraft extends LitElement {
   private syncDictationBox(): void {
     const box = this.editorHost?.querySelector(".cm-editor");
     box?.classList.toggle("dictation-live", this.dictationReadout !== undefined);
+    // Whether the reader has words in the draft decides where the readout sits,
+    // and the draft is the one that knows.
+    box?.classList.toggle("dictation-over-text", this.dictationReadout !== undefined && this.draft !== "");
   }
 
   private announcePolite(message: string): void {

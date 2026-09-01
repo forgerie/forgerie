@@ -726,11 +726,11 @@ export class PromptEditor extends LitElement {
     });
     if (readout.kind === "none") return undefined;
     if (readout.kind === "stated") {
-      return html`<div class="dictation-readout dictation-stated"><span class="dictation-words">${readout.words}</span></div>`;
+      return html`<div class=${`dictation-readout dictation-stated${this.draftEmpty ? "" : " dictation-over-text"}`}><span class="dictation-words">${readout.words}</span></div>`;
     }
     const working = readout.kind === "working";
     return html`
-      <div class=${`dictation-readout${working ? " dictation-working" : ""}`}>
+      <div class=${`dictation-readout${working ? " dictation-working" : ""}${this.draftEmpty ? "" : " dictation-over-text"}`}>
         ${working ? html`<span class="dictation-words">${readout.words}</span>` : nothing}
         ${renderDictationWave(readout.bars)}
         <span class="dictation-clock">${readout.clock}</span>
