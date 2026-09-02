@@ -604,8 +604,16 @@ export interface PendingAskUser {
   questions: AskUserQuestion[];
 }
 
-/** Why an ask stopped being the session's open ask. */
-export type AskUserCloseReason = "submitted" | "superseded" | "cancelled";
+/**
+ * Why an ask stopped being the session's open ask.
+ *
+ * `cancelled` and `answered-in-chat` both leave every question unanswered, but
+ * they are different events and must stay separate cases: `cancelled` is the
+ * user dismissing the form, while `answered-in-chat` is the user replying in
+ * the composer instead. Collapsing them made models report a dismissal the user
+ * never performed.
+ */
+export type AskUserCloseReason = "submitted" | "superseded" | "cancelled" | "answered-in-chat";
 
 /**
  * What the user replied to one question. Absent from a submission means the

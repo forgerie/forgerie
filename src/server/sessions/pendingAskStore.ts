@@ -128,12 +128,14 @@ export class PendingAskStore {
   }
 
   /**
-   * Close whatever ask the session currently has open, e.g. because the user sent
-   * an ordinary chat message instead of answering the form. Returns the outcome,
-   * or `undefined` when the session has no open ask.
+   * Close whatever ask the session currently has open because the user replied in
+   * chat instead of answering the form. Reported as its own reason, never as a
+   * cancel: the questions went unanswered, but the user did act, and their
+   * message is the answer. Returns the outcome, or `undefined` when the session
+   * has no open ask.
    */
-  cancelOpen(sessionId: string): AskUserOutcome | undefined {
-    return this.close(requireSessionId(sessionId), "cancelled", this.timestamp(), new Map());
+  voidForChatReply(sessionId: string): AskUserOutcome | undefined {
+    return this.close(requireSessionId(sessionId), "answered-in-chat", this.timestamp(), new Map());
   }
 
   /** Drop the open ask of a session that is going away, without reporting an outcome. */
@@ -169,10 +171,25 @@ export class PendingAskStore {
  * unanswered questions as plainly as the answered ones.
  */
 export function renderAskUserAnswersText(outcome: AskUserOutcome): string {
-  const lead = outcome.reason === "submitted"
-    ? "The user submitted answers to your questions."
-    : `The question set was closed (${outcome.reason}) before it was fully answered.`;
-  return [lead, "", ...outcome.questions.map(questionLines).flat(), "", outcome.summary].join("\n");
+  return [askCloseLead(outcome.reason), "", ...outcome.questions.map(questionLines).flat(), "", outcome.summary].join("\n");
+}
+
+/**
+ * The first line the model reads about a closed ask. Each reason states what the
+ * user did, in the user's terms. The unanswered cases are worded so a model
+ * cannot restate them as a button press: only `cancelled` is one.
+ */
+function askCloseLead(reason: AskUserCloseReason): string {
+  switch (reason) {
+    case "submitted":
+      return "The user submitted answers to your questions.";
+    case "answered-in-chat":
+      return "The user replied in chat instead of answering this question set, so it closed. The user did not cancel it: read their message as the answer.";
+    case "cancelled":
+      return "The user dismissed this question set without answering it.";
+    case "superseded":
+      return "A newer question set replaced this one before the user answered it.";
+  }
 }
 
 /**

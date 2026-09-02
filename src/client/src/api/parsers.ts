@@ -293,8 +293,10 @@ export function parseSessionAskClosedEvent(value: unknown): { type: "ask.closed"
 }
 
 function parseAskUserCloseReason(value: unknown): AskUserCloseReason {
-  if (value !== "submitted" && value !== "superseded" && value !== "cancelled") throw new Error("Invalid ask close reason");
-  return value;
+  // `cancelled` stays accepted for records written before chat replies got their
+  // own reason, so an old transcript still renders.
+  if (value === "submitted" || value === "superseded" || value === "cancelled" || value === "answered-in-chat") return value;
+  throw new Error("Invalid ask close reason");
 }
 
 function parseAskUserQuestionRecord(value: unknown): AskUserQuestionRecord {

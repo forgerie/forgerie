@@ -269,15 +269,15 @@ describe("PendingAskStore close transitions", () => {
     expect(store.pendingAsk(sessionId)).toBeUndefined();
   });
 
-  it("cancels whatever ask is open without naming its id", () => {
+  it("voids whatever ask is open as answered in chat, without naming its id", () => {
     const store = testStore();
     openTwoQuestions(store);
 
-    const outcome = store.cancelOpen(sessionId);
+    const outcome = store.voidForChatReply(sessionId);
 
-    expect(outcome).toMatchObject({ askId: "ask-1", reason: "cancelled", answeredCount: 0, unansweredIds: ["q1", "q2"] });
+    expect(outcome).toMatchObject({ askId: "ask-1", reason: "answered-in-chat", answeredCount: 0, unansweredIds: ["q1", "q2"] });
     expect(store.pendingAsk(sessionId)).toBeUndefined();
-    expect(store.cancelOpen(sessionId)).toBeUndefined();
+    expect(store.voidForChatReply(sessionId)).toBeUndefined();
   });
 
   it("forgets the open ask of a session that goes away without reporting an outcome", () => {
@@ -326,13 +326,29 @@ describe("ask outcome rendering", () => {
     ].join("\n"));
   });
 
-  it("tells the model a cancelled ask was closed before it was answered", () => {
+  it("tells the model a dismissed ask was closed by the user", () => {
     const store = testStore();
     const { ask } = openTwoQuestions(store);
     const result = store.cancel(sessionId, ask.askId);
     if (result.status !== "closed") throw new Error("expected the ask to close");
 
-    expect(renderAskUserAnswersText(result.outcome)).toContain("closed (cancelled) before it was fully answered");
+    expect(renderAskUserAnswersText(result.outcome)).toContain("The user dismissed this question set without answering it.");
+  });
+
+  // A chat reply and a dismissal both leave every question unanswered, so a
+  // shared "cancelled" wording made models report a button press that never
+  // happened. The lead line has to separate the two.
+  it("tells the model a chat reply is an answer, not a cancel", () => {
+    const store = testStore();
+    openTwoQuestions(store);
+
+    const outcome = store.voidForChatReply(sessionId);
+    if (outcome === undefined) throw new Error("expected an outcome");
+
+    const text = renderAskUserAnswersText(outcome);
+    expect(text).toContain("The user replied in chat instead of answering this question set");
+    expect(text).toContain("did not cancel");
+    expect(text).not.toContain("cancelled)");
   });
 
   it("names the abandoned questions when an ask is superseded", () => {

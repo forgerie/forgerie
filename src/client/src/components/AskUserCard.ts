@@ -3,6 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import {
   ASK_USER_OTHER_TEXT_MAX_LENGTH,
+  type AskUserCloseReason,
   type AskUserOutcome,
   type AskUserQuestion,
   type AskUserQuestionRecord,
@@ -25,6 +26,26 @@ import type { AskUserTextComposer } from "./AskUserTextComposer";
 import "./AskUserTextComposer";
 
 export type AskUserSubmitCallback = (askId: string, submission: AskDraftSubmission) => void | Promise<void>;
+
+/** Header badge of a closed ask. Each reason names what the user did, so the card never claims an action they did not take. */
+export function askRecordLabel(reason: AskUserCloseReason): string {
+  switch (reason) {
+    case "submitted": return "Answers sent";
+    case "answered-in-chat": return "Answered in chat";
+    case "superseded": return "Superseded";
+    case "cancelled": return "Dismissed";
+  }
+}
+
+/** Body line of a closed ask: the two closes the user did not drive get an explanation, the rest get the answered/unanswered tally. */
+export function askRecordSummary(outcome: AskUserOutcome): string {
+  switch (outcome.reason) {
+    case "superseded": return "A newer question set replaced this one. Draft answers shown below were not sent to the model.";
+    case "answered-in-chat": return "You replied in chat, so this question set closed. Your message went to the model instead.";
+    case "submitted":
+    case "cancelled": return outcome.summary;
+  }
+}
 
 interface DisplayedRecordAnswer {
   values: string[];
@@ -217,11 +238,7 @@ export class AskUserCard extends LitElement {
   }
 
   private renderRecord(outcome: AskUserOutcome): TemplateResult {
-    const recordLabel = outcome.reason === "submitted"
-      ? "Answers sent"
-      : outcome.reason === "superseded"
-        ? "Superseded"
-        : "Cancelled";
+    const recordLabel = askRecordLabel(outcome.reason);
     return html`
       <article class="card record-card" aria-labelledby="ask-user-record-heading">
         <header class="card-header">
@@ -229,9 +246,7 @@ export class AskUserCard extends LitElement {
           <span class=${`header-status ${outcome.reason}`}>${recordLabel}</span>
         </header>
         <p class="record-summary">
-          ${outcome.reason === "superseded"
-            ? "A newer question set replaced this one. Draft answers shown below were not sent to the model."
-            : outcome.summary}
+          ${askRecordSummary(outcome)}
         </p>
         <div class="record-questions">
           ${outcome.questions.map((record, index) => this.renderQuestionRecord(outcome, record, index))}
@@ -534,6 +549,7 @@ export class AskUserCard extends LitElement {
     }
     .header-status { flex: 0 1 auto; color: var(--pi-muted); font-size: var(--pi-text-xs); text-align: end; }
     .header-status.submitted { color: var(--pi-success); }
+    .header-status.answered-in-chat { color: var(--pi-success); }
     .header-status.superseded { color: var(--pi-warning); }
     .questions { display: grid; padding-top: 8px; }
     fieldset.question {

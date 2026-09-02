@@ -243,11 +243,12 @@ describe("PiSessionService.prompt with an open ask", () => {
     expect(store.pendingAsk(ACTIVE_SESSION_ID)).toBeUndefined();
     expect(askEvents(events).map(({ event }) => event)).toEqual([
       { type: "ask.opened", ask: { askId: "ask-1", askedAt: "2026-02-01T10:00:00.000Z", questions } },
-      { type: "ask.closed", askId: "ask-1", reason: "cancelled" },
+      { type: "ask.closed", askId: "ask-1", reason: "answered-in-chat" },
     ]);
     const [delivered] = fake.calls.sendCustomMessage;
     expect(delivered?.message.customType).toBe(ASK_USER_ANSWERS_CUSTOM_TYPE);
-    expect(delivered?.message.content).toContain("closed (cancelled) before it was fully answered");
+    expect(delivered?.message.content).toContain("The user replied in chat instead of answering this question set");
+    expect(delivered?.message.content).not.toContain("cancelled");
     expect(delivered?.message.content).toContain("unanswered: db");
     expect(delivered?.options).toEqual({ triggerTurn: false, deliverAs: "followUp" });
     expect(fake.calls.prompt.map((call) => call.text)).toEqual(["Use DuckDB"]);
@@ -274,7 +275,7 @@ describe("PiSessionService.cancelAsk", () => {
     const response = await service.cancelAsk(sessionRef(ACTIVE_SESSION_ID), "ask-1");
 
     expect(response).toMatchObject({ result: "closed", outcome: { reason: "cancelled", answeredCount: 0, unansweredIds: ["db"] } });
-    expect(fake.calls.sendCustomMessage[0]?.message.content).toContain("closed (cancelled) before it was fully answered");
+    expect(fake.calls.sendCustomMessage[0]?.message.content).toContain("The user dismissed this question set without answering it.");
     expect(fake.calls.sendCustomMessage[0]?.options).toEqual({ triggerTurn: true, deliverAs: "followUp" });
     expect(askEvents(events).at(-1)?.event).toEqual({ type: "ask.closed", askId: "ask-1", reason: "cancelled" });
     expect(store.pendingAsk(ACTIVE_SESSION_ID)).toBeUndefined();
