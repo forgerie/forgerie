@@ -19,6 +19,10 @@ export interface ChatScrollControllerOptions {
 const CHAT_SCROLL_BOTTOM_TOLERANCE = 2;
 const CHAT_TOUCH_TAKEOVER_DELTA = 6;
 const CHAT_OPENING_SETTLE_FRAMES = 2;
+/* An opening that never reports completion must still end. Without this cap a
+   session whose runtime never attaches stays in opening-tail for its whole
+   life, and the browser's own scroll anchoring stays switched off with it. */
+const CHAT_OPENING_MAX_FRAMES = 90;
 
 const browserFrameScheduler: ChatScrollFrameScheduler = {
   request(callback: FrameRequestCallback): number {
@@ -38,6 +42,7 @@ export class ChatScrollController {
   private placementFrame: number | undefined;
   private openingReady = false;
   private openingStableFrames = 0;
+  private openingFrames = 0;
   private touchY: number | undefined;
   private touchActive = false;
   private pointerActive = false;
@@ -60,6 +65,7 @@ export class ChatScrollController {
     this.cancelPlacement();
     this.openingReady = false;
     this.openingStableFrames = 0;
+    this.openingFrames = 0;
     this.touchY = undefined;
     this.touchActive = false;
     this.pointerActive = false;
@@ -80,7 +86,6 @@ export class ChatScrollController {
       if (!this.isAtBottom()) return;
       this.setMode("tail");
     }
-    this.openingStableFrames = 0;
     this.placeTail();
     this.schedulePlacement();
   }
@@ -136,6 +141,7 @@ export class ChatScrollController {
     this.pointerActive = false;
     this.openingReady = false;
     this.openingStableFrames = 0;
+    this.openingFrames = 0;
     this.setMode("history");
   }
 
@@ -154,11 +160,10 @@ export class ChatScrollController {
     this.viewport = undefined;
   }
 
+  /* Reader intent outranks every placement state, including an unsettled
+     opening. A reader who reaches for earlier text during the opening frames
+     must keep the position they reached, or the transcript fights the hand. */
   private takeReaderControl(): void {
-    if (this.currentMode === "opening-tail") {
-      this.contentChanged();
-      return;
-    }
     this.cancelPlacement();
     this.setMode("reader");
   }
@@ -169,11 +174,9 @@ export class ChatScrollController {
       this.placementFrame = undefined;
       if (this.currentMode === "reader") return;
       this.placeTail();
-      if (this.currentMode !== "opening-tail" || !this.openingReady) return;
-      if (this.pointerActive || this.touchActive) {
-        this.openingStableFrames = 0;
-        return;
-      }
+      if (this.currentMode !== "opening-tail") return;
+      this.openingFrames += 1;
+      if (!this.openingReady && this.openingFrames < CHAT_OPENING_MAX_FRAMES) return;
       this.openingStableFrames = this.isAtBottom() ? this.openingStableFrames + 1 : 0;
       if (this.openingStableFrames >= CHAT_OPENING_SETTLE_FRAMES) {
         this.setMode("tail");

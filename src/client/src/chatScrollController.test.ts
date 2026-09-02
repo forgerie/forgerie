@@ -41,7 +41,7 @@ function viewport(): ChatScrollViewport {
 }
 
 describe("ChatScrollController", () => {
-  it("owns the tail until an opening has settled", () => {
+  it("owns the tail through the opening frames", () => {
     const frames = new ManualFrameScheduler();
     const chat = viewport();
     const controller = new ChatScrollController({ frames });
@@ -49,7 +49,6 @@ describe("ChatScrollController", () => {
     controller.connect(chat);
     controller.beginOpening();
     controller.completeOpening();
-    controller.readerWheel(-120);
     chat.scrollTop = 500;
     frames.releaseAll();
 
@@ -58,6 +57,77 @@ describe("ChatScrollController", () => {
 
     controller.readerWheel(-120);
     expect(controller.mode).toBe("reader");
+  });
+
+  it("yields to reader intent during an opening that has not settled", () => {
+    const frames = new ManualFrameScheduler();
+    const chat = viewport();
+    const controller = new ChatScrollController({ frames });
+
+    controller.connect(chat);
+    controller.beginOpening();
+    controller.completeOpening();
+    controller.contentChanged();
+
+    controller.readerTouchStart(100);
+    chat.scrollTop = 200;
+    controller.readerTouchMove(160);
+
+    expect(controller.mode).toBe("reader");
+    expect(chat.scrollTop).toBe(200);
+
+    controller.contentChanged();
+    frames.releaseAll();
+    expect(chat.scrollTop).toBe(200);
+  });
+
+  it("settles an opening even while content keeps arriving", () => {
+    const frames = new ManualFrameScheduler();
+    const chat = viewport();
+    const controller = new ChatScrollController({ frames });
+
+    controller.connect(chat);
+    controller.beginOpening();
+    controller.completeOpening();
+
+    // A live turn lands one transcript update per animation frame.
+    for (let tick = 0; tick < 30; tick += 1) {
+      controller.contentChanged();
+      frames.releaseNext();
+    }
+
+    expect(controller.mode).toBe("tail");
+  });
+
+  it("yields to reader intent when an opening never reports completion", () => {
+    const frames = new ManualFrameScheduler();
+    const chat = viewport();
+    const controller = new ChatScrollController({ frames });
+
+    controller.connect(chat);
+    controller.beginOpening();
+    frames.releaseAll();
+
+    chat.scrollTop = 200;
+    controller.readerWheel(-120);
+
+    expect(controller.mode).toBe("reader");
+    expect(chat.scrollTop).toBe(200);
+  });
+
+  it("gives up an opening that never reports completion", () => {
+    const frames = new ManualFrameScheduler();
+    const chat = viewport();
+    const controller = new ChatScrollController({ frames });
+
+    controller.connect(chat);
+    controller.beginOpening();
+    for (let tick = 0; tick < 200; tick += 1) {
+      controller.contentChanged();
+      frames.releaseNext();
+    }
+
+    expect(controller.mode).toBe("tail");
   });
 
   it("re-pins after viewport and transcript geometry changes", () => {
@@ -98,16 +168,19 @@ describe("ChatScrollController", () => {
     expect(chat.scrollTop).toBe(800);
   });
 
-  it("lets explicit upward input take control only after opening", () => {
+  it("lets explicit upward input take control during and after opening", () => {
     const frames = new ManualFrameScheduler();
     const chat = viewport();
     const controller = new ChatScrollController({ frames });
 
     controller.connect(chat);
     controller.beginOpening();
+    chat.scrollTop = 500;
     controller.readerKey("PageUp", false);
-    expect(controller.mode).toBe("opening-tail");
+    expect(controller.mode).toBe("reader");
+    expect(chat.scrollTop).toBe(500);
 
+    controller.beginOpening();
     controller.completeOpening();
     frames.releaseAll();
     controller.readerKey("PageDown", false);
@@ -139,7 +212,7 @@ describe("ChatScrollController", () => {
     expect(controller.mode).toBe("reader");
   });
 
-  it("keeps opening ownership through a scrollbar drag", () => {
+  it("hands a scrollbar drag to the reader, opening or not", () => {
     const frames = new ManualFrameScheduler();
     const chat = viewport();
     const controller = new ChatScrollController({ frames });
@@ -151,17 +224,16 @@ describe("ChatScrollController", () => {
     chat.scrollTop = 500;
     frames.releaseNext();
 
-    expect(controller.mode).toBe("opening-tail");
-    expect(chat.scrollTop).toBe(800);
+    expect(controller.mode).toBe("reader");
+    expect(chat.scrollTop).toBe(500);
 
-    chat.scrollTop = 500;
     controller.readerPointerEnd();
     frames.releaseAll();
-    expect(controller.mode).toBe("tail");
-    expect(chat.scrollTop).toBe(800);
+    expect(controller.mode).toBe("reader");
+    expect(chat.scrollTop).toBe(500);
   });
 
-  it("clears an active gesture when the viewport reconnects", () => {
+  it("returns tail ownership when a drag ends at the bottom", () => {
     const frames = new ManualFrameScheduler();
     const chat = viewport();
     const controller = new ChatScrollController({ frames });
@@ -169,7 +241,28 @@ describe("ChatScrollController", () => {
     controller.connect(chat);
     controller.beginOpening();
     controller.completeOpening();
+    frames.releaseAll();
+
     controller.readerPointerStart();
+    chat.scrollTop = 500;
+    expect(controller.mode).toBe("reader");
+
+    chat.scrollTop = 800;
+    controller.readerPointerEnd();
+    expect(controller.mode).toBe("tail");
+  });
+
+  it("keeps whoever owns the scroll across a viewport reconnect", () => {
+    const frames = new ManualFrameScheduler();
+    const chat = viewport();
+    const controller = new ChatScrollController({ frames });
+
+    controller.connect(chat);
+    controller.beginOpening();
+    controller.completeOpening();
+    frames.releaseAll();
+    expect(controller.mode).toBe("tail");
+
     controller.dispose();
     chat.scrollTop = 500;
     controller.connect(chat);
@@ -177,6 +270,15 @@ describe("ChatScrollController", () => {
 
     expect(controller.mode).toBe("tail");
     expect(chat.scrollTop).toBe(800);
+
+    controller.readerPointerStart();
+    chat.scrollTop = 500;
+    controller.dispose();
+    controller.connect(chat);
+    frames.releaseAll();
+
+    expect(controller.mode).toBe("reader");
+    expect(chat.scrollTop).toBe(500);
   });
 
   it("holds the reading position until explicit earlier-history loading finishes", () => {
