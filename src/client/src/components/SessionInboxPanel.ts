@@ -783,6 +783,10 @@ export class SessionInboxPanel extends LitElement {
    * What this session has working right now, as counts rather than words:
    * delegated agents and managed processes. Both are omitted when zero, so a
    * resting row shows nothing and the inbox stays quiet.
+   *
+   * It is a row of its own, not a tail on the location chip: the board gives
+   * it a column, and a badge that hung off the chip would start at a different
+   * place on every row.
    */
   private renderLiveWork(sessionId: string): TemplateResult | typeof nothing {
     const status = this.globalSessions?.statuses[sessionId];
@@ -800,7 +804,7 @@ export class SessionInboxPanel extends LitElement {
         ${renderBuiltinTabIcon("terminal")}${String(processes)}
       </span>`);
     }
-    return html`<span class="live-work" data-live-work>${parts}</span>`;
+    return html`<span class="row-work" data-live-work>${parts}</span>`;
   }
 
   private renderRow(
@@ -886,8 +890,8 @@ export class SessionInboxPanel extends LitElement {
                 `
               : html`<span class="chip" data-location-chip title=${session.cwd}>${unknownLocationLabel(session.cwd)}</span>`}
           ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
-          ${this.renderLiveWork(session.id)}
         </div>
+        ${this.renderLiveWork(session.id)}
         <span class="row-mark">
           ${session.pinned === true ? html`<span class="row-pin" title="Pinned" data-pinned-marker>${pinGlyph()}</span>` : nothing}
         </span>
@@ -1404,6 +1408,55 @@ export class SessionInboxPanel extends LitElement {
       overflow-y: auto;
       overscroll-behavior: contain;
       /* Scrollbar style inherits from the document root (index.html). */
+
+      /*
+       * The board is one table, not a stack of independently sized rows.
+       *
+       * Every row used to be its own grid, so each row sized its own columns
+       * from its own content: a short timestamp pulled that row's pin right, a
+       * missing live-work badge pulled its location chip right, and the eye
+       * running down the list met a different edge on every line. The tracks
+       * are declared once here and every row borrows them through subgrid, so
+       * a column is as wide as the widest thing in the whole board and each
+       * row draws its part of it in the same place.
+       *
+       * Six tracks: state marker, title, location, live work, mark, time. The
+       * title is the flexible one, so the title is what truncates -- sizing
+       * the location track with 1fr instead cut project names mid-word.
+       */
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+      align-content: start;
+      column-gap: var(--row-title-gap);
+    }
+
+    /*
+     * Each level between the board and a row passes the tracks down untouched.
+     * The gap is restated at every level because column-gap does not inherit,
+     * and a subgrid that named a different gap would draw its cells beside the
+     * board's columns rather than in them.
+     */
+    .group,
+    .group-rows,
+    .row-slot,
+    .row {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: subgrid;
+      column-gap: var(--row-title-gap);
+    }
+
+    /*
+     * A collapsed group is hidden by its hidden attribute, and the display
+     * rule above outranks the user-agent rule that would have honoured it.
+     */
+    .group-rows[hidden] { display: none; }
+
+    /* Everything that is not a row takes the whole width and keeps its own layout. */
+    .band-label,
+    .group-header,
+    .row-slot > .menu-panel {
+      grid-column: 1 / -1;
     }
 
     /* ---- groups ---- */
@@ -1503,10 +1556,8 @@ export class SessionInboxPanel extends LitElement {
      */
     .row {
       position: relative;
-      display: grid;
       width: 100%;
       padding: 6px 12px;
-      column-gap: var(--row-title-gap);
       row-gap: 0;
       text-align: left;
       border-bottom: 1px solid var(--pi-border-muted, #202225);
@@ -1548,18 +1599,14 @@ export class SessionInboxPanel extends LitElement {
     }
 
     /*
-     * The title track is the flexible one, so it is the title that truncates.
-     * Sizing the location track with 1fr instead cut project names mid-word.
+     * Both shapes borrow the same six board columns. They differ in which line
+     * the location sits on, never in what a column means, so a two-line row
+     * and a one-line row still share every edge to the right of the title.
      */
-    /* marker | title | location | mark | time */
-    .row[data-shape="one-line"] {
-      grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-      align-items: center;
-    }
+    .row[data-shape="one-line"] { align-items: center; }
 
-    /* marker | title | mark | time, with the location below the title. */
+    /* The location drops under the title; the trailing columns do not move. */
     .row[data-shape="two-line"] {
-      grid-template-columns: auto minmax(0, 1fr) auto auto;
       align-items: start;
       row-gap: 2px;
     }
@@ -1604,7 +1651,7 @@ export class SessionInboxPanel extends LitElement {
      * rather than pushing every row below it down the pane.
      */
     .row-title {
-      grid-column: 2;
+      grid-column: 2 / 3;
       grid-row: 1;
       min-width: 0;
       font-size: var(--pi-text-md);
@@ -1614,6 +1661,13 @@ export class SessionInboxPanel extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
+    /*
+     * A two-line row leaves the location column empty on the title's line, so
+     * the title reads into it instead of ending in an ellipsis with clear
+     * space beside it.
+     */
+    .row[data-shape="two-line"] .row-title { grid-column: 2 / 4; }
 
     .row[data-state="unread"] .row-title,
     .row[data-state="blocked"] .row-title {
@@ -1641,17 +1695,13 @@ export class SessionInboxPanel extends LitElement {
      * Both lines named, never a single line number. An absolutely positioned
      * grid child takes its grid area as its containing block, but an auto end
      * line resolves to the grid container's padding edge rather than to
-     * start + 1. A single-line grid-column: 4 therefore gave the action a 57px
+     * start + 1. A single-line grid-column: 5 therefore gave the action a 57px
      * box running from the mark slot to the row's edge, and centring in it put
      * the glyph 19px right of the pin it replaces.
      */
-    .row[data-shape="one-line"] .row-mark { grid-column: 4 / 5; }
-    .row[data-shape="one-line"] .row-time { grid-column: 5 / 6; }
-    .row[data-shape="one-line"] .row-actions { grid-column: 4 / 5; }
-
-    .row[data-shape="two-line"] .row-mark { grid-column: 3 / 4; }
-    .row[data-shape="two-line"] .row-time { grid-column: 4 / 5; }
-    .row[data-shape="two-line"] .row-actions { grid-column: 3 / 4; }
+    .row-mark { grid-column: 5 / 6; }
+    .row-actions { grid-column: 5 / 6; }
+    .row-time { grid-column: 6 / 7; }
 
     /*
      * The mark centres in its track in both shapes, because the action that
@@ -1699,18 +1749,28 @@ export class SessionInboxPanel extends LitElement {
       color: var(--pi-dim, #62656b);
     }
 
-    /* Beside the title, sized to its content, so a project name is never cut. */
+    /* Beside the title, in the board's location column. */
     .row[data-shape="one-line"] .row-meta {
-      grid-column: 3;
+      grid-column: 3 / 4;
       grid-row: 1;
       flex-wrap: nowrap;
       white-space: nowrap;
     }
 
+    /*
+     * Under the title, across the rest of the row. The second line carries a
+     * whole question, so it takes every column the row has left rather than
+     * wrapping to a third line inside the title's column.
+     *
+     * Spanning is safe here only because the span crosses the flexible title
+     * track: track sizing leaves the intrinsic tracks alone for such an item,
+     * so a long question cannot widen the location column -- and with it every
+     * row's title -- the way it would from a span of auto tracks alone.
+     */
     .row[data-shape="two-line"] .row-meta {
-      grid-column: 2;
+      grid-column: 2 / -1;
       grid-row: 2;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
     }
 
     .chip {
@@ -1726,10 +1786,35 @@ export class SessionInboxPanel extends LitElement {
       text-overflow: ellipsis;
     }
 
+    /*
+     * The location column belongs to the whole board, so one long name -- a
+     * project plus a worktree branch, say -- would take width from every title
+     * in the list, not only from its own row's. Two caps, whichever is
+     * smaller: a share of the pane, so a narrow pane keeps its titles, and a
+     * character count, so a wide pane does not hand a third of itself to a
+     * project name. The name ellipsises inside the cap.
+     *
+     * One-line rows only: a two-line row keeps its location under the title,
+     * where it is nobody else's column and can use the width it needs.
+     */
+    .row[data-shape="one-line"] .chip { max-width: min(30cqi, 22ch); }
+
     .chip-branch { color: var(--pi-muted, #85888e); }
 
-    /* Live work sits with the location chip: icon plus count, never a word. */
-    .live-work { display: inline-flex; align-items: center; gap: 8px; }
+    /*
+     * Live work: icon plus count, never a word, in a column of its own on the
+     * title's line in both shapes. Rows without it leave the column empty
+     * rather than closing it up, so the counts that do exist read down the
+     * board as one column.
+     */
+    .row-work {
+      grid-column: 4 / 5;
+      grid-row: 1;
+      align-self: center;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
     .live-work-item {
       display: inline-flex;
       align-items: center;

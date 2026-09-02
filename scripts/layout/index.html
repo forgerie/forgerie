@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!-- Without this the postures do not reach the fixture: mobile emulation
+         with no viewport tag lays every posture out at Chromium's default
+         980px layout viewport, so a folded pane was measured at the width of a
+         tablet. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Forgerie layout fixtures</title>
     <!-- The design tokens are injected from the app's own index.html at build
          time. Restating them here would let the harness drift into measuring a

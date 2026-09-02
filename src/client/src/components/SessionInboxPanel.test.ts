@@ -1451,6 +1451,24 @@ describe("live work indicator", () => {
 
     expect(shadowRoot(panel).querySelector("[data-live-work]")).toBeNull();
   });
+
+  /*
+   * The counts hold a column of the board, so they are a child of the row and
+   * not a tail on the location chip. Hung off the chip they would start at a
+   * different x on every row; happy-dom does no layout, so this asserts the
+   * structure the column model needs rather than the geometry it produces.
+   */
+  it("puts the counts beside the location rather than inside it", async () => {
+    const session = mkSession("live", { name: "Busy session" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session], {
+        statuses: { live: statusWith({ workingAgents: 1 }) },
+      }),
+    });
+
+    const work = shadowRoot(panel).querySelector("[data-live-work]");
+    expect(work?.parentElement?.classList.contains("row")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

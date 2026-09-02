@@ -18,6 +18,7 @@ import { appTokensPlugin } from "./lib/app-token-css.mjs";
 import { evaluate, findChrome, getFreePort, launchChrome, sleep, waitForDebugger } from "./lib/cdp.mjs";
 import { FOLD8_POSTURES } from "./lib/fold8-postures.mjs";
 import { GRID_STRETCH_PROBE } from "./lib/grid-stretch-probe.mjs";
+import { INBOX_COLUMNS_PROBE } from "./lib/inbox-columns-probe.mjs";
 import { INBOX_FLOOR_PROBE } from "./lib/inbox-floor-probe.mjs";
 import { openPosturePage } from "./lib/posture-page.mjs";
 import { TRANSCRIPT_LAYOUT_PROBE } from "./lib/transcript-layout-probe.mjs";
@@ -40,6 +41,9 @@ const MAX_EMPTY_OFFSET_PX = 8;
 
 /** Rounding slack for a box that should match another box exactly. */
 const BOX_SLACK_PX = 1;
+
+/** How far two rows' shared column edge may differ before the list reads as ragged. */
+const MAX_COLUMN_DRIFT_PX = 0.6;
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -93,10 +97,12 @@ async function main() {
           await sleep(150);
           const where = `${posture.name}/inbox-${state}`;
           const measured = JSON.parse(String(await evaluate(cdp, INBOX_FLOOR_PROBE)));
+          const columns = JSON.parse(String(await evaluate(cdp, INBOX_COLUMNS_PROBE)));
           if (args.dump === state || args.dump === "all") {
-            process.stdout.write(`\n--- ${where}\n${JSON.stringify(measured, undefined, 1)}\n`);
+            process.stdout.write(`\n--- ${where}\n${JSON.stringify({ measured, columns }, undefined, 1)}\n`);
           }
           failures.push(...checkInboxFloor({ where, contentPx: shelfContentPx[state], measured }));
+          failures.push(...checkInboxColumns({ where, columns }));
           process.stderr.write(`${where}: checked\n`);
         }
       } finally {
@@ -212,6 +218,59 @@ function checkInboxFloor({ where, contentPx, measured }) {
   }
 
   return failures;
+}
+
+/**
+ * The inbox is one table. Rows differ in project name, live work, pin and
+ * timestamp length, and none of that is allowed to move a column: every row
+ * starts its title, its live-work counts and its mark at the same x, and ends
+ * its timestamp at the same x. The location chip shares a column with the
+ * rows of its own shape, because a two-line row keeps its location under the
+ * title by design.
+ */
+function checkInboxColumns({ where, columns }) {
+  if (columns.error !== undefined) return [`${where}: ${columns.error}`];
+  const rows = columns.rows;
+  if (rows.length < 2) return [`${where}: ${String(rows.length)} row(s) measured, too few to compare columns`];
+
+  const failures = [];
+  const shared = [
+    { column: "title", edge: "left" },
+    { column: "work", edge: "left" },
+    { column: "mark", edge: "left" },
+    { column: "mark", edge: "right" },
+    { column: "time", edge: "right" },
+  ];
+  for (const { column, edge } of shared) {
+    failures.push(...driftFailures({ where, rows, column, edge, scope: "the board" }));
+  }
+
+  for (const shape of [...new Set(rows.map((row) => row.shape))]) {
+    failures.push(...driftFailures({
+      where,
+      rows: rows.filter((row) => row.shape === shape),
+      column: "location",
+      edge: "left",
+      scope: `${shape} rows`,
+    }));
+  }
+
+  return failures;
+}
+
+function driftFailures({ where, rows, column, edge, scope }) {
+  const measured = rows
+    .map((row) => ({ id: row.id, value: row[column]?.[edge] }))
+    .filter((entry) => entry.value !== undefined);
+  if (measured.length < 2) return [];
+
+  const values = measured.map((entry) => entry.value);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  if (high - low <= MAX_COLUMN_DRIFT_PX) return [];
+  const lowest = measured.find((entry) => entry.value === low);
+  const highest = measured.find((entry) => entry.value === high);
+  return [`${where}: the ${column} column's ${edge} edge drifts ${String(Math.round((high - low) * 10) / 10)}px across ${scope} (${lowest.id} at ${String(low)}, ${highest.id} at ${String(high)})`];
 }
 
 const CONTENT_TYPES = {
