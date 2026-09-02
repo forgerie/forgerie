@@ -134,11 +134,33 @@ describe("PiSessionService extension dialog UI context", () => {
     await service.dispose();
   });
 
-  it("keeps delegating non-dialog UI methods to the base context", async () => {
+  it("keeps delegating harmless non-dialog UI methods to the base context", async () => {
     const { service, fake } = dialogService();
     const ui = await boundUiContext(service, fake);
 
-    await expect(ui.editor("title")).resolves.toBeUndefined();
+    expect(() => { ui.setTitle("title"); }).not.toThrow();
+    expect(ui.getEditorText()).toBe("");
+    await service.dispose();
+  });
+
+  // A daemon session has no terminal, so the surfaces that draw one cannot run.
+  // Pi's headless defaults resolve them with `undefined`, which extension code
+  // reads as "the user chose nothing" and reports as a cancel the user never
+  // performed. Refusing them keeps the failure honest and names the way out.
+  it("refuses a terminal-only custom component instead of resolving it unanswered", async () => {
+    const { service, fake } = dialogService();
+    const ui = await boundUiContext(service, fake);
+
+    await expect(ui.custom(() => { throw new Error("the component factory must never run"); }))
+      .rejects.toThrow(/no terminal.*ui\.select, ui\.confirm, or ui\.input/s);
+    await service.dispose();
+  });
+
+  it("refuses the terminal-only multi-line editor instead of resolving it unanswered", async () => {
+    const { service, fake } = dialogService();
+    const ui = await boundUiContext(service, fake);
+
+    await expect(ui.editor("Write the release note")).rejects.toThrow(/no terminal.*ui\.input/s);
     await service.dispose();
   });
 });

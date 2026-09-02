@@ -143,6 +143,17 @@ const STARTUP_PHASE_EXTENSIONS = "Loading session extensions";
 const STARTUP_CONCURRENT_CATALOG_REFRESH = "provider model lists are refreshing";
 const MAX_UNREAD_PUBLICATION_RETRY_MS = 30_000;
 const MAX_PENDING_UNREAD_MUTATIONS = SESSION_UNREAD_LIMIT + 1;
+/**
+ * Why a terminal-drawing UI surface cannot run in a daemon session, and which
+ * browser-backed surface to use instead. The model reads these as tool errors,
+ * so each names the alternative rather than only the refusal — an extension
+ * author reading the transcript must be able to act on it without opening
+ * Forgerie's source.
+ */
+const TERMINAL_ONLY_UI_REFUSAL = {
+  custom: "ui.custom is not available: a Forgerie session runs headless and has no terminal to draw a component in. Ask through ui.select, ui.confirm, or ui.input, which Forgerie renders as browser dialogs.",
+  editor: "ui.editor is not available: a Forgerie session runs headless and has no terminal to draw an editor in. Collect the text with ui.input, which Forgerie renders as a browser dialog.",
+} as const;
 
 function noop(): void {
   // Intentionally empty default unsubscribe callback.
@@ -2021,12 +2032,13 @@ export class PiSessionService implements SessionRouteService {
 
   /**
    * Void the session's open ask because the user sent a chat message instead of
-   * answering it. Every browser closes the card as cancelled, and the model is
-   * told — without being woken — so the notice rides into the turn the message
-   * itself triggers rather than becoming a turn of its own.
+   * answering it. Every browser closes the card as answered in chat — not as a
+   * cancel, which the user never performed — and the model is told without being
+   * woken, so the notice rides into the turn the message itself triggers rather
+   * than becoming a turn of its own.
    */
   private async voidOpenAskForUserMessage(session: PiAgentSession): Promise<void> {
-    const outcome = this.pendingAskStore.cancelOpen(session.sessionId);
+    const outcome = this.pendingAskStore.voidForChatReply(session.sessionId);
     if (outcome === undefined) return;
     this.publishAskClosed(session.sessionId, outcome);
     await this.runSessionEntryMutation(session, "void the open questions", () => session.sendCustomMessage(
@@ -4150,12 +4162,24 @@ export class PiSessionService implements SessionRouteService {
     // Forgerie owns the browser-facing dialog, notification, and text-formatting
     // boundaries: the three dialog primitives park daemon-held Promises that
     // the browser answers, while every other UI method delegates to Pi's
-    // headless defaults so unsupported surfaces cancel safely instead of
-    // hanging.
+    // headless defaults.
+    //
+    // The two surfaces that draw a terminal to collect an answer are refused
+    // rather than delegated. Pi's headless defaults resolve them with
+    // `undefined`, which is the same value they carry when a user walks away
+    // from a real terminal, so extension code reports a cancel that nobody
+    // performed. A rejection reaches the model as a tool error naming the
+    // browser-backed alternatives instead.
     return new Proxy(baseUiContext, {
       get: (target, property, receiver): unknown => {
         if (property === "notify") return notify;
         if (property === "theme") return plainTextTheme;
+        if (property === "custom") {
+          return () => Promise.reject(new Error(TERMINAL_ONLY_UI_REFUSAL.custom));
+        }
+        if (property === "editor") {
+          return () => Promise.reject(new Error(TERMINAL_ONLY_UI_REFUSAL.editor));
+        }
         if (property === "confirm") {
           return (title: string, message: string, opts?: ExtensionUIDialogOptions) =>
             this.openExtensionDialog(session, { kind: "confirm", title, message }, opts);
