@@ -974,8 +974,6 @@ export class PiSessionService implements SessionRouteService {
   private readonly completedHandoffs = new Set<string>();
   /** Destination session ids that must reject user prompts until automatic continuation is accepted. */
   private readonly preparingHandoffDestinations = new Set<string>();
-  /** Source session ids reserved by a detached handoff until that handoff reaches a terminal state. */
-  private readonly handoffSourceReservations = new Set<string>();
   /** Tracked subsession id -> the parent session id that spawned it. */
   private readonly subsessionParents = new Map<string, string>();
   /** Parent session id -> the set of tracked subsession ids it spawned. */
@@ -1570,9 +1568,6 @@ export class PiSessionService implements SessionRouteService {
     if (source.sessionFile !== input.sourceSessionFile) throw new Error("Source session transcript changed before handoff");
     const sourceBranch = [...source.sessionManager.getBranch()];
 
-    if (this.handoffSourceReservations.has(input.sourceSessionId)) throw new Error("A handoff is already in progress for this source session");
-    this.handoffSourceReservations.add(input.sourceSessionId);
-
     const handoffId = randomUUID();
     const requestedAt = this.now().toISOString();
     const requestedContext: HandoffLifecycleContext = {
@@ -1582,12 +1577,7 @@ export class PiSessionService implements SessionRouteService {
       ...(input.focus === undefined ? {} : { focus: input.focus }),
       requestedAt,
     };
-    try {
-      this.requireHandoffTransition(source, requestedContext, "requested");
-    } catch (error: unknown) {
-      this.handoffSourceReservations.delete(input.sourceSessionId);
-      throw error;
-    }
+    this.requireHandoffTransition(source, requestedContext, "requested");
     this.logHandoffTransition(handoffId, "requested", {
       sourceSessionId: input.sourceSessionId,
       spawningCwd: input.spawningCwd,
@@ -1610,7 +1600,6 @@ export class PiSessionService implements SessionRouteService {
       const message = error instanceof Error ? error.message : String(error);
       this.recordHandoffTransition(source, requestedContext, "failed", message);
       this.logHandoffTransition(handoffId, "failed", { sourceSessionId: input.sourceSessionId, error: message });
-      this.handoffSourceReservations.delete(input.sourceSessionId);
       throw error;
     }
 
@@ -1619,7 +1608,6 @@ export class PiSessionService implements SessionRouteService {
       const message = "Handoff destination did not become active";
       this.recordHandoffTransition(source, requestedContext, "failed", message);
       this.logHandoffTransition(handoffId, "failed", { sourceSessionId: input.sourceSessionId, destinationSessionId: created.id, error: message });
-      this.handoffSourceReservations.delete(input.sourceSessionId);
       throw new Error(message);
     }
     const lifecycleContext: HandoffLifecycleContext = {
@@ -1635,7 +1623,6 @@ export class PiSessionService implements SessionRouteService {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.preparingHandoffDestinations.delete(created.id);
-      this.handoffSourceReservations.delete(input.sourceSessionId);
       this.recordHandoffTransition(source, lifecycleContext, "failed", message);
       this.logHandoffTransition(handoffId, "failed", { sourceSessionId: input.sourceSessionId, destinationSessionId: created.id, error: message });
       await destination.abort();
@@ -1793,14 +1780,12 @@ export class PiSessionService implements SessionRouteService {
         await this.publishHandoffStatus(destination, context, "continuation-failed", message);
       }
     } finally {
-      this.handoffSourceReservations.delete(context.sourceSessionId);
       await rm(context.sourceSnapshotFile, { force: true });
     }
   }
 
   private async failDetachedHandoff(source: PiAgentSession, destination: PiAgentSession, context: HandoffLifecycleContext, error: string): Promise<void> {
     this.completedHandoffs.add(context.handoffId);
-    this.handoffSourceReservations.delete(context.sourceSessionId);
     if (context.destinationSessionId !== undefined) this.preparingHandoffDestinations.delete(context.destinationSessionId);
     this.recordHandoffTransition(source, context, "failed", error);
     this.recordHandoffTransition(destination, context, "failed", error);

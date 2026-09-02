@@ -374,7 +374,107 @@ describe("PiSessionService handoffSession", () => {
     expect(log.at(-1)?.details).toMatchObject({ state: "failed", error: "Preparation run ended with stop reason error: model failed" });
     await service.dispose();
   });
+
+  it("starts a second handoff from the same source session", async () => {
+    const workspace = await tempWorkspace();
+    const sourceTransitions: unknown[] = [];
+    const source = fakeRuntime("source-1", {
+      sessionFile: "/sessions/source-1.jsonl",
+      sessionManager: sessionManager("source-1", "/sessions/source-1.jsonl", workspace, sourceTransitions),
+    });
+    const first = preparableDestination("destination-1", workspace);
+    const second = preparableDestination("destination-2", workspace);
+    const service = handoffService([source.runtime, first.runtime, second.runtime], workspace, []);
+    await service.start(workspace);
+
+    const firstResult = await service.handoffSession(handoffRequest(workspace));
+    const secondResult = await service.handoffSession(handoffRequest(workspace));
+
+    expect(firstResult).toMatchObject({ destinationSessionId: "destination-1", state: "preparing" });
+    expect(secondResult).toMatchObject({ destinationSessionId: "destination-2", state: "preparing" });
+    expect(secondResult.handoffId).not.toBe(firstResult.handoffId);
+
+    await first.preparationStarted;
+    await second.preparationStarted;
+    const firstSnapshotFile = join(tmpdir(), `forgerie-handoff-${firstResult.handoffId}.json`);
+    const secondSnapshotFile = join(tmpdir(), `forgerie-handoff-${secondResult.handoffId}.json`);
+    expect(first.prompts[0]).toContain(firstSnapshotFile);
+    expect(second.prompts[0]).toContain(secondSnapshotFile);
+    await expect(readFile(firstSnapshotFile, "utf8")).resolves.toContain(firstResult.handoffId);
+    await expect(readFile(secondSnapshotFile, "utf8")).resolves.toContain(secondResult.handoffId);
+
+    const handoffDirectory = join(workspace, ".pi-web", "handoffs");
+    await mkdir(handoffDirectory, { recursive: true });
+    await writeFile(join(handoffDirectory, `${firstResult.handoffId}.md`), "first ready\n", "utf8");
+    await writeFile(join(handoffDirectory, `${secondResult.handoffId}.md`), "second ready\n", "utf8");
+
+    first.finishPreparation();
+    await first.continuationStarted;
+    await waitForBackgroundWork();
+    expect(statesFor(sourceTransitions, firstResult.handoffId)).toEqual(["requested", "destination-created", "source-detached", "preparing", "ready"]);
+    await expect(readFile(secondSnapshotFile, "utf8")).resolves.toContain(secondResult.handoffId);
+
+    second.finishPreparation();
+    await second.continuationStarted;
+    await waitForBackgroundWork();
+    expect(statesFor(sourceTransitions, secondResult.handoffId)).toEqual(["requested", "destination-created", "source-detached", "preparing", "ready"]);
+
+    expect(first.prompts[1]).toContain(`${firstResult.handoffId}.md`);
+    expect(second.prompts[1]).toContain(`${secondResult.handoffId}.md`);
+    expect(source.calls.abort).toBe(2);
+    await service.dispose();
+  });
 });
+
+function handoffRequest(workspace: string) {
+  return {
+    spawningCwd: workspace,
+    sourceSessionId: "source-1",
+    sourceSessionFile: "/sessions/source-1.jsonl",
+    sourceLeafId: "leaf-1",
+    focus: undefined,
+    cwd: undefined,
+  };
+}
+
+/**
+ * A destination whose preparation run stays open until the test releases it, so
+ * two handoffs can be held in flight at the same time.
+ */
+function preparableDestination(id: string, workspace: string) {
+  const destination = fakeRuntime(id, {
+    sessionFile: `/sessions/${id}.jsonl`,
+    sessionManager: sessionManager(id, `/sessions/${id}.jsonl`, workspace, []),
+  });
+  const prompts: string[] = [];
+  let finishPreparation: (() => void) | undefined;
+  let observePreparation: (() => void) | undefined;
+  let observeContinuation: (() => void) | undefined;
+  const preparationStarted = new Promise<void>((resolve) => { observePreparation = resolve; });
+  const continuationStarted = new Promise<void>((resolve) => { observeContinuation = resolve; });
+  destination.session.prompt = (text, options) => {
+    prompts.push(text);
+    preflight(options)?.(true);
+    if (prompts.length > 1) {
+      observeContinuation?.();
+      return Promise.resolve();
+    }
+    observePreparation?.();
+    return new Promise<void>((resolve) => {
+      finishPreparation = () => {
+        destination.emit({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "prepared" }] } });
+        resolve();
+      };
+    });
+  };
+  return {
+    runtime: destination.runtime,
+    prompts,
+    preparationStarted,
+    continuationStarted,
+    finishPreparation: () => { finishPreparation?.(); },
+  };
+}
 
 function handoffService(runtimes: ReturnType<typeof fakeRuntime>["runtime"][], workspace: string, log: { details: Record<string, unknown>; message: string }[]) {
   let index = 0;
@@ -417,6 +517,15 @@ function states(transitions: unknown[]): unknown[] {
     const state: unknown = Reflect.get(transition, "state");
     return state;
   });
+}
+
+function statesFor(transitions: unknown[], handoffId: string): unknown[] {
+  return states(transitions.filter((transition) => handoffIdOf(transition) === handoffId));
+}
+
+function handoffIdOf(transition: unknown): unknown {
+  if (typeof transition !== "object" || transition === null) return undefined;
+  return Reflect.get(transition, "handoffId");
 }
 
 function hasSourceFilePath(transition: unknown): boolean {
