@@ -32,6 +32,7 @@ class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
   private sourceAccumulatorCount = 0;
   private sourceStep = 1;
   private sourceStepProgress = 0;
+  private liveInputReported = false;
   private terminal = false;
 
   public constructor(options?: SpeechCaptureWorkletOptions) {
@@ -53,6 +54,7 @@ class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
     if (this.terminal) return false;
     const channel = inputs[0]?.[0];
     if (channel === undefined || channel.length === 0) return true;
+    this.reportLiveInputOnce();
     for (const sample of channel) {
       if (this.totalOutputSamples >= this.maxSamples) {
         this.reportLimitOnce();
@@ -61,6 +63,12 @@ class ForgerieSpeechCaptureProcessor extends AudioWorkletProcessor {
       if (!this.acceptSourceSample(sample)) return false;
     }
     return true;
+  }
+
+  private reportLiveInputOnce(): void {
+    if (this.liveInputReported) return;
+    this.liveInputReported = true;
+    this.port.postMessage({ kind: "live" });
   }
 
   private acceptSourceSample(sample: number): boolean {

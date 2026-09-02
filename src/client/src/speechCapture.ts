@@ -1,7 +1,7 @@
 import speechCaptureWorkletUrl from "./speechCaptureWorklet.ts?worker&url";
 import { SPEECH_POLICY, type SpeechRuntimePolicy } from "../../shared/speechPolicy";
 
-export type SpeechCaptureFailureKind = "unsupported" | "permission_denied" | "device_unavailable" | "worklet_load_failed" | "context_failed" | "track_ended" | "limit_reached" | "worklet_failed" | "cancelled";
+export type SpeechCaptureFailureKind = "unsupported" | "permission_denied" | "device_unavailable" | "worklet_load_failed" | "context_failed" | "startup_stalled" | "track_ended" | "limit_reached" | "worklet_failed" | "cancelled";
 
 export class SpeechCaptureError extends Error {
   public constructor(public readonly kind: SpeechCaptureFailureKind, message: string, public readonly options: { readonly retryable: boolean } = { retryable: false }) {
@@ -28,6 +28,7 @@ export interface SpeechPauseCandidate {
 }
 
 export type SpeechCaptureMessage =
+  | { readonly kind: "live" }
   | { readonly kind: "batch"; readonly startSample: number; readonly endSample: number; readonly samples: Float32Array; readonly rms: number; readonly voiced: boolean }
   | { readonly kind: "limit"; readonly totalSamples: number }
   | { readonly kind: "flushed"; readonly requestId: string; readonly totalSamples: number };
@@ -73,6 +74,8 @@ export interface SpeechCaptureOptions {
   readonly policy?: SpeechRuntimePolicy;
   readonly signal?: AbortSignal;
   readonly rmsThreshold?: number;
+  /** How long one browser audio graph has to prove that microphone frames are flowing. */
+  readonly startupTimeoutMs?: number;
   readonly onPauseCandidate?: (candidate: { readonly samples: Float32Array; readonly endSample: number }) => void;
   readonly onSpeechActivity?: (activity: { readonly startSample: number; readonly endSample: number; readonly sampleCount: number }) => void;
   /**
@@ -242,9 +245,26 @@ export class SpeechPauseCandidateDetector {
   }
 }
 
+// One retry replaces the full-page refresh that currently revives a stalled
+// Android audio graph, without hiding a persistent microphone failure.
+const startupAttempts = 2;
+
 export async function createSpeechCaptureSession(options: SpeechCaptureOptions = {}): Promise<SpeechCaptureSession> {
-  const policy = options.policy ?? SPEECH_POLICY;
   const host = options.host ?? defaultSpeechCaptureBrowserHost();
+  let lastError: unknown;
+  for (let attempt = 0; attempt < startupAttempts; attempt += 1) {
+    try {
+      return await createSpeechCaptureAttempt(options, host);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof SpeechCaptureError) || error.kind !== "startup_stalled" || attempt === startupAttempts - 1) throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function createSpeechCaptureAttempt(options: SpeechCaptureOptions, host: SpeechCaptureBrowserHost): Promise<SpeechCaptureSession> {
+  const policy = options.policy ?? SPEECH_POLICY;
   const signal = options.signal;
   throwIfCaptureAborted(signal);
   if (host.mediaDevices === undefined) throw new SpeechCaptureError("unsupported", "This browser does not expose microphone capture.");
@@ -255,6 +275,7 @@ export async function createSpeechCaptureSession(options: SpeechCaptureOptions =
   let filter: SpeechBiquadFilterLike | undefined;
   let worklet: SpeechAudioWorkletNodeLike | undefined;
   let gain: SpeechGainNodeLike | undefined;
+  let session: SpeechCaptureSessionImpl | undefined;
   try {
     stream = await host.mediaDevices.getUserMedia(microphoneConstraints()).catch((error: unknown) => {
       throw mapSpeechCaptureFailure(error);
@@ -293,12 +314,17 @@ export async function createSpeechCaptureSession(options: SpeechCaptureOptions =
     worklet.connect(gain);
     gain.connect(context.destination);
     throwIfCaptureAborted(signal);
-    const session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, signal, onPauseCandidate: options.onPauseCandidate, onSpeechActivity: options.onSpeechActivity, onLevel: options.onLevel, onTerminal: options.onTerminal });
+    session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, signal, onPauseCandidate: options.onPauseCandidate, onSpeechActivity: options.onSpeechActivity, onLevel: options.onLevel, onTerminal: options.onTerminal });
     session.start();
+    await session.waitUntilLive(options.startupTimeoutMs ?? policy.timing.captureStartupTimeoutMs);
+    session.confirmStartup();
     return session;
   } catch (error) {
-    cleanupSetup({ stream, context, source, filter, worklet, gain });
-    if (context !== undefined) await context.close().catch(() => undefined);
+    if (session !== undefined) await session.abandonStartup();
+    else {
+      cleanupSetup({ stream, context, source, filter, worklet, gain });
+      if (context !== undefined) await context.close().catch(() => undefined);
+    }
     if (error instanceof SpeechCaptureError) throw error;
     throw new SpeechCaptureError("context_failed", error instanceof Error ? error.message : "Speech capture setup failed.");
   }
@@ -322,6 +348,9 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
   private stopPromise: Promise<Float32Array> | undefined;
   private terminalPromise: Promise<void> | undefined;
   private terminalNotified = false;
+  private startupConfirmed = false;
+  private liveInputSeen = false;
+  private startupWaiter: { readonly reject: (error: SpeechCaptureError) => void; readonly resolve: () => void; readonly timer: ReturnType<typeof setTimeout> } | undefined;
   private captureFailure: SpeechCaptureError | undefined;
   private flushCounter = 0;
   private flushTail: Promise<void> = Promise.resolve();
@@ -332,6 +361,10 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
   private readonly onWorkletMessage = (event: MessageEvent<SpeechCaptureMessage>): void => {
     if (!this.acceptingMessages) return;
     const message = event.data;
+    if (message.kind === "live") {
+      this.markLiveInput();
+      return;
+    }
     if (message.kind === "flushed") {
       if (this.pendingFlush?.requestId === message.requestId) {
         const pending = this.pendingFlush;
@@ -344,6 +377,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
       void this.failTerminal(new SpeechCaptureError("limit_reached", "Speech capture reached the maximum turn duration."), { clearSamples: true, notifySamples: this.snapshotAndClear() });
       return;
     }
+    this.markLiveInput();
     this.chunks.push(message.samples, message.startSample);
     const candidate = this.detector.accept({
       startSample: message.startSample,
@@ -399,6 +433,40 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     else this.options.signal?.addEventListener("abort", this.abortFromSignal, { once: true });
   }
 
+  public waitUntilLive(timeoutMs: number): Promise<void> {
+    if (this.liveInputSeen) return Promise.resolve();
+    if (this.captureFailure !== undefined) return Promise.reject(this.captureFailure);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.startupWaiter?.timer !== timer) return;
+        this.startupWaiter = undefined;
+        reject(new SpeechCaptureError("startup_stalled", "The microphone opened but no audio frames arrived.", { retryable: true }));
+      }, timeoutMs);
+      this.startupWaiter = {
+        timer,
+        resolve: () => {
+          clearTimeout(timer);
+          this.startupWaiter = undefined;
+          resolve();
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          this.startupWaiter = undefined;
+          reject(error);
+        },
+      };
+    });
+  }
+
+  public confirmStartup(): void {
+    if (this.captureFailure !== undefined) throw this.captureFailure;
+    this.startupConfirmed = true;
+  }
+
+  public async abandonStartup(): Promise<void> {
+    await this.cleanup({ clearSamples: true });
+  }
+
   public endpointWindow(): Float32Array {
     if (!this.acceptingMessages && this.cleanupPromise !== undefined) return new Float32Array();
     return this.chunks.flattenLatest(this.options.policy.audio.endpointWindowSamples);
@@ -444,6 +512,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
 
   private async failTerminal(error: SpeechCaptureError, options: { readonly clearSamples: boolean; readonly notifySamples: Float32Array }): Promise<void> {
     this.captureFailure ??= error;
+    this.startupWaiter?.reject(this.captureFailure);
     this.terminalPromise ??= (async () => {
       await this.cleanup({ clearSamples: options.clearSamples });
       this.notifyTerminal({ kind: "failed", error: this.captureFailure ?? error, samples: options.notifySamples });
@@ -494,9 +563,19 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     return samples;
   }
 
+  private markLiveInput(): void {
+    if (this.liveInputSeen) return;
+    this.liveInputSeen = true;
+    this.startupWaiter?.resolve();
+  }
+
   private notifyTerminal(terminal: SpeechCaptureTerminal): void {
     if (this.terminalNotified) return;
     this.terminalNotified = true;
+    if (!this.startupConfirmed) {
+      if (terminal.kind === "failed") this.startupWaiter?.reject(terminal.error);
+      return;
+    }
     this.options.onTerminal?.(terminal);
   }
 
@@ -504,6 +583,9 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     this.cleanupPromise ??= (async () => {
       this.acceptingMessages = false;
       this.pendingFlush = undefined;
+      const startupWaiter = this.startupWaiter;
+      this.startupWaiter = undefined;
+      if (startupWaiter !== undefined) clearTimeout(startupWaiter.timer);
       this.options.signal?.removeEventListener("abort", this.abortFromSignal);
       this.options.worklet.port.removeEventListener("message", this.onWorkletMessage);
       this.options.worklet.port.close?.();

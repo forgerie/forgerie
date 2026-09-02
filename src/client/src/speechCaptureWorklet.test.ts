@@ -38,16 +38,28 @@ describe("speech capture worklet protocol", () => {
     vi.unstubAllGlobals();
   });
 
+  it("reports live input once before it emits captured batches", () => {
+    const processor = createProcessor({ batchSamples: 2, maxSamples: 10 });
+
+    expect(processor.process([[]])).toBe(true);
+    expect(processor.port.posted).toEqual([]);
+
+    expect(processor.process([[new Float32Array([0.1, 0.2])]])).toBe(true);
+    expect(processor.process([[new Float32Array([0.3, 0.4])]])).toBe(true);
+
+    expect(processor.port.posted.map(messageKind)).toEqual(["live", "batch", "batch"]);
+  });
+
   it("flushes a partial batch and acknowledges the request ID", () => {
     const processor = createProcessor({ batchSamples: 4, maxSamples: 10 });
 
     expect(processor.process([[new Float32Array([0.1, 0.2])]])).toBe(true);
-    expect(processor.port.posted.map(messageKind)).toEqual([]);
+    expect(processor.port.posted.map(messageKind)).toEqual(["live"]);
 
     processor.port.emit({ kind: "flush", requestId: "flush-1" });
 
-    expect(processor.port.posted.map(messageKind)).toEqual(["batch", "flushed"]);
-    expect(messageProperty(processor.port.posted[1], "requestId")).toBe("flush-1");
+    expect(processor.port.posted.map(messageKind)).toEqual(["live", "batch", "flushed"]);
+    expect(messageProperty(processor.port.posted[2], "requestId")).toBe("flush-1");
   });
 
   it("keeps capture alive when main-thread message handling is delayed while the turn limit stays bounded", () => {
@@ -58,7 +70,7 @@ describe("speech capture worklet protocol", () => {
     }
     expect(processor.process([[new Float32Array([0.2])]])).toBe(false);
 
-    expect(processor.port.posted.map(messageKind)).toEqual(["batch", "batch", "batch", "batch", "batch", "limit"]);
+    expect(processor.port.posted.map(messageKind)).toEqual(["live", "batch", "batch", "batch", "batch", "batch", "limit"]);
   });
 
   it("flushes the final partial batch before the terminal limit message", () => {
@@ -67,7 +79,7 @@ describe("speech capture worklet protocol", () => {
     expect(processor.process([[new Float32Array([0.1, 0.2, 0.3])]])).toBe(true);
     expect(processor.process([[new Float32Array([0.4])]])).toBe(false);
 
-    expect(processor.port.posted.map(messageKind)).toEqual(["batch", "limit"]);
+    expect(processor.port.posted.map(messageKind)).toEqual(["live", "batch", "limit"]);
   });
 
   it("downsamples 48 kHz input to averaged 16 kHz output samples", () => {
@@ -76,8 +88,8 @@ describe("speech capture worklet protocol", () => {
     expect(processor.process([[new Float32Array([0, 0.3, 0.6, 0.9, -0.3, -0.6])]])).toBe(true);
     expect(processor.process([[new Float32Array([0.5, 0.5, 0.5])]])).toBe(false);
 
-    const batch = processor.port.posted[0];
-    expect(processor.port.posted.map(messageKind)).toEqual(["batch", "limit"]);
+    const batch = processor.port.posted[1];
+    expect(processor.port.posted.map(messageKind)).toEqual(["live", "batch", "limit"]);
     expect(messageProperty(batch, "startSample")).toBe(0);
     expect(messageProperty(batch, "endSample")).toBe(2);
     const samples = messageProperty(batch, "samples");
@@ -86,7 +98,7 @@ describe("speech capture worklet protocol", () => {
     expect(samples[1]).toBeCloseTo(0);
     expect(messageProperty(batch, "rms")).toBeCloseTo(Math.sqrt((0.3 * 0.3) / 2));
     expect(messageProperty(batch, "voiced")).toBe(true);
-    expect(messageProperty(processor.port.posted[1], "totalSamples")).toBe(2);
+    expect(messageProperty(processor.port.posted[2], "totalSamples")).toBe(2);
   });
 });
 

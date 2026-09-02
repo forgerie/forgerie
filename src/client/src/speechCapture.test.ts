@@ -83,6 +83,63 @@ describe("speech capture browser lifecycle", () => {
     expect(host.workletOptions?.processorOptions).toMatchObject({ maxSamples: 9_600_000 });
   });
 
+  it("rebuilds a capture that produces no live input before reporting success", async () => {
+    vi.useFakeTimers();
+    const stalled = fakeHost();
+    stalled.autoLive = false;
+    const recovered = fakeHost();
+    const host = new SequencedSpeechHost([stalled, recovered]);
+
+    const capture = createSpeechCaptureSession({ host, startupTimeoutMs: 50 });
+    await vi.advanceTimersByTimeAsync(50);
+    const session = await capture;
+
+    expect(host.getUserMediaCalls).toHaveLength(2);
+    expect(stalled.trackStopped).toBe(true);
+    expect(stalled.audioContextClosed).toBe(true);
+    expect(stalled.workletPortClosed).toBe(true);
+    expect(recovered.trackStopped).toBe(false);
+    expect(session.actualSampleRateHz).toBe(48_000);
+    await session.abort();
+  });
+
+  it("fails startup and cleans both attempts when neither capture produces live input", async () => {
+    vi.useFakeTimers();
+    const first = fakeHost();
+    first.autoLive = false;
+    const second = fakeHost();
+    second.autoLive = false;
+    const host = new SequencedSpeechHost([first, second]);
+    const terminals: SpeechCaptureTerminal[] = [];
+
+    const capture = createSpeechCaptureSession({ host, startupTimeoutMs: 50, onTerminal: (terminal) => { terminals.push(terminal); } });
+    const rejected = expect(capture).rejects.toMatchObject({ kind: "startup_stalled", retryable: true });
+    await vi.advanceTimersByTimeAsync(100);
+    await rejected;
+
+    expect(host.getUserMediaCalls).toHaveLength(2);
+    expect(first.trackStopped).toBe(true);
+    expect(first.audioContextClosed).toBe(true);
+    expect(second.trackStopped).toBe(true);
+    expect(second.audioContextClosed).toBe(true);
+    expect(terminals).toEqual([]);
+  });
+
+  it("cancels startup without retry when ownership ends before live input arrives", async () => {
+    const host = fakeHost();
+    host.autoLive = false;
+    const controller = new AbortController();
+    const capture = createSpeechCaptureSession({ host, signal: controller.signal, startupTimeoutMs: 10_000 });
+    await vi.waitFor(() => { expect(host.workletCreated).toBe(true); });
+
+    controller.abort();
+
+    await expect(capture).rejects.toMatchObject({ kind: "cancelled" });
+    expect(host.getUserMediaCalls).toHaveLength(1);
+    expect(host.trackStopped).toBe(true);
+    expect(host.audioContextClosed).toBe(true);
+  });
+
   it("rejects a pre-aborted capture before requesting microphone permission", async () => {
     const host = fakeHost();
     const controller = new AbortController();
@@ -425,11 +482,13 @@ class RecordingWorkletNode extends RecordingAudioNode implements SpeechAudioWork
     },
     addEventListener: (_type: "message", listener: (event: MessageEvent<SpeechCaptureMessage>) => void): void => { this.listener = listener; },
     removeEventListener: (): void => { this.listener = undefined; },
-    start: (): void => undefined,
+    start: (): void => {
+      if (this.liveOnStart()) this.emit({ kind: "live" });
+    },
     close: (): void => { this.closed = true; },
   };
 
-  public constructor() {
+  public constructor(private readonly liveOnStart: () => boolean = () => true) {
     super("worklet");
   }
 
@@ -517,9 +576,10 @@ class RecordingSpeechHost implements SpeechCaptureBrowserHost {
   public readonly getUserMediaCalls: MediaStreamConstraints[] = [];
   public readonly track = new RecordingMediaTrack();
   public readonly context = new RecordingAudioContext(this);
-  public readonly worklet = new RecordingWorkletNode();
+  public readonly worklet = new RecordingWorkletNode(() => this.autoLive);
   public readonly workletUrl = "worklet.js";
   public audioContextCreatedBeforeWorklet = false;
+  public autoLive = true;
   public failWorklet = false;
   public deferUserMedia = false;
   public deferWorkletModule = false;
@@ -536,7 +596,8 @@ class RecordingSpeechHost implements SpeechCaptureBrowserHost {
     },
   };
 
-  public createAudioContext(): SpeechAudioContextLike {
+  public createAudioContext(options?: AudioContextOptions): SpeechAudioContextLike {
+    void options;
     this.createAudioContextCalls += 1;
     return this.context;
   }
@@ -613,6 +674,35 @@ class RecordingSpeechHost implements SpeechCaptureBrowserHost {
 
   public endTrack(): void {
     this.track.end();
+  }
+}
+
+class SequencedSpeechHost implements SpeechCaptureBrowserHost {
+  public readonly getUserMediaCalls: MediaStreamConstraints[] = [];
+  public readonly workletUrl = "worklet.js";
+  private activeAttempt = -1;
+  public readonly mediaDevices = {
+    getUserMedia: (constraints: MediaStreamConstraints): Promise<SpeechMediaStreamLike> => {
+      this.getUserMediaCalls.push(constraints);
+      this.activeAttempt += 1;
+      return this.current().mediaDevices.getUserMedia(constraints);
+    },
+  };
+
+  public constructor(private readonly attempts: readonly RecordingSpeechHost[]) {}
+
+  public createAudioContext(options: AudioContextOptions): SpeechAudioContextLike {
+    return this.current().createAudioContext(options);
+  }
+
+  public createAudioWorkletNode(context: SpeechAudioContextLike, name: string, options: AudioWorkletNodeOptions): SpeechAudioWorkletNodeLike {
+    return this.current().createAudioWorkletNode(context, name, options);
+  }
+
+  private current(): RecordingSpeechHost {
+    const attempt = this.attempts[this.activeAttempt];
+    if (attempt === undefined) throw new Error("No configured speech capture attempt");
+    return attempt;
   }
 }
 

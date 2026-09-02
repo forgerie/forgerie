@@ -24,6 +24,7 @@ export interface SpeechTimingPolicy {
   readonly bodyUploadDeadlineMs: number;
   /** Queue-inclusive deadline for one admitted endpoint or transcription operation. */
   readonly operationDeadlineMs: number;
+  readonly captureStartupTimeoutMs: number;
   readonly initialSpeechTimeoutMs: number;
   readonly pauseAfterSpeechMs: number;
   readonly endpointCompletionGraceMs: number;
@@ -110,6 +111,7 @@ export const SPEECH_POLICY: SpeechRuntimePolicy = {
     endpointDeadlineMs: 2_500,
     bodyUploadDeadlineMs,
     operationDeadlineMs,
+    captureStartupTimeoutMs: 1_000,
     initialSpeechTimeoutMs: 10_000,
     pauseAfterSpeechMs,
     endpointCompletionGraceMs,
