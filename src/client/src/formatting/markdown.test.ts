@@ -99,6 +99,47 @@ describe("toSafeMarkdownHtml", () => {
   });
 });
 
+describe("rendered Markdown tables", () => {
+  const table = "| Option | Cost |\n| --- | --- |\n| Reflow | Tall rows |\n";
+
+  it("gives every cell the heading it belongs to, so a stacked row still reads", () => {
+    const cells = renderedTable(table).querySelectorAll("tbody td");
+
+    expect([...cells].map((cell) => cell.getAttribute("data-label"))).toEqual(["Option", "Cost"]);
+  });
+
+  it("names the table roles the elements already have, so stacking cannot drop them", () => {
+    const rendered = renderedTable(table);
+
+    expect(rendered.getAttribute("role")).toBe("table");
+    expect(rendered.querySelector("tbody")?.getAttribute("role")).toBe("rowgroup");
+    expect(rendered.querySelector("tbody tr")?.getAttribute("role")).toBe("row");
+    expect(rendered.querySelector("tbody td")?.getAttribute("role")).toBe("cell");
+    expect(rendered.querySelector("thead th")?.getAttribute("role")).toBe("columnheader");
+  });
+
+  it("leaves an empty heading off its column rather than labelling a cell with nothing", () => {
+    const cells = renderedTable("| Option |  |\n| --- | --- |\n| Reflow | Tall rows |\n").querySelectorAll("tbody td");
+
+    expect([...cells].map((cell) => cell.getAttribute("data-label"))).toEqual(["Option", null]);
+  });
+
+  it("keeps the table in a scroll region, which is what a reader gets if it is never measured", () => {
+    const wrapper = renderedTable(table).parentElement;
+
+    expect(wrapper?.className).toBe("table-scroll");
+    expect(wrapper?.getAttribute("tabindex")).toBe("0");
+  });
+});
+
+function renderedTable(markdown: string): HTMLTableElement {
+  const root = document.createElement("div");
+  root.innerHTML = toSafeMarkdownHtml(markdown);
+  const table = root.querySelector("table");
+  if (table === null) throw new Error("Expected a rendered table");
+  return table;
+}
+
 function renderedCode(markdown: string): HTMLElement {
   const code = renderedCodes(markdown)[0];
   if (code === undefined) throw new Error("Expected a rendered code block");

@@ -169,14 +169,18 @@ function sanitizeHtml(html: string): string {
       element.setAttribute("rel", "noreferrer noopener");
     }
   });
-  wrapTablesInScrollRegions(template.content);
+  prepareTables(template.content);
   return template.innerHTML;
 }
 
-// Markdown tables stay at their natural width and scroll horizontally instead of
-// being squeezed into the chat column, which is unreadable on narrow screens.
-function wrapTablesInScrollRegions(root: DocumentFragment): void {
+// A markdown table keeps its natural width rather than being squeezed into the
+// chat column. Where that width does not fit, the table is laid out as one card
+// per row instead -- see formatting/tableReflow.ts -- and the scroll region here
+// is what a reader gets when that measurement cannot run.
+function prepareTables(root: DocumentFragment): void {
   root.querySelectorAll("table").forEach((table) => {
+    labelBodyCells(table);
+    keepTableSemanticsWhenStacked(table);
     if (table.parentElement?.classList.contains(TABLE_SCROLL_CLASS) === true) return;
     const wrapper = document.createElement("div");
     wrapper.className = TABLE_SCROLL_CLASS;
@@ -186,6 +190,42 @@ function wrapTablesInScrollRegions(root: DocumentFragment): void {
     table.before(wrapper);
     wrapper.append(table);
   });
+}
+
+// A stacked row has no header row above it to read across, so each cell carries
+// its own heading. The heading is written here, while the table structure is
+// still known, and the style sheet decides whether to show it.
+function labelBodyCells(table: HTMLTableElement): void {
+  const headings = [...table.querySelectorAll("thead th")].map((heading) => heading.textContent.trim());
+  if (headings.length === 0) return;
+  table.querySelectorAll("tbody tr").forEach((row) => {
+    [...row.children].forEach((cell, index) => {
+      const heading = headings[index];
+      if (heading === undefined || heading === "") return;
+      cell.setAttribute("data-label", heading);
+    });
+  });
+}
+
+// Stacking replaces the table display types with block boxes, which drops the
+// implicit table roles with them. Naming the roles the elements already have
+// changes nothing while the table is a table, and keeps a stacked table
+// navigable as a table.
+const TABLE_ELEMENT_ROLES: Readonly<Record<string, string>> = {
+  TABLE: "table",
+  THEAD: "rowgroup",
+  TBODY: "rowgroup",
+  TFOOT: "rowgroup",
+  TR: "row",
+  TH: "columnheader",
+  TD: "cell",
+};
+
+function keepTableSemanticsWhenStacked(table: HTMLTableElement): void {
+  for (const element of [table, ...table.querySelectorAll("thead, tbody, tfoot, tr, th, td")]) {
+    const role = TABLE_ELEMENT_ROLES[element.tagName];
+    if (role !== undefined) element.setAttribute("role", role);
+  }
 }
 
 function isSafeUrl(url: string): boolean {

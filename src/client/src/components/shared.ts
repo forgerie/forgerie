@@ -1024,8 +1024,41 @@ export const formattedTextStyles = css`
   .table-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
   .table-scroll:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
   table { border-collapse: collapse; width: max-content; min-width: 100%; max-width: none; }
-  th, td { border: 1px solid var(--pi-border); padding: 4px 8px; max-width: 48ch; overflow-wrap: anywhere; }
+  /* A table is reference, not prose. One step down from the reading size buys
+     about a column of width before anything has to give, and a table is read by
+     scanning rather than by the line. */
+  th, td { border: 1px solid var(--pi-border); padding: 4px 8px; max-width: 48ch; overflow-wrap: anywhere; font-size: var(--pi-text-sm); }
   th { background: var(--pi-surface); }
+
+  /* A table too wide for the column becomes one card per row.
+
+     Scrolling a table sideways inside a transcript costs the reader the first
+     column as soon as they reach the last one, and on a touch screen the
+     gesture fights the transcript. Stacked, every value stays reachable and
+     carries the heading it belongs to. What is lost is comparison down a
+     column: that is the trade, and it is only taken when the table does not
+     fit. formatting/tableReflow.ts decides, from width alone. */
+  .table-scroll.stacked { inline-size: 100%; max-inline-size: 100%; overflow-x: visible; }
+  .table-scroll.stacked table { display: block; inline-size: 100%; min-inline-size: 0; }
+  .table-scroll.stacked tbody { display: block; }
+  /* The heading row is in every cell now, so the original is noise. */
+  .table-scroll.stacked thead { display: none; }
+  /* Heading beside value. The card owns both tracks and every cell borrows
+     them through subgrid, so the values line up down the card instead of each
+     cell starting wherever its own heading ended. The heading track is as wide
+     as the headings need and no wider than a third of the card, so a long
+     heading wraps instead of starving the value. fit-content() takes a
+     percentage; min() does not take max-content, and spelling it that way
+     drops the declaration and puts every heading on its own line. */
+  .table-scroll.stacked tr { display: grid; grid-template-columns: fit-content(32%) minmax(0, 1fr); gap: 5px 10px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); padding: 8px 10px; }
+  .table-scroll.stacked tr + tr { margin-top: 6px; }
+  .table-scroll.stacked td { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; border: 0; padding: 0; max-width: none; }
+  .table-scroll.stacked td::before { content: attr(data-label); color: var(--pi-muted); font-size: var(--pi-text-xs); }
+  /* A cell with nothing in it says nothing worth a line. */
+  .table-scroll.stacked td:empty { display: none; }
+  /* A cell past the end of the heading row has no heading to show. */
+  .table-scroll.stacked td:not([data-label]) { display: block; }
+  .table-scroll.stacked td:not([data-label])::before { content: none; }
 `;
 
 export const autocompleteStyles = css`

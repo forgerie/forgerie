@@ -27,3 +27,26 @@ describe("transcript reading column", () => {
     expect(proseCss).not.toContain("margin-inline: calc(-1");
   });
 });
+
+describe("a table too wide for the column", () => {
+  it("stops scrolling sideways and becomes one card per row", () => {
+    expect(proseCss).toMatch(/\.table-scroll\.stacked\s*{[^}]*overflow-x:\s*visible/);
+    expect(proseCss).toMatch(/\.table-scroll\.stacked table\s*{[^}]*display:\s*block/);
+    expect(proseCss).toMatch(/\.table-scroll\.stacked tr\s*{[^}]*display:\s*grid/);
+  });
+
+  it("carries the heading into each cell and drops the heading row", () => {
+    expect(proseCss).toContain("content: attr(data-label)");
+    expect(proseCss).toMatch(/\.table-scroll\.stacked thead\s*{[^}]*display:\s*none/);
+  });
+
+  // min() takes lengths, not max-content. Spelled that way the declaration is
+  // dropped and every heading lands on its own line, which looks deliberate.
+  it("bounds the heading by a share of the card, so no width is a special case", () => {
+    expect(proseCss).toContain("grid-template-columns: fit-content(32%) minmax(0, 1fr)");
+  });
+
+  it("lines the values up down the card rather than after each heading", () => {
+    expect(proseCss).toMatch(/\.table-scroll\.stacked td\s*{[^}]*grid-template-columns:\s*subgrid/);
+  });
+});
