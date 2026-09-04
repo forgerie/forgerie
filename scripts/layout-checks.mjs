@@ -8,14 +8,11 @@
 // a rule is written down; it cannot assert that the rule produces the right
 // box. Everything here is a box measurement, so it survives a rewrite of the
 // stylesheet that keeps the reading behaviour.
-import { createReadStream } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
-import { createServer } from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { extname, join, resolve } from "node:path";
-import { build } from "vite";
-import { appTokensPlugin } from "./lib/app-token-css.mjs";
+import { join } from "node:path";
 import { evaluate, findChrome, getFreePort, launchChrome, sleep, waitForDebugger } from "./lib/cdp.mjs";
+import { buildFixture, serveDirectory } from "./lib/fixture-site.mjs";
 import { FOLD8_POSTURES } from "./lib/fold8-postures.mjs";
 import { GRID_STRETCH_PROBE } from "./lib/grid-stretch-probe.mjs";
 import { INBOX_COLUMNS_PROBE } from "./lib/inbox-columns-probe.mjs";
@@ -271,52 +268,6 @@ function driftFailures({ where, rows, column, edge, scope }) {
   const lowest = measured.find((entry) => entry.value === low);
   const highest = measured.find((entry) => entry.value === high);
   return [`${where}: the ${column} column's ${edge} edge drifts ${String(Math.round((high - low) * 10) / 10)}px across ${scope} (${lowest.id} at ${String(low)}, ${highest.id} at ${String(high)})`];
-}
-
-const CONTENT_TYPES = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".svg": "image/svg+xml",
-};
-
-async function serveDirectory(directory) {
-  const server = createServer((request, response) => {
-    const requested = new URL(request.url ?? "/", "http://localhost").pathname;
-    const filePath = resolve(directory, `.${requested === "/" ? "/index.html" : requested}`);
-    if (!filePath.startsWith(resolve(directory))) {
-      response.statusCode = 403;
-      response.end();
-      return;
-    }
-    stat(filePath).then(
-      () => {
-        response.setHeader("Content-Type", CONTENT_TYPES[extname(filePath)] ?? "application/octet-stream");
-        createReadStream(filePath).pipe(response);
-      },
-      () => {
-        response.statusCode = 404;
-        response.end();
-      },
-    );
-  });
-  await new Promise((ready) => { server.listen(0, "127.0.0.1", ready); });
-  const { port } = server.address();
-  return {
-    origin: `http://127.0.0.1:${String(port)}`,
-    close: () => new Promise((done) => { server.close(done); }),
-  };
-}
-
-async function buildFixture(outDir) {
-  await build({
-    configFile: false,
-    root: resolve("scripts/layout"),
-    base: "./",
-    logLevel: "error",
-    plugins: [appTokensPlugin()],
-    build: { outDir, emptyOutDir: true },
-  });
 }
 
 function parseArgs(argv) {

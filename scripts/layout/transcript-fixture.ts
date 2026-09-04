@@ -15,6 +15,33 @@ import { selectedChatFreshReadable, selectedChatTarget } from "../../src/client/
 
 const session = { id: "layout-fixture", cwd: "/repo" };
 
+/**
+ * A table wider than any posture's reading column, so it always stacks.
+ *
+ * The cells deliberately mix inline content with prose -- code beside words,
+ * a path long enough to wrap, a value short enough to look empty beside its
+ * heading -- because a cell holding one plain word cannot show whether the
+ * layout keeps a cell together.
+ */
+const WIDE_TABLE = [
+  "Proposed shape, three tiers:",
+  "",
+  "| Tier | Source of truth | Who writes | Who reads | Delete from the page? |",
+  "| --- | --- | --- | --- | --- |",
+  "| system | `persona/skills/` in this repo | operator, by commit + deploy | every assistant | no |",
+  "| shared | gateway-owned store, e.g. `~/.local/share/team-context-assistant/shared-skills/` | any signed-in person through the page | every assistant | yes, by rule below |",
+  "| personal | the person's own assistant | that person | that person's assistant only | yes |",
+  "",
+  "How it works underneath: the gateway writes the record to its own store.",
+  "",
+  "| Tier | Undo |",
+  "| --- | --- |",
+  "| system | by commit |",
+  "| shared | by rule |",
+  "",
+  "A table that fits is still a table: the two above are judged separately.",
+].join("\n");
+
 const STATES: Record<string, (view: ChatView) => void> = {
   /** Fewer messages than the scroller can hold: the case that was stretching. */
   short: (view: ChatView) => {
@@ -35,6 +62,14 @@ const STATES: Record<string, (view: ChatView) => void> = {
     view.messageEnd = messages.length;
     view.messageTotal = messages.length;
     view.hasMore = true;
+  },
+  /** A table too wide for the reading column, which is laid out as records. */
+  table: (view: ChatView) => {
+    view.messages = [textMessage("user", "where should skills live?"), textMessage("assistant", WIDE_TABLE)];
+    view.messageStart = 0;
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.hasMore = false;
   },
   /** No transcript at all: the empty screen has to centre itself. */
   empty: (view: ChatView) => {
