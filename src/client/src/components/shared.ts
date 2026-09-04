@@ -981,7 +981,10 @@ export const formattedTextStyles = css`
   :is(p, ul, ol, pre, blockquote, .table-scroll):last-child { margin-bottom: 0; }
   ul, ol { padding-left: 22px; }
   li + li { margin-top: 3px; }
-  code { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
+  /* A path long enough to wrap gets a whole chip on each line. Without the
+     clone the border opens at the break and closes on the next line, which
+     reads as one broken box rather than one value continued. */
+  code { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-inline); background: var(--pi-bg); padding: 1px 4px; font: var(--pi-text-sm) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
   pre { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-bg); padding: 10px; overflow-x: auto; overflow-y: hidden; direction: ltr; text-align: left; unicode-bidi: isolate; }
   pre code { border: 0; padding: 0; background: transparent; }
   .hljs-comment, .hljs-code, .hljs-formula { color: var(--pi-muted); font-style: italic; }
@@ -1030,35 +1033,61 @@ export const formattedTextStyles = css`
   th, td { border: 1px solid var(--pi-border); padding: 4px 8px; max-width: 48ch; overflow-wrap: anywhere; font-size: var(--pi-text-sm); }
   th { background: var(--pi-surface); }
 
-  /* A table too wide for the column becomes one card per row.
+  /* A table too wide for the column is read as records instead.
 
      Scrolling a table sideways inside a transcript costs the reader the first
      column as soon as they reach the last one, and on a touch screen the
-     gesture fights the transcript. Stacked, every value stays reachable and
-     carries the heading it belongs to. What is lost is comparison down a
+     gesture fights the transcript. Read as records, every value stays reachable
+     and carries the heading it belongs to. What is lost is comparison down a
      column: that is the trade, and it is only taken when the table does not
      fit. formatting/tableReflow.ts decides, from width alone. */
-  .table-scroll.stacked { inline-size: 100%; max-inline-size: 100%; overflow-x: visible; }
+  .table-scroll.stacked { inline-size: 100%; max-inline-size: 100%; overflow-x: visible; container-type: inline-size; }
   .table-scroll.stacked table { display: block; inline-size: 100%; min-inline-size: 0; }
-  .table-scroll.stacked tbody { display: block; }
   /* The heading row is in every cell now, so the original is noise. */
   .table-scroll.stacked thead { display: none; }
-  /* Heading beside value. The card owns both tracks and every cell borrows
-     them through subgrid, so the values line up down the card instead of each
-     cell starting wherever its own heading ended. The heading track is as wide
-     as the headings need and no wider than a third of the card, so a long
-     heading wraps instead of starving the value. fit-content() takes a
-     percentage; min() does not take max-content, and spelling it that way
-     drops the declaration and puts every heading on its own line. */
-  .table-scroll.stacked tr { display: grid; grid-template-columns: fit-content(32%) minmax(0, 1fr); gap: 5px 10px; border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); padding: 8px 10px; }
-  .table-scroll.stacked tr + tr { margin-top: 6px; }
+  /* One grid for the whole table, borrowed by every record and every field, so
+     a single heading track serves all of them and the values line up down the
+     table. A grid per record measures only its own headings and leaves each
+     record's values at a different place, which reads as three lists that
+     happen to be stacked rather than one table.
+
+     The heading track is as wide as the headings need and no wider than a third
+     of the table, so a long heading wraps rather than starving the value.
+     fit-content() takes a percentage; min() does not take max-content, and
+     spelling it that way drops the declaration and puts every heading on its
+     own line.
+
+     Hairlines above and below, and one between records -- the same grammar the
+     transcript uses for its other non-prose blocks. A box per record drew three
+     panels that looked unrelated to each other and to the sentence that
+     introduced them. */
+  .table-scroll.stacked tbody { display: grid; grid-template-columns: fit-content(32%) minmax(0, 1fr); column-gap: 14px; border-block: 1px solid var(--calm-rule, var(--pi-border)); }
+  .table-scroll.stacked tr { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: 3px; padding-block: 9px; }
+  .table-scroll.stacked tr + tr { border-top: 1px solid var(--calm-rule, var(--pi-border)); }
   .table-scroll.stacked td { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; border: 0; padding: 0; max-width: none; }
-  .table-scroll.stacked td::before { content: attr(data-label); color: var(--pi-muted); font-size: var(--pi-text-xs); }
+  .table-scroll.stacked td::before { content: attr(data-label); color: var(--pi-muted); font-size: var(--pi-text-xs); line-height: 1.5; }
+  .table-scroll.stacked .cell-value { min-inline-size: 0; }
+  /* The first column names the record: repeating its heading on every record
+     says the same word three times and buries the name in the list of fields.
+     It reads as a title instead, and the heading it drops is written once above
+     the table. */
+  .table-scroll.stacked td:first-child { display: block; grid-column: 1 / -1; margin-block-end: 3px; font-size: var(--pi-text-md); font-weight: 600; }
+  .table-scroll.stacked td:first-child::before { content: none; }
+  .table-scroll.stacked tbody::before { content: attr(data-record-label); grid-column: 1 / -1; padding-block-start: 8px; color: var(--pi-muted); font-size: var(--pi-text-xs); letter-spacing: .08em; text-transform: uppercase; }
+  .table-scroll.stacked tbody:not([data-record-label])::before { content: none; }
   /* A cell with nothing in it says nothing worth a line. */
   .table-scroll.stacked td:empty { display: none; }
   /* A cell past the end of the heading row has no heading to show. */
   .table-scroll.stacked td:not([data-label]) { display: block; }
   .table-scroll.stacked td:not([data-label])::before { content: none; }
+  /* Too narrow for two tracks: a heading that takes a third of the width leaves
+     the value a stub. The heading moves above its value, and the record's own
+     grid is what decides -- the table is asked how much room it has, never what
+     is showing it. */
+  @container (max-width: 26rem) {
+    .table-scroll.stacked tbody { grid-template-columns: minmax(0, 1fr); }
+    .table-scroll.stacked td { row-gap: 0; }
+  }
 `;
 
 export const autocompleteStyles = css`

@@ -118,6 +118,34 @@ describe("rendered Markdown tables", () => {
     expect(rendered.querySelector("thead th")?.getAttribute("role")).toBe("columnheader");
   });
 
+  it("keeps a cell's contents in one box, so a stacked record cannot tear a sentence up", () => {
+    const cell = renderedTable("| Option | Cost |\n| --- | --- |\n| Reflow | `tall.ts` rows and prose |\n").querySelectorAll("tbody td")[1];
+
+    const value = cell?.firstElementChild;
+    expect(cell?.childNodes.length).toBe(1);
+    expect(value?.className).toBe("cell-value");
+    expect(value?.querySelector("code")?.textContent).toBe("tall.ts");
+    expect(value?.textContent).toBe("tall.ts rows and prose");
+  });
+
+  it("writes the first column's heading once, because each record reads it as a title", () => {
+    const rendered = renderedTable(table);
+
+    expect(rendered.querySelector("tbody")?.getAttribute("data-record-label")).toBe("Option");
+  });
+
+  it("leaves a nameless first column without a record heading rather than an empty line", () => {
+    const rendered = renderedTable("|  | Cost |\n| --- | --- |\n| Reflow | Tall rows |\n");
+
+    expect(rendered.querySelector("tbody")?.hasAttribute("data-record-label")).toBe(false);
+  });
+
+  it("leaves an empty cell empty, so a record spends no line on it", () => {
+    const cells = renderedTable("| Option | Cost |\n| --- | --- |\n| Reflow |  |\n").querySelectorAll("tbody td");
+
+    expect(cells[1]?.childNodes.length).toBe(0);
+  });
+
   it("leaves an empty heading off its column rather than labelling a cell with nothing", () => {
     const cells = renderedTable("| Option |  |\n| --- | --- |\n| Reflow | Tall rows |\n").querySelectorAll("tbody td");
 

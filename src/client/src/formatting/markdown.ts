@@ -153,6 +153,7 @@ function escapeHtml(text: string): string {
 }
 
 const TABLE_SCROLL_CLASS = "table-scroll";
+const CELL_VALUE_CLASS = "cell-value";
 
 function sanitizeHtml(html: string): string {
   const template = document.createElement("template");
@@ -180,6 +181,7 @@ function sanitizeHtml(html: string): string {
 function prepareTables(root: DocumentFragment): void {
   root.querySelectorAll("table").forEach((table) => {
     labelBodyCells(table);
+    keepCellContentTogether(table);
     keepTableSemanticsWhenStacked(table);
     if (table.parentElement?.classList.contains(TABLE_SCROLL_CLASS) === true) return;
     const wrapper = document.createElement("div");
@@ -198,12 +200,39 @@ function prepareTables(root: DocumentFragment): void {
 function labelBodyCells(table: HTMLTableElement): void {
   const headings = [...table.querySelectorAll("thead th")].map((heading) => heading.textContent.trim());
   if (headings.length === 0) return;
+  // The first column names the record, so a stacked record reads it as a title
+  // and does not repeat its heading. The heading is not dropped: it is written
+  // once above the records, where it says what the titles are.
+  const recordLabel = headings[0];
+  if (recordLabel !== undefined && recordLabel !== "") {
+    table.querySelector("tbody")?.setAttribute("data-record-label", recordLabel);
+  }
   table.querySelectorAll("tbody tr").forEach((row) => {
     [...row.children].forEach((cell, index) => {
       const heading = headings[index];
       if (heading === undefined || heading === "") return;
       cell.setAttribute("data-label", heading);
     });
+  });
+}
+
+// A stacked cell is one box beside its heading, so what the cell holds has to
+// be one box too.
+//
+// Stacking lays the record out as a grid and the cell borrows its tracks. Every
+// child of a grid box is a grid item, so a cell written as `code` plus a few
+// words became two items: the code took the value track and the words fell into
+// the heading track on the next line. The reader saw one sentence torn in half
+// and filed under the wrong heading. One wrapper makes the cell's contents a
+// single item again, and inline content inside it stays inline.
+function keepCellContentTogether(table: HTMLTableElement): void {
+  table.querySelectorAll("tbody td").forEach((cell) => {
+    if (cell.childNodes.length === 0) return;
+    if (cell.firstElementChild?.classList.contains(CELL_VALUE_CLASS) === true && cell.childNodes.length === 1) return;
+    const value = document.createElement("span");
+    value.className = CELL_VALUE_CLASS;
+    value.append(...cell.childNodes);
+    cell.append(value);
   });
 }
 
