@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { createInboxLocationResolver } from "./inboxLocation";
+import { createInboxLocationResolver, inboxLocationChip } from "./inboxLocation";
 import type { Project, Workspace } from "./api";
 
 function project(id: string, name: string, path: string): Project {
@@ -61,5 +61,25 @@ describe("createInboxLocationResolver", () => {
     const resolve = createInboxLocationResolver([project("p1", "forgerie", "/code/forgerie")], {});
 
     expect(resolve("/somewhere/else")).toBeUndefined();
+  });
+});
+
+describe("inboxLocationChip", () => {
+  const main = { projectId: "p1", projectName: "forgerie", projectPath: "/code/forgerie", workspaceLabel: "main", isMain: true };
+  const branch = { ...main, workspaceLabel: "feat/session-inbox", isMain: false };
+
+  it("names the project, and the branch off main, when the groups do not", () => {
+    expect(inboxLocationChip(main, "state")).toEqual({ kind: "project", project: "forgerie" });
+    expect(inboxLocationChip(branch, "state")).toEqual({ kind: "project", project: "forgerie", branch: "feat/session-inbox" });
+  });
+
+  // Grouped by project, the header names the project; the chip repeating it
+  // spent a third of every row on a word the line above already said.
+  it("says nothing on a main checkout when the group header names the project", () => {
+    expect(inboxLocationChip(main, "project")).toEqual({ kind: "none" });
+  });
+
+  it("keeps only the branch on a worktree when the group header names the project", () => {
+    expect(inboxLocationChip(branch, "project")).toEqual({ kind: "branch", branch: "feat/session-inbox" });
   });
 });

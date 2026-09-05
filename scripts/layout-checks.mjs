@@ -42,6 +42,15 @@ const BOX_SLACK_PX = 1;
 /** How far two rows' shared column edge may differ before the list reads as ragged. */
 const MAX_COLUMN_DRIFT_PX = 0.6;
 
+/**
+ * The least a title may be given on a one-line row, as a share of the pane
+ * and as a character count, whichever is smaller. Mirrors the board's
+ * --row-title-floor; the stylesheet is what is being checked, so the number
+ * is restated here rather than read from it.
+ */
+const TITLE_FLOOR_PANE_SHARE = 0.5;
+const TITLE_FLOOR_CH = 26;
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const chromeBin = args.chromeBin ?? process.env["CHROME_BIN"] ?? findChrome();
@@ -252,6 +261,43 @@ function checkInboxColumns({ where, columns }) {
     }));
   }
 
+  failures.push(...titleFloorFailures({ where, columns }));
+  failures.push(...actionOverMarkFailures({ where, columns }));
+  return failures;
+}
+
+/**
+ * The row's action draws where its pin was, so revealing it moves nothing.
+ * The action is positioned inside the mark's grid area, and the mark's box is
+ * offset from that area by its own margin; the two have to agree or the
+ * glyph appears to jump under the pointer.
+ */
+function actionOverMarkFailures({ where, columns }) {
+  const failures = [];
+  for (const row of columns.rows) {
+    if (row.mark === undefined || row.action === undefined) continue;
+    const drift = Math.max(Math.abs(row.mark.left - row.action.left), Math.abs(row.mark.right - row.action.right));
+    if (drift <= MAX_COLUMN_DRIFT_PX) continue;
+    failures.push(`${where}: ${row.id}'s action sits ${String(Math.round(drift * 10) / 10)}px off its mark (mark ${String(row.mark.left)}-${String(row.mark.right)}, action ${String(row.action.left)}-${String(row.action.right)})`);
+  }
+  return failures;
+}
+
+/**
+ * The title is the readout the row exists for, so it is the chip that yields:
+ * on a one-line row the title keeps at least its floor and the location chip
+ * takes what is left. A chip that pushed a title under the floor is the
+ * thirteen-character title this check was written against.
+ */
+function titleFloorFailures({ where, columns }) {
+  const floorPx = Math.min(columns.paneWidth * TITLE_FLOOR_PANE_SHARE, columns.titleChPx * TITLE_FLOOR_CH);
+  const failures = [];
+  for (const row of columns.rows) {
+    if (row.shape !== "one-line" || row.title === undefined) continue;
+    const width = row.title.right - row.title.left;
+    if (width + BOX_SLACK_PX >= floorPx) continue;
+    failures.push(`${where}: ${row.id}'s title is ${String(Math.round(width))}px wide, under its ${String(Math.round(floorPx))}px floor`);
+  }
   return failures;
 }
 

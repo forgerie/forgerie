@@ -46,6 +46,14 @@ Of the inbox floor — the space contract between an open plugin shelf and the s
 - A shelf opens to the height its content asks for, up to the room the panel can give it.
 - A shelf the panel cannot hold is compressed onto its own scroller, and never sideways.
 
+Of the inbox columns — the board is one table, and every row draws its part of it in the same place — it asserts three more:
+
+- No shared column edge drifts between rows, whatever each row's own content is.
+- A one-line title is never narrower than its floor: half the pane or 26 characters, whichever is smaller. The location chip is what yields.
+- A row's action draws exactly over the pin it replaces.
+
+`node scripts/shoot-inbox-fixture.mjs --out DIR` photographs the same inbox fixture at each posture, for looking at what the columns check measured.
+
 The run takes about 30 seconds, so it is not part of `npm run verify`. CI runs it on Linux with `--require-browser`, which turns a missing browser into a failure instead of a skip. Without that flag the command skips when no browser is installed.
 
 States live in `scripts/layout/transcript-fixture.ts` and `scripts/layout/inbox-fixture.ts`, and the runner reads each list from its fixture, so a state added there is measured without touching the runner.

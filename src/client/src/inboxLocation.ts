@@ -26,6 +26,36 @@ export interface InboxLocation extends SessionBoardLocation {
 
 export type InboxLocationResolver = (cwd: string) => InboxLocation | undefined;
 
+/** How the board's rows are grouped; the chip says only what the group header does not. */
+export type InboxGrouping = "state" | "project";
+
+/**
+ * What a row's location chip says.
+ *
+ * `none` is a real answer: the row draws no chip and the board's location
+ * column closes up on that row, so the title takes the width.
+ */
+export type InboxLocationChip =
+  | { readonly kind: "none" }
+  | { readonly kind: "branch"; readonly branch: string }
+  | { readonly kind: "project"; readonly project: string; readonly branch?: string };
+
+/**
+ * The chip never repeats the group header (intrinsic design: never duplicate
+ * what the container already shows). Grouped by state, the header says
+ * nothing about where the session is, so the chip names the project and, off
+ * main, the branch. Grouped by project, the header already names the project,
+ * so a main checkout says nothing and a worktree says only its branch.
+ */
+export function inboxLocationChip(location: InboxLocation, grouping: InboxGrouping): InboxLocationChip {
+  if (grouping === "project") {
+    return location.isMain ? { kind: "none" } : { kind: "branch", branch: location.workspaceLabel };
+  }
+  return location.isMain
+    ? { kind: "project", project: location.projectName }
+    : { kind: "project", project: location.projectName, branch: location.workspaceLabel };
+}
+
 /**
  * Build a memoized resolver over the currently known projects and cached
  * workspaces. Cheap to rebuild per render: the memo exists so repeated rows in

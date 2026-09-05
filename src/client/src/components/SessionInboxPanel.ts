@@ -31,7 +31,7 @@ import { isKeyEventInEditableContext } from "../keyboardContext";
 import { DEFAULT_INBOX_DENSITY, inboxRowShape, type InboxDensity } from "../inboxDensity";
 import { ROW_PRESS, pressTravel, readRowPress } from "../rowPress";
 
-import { createInboxLocationResolver, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
+import { createInboxLocationResolver, inboxLocationChip, type InboxLocation, type InboxLocationResolver } from "../inboxLocation";
 import {
   DEFAULT_COLLAPSED_AGE_BANDS,
   ageBandKind,
@@ -807,6 +807,54 @@ export class SessionInboxPanel extends LitElement {
     return html`<span class="row-work" data-live-work>${parts}</span>`;
   }
 
+  /**
+   * Where the session is, plus the state detail on a two-line row.
+   *
+   * Rendered only when there is something to say. A row with nothing here
+   * draws no element at all, so the board's location column closes up on it
+   * and the title takes the width; an empty element would still be a grid
+   * item and still cost the column its gap.
+   */
+  private renderLocation(
+    session: SessionInfo,
+    location: InboxLocation | undefined,
+    isDeleted: boolean,
+    detail: string | undefined,
+  ): TemplateResult | typeof nothing {
+    const chip = this.renderLocationChip(session, location, isDeleted);
+    if (chip === nothing && detail === undefined) return nothing;
+    return html`
+      <div class="row-meta">
+        ${chip}
+        ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
+      </div>
+    `;
+  }
+
+  private renderLocationChip(
+    session: SessionInfo,
+    location: InboxLocation | undefined,
+    isDeleted: boolean,
+  ): TemplateResult | typeof nothing {
+    if (isDeleted) return html`<span class="chip chip-deleted" data-location-chip>workspace removed</span>`;
+    if (location === undefined) {
+      return html`<span class="chip" data-location-chip title=${session.cwd}>${unknownLocationLabel(session.cwd)}</span>`;
+    }
+    const chip = inboxLocationChip(location, this.groupBy);
+    switch (chip.kind) {
+      case "none":
+        return nothing;
+      case "branch":
+        return html`<span class="chip" data-location-chip><span class="chip-branch">${chip.branch}</span></span>`;
+      case "project":
+        return html`
+          <span class="chip" data-location-chip>
+            ${chip.project}${chip.branch !== undefined ? html` · <span class="chip-branch">${chip.branch}</span>` : nothing}
+          </span>
+        `;
+    }
+  }
+
   private renderRow(
     row: SessionBoardRow<SessionInfo>,
     resolveLocation: InboxLocationResolver,
@@ -879,18 +927,7 @@ export class SessionInboxPanel extends LitElement {
       >
         <span class="row-marker" aria-hidden="true"></span>
         <div class="row-title">${session.name ?? (session.firstMessage || session.id)}</div>
-        <div class="row-meta">
-          ${isDeleted
-            ? html`<span class="chip chip-deleted" data-location-chip>workspace removed</span>`
-            : location !== undefined
-              ? html`
-                  <span class="chip" data-location-chip>
-                    ${location.projectName}${!location.isMain ? html` · <span class="chip-branch">${location.workspaceLabel}</span>` : nothing}
-                  </span>
-                `
-              : html`<span class="chip" data-location-chip title=${session.cwd}>${unknownLocationLabel(session.cwd)}</span>`}
-          ${detail !== undefined ? html`<span class="row-detail">${detail}</span>` : nothing}
-        </div>
+        ${this.renderLocation(session, location, isDeleted, detail)}
         ${this.renderLiveWork(session.id)}
         <span class="row-mark">
           ${session.pinned === true ? html`<span class="row-pin" title="Pinned" data-pinned-marker>${pinGlyph()}</span>` : nothing}
@@ -1423,18 +1460,40 @@ export class SessionInboxPanel extends LitElement {
        * Six tracks: state marker, title, location, live work, mark, time. The
        * title is the flexible one, so the title is what truncates -- sizing
        * the location track with 1fr instead cut project names mid-word.
+       *
+       * The title is also the one with a floor. Without it the location
+       * column, shared by the whole board, took its cap from every title at
+       * once: a 360px pane gave 108px to a project name and 125px -- thirteen
+       * characters -- to the title beside it. The title is the readout the
+       * row exists for, so it is the chip that yields: the location track's
+       * minimum is zero (row-meta has min-width: 0), the title's is the floor,
+       * and the track algorithm hands the chip what is free after the floor,
+       * up to its cap, before the title takes the rest.
+       *
+       * The floor is the least of three: half the pane, so the chip keeps a
+       * share; 26 characters, so a wide pane does not hold a long title's
+       * width hostage; and the pane less the columns' fixed cost, so a pane
+       * dragged to its 180px minimum overflows nothing. The 140px is the
+       * marker, gaps, mark slot, timestamp and row padding, plus room for a
+       * few characters of chip -- a guess until scripts/layout-checks.mjs
+       * measures it at each posture.
+       *
+       * The floor is what the text gets. The title's cell carries the column
+       * gap as its own margin (see below), so the track is the floor plus the
+       * gap; scripts/layout-checks.mjs measures the text box against the
+       * floor, at every posture.
        */
+      --row-title-floor: min(50cqi, 26ch, calc(100cqi - 140px));
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+      grid-template-columns:
+        auto
+        minmax(calc(var(--row-title-floor) + var(--row-title-gap)), 1fr)
+        auto auto auto auto;
       align-content: start;
-      column-gap: var(--row-title-gap);
     }
 
     /*
      * Each level between the board and a row passes the tracks down untouched.
-     * The gap is restated at every level because column-gap does not inherit,
-     * and a subgrid that named a different gap would draw its cells beside the
-     * board's columns rather than in them.
      */
     .group,
     .group-rows,
@@ -1443,8 +1502,22 @@ export class SessionInboxPanel extends LitElement {
       grid-column: 1 / -1;
       display: grid;
       grid-template-columns: subgrid;
-      column-gap: var(--row-title-gap);
     }
+
+    /*
+     * The space between columns is carried by the cells, not by the grid.
+     *
+     * A grid gap is paid between every pair of tracks, including a track no
+     * row has anything in: a board with no live work anywhere still spent two
+     * gaps on the live-work column, and one on the location column when
+     * grouping made every chip go quiet. A cell's own margin costs nothing
+     * when the cell is not there, so an empty column closes to zero.
+     *
+     * The action shares the mark's margin so it keeps drawing exactly where
+     * the pin was: its insets are measured from the grid area, and the
+     * margin moves them the same distance the pin's box moved.
+     */
+    .row > :not(.row-marker) { margin-inline-start: var(--row-title-gap); }
 
     /*
      * A collapsed group is hidden by its hidden attribute, and the display
@@ -1663,11 +1736,13 @@ export class SessionInboxPanel extends LitElement {
     }
 
     /*
-     * A two-line row leaves the location column empty on the title's line, so
-     * the title reads into it instead of ending in an ellipsis with clear
-     * space beside it.
+     * A row with nothing beside the title on its first line -- a two-line row,
+     * whose location is on the second, or a one-line row with no chip at all --
+     * lends the location column to the title, so the title reads into it
+     * instead of ending in an ellipsis with clear space beside it.
      */
-    .row[data-shape="two-line"] .row-title { grid-column: 2 / 4; }
+    .row[data-shape="two-line"] .row-title,
+    .row:not(:has(> .row-meta)) .row-title { grid-column: 2 / 4; }
 
     .row[data-state="unread"] .row-title,
     .row[data-state="blocked"] .row-title {
@@ -1773,10 +1848,13 @@ export class SessionInboxPanel extends LitElement {
       flex-wrap: nowrap;
     }
 
+    /*
+     * A block, not a flex container: text-overflow acts on a block's own line
+     * box and never on text inside a flex container, which is why a chip used
+     * to end in a cut letter ("team-context-assistan") rather than an ellipsis.
+     */
     .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
+      display: inline-block;
       flex: 0 1 auto;
       min-width: 0;
       font-size: var(--pi-text-sm);

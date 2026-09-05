@@ -955,6 +955,57 @@ describe("location chip", () => {
     const chip = root.querySelector("[data-session='feat-one'] [data-location-chip]");
     expect(chip?.textContent).toContain("feat/inbox");
   });
+
+  // Grouped by project, the header already names the project. A chip that
+  // said it again spent a third of every row on the line above it.
+  it("drops the chip on a main checkout when the group header names the project", async () => {
+    const session = mkSession("open-one", { cwd: "/repo" });
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      projects: [mkProject("proj-1", "My Repo")],
+      workspacesByProjectId: { "proj-1": [mkWorkspace("ws-1", "proj-1", "/repo")] },
+    });
+    await chooseGroupBy(panel, "project");
+    const root = shadowRoot(panel);
+
+    expect(root.querySelector("[data-group='proj-1'] .group-label")?.textContent).toContain("My Repo");
+    expect(root.querySelector("[data-session='open-one'] [data-location-chip]")).toBeNull();
+  });
+
+  it("keeps only the branch on a worktree row when grouped by project", async () => {
+    const session = mkSession("feat-one", { cwd: "/repo-feat" });
+    const ws: Workspace = {
+      id: "ws-feat",
+      projectId: "proj-1",
+      path: "/repo-feat",
+      label: "feat/inbox",
+      isMain: false,
+      isGitRepo: true,
+      isGitWorktree: true,
+      effectiveConfig: {},
+    };
+    const panel = await mountPanel({
+      globalSessions: mkGlobalSessions([session]),
+      projects: [mkProject("proj-1", "My Repo")],
+      workspacesByProjectId: { "proj-1": [ws] },
+    });
+    await chooseGroupBy(panel, "project");
+    const root = shadowRoot(panel);
+
+    const chip = root.querySelector("[data-session='feat-one'] [data-location-chip]");
+    expect(chip?.textContent.trim()).toBe("feat/inbox");
+    expect(chip?.textContent).not.toContain("My Repo");
+  });
+
+  it("still names the project on a removed or unresolved workspace when grouped by project", async () => {
+    const session = mkSession("orphan-one", { cwd: "/not-loaded-yet" });
+    const panel = await mountPanel({ globalSessions: mkGlobalSessions([session]) });
+    await chooseGroupBy(panel, "project");
+    const root = shadowRoot(panel);
+
+    const chip = root.querySelector("[data-session='orphan-one'] [data-location-chip]");
+    expect(chip?.textContent.trim()).toBe("not-loaded-yet");
+  });
 });
 
 // ---------------------------------------------------------------------------

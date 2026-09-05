@@ -16,13 +16,27 @@ import type { GlobalSessionsState } from "../../src/client/src/appState";
 import type { Project, SessionInfo, SessionStatus, Workspace } from "../../src/client/src/api";
 import { SessionInboxPanel } from "../../src/client/src/components/SessionInboxPanel";
 
-/** Content heights, in px, for the shelf each state opens. */
-const STATES: Record<string, number> = {
+interface InboxFixtureState {
+  /** Content height, in px, for the shelf this state opens. */
+  readonly shelfContentPx: number;
+  readonly groupBy: "state" | "project";
+}
+
+const STATES: Record<string, InboxFixtureState> = {
   /** Shorter than the space the board can give up: the shelf opens whole. */
-  fits: 180,
+  fits: { shelfContentPx: 180, groupBy: "state" },
   /** Taller than the panel at every posture: the board stops at its floor. */
-  overflows: 900,
+  overflows: { shelfContentPx: 900, groupBy: "state" },
+  /**
+   * Grouped by project the header names the project, so a main-checkout row
+   * draws no chip and the location column has to close up on it -- while the
+   * one worktree row still needs the column for its branch.
+   */
+  byProject: { shelfContentPx: 180, groupBy: "project" },
 };
+
+/** Where the panel keeps its grouping choice, for the machine the fixture names. */
+const GROUP_BY_STORAGE_KEY = "forgerie:inbox:local:groupBy";
 
 const SHELF_ROW_PX = 30;
 
@@ -127,10 +141,15 @@ function globalSessions(): GlobalSessionsState {
   };
 }
 
-/** Three projects whose names differ in length, so the location column has a widest member. */
+/**
+ * Three projects whose names differ in length, so the location column has a
+ * widest member -- and that member is long enough to press on the titles the
+ * way a real project name does, which is what the title floor is measured
+ * against.
+ */
 function projects(): Project[] {
   return [
-    { id: "proj-1", name: "amaze-next", path: "/repo", createdAt: "2026-08-27T00:00:00.000Z" },
+    { id: "proj-1", name: "team-context-assistant", path: "/repo", createdAt: "2026-08-27T00:00:00.000Z" },
     { id: "proj-2", name: "pi", path: "/tiny", createdAt: "2026-08-27T00:00:00.000Z" },
     { id: "proj-3", name: "portal-source", path: "/portal-source", createdAt: "2026-08-27T00:00:00.000Z" },
   ];
@@ -182,14 +201,17 @@ function shelf(contentPx: number) {
 }
 
 async function mount(state: string): Promise<void> {
-  const contentPx = STATES[state];
-  if (contentPx === undefined) throw new Error(`Unknown inbox state ${JSON.stringify(state)}`);
+  const spec = STATES[state];
+  if (spec === undefined) throw new Error(`Unknown inbox state ${JSON.stringify(state)}`);
   document.body.replaceChildren();
+  // The panel reads its grouping from storage when it learns its machine, so
+  // the choice is staged the way a user's would be rather than poked in.
+  localStorage.setItem(GROUP_BY_STORAGE_KEY, spec.groupBy);
   const panel = new SessionInboxPanel();
   panel.globalSessions = globalSessions();
   panel.projects = projects();
   panel.workspacesByProjectId = workspacesByProjectId();
-  panel.inboxShelves = [shelf(contentPx)];
+  panel.inboxShelves = [shelf(spec.shelfContentPx)];
   document.body.append(panel);
   await panel.updateComplete;
   await new Promise((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(resolve); }); });
@@ -207,4 +229,6 @@ window.mountInbox = mount;
 // The runner reads the case list and the heights from the model rather than
 // keeping its own copy, so a new state cannot be added without being measured.
 window.inboxStates = Object.keys(STATES);
-window.inboxShelfContentPx = STATES;
+window.inboxShelfContentPx = Object.fromEntries(
+  Object.entries(STATES).map(([name, spec]) => [name, spec.shelfContentPx]),
+);
