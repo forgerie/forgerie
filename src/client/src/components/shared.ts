@@ -877,6 +877,15 @@ export const chatStyles = css`
   .session-launch-recovery-actions button { border: 1px solid var(--pi-warning-border); border-radius: var(--pi-radius-pill); background: var(--pi-surface); color: var(--pi-warning); padding: 5px 10px; font: var(--pi-text-sm) system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
   .session-launch-recovery-actions button:hover, .session-launch-recovery-actions button:focus { border-color: var(--pi-warning); color: var(--pi-text-bright); }
   .session-launch-recovery-actions button:disabled { border-color: var(--pi-border); color: var(--pi-muted); cursor: default; opacity: .7; }
+  .completed-dialogs { min-inline-size: 0; margin-block-end: var(--pi-space-md); }
+  .completed-dialogs > summary { display: flex; align-items: center; gap: var(--pi-space-sm); box-sizing: border-box; padding: var(--pi-space-sm) var(--pi-space-md); color: var(--pi-muted); font-size: var(--pi-text-sm); overflow-wrap: anywhere; list-style: none; cursor: pointer; }
+  /* No shared hit-area token exists: keep the disclosure at least 48 CSS px tall. */
+  .completed-dialogs > summary { min-block-size: 3rem; }
+  .completed-dialogs > summary::-webkit-details-marker { display: none; }
+  .completed-dialogs > summary::before { content: "▸"; flex: 0 0 auto; }
+  .completed-dialogs[open] > summary::before { content: "▾"; }
+  .completed-dialogs > summary:hover { color: var(--pi-text); }
+  .completed-dialogs > summary:focus-visible { outline: var(--pi-focus-ring); border-radius: var(--pi-radius-control); }
   .queued-dialogs { margin: -8px 0 14px; padding: 0 4px; color: var(--pi-muted); font-size: var(--pi-text-sm); text-align: center; }
   .history-boundary small { color: var(--pi-dim); }
   /* The liveness line is the running turn's footer, so it sits with the pooled

@@ -328,6 +328,7 @@ export class ChatView extends LitElement {
   @query(".chat-load-retry") private retryButton?: HTMLButtonElement;
   @query("image-lightbox") private imageLightbox?: ImageLightbox;
   @state() private expandedMetaKey: string | undefined;
+  @state() private completedDialogsExpanded = false;
   /**
    * Rails the reader has opened, by rail key. Expansion is per-turn state that
    * lives as long as the session view does -- not a preference, so it is
@@ -402,6 +403,7 @@ export class ChatView extends LitElement {
 
   private prepareSessionUiState(): void {
     this.disclosures.syncSession(this.sessionId);
+    this.completedDialogsExpanded = false;
     this.scrolling.beginOpening();
     this.loadMoreGeneration += 1;
     this.loadMoreRequested = false;
@@ -414,6 +416,7 @@ export class ChatView extends LitElement {
       this.livenessClock = undefined;
       this.prepareSessionUiState();
     } else if (changed.has("openingAttempt")) this.scrolling.beginOpening();
+    if (this.closedDialogs.length === 0) this.completedDialogsExpanded = false;
     this.trackLivenessClock();
   }
 
@@ -1020,22 +1023,32 @@ export class ChatView extends LitElement {
     `;
   }
 
+  private onCompletedDialogsToggle(event: Event): void {
+    const details = event.currentTarget;
+    if (details instanceof HTMLDetailsElement) this.completedDialogsExpanded = details.open;
+  }
+
   private renderExtensionDialogs() {
     const open = this.pendingDialogs[0];
     if (open === undefined && this.closedDialogs.length === 0) return null;
     const queuedCount = this.pendingDialogs.length - 1;
     return html`
-      ${repeat(
-        this.closedDialogs,
-        (closed) => closed.dialog.dialogId,
-        (closed) => html`
-          <extension-dialog-card
-            class="closed-dialog-card"
-            .outcome=${closed}
-            .onDismiss=${this.onDismissClosedDialog}
-          ></extension-dialog-card>
-        `,
-      )}
+      ${this.closedDialogs.length === 0 ? null : html`
+        <details class="completed-dialogs" ?open=${this.completedDialogsExpanded} @toggle=${(event: Event) => { this.onCompletedDialogsToggle(event); }}>
+          <summary>Completed questions (${this.closedDialogs.length})</summary>
+          ${repeat(
+            this.closedDialogs,
+            (closed) => closed.dialog.dialogId,
+            (closed) => html`
+              <extension-dialog-card
+                class="closed-dialog-card"
+                .outcome=${closed}
+                .onDismiss=${this.onDismissClosedDialog}
+              ></extension-dialog-card>
+            `,
+          )}
+        </details>
+      `}
       ${open === undefined ? null : html`
         <extension-dialog-card
           class="open-dialog-card"
