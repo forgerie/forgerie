@@ -58,6 +58,15 @@ describe("a table too wide for the column", () => {
     expect(proseCss).not.toMatch(/\.table-scroll\.stacked tr\s*{[^}]*border-radius/);
   });
 
+  // The step down to --pi-text-sm pays for column width; a stacked table has no
+  // columns left to pay for, and it left the heading at 11px under the value it
+  // names.
+  it("reads a record at the reading size, with its heading one step under", () => {
+    expect(proseCss).toMatch(/\.table-scroll\.stacked td\s*{[^}]*font-size:\s*var\(--pi-text-md\)/);
+    expect(proseCss).toMatch(/\.table-scroll\.stacked td::before\s*{[^}]*font-size:\s*var\(--pi-text-sm\)/);
+    expect(proseCss).not.toMatch(/\.table-scroll\.stacked td::before\s*{[^}]*font-size:\s*var\(--pi-text-xs\)/);
+  });
+
   it("reads the record's name as a title instead of repeating its heading", () => {
     expect(proseCss).toMatch(/\.table-scroll\.stacked td:first-child\s*{[^}]*font-weight:\s*600/);
     expect(proseCss).toMatch(/\.table-scroll\.stacked td:first-child::before\s*{[^}]*content:\s*none/);

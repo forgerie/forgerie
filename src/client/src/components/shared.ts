@@ -1064,8 +1064,18 @@ export const formattedTextStyles = css`
   .table-scroll.stacked tbody { display: grid; grid-template-columns: fit-content(32%) minmax(0, 1fr); column-gap: 14px; border-block: 1px solid var(--calm-rule, var(--pi-border)); }
   .table-scroll.stacked tr { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: 3px; padding-block: 9px; }
   .table-scroll.stacked tr + tr { border-top: 1px solid var(--calm-rule, var(--pi-border)); }
-  .table-scroll.stacked td { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; border: 0; padding: 0; max-width: none; }
-  .table-scroll.stacked td::before { content: attr(data-label); color: var(--pi-muted); font-size: var(--pi-text-xs); line-height: 1.5; }
+  /* A record is read at the reading size.
+
+     A table steps down to --pi-text-sm to buy width. A stacked table has no
+     columns left to buy width for -- it is a list of statements -- so the step
+     bought nothing and cost the heading, which sat one step further down at the
+     bottom of the ramp: 11px and muted, under the value it is there to name.
+
+     The value returns to the prose size and the heading sits one step under it,
+     as large as a heading may be without out-shouting what it names. The cost is
+     height: bigger type wraps sooner, so a stacked table is taller than it was. */
+  .table-scroll.stacked td { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; border: 0; padding: 0; max-width: none; font-size: var(--pi-text-md); }
+  .table-scroll.stacked td::before { content: attr(data-label); color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.5; }
   .table-scroll.stacked .cell-value { min-inline-size: 0; }
   /* The first column names the record: repeating its heading on every record
      says the same word three times and buries the name in the list of fields.
