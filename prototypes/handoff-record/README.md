@@ -1,7 +1,19 @@
 # Handoff record
 
-**Verdict (2026-09-07): F, the door in the bubble.** Treatments for the turn a
-`/handoff` leaves behind.
+**Verdict (2026-09-07): F, the door in the bubble. Shipped.** Treatments for
+the turn a `/handoff` leaves behind.
+
+Landed in two commits: the command bubble for every skill invocation, then the
+door for turns that created a session. The door's derivation is
+`src/client/src/handoffDoor.ts`; navigation reuses the resolver the
+missing-parent indicator already used, generalised to take a cwd and id
+(`resolveSessionLocation`).
+
+One defect the postures caught that no test could: the bubble's summary
+inherited the muted colour the generic `summary` rule gives a fold, so the
+person's own words rendered dimmer than the bubble above them. happy-dom does
+not resolve shadow-DOM computed colour, so the guard is the capture, not a
+unit test.
 
 The verdict is two rules, with different scopes:
 
