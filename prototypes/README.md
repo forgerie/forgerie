@@ -48,8 +48,9 @@ python3 -m http.server 8600
   destination's live board state, D one centred boundary rule. Round 2
   (`stateless.html`) drops every state readout because the inbox owns state:
   E a door line, F the door in the bubble's tail, G a stateless boundary.
-  No verdict yet. `render.sh [stateless]` captures each at three Fold
-  postures over CDP emulation.
+  **Verdict: F.** One `/name args` bubble for every skill invocation; the
+  door only on turns that created a session. `render.sh [stateless]`
+  captures each at three Fold postures over CDP emulation.
 
 - [`interim-voice/`](./interim-voice/) — three voices for one turn: what the
   user said, what the agent finally answered, and the interim narration in

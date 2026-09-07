@@ -1,7 +1,27 @@
 # Handoff record
 
-**Status: round 2, no verdict yet.** Treatments for the turn a `/handoff`
-leaves behind. The verdict goes here when one is picked.
+**Verdict (2026-09-07): F, the door in the bubble.** Treatments for the turn a
+`/handoff` leaves behind.
+
+The verdict is two rules, with different scopes:
+
+1. **One command bubble, for every skill.** `normalizeSkillInvocation`
+   (`src/client/src/chatMessages.ts`) parses any `<skill name="...">` block,
+   not only handoff, and today splits it into a `[skill]` card and a second
+   user line. That split is also why each `/skill args` opens two turns in
+   `chatTurns`. The bubble merges them into one `/name args` line with the
+   composer's command mark; the mark is the disclosure for the skill text.
+   Across this machine's session files the same block shape appears for
+   `se-plan` (6908), `se-work` (3861), `ce-work`, `handoff` (362), `se-debug`,
+   and the rest, so the bubble fixes all of them at once.
+2. **The door, only for a turn that made a session.** Derived from a
+   successful `handoff_session` execution in the turn; its result already
+   carries `destinationSessionId` and `cwd`. `spawn_session` returns the
+   same shape (`sessionId`, `cwd`), so it can take the same door. A turn
+   that created nothing has nothing to open, so it gets no arrow.
+
+Failure keeps the transcript's notice register (`✗ Handoff failed.
+<reason>`) because a failed handoff has no door.
 
 ## Round 2: no state in the chat
 
