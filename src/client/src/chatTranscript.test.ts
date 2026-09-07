@@ -566,7 +566,25 @@ describe("applyTranscriptEvent", () => {
     expect(messages.map((message) => message.transcriptPosition?.messageIndex)).toEqual([10, 11]);
   });
 
-  it("replaces all optimistic lines from one finalized skill prompt", () => {
+  it("stamps every line of a wire message that finalizes into more than one", () => {
+    const finalized = applyTranscriptEvent([], {
+      type: "message.end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial answer" }],
+        stopReason: "error",
+        errorMessage: "connection lost",
+        timestamp: "2026-05-09T12:00:00.000Z",
+      },
+    }, 10);
+
+    expect(finalized?.map((message) => message.transcriptPosition)).toEqual([
+      { messageIndex: 10, lineIndex: 0, segmentIndex: 0 },
+      { messageIndex: 10, lineIndex: 1, segmentIndex: 0 },
+    ]);
+  });
+
+  it("replaces the optimistic line from a finalized skill prompt", () => {
     const content = `<skill name="se-debug" location="/skills/se-debug">
 Debug this
 </skill>
@@ -585,7 +603,6 @@ Find the duplicate chat`;
     }], 10));
     expect(finalized?.map((message) => message.transcriptPosition)).toEqual([
       { messageIndex: 10, lineIndex: 0, segmentIndex: 0 },
-      { messageIndex: 10, lineIndex: 1, segmentIndex: 0 },
     ]);
   });
 

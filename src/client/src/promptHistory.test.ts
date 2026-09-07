@@ -39,6 +39,17 @@ describe("prompt history", () => {
     expect(promptHistoryEntries(normalizeMessages([{ role: "user", content: prompt }]))).toEqual([prompt]);
   });
 
+  it("reconstructs a skill prompt from its parts when no promptText survived", () => {
+    const skill: ChatLine = {
+      role: "user",
+      parts: [{ type: "skillInvocation", name: "testing-guide", location: "/skills/testing-guide/SKILL.md", content: "Use the test harness", argument: "Now test the UI" }],
+    };
+
+    expect(promptHistoryEntries([skill])).toEqual([
+      "<skill name=\"testing-guide\" location=\"/skills/testing-guide/SKILL.md\">\nUse the test harness\n</skill>\n\nNow test the UI",
+    ]);
+  });
+
   it("keeps a skill-only turn separate from a later queued prompt", () => {
     const skill: ChatLine = {
       role: "user",

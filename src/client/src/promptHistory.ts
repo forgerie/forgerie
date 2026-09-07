@@ -9,6 +9,7 @@ export interface PromptHistoryMessage {
     readonly name?: string;
     readonly location?: string;
     readonly content?: unknown;
+    readonly argument?: string;
   }[];
 }
 
@@ -66,7 +67,10 @@ function userPromptText(message: PromptHistoryMessage): string {
       || part.name === undefined
       || part.location === undefined
       || typeof part.content !== "string") return [];
-    return [`<skill name="${part.name}" location="${part.location}">\n${part.content}\n</skill>`];
+    // Rebuild exactly what Pi expanded, argument and separator included, so
+    // recalling the prompt re-sends the command rather than the skill alone.
+    const block = `<skill name="${part.name}" location="${part.location}">\n${part.content}\n</skill>`;
+    return [part.argument === undefined ? block : `${block}\n\n${part.argument}`];
   }).join("");
 }
 

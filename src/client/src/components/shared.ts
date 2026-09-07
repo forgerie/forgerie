@@ -65,7 +65,7 @@ export type ChatPart =
   | { type: "text"; text: string }
   | { type: "image"; mimeType: string; data: string }
   | { type: "thinking"; text: string }
-  | { type: "skillInvocation"; name: string; location: string; content: string }
+  | { type: "skillInvocation"; name: string; location: string; content: string; argument?: string }
   | { type: "skillRead"; name: string; path: string; toolCallId?: string }
   | { type: "askUserRecord"; outcome: AskUserOutcome }
   | { type: "processNotification"; kind: ProcessNotificationDetails["kind"]; processName: string; summary: string; status?: ProcessNotificationDetails["status"]; exitCode?: number; rawContent: string }
@@ -926,11 +926,35 @@ export const chatStyles = css`
   .tool-line { color: var(--pi-warning); }
   .summary { color: var(--pi-muted); margin-left: 6px; }
   .part:is(details) { border-top: 1px solid var(--pi-border); padding-top: 8px; }
+  /* The command bubble is the message, not a fold appended to one. */
+  .part.skill-command:is(details) { border-top: 0; padding-top: 0; }
   .part > formatted-text { display: block; max-width: 100%; min-width: 0; overflow: visible; }
-  .skill-invocation { border: 1px solid var(--pi-border); border-radius: var(--pi-radius-control); background: var(--pi-surface); padding: 8px 10px; }
-  /* An expandable disclosure is interactive, not a status: accent, not purple. */
-  .skill-invocation > summary { color: var(--pi-accent); }
-  .skill-invocation > small { display: block; margin: 6px 0 0; color: var(--pi-muted); }
+  /* A skill invocation is a command the person typed, so it is drawn as the
+     command and not as a card about one. It used to be a bordered, filled
+     disclosure inside the user's bubble -- a box inside a box, labelled
+     with a bracketed word, and the argument stranded in a second bubble
+     below it.
+
+     The mark is the same one the composer's completion menu and the queued
+     ghosts draw, so a slash command looks the same before and after it is
+     sent. The mark is also the disclosure, which is why there is no caret:
+     the bubble's tail is left free.
+
+     The summary is inline flow rather than flex. A flex row wraps whole
+     items, so a bubble narrower than its argument dropped the entire
+     argument below the mark; inline flow wraps mid-argument and keeps the
+     command and its argument reading as one line of text. */
+  .skill-command { min-width: 0; }
+  .skill-command > summary { display: block; list-style: none; cursor: pointer; }
+  .skill-command > summary::-webkit-details-marker { display: none; }
+  .skill-command > summary:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 3px; border-radius: var(--pi-radius-inline); }
+  .skill-command > summary .command-mark { margin-inline-end: 8px; vertical-align: baseline; }
+  .skill-command > summary:hover .command-mark, .skill-command[open] > summary .command-mark { border-color: var(--pi-accent); }
+  /* pre-wrap keeps a multi-line argument's own line breaks, the same way the
+     queued ghost keeps them for a command it has not sent yet. */
+  .skill-command-argument { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .skill-command-body { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--calm-rule); color: var(--calm-ink-muted); font-size: var(--pi-text-sm); }
+  .skill-command-body small { display: block; margin: 0 0 4px; color: var(--calm-ink-dim); font-family: var(--pi-mono, ui-monospace, monospace); overflow-wrap: anywhere; }
   /* A skill read sits inside the fold with the other steps, so it takes the
      fold's voice: one dim line naming the skill, with the path underneath in
      the same tone. No card -- the fold must not reintroduce the texture the

@@ -1308,10 +1308,16 @@ export class ChatView extends LitElement {
     if (part.type === "text") return html`<formatted-text class="part" .text=${part.text}></formatted-text>`;
     if (part.type === "thinking") return html`<details class="part"><summary>thinking</summary><formatted-text .text=${part.text}></formatted-text></details>`;
     if (part.type === "skillInvocation") return html`
-      <details class="part skill-invocation">
-        <summary><b>[skill]</b> ${part.name}</summary>
-        <small>${part.location}</small>
-        <formatted-text .text=${part.content}></formatted-text>
+      <details class="part skill-command">
+        <summary title=${`Show the ${part.name} skill's own text`}>
+          <span class="command-mark"><span class="command-sigil">/</span><span class="command-name">${part.name}</span></span>${part.argument === undefined
+            ? null
+            : html`<span class="skill-command-argument" dir="auto">${part.argument}</span>`}
+        </summary>
+        <div class="skill-command-body">
+          <small>${part.location}</small>
+          <formatted-text .text=${part.content}></formatted-text>
+        </div>
       </details>
     `;
     if (part.type === "skillRead") return html`

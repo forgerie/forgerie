@@ -175,14 +175,29 @@ function isChatLine(message: unknown): message is ChatLine {
     && Array.isArray(getProperty(message, "parts"));
 }
 
+/**
+ * One typed command, kept as one message.
+ *
+ * Pi expands `/name args` into a skill block followed by the argument. An
+ * earlier revision split that back into two user lines, which cost two
+ * bubbles and -- because `chatTurns` opens a turn at every user line -- two
+ * turns for one thing the person did. The argument rides on the invocation
+ * instead, so the transcript can draw the command that was typed.
+ */
 function normalizeSkillInvocation(parts: ChatPart[]): ChatLine[] | undefined {
   if (parts.length !== 1 || parts[0]?.type !== "text") return undefined;
   const skill = parseSkillBlock(parts[0].text);
   if (skill === undefined) return undefined;
-  return [
-    { role: "user", parts: [{ type: "skillInvocation", name: skill.name, location: skill.location, content: skill.content }] },
-    ...(skill.userMessage === undefined ? [] : [{ role: "user" as const, parts: [{ type: "text" as const, text: skill.userMessage }] }]),
-  ];
+  return [{
+    role: "user",
+    parts: [{
+      type: "skillInvocation",
+      name: skill.name,
+      location: skill.location,
+      content: skill.content,
+      ...(skill.userMessage === undefined ? {} : { argument: skill.userMessage }),
+    }],
+  }];
 }
 
 function parseSkillBlock(text: string): { name: string; location: string; content: string; userMessage?: string } | undefined {
