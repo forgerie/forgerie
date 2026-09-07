@@ -945,7 +945,10 @@ export const chatStyles = css`
      argument below the mark; inline flow wraps mid-argument and keeps the
      command and its argument reading as one line of text. */
   .skill-command { min-width: 0; }
-  .skill-command > summary { display: block; list-style: none; cursor: pointer; }
+  /* Full ink, against the generic summary rule below, which is written for
+     folds. The argument is the person's own words and must read like the
+     rest of their bubble, not like machinery. */
+  .skill-command > summary { display: block; list-style: none; cursor: pointer; color: var(--calm-ink); }
   .skill-command > summary::-webkit-details-marker { display: none; }
   .skill-command > summary:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 3px; border-radius: var(--pi-radius-inline); }
   .skill-command > summary .command-mark { margin-inline-end: 8px; vertical-align: baseline; }
