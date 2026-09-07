@@ -35,22 +35,37 @@ export interface ParentSessionLocationSources {
  * into a sibling worktree.
  */
 export function resolveParentSessionLocation(session: SessionInfo, sources: ParentSessionLocationSources): ParentSessionLocation {
-  const parentCwd = session.parentSessionCwd;
-  if (parentCwd === undefined || parentCwd === "") return { kind: "unknown" };
+  return resolveSessionLocation(session.parentSessionCwd, session.parentSessionId, sources);
+}
 
-  const currentProjectMatch = findWorkspaceByPath(sources.workspaces, parentCwd);
+/**
+ * Where a session lives, from its working directory alone.
+ *
+ * The parent resolver is one caller; a handoff's destination is another. Both
+ * ask the same question -- which workspace owns this cwd, and can the browser
+ * navigate there -- so they share one answer rather than growing two lookups
+ * that can disagree about the same path.
+ */
+export function resolveSessionLocation(
+  cwd: string | undefined,
+  sessionId: string | undefined,
+  sources: ParentSessionLocationSources,
+): ParentSessionLocation {
+  if (cwd === undefined || cwd === "") return { kind: "unknown" };
+
+  const currentProjectMatch = findWorkspaceByPath(sources.workspaces, cwd);
   if (currentProjectMatch !== undefined) {
-    return workspaceLocation(currentProjectMatch, session.parentSessionId, undefined);
+    return workspaceLocation(currentProjectMatch, sessionId, undefined);
   }
 
   for (const [projectId, workspaces] of Object.entries(sources.workspacesByProjectId)) {
-    const match = findWorkspaceByPath(workspaces, parentCwd);
+    const match = findWorkspaceByPath(workspaces, cwd);
     if (match === undefined) continue;
     const projectName = sources.projects.find((project) => project.id === projectId)?.name;
-    return workspaceLocation(match, session.parentSessionId, projectName);
+    return workspaceLocation(match, sessionId, projectName);
   }
 
-  return { kind: "path", label: shortenPath(parentCwd), cwd: parentCwd };
+  return { kind: "path", label: shortenPath(cwd), cwd };
 }
 
 /** Short user-facing text for the row indicator, e.g. `parent in feature/foo`. */

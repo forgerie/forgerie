@@ -956,6 +956,23 @@ export const chatStyles = css`
   /* pre-wrap keeps a multi-line argument's own line breaks, the same way the
      queued ghost keeps them for a command it has not sent yet. */
   .skill-command-argument { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* The way into the session a turn created.
+
+     It sits in the bubble's tail because the turn has no reply to hang it on:
+     the tool that made the session ends the run. Drawn small and padded out to
+     a full touch target, so the hit area does not shrink with the glyph; the
+     negative margins keep the padding from growing the bubble. */
+  .msg.user:has(.command-door) { display: flex; align-items: baseline; gap: 12px; }
+  .msg.user:has(.command-door) .skill-command { flex: 1 1 auto; min-width: 0; }
+  .command-door {
+    flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 5px;
+    margin: -12px -16px -12px 0; padding: 12px 16px;
+    border: 0; background: none; color: var(--pi-accent);
+    font: var(--pi-text-sm) system-ui, sans-serif; cursor: pointer;
+  }
+  .command-door:hover, .command-door:focus-visible { text-decoration: underline; }
+  .command-door:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: -4px; border-radius: var(--pi-radius-control); }
+  .command-door-where { color: var(--calm-ink-dim); }
   .skill-command-body { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--calm-rule); color: var(--calm-ink-muted); font-size: var(--pi-text-sm); }
   .skill-command-body small { display: block; margin: 0 0 4px; color: var(--calm-ink-dim); font-family: var(--pi-mono, ui-monospace, monospace); overflow-wrap: anywhere; }
   /* A skill read sits inside the fold with the other steps, so it takes the

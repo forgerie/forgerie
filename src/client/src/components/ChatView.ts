@@ -5,6 +5,7 @@ import { ChatDisclosureController } from "../chatDisclosure";
 import { inheritChatLineTranscriptPosition } from "../chatLinePosition";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
 import { advanceLivenessClock, livenessBeatMs, livenessPhase, livenessStep, replyIsStreaming, type LivenessClock } from "../chatLiveness";
+import { handoffDoor, type HandoffDoor } from "../handoffDoor";
 import { turnLedgerRows, turnRailState, type TurnLedgerRow } from "../turnRail";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import type { ComposerDictationCapability } from "../composerCapabilities";
@@ -272,6 +273,16 @@ export function chatMessageModelLabel(message: ChatLine): string | undefined {
   return humanizeModelId(id);
 }
 
+/**
+ * The last segment of a working directory, which is what a reader calls the
+ * place: a worktree by its folder name, a repo by its own. Only used when the
+ * destination is somewhere other than the session being read.
+ */
+function workspaceName(cwd: string): string {
+  const segments = cwd.split(/[/\\]/u).filter((segment) => segment !== "");
+  return segments.at(-1) ?? cwd;
+}
+
 function humanizeModelId(id: string): string {
   return id.split("-").map((word) => {
     const cap = MODEL_WORD_CAPS[word.toLowerCase()];
@@ -320,6 +331,8 @@ export class ChatView extends LitElement {
   @property({ attribute: false }) onDismissWarning?: (dismissId: string) => void;
   @property({ type: Boolean }) warningsVisible = true;
   @property({ attribute: false }) onToggleWarnings?: () => void;
+  /** Open the session a turn created. Absent in previews, where the door is inert. */
+  @property({ attribute: false }) onOpenSession?: (door: HandoffDoor) => void;
   @property({ attribute: false }) onLoadMore?: () => Promise<void>;
   @property({ attribute: false }) onRetry?: () => void;
   @property({ attribute: false }) onSelectedLoadPaint?: (load: SelectedChatLoad) => void;
@@ -721,7 +734,7 @@ export class ChatView extends LitElement {
     return html`
       <section class="turn" data-turn-key=${key}>
         <div class="turn-body">
-          ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup)}
+          ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup, false, handoffDoor(turn))}
           ${this.renderTurnRail(work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined, !turnClosed && continuation.length === 0, `${key}:work`)}
           ${flow.answer === undefined ? null : this.renderGroup(flow.answer, flow.answer === liveTailGroup)}
           ${this.renderTurnImageGallery(galleryImages)}
@@ -880,10 +893,10 @@ export class ChatView extends LitElement {
     `;
   }
 
-  private renderGroup(group: ChatGroup, live: boolean, interim = false) {
+  private renderGroup(group: ChatGroup, live: boolean, interim = false, door?: HandoffDoor) {
     if (group.kind === "group") return this.renderMessageGroup(group.messages, group.startIndex, group.endIndex, live);
     if (group.kind === "tool-image") return this.renderToolImageOutput(group.message, group.index, group.toolName);
-    return this.renderMessage(group.message, group.index, interim);
+    return this.renderMessage(group.message, group.index, interim, door);
   }
 
   private isSessionLive(): boolean {
@@ -1152,7 +1165,7 @@ export class ChatView extends LitElement {
     return Math.max(this.messageEnd, this.messageStart + this.messages.length);
   }
 
-  private renderMessage(message: ChatLine, index: number, interim = false) {
+  private renderMessage(message: ChatLine, index: number, interim = false, door?: HandoffDoor) {
     const toolOnly = this.isToolExecutionOnlyMessage(message);
     const askUserRecordOnly = this.isAskUserRecordOnlyMessage(message);
     const shellClass = toolOnly ? "msg tool-execution-shell" : "msg ask-user-record-shell";
@@ -1171,7 +1184,30 @@ export class ChatView extends LitElement {
       <article class=${toolOnly || askUserRecordOnly ? shellClass : roleClass} data-index=${index}>
         ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message)}
         ${message.parts.map((part) => this.renderPart(part, message))}
+        ${door === undefined ? null : this.renderHandoffDoor(door)}
       </article>
+    `;
+  }
+
+  /**
+   * The way into the session this turn created.
+   *
+   * It rides in the opener's own bubble rather than standing as a reply,
+   * because the turn has no reply: the tool that made the session ends the
+   * run. The workspace is named only when the destination is not the one being
+   * read, since the shell already names that one. The arrow is drawn small and
+   * padded out to a full touch target, so its hit area does not shrink with it.
+   */
+  private renderHandoffDoor(door: HandoffDoor) {
+    const elsewhere = door.cwd !== this.sessionCwd ? workspaceName(door.cwd) : undefined;
+    return html`
+      <button
+        type="button"
+        class="command-door"
+        aria-label="Open the session this handoff created"
+        title=${elsewhere === undefined ? "Open the session this handoff created" : `Open the session this handoff created, in ${door.cwd}`}
+        @click=${() => { this.onOpenSession?.(door); }}
+      ><span class="command-door-glyph" aria-hidden="true">↗</span>${elsewhere === undefined ? null : html`<span class="command-door-where">${elsewhere}</span>`}</button>
     `;
   }
 

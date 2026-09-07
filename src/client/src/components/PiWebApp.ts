@@ -40,7 +40,7 @@ import { observeInputMode } from "../inputMode";
 import { machineSessionKey } from "../machineKeys";
 import { createManagedProcessesRuntime } from "../managedProcessesRuntime";
 import type { ManagedProcessesBrowserEvent, ManagedProcessesRuntime } from "../../../plugin-api/unstable";
-import { resolveParentSessionLocation, type ParentSessionLocation } from "../parentSessionLocation";
+import { resolveParentSessionLocation, resolveSessionLocation, type ParentSessionLocation } from "../parentSessionLocation";
 import { promptHistoryEntries } from "../promptHistory";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
 import { selectedNotificationView } from "../sessionNotifications";
@@ -1933,8 +1933,26 @@ export class PiWebApp extends LitElement {
   });
 
   /**
-   * Select the workspace that owns an out-of-workspace parent session, and the
-   * parent session itself when its id is known. Cross-project parents go through
+   * Open the session a turn created, from the transcript's door.
+   *
+   * The destination is named by cwd and id, not by a loaded `SessionInfo`: a
+   * handoff usually lands in the same workspace, but may land in a sibling
+   * worktree that is not loaded yet. Resolving the cwd first means both cases
+   * take one path, and a destination whose workspace Forgerie does not know
+   * leaves the door inert rather than navigating somewhere wrong.
+   */
+  private readonly openCreatedSession = (door: { readonly sessionId: string; readonly cwd: string }): void => {
+    const location = resolveSessionLocation(door.cwd, door.sessionId, {
+      workspaces: this.state.workspaces,
+      workspacesByProjectId: this.state.workspacesByProjectId,
+      projects: this.state.projects,
+    });
+    void this.goToParentSession(location);
+  };
+
+  /**
+   * Select the workspace that owns a session outside the current workspace, and
+   * the session itself when its id is known. Cross-project targets go through
    * `selectProject`, which loads that project's workspaces first.
    */
   private async goToParentSession(location: ParentSessionLocation): Promise<void> {
@@ -3429,7 +3447,7 @@ export class PiWebApp extends LitElement {
     const sessionLaunchRecovery = this.sessions.getSessionLaunchRecovery(session.id);
     const pendingSessionLaunch = this.sessions.pendingSessionLaunchView(machineId, session.id);
     return html`
-      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .sessionTitle=${sessionDisplayLabel(session)} .selectedMachineId=${machineId} .sessionCwd=${session.cwd} .selectedLoad=${state.selectedChatLoad} .openingAttempt=${this.chatOpeningAttempt} .messages=${state.messages} .pendingSessionLaunch=${pendingSessionLaunch} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .sessionLaunchRecovery=${sessionLaunchRecovery} .onSessionLaunchRecoveryAction=${this.handleSessionLaunchRecoveryAction} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .askComposerDictation=${this.sessionDictationCapability()} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(machineId, session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onStopActiveWork=${this.handleStopActiveWork} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())} .onRetry=${retry} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>
+      <chat-view .chromeSummoned=${this.appShell.isChromeSummoned} .sessionId=${session.id} .sessionTitle=${sessionDisplayLabel(session)} .selectedMachineId=${machineId} .sessionCwd=${session.cwd} .selectedLoad=${state.selectedChatLoad} .openingAttempt=${this.chatOpeningAttempt} .messages=${state.messages} .pendingSessionLaunch=${pendingSessionLaunch} .messageStart=${state.messagePageStart} .messageEnd=${state.messagePageEnd} .messageTotal=${state.messagePageTotal} .hasMore=${state.messagePageStart > 0} .loadingMore=${state.isLoadingEarlierMessages} .isSendingPrompt=${state.sendingPrompts[session.id] === true} .isCompacting=${state.status?.isCompacting === true} .clientQueuedMessages=${state.clientQueuedSessionMessages[session.id] ?? []} .sessionLaunchRecovery=${sessionLaunchRecovery} .onSessionLaunchRecoveryAction=${this.handleSessionLaunchRecoveryAction} .status=${state.status} .activity=${state.activity} .pendingAsk=${state.pendingAsk} .askComposerDictation=${this.sessionDictationCapability()} .pendingDialogs=${state.pendingDialogs} .closedDialogs=${state.closedDialogs} .onAnswerDialog=${this.handleAnswerDialog} .onCancelDialog=${this.handleCancelDialog} .onDismissClosedDialog=${this.handleDismissClosedDialog} .askDraftSessionId=${machineSessionKey(machineId, session.id)} .onSubmitAsk=${this.handleSubmitAsk} .notificationInbox=${selectedNotificationView(state.selectedNotificationInbox)} .onClearServerQueue=${this.handleClearServerQueue} .onStopActiveWork=${this.handleStopActiveWork} .onDismissWarning=${this.handleDismissWarning} .warningsVisible=${!this.sessionWarningVisibility.collapsed} .onToggleWarnings=${this.handleToggleWarnings} .onLoadMore=${() => this.withChatPrependTransition(() => this.sessions.loadEarlierMessages())} .onRetry=${retry} .onOpenSession=${this.openCreatedSession} .onSelectedLoadPaint=${this.handleSelectedLoadPaint}></chat-view>
     `;
   }
 
