@@ -5,7 +5,7 @@ import { ChatDisclosureController } from "../chatDisclosure";
 import { inheritChatLineTranscriptPosition } from "../chatLinePosition";
 import { chatTurnFlow, chatTurnGalleryImages, chatTurns, groupChatMessages, summarizeChatGroup, turnMetaSource, withoutToolImageGroups, type ChatGroup, type ChatTurn, type ChatTurnGalleryImage } from "../chatGroups";
 import { advanceLivenessClock, livenessBeatMs, livenessPhase, livenessStep, replyIsStreaming, type LivenessClock } from "../chatLiveness";
-import { handoffDoor, type HandoffDoor } from "../handoffDoor";
+import { turnHandoff, withoutPromotedStep, type HandoffDoor } from "../handoffDoor";
 import { turnLedgerRows, turnRailState, type TurnLedgerRow } from "../turnRail";
 import type { SessionActivityIndicator } from "../sessionStatusStrip";
 import type { ComposerDictationCapability } from "../composerCapabilities";
@@ -727,14 +727,18 @@ export class ChatView extends LitElement {
     const turnClosed = !(last && this.isSessionLive());
     const replySettled = !(last && this.latestReplyIsStreaming());
     const flow = chatTurnFlow(turn, replySettled);
-    const work = withoutToolImageGroups(flow.work);
-    const continuation = withoutToolImageGroups(flow.continuation);
+    // Two promotions, then the rail reports what is left. A tool image belongs
+    // to the gallery and a session-creating call belongs to the door; neither
+    // is work the rail still has to account for.
+    const handoff = turnHandoff(turn);
+    const work = withoutPromotedStep(withoutToolImageGroups(flow.work), handoff);
+    const continuation = withoutPromotedStep(withoutToolImageGroups(flow.continuation), handoff);
     const galleryImages = chatTurnGalleryImages(turn);
     const continuationClosesTurn = turnClosed && continuation.length > 0;
     return html`
       <section class="turn" data-turn-key=${key}>
         <div class="turn-body">
-          ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup, false, handoffDoor(turn))}
+          ${flow.opener === undefined ? null : this.renderGroup(flow.opener, flow.opener === liveTailGroup, false, handoff?.door)}
           ${this.renderTurnRail(work, liveTailGroup, turnClosed && !continuationClosesTurn ? { turn, key } : undefined, !turnClosed && continuation.length === 0, `${key}:work`)}
           ${flow.answer === undefined ? null : this.renderGroup(flow.answer, flow.answer === liveTailGroup)}
           ${this.renderTurnImageGallery(galleryImages)}

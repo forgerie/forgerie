@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chatTurns, groupChatMessages } from "./chatGroups";
-import { handoffDoor } from "./handoffDoor";
+import { turnHandoff, withoutPromotedStep } from "./handoffDoor";
 import type { ChatLine, ToolExecutionPart } from "./components/shared";
 
 const command: ChatLine = {
@@ -26,7 +26,7 @@ describe("the door a turn earned", () => {
       details: { handoffId: "d272ec25", destinationSessionId: "01a07c5b", cwd: "/home/me/code/pyxis", state: "preparing" },
     }));
 
-    expect(handoffDoor(turn)).toEqual({ sessionId: "01a07c5b", cwd: "/home/me/code/pyxis" });
+    expect(turnHandoff(turn)?.door).toEqual({ sessionId: "01a07c5b", cwd: "/home/me/code/pyxis" });
   });
 
   it("takes the same door from a spawned session, which names its id differently", () => {
@@ -36,7 +36,7 @@ describe("the door a turn earned", () => {
       details: { sessionId: "01a07999", cwd: "/home/me/code/pyxis" },
     }));
 
-    expect(handoffDoor(turn)).toEqual({ sessionId: "01a07999", cwd: "/home/me/code/pyxis" });
+    expect(turnHandoff(turn)?.door).toEqual({ sessionId: "01a07999", cwd: "/home/me/code/pyxis" });
   });
 
   it("opens no door for a handoff that failed, because it made no session", () => {
@@ -46,13 +46,13 @@ describe("the door a turn earned", () => {
       resultText: "Spawning sessions is disabled",
     }));
 
-    expect(handoffDoor(turn)).toBeUndefined();
+    expect(turnHandoff(turn)).toBeUndefined();
   });
 
   it("opens no door while the call is still running, because there is nothing to open yet", () => {
     const turn = turnOf(command, ran({ toolName: "handoff_session", status: "running" }));
 
-    expect(handoffDoor(turn)).toBeUndefined();
+    expect(turnHandoff(turn)).toBeUndefined();
   });
 
   it("opens no door for a skill that created nothing", () => {
@@ -61,7 +61,7 @@ describe("the door a turn earned", () => {
       ran({ toolName: "edit", status: "success", details: { cwd: "/home/me/code/pyxis" } }),
     );
 
-    expect(handoffDoor(turn)).toBeUndefined();
+    expect(turnHandoff(turn)).toBeUndefined();
   });
 
   it("opens no door when the result names a session but no workspace to find it in", () => {
@@ -71,6 +71,46 @@ describe("the door a turn earned", () => {
       details: { destinationSessionId: "01a07c5b" },
     }));
 
-    expect(handoffDoor(turn)).toBeUndefined();
+    expect(turnHandoff(turn)).toBeUndefined();
+  });
+});
+
+describe("the step a door promoted", () => {
+  const success = {
+    toolName: "handoff_session",
+    status: "success" as const,
+    details: { destinationSessionId: "01a07c5b", cwd: "/home/me/code/pyxis" },
+  };
+
+  it("leaves the rail, so one call is not both a door and a step", () => {
+    const turn = turnOf(command, ran(success));
+
+    expect(withoutPromotedStep(turn.groups, turnHandoff(turn))).toEqual([turn.groups[0]]);
+  });
+
+  it("keeps every other step the turn ran", () => {
+    const turn = turnOf(
+      command,
+      ran({ toolName: "read", status: "success", details: { path: "docs/plan.md" } }),
+      ran(success),
+    );
+
+    const kept = withoutPromotedStep(turn.groups, turnHandoff(turn));
+    const executions = kept.flatMap((group) => group.kind === "group"
+      ? group.messages.flatMap((message) => message.parts.filter((part) => part.type === "toolExecution"))
+      : []);
+    expect(executions.map((execution) => execution.toolName)).toEqual(["read"]);
+  });
+
+  it("keeps a failed call on the rail, which is the only place that reports it", () => {
+    const turn = turnOf(command, ran({ toolName: "handoff_session", status: "error", resultText: "Spawning sessions is disabled" }));
+
+    expect(withoutPromotedStep(turn.groups, turnHandoff(turn))).toEqual(turn.groups);
+  });
+
+  it("drops nothing when the turn earned no door", () => {
+    const turn = turnOf(command, ran({ toolName: "edit", status: "success" }));
+
+    expect(withoutPromotedStep(turn.groups, undefined)).toEqual(turn.groups);
   });
 });
