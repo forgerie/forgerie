@@ -41,6 +41,13 @@ python3 -m http.server 8600
   reduced-motion-guarded). `render.sh` captures 1920x1080 + 932x553; pages
   also work over `file://`.
 
+- [`handoff-record/`](./handoff-record/) — what a `/handoff` turn leaves
+  behind. Today it is a skill card, a bare focus bubble, and `✓ 2 steps`.
+  Four treatments over real session data: A receipt on the rail, B a
+  handoff record in the answer's place, C the record carrying the
+  destination's live board state, D one centred boundary rule. No verdict
+  yet. `render.sh` captures each at three Fold postures over CDP emulation.
+
 - [`interim-voice/`](./interim-voice/) — three voices for one turn: what the
   user said, what the agent finally answered, and the interim narration in
   between. One conversation, four treatments switchable with the arrow keys
