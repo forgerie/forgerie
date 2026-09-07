@@ -45,8 +45,11 @@ python3 -m http.server 8600
   behind. Today it is a skill card, a bare focus bubble, and `✓ 2 steps`.
   Four treatments over real session data: A receipt on the rail, B a
   handoff record in the answer's place, C the record carrying the
-  destination's live board state, D one centred boundary rule. No verdict
-  yet. `render.sh` captures each at three Fold postures over CDP emulation.
+  destination's live board state, D one centred boundary rule. Round 2
+  (`stateless.html`) drops every state readout because the inbox owns state:
+  E a door line, F the door in the bubble's tail, G a stateless boundary.
+  No verdict yet. `render.sh [stateless]` captures each at three Fold
+  postures over CDP emulation.
 
 - [`interim-voice/`](./interim-voice/) — three voices for one turn: what the
   user said, what the agent finally answered, and the interim narration in

@@ -3,7 +3,8 @@
 // Same reason as interim-voice/capture.mjs: headless chromium clamps
 // --window-size below ~500px, so the folded widths are emulated instead.
 //
-// Usage: node capture.mjs
+// Usage: node capture.mjs            (round 1, index.html)
+//        node capture.mjs stateless  (round 2, stateless.html)
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,9 +13,17 @@ import { findChrome, getFreePort, launchChrome, openPage, sleep, waitForDebugger
 import { FOLD8_DPR, FOLD8_FOLDED_LANDSCAPE, FOLD8_FOLDED_PORTRAIT, FOLD8_UNFOLDED_LANDSCAPE } from "../../scripts/lib/fold8-postures.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const pageUrl = `file://${join(here, "index.html")}`;
-
-const VARIANTS = ["today", "receipt", "record", "thread", "boundary"];
+const ROUNDS = {
+  index: { page: "index.html", prefix: "", variants: ["today", "receipt", "record", "thread", "boundary"] },
+  stateless: { page: "stateless.html", prefix: "stateless-", variants: ["today", "line", "bubble", "boundary"] },
+};
+const round = ROUNDS[process.argv[2] ?? "index"];
+if (round === undefined) {
+  process.stderr.write(`Unknown round. Use one of: ${Object.keys(ROUNDS).join(", ")}\n`);
+  process.exit(1);
+}
+const pageUrl = `file://${join(here, round.page)}`;
+const VARIANTS = round.variants;
 const SHOTS = [
   { name: "wide", posture: FOLD8_UNFOLDED_LANDSCAPE },
   { name: "folded", posture: FOLD8_FOLDED_PORTRAIT },
@@ -49,9 +58,9 @@ try {
         await loaded;
         await sleep(500);
         const { data } = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false });
-        const out = join(here, `${variant}-${shot.name}.png`);
+        const out = join(here, `${round.prefix}${variant}-${shot.name}.png`);
         await writeFile(out, Buffer.from(data, "base64"));
-        process.stdout.write(`wrote ${variant}-${shot.name}.png (${String(shot.posture.width)}x${String(shot.posture.height)})\n`);
+        process.stdout.write(`wrote ${round.prefix}${variant}-${shot.name}.png (${String(shot.posture.width)}x${String(shot.posture.height)})\n`);
       } finally {
         cdp.close();
       }

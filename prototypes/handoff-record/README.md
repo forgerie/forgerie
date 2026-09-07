@@ -1,7 +1,47 @@
 # Handoff record
 
-**Status: study, no verdict yet.** Four treatments for the turn a `/handoff`
+**Status: round 2, no verdict yet.** Treatments for the turn a `/handoff`
 leaves behind. The verdict goes here when one is picked.
+
+## Round 2: no state in the chat
+
+Round 1 was rejected on one ground: the chat must not report session state.
+The inbox owns "ready", "preparing", "blocked on you", the model, and the
+id. That kills C outright and strips the state row from A, B, and D. What is
+left for the chat to say is a fact and a door: a handoff happened, and this
+is the way to the session it made.
+
+Open `stateless.html`. Same switcher, `#line`, `#bubble`, `#boundary`.
+
+| Key | Name | What changes |
+|---|---|---|
+| `line` | E · Door line | One command bubble. The reply is one line in the interface voice, and the line is the link: `↗ Continued in a new session`. The workspace is named only when it differs from this one (`in .worktrees/sonos`). |
+| `bubble` | F · Door in the bubble | No reply at all. The bubble's tail carries a `↗` that opens the session, with a 44px hit rect. Cross-workspace labels the arrow (`↗ sonos`). |
+| `boundary` | G · Boundary | Round 1's D without the state word. |
+
+All three share one bubble that shows what was typed, `/handoff <focus>`,
+with the command mark the composer and queued ghosts already draw. The mark
+itself is the disclosure for the skill text, so there is no caret in the
+bubble. Failure is the one thing the chat still has to say: E and F both fall
+back to the transcript's notice register, `✗ Handoff failed. <reason>`,
+because a failed handoff made no session and has no door.
+
+What each one costs:
+
+- **E** adds a line per handoff. When handoffs stack (the real session had
+  two in 20 seconds) that is two extra lines, and the line repeats a fact the
+  bubble already implies. It survives the 30rem bubble cap because it is not
+  in the bubble.
+- **F** is the least the chat can say. The bubble is the whole turn. The cost
+  is that the door is a 12px glyph a reader can miss, and that a bubble
+  narrower than its argument wraps the argument under the mark while the
+  arrow keeps the top-right corner. The first render of F had the argument
+  dropping whole to a second line at 30rem; the mark is now inline with the
+  text so it wraps mid-argument instead (rule 5, do not split the group).
+- **G** still hides the typed command inside a rule and still wraps to two
+  centred lines at 475px.
+
+## Round 1
 
 ## The problem
 
@@ -63,7 +103,7 @@ sent.
 
 ## Postures
 
-`render.sh` captures each variant at three postures over CDP emulation
-(932×553, 475×638, 711×374). The record's readouts respond to their own
+`render.sh` (round 1) and `render.sh stateless` (round 2) capture each
+variant at three postures over CDP emulation (932×553, 475×638, 711×374). The record's readouts respond to their own
 container (`@container record`), not the viewport: below 30rem the model and
 id leave the head; below 22rem `Open session` takes its own row.
