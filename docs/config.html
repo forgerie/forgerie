@@ -991,6 +991,12 @@ worktree_path="$1"
                 tool. The environment override accepts <code>0|1|true|false</code> and takes precedence over the config file.
               </p>
               <p>
+                Forgerie excludes the <code>question</code> tool supplied by Pi extensions from hosted sessions.
+                Agents use <code>ask_user</code> instead. Disabling <code>askUser</code> does not restore <code>question</code>.
+                Extension hooks can still use <a href="#extension-dialogs">extension dialogs</a> for confirmations and
+                other plugin workflows. This policy does not change the shared Pi profile or standalone terminal sessions.
+              </p>
+              <p>
                 Use <strong>Settings → Session daemon → Allow agents to ask questions</strong> to change
                 <code>askUser</code> on the selected machine. An environment override makes the toggle read-only.
               </p>

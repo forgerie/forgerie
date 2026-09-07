@@ -835,6 +835,9 @@ function createDefaultRuntimeFactory(
       services,
       sessionManager,
       customTools,
+      // Agent questions use ask_user. Keep extension hooks and their UI dialogs,
+      // but exclude the competing tool from the registry, including on reload.
+      excludeTools: ["question"],
       ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
       ...(initialModel === undefined ? {} : { model: initialModel }),
       ...(initialThinkingLevel === undefined ? {} : { thinkingLevel: initialThinkingLevel }),

@@ -364,6 +364,8 @@ In **Settings → Session daemon**, these keys are saved on the selected machine
 
 `askUser` controls whether agents receive the core `ask_user` tool. It defaults to `true`; set it to `false`, or set `PI_WEB_ASK_USER=false`, to remove the tool. The environment override accepts `0|1|true|false` and takes precedence over the config file.
 
+Forgerie excludes the `question` tool supplied by Pi extensions from hosted sessions. Agents use `ask_user` instead. Disabling `askUser` does not restore `question`. Extension hooks can still use [extension dialogs](#extension-dialogs) for confirmations and other plugin workflows. This policy does not change the shared Pi profile or standalone terminal sessions.
+
 Use **Settings → Session daemon → Allow agents to ask questions** to change `askUser` on the selected machine. An environment override makes the toggle read-only.
 
 The tool accepts one set of 1–20 questions. Each question has a unique `id`, its `question` text, optional supporting `detail`, up to 12 options with stable values and user-facing labels, and an optional `multiple` flag. The browser always adds a **Custom** free-text answer, including when the model supplies no options. No question is required: the user may leave any of them unanswered.
