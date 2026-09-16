@@ -87,19 +87,29 @@ export async function drivePage(cdp, options) {
 
   // Repeated click titles run in order, so a run can walk a short path (open
   // the workspace sheet, then pick a tool tab).
+  //
+  // A title prefixed with `?` is optional. The layout this harness exists to
+  // sweep is adaptive, so a control can be real in one posture and absent in
+  // another by design -- the navigation panel is already open at the wider
+  // postures and has no "Show sessions" button there. Without this, no single
+  // run can reach the same surface across all four postures, which is the one
+  // thing the sweep is for. An unprefixed title stays required, so a genuine
+  // missing control is still a failure.
   for (const clickTitle of clickTitles) {
+    const optional = clickTitle.startsWith("?");
+    const title = optional ? clickTitle.slice(1) : clickTitle;
     await evaluate(cdp, DEEP_QUERY);
     const clicked = await evaluate(cdp, `
       (() => {
         const target = window.__forgerieDeepFind((element) =>
-          element.tagName === "BUTTON" && element.getAttribute("title") === ${JSON.stringify(clickTitle)});
+          element.tagName === "BUTTON" && element.getAttribute("title") === ${JSON.stringify(title)});
         if (!target) return false;
         target.click();
         return true;
       })()
     `);
-    if (clicked !== true) throw new Error(`No button titled ${JSON.stringify(clickTitle)} in ${label}`);
-    await sleep(settle);
+    if (clicked !== true && !optional) throw new Error(`No button titled ${JSON.stringify(title)} in ${label}`);
+    if (clicked === true) await sleep(settle);
   }
 }
 
