@@ -1078,8 +1078,18 @@ export const formattedTextStyles = css`
   h3 { font-size: var(--pi-text-md); }
   h4 { font-size: var(--pi-text-md); }
   .table-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  /* Being measured: the table is released to the width it wants and the wrapper
+     to the width it may have, so formatting/tableReflow.ts reads one against
+     the other rather than against whatever an earlier decision left. Applied
+     and removed inside one task, so this state is never painted. */
+  .table-scroll.measuring { inline-size: calc(100% + var(--calm-bleed, 0px)); max-inline-size: none; }
+  .table-scroll.measuring table { width: max-content; min-width: 0; max-width: none; }
   .table-scroll:focus-visible { outline: var(--pi-focus-ring, 2px solid var(--pi-accent)); outline-offset: 2px; }
-  table { border-collapse: collapse; width: max-content; min-width: 100%; max-width: none; }
+  /* max-content, but never past the space the wrapper is allowed: a table that
+     asks for more than it may have wraps its cells instead of scrolling. A cell
+     holding a sentence always asks for more, and the sentence costs one more
+     line, while sideways scrolling costs the reader the first column. */
+  table { border-collapse: collapse; width: max-content; min-width: 100%; max-width: 100%; }
   /* A table is reference, not prose. One step down from the reading size buys
      about a column of width before anything has to give, and a table is read by
      scanning rather than by the line. */
@@ -1098,24 +1108,25 @@ export const formattedTextStyles = css`
   .table-scroll.stacked table { display: block; inline-size: 100%; min-inline-size: 0; }
   /* The heading row is in every cell now, so the original is noise. */
   .table-scroll.stacked thead { display: none; }
-  /* One grid for the whole table, borrowed by every record and every field, so
-     a single heading track serves all of them and the values line up down the
-     table. A grid per record measures only its own headings and leaves each
-     record's values at a different place, which reads as three lists that
-     happen to be stacked rather than one table.
+  /* One grid for the whole table, borrowed by every record, so the fields line
+     up down the table. A grid per record places each record's fields wherever
+     its own values happen to end, which reads as three lists that happen to be
+     stacked rather than one table.
 
-     The heading track is as wide as the headings need and no wider than a third
-     of the table, so a long heading wraps rather than starving the value.
-     fit-content() takes a percentage; min() does not take max-content, and
-     spelling it that way drops the declaration and puts every heading on its
-     own line.
+     The track count is the grid's own decision: as many fields side by side as
+     the record has room for, at the width its values asked for. Six short
+     fields pair up where two sentences take the row each. --record-field-min
+     is written by formatting/tableReflow.ts from the measured columns, so the
+     table is asked what it holds and how much room it has, never what kind of
+     screen is showing it. min(100%, ...) keeps a field inside a record
+     narrower than one field.
 
      Hairlines above and below, and one between records -- the same grammar the
      transcript uses for its other non-prose blocks. A box per record drew three
      panels that looked unrelated to each other and to the sentence that
      introduced them. */
-  .table-scroll.stacked tbody { display: grid; grid-template-columns: fit-content(32%) minmax(0, 1fr); column-gap: 14px; border-block: 1px solid var(--calm-rule, var(--pi-border)); }
-  .table-scroll.stacked tr { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: 3px; padding-block: 9px; }
+  .table-scroll.stacked tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--record-field-min, 14rem)), 1fr)); column-gap: 18px; border-block: 1px solid var(--calm-rule, var(--pi-border)); }
+  .table-scroll.stacked tr { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: 6px; padding-block: 10px; }
   .table-scroll.stacked tr + tr { border-top: 1px solid var(--calm-rule, var(--pi-border)); }
   /* A record is read at the reading size.
 
@@ -1124,11 +1135,17 @@ export const formattedTextStyles = css`
      bought nothing and cost the heading, which sat one step further down at the
      bottom of the ramp: 11px and muted, under the value it is there to name.
 
-     The value returns to the prose size and the heading sits one step under it,
-     as large as a heading may be without out-shouting what it names. The cost is
-     height: bigger type wraps sooner, so a stacked table is taller than it was. */
-  .table-scroll.stacked td { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; border: 0; padding: 0; max-width: none; font-size: var(--pi-text-md); }
-  .table-scroll.stacked td::before { content: attr(data-label); color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.5; }
+     The value returns to the prose size and the heading sits above it, one step
+     under it in size, as large as a heading may be without out-shouting what it
+     names. The cost is height: bigger type wraps sooner. */
+  .table-scroll.stacked td { display: block; min-inline-size: 0; border: 0; padding: 0; max-width: none; font-size: var(--pi-text-md); }
+  .table-scroll.stacked td::before { display: block; content: attr(data-label); color: var(--pi-muted); font-size: var(--pi-text-sm); line-height: 1.5; }
+  /* A record whose only value is the second cell has nothing to sit beside, so
+     it takes the row rather than a track and a half-empty gap. Unlabelled, it
+     is what the record's name means rather than a second statement about it,
+     and it is drawn as the quieter of the two so the name owns the record. */
+  .table-scroll.stacked td:nth-child(2):last-child { grid-column: 1 / -1; }
+  .table-scroll.stacked td:nth-child(2):last-child:not([data-label]) { color: var(--pi-muted); }
   .table-scroll.stacked .cell-value { min-inline-size: 0; }
   /* The first column names the record: repeating its heading on every record
      says the same word three times and buries the name in the list of fields.
@@ -1143,14 +1160,11 @@ export const formattedTextStyles = css`
   /* A cell past the end of the heading row has no heading to show. */
   .table-scroll.stacked td:not([data-label]) { display: block; }
   .table-scroll.stacked td:not([data-label])::before { content: none; }
-  /* Too narrow for two tracks: a heading that takes a third of the width leaves
-     the value a stub. The heading moves above its value, and the record's own
-     grid is what decides -- the table is asked how much room it has, never what
-     is showing it. */
-  @container (max-width: 26rem) {
-    .table-scroll.stacked tbody { grid-template-columns: minmax(0, 1fr); }
-    .table-scroll.stacked td { row-gap: 0; }
-  }
+  /* How many fields stand side by side is the grid's decision, made from the
+     room the record actually has and the width its own values asked for
+     (--record-field-min, written by formatting/tableReflow.ts). No breakpoint,
+     no column count in the style sheet: six short fields pair up where two
+     sentences do not. */
 `;
 
 export const autocompleteStyles = css`

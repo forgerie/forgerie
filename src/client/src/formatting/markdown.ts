@@ -203,7 +203,15 @@ function labelBodyCells(table: HTMLTableElement): void {
   // The first column names the record, so a stacked record reads it as a title
   // and does not repeat its heading. The heading is not dropped: it is written
   // once above the records, where it says what the titles are.
-  const recordLabel = headings[0];
+  //
+  // A two-column table is that case twice over. Its records are a title and one
+  // value, so the value's heading would be printed once per record while saying
+  // the same word every time -- the noise that made a stacked table something to
+  // skip rather than read. Both headings go above the records instead, and the
+  // records are left as title and meaning.
+  const carriedHeadings = headings.filter((heading) => heading !== "");
+  const carryBothHeadings = headings.length === 2 && carriedHeadings.length === 2;
+  const recordLabel = carryBothHeadings ? carriedHeadings.join(" \u00b7 ") : headings[0];
   if (recordLabel !== undefined && recordLabel !== "") {
     table.querySelector("tbody")?.setAttribute("data-record-label", recordLabel);
   }
@@ -211,6 +219,7 @@ function labelBodyCells(table: HTMLTableElement): void {
     [...row.children].forEach((cell, index) => {
       const heading = headings[index];
       if (heading === undefined || heading === "") return;
+      if (carryBothHeadings && index > 0) return;
       cell.setAttribute("data-label", heading);
     });
   });

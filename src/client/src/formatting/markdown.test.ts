@@ -103,9 +103,19 @@ describe("rendered Markdown tables", () => {
   const table = "| Option | Cost |\n| --- | --- |\n| Reflow | Tall rows |\n";
 
   it("gives every cell the heading it belongs to, so a stacked row still reads", () => {
+    const cells = renderedTable("| Option | Cost | Owner |\n| --- | --- | --- |\n| Reflow | Tall rows | Simon |\n").querySelectorAll("tbody td");
+
+    expect([...cells].map((cell) => cell.getAttribute("data-label"))).toEqual(["Option", "Cost", "Owner"]);
+  });
+
+  it("labels no cell in a two-column table, where the record is a title and one value", () => {
     const cells = renderedTable(table).querySelectorAll("tbody td");
 
-    expect([...cells].map((cell) => cell.getAttribute("data-label"))).toEqual(["Option", "Cost"]);
+    // Two columns means one label per record, repeated down the table, saying
+    // the same word as often as there are rows. The heading is not dropped --
+    // it joins the first column's heading above the records -- so the label
+    // would only be the same word twice.
+    expect([...cells].map((cell) => cell.getAttribute("data-label"))).toEqual(["Option", null]);
   });
 
   it("names the table roles the elements already have, so stacking cannot drop them", () => {
@@ -129,9 +139,21 @@ describe("rendered Markdown tables", () => {
   });
 
   it("writes the first column's heading once, because each record reads it as a title", () => {
-    const rendered = renderedTable(table);
+    const rendered = renderedTable("| Option | Cost | Owner |\n| --- | --- | --- |\n| Reflow | Tall rows | Simon |\n");
 
     expect(rendered.querySelector("tbody")?.getAttribute("data-record-label")).toBe("Option");
+  });
+
+  it("writes both headings above a two-column table, since neither is repeated in the records", () => {
+    const rendered = renderedTable(table);
+
+    expect(rendered.querySelector("tbody")?.getAttribute("data-record-label")).toBe("Option · Cost");
+  });
+
+  it("keeps the second heading on the cell when the first column has no name to carry it", () => {
+    const rendered = renderedTable("|  | Cost |\n| --- | --- |\n| Reflow | Tall rows |\n");
+
+    expect(rendered.querySelector("tbody td:last-child")?.getAttribute("data-label")).toBe("Cost");
   });
 
   it("leaves a nameless first column without a record heading rather than an empty line", () => {

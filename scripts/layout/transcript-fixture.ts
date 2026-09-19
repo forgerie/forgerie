@@ -42,6 +42,33 @@ const WIDE_TABLE = [
   "A table that fits is still a table: the two above are judged separately.",
 ].join("\n");
 
+/**
+ * Two columns of prose: the table that used to stack at every posture, because
+ * a cell holding a sentence never fits that sentence on one line.
+ */
+const PROSE_TABLE = [
+  "The first decision is which outcome matters most:",
+  "",
+  "| Outcome | What success means |",
+  "| --- | --- |",
+  "| Install another unit of a supported model. | Follow an established procedure without engineering work. |",
+  "| Add a new device model. | Solve hardware support without rebuilding the product setup. |",
+  "| Update an installed device. | Deliver, verify, and roll back through a consistent process. |",
+  "",
+  "**Which of these three is the main frustration?**",
+].join("\n");
+
+/** Six columns of short values: many fields, none of them a sentence. */
+const SIX_COLUMN_TABLE = [
+  "Three devices, and where each one stands:",
+  "",
+  "| Model | Boot | Drivers | Image | Verified | Owner |",
+  "| --- | --- | --- | --- | --- | --- |",
+  "| SM8550 | fastboot | in tree | 2026-09-12 | yes | Simon |",
+  "| SM8650 | uefi | out of tree | 2026-09-04 | no | Korri |",
+  "| MT8195 | u-boot | partial | 2026-08-28 | yes | unassigned |",
+].join("\n");
+
 const STATES: Record<string, (view: ChatView) => void> = {
   /** Fewer messages than the scroller can hold: the case that was stretching. */
   short: (view: ChatView) => {
@@ -66,6 +93,22 @@ const STATES: Record<string, (view: ChatView) => void> = {
   /** A table too wide for the reading column, which is laid out as records. */
   table: (view: ChatView) => {
     view.messages = [textMessage("user", "where should skills live?"), textMessage("assistant", WIDE_TABLE)];
+    view.messageStart = 0;
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.hasMore = false;
+  },
+  /** Two columns of prose, which fit as columns wherever the column is wide enough. */
+  "prose-table": (view: ChatView) => {
+    view.messages = [textMessage("user", "what are we deciding?"), textMessage("assistant", PROSE_TABLE)];
+    view.messageStart = 0;
+    view.messageEnd = 2;
+    view.messageTotal = 2;
+    view.hasMore = false;
+  },
+  /** Six short columns: the case where records pair their fields up. */
+  "six-table": (view: ChatView) => {
+    view.messages = [textMessage("user", "where do the three devices stand?"), textMessage("assistant", SIX_COLUMN_TABLE)];
     view.messageStart = 0;
     view.messageEnd = 2;
     view.messageTotal = 2;
