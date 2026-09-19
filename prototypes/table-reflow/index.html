@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Table reflow — four treatments</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --pi-bg: #111214;
+        --pi-surface: #191a1d;
+        --pi-border: #2a2c30;
+        --pi-text: #e6e7e9;
+        --pi-muted: #85888e;
+        --pi-dim: #62656b;
+        --pi-accent: #6699e0;
+        --calm-rule: color-mix(in srgb, var(--pi-border) 70%, transparent);
+        --pi-text-xs: clamp(0.6875rem, 0.67rem + 0.1cqi, 0.75rem);
+        --pi-text-sm: clamp(0.75rem, 0.73rem + 0.1cqi, 0.8125rem);
+        --pi-text-md: clamp(0.875rem, 0.86rem + 0.1cqi, 0.9375rem);
+        --calm-gutter: 32px;
+        --calm-measure: min(36rem, 100cqi - 2 * var(--calm-gutter));
+        --calm-para-gap: 1rem;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--pi-bg);
+        color: var(--pi-text);
+        font: var(--pi-text-md) / 1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+      /* Prototype chrome. Hidden with #variant.bare so captures show only the
+         transcript, the way the reader sees it. */
+      .switcher {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--calm-rule);
+        font-size: var(--pi-text-xs);
+      }
+      .switcher a {
+        color: var(--pi-muted);
+        text-decoration: none;
+        border: 1px solid var(--pi-border);
+        border-radius: 999px;
+        padding: 3px 9px;
+      }
+      .switcher a[aria-current="true"] { color: var(--pi-text); border-color: var(--pi-accent); }
+      body.bare .switcher { display: none; }
+
+      .scroller { container-type: inline-size; overflow-y: auto; }
+      .column {
+        inline-size: min(var(--calm-measure), 100% - 2 * var(--calm-gutter));
+        margin-inline: auto;
+        padding-block: 20px 40px;
+      }
+      .meta { color: var(--pi-dim); font-size: var(--pi-text-sm); margin-block-end: 18px; }
+      p { margin: 0 0 var(--calm-para-gap); }
+      p:last-child { margin-bottom: 0; }
+      code {
+        border: 1px solid var(--pi-border);
+        border-radius: 4px;
+        background: var(--pi-bg);
+        padding: 1px 4px;
+        font: var(--pi-text-sm) ui-monospace, Menlo, Consolas, monospace;
+      }
+      .block { container-type: inline-size; margin-block: var(--calm-para-gap); }
+
+      /* ---------------------------------------------------------------- */
+      /* current — the shipped stacked rendering, for comparison.          */
+      /* ---------------------------------------------------------------- */
+      .current { border-block: 1px solid var(--calm-rule); }
+      .current .caption {
+        padding-block-start: 8px;
+        color: var(--pi-muted);
+        font-size: var(--pi-text-xs);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .current .record { padding-block: 9px; }
+      .current .record + .record { border-top: 1px solid var(--calm-rule); }
+      .current .name { font-weight: 600; margin-block-end: 3px; }
+      .current .label { color: var(--pi-muted); font-size: var(--pi-text-sm); }
+
+      /* ---------------------------------------------------------------- */
+      /* pairs — name over meaning. The column heading is said once, in    */
+      /* the sentence above, never once per record.                       */
+      /* ---------------------------------------------------------------- */
+      .pairs { display: grid; gap: 14px; }
+      .pairs .record { display: grid; gap: 2px; }
+      .pairs .name { font-weight: 600; }
+      .pairs .meaning { color: var(--pi-muted); }
+      /* One hairline, at the start, to say where the list begins. No box, no
+         rule per record: three rules around three sentences is table chrome
+         with none of a table's use. */
+      .pairs { border-inline-start: 1px solid var(--calm-rule); padding-inline-start: 14px; }
+
+      /* ---------------------------------------------------------------- */
+      /* prose — no block at all. Each record is a sentence with a bold    */
+      /* lead-in, so the list stays inside the reading flow.               */
+      /* ---------------------------------------------------------------- */
+      .prose { margin: 0; padding-inline-start: 0; list-style: none; display: grid; gap: 8px; }
+      .prose li { display: grid; grid-template-columns: 1.1em minmax(0, 1fr); }
+      .prose li::before { content: "—"; color: var(--pi-dim); }
+      .prose .name { font-weight: 600; }
+      .prose .meaning { color: var(--pi-muted); }
+
+      /* ---------------------------------------------------------------- */
+      /* rows — still a table: two wrapping tracks, heading row once.      */
+      /* Comparison down the column survives. Under 26rem of container the */
+      /* second track cannot hold a sentence, so a record folds to the     */
+      /* `pairs` shape — the same grammar, one track instead of two.       */
+      /* ---------------------------------------------------------------- */
+      .rows { display: grid; grid-template-columns: minmax(7rem, 0.85fr) minmax(0, 1.15fr); column-gap: 18px; border-block: 1px solid var(--calm-rule); }
+      .rows .head, .rows .record { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-block: 9px; }
+      .rows .head { color: var(--pi-muted); font-size: var(--pi-text-xs); letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--calm-rule); }
+      .rows .record + .record { border-top: 1px solid var(--calm-rule); }
+      .rows .name { font-weight: 600; }
+      .rows .meaning { color: var(--pi-muted); }
+      @container (max-width: 26rem) {
+        .rows { grid-template-columns: minmax(0, 1fr); }
+        .rows .head { display: none; }
+        .rows .record { row-gap: 2px; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="switcher" id="switcher"></nav>
+    <div class="scroller">
+      <div class="column">
+        <div class="meta">9:01 AM · GPT 6 Astra · high effort</div>
+        <p>Start with <code>/grill-with-docs</code>. We have enough evidence to define the problem, but not an agreed meaning of “repeatable install.”</p>
+        <p id="lead">The first decision is which outcome matters most:</p>
+        <div class="block" id="block"></div>
+        <p>My recommendation is to define that outcome before choosing shared modules or writing tickets. Otherwise, we risk removing duplicate code while leaving installation just as manual.</p>
+        <p><strong>Which of these three is the main frustration?</strong></p>
+      </div>
+    </div>
+
+    <script type="module">
+      /**
+       * One table, four renderings. The data is what a markdown table parses
+       * to: a heading row and body rows. Every treatment below is a pure
+       * function of that data, so what the screenshots show is what the
+       * renderer would do — no hand-drawn states.
+       */
+      const table = {
+        headings: ["Outcome", "What success means"],
+        rows: [
+          ["Install another unit of a supported model.", "Follow an established procedure without engineering work."],
+          ["Add a new device model.", "Solve hardware support without rebuilding Korri’s product setup."],
+          ["Update an installed device.", "Deliver, verify, and roll back through a consistent process."],
+        ],
+      };
+
+      const esc = (value) => value.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+      const TREATMENTS = {
+        current: {
+          label: "current (shipped)",
+          lead: "The first decision is which outcome matters most:",
+          render: ({ headings, rows }) => `
+            <div class="current">
+              <div class="caption">${esc(headings[0])}</div>
+              ${rows
+                .map(
+                  ([name, meaning]) => `
+                    <div class="record">
+                      <div class="name">${esc(name)}</div>
+                      <div class="label">${esc(headings[1])}</div>
+                      <div class="value">${esc(meaning)}</div>
+                    </div>`,
+                )
+                .join("")}
+            </div>`,
+        },
+        pairs: {
+          label: "A · pairs",
+          // The heading the records drop is carried by the sentence above, so
+          // it is said once instead of once per record.
+          lead: "The first decision is which outcome matters most, and what success would mean for each:",
+          render: ({ rows }) => `
+            <div class="pairs">
+              ${rows
+                .map(
+                  ([name, meaning]) => `
+                    <div class="record">
+                      <div class="name">${esc(name)}</div>
+                      <div class="meaning">${esc(meaning)}</div>
+                    </div>`,
+                )
+                .join("")}
+            </div>`,
+        },
+        prose: {
+          label: "B · prose",
+          lead: "The first decision is which outcome matters most, and what success would mean for each:",
+          render: ({ rows }) => `
+            <ul class="prose">
+              ${rows
+                .map(
+                  ([name, meaning]) => `
+                    <li><span><span class="name">${esc(name)}</span> <span class="meaning">${esc(meaning)}</span></span></li>`,
+                )
+                .join("")}
+            </ul>`,
+        },
+        rows: {
+          label: "C · rows",
+          lead: "The first decision is which outcome matters most:",
+          render: ({ headings, rows }) => `
+            <div class="rows">
+              <div class="head">${headings.map((heading) => `<div>${esc(heading)}</div>`).join("")}</div>
+              ${rows
+                .map(
+                  ([name, meaning]) => `
+                    <div class="record">
+                      <div class="name">${esc(name)}</div>
+                      <div class="meaning">${esc(meaning)}</div>
+                    </div>`,
+                )
+                .join("")}
+            </div>`,
+        },
+      };
+
+      const block = document.getElementById("block");
+      const lead = document.getElementById("lead");
+      const switcher = document.getElementById("switcher");
+
+      function apply() {
+        const parts = location.hash.replace("#", "").split(".");
+        const name = TREATMENTS[parts[0]] === undefined ? "current" : parts[0];
+        document.body.classList.toggle("bare", parts.includes("bare"));
+        const treatment = TREATMENTS[name];
+        lead.textContent = treatment.lead;
+        block.innerHTML = treatment.render(table);
+        switcher.innerHTML = Object.entries(TREATMENTS)
+          .map(([key, value]) => `<a href="#${key}" aria-current="${String(key === name)}">${value.label}</a>`)
+          .join("");
+      }
+
+      addEventListener("hashchange", apply);
+      apply();
+    </script>
+  </body>
+</html>

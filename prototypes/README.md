@@ -85,3 +85,8 @@ python3 -m http.server 8600
 - [`session-board/`](./session-board/) — the inbox redesign. Sessions become
   the root list, grouped by **what they need from you** instead of **where they
   live**. Open `session-board/index.html` through the prototype server.
+- [`table-reflow/`](./table-reflow/) — four ways to read a two-column table in
+  the transcript, against the shipped stacking: A pairs (name over meaning,
+  heading said once), B prose (each record one sentence, no block), C rows
+  (a real wrapping table that folds to A under 26rem). `capture.mjs` shoots
+  the postures, `measure.mjs` prints the block height each one costs.
