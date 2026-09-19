@@ -14,7 +14,7 @@ import { FOLD8_DPR, FOLD8_FOLDED_LANDSCAPE, FOLD8_FOLDED_PORTRAIT, FOLD8_UNFOLDE
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pageUrl = `file://${join(here, "index.html")}`;
-const VARIANTS = ["current", "pairs", "prose", "rows"];
+const VARIANTS = ["current6", "rows6"];
 const POSTURES = [
   { name: "unfolded-portrait", posture: FOLD8_UNFOLDED_PORTRAIT },
   { name: "unfolded-landscape", posture: FOLD8_UNFOLDED_LANDSCAPE },

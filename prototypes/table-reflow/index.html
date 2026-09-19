@@ -51,13 +51,18 @@
       .switcher a[aria-current="true"] { color: var(--pi-text); border-color: var(--pi-accent); }
       body.bare .switcher { display: none; }
 
-      .scroller { container-type: inline-size; overflow-y: auto; }
+      .scroller {
+        container-type: inline-size;
+        overflow-y: auto;
+        --calm-bleed: min(max(0px, (100cqi - 2 * var(--calm-gutter) - var(--calm-measure)) / 2), 10rem);
+      }
       .column {
         inline-size: min(var(--calm-measure), 100% - 2 * var(--calm-gutter));
         margin-inline: auto;
         padding-block: 20px 40px;
       }
       .meta { color: var(--pi-dim); font-size: var(--pi-text-sm); margin-block-end: 18px; }
+      .probe { inline-size: calc(100% + var(--calm-bleed, 0px)); block-size: 0; }
       p { margin: 0 0 var(--calm-para-gap); }
       p:last-child { margin-bottom: 0; }
       code {
@@ -67,6 +72,10 @@
         padding: 1px 4px;
         font: var(--pi-text-sm) ui-monospace, Menlo, Consolas, monospace;
       }
+      /* The block takes the column by default. Only the ladder's `columns`
+         rung widens it, and it does so to a measured number rather than to
+         fit-content: a fit-content block sizes to its widest *cell*, which
+         collapsed this study to a 110px column the first time it was run. */
       .block { container-type: inline-size; margin-block: var(--calm-para-gap); }
 
       /* ---------------------------------------------------------------- */
@@ -125,6 +134,36 @@
         .rows .head { display: none; }
         .rows .record { row-gap: 2px; }
       }
+
+      /* ---------------------------------------------------------------- */
+      /* Six columns. Same ladder as C, three rungs instead of two:        */
+      /* keep the columns while each track can hold a value, then give     */
+      /* each record its own field grid that gains and loses tracks with   */
+      /* the room, then one field per line.                                */
+      /* ---------------------------------------------------------------- */
+      .grid { border-block: 1px solid var(--calm-rule); }
+      .grid .head, .grid .record { display: grid; grid-template-columns: var(--tracks); column-gap: 14px; padding-block: 9px; }
+      .grid .head { color: var(--pi-muted); font-size: var(--pi-text-xs); letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--calm-rule); }
+      .grid .record + .record { border-top: 1px solid var(--calm-rule); }
+      .grid .record .cell:first-child { font-weight: 600; }
+      .grid .record .cell { color: var(--pi-muted); overflow-wrap: anywhere; }
+      .grid .record .cell:first-child { color: var(--pi-text); }
+
+      /* Rung 2 and 3: the heading row is gone, so every value carries its own
+         label. The record's name keeps the prose weight and the whole width. */
+      .cards { display: grid; gap: 16px; }
+      .cards .record { display: grid; gap: 6px; }
+      .cards .name { font-weight: 600; }
+      .cards .fields { display: grid; grid-template-columns: var(--tracks); gap: 6px 18px; }
+      .cards .field { display: grid; gap: 0; min-inline-size: 0; }
+      .cards .label { color: var(--pi-dim); font-size: var(--pi-text-xs); letter-spacing: 0.06em; text-transform: uppercase; }
+      .cards .value { color: var(--pi-muted); overflow-wrap: anywhere; }
+      .cards { border-inline-start: 1px solid var(--calm-rule); padding-inline-start: 14px; }
+      /* Rung 3: one field per line, label beside value so a stack of six does
+         not read as twelve lines. */
+      .cards.stacked .fields { grid-template-columns: minmax(6rem, auto) minmax(0, 1fr); gap: 3px 14px; }
+      .cards.stacked .field { display: contents; }
+      .cards.stacked .label { text-transform: none; letter-spacing: 0; font-size: var(--pi-text-sm); }
     </style>
   </head>
   <body>
@@ -134,6 +173,9 @@
         <div class="meta">9:01 AM · GPT 6 Astra · high effort</div>
         <p>Start with <code>/grill-with-docs</code>. We have enough evidence to define the problem, but not an agreed meaning of “repeatable install.”</p>
         <p id="lead">The first decision is which outcome matters most:</p>
+        <!-- Zero-height probe: the width a non-prose block may take, column
+             plus bleed, measured rather than recomputed in JS. -->
+        <div class="probe" id="probe"></div>
         <div class="block" id="block"></div>
         <p>My recommendation is to define that outcome before choosing shared modules or writing tickets. Otherwise, we risk removing duplicate code while leaving installation just as manual.</p>
         <p><strong>Which of these three is the main frustration?</strong></p>
@@ -147,6 +189,15 @@
        * function of that data, so what the screenshots show is what the
        * renderer would do — no hand-drawn states.
        */
+      const six = {
+        headings: ["Model", "Boot", "Drivers", "Image", "Verified", "Owner"],
+        rows: [
+          ["SM8550", "fastboot", "in tree", "2026-09-12", "yes", "Simon"],
+          ["SM8650", "uefi", "out of tree", "2026-09-04", "no", "Korri"],
+          ["MT8195", "u-boot", "partial", "2026-08-28", "yes", "unassigned"],
+        ],
+      };
+
       const table = {
         headings: ["Outcome", "What success means"],
         rows: [
@@ -227,7 +278,112 @@
         },
       };
 
+      /**
+       * C at any column count.
+       *
+       * Three rungs, no breakpoints and no column count in the CSS. A table
+       * keeps its columns while every track can still hold a value. When it
+       * cannot, the table is read as records, and each record's fields take as
+       * many tracks as the room allows -- that is the rung the two-column
+       * study never needed, because two columns either fit or become one.
+       * Only when a label and its value cannot share a line does a record
+       * become one field per line.
+       *
+       * Pure function of column count and available width, so the screenshots
+       * are the algorithm rather than a drawing of it.
+       */
+      const MIN_TRACK_PX = 104; // a value column narrower than this is a stub
+      const MIN_FIELD_PX = 150; // a label over its value needs this much
+      const FIELD_GAP_PX = 18;
+
+      function plan(columnCount, availableWidth) {
+        if (availableWidth >= columnCount * MIN_TRACK_PX) {
+          return { rung: "columns", tracks: columnCount };
+        }
+        const fieldTracks = Math.floor((availableWidth + FIELD_GAP_PX) / (MIN_FIELD_PX + FIELD_GAP_PX));
+        if (fieldTracks >= 2) return { rung: "cards", tracks: Math.min(fieldTracks, columnCount - 1) };
+        return { rung: "stacked", tracks: 1 };
+      }
+
+      function renderLadder({ headings, rows }, availableWidth) {
+        const { rung, tracks } = plan(headings.length, availableWidth);
+        if (rung === "columns") {
+          return {
+            width: `${String(Math.round(availableWidth))}px`,
+            html: `
+              <div class="grid" style="--tracks: repeat(${String(tracks)}, minmax(0, 1fr))">
+                <div class="head">${headings.map((heading) => `<div>${esc(heading)}</div>`).join("")}</div>
+                ${rows
+                  .map((row) => `<div class="record">${row.map((cell) => `<div class="cell">${esc(cell)}</div>`).join("")}</div>`)
+                  .join("")}
+              </div>`,
+          };
+        }
+        const stacked = rung === "stacked";
+        const trackCss = stacked ? "minmax(6rem, auto) minmax(0, 1fr)" : `repeat(${String(tracks)}, minmax(0, 1fr))`;
+        return {
+          width: "100%",
+          html: `
+            <div class="cards${stacked ? " stacked" : ""}" style="--tracks: ${trackCss}">
+              ${rows
+                .map(
+                  (row) => `
+                    <div class="record">
+                      <div class="name">${esc(row[0])}</div>
+                      <div class="fields">
+                        ${row
+                          .slice(1)
+                          .map(
+                            (cell, index) => `
+                              <div class="field">
+                                <div class="label">${esc(headings[index + 1])}</div>
+                                <div class="value">${esc(cell)}</div>
+                              </div>`,
+                          )
+                          .join("")}
+                      </div>
+                    </div>`,
+                )
+                .join("")}
+            </div>`,
+        };
+      }
+
+      TREATMENTS.current6 = {
+        label: "current · 6 cols",
+        lead: "Three devices, and where each one stands:",
+        render: ({ headings, rows }) => `
+          <div class="current">
+            <div class="caption">${esc(headings[0])}</div>
+            ${rows
+              .map(
+                (row) => `
+                  <div class="record">
+                    <div class="name">${esc(row[0])}</div>
+                    ${row
+                      .slice(1)
+                      .map(
+                        (cell, index) => `
+                          <div class="label">${esc(headings[index + 1])}</div>
+                          <div class="value">${esc(cell)}</div>`,
+                      )
+                      .join("")}
+                  </div>`,
+              )
+              .join("")}
+          </div>`,
+        data: six,
+      };
+
+      TREATMENTS.rows6 = {
+        label: "C · 6 cols",
+        lead: "Three devices, and where each one stands:",
+        data: six,
+        ladder: true,
+      };
+
       const block = document.getElementById("block");
+      const probe = document.getElementById("probe");
       const lead = document.getElementById("lead");
       const switcher = document.getElementById("switcher");
 
@@ -237,13 +393,24 @@
         document.body.classList.toggle("bare", parts.includes("bare"));
         const treatment = TREATMENTS[name];
         lead.textContent = treatment.lead;
-        block.innerHTML = treatment.render(table);
+        const data = treatment.data ?? table;
+        if (treatment.ladder === true) {
+          const laid = renderLadder(data, probe.clientWidth);
+          block.style.inlineSize = laid.width;
+          block.innerHTML = laid.html;
+        } else {
+          block.style.inlineSize = "";
+          block.innerHTML = treatment.render(data);
+        }
         switcher.innerHTML = Object.entries(TREATMENTS)
           .map(([key, value]) => `<a href="#${key}" aria-current="${String(key === name)}">${value.label}</a>`)
           .join("");
       }
 
       addEventListener("hashchange", apply);
+      // The ladder decides from the width the block actually has, so it is
+      // re-decided whenever that width changes -- never from the viewport.
+      new ResizeObserver(() => { apply(); }).observe(probe);
       apply();
     </script>
   </body>

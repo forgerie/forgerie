@@ -61,6 +61,43 @@ container the second track cannot hold a sentence, so a record folds to the
 A shape — same grammar, one track instead of two. Cost: 229px against prose's
 151px, and narrow names leave ragged space in the first track.
 
+## C at six columns
+
+Two columns either fit or become one, so C only needed two rungs. A wide table
+needs a third. The ladder, written as `plan(columnCount, availableWidth)` in
+`index.html` and rendered by executing it, never drawn by hand:
+
+1. **columns** while `width >= columns × 104px` — the table stays a table.
+2. **cards** — one block per record: the name keeps the prose weight, and the
+   remaining fields take as many tracks as fit at 150px each. This is the rung
+   that does not exist for two columns.
+3. **stacked** — label beside value, one field per line, when even two fields
+   cannot share a line.
+
+Six columns of short values (`Model, Boot, Drivers, Image, Verified, Owner`,
+three devices), block height measured by `measure.mjs`:
+
+| Posture | Available width | Rung | current | C |
+|---|---|---|---|---|
+| Unfolded landscape (932) | 722px | columns (6 tracks) | 787px | **163px** |
+| Unfolded portrait (704) | 608px | cards (3 tracks) | 781px | 375px |
+| Folded landscape (711) | 611px | cards (3 tracks) | 781px | 375px |
+| Folded portrait (475) | 411px | cards (2 tracks) | 770px | 506px |
+
+`rows6-wide.png` is the point: at the width where the shipped code prints 787px
+of repeated labels, the table is still a table and costs 163px. `rows6-tall.png`
+and `rows6-folded.png` are the cards rung, 3-up and 2-up.
+
+Two honest defects in the cards rung, both visible in `rows6-tall.png`:
+
+- Five fields into three tracks leaves the second line of each record half
+  empty. Filling it would mean reordering fields away from the table's own
+  order, which is worse.
+- `plan` decides from the column *count*, not from what the cells hold. Six
+  columns of sentences would claim the `columns` rung at 932 and then wrap
+  into six very tall rows. A production version has to feed it measured
+  natural cell widths.
+
 ## The finding underneath the treatments
 
 **C is possible at the width where the shipped code stacks.** `rows-wide.png`
@@ -78,6 +115,9 @@ If that holds, the smallest real fix is to measure a wrapped fit — or lower th
 per-cell cap — before reaching for the stack.
 
 ## Recommendation
+
+For a wide table, ship the three-rung ladder: it keeps a six-column table
+readable at every posture and only ever costs less height than stacking.
 
 Ship **A** as the stacked form: it is the smallest change to the existing CSS
 (drop the per-record label and the record caption, keep the records) and it

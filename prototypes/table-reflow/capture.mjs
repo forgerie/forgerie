@@ -9,13 +9,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findChrome, getFreePort, launchChrome, openPage, sleep, waitForDebugger } from "../../scripts/lib/cdp.mjs";
-import { FOLD8_DPR, FOLD8_FOLDED_LANDSCAPE, FOLD8_FOLDED_PORTRAIT, FOLD8_UNFOLDED_LANDSCAPE } from "../../scripts/lib/fold8-postures.mjs";
+import { FOLD8_DPR, FOLD8_FOLDED_LANDSCAPE, FOLD8_FOLDED_PORTRAIT, FOLD8_UNFOLDED_LANDSCAPE, FOLD8_UNFOLDED_PORTRAIT } from "../../scripts/lib/fold8-postures.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pageUrl = `file://${join(here, "index.html")}`;
-const VARIANTS = ["current", "pairs", "prose", "rows"];
+const VARIANTS = ["current6", "rows6"];
 const SHOTS = [
   { name: "wide", posture: FOLD8_UNFOLDED_LANDSCAPE },
+  { name: "tall", posture: FOLD8_UNFOLDED_PORTRAIT },
   { name: "folded", posture: FOLD8_FOLDED_PORTRAIT },
   { name: "strip", posture: FOLD8_FOLDED_LANDSCAPE },
 ];
