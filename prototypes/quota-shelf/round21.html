@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 21 · the risk bar, with a riser per account — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<link rel="stylesheet" href="round20.css">
+<link rel="stylesheet" href="round21.css">
+<style>
+  body { width: 912px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 30px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 82ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+<h1>Round 21 · one bar, what expires, and how many accounts</h1>
+<p class="note">Round 20's <b>risk</b> bar, now told how many accounts it pools. The fill is the group's level,
+the hollow run is the part of that level which expires unspent — summed from positive terms only, so a starving
+account can never erase a wasting one — and each <b>riser</b> above the bar is an account boundary. The risers
+sit outside the lane, so no fill, cut or hollow edge can ever land on one and the bar stays a single run.</p>
+
+<h2>Seven Codex groups · riser above, and the broken rule beneath for contrast</h2>
+<div class="grid" id="states"></div>
+
+<h2>Three meters, two accounts, at 2.4×</h2>
+<p class="note">The case round 16 never drew. The risers live in the 3 px gap between stacked lanes, which is
+where they were most likely to crowd. Five hours at 92 % with forty minutes to run, the week at 96 %, Fable at
+38 % and behind.</p>
+<div class="zoom" id="claude"></div>
+
+<h2>The whole shelf</h2>
+<p class="note">Left, today's live figures. Right, the same accounts with a five-hour window and two Codex
+accounts about to turn over unspent. Antigravity states no window length, so its lanes can carry no pace and
+contribute nothing to the hollow — the bar understates there rather than inventing.</p>
+<div class="ladder" id="shelves"></div>
+
+<h2>The size ladder</h2>
+<div class="ladder" id="sizes"></div>
+
+<script src="data.js"></script>
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="round21.js"></script>
+<script>
+  const { groupRow, shelf, STATES, CLAUDE, SHELF_CALM, SHELF_WASTING, NOW } = window.QUOTA_ROUND21;
+
+  function pane(build, width, zoom) {
+    const frame = document.createElement("div");
+    frame.className = "frame";
+    frame.style.width = `${width}px`;
+    if (zoom) frame.style.zoom = zoom;
+    frame.append(build());
+    return frame;
+  }
+
+  function cell(container, caption, node, measured) {
+    const box = document.createElement("div");
+    const line = document.createElement("p");
+    line.className = "cell-cap";
+    line.innerHTML = caption;
+    box.append(line, node);
+    if (measured) {
+      const measure = document.createElement("p");
+      measure.className = "measure";
+      box.append(measure);
+      requestAnimationFrame(() => {
+        measure.innerHTML = `<b>${measured().offsetHeight} px</b>`;
+      });
+    }
+    container.append(box);
+  }
+
+  const states = document.getElementById("states");
+  for (const seam of ["riser", "base"]) {
+    cell(states, `<b>${seam}</b> · states 1 to 7`, pane(() => {
+      const root = document.createElement("div");
+      root.className = "w r";
+      for (const state of STATES) root.append(groupRow(state.group, NOW, { seam }));
+      return root;
+    }, 360));
+  }
+
+  const claude = document.getElementById("claude");
+  for (const seam of ["riser", "base", "none"]) {
+    cell(claude, `<b>${seam}</b>`, pane(() => {
+      const root = document.createElement("div");
+      root.className = "w r";
+      root.append(groupRow(CLAUDE, NOW, { seam }));
+      return root;
+    }, 360, 2.4));
+  }
+
+  const shelves = document.getElementById("shelves");
+  for (const [label, accounts] of [["today's figures", SHELF_CALM], ["about to waste", SHELF_WASTING]]) {
+    let root;
+    cell(shelves, `360 px · <b>${label}</b>`,
+      pane(() => (root = shelf(accounts, NOW, { seam: "riser" })), 360), () => root);
+  }
+
+  const sizes = document.getElementById("sizes");
+  for (const width of [280, 360, 480]) {
+    let root;
+    cell(sizes, `<b>${width} px</b> · about to waste`,
+      pane(() => (root = shelf(SHELF_WASTING, NOW, { seam: "riser" })), width), () => root);
+  }
+</script>
+</html>
