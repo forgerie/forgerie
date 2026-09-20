@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 24 · the two risks, walked — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<link rel="stylesheet" href="round20.css">
+<link rel="stylesheet" href="round21.css">
+<link rel="stylesheet" href="round24.css">
+<style>
+  body { width: 912px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 30px 0 6px; color: var(--muted); }
+  h3 { font-size: 12px; font-weight: 500; margin: 18px 0 8px; color: var(--dim); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 82ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+<h1>Round 24 · losing credit, and spending too fast</h1>
+<p class="stamp" id="stamp"></p>
+<p class="note">Both risks are the pace cut, read in opposite directions. The cut sits at the share of the window
+still to run; the fill sits at the share of the allowance still unspent. <b>Fill beyond the cut</b> is credit that
+expires unspent, drawn hollow. <b>Cut beyond the fill</b> is spending faster than the window allows, drawn
+hatched. Same geometry, opposite sign.</p>
+
+<h2>1 · Losing credit — the level holds, the clock runs out</h2>
+<p class="note">Nothing is spent between steps. The cut walks left on its own, so the hollow grows without you
+doing anything, and at the reset it is the whole balance.</p>
+<div class="pair">
+  <div><h3>one account holding 90 %</h3><div class="walk" id="losing-one"></div></div>
+  <div><h3>the same, with a spent account beside it</h3><div class="walk" id="losing-two"></div></div>
+</div>
+
+<h2>2 · Spending too fast — the clock runs, the level falls faster</h2>
+<p class="note">The fill starts ahead of the cut and crosses it. Everything after the crossing is hatched: the
+amount you would have to stop spending to reach the reset.</p>
+<div class="walk" id="draining"></div>
+
+<h2>3 · Both at once</h2>
+<p class="note">The account in use is starving while a spare one wastes. The hatch is gated off on purpose —
+the group can still serve a request, so running dry is not the risk. Whether that gate is right is the thing to
+judge here.</p>
+<div class="walk" id="both"></div>
+
+<h2>4 · How loud the hollow should be, at the worst step</h2>
+<p class="note">90 % unspent with one hour to run. <b>quiet</b> outlines in the lane's own hue and adds no colour.
+<b>amber</b> outlines in the warn colour. <b>wash</b> also tints the run.</p>
+<div class="loud" id="loud"></div>
+
+<h2>5 · The whole live shelf at 360 px</h2>
+<div class="ladder" id="shelves"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round22.js"></script>
+<script>
+  window.QUOTA_FIXTURE = { NOW: Date.now(), MIN: 60000, HOUR: 3600000, DAY: 86400000, ACCOUNTS: [] };
+</script>
+<script src="round15.js"></script>
+<script src="round23.js"></script>
+<script src="round24.js"></script>
+<script>
+  const { ACCOUNTS, stamp, payload } = window.QUOTA_ROUND22;
+  const { shelf } = window.QUOTA_ROUND23;
+  const { losing, draining, both, shelves, groupRow } = window.QUOTA_ROUND24;
+  const NOW = Date.now();
+
+  document.getElementById("stamp").innerHTML =
+    `router said <b>${stamp(Date.parse(payload.updatedAt))}</b> · drawn <b>${stamp(NOW)}</b>`;
+
+  function frame(build, width, zoom, loud) {
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    pane.style.width = `${width}px`;
+    if (zoom !== undefined) pane.style.zoom = zoom;
+    const root = document.createElement("div");
+    root.className = `w r${loud ? ` h-${loud}` : ""}`;
+    build(root);
+    pane.append(root);
+    return pane;
+  }
+
+  function walk(container, steps) {
+    for (const step of steps) {
+      const box = document.createElement("div");
+      const line = document.createElement("p");
+      line.className = "step";
+      line.innerHTML = step.note;
+      box.append(line, frame((root) => root.append(groupRow(step.group, NOW, "reach")), 360, 1.8));
+      container.append(box);
+    }
+  }
+
+  walk(document.getElementById("losing-one"), losing(NOW, false));
+  walk(document.getElementById("losing-two"), losing(NOW, true));
+  walk(document.getElementById("draining"), draining(NOW));
+  walk(document.getElementById("both"), both(NOW));
+
+  const worst = losing(NOW, false).at(-1);
+  const loud = document.getElementById("loud");
+  for (const mode of ["quiet", "amber", "wash"]) {
+    const box = document.createElement("div");
+    const line = document.createElement("p");
+    line.className = "cell-cap";
+    line.innerHTML = `<b>${mode}</b>`;
+    box.append(line, frame((root) => root.append(groupRow(worst.group, NOW, "reach")), 360, 2.4, mode));
+    loud.append(box);
+  }
+
+  const ladder = document.getElementById("shelves");
+  for (const scene of shelves(NOW, ACCOUNTS)) {
+    const box = document.createElement("div");
+    const line = document.createElement("p");
+    line.className = "cell-cap";
+    line.innerHTML = `<b>${scene.caption}</b>`;
+    box.append(line, frame((root) => {
+      for (const row of [...shelf(scene.accounts, NOW, "reach").children]) root.append(row);
+    }, 360));
+    ladder.append(box);
+  }
+</script>
+</html>
