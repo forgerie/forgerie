@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 16 · the pooled row, every state — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<link rel="stylesheet" href="round16.css">
+<style>
+  body { width: 984px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 26px 0 12px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 18px; max-width: 88ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+<h1>Round 16 · the pooled row, one state at a time</h1>
+<p class="note">Every frame is 360 px and holds one provider group drawn by round 15's <b>pool</b>: the accounts
+of a group added into one tank per meter, with a mark at each seam. Each state changes one fact and nothing else.
+The two states under <b>when the accounts disagree</b> are the price of the idea — the pool averages them to the
+same picture.</p>
+
+<div class="states" id="states"></div>
+
+<h2>The seam, at 2.6×</h2>
+<p class="note">Round 15 cut a 1 px notch through the lane. On the live Codex group both notches landed on an edge
+the lane already had, and disappeared. Same row, same data, four places to put the same fact. The second row of
+each pair is the worst case: two accounts, so the seam sits at 50 %, exactly where the fill ends.</p>
+<div class="seams" id="seams"></div>
+
+<script src="data.js"></script>
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="round15.js"></script>
+<script src="round16.js"></script>
+<script>
+  const { STATES, SEAMS, seamRow, NOW } = window.QUOTA_ROUND16;
+  const { groupRow } = window.QUOTA_ROUND15;
+
+  const root = () => {
+    const node = document.createElement("div");
+    node.className = "w r t-pool";
+    return node;
+  };
+
+  const states = document.getElementById("states");
+  for (const state of STATES) {
+    if (state.band !== undefined) {
+      const band = document.createElement("div");
+      band.className = "band";
+      band.textContent = state.band;
+      states.append(band);
+    }
+    const box = document.createElement("div");
+    box.className = "state";
+    const cap = document.createElement("p");
+    cap.className = "state-cap";
+    cap.textContent = state.caption;
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    const shell = root();
+    shell.append(groupRow(state.group, NOW, "pool"));
+    pane.append(shell);
+    box.append(cap, pane);
+    states.append(box);
+  }
+
+  // The live three-account group, then the two-account group whose seam sits
+  // exactly on the end of the fill.
+  const PROBES = [STATES[2], STATES[18]];
+  const seams = document.getElementById("seams");
+  for (const [seam, label] of Object.entries(SEAMS)) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "seam-cap";
+    cap.textContent = label;
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    const shell = root();
+    for (const probe of PROBES) shell.append(seamRow(probe, seam));
+    pane.append(shell);
+    box.append(cap, pane);
+    seams.append(box);
+  }
+</script>
+</html>
