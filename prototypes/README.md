@@ -55,7 +55,12 @@ python3 -m http.server 8600
   routed account becomes a rail on the row edge instead of a word, countdowns
   state one unit (`38h`, never `1d 14h`), and the long Claude/Codex window is
   named `week` so its label cannot be confused with its countdown. Collapsed
-  176 px, expanded 186 px.
+  176 px, expanded 186 px. Rounds 5 to 10 take the words out and settle the
+  shape: one state only, every window of an account on one line, a drained
+  account folded into a single bar of its own wait, Gemini as a boolean mark,
+  and Anthropic's three meters (5h, week, Fable) as hued layers in one block.
+  Round 10 compares four pace indicators on those layers: ghost, notch, track,
+  pip.
 
 - [`accounts-board/`](./accounts-board/) — fullscreen second-screen monitor
   for the LLM accounts (quota windows, resets, auth health). Two rounds on
