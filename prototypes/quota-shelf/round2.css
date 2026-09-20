@@ -1,0 +1,89 @@
+/* Round 2 styles. Every padding here is a height budget, so each one is
+   stated once and shared by the four renderings. */
+
+.t0, .e, .f, .g { padding-bottom: 4px; }
+
+/* --- 0 · today: the shipped paddings, copied so the ruler is honest --- */
+.t0-provider {
+  display: flex; align-items: center; min-height: 26px; padding: 4px 10px;
+  border-bottom: 1px solid var(--line); background: #12161a;
+  color: var(--ink); font-weight: 600; font-size: 13px;
+}
+.t0-acct {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 10px 2px 16px; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 11px;
+}
+.t0-provider + .t0-acct { border-top: 0; }
+.t0-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t0-tag { margin-left: auto; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+.t0-tag.routed { color: var(--ok); }
+.t0-tag.cooling { color: var(--warn); }
+.t0-row {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  align-items: center; column-gap: 10px;
+}
+.t0-name { padding: 4px 0 4px 16px; color: var(--muted); font-size: 11px; text-align: right; white-space: nowrap; }
+.t0-bars { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.t0-bars .track.quiet { height: 2px; }
+.t0-pct { padding: 4px 0; text-align: right; }
+.t0-pct.tone-open { font-size: 10px; letter-spacing: .04em; }
+.t0-tm { padding: 4px 10px 4px 0; text-align: right; color: var(--ink); }
+
+/* --- E · trimmed --- */
+.e-acct { padding: 2px 0; }
+.e-acct + .e-acct { border-top: 1px solid var(--line); }
+.e-head { display: flex; align-items: baseline; gap: 7px; padding: 3px 10px; }
+.e-head .who { flex: 1; font-size: 12px; }
+.e-prov {
+  flex: 0 0 auto; font: 9px/1.5 var(--num); letter-spacing: .06em;
+  color: var(--dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px;
+}
+.e-val { font-size: 12px; text-align: right; }
+.e-val.unmetered { color: var(--dim); font-size: 10.5px; }
+.e-tm { min-width: 4.4em; color: var(--dim); font-size: 10px; text-align: right; white-space: nowrap; }
+.e-lane {
+  display: grid; grid-template-columns: 3.6em minmax(0, 1fr) max-content 4.4em;
+  align-items: center; column-gap: 8px; padding: 1px 10px 1px 27px;
+}
+.e.no-bar .e-lane { grid-template-columns: 3.6em max-content 4.4em; }
+.e-name { color: var(--muted); font-size: 10.5px; }
+.e-lane .e-val { font-size: 11px; }
+.e-hollow { height: 0; border-top: 1px dashed #232a31; }
+
+/* --- F · one line per account --- */
+.f-row {
+  display: grid;
+  /* The bar is the element that yields: it is a picture of a number that is
+     printed two cells later, while a truncated address is a fact the shelf
+     cannot restate anywhere else. */
+  grid-template-columns: max-content minmax(0, 1fr) max-content minmax(28px, 56px) max-content max-content;
+  align-items: center; column-gap: 8px; padding: 4px 10px; min-height: 26px;
+}
+.f.no-bar .f-row { grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content; }
+.f-row + .f-row { border-top: 1px solid var(--line); }
+.f-row .who { font-size: 12px; }
+.f-prov { font: 9px/1.5 var(--num); letter-spacing: .06em; color: var(--dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; }
+.f-dots { display: flex; gap: 3px; }
+.f-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.f-dot.hollow { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
+.f-val { font-size: 12px; text-align: right; }
+.f-tm { color: var(--dim); font-size: 10px; text-align: right; min-width: 4.4em; white-space: nowrap; }
+
+/* --- G · routed only --- */
+.g-row {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  align-items: center; column-gap: 8px; padding: 5px 10px 1px;
+}
+.g.no-bar .g-row { grid-template-columns: max-content max-content max-content; justify-content: space-between; }
+.g-prov { font-size: 12px; font-weight: 600; color: var(--ink); }
+.g-val { font-size: 12.5px; text-align: right; }
+.g-tm { color: var(--dim); font-size: 10px; min-width: 4.4em; text-align: right; white-space: nowrap; }
+.g-sub {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px;
+  padding: 0 10px 5px; border-bottom: 1px solid var(--line);
+  color: var(--muted); font-size: 10.5px;
+}
+.g-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
+.g-chip { border: 1px solid var(--line); border-radius: 999px; padding: 0 5px; font-size: 10px; }
+.g-spare { margin-left: auto; color: var(--dim); }

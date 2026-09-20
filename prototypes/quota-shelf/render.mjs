@@ -18,7 +18,7 @@ import { findChrome, getFreePort, launchChrome, openPage, sleep, waitForDebugger
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = resolve(process.argv[2] ?? "/tmp/quota-shelf-shots");
-const pages = ["a-ledger", "b-fuel", "c-runway", "d-trend"];
+const pages = process.env["PAGES"]?.split(" ") ?? ["a-ledger", "b-fuel", "c-runway", "d-trend"];
 const VIEWPORT = { width: 1500, height: 1000, scale: 2 };
 
 // findChrome probes through a login shell, which does not see a `nix shell`

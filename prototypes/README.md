@@ -36,8 +36,14 @@ python3 -m http.server 8600
   made honest), B fuel (one binding number per account, which also surfaces the
   hidden five-hour Claude window), C runway (percentages as time, with a reset
   mark per lane), D trend (24 h of history, and a tick per 429 where there is no
-  level to draw). `node render.mjs [outDir]` captures each ladder over CDP;
-  pages also work over `file://`.
+  level to draw). Round 2 answers the defect round 1 shipped with: it was
+  taller than the shelf it replaced. `round2.html` replicates the live shelf
+  from its own CSS as a ruler (560 px for seven accounts at 360 px wide) and
+  measures three shorter answers beside it: E trimmed (316 px, keeps every
+  lane), F one line per account (188 px, lanes become state dots), G routed
+  only (184 px, one row per provider plus a spare count).
+  `node render.mjs [outDir]` captures each ladder over CDP, `PAGES=round2`
+  captures one; pages also work over `file://`.
 
 - [`accounts-board/`](./accounts-board/) — fullscreen second-screen monitor
   for the LLM accounts (quota windows, resets, auth health). Two rounds on
