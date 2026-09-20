@@ -42,8 +42,14 @@ python3 -m http.server 8600
   measures three shorter answers beside it: E trimmed (316 px, keeps every
   lane), F one line per account (188 px, lanes become state dots), G routed
   only (184 px, one row per provider plus a spare count).
-  `node render.mjs [outDir]` captures each ladder over CDP, `PAGES=round2`
-  captures one; pages also work over `file://`.
+  Round 3 is the answer: one design in two states, neither spending a line on
+  an address. Collapsed is one row per account (184 px) carrying the lane that
+  binds plus a dot per other lane; expanded is provider-led and lossless
+  (301 px), every window of every account as a chip with its own number and
+  return time, so the five-hour window and a spare that comes back tomorrow
+  are both readable. A spent lane trades its zero for `back 4d`, at every
+  width. `node render.mjs [outDir]` captures each ladder over CDP,
+  `PAGES=round3` captures one; pages also work over `file://`.
 
 - [`accounts-board/`](./accounts-board/) — fullscreen second-screen monitor
   for the LLM accounts (quota windows, resets, auth health). Two rounds on
