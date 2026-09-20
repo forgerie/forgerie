@@ -8,7 +8,7 @@ import type { SettingsSection } from "../settingsRoute";
 import { corePlugin } from "./core";
 import { PluginRegistry } from "./registry";
 import { themePackPlugin } from "./themes";
-import type { InboxShelfContext, PluginRuntimeContext, ThemeTokens, WorkspaceFiles, WorkspaceHost, WorkspaceLabelContext, WorkspaceLabelItem, WorkspacePanelContext } from "./types";
+import type { InboxShelfContext, PluginRuntimeContext, PluginSettingsField, ThemeTokens, WorkspaceFiles, WorkspaceHost, WorkspaceLabelContext, WorkspaceLabelItem, WorkspacePanelContext } from "./types";
 
 function createContext(statePatch: Partial<AppState> = {}) {
   const calls: string[] = [];
@@ -136,6 +136,50 @@ describe("PluginRegistry", () => {
     expect(shelves).toHaveLength(1);
     expect(shelves[0]?.id).toBe("quota:inbox.quota");
     expect(shelves[0]?.render(createInboxShelfContext("local"))).toBeDefined();
+  });
+
+  it("reports the settings fields a plugin declares, tagged with its machine", () => {
+    const registry = new PluginRegistry();
+    const fields = [quotaBarField("five_hour", "Five-hour window")];
+    registry.register({
+      id: "quota",
+      plugin: { apiVersion: 1, name: "Quota", settings: fields, activate: () => ({ contributions: {} }) },
+    });
+    registry.register({
+      id: machineScopedPluginId("remote-a", "quota"),
+      plugin: { apiVersion: 1, name: "Quota", settings: fields, activate: () => ({ contributions: {} }) },
+      machineId: "remote-a",
+      sourcePluginId: "quota",
+      machineSpecific: true,
+    });
+
+    expect(registry.getPluginSettings()).toEqual([
+      { pluginId: "quota", sourcePluginId: "quota", fields },
+      { pluginId: machineScopedPluginId("remote-a", "quota"), sourcePluginId: "quota", machineId: "remote-a", fields },
+    ]);
+  });
+
+  it("omits plugins that declare no settings fields", () => {
+    const registry = new PluginRegistry();
+    registry.register({ id: "plain", plugin: { apiVersion: 1, name: "Plain", activate: () => ({ contributions: {} }) } });
+    registry.register({ id: "empty", plugin: { apiVersion: 1, name: "Empty", settings: [], activate: () => ({ contributions: {} }) } });
+
+    expect(registry.getPluginSettings()).toEqual([]);
+  });
+
+  it("rejects a settings field with a duplicate id", () => {
+    const registry = new PluginRegistry();
+    expect(() => {
+      registry.register({
+        id: "quota",
+        plugin: {
+          apiVersion: 1,
+          name: "Quota",
+          settings: [quotaBarField("five_hour", "Five-hour window"), quotaBarField("five_hour", "Five-hour window (again)")],
+          activate: () => ({ contributions: {} }),
+        },
+      });
+    }).toThrow("Duplicate settings field id for quota: five_hour");
   });
 
   it("exposes the prompt helper to workspace panel callbacks", () => {
@@ -728,6 +772,10 @@ function createWorkspaceLabelContext(machineId: string, workspace = testWorkspac
     files,
     host,
   };
+}
+
+function quotaBarField(id: string, label: string): PluginSettingsField {
+  return { id, label, type: "boolean", default: true };
 }
 
 function createInboxShelfContext(machineId: string): InboxShelfContext {

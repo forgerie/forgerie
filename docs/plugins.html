@@ -342,7 +342,8 @@ After editing, check the manifest endpoint and browser-console failure cases.</c
               <p>
                 Plugins are enabled by default. Set <code>enabled</code> to <code>false</code> to remove a plugin from
                 <code>/pi-web-plugins/manifest.json</code> so it is not imported or activated on the next page load.
-                The optional <code>settings</code> object is reserved for plugin-specific settings.
+                The optional <code>settings</code> object holds the values for the fields the plugin declares.
+                <strong>Settings &rarr; Forgerie plugins</strong> writes them, next to each plugin's enable toggle.
               </p>
               <p>
                 After changing plugin enablement, reload the Forgerie browser tab. Already-loaded plugin JavaScript is not

@@ -11,7 +11,7 @@ describe("settings-plugins-panel layout", () => {
     panel.configResponse = configResponse({ plugins: { "remote-enabled": { enabled: true } } });
     panel.pluginsResponse = { plugins: [pluginInfo("remote-enabled", true)] };
     panel.error = "Failed to load Forgerie plugin settings from Lab Mac: Forgerie plugins: timed out.";
-    panel.savedMessage = "Config saved.";
+    panel.savedMessage = "Plugin enablement saved. Reload the tab to apply.";
 
     const rendered = flattenTemplateContent(panel.render());
 
@@ -20,7 +20,7 @@ describe("settings-plugins-panel layout", () => {
       "Browser plugins on ",
       "Lab Mac (remote machine)",
       "Failed to load Forgerie plugin settings from Lab Mac: Forgerie plugins: timed out.",
-      "Config saved. Reload the tab to apply.",
+      "Plugin enablement saved. Reload the tab to apply.",
       "run with your user permissions",
       "Saved under ",
       "remote-enabled",

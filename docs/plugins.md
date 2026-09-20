@@ -207,7 +207,18 @@ Plugin preferences are stored under the top-level `plugins` config key in the Fo
 }
 ```
 
-Plugins are enabled by default. Set `enabled` to `false` to remove a plugin from `/pi-web-plugins/manifest.json` so the browser will not import or activate it on the next page load. The optional `settings` object is reserved for plugin-specific settings.
+Plugins are enabled by default. Set `enabled` to `false` to remove a plugin from `/pi-web-plugins/manifest.json` so the browser will not import or activate it on the next page load. The optional `settings` object holds the values for the fields the plugin declares; **Settings -> Forgerie plugins** writes them. A plugin with no declared fields leaves it empty.
+
+```json
+{
+  "plugins": {
+    "cliproxyapi-quota": {
+      "enabled": true,
+      "settings": { "five_hour": false }
+    }
+  }
+}
+```
 
 After changing plugin enablement, reload the Forgerie browser tab. Already-loaded plugin JavaScript is not unloaded from the current page.
 
@@ -555,10 +566,65 @@ interface InboxShelfContext {
   host: {
     requestRender(): void;
   };
+  /** Saved values for this plugin's declared settings fields. */
+  settings?: Record<string, unknown>;
 }
 ```
 
 Use `machineSpecific: true` when a shelf depends on services or files that exist only on its source machine. The shelf is trusted browser code. It can fetch a separate service directly when that service permits the Forgerie origin through CORS.
+
+### Plugin settings
+
+A plugin can declare the settings the user changes in **Settings -> Forgerie plugins**. Declare the fields on the plugin object. Forgerie renders one control per field inside that plugin's card and saves the values under `plugins[<plugin id>].settings` in the Forgerie config file.
+
+```js
+const plugin = {
+  apiVersion: 1,
+  name: "CLIProxyAPI Quota",
+  settings: [
+    {
+      id: "five_hour",
+      label: "Five-hour window",
+      description: "Draw the rolling five-hour allowance.",
+      type: "boolean",
+      default: true,
+    },
+  ],
+  activate: ({ html }) => ({ contributions: { inboxShelves: [/* ... */] } }),
+};
+```
+
+Field type:
+
+```ts
+interface PluginSettingsField {
+  id: string;
+  label: string;
+  description?: string;
+  type: "boolean";
+  default: boolean;
+}
+```
+
+Read the saved values from the surface context. Inbox shelves receive them today as `context.settings`, keyed by field id. Treat an absent key as the field's declared `default`:
+
+```js
+render: (context) => html`
+  <my-quota-shelf
+    .context=${context}
+    .showFiveHour=${context.settings?.["five_hour"] !== false}
+  ></my-quota-shelf>
+`
+```
+
+Rules:
+
+- `id` must be unique within the plugin and must not change once shipped; it is the config key.
+- `boolean` is the only field type today. A plugin that needs another type must not invent one; ask for it here first.
+- A field with a duplicate id, a missing label, or an unknown type fails plugin registration with a clear error, so a broken declaration is visible instead of silently unrendered.
+- Settings reach a running plugin from the config the browser already holds, so a saved value applies without a tab reload. Plugin enablement still needs a tab reload.
+- A remote plugin is registered under a machine-scoped id but saves settings under its own id. Forgerie resolves both.
+- Declared fields do not create a config section of their own. They render under the plugin's card, and only for the plugin instance on the machine the plugin list targets.
 
 ### Workspace panels
 

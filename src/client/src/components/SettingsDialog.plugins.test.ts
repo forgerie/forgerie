@@ -77,7 +77,7 @@ describe("settings-dialog plugin settings machine targeting", () => {
     expect(pluginsSpy.mock.calls).toEqual([["remote-a"]]);
     expect(getDialogProperty(dialog, "selectedPluginConfigResponse")).toBe(savedConfig);
     expect(getDialogProperty(dialog, "selectedPluginsResponse")).toBe(refreshedPlugins);
-    expect(getDialogProperty(dialog, "savedMessage")).toBe("Config saved.");
+    expect(getDialogProperty(dialog, "savedMessage")).toBe("Plugin enablement saved. Reload the tab to apply.");
     expect(getDialogProperty(dialog, "saving")).toBe(false);
   });
 
@@ -124,6 +124,48 @@ describe("settings-dialog plugin settings machine targeting", () => {
       spawnSessions: false,
       plugins: { info: { enabled: true }, gateway: { settings: { theme: "dark" } } },
     });
+  });
+
+  it("saves one plugin setting as a settings-only patch and preserves its other keys", async () => {
+    stubWindowTimers();
+    const baseConfig = configResponse({
+      plugins: {
+        quota: { enabled: true, settings: { five_hour: true, seven_day: true }, custom: "keep" },
+      },
+    });
+    const savedConfig = configResponse({
+      plugins: {
+        quota: { enabled: true, settings: { five_hour: false, seven_day: true }, custom: "keep" },
+      },
+    });
+    const saveSpy = vi.spyOn(configApi, "saveConfig").mockResolvedValue(savedConfig);
+    vi.spyOn(pluginsApi, "plugins").mockResolvedValue(pluginsResponse([pluginInfo("quota", true)]));
+    const dialog = new SettingsDialog();
+    dialog.machine = remoteMachine;
+    setDialogProperty(dialog, "selectedPluginConfigResponse", baseConfig);
+
+    await callDialogPromise(dialog, "savePluginSetting", "quota", "five_hour", false);
+
+    expect(saveSpy.mock.calls).toEqual([[
+      {
+        plugins: {
+          quota: { enabled: true, settings: { five_hour: false, seven_day: true }, custom: "keep" },
+        },
+      },
+      "remote-a",
+    ]]);
+    expect(getDialogProperty(dialog, "savedMessage")).toBe("Plugin settings saved.");
+  });
+
+  it("refuses to save a plugin setting before the selected machine config has loaded", async () => {
+    const saveSpy = vi.spyOn(configApi, "saveConfig");
+    const dialog = new SettingsDialog();
+    dialog.machine = remoteMachine;
+
+    await callDialogPromise(dialog, "savePluginSetting", "quota", "five_hour", false);
+
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(getDialogProperty(dialog, "pluginError")).toBe("Plugin config is not loaded for Lab Mac (remote machine). Reload before changing plugin settings.");
   });
 
   it("ignores stale plugin load responses after the selected machine changes", async () => {

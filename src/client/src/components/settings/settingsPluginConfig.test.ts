@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PiWebConfigResponse, PiWebConfigValues } from "../../api";
-import { mergeSelectedMachinePluginConfig, pluginEnabledConfigPatch } from "./settingsPluginConfig";
+import { mergeSelectedMachinePluginConfig, pluginEnabledConfigPatch, pluginSettingsBoolean, pluginSettingsConfigPatch } from "./settingsPluginConfig";
 
 describe("plugin settings config helpers", () => {
   it("builds plugin-only save patches while preserving existing plugin config", () => {
@@ -55,6 +55,34 @@ describe("plugin settings config helpers", () => {
         plugins: { info: { enabled: true }, metrics: { enabled: false } },
       },
     });
+  });
+
+  it("patches one plugin's saved settings without dropping its enablement or other keys", () => {
+    const patch = pluginSettingsConfigPatch(
+      {
+        plugins: {
+          quota: { enabled: true, settings: { five_hour: true, seven_day: true }, custom: "keep" },
+          other: { enabled: false },
+        },
+      },
+      "quota",
+      { five_hour: false },
+    );
+
+    expect(Object.keys(patch)).toEqual(["plugins"]);
+    expect(patch).toEqual({
+      plugins: {
+        quota: { enabled: true, settings: { five_hour: false, seven_day: true }, custom: "keep" },
+        other: { enabled: false },
+      },
+    });
+  });
+
+  it("reads a saved boolean setting and falls back to the field default", () => {
+    expect(pluginSettingsBoolean({ five_hour: false }, "five_hour", true)).toBe(false);
+    expect(pluginSettingsBoolean({ five_hour: "no" }, "five_hour", true)).toBe(true);
+    expect(pluginSettingsBoolean(undefined, "five_hour", true)).toBe(true);
+    expect(pluginSettingsBoolean({ five_hour: true }, "five_hour", false)).toBe(true);
   });
 });
 

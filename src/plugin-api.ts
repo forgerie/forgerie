@@ -40,7 +40,31 @@ export type SvgTemplateTag = (strings: TemplateStringsArray, ...values: unknown[
 export interface PiWebPlugin {
   apiVersion: 1;
   name: string;
+  /**
+   * Settings this plugin lets the user change in Settings → Forgerie plugins.
+   * Declare the fields here; read the saved values from the `settings` field of
+   * the surface context (today, `InboxShelfContext.settings`).
+   */
+  settings?: readonly PluginSettingsField[];
   activate: (context: PluginActivationContext) => PluginActivationResult;
+}
+
+/**
+ * One user-changeable plugin setting.
+ *
+ * `id` is the key the plugin reads back. The host stores values under
+ * `plugins[<plugin id>].settings[<field id>]` in the Forgerie config file.
+ */
+export interface PluginSettingsField {
+  /** Stable key this field is stored and read by. */
+  id: string;
+  /** Short name shown beside the control. */
+  label: string;
+  /** One sentence explaining what the setting changes. */
+  description?: string;
+  type: "boolean";
+  /** Value used until the user saves one. */
+  default: boolean;
 }
 
 export interface PluginActivationContext {
@@ -171,6 +195,11 @@ export interface InboxShelfContext {
   machine: PluginMachine;
   state?: PluginRuntimeState;
   host: WorkspaceHost;
+  /**
+   * Saved values for this plugin's declared `settings` fields, keyed by field
+   * id. Empty when the plugin declares none or nothing is saved yet.
+   */
+  settings?: Record<string, unknown>;
 }
 
 export interface InboxShelfContribution {

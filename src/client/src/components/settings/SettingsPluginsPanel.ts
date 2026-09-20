@@ -1,8 +1,10 @@
-import { css, html, LitElement, type TemplateResult } from "lit";
+import { css, html, LitElement, nothing, type TemplateResult } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { PiWebConfigResponse, PiWebPluginInfo, PiWebPluginsResponse } from "../../api";
+import type { PiWebConfigResponse, PiWebPluginInfo, PiWebPluginSettings, PiWebPluginsResponse } from "../../api";
+import type { PluginSettingsField } from "../../plugins/types";
 import "./SettingsPanelFrame";
 import type { SettingsNotice } from "./SettingsPanelFrame";
+import { pluginSettingsBoolean } from "./settingsPluginConfig";
 
 @customElement("settings-plugins-panel")
 export class SettingsPluginsPanel extends LitElement {
@@ -13,8 +15,10 @@ export class SettingsPluginsPanel extends LitElement {
   @property() error = "";
   @property() savedMessage = "";
   @property() targetLabel = "local (local gateway)";
+  @property({ attribute: false }) settingsFieldsForPlugin?: (pluginId: string) => readonly PluginSettingsField[];
   @property({ attribute: false }) onReload?: () => void | Promise<void>;
   @property({ attribute: false }) onTogglePlugin?: (pluginId: string, enabled: boolean) => void | Promise<void>;
+  @property({ attribute: false }) onSavePluginSetting?: (pluginId: string, fieldId: string, value: boolean) => void | Promise<void>;
 
   override render(): TemplateResult {
     const plugins = this.pluginsResponse?.plugins ?? [];
@@ -40,7 +44,7 @@ export class SettingsPluginsPanel extends LitElement {
     if (this.shouldShowConfigUnavailableNotice(showTrustedCodeWarning)) {
       notices.push({ type: "availability", content: "Configuration unavailable. Reload before toggling plugins." });
     }
-    if (this.savedMessage !== "") notices.push({ type: "success", content: `${this.savedMessage} Reload the tab to apply.` });
+    if (this.savedMessage !== "") notices.push({ type: "success", content: this.savedMessage });
     if (showTrustedCodeWarning) {
       notices.push({
         type: "security",
@@ -72,6 +76,7 @@ export class SettingsPluginsPanel extends LitElement {
   private renderPlugin(plugin: PiWebPluginInfo): TemplateResult {
     const configured = this.configResponse?.config.plugins?.[plugin.id];
     const configuredState = configured?.enabled === false ? "Config disabled" : configured?.enabled === true ? "Config enabled" : "Default enabled";
+    const fields = this.settingsFieldsForPlugin?.(plugin.id) ?? [];
     return html`
       <article class=${`plugin-card${plugin.enabled ? "" : " disabled"}`}>
         <div class="plugin-main">
@@ -83,8 +88,41 @@ export class SettingsPluginsPanel extends LitElement {
           <input type="checkbox" .checked=${plugin.enabled} ?disabled=${this.saving || this.configResponse === undefined} @change=${(event: Event) => { void this.togglePlugin(plugin, event); }}>
           <span>${plugin.enabled ? "Enabled" : "Disabled"}</span>
         </label>
+        ${fields.length === 0 ? nothing : this.renderPluginSettings(plugin, fields, configured?.settings)}
       </article>
     `;
+  }
+
+  private renderPluginSettings(plugin: PiWebPluginInfo, fields: readonly PluginSettingsField[], settings: PiWebPluginSettings | undefined): TemplateResult {
+    return html`
+      <fieldset class="plugin-settings">
+        <legend>Settings</legend>
+        ${fields.map((field) => this.renderPluginSetting(plugin, field, settings))}
+      </fieldset>
+    `;
+  }
+
+  private renderPluginSetting(plugin: PiWebPluginInfo, field: PluginSettingsField, settings: PiWebPluginSettings | undefined): TemplateResult {
+    const disabled = this.saving || this.configResponse === undefined;
+    return html`
+      <label class="plugin-setting">
+        <span class="plugin-setting-text">
+          <strong>${field.label}</strong>
+          ${field.description === undefined ? nothing : html`<small>${field.description}</small>`}
+        </span>
+        <input
+          type="checkbox"
+          .checked=${pluginSettingsBoolean(settings, field.id, field.default)}
+          ?disabled=${disabled}
+          @change=${(event: Event) => { void this.savePluginSetting(plugin, field, event); }}
+        >
+      </label>
+    `;
+  }
+
+  private async savePluginSetting(plugin: PiWebPluginInfo, field: PluginSettingsField, event: Event): Promise<void> {
+    const value = event.target instanceof HTMLInputElement ? event.target.checked : pluginSettingsBoolean(undefined, field.id, field.default);
+    await this.onSavePluginSetting?.(plugin.id, field.id, value);
   }
 
   private async togglePlugin(plugin: PiWebPluginInfo, event: Event): Promise<void> {
@@ -108,9 +146,25 @@ export class SettingsPluginsPanel extends LitElement {
     .toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
     .toggle input { width: 18px; height: 18px; accent-color: var(--pi-accent); }
 
+    .plugin-settings { grid-column: 1 / -1; min-width: 0; margin: 4px 0 0; padding: 10px 0 0; border: 0; border-top: 1px solid var(--pi-border-muted); }
+    .plugin-settings legend { padding: 0; color: var(--pi-muted); font-size: var(--pi-text-sm); text-transform: uppercase; letter-spacing: .06em; }
+    .plugin-setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 10px; padding: 8px 0; cursor: pointer; }
+    .plugin-setting + .plugin-setting { border-top: 1px solid color-mix(in oklab, var(--pi-border-muted) 55%, transparent); }
+    .plugin-setting-text { display: grid; gap: 2px; min-width: 0; }
+    .plugin-setting-text strong { font-weight: 500; }
+    .plugin-setting-text small { color: var(--pi-muted); }
+    .plugin-setting input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--pi-accent); }
+    .plugin-setting input:disabled { opacity: .55; cursor: not-allowed; }
+    .plugin-setting:has(input:disabled) { cursor: not-allowed; opacity: .75; }
+
     @container (max-width: 760px) {
       .plugin-card { grid-template-columns: minmax(0, 1fr); align-items: start; }
       .toggle { justify-self: start; }
+    }
+
+    @container (max-width: 420px) {
+      .plugin-setting { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+      .plugin-setting input { justify-self: start; }
     }
   `;
 }

@@ -3,6 +3,8 @@ import { customElement, property, state } from "lit/decorators.js";
 import type { AppAction } from "../actions";
 import { configApi, piPackagesApi, pluginsApi, type Machine, type MachineRuntime, type PiPackageMutationResponse, type PiPackageScope, type PiPackagesResponse, type PiWebConfigResponse, type PiWebConfigValues, type PiWebPluginsResponse } from "../api";
 import type { SettingsSection } from "../settingsRoute";
+import type { PluginSettingsField } from "../plugins/types";
+import type { RegisteredPluginSettings } from "../plugins/registry";
 import { DEFAULT_INBOX_DENSITY, type InboxDensity } from "../inboxDensity";
 import "./ModalSurface";
 import "./settings/SettingsGeneralPanel";
@@ -15,7 +17,7 @@ import { friendlyPiPackageErrorMessage, piPackageMutationFollowUpMessage, piPack
 import { loadGatewaySettingsData, loadPiPackagesData } from "./settings/settingsDataLoading";
 import { mergeSelectedMachineAccessConfig } from "./settings/settingsMachineAccessConfig";
 import { friendlySelectedMachineSettingsErrorMessage, settingsMachineTarget, settingsMachineTargetLabel, type SettingsMachineTarget } from "./settings/settingsMachineTarget";
-import { mergeSelectedMachinePluginConfig, pluginEnabledConfigPatch } from "./settings/settingsPluginConfig";
+import { mergeSelectedMachinePluginConfig, pluginEnabledConfigPatch, pluginSettingsConfigPatch } from "./settings/settingsPluginConfig";
 import { mergeSelectedMachineSessiondConfig } from "./settings/settingsSessiondConfig";
 
 @customElement("settings-dialog")
@@ -29,6 +31,8 @@ export class SettingsDialog extends LitElement {
   @property({ attribute: false }) onNavigate?: (section: SettingsSection) => void;
   @property({ attribute: false }) onClose?: () => void;
   @property({ attribute: false }) onConfigSaved?: (config: PiWebConfigValues) => void;
+  /** Settings fields declared by the plugins the browser has loaded. */
+  @property({ attribute: false }) pluginSettings: readonly RegisteredPluginSettings[] = [];
   @property({ attribute: false }) onRefreshMachineRuntime?: (machineId: string) => void | Promise<void>;
   @state() private configResponse: PiWebConfigResponse | undefined;
   @state() private accessConfigResponse: PiWebConfigResponse | undefined;
@@ -180,8 +184,10 @@ export class SettingsDialog extends LitElement {
           .error=${this.pluginError}
           .savedMessage=${this.savedMessage}
           .targetLabel=${settingsMachineTargetLabel(this.settingsTarget())}
+          .settingsFieldsForPlugin=${(pluginId: string) => this.settingsFieldsForTargetPlugin(pluginId)}
           .onReload=${() => this.loadPluginsForTarget()}
           .onTogglePlugin=${(pluginId: string, enabled: boolean) => this.togglePlugin(pluginId, enabled)}
+          .onSavePluginSetting=${(pluginId: string, fieldId: string, value: boolean) => this.savePluginSetting(pluginId, fieldId, value)}
         ></settings-plugins-panel>
       `;
     }
@@ -340,7 +346,26 @@ export class SettingsDialog extends LitElement {
       this.pluginError = `Plugin config is not loaded for ${settingsMachineTargetLabel(target)}. Reload before changing plugin enablement.`;
       return;
     }
-    const patch = pluginEnabledConfigPatch(this.selectedPluginConfigResponse.config, pluginId, enabled);
+    await this.savePluginConfigPatch(pluginEnabledConfigPatch(this.selectedPluginConfigResponse.config, pluginId, enabled), target, "enablement");
+  }
+
+  private async savePluginSetting(pluginId: string, fieldId: string, value: boolean): Promise<void> {
+    if (this.saving) return;
+    const target = this.settingsTarget();
+    if (this.selectedPluginConfigResponse === undefined) {
+      this.pluginError = `Plugin config is not loaded for ${settingsMachineTargetLabel(target)}. Reload before changing plugin settings.`;
+      return;
+    }
+    await this.savePluginConfigPatch(pluginSettingsConfigPatch(this.selectedPluginConfigResponse.config, pluginId, { [fieldId]: value }), target, "settings");
+  }
+
+  /**
+   * Persist one plugin-only patch and refresh the selected machine's plugin
+   * list. Plugin enablement needs a tab reload; saved settings reach the
+   * running plugin the moment the gateway config comes back, so the two
+   * messages differ.
+   */
+  private async savePluginConfigPatch(patch: PiWebConfigValues, target: SettingsMachineTarget, kind: "enablement" | "settings"): Promise<void> {
     this.saving = true;
     this.pluginError = "";
     this.savedMessage = "";
@@ -355,7 +380,7 @@ export class SettingsDialog extends LitElement {
       const pluginRefreshError = await this.refreshPluginsForTarget(target);
       if (!this.isCurrentSettingsTarget(target)) return;
       if (pluginRefreshError !== undefined) this.pluginError = pluginRefreshError;
-      this.showSavedMessage();
+      this.showSavedMessage(kind === "enablement" ? "Plugin enablement saved. Reload the tab to apply." : "Plugin settings saved.");
     } catch (error) {
       if (this.isCurrentSettingsTarget(target)) {
         this.pluginError = `Failed to save Forgerie plugin config on ${settingsMachineTargetLabel(target)}: ${friendlySelectedMachineSettingsErrorMessage(errorMessage(error), target)}`;
@@ -363,6 +388,20 @@ export class SettingsDialog extends LitElement {
     } finally {
       this.saving = false;
     }
+  }
+
+  /**
+   * The settings fields the selected machine's copy of a plugin declared.
+   *
+   * The plugin list and the config file both use the plugin's own id, while a
+   * remote plugin registers under a machine-scoped one. Match on both the id
+   * and the machine so two machines running the same plugin cannot borrow each
+   * other's fields.
+   */
+  private settingsFieldsForTargetPlugin(pluginId: string): readonly PluginSettingsField[] {
+    const target = this.settingsTarget();
+    const machineId = target.kind === "local" ? undefined : target.id;
+    return this.pluginSettings.find((entry) => entry.sourcePluginId === pluginId && entry.machineId === machineId)?.fields ?? [];
   }
 
   private async saveConfig(config: PiWebConfigValues): Promise<void> {
@@ -566,11 +605,11 @@ export class SettingsDialog extends LitElement {
     if (hadPackageOperation) this.saving = false;
   }
 
-  private showSavedMessage(): void {
-    this.savedMessage = "Config saved.";
+  private showSavedMessage(message = "Config saved."): void {
+    this.savedMessage = message;
     if (this.savedMessageTimer !== undefined) window.clearTimeout(this.savedMessageTimer);
     this.savedMessageTimer = window.setTimeout(() => {
-      if (this.savedMessage === "Config saved.") this.savedMessage = "";
+      if (this.savedMessage === message) this.savedMessage = "";
       this.savedMessageTimer = undefined;
     }, 3000);
   }

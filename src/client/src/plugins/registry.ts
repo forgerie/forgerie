@@ -1,5 +1,6 @@
 import { html, svg } from "lit";
-import type { InboxShelfContext, InboxShelfContribution, PiWebPluginRegistration, PluginAction, PluginRuntimeContext, QualifiedContributionId, QualifiedInboxShelfContribution, QualifiedPluginAction, QualifiedThemeContribution, QualifiedThemePairContribution, QualifiedWorkspaceLabelContribution, QualifiedWorkspacePanelContribution, ThemeContribution, ThemePairContribution, WorkspaceLabelContext, WorkspaceLabelContribution, WorkspaceLabelItem, WorkspacePanelContext, WorkspacePanelContribution } from "./types";
+import type { InboxShelfContext, InboxShelfContribution, PiWebPluginRegistration, PluginAction, PluginRuntimeContext, PluginSettingsField, QualifiedContributionId, QualifiedInboxShelfContribution, QualifiedPluginAction, QualifiedThemeContribution, QualifiedThemePairContribution, QualifiedWorkspaceLabelContribution, QualifiedWorkspacePanelContribution, ThemeContribution, ThemePairContribution, WorkspaceLabelContext, WorkspaceLabelContribution, WorkspaceLabelItem, WorkspacePanelContext, WorkspacePanelContribution } from "./types";
+import { formatUnknownValue, readPluginSettingsFields } from "./pluginSettingsFields";
 
 const idPattern = /^[a-z][a-z0-9.-]*$/u;
 const localIdPattern = /^[a-z][a-z0-9.-]*$/u;
@@ -14,6 +15,22 @@ type RegisteredPluginAction = Omit<PluginAction, "id"> & {
   sourcePluginId?: string;
 };
 
+/**
+ * The settings fields one registered plugin declares, tagged with the machine
+ * the plugin instance belongs to.
+ *
+ * A remote plugin registers under a machine-scoped id, while the settings
+ * surface and the config file both use the plugin's own id. Both are kept so
+ * the settings panel can match on either.
+ */
+export interface RegisteredPluginSettings {
+  /** The id the plugin registered under, machine-scoped for remote plugins. */
+  pluginId: string;
+  sourcePluginId: string;
+  machineId?: string;
+  fields: readonly PluginSettingsField[];
+}
+
 export class PluginRegistry {
   private readonly actions: RegisteredPluginAction[] = [];
   private readonly inboxShelves: QualifiedInboxShelfContribution[] = [];
@@ -21,6 +38,7 @@ export class PluginRegistry {
   private readonly workspaceLabels: QualifiedWorkspaceLabelContribution[] = [];
   private readonly themes: QualifiedThemeContribution[] = [];
   private readonly themePairs: QualifiedThemePairContribution[] = [];
+  private readonly pluginSettings: RegisteredPluginSettings[] = [];
   private readonly pluginIds = new Set<string>();
   private readonly gatewayPluginIds = new Set<string>();
   private readonly gatewayMachineSpecificPluginIds = new Set<string>();
@@ -38,6 +56,7 @@ export class PluginRegistry {
     const apiVersion: unknown = plugin.apiVersion;
     if (apiVersion !== 1) throw new Error(`Unsupported plugin API version for ${id}: ${String(apiVersion)}`);
     const result = plugin.activate({ apiVersion: 1, pluginId: id, html, svg });
+    this.registerSettingsFields(id, registration, plugin.settings);
     const contributions = result.contributions;
     for (const action of contributions.actions ?? []) this.actions.push(this.qualifyAction(id, action, registration.machineId, registration.sourcePluginId));
     for (const shelf of contributions.inboxShelves ?? []) this.inboxShelves.push(this.qualifyInboxShelf(id, shelf, registration.machineId, registration.sourcePluginId));
@@ -91,6 +110,14 @@ export class PluginRegistry {
     return [...this.workspacePanels].sort((left, right) => (left.order ?? 1000) - (right.order ?? 1000) || left.title.localeCompare(right.title));
   }
 
+  /**
+   * The settings fields every registered plugin declares, in registration
+   * order. Plugins that declare none are absent.
+   */
+  getPluginSettings(): readonly RegisteredPluginSettings[] {
+    return this.pluginSettings;
+  }
+
   getThemes(): QualifiedThemeContribution[] {
     return [...this.themes].sort((left, right) => (left.order ?? 1000) - (right.order ?? 1000) || left.name.localeCompare(right.name));
   }
@@ -106,6 +133,17 @@ export class PluginRegistry {
         if (contribution.visible?.(context) === false) return [];
         return contribution.items(context);
       });
+  }
+
+  private registerSettingsFields(pluginId: string, registration: PiWebPluginRegistration, fields: readonly PluginSettingsField[] | undefined): void {
+    const validated = readPluginSettingsFields(pluginId, fields);
+    if (validated.length === 0) return;
+    this.pluginSettings.push({
+      pluginId,
+      sourcePluginId: registration.sourcePluginId ?? pluginId,
+      ...(registration.machineId === undefined ? {} : { machineId: registration.machineId }),
+      fields: validated,
+    });
   }
 
   private qualifyAction(pluginId: string, action: PluginAction, machineId: string | undefined, sourcePluginId: string | undefined): RegisteredPluginAction {
@@ -250,16 +288,6 @@ function addMappedSetValue(map: Map<string, Set<string>>, key: string, value: st
   const existing = map.get(key);
   if (existing === undefined) map.set(key, new Set([value]));
   else existing.add(value);
-}
-
-function formatUnknownValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint" || typeof value === "symbol" || typeof value === "function" || value === null || value === undefined) return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return Object.prototype.toString.call(value);
-  }
 }
 
 function runtimeContextMachineId(context: PluginRuntimeContext): string {
