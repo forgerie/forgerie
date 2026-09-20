@@ -20,7 +20,7 @@
  *  - No viewport breakpoints; no device or user-agent sniffing.
  */
 
-import { LitElement, css, html, nothing, type TemplateResult } from "lit";
+import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Project, SessionInfo, Workspace } from "../api";
 import type { GlobalSessionsState } from "../appState";
@@ -341,7 +341,7 @@ export class SessionInboxPanel extends LitElement {
     this.onSelectSession?.(next);
   }
 
-  override willUpdate(): void {
+  override willUpdate(changedProperties: PropertyValues<this>): void {
     // Re-load prefs when the machine changes.
     const machineId = this.globalSessions?.machineId;
     if (machineId !== undefined && machineId !== this.loadedMachineId) {
@@ -353,9 +353,19 @@ export class SessionInboxPanel extends LitElement {
       this.observedWorkingSince.clear();
     }
 
+    const boardInputsChanged =
+      this.updateDerivation === undefined ||
+      changedProperties.has("globalSessions") ||
+      changedProperties.has("unreadSessionIds") ||
+      changedProperties.has("unreadCompletedAt") ||
+      changedProperties.has("projects") ||
+      changedProperties.has("workspacesByProjectId");
+
     // Own one derivation for this Lit update. Auto-expand and render consume
     // this same snapshot, so their view of row state and location cannot differ.
-    this.updateDerivation = this.deriveForUpdate();
+    if (boardInputsChanged) {
+      this.updateDerivation = this.deriveForUpdate();
+    }
     this.syncWorkingStarts(this.updateDerivation?.board, Date.now());
     if (this.updateDerivation === undefined) {
       // Loading and empty renders have no keyboard-visible rows. Do not let

@@ -709,8 +709,8 @@ export class PiWebApp extends LitElement {
       this.readyChatIdentity = undefined;
     }
     if (machineUnreadInputsChanged(previous, this.state)) this.syncSessionUnreadMachines();
-    this.syncUnreadSessionIds();
-    this.syncUnreadPresence();
+    if (sessionUnreadIdsInputsChanged(previous, this.state)) this.syncUnreadSessionIds();
+    if (unreadPresenceInputsChanged(previous, this.state)) this.syncUnreadPresence();
     this.handleActivityTransition(previous, this.state);
     this.handleWorkspaceChange(previous, this.state);
     this.handleMachineChange(previous, this.state);
@@ -3966,6 +3966,20 @@ function selectedChatIdentity(state: Pick<AppState, "selectedMachine" | "selecte
 
 function machineUnreadInputsChanged(previous: AppState, next: AppState): boolean {
   return previous.machines !== next.machines;
+}
+
+function sessionUnreadIdsInputsChanged(previous: AppState, next: AppState): boolean {
+  return previous.globalSessions !== next.globalSessions
+    || previous.sessions !== next.sessions
+    || selectedMachineId(previous) !== selectedMachineId(next);
+}
+
+function unreadPresenceInputsChanged(previous: AppState, next: AppState): boolean {
+  return previous.machines !== next.machines
+    || selectedMachineId(previous) !== selectedMachineId(next)
+    || previous.projects !== next.projects
+    || previous.workspaces !== next.workspaces
+    || previous.workspacesByProjectId !== next.workspacesByProjectId;
 }
 
 function machineActivitySubscriptionInputsChanged(previous: AppState, next: AppState): boolean {
