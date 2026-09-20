@@ -1,0 +1,58 @@
+.m { --quiet: #39434d; --rail: #171c21; font-variant-numeric: tabular-nums; }
+.m .tone-ok { color: var(--ink); }
+.m .tone-warn { color: var(--warn); }
+.m .tone-danger { color: var(--danger); }
+.m .tone-dead { color: var(--dim); }
+
+.m-row {
+  display: grid; grid-template-columns: max-content minmax(40px, 1fr) max-content 3.2em;
+  align-items: center; column-gap: 9px; padding: 5px 10px; min-height: 26px;
+}
+.m-row + .m-row { border-top: 1px solid #14181c; }
+.m-row.routed { box-shadow: inset 2px 0 0 #4d5a66; }
+.m-row.dormant { min-height: 14px; padding: 2px 10px; }
+.m-tag { font: 9.5px/1.6 var(--num); letter-spacing: .06em; color: var(--dim); min-width: 1.8em; }
+.m-body { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.m-legend { font: 9px/1 var(--num); color: var(--dim); font-weight: 400; white-space: nowrap; }
+.m-val { font-size: 12px; text-align: right; }
+.m-tm { color: var(--dim); font-size: 10.5px; text-align: right; white-space: nowrap; }
+
+.m-bool { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: 0 0 7px; }
+.m-bool.off { background: none; box-shadow: inset 0 0 0 1.5px var(--danger); }
+
+.m-wait { position: relative; flex: 1 1 0; height: 2px; border-radius: 1px; background: var(--rail); }
+.m-wait > i { position: absolute; inset: 0 auto 0 0; width: var(--fill); border-radius: 1px; background: #333c45; }
+
+/* layers · one block, a lane per meter */
+.m-layers { display: flex; flex-direction: column; gap: 1px; flex: 1 1 0; min-width: 0; }
+.m-layer { position: relative; height: 2px; border-radius: 1px; background: var(--rail); }
+.m-layer > i { position: absolute; inset: 0 auto 0 0; width: var(--fill); border-radius: 1px; background: var(--quiet); }
+.m-layer.tone-warn > i { background: var(--warn); }
+.m-layer.tone-danger > i { background: var(--danger); }
+
+/* shade · fills over each other, tightest brightest */
+.m-shade { position: relative; flex: 1 1 0; min-width: 0; height: 5px; border-radius: 2px; background: var(--rail); overflow: hidden; }
+.m-step { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 2px; background: currentColor; }
+.m-step.s0 { opacity: .30; }
+.m-step.s1 { opacity: .58; }
+.m-step.s2 { opacity: 1; }
+.m-shade .tone-ok { color: #6d7a86; }
+
+/* ticks · one fill at the tightest meter, the rest as stems */
+.m-ticks { position: relative; flex: 1 1 0; min-width: 0; height: 3px; border-radius: 2px; background: var(--rail); }
+.m-fill { position: absolute; inset: 0 auto 0 0; width: var(--fill); border-radius: 2px; background: var(--quiet); }
+.m-ticks.tone-warn .m-fill { background: var(--warn); }
+.m-ticks.tone-danger .m-fill { background: var(--danger); }
+.m-tick { position: absolute; top: -2px; width: 1px; height: 7px; background: #6d7a86; }
+.m-pace { position: absolute; top: -4px; width: 1px; height: 11px; background: #8a97a3; opacity: .7; }
+
+/* segments · a cell per meter, end to end */
+.m-segments { display: flex; gap: 3px; flex: 1 1 0; min-width: 0; }
+.m-cell { position: relative; flex: 1 1 0; min-width: 0; height: 3px; border-radius: 2px; background: var(--rail); }
+.m-cell > i { position: absolute; inset: 0 auto 0 0; width: var(--fill); border-radius: 2px; background: var(--quiet); }
+.m-cell.tone-warn > i { background: var(--warn); }
+.m-cell.tone-danger > i { background: var(--danger); }
+
+.detail8 { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 22px; }
+.detail8 .frame { width: 360px; zoom: 2; }
+.detail8 .detail-label { font: 11px/1 var(--num); color: var(--dim); margin-bottom: 6px; }

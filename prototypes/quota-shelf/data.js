@@ -130,6 +130,16 @@
           resetsAtMs: Date.parse("2026-09-26T14:00:00Z"),
           history: decay(99, 96, 60, 0.3),
         }),
+        // The top model meters separately, on its own weekly allowance, and it
+        // is usually the one that binds long before the general week does.
+        lane({
+          id: "seven_day_fable",
+          name: "Fable",
+          windowMs: 7 * DAY,
+          remainingPercent: 38,
+          resetsAtMs: Date.parse("2026-09-26T14:00:00Z"),
+          history: decay(88, 38, 60, 1.2),
+        }),
       ],
     },
     {
