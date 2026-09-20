@@ -1,0 +1,44 @@
+.r { --fill-quiet: #39434d; --rail-bg: #171c21; font-variant-numeric: tabular-nums; }
+.r .tone-ok { color: var(--ink); }
+.r .tone-warn { color: var(--warn); }
+.r .tone-danger { color: var(--danger); }
+.r .tone-dead { color: var(--dim); }
+
+.r-rail { position: relative; height: 3px; border-radius: 2px; background: var(--rail-bg); overflow: hidden; }
+.r-rail > i { position: absolute; inset: 0 auto 0 0; width: var(--fill); border-radius: 2px; background: var(--fill-quiet); }
+.r-rail.tone-warn > i { background: var(--warn); }
+.r-rail.tone-danger > i { background: var(--danger); }
+.r-rail.tone-dead > i { background: #232a31; }
+/* Unmetered has no level to draw, so it draws no solid: a dashed rule is a
+   track with nothing measured in it. */
+.r-rail.dashed { background: none; border-top: 1px dashed #39434d; height: 0; align-self: center; }
+.r-rail.dashed.tone-danger { border-top-color: var(--danger); }
+.r-rail.short { width: 16px; flex: 0 0 16px; }
+
+.r-tag { font: 9.5px/1.6 var(--num); letter-spacing: .06em; color: var(--dim); min-width: 1.8em; }
+.r-row.routed, .r-arow.routed { box-shadow: inset 2px 0 0 #4d5a66; }
+.r-arow.spent { color: var(--dim); }
+
+.rc .r-row {
+  display: grid; grid-template-columns: max-content max-content minmax(28px, 1fr) max-content 3.2em;
+  align-items: center; column-gap: 9px; padding: 4px 10px; min-height: 24px;
+}
+.rc.no-bar .r-row { grid-template-columns: max-content max-content minmax(0, 1fr) 3.2em; }
+.rc .r-row + .r-row { border-top: 1px solid #14181c; }
+.r-dots { display: flex; gap: 3px; min-width: 14px; }
+.r-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.r-dot.tone-ok { color: #4a555f; }
+.r-dot.hollow { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
+.rc .r-val { font-size: 12px; text-align: right; }
+.rc .r-tm { color: var(--dim); font-size: 10.5px; text-align: right; white-space: nowrap; }
+
+.re .r-group + .r-group { border-top: 1px solid #14181c; }
+.re .r-arow {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline; column-gap: 9px; padding: 3px 10px;
+}
+.r-chips { display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; }
+.r-chip { display: inline-flex; align-items: baseline; gap: 5px; font: 11px/1.6 var(--num); white-space: nowrap; }
+.r-chip-name { color: var(--muted); font-weight: 400; }
+.r-chip-val { color: currentColor; }
+.r-chip-tm { color: var(--dim); }
