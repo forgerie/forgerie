@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 14 · the row with no level — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<style>
+  .measure { font: 11px/1 var(--num); color: var(--dim); margin: 6px 0 0; }
+  h2 { font-size: 13px; font-weight: 600; margin: 8px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 14px; max-width: 92ch; }
+</style>
+<h1>Round 14 · an account with nothing to meter</h1>
+<p class="note">Every frame holds the same four rows: an Antigravity account with all three pools, one whose only pool
+answers, one whose only pool refuses, and a Claude account for scale. Only the second and third rows change between
+treatments — they are the rows with no level to draw.</p>
+<h2>At 2.4×</h2>
+<div class="detail14" id="detail"></div>
+<h2>At 360 px</h2>
+<div class="ladder" id="ladder"></div>
+<script src="data.js"></script>
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="round14.js"></script>
+<script>
+  const { NOW, ACCOUNTS, MIN } = window.QUOTA_FIXTURE;
+  const antigravity = ACCOUNTS.find((account) => account.provider === "Antigravity" && account.routed);
+  const claude = ACCOUNTS.find((account) => account.provider === "Claude");
+
+  const onlyGemini = (blocked) => {
+    const account = structuredClone(antigravity);
+    account.routed = !blocked;
+    account.state = "standby";
+    account.lanes = account.lanes.filter((lane) => lane.metered === false);
+    for (const lane of account.lanes) {
+      lane.blocked = blocked;
+      lane.blockedUntilMs = blocked ? NOW + 12 * MIN : null;
+      lane.resetsAtMs = NOW + 5 * 3600_000;
+    }
+    return account;
+  };
+
+  const ROWS = [antigravity, onlyGemini(false), onlyGemini(true), claude];
+  const LABELS = {
+    dot: "dot · today, and the hole",
+    rule: "rule · a hairline at lane width",
+    hollow: "hollow · the track as an outline",
+    grain: "grain · texture with no end",
+    dotrail: "dotrail · the mark on a rail of its own",
+    value: "value · the mark takes the number's place",
+    clock: "clock · the countdown moves left",
+    fold: "fold · half height, like a drained row",
+  };
+
+  const detail = document.getElementById("detail");
+  for (const treatment of window.QUOTA_ROUND14.TREATMENTS) {
+    const col = document.createElement("div");
+    const label = document.createElement("div");
+    label.className = "detail-label";
+    label.textContent = LABELS[treatment] ?? treatment;
+    const frame = document.createElement("div");
+    frame.className = "frame";
+    frame.append(window.QUOTA_ROUND14.shelf(ROWS, NOW, treatment));
+    col.append(label, frame);
+    detail.append(col);
+  }
+
+  const ladder = document.getElementById("ladder");
+  for (const treatment of window.QUOTA_ROUND14.TREATMENTS) {
+    const col = document.createElement("div");
+    const label = document.createElement("div");
+    label.className = "frame-label";
+    label.innerHTML = `360 × auto <b>${treatment}</b>`;
+    const frame = document.createElement("div");
+    frame.className = "frame";
+    frame.style.width = "360px";
+    frame.append(window.QUOTA_ROUND14.shelf(ROWS, NOW, treatment));
+    col.append(label, frame);
+    ladder.append(col);
+  }
+</script>
+</html>
