@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 25 · both risks, three accounts — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<link rel="stylesheet" href="round20.css">
+<link rel="stylesheet" href="round21.css">
+<link rel="stylesheet" href="round24.css">
+<style>
+  body { width: 912px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 30px 0 6px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 82ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 26px; align-items: start; }
+  .two .head { font: 10px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 0 0 6px; }
+  .two .frame { width: 360px; zoom: 1; }
+  .rowline { grid-column: 1 / -1; }
+</style>
+<h1>Round 25 · both risks, with three accounts on different days</h1>
+<p class="stamp" id="stamp"></p>
+<p class="note">Round 24's draining walk held a single account, which is not the case that matters. Here every
+group has three accounts resetting on three different days, none of them failing over, because every provider is
+set to <b>pinned</b> routing. Each row is drawn twice: <b>reach</b> names the fullest usable account,
+<b>pinned</b> names the account the router is held to and counts down to the next thing the group loses.</p>
+
+<h2>1 · Losing credit in waves</h2>
+<p class="note">Three accounts hold 40 %, 80 % and 95 %, resetting in 6 d, 4 d and 2 d. Nothing is spent; only the
+clock moves. Each account's cut crosses its own fill at its own moment, so the group's hollow grows in steps.</p>
+<div class="two" id="waves"></div>
+
+<h2>2 · What a single bar costs</h2>
+<p class="note">One account about to lose 89 points, in groups of one, two, three and six. The others sit exactly
+on pace and contribute nothing. The pooled fill is a mean, so the loss is divided by the account count — this is
+the price of one bar, in points.</p>
+<div class="two" id="dilution"></div>
+
+<h2>3 · Spending too fast, across accounts</h2>
+<p class="note">The first four steps drain all three together. The last two drain only the pinned account while
+the spares sit full — which switches the hatch gate off, and leaves the readout to carry the warning alone.</p>
+<div class="two" id="starving"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round22.js"></script>
+<script>
+  window.QUOTA_FIXTURE = { NOW: Date.now(), MIN: 60000, HOUR: 3600000, DAY: 86400000, ACCOUNTS: [] };
+</script>
+<script src="round15.js"></script>
+<script src="round23.js"></script>
+<script src="round25.js"></script>
+<script>
+  const { stamp, payload } = window.QUOTA_ROUND22;
+  const { groupRow } = window.QUOTA_ROUND23;
+  const { waves, dilution, starving } = window.QUOTA_ROUND25;
+  const NOW = Date.now();
+
+  document.getElementById("stamp").innerHTML =
+    `router said <b>${stamp(Date.parse(payload.updatedAt))}</b> · drawn <b>${stamp(NOW)}</b>`;
+
+  function frame(build) {
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    pane.style.width = "360px";
+    const root = document.createElement("div");
+    root.className = "w r h-amber";
+    build(root);
+    pane.append(root);
+    return pane;
+  }
+
+  function walk(id, steps) {
+    const container = document.getElementById(id);
+    const heads = document.createElement("div");
+    heads.className = "rowline two";
+    heads.innerHTML = '<p class="head">reach</p><p class="head">pinned</p>';
+    container.append(heads);
+    for (const step of steps) {
+      const line = document.createElement("p");
+      line.className = "step rowline";
+      line.innerHTML = step.note;
+      container.append(line);
+      for (const treatment of ["reach", "pinned"]) {
+        container.append(frame((root) => root.append(groupRow(step.group, NOW, treatment))));
+      }
+    }
+  }
+
+  walk("waves", waves(NOW));
+  walk("dilution", dilution(NOW));
+  walk("starving", starving(NOW));
+</script>
+</html>

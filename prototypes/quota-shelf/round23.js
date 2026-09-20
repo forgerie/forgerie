@@ -165,9 +165,41 @@
     }
   }
 
-  /** Pooled: the emptiest tank. Reach: the account you would be routed to. */
+  /**
+   * Pooled: the emptiest tank. Reach: the account a request would land on.
+   * Pinned: the account the router is actually held to, which is what every
+   * provider here is set to — so the balance you are spending is that one's,
+   * whatever else the group holds.
+   *
+   * Under `pinned` the countdown stops describing the number beside it and
+   * answers a different question: when does the group next lose something.
+   * That is the soonest reset among the accounts that still hold credit, and
+   * with the accounts resetting on different days it is the only clock worth
+   * one slot.
+   */
   function readout(accounts, now, mode) {
     const meters = kinds(accounts);
+    if (mode.value === "pinned") {
+      const held = accounts.filter((account) => {
+        const binding = bindingOf(account);
+        return binding !== null && binding.remainingPercent > 0;
+      });
+      const clock = (held.length > 0 ? held : accounts)
+        .map((account) => wakesIn(account, now))
+        .filter(Number.isFinite);
+      const ms = clock.length === 0 ? Infinity : Math.min(...clock);
+      const pin = accounts.find((account) => account.routed) ?? reachable(accounts);
+      if (pin === null || pin === undefined) return { text: "0%", tone: "dead", ms };
+      const binding = bindingOf(pin);
+      if (binding === null) return { text: "", tone: "ok", ms };
+      return {
+        text: typeof binding.remainingAmount === "number"
+          ? `$${binding.remainingAmount.toFixed(2)}`
+          : `${Math.round(binding.remainingPercent)}%`,
+        tone: toneOf(binding.remainingPercent),
+        ms,
+      };
+    }
     if (mode.value === "reach") {
       const best = reachable(accounts);
       if (best !== null) {
@@ -209,6 +241,7 @@
     pooled: { value: "pool", tone: "pool", hatch: "pool", cut: "pool" },
     reach: { value: "reach", tone: "reach", hatch: "reach", cut: "pool" },
     reachcut: { value: "reach", tone: "reach", hatch: "reach", cut: "reach" },
+    pinned: { value: "pinned", tone: "pinned", hatch: "reach", cut: "pool" },
   };
 
   function groupRow(group, now, treatment) {
