@@ -27,6 +27,18 @@ python3 -m http.server 8600
 
 ## Current prototypes
 
+- [`quota-shelf/`](./quota-shelf/) — the shipped CLIProxyAPI quota shelf, re-cut
+  against two complaints: it never states how much fuel is left, and it draws
+  Gemini's unmetered pool as a full tank. One fixture from the live `/quota`
+  payload (plus a proxy cooldown and a spent account), one
+  `plan(width, height)` in `plan.js`, four renderings executed across the same
+  seven-rung ladder from 236 px to a 900×232 strip: A ledger (today's shape,
+  made honest), B fuel (one binding number per account, which also surfaces the
+  hidden five-hour Claude window), C runway (percentages as time, with a reset
+  mark per lane), D trend (24 h of history, and a tick per 429 where there is no
+  level to draw). `node render.mjs [outDir]` captures each ladder over CDP;
+  pages also work over `file://`.
+
 - [`accounts-board/`](./accounts-board/) — fullscreen second-screen monitor
   for the LLM accounts (quota windows, resets, auth health). Two rounds on
   one live fixture. Round 1 (labeled numbers — rejected as dashboard slop):

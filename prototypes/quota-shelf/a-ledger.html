@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>A · ledger — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<h1>A · Ledger</h1>
+<p>Closest to today. One line per lane, every number right-aligned in its own column. The unmetered lane prints
+<code>unmetered</code> where the others print a level and draws a dashed rule instead of a track, so a pool with no
+measurement can never look like a full tank. Money is shown as money: <code>$1.63 of $10</code>.</p>
+<div class="ladder"></div>
+<script src="data.js"></script>
+<script src="plan.js"></script>
+<script src="variants.js"></script>
+<script src="harness.js"></script>
+<script>renderLadder("a");</script>
+</html>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Quota shelf — four layouts</title>
+<link rel="stylesheet" href="shelf.css">
+<style>
+  ul { list-style: none; padding: 0; max-width: 78ch; }
+  li { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--panel); }
+  a { color: var(--ink); font-size: 14px; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  p.note { color: var(--muted); margin: 6px 0 0; font-size: 12px; }
+  .cost { color: var(--warn); }
+</style>
+<h1>Quota shelf — four layouts</h1>
+<p>One fixture, one <code>plan(width, height)</code>, four renderings, each executed across the same seven-rung size
+ladder. The two problems being solved: a shelf that does not state how much fuel is left, and an unmetered pool drawn
+as a full tank.</p>
+<ul>
+  <li>
+    <a href="a-ledger.html">A · Ledger</a>
+    <p class="note">Today's shape, made honest. <code>unmetered</code> replaces the level, money replaces the share.
+    Densest: all seven accounts fit a 620&nbsp;px column.</p>
+  </li>
+  <li>
+    <a href="b-fuel.html">B · Fuel</a>
+    <p class="note">One big number per account: the lane that binds. Surfaces the five-hour Claude window that today's
+    shelf hides. <span class="cost">Costs height</span> — about four accounts per 620&nbsp;px.</p>
+  </li>
+  <li>
+    <a href="c-runway.html">C · Runway</a>
+    <p class="note">Percentages become time, with a reset mark on each lane's timeline. Answers "can I finish this
+    task". <span class="cost">Costs height and needs history</span> for a real pace on Antigravity.</p>
+  </li>
+  <li>
+    <a href="d-trend.html">D · Trend</a>
+    <p class="note">A 24-hour line instead of a level, and a tick per 429 for the unmetered lane.
+    <span class="cost">Needs a rolling sample buffer in the router.</span></p>
+  </li>
+</ul>
+</html>
