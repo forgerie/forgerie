@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 19 · waste across accounts — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<link rel="stylesheet" href="round18.css">
+<link rel="stylesheet" href="round19.css">
+<style>
+  body { width: 808px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 30px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 80ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+<h1>Round 19 · the tokens the bench is about to lose</h1>
+<p class="note">The router spends one account at a time, so every other account in the group sits still while its
+own clock runs out, on its own day. Waste is what the bench does by default. Round 18 showed the fill beyond the
+pace cut is exactly what expires — that holds per lane, and the question is which arrangements still carry it
+when a group has several. The surplus is drawn with round 18's <b>void</b> mark throughout.</p>
+
+<h2>1 · Cancellation</h2>
+<p class="note">Two Codex accounts. One holds <b>10 %</b> with 80 % of its window still to run — it will run dry.
+The other holds <b>90 %</b> with 20 % of its window to run — it will lose almost all of it. The two overshoots
+are equal and opposite.</p>
+<div class="grid" id="cancel"></div>
+
+<h2>2 · The walk</h2>
+<p class="note">One account is spent down at a steady rate. Two are never touched: only their clocks move.
+Each frame holds five moments, top to bottom.</p>
+<p class="legend" id="legend"></p>
+<div class="grid" id="walk"></div>
+
+<script src="data.js"></script>
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="round15.js"></script>
+<script src="round19.js"></script>
+<script>
+  const { CANCEL, WALK, LOSS, ARRANGEMENTS, NOW } = window.QUOTA_ROUND19;
+  const { groupRow, shelf } = window.QUOTA_ROUND15;
+
+  // `today` is not a group arrangement: it spends a row per account, so it
+  // comes from the whole-shelf builder rather than the single-row one.
+  const rowsFor = (group, arrangement) => arrangement === "today"
+    ? [...shelf(group.accounts, NOW, "today").children]
+    : [groupRow(group, NOW, arrangement)];
+
+  document.getElementById("legend").innerHTML = WALK
+    .map((step, index) => `<b>${step.left}</b> into the window · about to lose ${LOSS[index]}`)
+    .join("<br>");
+
+  function frame(build) {
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    const root = document.createElement("div");
+    root.className = "w r s-void";
+    build(root);
+    pane.append(root);
+    return pane;
+  }
+
+  function cell(container, caption, node) {
+    const box = document.createElement("div");
+    const line = document.createElement("p");
+    line.className = "cell-cap";
+    line.innerHTML = caption;
+    box.append(line, node);
+    container.append(box);
+  }
+
+  const cancel = document.getElementById("cancel");
+  for (const arrangement of ARRANGEMENTS) {
+    cell(cancel, `<b>${arrangement}</b>`,
+      frame((root) => { for (const row of rowsFor(CANCEL, arrangement)) root.append(row); }));
+  }
+
+  const walk = document.getElementById("walk");
+  for (const arrangement of ARRANGEMENTS) {
+    cell(walk, `<b>${arrangement}</b> · five moments`,
+      frame((root) => {
+        for (const step of WALK) for (const row of rowsFor(step.group, arrangement)) root.append(row);
+      }));
+  }
+</script>
+</html>
