@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 15 · the whole group on one row — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<style>
+  h2 { font-size: 13px; font-weight: 600; margin: 18px 0 10px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 94ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+<h1>Round 15 · every account of a provider on one row</h1>
+<p class="note">Same seven accounts every time: Antigravity holds two (one routed, one spent and cooling),
+Claude one, Codex three (one routed, two spent), OpenRouter one. <b>today</b> is the shipped layout — a row per
+live account, the spent ones folded into a half-height row. The five after it each put a whole group on one row
+and differ only in what they do with the accounts that are not carrying the work.</p>
+
+<h2>At 2.2×</h2>
+<div class="detail15" id="detail"></div>
+
+<h2>At 360 px · the width the panel actually gets</h2>
+<div class="ladder" id="ladder"></div>
+
+<h2>At 280 px · the squeeze</h2>
+<div class="ladder" id="narrow"></div>
+
+<h2>At 480 px · the room</h2>
+<div class="ladder" id="wide"></div>
+
+<script src="data.js"></script>
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="round15.js"></script>
+<script>
+  const { NOW, ACCOUNTS } = window.QUOTA_FIXTURE;
+  const { shelf, TREATMENTS } = window.QUOTA_ROUND15;
+
+  const LABELS = {
+    today: "today · a row per account, spent ones folded",
+    nest: "nest · every account keeps its stack, one under the other",
+    columns: "columns · every account keeps its stack, side by side",
+    segments: "segments · one lane per meter, cut once per account",
+    lead: "lead · the account in use in full, the bench as stubs",
+    pool: "pool · one tank per meter, ticked at the seams",
+  };
+
+  function frame(treatment, width, zoomed) {
+    const box = document.createElement("div");
+    const label = document.createElement("div");
+    label.className = zoomed ? "detail-label" : "frame-label";
+    label.innerHTML = zoomed ? LABELS[treatment] : `${width} × auto <b>${treatment}</b>`;
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    pane.style.width = `${width}px`;
+    const root = shelf(ACCOUNTS, NOW, treatment);
+    pane.append(root);
+    box.append(label, pane);
+    if (!zoomed) {
+      const measure = document.createElement("p");
+      measure.className = "measure";
+      box.append(measure);
+      requestAnimationFrame(() => {
+        measure.innerHTML = `<b>${root.offsetHeight} px</b> · ${root.childElementCount} rows`;
+      });
+    }
+    return box;
+  }
+
+  for (const treatment of TREATMENTS) document.getElementById("detail").append(frame(treatment, 360, true));
+  for (const treatment of TREATMENTS) document.getElementById("ladder").append(frame(treatment, 360, false));
+  for (const treatment of TREATMENTS) document.getElementById("narrow").append(frame(treatment, 280, false));
+  for (const treatment of TREATMENTS) document.getElementById("wide").append(frame(treatment, 480, false));
+</script>
+</html>

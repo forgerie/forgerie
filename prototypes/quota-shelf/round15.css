@@ -1,0 +1,68 @@
+/* Round 15 · one row per provider group.
+ *
+ * The lane itself is round 14's and is not restated here: the page loads
+ * round14.css and every root carries `.w`, so the split cut, the hues and the
+ * hatch are the approved ones. What follows is only the arrangement of
+ * accounts inside a single row. */
+
+.r-row {
+  display: grid; grid-template-columns: max-content minmax(40px, 1fr) max-content 3.2em;
+  align-items: center; column-gap: 9px; padding: 5px 10px; min-height: 26px;
+}
+.r-row + .r-row { border-top: 1px solid #14181c; }
+.r-row.routed { box-shadow: inset 2px 0 0 #4d5a66; }
+/* The shipped half-height row, kept only so `today` measures honestly. */
+.r-row.r-half { min-height: 14px; padding: 2px 10px; }
+
+.r-tag { font: 9.5px/1.6 var(--num); letter-spacing: .06em; color: var(--dim); min-width: 1.8em; }
+.r-lanes { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.r-val { font-size: 12px; text-align: right; }
+.r-tm { color: var(--dim); font-size: 10.5px; text-align: right; white-space: nowrap; }
+.r .tone-ok { color: var(--ink); }
+.r .tone-warn { color: var(--warn); }
+.r .tone-danger { color: var(--danger); }
+.r .tone-dead { color: var(--dim); }
+
+/* A spent account: one bar of its own wait, the shipped drained vocabulary. */
+.r-wait { position: relative; flex: 1 1 0; min-width: 0; height: 2px; border-radius: 1px; background: var(--rail); }
+.r-wait > i { position: absolute; inset: 0 auto 0 0; width: var(--fill); border-radius: 1px; background: #333c45; }
+
+/* A meter this account does not have: the rail, and no claim on it. */
+.r-void { flex: 1 1 0; min-width: 0; height: 1px; background: #161b20; border-radius: 1px; }
+
+/* --- nest · each account keeps its stack, one under the other --- */
+.r-nest { flex-direction: column; align-items: stretch; gap: 5px; flex: 1 1 0; }
+.r-acct { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 5px; }
+.r-acct.routed { box-shadow: inset 2px 0 0 #4d5a66; }
+.r-acct > .w-stack { flex: 1 1 0; }
+
+/* --- columns · each account keeps its stack, side by side --- */
+.r-cols { gap: 9px; flex: 1 1 0; align-items: center; }
+.r-col { display: flex; align-items: center; gap: 5px; flex: 1 1 0; min-width: 0; padding-left: 5px; }
+.r-col.routed { box-shadow: inset 2px 0 0 #4d5a66; }
+.r-col > .w-stack { flex: 1 1 0; }
+
+/* The booleans of a group, as a set. */
+.r-dots { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
+
+/* --- segments · one lane per meter, cut once per account --- */
+.r-seg { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.r-cell { display: flex; align-items: center; gap: 5px; flex: 1 1 0; min-width: 0; }
+.r-cell > * { flex: 1 1 0; min-width: 0; }
+.r-cell > .w-bool { flex: 0 0 7px; }
+
+/* --- lead · the account in use, then the bench --- */
+.r-lead > .w-stack { flex: 1 1 0; }
+.r-stub { display: flex; align-items: center; flex: 0 0 18px; width: 18px; }
+.r-stub > * { flex: 1 1 0; min-width: 0; }
+
+/* --- pool · one tank per meter, ticked at the seams --- */
+.r-tick { position: absolute; top: -1px; left: var(--at); width: 1px; height: 5px; background: var(--panel); }
+
+/* --- the comp --- */
+.detail15 { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 22px; }
+.detail15 .frame { width: 360px; zoom: 2.2; }
+.detail15 .detail-label { font: 11px/1 var(--num); color: var(--dim); margin-bottom: 6px; }
+.detail15 .detail-label b { color: var(--muted); font-weight: 500; }
+.measure { font: 11px/1 var(--num); color: var(--dim); margin: 6px 0 0; }
+.measure b { color: var(--muted); font-weight: 500; }
