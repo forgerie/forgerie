@@ -1,0 +1,60 @@
+/* Quiet palette.
+
+   Health is the default state of this panel, so health gets no colour at all:
+   a grey bar and plain text. Amber and red are then the only saturated things
+   on screen, and they mean something. */
+.q {
+  --quiet-fill: #39434d;
+  --quiet-rail: #171c21;
+  font-variant-numeric: tabular-nums;
+}
+.q .tone-ok, .q .tone-open { color: var(--ink); }
+.q .tone-warn { color: var(--warn); }
+.q .tone-danger { color: var(--danger); }
+.q .tone-dead { color: var(--dim); }
+
+.qtrack { position: relative; height: 3px; border-radius: 2px; background: var(--quiet-rail); overflow: hidden; }
+.qtrack > i { position: absolute; inset: 0 auto 0 0; width: var(--fill); border-radius: 2px; background: var(--quiet-fill); }
+.qtrack.tone-warn > i { background: var(--warn); }
+.qtrack.tone-danger > i { background: var(--danger); }
+.qtrack.tone-dead > i { background: #262d34; }
+
+.q-tag {
+  font: 9.5px/1.6 var(--num); letter-spacing: .06em; color: var(--dim);
+  min-width: 1.8em; text-align: left;
+}
+.q-mark { font-size: 10px; color: var(--dim); white-space: nowrap; }
+/* The routed account carries a rail on its leading edge. It reads as "this is
+   the one in use" without spending a word or a second dot on it. */
+.q-row.routed, .q-arow.routed { box-shadow: inset 2px 0 0 #4d5a66; }
+.q-mark.warn { color: var(--warn); }
+.q-mark.dead { color: var(--dim); }
+
+/* --- collapsed --- */
+.qc .q-row {
+  display: grid;
+  grid-template-columns: max-content 4.6em max-content minmax(28px, 1fr) max-content 3.6em;
+  align-items: center; column-gap: 8px; padding: 4px 10px; min-height: 24px;
+}
+.qc.no-bar .q-row { grid-template-columns: max-content 4.6em max-content minmax(0, 1fr) 3.6em; }
+.qc .q-row + .q-row { border-top: 1px solid #14181c; }
+.q-dots { display: flex; gap: 3px; }
+.q-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.q-dot.tone-ok, .q-dot.tone-open { color: #4a555f; }
+.q-dot.hollow { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
+.qc .q-val { font-size: 12px; text-align: right; }
+.qc .q-tm { color: var(--dim); font-size: 10.5px; text-align: right; white-space: nowrap; }
+
+/* --- expanded --- */
+.qe .q-group + .q-group { border-top: 1px solid #14181c; }
+.qe .q-arow {
+  display: grid; grid-template-columns: max-content 4.6em minmax(0, 1fr);
+  align-items: baseline; column-gap: 8px; padding: 3px 10px;
+}
+.q-chips { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+/* No pill: spacing groups the pair, and one weight of grey separates the name
+   from the number. A background behind every chip was most of round 3's din. */
+.q-chip { display: inline-flex; align-items: baseline; gap: 4px; font: 11px/1.55 var(--num); white-space: nowrap; }
+.q-chip-name { color: var(--muted); font-weight: 400; }
+.q-chip-val { color: currentColor; }
+.q-chip-tm { color: var(--dim); }

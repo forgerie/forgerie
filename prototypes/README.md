@@ -49,7 +49,13 @@ python3 -m http.server 8600
   return time, so the five-hour window and a spare that comes back tomorrow
   are both readable. A spent lane trades its zero for `back 4d`, at every
   width. `node render.mjs [outDir]` captures each ladder over CDP,
-  `PAGES=round3` captures one; pages also work over `file://`.
+  `PAGES=round3` captures one; pages also work over `file://`. Round 4 quiets
+  it: health carries no colour at all (grey rail, plain text) so amber and red
+  are the only saturated marks, provider names shrink to two letters, the
+  routed account becomes a rail on the row edge instead of a word, countdowns
+  state one unit (`38h`, never `1d 14h`), and the long Claude/Codex window is
+  named `week` so its label cannot be confused with its countdown. Collapsed
+  176 px, expanded 186 px.
 
 - [`accounts-board/`](./accounts-board/) — fullscreen second-screen monitor
   for the LLM accounts (quota windows, resets, auth health). Two rounds on
