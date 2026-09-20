@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 6 · one line — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round5.css">
+<link rel="stylesheet" href="round6.css">
+<style>
+  .measure { font: 11px/1 var(--num); color: var(--dim); margin: 6px 0 0; }
+  .measure b { font-weight: 500; }
+</style>
+<h1>Round 6 · every window on one line</h1>
+<div class="ladder" id="ladder"></div>
+<script src="data.js"></script>
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="round5.js"></script>
+<script src="round6.js"></script>
+<script>
+  const FRAMES = [
+    { render: () => window.QUOTA_ROUND6.labelled, width: 360, title: "labelled rails" },
+    { render: () => window.QUOTA_ROUND6.bare, width: 360, title: "bare rails" },
+    { render: () => window.QUOTA_ROUND5.collapsed, width: 360, title: "R5 (one rail)" },
+    { render: () => window.QUOTA_ROUND6.labelled, width: 475, title: "labelled · 475" },
+    { render: () => window.QUOTA_ROUND6.labelled, width: 236, title: "labelled · 236" },
+    { render: () => window.QUOTA_ROUND6.bare, width: 236, title: "bare · 236" },
+  ];
+  const { NOW, ACCOUNTS } = window.QUOTA_FIXTURE;
+  const ladder = document.getElementById("ladder");
+  const measured = [];
+  for (const spec of FRAMES) {
+    const col = document.createElement("div");
+    const label = document.createElement("div");
+    label.className = "frame-label";
+    label.innerHTML = `${spec.width} × auto <b>${spec.title}</b>`;
+    const frame = document.createElement("div");
+    frame.className = "frame";
+    frame.style.width = `${spec.width}px`;
+    frame.append(spec.render()(ACCOUNTS, window.QUOTA_PLAN.plan(spec.width, 620), NOW));
+    const measure = document.createElement("p");
+    measure.className = "measure";
+    col.append(label, frame, measure);
+    ladder.append(col);
+    measured.push({ frame, measure });
+  }
+  requestAnimationFrame(() => {
+    for (const item of measured) {
+      item.measure.innerHTML = `<b>${Math.round(item.frame.getBoundingClientRect().height)} px</b>`;
+    }
+  });
+</script>
+</html>
