@@ -374,5 +374,5 @@
     return root;
   }
 
-  window.QUOTA_ROUND15 = { shelf, groupRow, TREATMENTS: ["today", ...Object.keys(TREATMENTS)] };
+  window.QUOTA_ROUND15 = { shelf, groupRow, laneEl, TREATMENTS: ["today", ...Object.keys(TREATMENTS)] };
 })();
