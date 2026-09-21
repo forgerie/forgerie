@@ -18,18 +18,22 @@
 <p class="note">Value and countdown both gone, so every fact has to be in the drawing. The lanes gain the width
 the two columns were using — about <b>70 px of a 360 px row</b>, roughly a third more length to say the same
 things in. <b>mix</b> is round 29's row, kept only so what the numbers said stays visible for comparison.</p>
-<p class="note">Two facts leave with the numbers. <b>Absolute time</b>: the gap states the share of the window
+<p class="note">One fact leaves with the numbers: <b>absolute time</b>. The gap states the share of the window
 still to run, not the hours, which is enough inside a group because every account of a provider shares a window
-length, and not enough across groups. <b>The runway</b>: fill against gap asks whether an even spend from here
-leaves anything over, which is a different question from whether the rate already being spent at runs out early.
-<b>dry</b> puts that one back as a tick under the lane rather than a number.</p>
+length, and not enough across groups.</p>
+<p class="note"><b>dry is kept as a disproof, not as a candidate.</b> It was built on the claim that fill against
+gap and runway against reset ask different questions. They do not. The rate is derived from the same two numbers
+the gap is, so <code>runway &lt; timeLeft</code> reduces to <code>fill &lt; pace</code> — exactly the hatch
+condition. <code>dry-check.mjs</code> sweeps 400,599 combinations and finds one disagreement, at fill = pace = 1,
+which is a rounding tie. The red tick is the amber hatch drawn a second time.</p>
 
 <h2>Every state, three ways, at 360 px</h2>
 <div class="matrix" id="matrix"></div>
 
 <h2>Burning it down, at 2.2×</h2>
 <p class="note">The pinned account holds 20 % and resets in five days; at its rate it lasts about a day. In
-<b>dry</b> its tick sits far left of the gap, and is red because it runs out first.</p>
+<b>dry</b> its tick sits far left of the gap — and so does the start of the amber hatch on the same lane, because
+they are the same fact.</p>
 <div class="zoom" id="zoom"></div>
 
 <h2>Two queued, at 2.2×</h2>

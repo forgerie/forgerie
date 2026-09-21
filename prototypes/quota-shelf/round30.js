@@ -15,15 +15,28 @@
  *                   are comparable. Across groups it is not: a five-hour lane
  *                   and a seven-day lane at the same cut mean an hour and a
  *                   day.
- *   the runway      fill against cut asks whether an even spend from here
- *                   leaves anything over. The runway asks whether the rate
- *                   already being spent at runs out early. Those are
- *                   different questions, and only the first is in the
- *                   geometry.
  *
- * `dry` puts the second one back as a mark rather than a number: a tick under
- * the lane at the point the observed rate exhausts the balance. Left of the
- * gap means running dry before the reset; right of it means leftovers. */
+ * `dry` was built on a second claim that turned out to be false, and is kept
+ * here as the disproof rather than as a candidate.
+ *
+ * The claim was that fill-against-cut and runway-against-reset ask different
+ * questions. They do not, because the rate is derived from the same two
+ * numbers the cut is:
+ *
+ *     runway < timeLeft
+ *     (W - L) * r / (100 - r) < L
+ *     r * W < 100 * L
+ *     r < 100 * L / W
+ *     fill < pace                        <- exactly the hatch condition
+ *
+ * `dry-check.mjs` sweeps 400,599 combinations and finds one disagreement, at
+ * fill = pace = 1, which is a rounding tie. So the tick is the hatch drawn
+ * twice. No history reaches the shelf, so no rate estimate made from the
+ * payload can carry anything the geometry does not already hold.
+ *
+ * What survives: the runway as a *number*. Hours are the one quantity a mark
+ * on a fraction axis cannot express, which is the whole argument for keeping
+ * any text on the row at all. */
 
 (() => {
   const DAY = 86_400_000;
