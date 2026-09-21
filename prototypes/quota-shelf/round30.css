@@ -1,0 +1,34 @@
+/* Round 30 · the row with no numbers on it at all. */
+
+.b-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; }
+.b-void {
+  position: absolute; top: 0; height: 3px; border-radius: 2px;
+  background: var(--rail); box-shadow: inset 0 0 0 1px var(--warn);
+}
+.b-nest { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 0; }
+.b-line { display: flex; align-items: center; min-width: 0; padding-left: 5px; }
+.b-line.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
+
+/* The runway, put back as a mark rather than a number: a tick under the lane
+   at the point the rate already being spent at exhausts the balance. Left of
+   the gap is running dry early; right of it is leftovers. */
+.b-dry { position: absolute; top: 4px; width: 1px; height: 3px; background: var(--muted); }
+.b-dry.short { background: var(--danger); }
+
+/* Dropping both trailing columns hands their width back to the lanes. */
+.r-row { grid-template-columns: max-content minmax(40px, 1fr) max-content 3.4em; }
+.r-row.v-bare, .r-row.v-dry { grid-template-columns: max-content minmax(40px, 1fr); }
+.r-val.time { font-size: 12px; }
+/* The runway tick hangs below its lane, so the stack needs the room. */
+.v-dry .b-nest { gap: 6px; }
+
+/* --- the comp --- */
+.matrix { display: grid; grid-template-columns: max-content repeat(3, 360px); gap: 12px 26px; align-items: center; }
+.matrix .head { font: 10px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.matrix .rowcap { font: 11px/1.4 var(--num); color: var(--dim); max-width: 34ch; }
+.matrix .rowcap b { color: var(--warn); font-weight: 500; }
+.matrix .frame { width: 360px; }
+.zoom { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+.zoom .frame { width: 360px; zoom: 2.2; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 5px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
