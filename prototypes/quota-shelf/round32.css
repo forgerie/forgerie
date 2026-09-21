@@ -1,0 +1,34 @@
+/* Round 32 · five Codex accounts, and how loud the doom gets. */
+
+.d-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; }
+.d-nest { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 0; }
+.d-line { display: flex; align-items: center; min-width: 0; padding-left: 5px; }
+.d-line.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
+
+/* The credit that will not be spent before the reset. */
+.d-void {
+  position: absolute; top: 0; height: 3px; border-radius: 2px;
+  background: var(--rail); box-shadow: inset 0 0 0 1px var(--warn);
+}
+/* pip leaves the hollow flat and puts the urgency in a dot at the deadline. */
+.d-void.bare { box-shadow: inset 0 0 0 1px rgba(224, 158, 62, .55); }
+.d-pip {
+  position: absolute; top: 50%; border-radius: 50%;
+  background: var(--warn); transform: translate(-50%, -50%);
+}
+
+.r-row.v-bare { grid-template-columns: max-content minmax(40px, 1fr); }
+
+/* --- the comp --- */
+.matrix { display: grid; grid-template-columns: max-content repeat(5, 300px); gap: 14px 20px; align-items: center; }
+.matrix .head { font: 10px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.matrix .rowcap { font: 11px/1.45 var(--num); color: var(--dim); max-width: 34ch; }
+.matrix .rowcap b { color: var(--ink); font-weight: 500; }
+.matrix .frame { width: 300px; }
+.zoom { display: flex; flex-wrap: wrap; gap: 20px 26px; align-items: flex-start; }
+.zoom .frame { width: 360px; zoom: 1.9; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 5px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.ramp { display: flex; gap: 18px; align-items: flex-end; margin: 0 0 8px; }
+.ramp div { font: 10px/1.6 var(--num); color: var(--dim); text-align: center; }
+.ramp b { display: block; color: var(--muted); font-weight: 500; }
