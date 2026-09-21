@@ -1,0 +1,51 @@
+/* Round 34 · solid doom, grouped accounts, and an aligned boolean strip. */
+
+/* The tag column is fixed, not max-content, so every row starts its lanes at
+   the same x however wide the provider tag is. */
+.k-row {
+  display: grid;
+  grid-template-columns: 22px minmax(40px, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: #0c0f12;
+  box-shadow: inset 0 0 0 1px #171c21;
+}
+.k-tag { font: 11px/1 var(--num); letter-spacing: .06em; color: var(--dim); }
+
+.k-stack { display: flex; flex-direction: column; min-width: 0; }
+/* Lanes inside an account sit close; accounts are held apart. */
+.k-acct { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-left: 5px; }
+.k-acct + .k-acct { margin-top: 9px; }
+.k-acct.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
+.k-line { display: flex; align-items: center; min-width: 0; }
+.k-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; }
+
+/* Credit that will not be spent in time. Solid at every distance; only the
+   hue moves, amber through red. */
+.k-doom { position: absolute; top: 0; height: 3px; border-radius: 2px; }
+
+/* One segment per boolean account. flex:1 means the strip is always the full
+   track, so two accounts and a hundred occupy identical width.
+
+   The strip sits on the same rail as every metered lane, and an available
+   segment uses the lane fill grey. At #3d4855 the first segment was too dark
+   to find, which made a correctly placed strip look like it started late. */
+.k-strip { display: flex; gap: 2px; background: var(--rail); border-radius: 2px; }
+.k-strip.dense { gap: 1px; }
+.k-seg { flex: 1 1 0; min-width: 0; height: 3px; border-radius: 1px; background: #5f6b76; }
+.k-seg.off { background: var(--danger); }
+
+/* --- the comp --- */
+.pair { display: flex; flex-wrap: wrap; gap: 20px 30px; align-items: flex-start; }
+.pair .frame { width: 360px; }
+.big .frame { width: 360px; zoom: 1.9; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 6px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.strips { display: flex; flex-direction: column; gap: 14px; width: 360px; }
+.strips .k-lane { height: 3px; }
+.ramp { display: flex; gap: 0; width: 620px; margin: 0 0 6px; }
+.ramp div { flex: 1; font: 10px/1.8 var(--num); color: var(--dim); text-align: center; }
+.ramp i { display: block; height: 6px; border-radius: 2px; margin-bottom: 4px; }
+.rule { display: flex; align-items: center; gap: 0; width: 360px; height: 1px; background: #2f6f4f; margin: 4px 0 0; }
