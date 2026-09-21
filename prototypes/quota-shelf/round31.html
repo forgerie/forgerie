@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 31 · bare lanes and one countdown — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<link rel="stylesheet" href="round31.css">
+<style>
+  body { width: 1830px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 32px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 86ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+<h1>Round 31 · bare lanes, and one countdown</h1>
+<p class="note">Round 30 proved a rate derived from this payload adds nothing to the geometry, so the drawing
+already holds both risks: a <b>hatch</b> is running dry early, a <b>hollow</b> is credit about to expire. What it
+cannot hold is hours — the gap is a share of a window, so a five-hour lane and a seven-day lane two thirds
+through are the same picture. One column, and the question is which moment it names.</p>
+<p class="note"><b>loss</b> names the next time the group throws credit away. <b>dry</b> names the moment the
+pinned account runs out at the rate it is going, and is blank when it will not. <b>next</b> names whichever
+comes first — running dry, losing credit, or a plain reset — with the colour saying which kind: red for dry,
+amber for a loss, grey for a reset.</p>
+
+<h2>Every state, at 340 px</h2>
+<div class="matrix" id="matrix"></div>
+
+<h2>Both risks at once, at 2.2×</h2>
+<p class="note">The pinned account is dry in hours; a spare loses 73 points in twelve. <b>loss</b> names the
+spare, <b>dry</b> names the pinned one, <b>next</b> names whichever lands first.</p>
+<div class="zoom" id="zoom"></div>
+
+<h2>Your live shelf at 360 px</h2>
+<p class="note">Every account of every provider, one line per meter, soonest reset at the top of each row.
+Antigravity states no window length, so its lanes are flat and carry neither risk mark.</p>
+<div class="ladder" id="shelf"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round22.js"></script>
+<script src="round31.js"></script>
+<script>
+  const { STATES, CLOCK_NAMES, row, liveRow } = window.QUOTA_ROUND31;
+  const { ACCOUNTS } = window.QUOTA_ROUND22;
+  const COLUMNS = [null, ...CLOCK_NAMES];
+
+  function frame(build, width) {
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    if (width) pane.style.width = `${width}px`;
+    const root = document.createElement("div");
+    root.className = "w r";
+    build(root);
+    pane.append(root);
+    return pane;
+  }
+
+  const matrix = document.getElementById("matrix");
+  matrix.append(document.createElement("div"));
+  for (const column of COLUMNS) {
+    const head = document.createElement("p");
+    head.className = "head";
+    head.textContent = column ?? "bare";
+    matrix.append(head);
+  }
+  for (const state of STATES) {
+    const cap = document.createElement("p");
+    cap.className = "rowcap";
+    cap.innerHTML = state.caption;
+    matrix.append(cap);
+    for (const column of COLUMNS) {
+      matrix.append(frame((root) => root.append(row(state.accounts, column))));
+    }
+  }
+
+  const zoom = document.getElementById("zoom");
+  for (const column of COLUMNS) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = `<b>${column ?? "bare"}</b>`;
+    box.append(cap, frame((root) => root.append(row(STATES[4].accounts, column)), 360));
+    zoom.append(box);
+  }
+
+  const TAGS = { antigravity: "AN", claude: "CL", codex: "CO", openrouter: "OP" };
+  const groups = [];
+  for (const account of ACCOUNTS) {
+    let group = groups.find((candidate) => candidate.id === account.providerId);
+    if (group === undefined) {
+      group = { id: account.providerId, tag: TAGS[account.providerId] ?? "??", accounts: [] };
+      groups.push(group);
+    }
+    group.accounts.push(account);
+  }
+
+  const shelf = document.getElementById("shelf");
+  for (const column of COLUMNS) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = `<b>${column ?? "bare"}</b>`;
+    let root;
+    const pane = frame((node) => {
+      root = node;
+      for (const group of groups) node.append(liveRow(group, column));
+    }, 360);
+    const measure = document.createElement("p");
+    measure.className = "measure";
+    box.append(cap, pane, measure);
+    requestAnimationFrame(() => { measure.innerHTML = `<b>${root.offsetHeight} px</b>`; });
+    shelf.append(box);
+  }
+</script>
+</html>

@@ -1,0 +1,34 @@
+/* Round 31 · bare lanes with one countdown. */
+
+.b-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; }
+.b-void {
+  position: absolute; top: 0; height: 3px; border-radius: 2px;
+  background: var(--rail); box-shadow: inset 0 0 0 1px var(--warn);
+}
+.b-nest { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 0; }
+.b-line { display: flex; align-items: center; min-width: 0; padding-left: 5px; }
+.b-line.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
+.r-dots { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; margin-right: 7px; }
+
+/* Three columns now: tag, lanes, one countdown. */
+.r-row { grid-template-columns: max-content minmax(40px, 1fr) 3.4em; }
+.r-row.v-bare { grid-template-columns: max-content minmax(40px, 1fr); }
+/* The countdown carries the kind of moment it names. */
+.r-tm.tone-ok { color: var(--dim); }
+.r-tm.tone-warn { color: var(--warn); }
+.r-tm.tone-danger { color: var(--danger); }
+
+/* --- the comp --- */
+.matrix { display: grid; grid-template-columns: max-content repeat(4, 340px); gap: 12px 24px; align-items: center; }
+.matrix .head { font: 10px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.matrix .rowcap { font: 11px/1.4 var(--num); color: var(--dim); max-width: 32ch; }
+.matrix .rowcap b { color: var(--warn); font-weight: 500; }
+.matrix .frame { width: 340px; }
+.zoom { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+.zoom .frame { width: 360px; zoom: 2.2; }
+.ladder { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; }
+.ladder .frame { width: 360px; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 5px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.measure { font: 11px/1 var(--num); color: var(--dim); margin: 6px 0 0; }
+.measure b { color: var(--muted); font-weight: 500; }
