@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 28 · nested against pooled — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round15.css">
+<link rel="stylesheet" href="round28.css">
+<style>
+  body { width: 1500px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 32px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 86ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+<h1>Round 28 · the nested row against the pooled one</h1>
+<p class="note">Every problem rounds 19 to 27 hit came from one place: the pooled bar's length is a mean. One
+account's loss gets divided by the account count, two losses queued behind each other collapse into one, and the
+readout has to carry warnings the bar cannot. The nested row never averages — each account keeps its own line,
+its own cut and its own surplus at full size, so <b>78 points of loss is 78 points of hollow, not 26</b>. What it
+spends instead is height. The number beside each frame is its measured row height.</p>
+<p class="facts" id="facts"></p>
+
+<h2>Every state, three ways, at 360 px</h2>
+<div class="matrix" id="matrix"></div>
+
+<h2>Two queued, at 2.2×</h2>
+<p class="note">78 expiring in 12 h, 71 in 24 h, with the pinned account at 40 %. Top to bottom: <b>pool</b>,
+<b>nest</b>, <b>nestboth</b>.</p>
+<div class="zoom" id="zoom"></div>
+
+<h2>Six accounts, at 2.2×</h2>
+<p class="note">Where the height cost lands.</p>
+<div class="zoom" id="zoom6"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="round28.js"></script>
+<script>
+  const { STATES, FACTS, COLUMNS, row } = window.QUOTA_ROUND28;
+
+  document.getElementById("facts").innerHTML = STATES
+    .map((state, index) => `<b>${index + 1}</b> · queued: ${FACTS[index].queue}`
+      + ` · a pooled bar can show ${FACTS[index].pooled}`)
+    .join("<br>");
+
+  function frame(accounts, column, measured) {
+    const pane = document.createElement("div");
+    pane.className = "frame";
+    const root = document.createElement("div");
+    root.className = "w r";
+    const node = row(accounts, column);
+    root.append(node);
+    pane.append(root);
+    if (measured) {
+      requestAnimationFrame(() => { measured.textContent = `${node.offsetHeight}px`; });
+    }
+    return pane;
+  }
+
+  const matrix = document.getElementById("matrix");
+  matrix.append(document.createElement("div"));
+  for (const column of COLUMNS) {
+    const head = document.createElement("p");
+    head.className = "head";
+    head.textContent = column;
+    matrix.append(head);
+  }
+  for (const state of STATES) {
+    const cap = document.createElement("p");
+    cap.className = "rowcap";
+    cap.innerHTML = state.caption;
+    matrix.append(cap);
+    for (const column of COLUMNS) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      const px = document.createElement("span");
+      px.className = "px";
+      cell.append(frame(state.accounts, column, px), px);
+      matrix.append(cell);
+    }
+  }
+
+  for (const [id, index] of [["zoom", 1], ["zoom6", 4]]) {
+    const host = document.getElementById(id);
+    for (const column of COLUMNS) {
+      const box = document.createElement("div");
+      const cap = document.createElement("p");
+      cap.className = "cell-cap";
+      cap.innerHTML = `<b>${column}</b>`;
+      box.append(cap, frame(STATES[index].accounts, column));
+      host.append(box);
+    }
+  }
+</script>
+</html>
