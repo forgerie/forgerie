@@ -1,0 +1,54 @@
+/* Round 35 · what a boolean should look like.
+ *
+ * Reuses round 34's row geometry (.k-*) and adds the roster treatments.
+ * The prefix is m- because every page here loads the same shared sheets, so
+ * a class name is a global name; e-, f-, g-, q-, t- and w- are already taken.
+ */
+
+.m-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; }
+
+/* bar · round 34. A full-height segment per account. */
+.m-bar { display: flex; gap: 2px; background: var(--rail); border-radius: 2px; }
+.m-bar.dense { gap: 1px; }
+.m-bar .m-seg { flex: 1 1 0; min-width: 0; height: 3px; border-radius: 1px; background: #5f6b76; }
+.m-bar .m-seg.off { background: var(--danger); }
+
+/* ghost · the track stays empty and only trouble is drawn. */
+.m-ghost { display: flex; gap: 2px; background: var(--rail); border-radius: 2px; }
+.m-ghost.dense { gap: 1px; }
+.m-ghost .m-seg { flex: 1 1 0; min-width: 0; height: 3px; border-radius: 1px; background: transparent; }
+.m-ghost .m-seg.off { background: var(--danger); }
+
+/* notch · available accounts are a 1 px line, blocked rise to the full 3 px. */
+.m-notch { display: flex; gap: 2px; align-items: center; }
+.m-notch.dense { gap: 1px; }
+.m-notch .m-seg { flex: 1 1 0; min-width: 0; height: 1px; border-radius: 0; background: #3a434d; }
+.m-notch .m-seg.off { height: 3px; border-radius: 1px; background: var(--danger); }
+
+/* tick · one hairline for the whole roster, blocked accounts standing on it. */
+.m-tick { display: flex; gap: 2px; align-items: center; }
+.m-tick.dense { gap: 1px; }
+.m-tick .m-wire { position: absolute; left: 0; right: 0; top: 1px; height: 1px; background: #323b44; }
+.m-tick .m-seg { position: relative; flex: 1 1 0; min-width: 0; height: 3px; background: transparent; }
+.m-tick .m-seg.off { background: var(--danger); border-radius: 1px; }
+
+/* count · one proportion, no segments. Scales without limit, names nobody. */
+.m-count { background: var(--rail); border-radius: 2px; }
+.m-count .m-run { position: absolute; top: 0; height: 3px; border-radius: 2px; }
+.m-count .m-run.ok { background: #5f6b76; }
+.m-count .m-run.bad { background: var(--danger); }
+
+/* --- the comp --- */
+.matrix { display: grid; grid-template-columns: max-content repeat(5, 240px); gap: 14px 18px; align-items: center; }
+.matrix .head { font: 10px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.matrix .rowcap { font: 11px/1.45 var(--num); color: var(--dim); max-width: 34ch; }
+.matrix .rowcap b { color: var(--ink); font-weight: 500; }
+.matrix .frame { width: 240px; }
+.pair { display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: flex-start; }
+.pair .frame { width: 360px; }
+.big .frame { width: 360px; zoom: 2; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 6px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.counts { display: grid; grid-template-columns: max-content repeat(5, 240px); gap: 12px 18px; align-items: center; }
+.counts .rowcap { font: 11px/1.4 var(--num); color: var(--dim); }
+.counts .holder { width: 240px; display: flex; }
