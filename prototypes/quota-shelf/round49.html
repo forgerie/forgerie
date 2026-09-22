@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 49 · the two colour problems — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round49.css">
+<style>
+  body { width: 1500px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 34px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 94ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .note code { color: var(--ink); font-family: var(--num); }
+</style>
+
+<svg class="defs" aria-hidden="true">
+  <filter id="deuteranopia" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.625 0.375 0 0 0  0.7 0.3 0 0 0  0 0.3 0.7 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="protanopia" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0"/>
+  </filter>
+</svg>
+
+<h1>Round 49 · the two colour problems</h1>
+<p class="note">The shelf carries its most important distinction in hue alone, and it picked the worst possible
+pair to carry it. <b>Amber says spend faster</b> — credit is dying unspent. <b>Red says spend slower</b> — the
+lane runs dry early. Those are opposite instructions, and red against amber is exactly the axis red-green
+colour blindness collapses. Deuteranomaly and protanomaly together are about <b>8 % of men</b>.</p>
+<p class="note">The hatch survives simulation, because it is texture and not colour. That is the clue: the two
+states <i>already</i> differ in geometry — the hatch sits between fill and pace, the doom bar between pace and
+fill, striped against solid. What relies on colour alone is the <b>countdown</b>, the one piece of text that
+says which kind of trouble this is.</p>
+
+<h2>Under deuteranopia · today</h2>
+<p class="note">Real rendered pixels through a Brettel-style matrix, not a swatch chart. Claude's top lane is
+amber (spend faster) and the two below it are red (spend slower).</p>
+<div class="pair" id="sim"></div>
+
+<h2>The second channel</h2>
+<p class="note">Each keeps the hues for those who can see them and adds a channel for those who cannot. Shown
+normal, then deuteranope.</p>
+<div class="pair" id="channels"></div>
+
+<h2>Light scheme</h2>
+<p class="note">Forty-nine rounds, dark only, while AGENTS.md requires both validated. The shelf is built on a
+dark rail with hues lifted <i>off</i> it; on white the rail has to lighten and the warning hues have to
+<b>darken</b> — <code>#d29922</code> on white is close to invisible.</p>
+<div class="pair" id="light"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round43.js"></script>
+<script src="round49.js"></script>
+<script>
+  const { shelf, CHANNELS } = window.QUOTA_ROUND49;
+  const payload = window.QUOTA_LIVE;
+  const now = window.QUOTA_LIVE_FETCHED_AT;
+
+  function pane(scheme, channel, filter) {
+    const host = document.createElement("div");
+    host.className = `n2-frame${scheme === "light" ? " light" : ""}${filter ? ` ${filter}` : ""}`;
+    const root = document.createElement("div");
+    root.className = "w r";
+    shelf(root, payload, now, { scheme, channel });
+    host.append(root);
+    return host;
+  }
+
+  function cell(host, label, node) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = label;
+    box.append(cap, node);
+    host.append(box);
+  }
+
+  cell(document.getElementById("sim"), "<b>normal vision</b>", pane("dark", "hue"));
+  cell(document.getElementById("sim"), "<b>deuteranopia</b> · amber and red converge", pane("dark", "hue", "vision"));
+  cell(document.getElementById("sim"), "<b>protanopia</b>", pane("dark", "hue", "vision-p"));
+
+  for (const channel of CHANNELS) {
+    cell(document.getElementById("channels"), `<b>${channel.id}</b> · ${channel.caption}`, pane("dark", channel.id));
+    cell(document.getElementById("channels"), `<b>${channel.id}</b> · deuteranope`, pane("dark", channel.id, "vision"));
+  }
+
+  cell(document.getElementById("light"), "<b>light</b> · re-toned ramp", pane("light", "mark"));
+  cell(document.getElementById("light"), "<b>light</b> · deuteranope", pane("light", "mark", "vision"));
+</script>
+</html>

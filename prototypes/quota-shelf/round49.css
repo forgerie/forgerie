@@ -1,0 +1,145 @@
+/* Round 49 · the two colour problems.
+ *
+ * Prefix n2-. Checked clear of the shared sheets.
+ *
+ * Amber says spend faster and red says spend slower. They are opposite
+ * instructions carried entirely in the one hue pair that red-green colour
+ * blindness collapses. The geometry already separates them -- the hatch
+ * sits between fill and pace, the doom bar between pace and fill, striped
+ * against solid -- so the fix is to stop the countdown being the only part
+ * that relies on colour.
+ *
+ * Both schemes are declared as variables on the frame rather than through
+ * a media query, so one page can show both at once.
+ */
+
+/* round14.css line 1 declares `.w { --rail: #171c21 }`, and the inner root
+   carries class "w r". A variable set on a descendant beats one inherited
+   from an ancestor, so declaring --rail on the frame alone is silently
+   overridden for every lane. It has to be re-declared on the .w itself.
+   Third time a shared sheet has done this: see the e- and q-rail notes. */
+.n2-frame .w { --rail: #262d35; }
+.n2-frame.light .w { --rail: #d8dde3; }
+
+.n2-frame {
+  container-type: size;
+  --rail: #262d35;
+  --paper: #0c0f12;
+  --edge: #171c21;
+  --tag: #5a636d;
+  --label: #79838e;
+  --meter-label: #5a636d;
+  --num-ink: #79838e;
+  --plain: #5f6b76;
+  --loss: #d29922;
+  --dry: #f85149;
+  --none: #39414a;
+  --riser: #4d5a66;
+  --dot: #4d5866;
+}
+.n2-frame.light {
+  --rail: #d8dde3;
+  --paper: #ffffff;
+  color: #24292f;
+  --edge: #e6eaee;
+  --tag: #8b949e;
+  --label: #57606a;
+  --meter-label: #8b949e;
+  --num-ink: #57606a;
+  --plain: #6e7781;
+  /* Darker than the dark-scheme pair: on white these must sit below the
+     paper in luminance, not above the rail. */
+  --loss: #9a6a00;
+  --dry: #c8201a;
+  --none: #c2c8ce;
+  --riser: #9aa4ae;
+  --dot: #9aa4ae;
+}
+
+.n2-row {
+  display: grid;
+  grid-template-columns: 22px minmax(40px, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+.n2-tag { font: 11px/1 var(--num); letter-spacing: .06em; color: var(--tag); }
+
+.n2-stack { display: flex; flex-direction: column; min-width: 0; }
+.n2-acct { display: flex; flex-direction: column; align-items: stretch; min-width: 0; padding-left: 10px; }
+.n2-acct.pinned { box-shadow: inset 2px 0 0 var(--riser); }
+.n2-stack.grouped > .n2-acct + .n2-acct { margin-top: 5px; }
+
+.n2-lanes { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.n2-line { display: flex; align-items: center; min-width: 0; }
+.n2-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+.n2-lane .w-ground { background: var(--rail); }
+
+.n2-doom { position: absolute; top: 0; height: 3px; border-radius: 2px; }
+.n2-roster { gap: 4px; }
+.n2-token { flex: 0 0 auto; width: 5px; height: 5px; border-radius: 50%; background: var(--dot); }
+.n2-token.is-out { background: var(--dry); }
+.n2-value { overflow: visible; }
+/* The balance carries the shared `tone-ok` class, and round14.css has
+   `.w .tone-ok { color: var(--ink) }` at specificity 0,2,0 against this
+   rule's 0,1,0 -- so on white the one number that matters went pale.
+   Matching the specificity and landing later in the cascade wins it back. */
+.n2-frame .n2-val { font: 500 12px/12px var(--num); font-variant-numeric: tabular-nums; color: var(--label); white-space: nowrap; }
+.n2-frame .n2-val.tone-low { color: var(--loss); }
+.n2-frame .n2-val.tone-out { color: var(--dry); }
+
+.n2-who, .n2-meter, .n2-pct, .n2-when {
+  display: none; flex: 0 0 auto; white-space: nowrap; font-size: 10px; line-height: 12px;
+}
+.n2-who {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--sans); color: var(--label); padding-bottom: 5px;
+}
+.n2-who.is-out { opacity: .55; text-decoration: line-through; }
+.n2-meter { width: 58px; font-family: var(--num); color: var(--meter-label); letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; }
+.n2-pct {
+  width: 30px; padding-left: 10px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--num-ink);
+}
+.n2-when {
+  width: 40px; padding-left: 8px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums;
+  display: none;
+}
+.n2-when.tone-plain { color: var(--plain); }
+.n2-when.tone-loss { color: var(--loss); }
+.n2-when.tone-dry { color: var(--dry); }
+.n2-when.tone-none { color: var(--none); }
+
+@container (min-width: 430px) { .n2-when { display: block; } }
+@container (min-width: 510px) { .n2-pct { display: block; } }
+@container (min-width: 820px) { .n2-meter { display: block; } }
+@container (min-width: 640px) and (min-height: 440px) {
+  .n2-who { display: block; }
+  .n2-stack > .n2-acct + .n2-acct { margin-top: 13px; }
+}
+
+/* --- the second channel --- */
+
+/* mark: a glyph with a direction. Up means credit is dying unspent so
+   spend faster; down means the lane is draining so spend slower. It reads
+   at any hue and at any contrast. */
+.n2-glyph { font-style: normal; font-size: 9px; padding-right: 1px; opacity: .9; }
+
+/* weight: urgency by contrast, which every form of colour blindness
+   preserves. Dry is the one that stops work, so it gets the strength. */
+.ch-weight.tone-dry .n2-num { font-weight: 700; }
+.ch-weight.tone-loss .n2-num { font-weight: 400; opacity: .85; }
+
+/* --- the comp --- */
+.pair { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.cell-cap { font: 11px/1.4 var(--num); color: #79838e; margin: 0 0 6px; }
+.cell-cap b { color: #c9d1d9; font-weight: 500; }
+.n2-frame { width: 700px; height: 300px; border-radius: 9px; }
+.n2-frame.light { background: #ffffff; padding: 4px; }
+.vision { filter: url(#deuteranopia); }
+.vision-p { filter: url(#protanopia); }
+svg.defs { position: absolute; width: 0; height: 0; }
