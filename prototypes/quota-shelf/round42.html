@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 42 · expanded, without re-plotting — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round42.css">
+<style>
+  body { width: 1460px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 34px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 94ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .note code { color: var(--ink); font-family: var(--num); }
+</style>
+<h1>Round 42 · expanded, without re-plotting</h1>
+<p class="note">The obvious way to build an expanded shelf is to draw a second, bigger thing: cards, headers, a
+lane per row with its name above it. That spends the one property the collapsed shelf took twenty-five rounds
+to earn — you would <b>learn the drawing twice</b>, and every mark you trained yourself to read at 360 px would
+sit somewhere else at 900.</p>
+<p class="note">So expansion here <b>adds columns and never moves a lane</b>. Same geometry, same hues, same
+origin, same doom bar, same hatch. Width buys words; it does not buy a new picture.</p>
+<p class="note"><b>This round first claimed expansion was free of height. The render disproved it.</b> A 10 px
+number needs a 12 px line box and the collapsed lane pitch is 7 px, so the moment any word appears the shelf
+grows: <b>144 px → 253 px</b>. What is true, and what the measurement below shows, is that the growth happens
+<b>once</b>. Every column after the first is free, because they all share that one line box. The first build
+did not share it, and grew a second time — 228 px, then 260 px — when the taller account column arrived.</p>
+<p class="note">The order things arrive in is the order they become worth saying. <b>when</b> first — hours are
+not a share of anything, so a fraction axis can never hold them. Then <b>level</b>, for when "about half" is
+not enough. Then <b>account</b>, because nothing in the collapsed drawing identifies one and you need the
+address to go and switch it. <b>meter</b> last, because hue already separates the three meters inside an
+account, and nothing at all separates the accounts.</p>
+
+<h2>The ladder · live payload</h2>
+<p class="note">The same component, the same data, six container widths. Watch the lanes: they start at the
+same place relative to their own row and they never re-plot.</p>
+<div class="ladder" id="ladder"></div>
+
+<h2>The widest rung at 2×</h2>
+<div class="stack"><div id="zoom" class="big"></div></div>
+
+<h2>What the countdown is saying</h2>
+<p class="note">It names whichever fact lands first, and the colour says which kind it is — the same rule the
+lane itself draws by.</p>
+<ul class="note">
+  <li><code>fill &lt; pace</code> — <b>less credit left than clock left</b>, so the lane runs dry early. The
+      lane hatches; the countdown is the runway and it is <b>red</b>, because work stops.</li>
+  <li><code>fill &gt; pace</code> — <b>more credit left than clock left</b>, so credit dies unspent. The lane
+      shows the solid doom bar; the countdown is the reset and it is <b>amber</b>, because money is lost.</li>
+  <li>otherwise — the plain reset, in grey.</li>
+  <li>no stated window — <b>—</b>, because a dash says "no such thing" and an empty cell reads as broken.</li>
+</ul>
+
+<h2>Height at every rung</h2>
+<p class="note">Measured, not asserted. The step from 360 to 430 is the cost of words. The four rungs after it
+are free.</p>
+<p class="note" id="heights"></p>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round42.js"></script>
+<script>
+  const { shelf, RUNGS } = window.QUOTA_ROUND42;
+  const payload = window.QUOTA_LIVE;
+  const now = window.QUOTA_LIVE_FETCHED_AT;
+
+  function build(width) {
+    const pane = document.createElement("div");
+    pane.className = "v-shelf";
+    pane.style.width = `${width}px`;
+    const root = document.createElement("div");
+    root.className = "w r";
+    shelf(root, payload, now);
+    pane.append(root);
+    return pane;
+  }
+
+  const ladder = document.getElementById("ladder");
+  const measured = [];
+  for (const rung of RUNGS) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = `<b>${rung.width} px</b> · ${rung.gains}`;
+    const pane = build(rung.width);
+    const out = document.createElement("p");
+    out.className = "cell-cap";
+    out.style.margin = "6px 0 0";
+    box.append(cap, pane, out);
+    ladder.append(box);
+    requestAnimationFrame(() => {
+      const height = pane.firstElementChild.offsetHeight;
+      out.innerHTML = `<b>${height} px</b>`;
+      measured.push(`${rung.width}→${height}`);
+      if (measured.length === RUNGS.length) {
+        const heights = new Set(measured.map((entry) => entry.split("→")[1]));
+        document.getElementById("heights").innerHTML =
+          `${measured.join(" · ")} — <b>${heights.size === 1 ? `identical at ${[...heights][0]} px` : "NOT identical"}</b>`;
+      }
+    });
+  }
+
+  document.getElementById("zoom").append(build(980));
+</script>
+</html>

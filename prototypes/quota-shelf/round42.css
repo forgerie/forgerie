@@ -1,0 +1,86 @@
+/* Round 42 · expanded, for the price of no height at all.
+ *
+ * Prefix v-. Checked clear of the shared sheets.
+ *
+ * Every column is a fixed width, not a content width. A content-sized
+ * account column would let a long address in one row push that row's lanes
+ * further right than the row above it, and the whole shelf rests on the
+ * lanes agreeing about where they start.
+ *
+ * The reveals are container queries, so the shelf answers to the panel it
+ * is given and never to the window.
+ */
+
+.v-shelf { container-type: inline-size; }
+
+.v-row {
+  display: grid;
+  grid-template-columns: 22px minmax(40px, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: #0c0f12;
+  box-shadow: inset 0 0 0 1px #171c21;
+}
+.v-tag { font: 11px/1 var(--num); letter-spacing: .06em; color: var(--dim); }
+
+.v-stack { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v-acct { display: flex; align-items: center; min-width: 0; padding-left: 5px; }
+.v-stack.grouped > .v-acct + .v-acct { margin-top: 5px; }
+.v-acct.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
+.v-lanes { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 0; }
+.v-line { display: flex; align-items: center; gap: 0; min-width: 0; }
+.v-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+
+.v-doom { position: absolute; top: 0; height: 3px; border-radius: 2px; }
+
+.v-roster { gap: 4px; }
+.v-token { flex: 0 0 auto; width: 5px; height: 5px; border-radius: 50%; background: #4d5866; }
+.v-token.is-out { background: var(--danger); }
+
+.v-value { overflow: visible; }
+.v-val { font: 500 12px/12px var(--num); font-variant-numeric: tabular-nums; color: #8b949e; white-space: nowrap; }
+.v-val.tone-low { color: var(--warn); }
+.v-val.tone-out { color: var(--danger); }
+
+/* --- the columns that width buys --- */
+
+.v-who, .v-meter, .v-pct, .v-when { display: none; flex: 0 0 auto; white-space: nowrap; }
+.v-who, .v-meter { overflow: hidden; text-overflow: ellipsis; }
+
+/* Every text column shares one 12 px line box. If they differ, the tallest
+   column sets the pitch, and the shelf grows again each time a taller one
+   is revealed -- measured at 228 px, then 260 px, before this was fixed. */
+.v-who, .v-meter, .v-pct, .v-when { font-size: 10px; line-height: 12px; }
+
+.v-who {
+  width: 132px; padding-right: 10px;
+  font-family: var(--sans); color: #79838e;
+}
+.v-who.is-out { color: #454e57; text-decoration: line-through; }
+.v-meter { width: 58px; font-family: var(--num); color: var(--dim); letter-spacing: .02em; }
+.v-pct {
+  width: 30px; padding-left: 10px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums; color: #79838e;
+}
+.v-when {
+  width: 32px; padding-left: 8px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.v-when.tone-plain { color: #5f6b76; }
+.v-when.tone-loss { color: var(--warn); }
+.v-when.tone-dry { color: var(--danger); }
+.v-when.tone-none { color: #39414a; }
+
+@container (min-width: 430px) { .v-when { display: block; } }
+@container (min-width: 510px) { .v-pct { display: block; } }
+@container (min-width: 640px) { .v-who { display: block; } }
+@container (min-width: 820px) { .v-meter { display: block; } }
+
+/* --- the comp --- */
+.ladder { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 6px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.big { zoom: 2; width: 500px; }
+.stack { display: flex; flex-direction: column; gap: 18px; }
