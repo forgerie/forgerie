@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 45 · room instead of weight — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round45.css">
+<style>
+  body { width: 1460px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 34px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 94ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .note code { color: var(--ink); font-family: var(--num); }
+</style>
+<h1>Round 45 · room instead of weight</h1>
+<p class="note">Round 44 answered "the address feels like an afterthought" by making the address louder. That
+works, and it is the wrong kind of answer for this shelf: everything here earns attention by being the only
+thing that moved, so <b>a heading that shouts joins the competition rather than standing outside it</b>.</p>
+<p class="note">The type goes back to round 43 exactly — 10 px, the same grey as the meter labels, no step, no
+split. The fix is space. The address did not need to be louder; it needed to not be <b>crushed between the
+riser on its left and the first lane below it</b>.</p>
+
+<h2>The three gaps</h2>
+<table class="m">
+  <tr><th>gap</th><th>round 43</th><th>why it moves</th></tr>
+  <tr><td><b>riser → label</b></td><td>5 px</td><td>the 2 px pinned riser sits on the block's left edge and every label starts 5 px off it — the gap you get when nobody chooses one</td></tr>
+  <tr><td><b>below the id</b></td><td>3 px</td><td>against 4 px between lanes, so the address is nearer its first lane than the lanes are to each other</td></tr>
+  <tr><td><b>between accounts</b></td><td>11 px</td><td>not free to leave alone: open the space below the address without opening the space above it and the address drifts to the midpoint between two accounts</td></tr>
+</table>
+
+<h2>Antigravity at 2.2×</h2>
+<p class="note">Two accounts, the second pinned, so the riser is visible against the labels it crowds.</p>
+<div class="stack" id="zoom"></div>
+
+<h2>The whole shelf, each step · 820 px</h2>
+<div class="ladder" id="shelves"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round43.js"></script>
+<script src="round45.js"></script>
+<script>
+  const { shelf, providerRow, STEPS } = window.QUOTA_ROUND45;
+  const payload = window.QUOTA_LIVE;
+  const now = window.QUOTA_LIVE_FETCHED_AT;
+  const antigravity = payload.providers.find((provider) => provider.id === "antigravity");
+
+  function pane(width, step, build) {
+    const host = document.createElement("div");
+    host.className = "j-shelf";
+    host.style.width = `${width}px`;
+    host.style.setProperty("--pad", `${step.pad}px`);
+    host.style.setProperty("--below", `${step.below}px`);
+    host.style.setProperty("--between", `${step.between}px`);
+    const root = document.createElement("div");
+    root.className = "w r";
+    build(root);
+    host.append(root);
+    return host;
+  }
+
+  const label = (step) =>
+    `<b>${step.id}</b> · riser ${step.pad} · below ${step.below} · between ${step.between}` +
+    (step.caption ? ` · ${step.caption}` : "");
+
+  const zoom = document.getElementById("zoom");
+  for (const step of STEPS) {
+    const box = document.createElement("div");
+    box.className = "big";
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = label(step);
+    box.append(cap, pane(410, step, (root) => root.append(providerRow(antigravity, now))));
+    zoom.append(box);
+  }
+
+  const shelves = document.getElementById("shelves");
+  for (const step of STEPS) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = label(step);
+    const host = pane(820, step, (root) => shelf(root, payload, now));
+    const out = document.createElement("p");
+    out.className = "cell-cap";
+    out.style.margin = "6px 0 0";
+    box.append(cap, host, out);
+    shelves.append(box);
+    requestAnimationFrame(() => {
+      const node = host.firstElementChild;
+      const track = Math.round(node.querySelector(".j-lane").getBoundingClientRect().width);
+      out.innerHTML = `<b>${node.offsetHeight} px</b> tall · <b>${track} px</b> of track`;
+    });
+  }
+</script>
+</html>
