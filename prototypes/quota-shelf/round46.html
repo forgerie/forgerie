@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 46 · assembled, and held against the device — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round46.css">
+<style>
+  body { width: 1460px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 34px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 94ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .note code { color: var(--ink); font-family: var(--num); }
+</style>
+<h1>Round 46 · assembled, and held against the device</h1>
+<p class="note">Thirty-one rounds of decisions have been living in thirty-one files. This is all of them in one
+component with nothing new invented — doom by rate (r33), solid doom and conditional grouping (r34), the
+boolean as a token (r35), the balance as a number (r39), both at the lane origin (r41), width buying columns
+without moving a lane (r42), the address above the lanes (r43), and <code>easy</code> spacing (r45).</p>
+<p class="note">And then the thing forty-five rounds never did: <b>measure it at the widths the acceptance
+device actually gives a panel</b>.</p>
+
+<h2>The acceptance device</h2>
+<p class="note">CSS-pixel viewports measured on the physical Z Fold, from AGENTS.md. A panel is never the whole
+viewport, so these widths are a <i>ceiling</i> — the shelf will usually get less. The height column is the
+whole screen, before any chrome above or below the shelf.</p>
+<table class="m" id="postures">
+  <tr><th>posture</th><th>viewport</th><th>shelf at that width</th><th>fits the screen?</th></tr>
+</table>
+
+<h2>Folded landscape · 711 × 374, drawn to scale</h2>
+<p class="note">The shelf in a box the exact size of the screen. Nothing else is on this screen — no header, no
+tab bar, no padding.</p>
+<div class="ladder" id="posture-shot"></div>
+
+<h2>The ladder</h2>
+<div class="ladder" id="ladder"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round43.js"></script>
+<script src="round46.js"></script>
+<script>
+  const { shelf, POSTURES, RUNGS } = window.QUOTA_ROUND46;
+  const payload = window.QUOTA_LIVE;
+  const now = window.QUOTA_LIVE_FETCHED_AT;
+
+  function pane(width) {
+    const host = document.createElement("div");
+    host.className = "o-shelf";
+    host.style.width = `${width}px`;
+    const root = document.createElement("div");
+    root.className = "w r";
+    shelf(root, payload, now);
+    host.append(root);
+    return host;
+  }
+
+  /* --- the ladder --- */
+  const ladder = document.getElementById("ladder");
+  const heights = new Map();
+  for (const width of RUNGS) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = `<b>${width} px</b>`;
+    const host = pane(width);
+    const out = document.createElement("p");
+    out.className = "cell-cap";
+    out.style.margin = "6px 0 0";
+    box.append(cap, host, out);
+    ladder.append(box);
+    requestAnimationFrame(() => {
+      const height = host.firstElementChild.offsetHeight;
+      heights.set(width, height);
+      out.innerHTML = `<b>${height} px</b> tall`;
+      fillTable();
+    });
+  }
+
+  function fillTable() {
+    const table = document.getElementById("postures");
+    if (table.rows.length > 1) return;
+    if (!POSTURES.every((posture) => heights.has(posture.width))) return;
+    for (const posture of POSTURES) {
+      const shelfHeight = heights.get(posture.width);
+      const fits = shelfHeight <= posture.height;
+      const row = document.createElement("tr");
+      row.innerHTML =
+        `<td><b>${posture.id}</b></td>` +
+        `<td>${posture.width} × ${posture.height}</td>` +
+        `<td>${shelfHeight} px</td>` +
+        `<td class="${fits ? "good" : "bad"}"><b>${fits ? `yes, ${posture.height - shelfHeight} px spare` : `NO — ${shelfHeight - posture.height} px over`}</b></td>`;
+      table.append(row);
+    }
+  }
+
+  /* --- folded landscape, to scale --- */
+  const shot = document.getElementById("posture-shot");
+  for (const posture of POSTURES.filter((item) => item.height < 600)) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = `<b>${posture.id}</b> · ${posture.width} × ${posture.height}`;
+    const frame = document.createElement("div");
+    frame.className = "posture";
+    frame.style.width = `${posture.width}px`;
+    frame.style.height = `${posture.height}px`;
+    frame.append(pane(posture.width - 12));
+    box.append(cap, frame);
+    shot.append(box);
+  }
+</script>
+</html>
