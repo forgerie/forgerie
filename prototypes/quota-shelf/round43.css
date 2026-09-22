@@ -1,0 +1,102 @@
+/* Round 43 · the address above the lanes it names.
+ *
+ * Prefix u-. Checked clear of the shared sheets.
+ *
+ * The address is the only thing that moves. Every column below it keeps the
+ * single 12 px line box round 42 had to introduce, because if the columns
+ * disagree the tallest one sets the pitch and the shelf grows again each
+ * time a taller column is revealed.
+ */
+
+.u-shelf { container-type: inline-size; }
+
+.u-row {
+  display: grid;
+  grid-template-columns: 22px minmax(40px, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: #0c0f12;
+  box-shadow: inset 0 0 0 1px #171c21;
+}
+.u-tag { font: 11px/1 var(--num); letter-spacing: .06em; color: var(--dim); }
+
+.u-stack { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.u-acct { display: flex; min-width: 0; padding-left: 5px; }
+.u-acct.at-column { align-items: center; }
+.u-acct.at-above { flex-direction: column; align-items: stretch; }
+.u-stack.grouped > .u-acct + .u-acct { margin-top: 5px; }
+/* A heading does not separate by itself. Set the same 4 px above an address
+   as below it and the address is equidistant between the lanes it names and
+   the lanes above, so it reads as belonging to either. It needs more room
+   above than below, or the grouping inverts.
+
+   This belongs to the heading, so it arrives with the heading. Applied at
+   every width it charges the narrow shelf 19 px for separating accounts
+   that have nothing to separate -- exactly what round 34 ruled out. */
+@container (min-width: 640px) {
+  .u-stack > .u-acct.at-above + .u-acct.at-above { margin-top: 8px; }
+}
+.u-acct.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
+.u-lanes { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 0; }
+.u-line { display: flex; align-items: center; min-width: 0; }
+.u-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+
+.u-doom { position: absolute; top: 0; height: 3px; border-radius: 2px; }
+
+.u-roster { gap: 4px; }
+.u-token { flex: 0 0 auto; width: 5px; height: 5px; border-radius: 50%; background: #4d5866; }
+.u-token.is-out { background: var(--danger); }
+
+.u-value { overflow: visible; }
+.u-val { font: 500 12px/12px var(--num); font-variant-numeric: tabular-nums; color: #8b949e; white-space: nowrap; }
+.u-val.tone-low { color: var(--warn); }
+.u-val.tone-out { color: var(--danger); }
+
+/* --- the columns that width buys --- */
+
+.u-who, .u-meter, .u-pct, .u-when { display: none; flex: 0 0 auto; white-space: nowrap; }
+.u-meter { overflow: hidden; text-overflow: ellipsis; }
+.u-who, .u-meter, .u-pct, .u-when { font-size: 10px; line-height: 12px; }
+
+.u-who { font-family: var(--sans); color: #79838e; }
+.u-who.is-out { color: #454e57; text-decoration: line-through; }
+
+/* Beside the lanes: a fixed width, or a long address in one row would push
+   that row's lanes further right than the row above it. */
+.at-column > .u-who { width: 132px; padding-right: 10px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Above the lanes: no width to reserve, so the address is never cut, and
+   every lane on the shelf gets those 132 px of track back. */
+.at-above > .u-who { width: auto; padding: 0 0 2px 1px; }
+
+.u-meter { width: 58px; font-family: var(--num); color: var(--dim); letter-spacing: .02em; }
+.u-pct {
+  width: 30px; padding-left: 10px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums; color: #79838e;
+}
+.u-when {
+  width: 32px; padding-left: 8px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.u-when.tone-plain { color: #5f6b76; }
+.u-when.tone-loss { color: var(--warn); }
+.u-when.tone-dry { color: var(--danger); }
+.u-when.tone-none { color: #39414a; }
+
+@container (min-width: 430px) { .u-when { display: block; } }
+@container (min-width: 510px) { .u-pct { display: block; } }
+@container (min-width: 640px) { .u-who { display: block; } }
+@container (min-width: 820px) { .u-meter { display: block; } }
+
+/* --- the comp --- */
+.ladder { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 6px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.big { zoom: 2; width: 500px; }
+.stack { display: flex; flex-direction: column; gap: 18px; }
+table.m { border-collapse: collapse; font: 11px/1.5 var(--num); color: var(--muted); margin: 0 0 18px; }
+table.m th, table.m td { text-align: left; padding: 3px 18px 3px 0; border-bottom: 1px solid #171c21; }
+table.m th { color: var(--dim); font-weight: 500; }
+table.m b { color: var(--ink); font-weight: 500; }
