@@ -1,0 +1,84 @@
+/* Round 51 · one line per provider.
+ *
+ * Prefix b2-. Self-contained, for the reason round 50 states: a shared
+ * sheet in this directory has silently overridden a variable three times.
+ */
+
+.b2-frame {
+  --rail: #262d35;
+  --paper: #0c0f12;
+  --edge: #171c21;
+  --muted: #8b949e;
+  --dim: #5f6b76;
+  --warn: #d29922;
+  --danger: #f85149;
+  --accent: #4d5a66;
+  --hue-0: #4f7f96;
+  --hue-1: #5f6b76;
+  --hue-2: #7d6fa8;
+  --pace-half: 1.5px;
+  --lane-h: 4px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 4px 6px 8px;
+}
+
+.b2-row {
+  display: grid;
+  grid-template-columns: 22px minmax(40px, 1fr) 26px;
+  align-items: center; gap: 0 10px;
+  padding: 7px 11px; border-radius: 9px;
+  background: var(--paper); box-shadow: inset 0 0 0 1px var(--edge);
+}
+.b2-tag { font: 11px/1 var(--num); letter-spacing: .06em; color: var(--muted); }
+/* How many accounts sit behind the one the line is drawn from. Reserved on
+   every row so the lanes still end at the same x. */
+.b2-res { font: 10px/12px var(--num); color: var(--dim); text-align: right; }
+.b2-none { font: 10px/12px var(--num); color: #39414a; }
+
+.b2-lane { position: relative; height: var(--lane-h); flex: 1 1 0; min-width: 0; display: block; }
+.b2-ground, .b2-fill, .b2-hatch, .b2-doom {
+  position: absolute; top: 0; height: var(--lane-h); border-radius: calc(var(--lane-h) / 2);
+}
+.b2-ground { background: var(--rail); }
+.b2-fill { background: var(--hue); }
+.hue0 { --hue: var(--hue-0); }
+.hue1 { --hue: var(--hue-1); }
+.hue2 { --hue: var(--hue-2); }
+.b2-ground.full { left: 0; right: 0; }
+.b2-fill.flat { left: 0; width: var(--fill); }
+.b2-ground.left { left: 0; width: calc(var(--pace) - var(--pace-half)); }
+.b2-ground.right { left: calc(var(--pace) + var(--pace-half)); right: 0; }
+.b2-fill.left { left: 0; width: min(var(--fill), calc(var(--pace) - var(--pace-half))); }
+.b2-fill.right { left: calc(var(--pace) + var(--pace-half)); width: calc(var(--fill) - var(--pace) - var(--pace-half)); }
+.b2-hatch {
+  left: var(--fill); width: calc(var(--pace) - var(--fill) - var(--pace-half));
+  background: repeating-linear-gradient(115deg, transparent 0 2px, var(--warn) 2px 3px);
+  opacity: .75;
+}
+.b2-doom { z-index: 1; }
+
+/* split: the track divided, not averaged. Each account keeps its own fill
+   and its own cut, so nothing cancels. The cost is that every account's
+   bar is 1/n as long, and a cut inside a short segment is hard to place. */
+.b2-split { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.b2-cell { flex: 1 1 0; min-width: 0; position: relative; }
+.b2-cell.routed::before {
+  content: ""; position: absolute; left: -3px; top: 50%;
+  width: 2px; height: 11px; margin-top: -5.5px; border-radius: 1px; background: var(--accent);
+}
+
+/* --- the page --- */
+.rail { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.cap { font: 11px/1.4 var(--num); color: #5b646e; margin: 0 0 6px; }
+.cap b { color: #8b949e; font-weight: 500; }
+.box { border: 1px solid #1c2228; border-radius: 9px; overflow: hidden; background: #0a0d10; width: 360px; }
+.box.wide { width: 620px; }
+.verdict { font: 11px/1.5 var(--sans); margin: 6px 0 0; max-width: 360px; }
+.verdict.bad { color: #d4736a; }
+.verdict.ok { color: #7fa88a; }
+table.m { border-collapse: collapse; font: 11.5px/1.55 var(--sans); color: #8b949e; max-width: 1150px; }
+table.m th, table.m td { text-align: left; vertical-align: top; padding: 7px 16px 7px 0; border-bottom: 1px solid #171c21; }
+table.m th { color: #5b646e; font-weight: 500; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
+table.m b { color: #e6e8eb; font-weight: 500; }
+table.m .no { color: #d4736a; }
+table.m .yes { color: #7fa88a; }
