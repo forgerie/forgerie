@@ -1,0 +1,71 @@
+/* Round 54 · the same idea, drawn in the shelf's own hand.
+ *
+ * Prefix h2-. Self-contained.
+ *
+ * Every constant is the shipped shelf's. 3 px rail, 12 px line, 4 px
+ * pitch, 22 px tag column, 40 px readout, the same hues at the same
+ * saturation, the same arrow glyphs in the same colours.
+ */
+
+.h2-frame {
+  --rail: #262d35; --paper: #0c0f12;
+  --muted: #8b949e; --dim: #5f6b76; --warn: #d29922; --danger: #f85149; --accent: #4d5a66;
+  --hue-0: #4f7f96; --hue-1: #5f6b76; --hue-2: #7d6fa8;
+  background: var(--paper);
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 7px 11px 8px;
+}
+
+/* The readout column is reserved at its widest on every row, or the rails
+   stop ending at the same x the moment one row has both arrows. */
+.h2-row { display: grid; grid-template-columns: 22px minmax(40px, 1fr) 72px; align-items: center; gap: 0 10px; height: 12px; }
+.h2-tag { font: 11px/12px var(--num); letter-spacing: .06em; color: var(--muted); }
+
+/* The rail: the same 3 px ground every lane sits on. */
+.h2-rail { position: relative; height: 12px; min-width: 0; }
+.h2-ground { position: absolute; left: 0; right: 0; top: 4.5px; height: 3px; border-radius: 1.5px; background: var(--rail); }
+/* On pace. One pixel, the rail's own colour but solid, the full line tall. */
+.h2-zero { position: absolute; left: 50%; top: 1px; width: 1px; height: 10px; margin-left: -.5px; background: var(--dim); }
+
+/* A meter, standing on the rail at its rate. Two pixels, its hue, faint:
+   health has no colour. */
+.h2-stripe { position: absolute; top: 3px; width: 2px; height: 6px; margin-left: -1px; border-radius: 1px; opacity: .75; }
+.h2-stripe.hue0 { background: var(--hue-0); }
+.h2-stripe.hue1 { background: var(--hue-1); }
+.h2-stripe.hue2 { background: var(--hue-2); }
+/* In trouble it takes the colour of its trouble, and stands taller. */
+.h2-stripe.is-loss { background: var(--warn); opacity: 1; top: 2px; height: 8px; }
+.h2-stripe.is-dry { background: var(--danger); opacity: 1; top: 2px; height: 8px; }
+/* No pace to place it. It cannot stand on the axis, because the axis is
+   rate and it has none, so it sits below the rail instead: present, and
+   visibly not measured. Fanned by index so several do not become one. */
+.h2-stripe.is-flat { background: none; box-shadow: inset 0 0 0 1px var(--dim); opacity: .8; top: 8px; height: 3px; width: 3px; margin-left: -1.5px; border-radius: 1.5px; }
+.h2-stripe.is-flat.routed { top: 8px; height: 3px; }
+/* The routed account: the full line, the way its riser is the full block. */
+.h2-stripe.routed { top: 1px; height: 10px; }
+/* Overlaps stack. Two stripes at one rate are one darker stripe. */
+.h2-stripe { mix-blend-mode: normal; }
+
+/* A pool: the shelf's own token, and like the unpaced meter it has no rate
+   to stand at, so it sits below the rail with them. */
+.h2-dot { position: absolute; top: 8px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--dim); }
+.h2-dot.off { background: var(--danger); }
+
+/* The readout: the countdown column, unchanged. */
+.h2-tms { display: flex; gap: 6px; justify-content: flex-end; }
+.h2-tm { width: 40px; text-align: right; font: 500 10px/12px var(--num); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; justify-self: end; }
+.h2-tm.loss { color: var(--warn); }
+.h2-tm.dry { color: var(--danger); width: 26px; }
+.h2-tm.none { opacity: .45; }
+.h2-glyph { font-style: normal; font-size: 9px; padding-right: 1px; }
+
+/* --- the page --- */
+.rail { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.cap { font: 11px/1.4 var(--num); color: #5b646e; margin: 0 0 6px; }
+.cap b { color: #8b949e; font-weight: 500; }
+.box { border: 1px solid #1c2228; border-radius: 9px; overflow: hidden; width: 420px; }
+.box.big { zoom: 2.4; width: 400px; }
+.box.narrow { width: 300px; }
+.out { font: 11px/1.4 var(--num); color: #5b646e; margin: 6px 0 0; }
+.out b { color: #e6e8eb; font-weight: 500; }
+.verdict { font: 11px/1.5 var(--sans); margin: 6px 0 0; max-width: 420px; color: #7fa88a; }

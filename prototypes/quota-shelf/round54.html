@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 54 · in the shelf's own hand — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round54.css">
+<style>
+  body { width: 1420px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 36px 0 10px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 100ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .note code { color: var(--ink); font-family: var(--num); }
+</style>
+
+<h1>Round 54 · the same idea, drawn in the shelf's own hand</h1>
+<p class="note">Round 53 got the idea right and the drawing wrong. It broke three rules the shipped shelf lives
+by: <b>one bar per line</b> (it drew two — the axis and a loss bar), <b>hairlines only</b> (the axis was a 12 px
+slab), and <b>colour on marks only</b> (the axis itself was tinted toward each failure).</p>
+<p class="note">Nothing about the idea needs any of that. The axis is a <b>rail</b> — the same 3 px ground every
+lane already sits on — with a 1 px tick at centre for on-pace. Every meter is a short stripe standing on the
+rail at its rate. The loss is a <b>number in the countdown column</b>, with the arrow the countdown already
+uses. The row is 12 px, the pitch is 4 px, the tag column is 22 px. It is a line from the shipped shelf that
+happens to hold every account.</p>
+
+<h2>Today · live payload</h2>
+<div class="rail" id="live"></div>
+
+<h2>At 2.4×</h2>
+<div class="rail" id="zoom"></div>
+
+<h2>The two cases that killed pooling</h2>
+<div class="rail" id="cases"></div>
+
+<h2>Scale, and width</h2>
+<div class="rail" id="scale"></div>
+
+<script src="live.js"></script>
+<script src="round53.js"></script>
+<script src="round54.js"></script>
+<script>
+  const { shelf } = window.QUOTA_ROUND54;
+  const { group, CANCEL, QUEUE, CALM, MANY, T0 } = window.QUOTA_ROUND53;
+  const payload = window.QUOTA_LIVE;
+  const now = window.QUOTA_LIVE_FETCHED_AT;
+
+  function cell(host, label, source, { cls = "", verdict, measure = false } = {}) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cap";
+    cap.innerHTML = label;
+    const shell = document.createElement("div");
+    shell.className = `box${cls ? ` ${cls}` : ""}`;
+    const frame = document.createElement("div");
+    frame.className = "h2-frame";
+    shelf(frame, source, source === payload ? now : T0);
+    shell.append(frame);
+    box.append(cap, shell);
+    if (verdict) { const v = document.createElement("p"); v.className = "verdict"; v.textContent = verdict; box.append(v); }
+    if (measure) {
+      const out = document.createElement("p"); out.className = "out"; box.append(out);
+      requestAnimationFrame(() => { out.innerHTML = `<b>${Math.round(frame.getBoundingClientRect().height)} px</b>`; });
+    }
+    host.append(box);
+  }
+
+  cell(document.getElementById("live"), "<b>four providers</b> · 13 meters · 420 px", payload, { measure: true });
+  cell(document.getElementById("zoom"), "<b>the same</b>", payload, { cls: "big" });
+
+  const lossOf = (src) => Math.round(group(src.providers[0], T0).loss);
+  cell(document.getElementById("cases"), "<b>cancellation</b>", CANCEL,
+    { verdict: `Red at the left edge, amber at the right. ↓1 running dry, ↑${lossOf(CANCEL)}% will go unspent. Neither hides the other.` });
+  cell(document.getElementById("cases"), "<b>queue</b>", QUEUE,
+    { verdict: `Two amber, both right of the tick. ↑${lossOf(QUEUE)}%, both losses added.` });
+
+  cell(document.getElementById("scale"), "<b>calm</b> · three accounts", CALM, { measure: true });
+  cell(document.getElementById("scale"), "<b>twelve accounts</b>", MANY, { measure: true });
+  cell(document.getElementById("scale"), "<b>today at 300 px</b>", payload, { cls: "narrow", measure: true });
+</script>
+</html>
