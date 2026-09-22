@@ -1,0 +1,87 @@
+/* Round 53 · every account on one axis, and the loss added up.
+ *
+ * Prefix r2-. Self-contained.
+ *
+ * The axis is diverging: on pace in the centre, credit dying to the right,
+ * running dry to the left. Stripes are translucent so overlaps stack --
+ * two meters at the same rate are a darker stripe, not a hidden one.
+ */
+
+.r2-frame {
+  --paper: #0c0f12; --edge: #171c21; --rail: #1c2228;
+  --muted: #8b949e; --dim: #5f6b76; --warn: #d29922; --danger: #f85149; --accent: #58a6ff;
+  --hue-0: #4f7f96; --hue-1: #7c8894; --hue-2: #7d6fa8;
+  background: var(--paper);
+  display: flex; flex-direction: column; gap: 0;
+  padding: 6px 10px 7px;
+}
+
+.r2-row {
+  display: grid; grid-template-columns: 34px minmax(60px, 1fr) 62px;
+  align-items: center; gap: 0 10px; height: 18px;
+}
+.r2-row + .r2-row { margin-top: 3px; }
+.r2-tag { font: 10px/12px var(--num); letter-spacing: .06em; color: var(--muted); white-space: nowrap; }
+.r2-dry { font-style: normal; color: var(--danger); margin-left: 3px; letter-spacing: 0; font-size: 9px; }
+
+/* --- the axis --- */
+.r2-axis {
+  position: relative; height: 12px; min-width: 0;
+  /* Faint, so the axis reads as a place rather than a bar. The two halves
+     are tinted toward their failure so direction can be read without a
+     stripe present. */
+  background:
+    linear-gradient(90deg,
+      color-mix(in oklab, var(--danger) 9%, var(--rail)) 0%,
+      var(--rail) 50%,
+      color-mix(in oklab, var(--warn) 11%, var(--rail)) 100%);
+  border-radius: 2px;
+}
+.r2-zero { position: absolute; left: 50%; top: 0; width: 1px; height: 100%; margin-left: -.5px; background: var(--dim); opacity: .8; }
+
+.r2-stripe {
+  position: absolute; top: 1px; width: 2px; height: 10px; margin-left: -1px;
+  border-radius: 1px; opacity: .55;
+}
+.r2-stripe.hue0 { background: var(--hue-0); }
+.r2-stripe.hue1 { background: var(--hue-1); }
+.r2-stripe.hue2 { background: var(--hue-2); }
+/* In trouble, a stripe takes the colour of its trouble. Everywhere else it
+   keeps its meter's hue at low opacity, so health carries no colour. */
+.r2-stripe.is-loss { background: var(--warn); opacity: .85; }
+.r2-stripe.is-dry { background: var(--danger); opacity: .85; }
+/* Unpaced: present, but with no rate to place. A hollow mark at centre. */
+.r2-stripe.is-flat { background: none; box-shadow: inset 0 0 0 1px var(--dim); opacity: .7; }
+/* The booleans: a dot at centre. */
+.r2-stripe.is-answering, .r2-stripe.is-refusing { width: 5px; height: 5px; top: 3.5px; margin-left: -2.5px; border-radius: 50%; }
+.r2-stripe.is-answering { background: var(--dim); opacity: .7; }
+.r2-stripe.is-refusing { background: var(--danger); opacity: .9; }
+/* The routed account's stripe is taller, so it can be found. */
+.r2-stripe.routed { top: -1px; height: 14px; }
+
+/* --- the loss --- */
+.r2-loss { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.r2-loss.none { color: #39414a; font: 10px/12px var(--num); justify-content: flex-end; }
+.r2-lossbar { position: relative; flex: 1 1 0; height: 4px; border-radius: 2px; background: var(--rail); overflow: hidden; }
+.r2-lossbar::after { content: ""; position: absolute; left: 0; top: 0; height: 100%; width: var(--w); background: var(--warn); border-radius: 2px; }
+.r2-lossbar:not(.on)::after { display: none; }
+.r2-loss b { flex: 0 0 26px; text-align: right; font: 500 10px/12px var(--num); color: var(--dim); font-variant-numeric: tabular-nums; }
+.r2-loss b.on { color: var(--warn); }
+
+/* --- the page --- */
+.rail { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.cap { font: 11px/1.4 var(--num); color: #5b646e; margin: 0 0 6px; }
+.cap b { color: #8b949e; font-weight: 500; }
+.box { border: 1px solid #1c2228; border-radius: 9px; overflow: hidden; width: 420px; }
+.box.big { zoom: 2.2; width: 430px; }
+.verdict { font: 11px/1.5 var(--sans); margin: 6px 0 0; max-width: 420px; color: #7fa88a; }
+.verdict.bad { color: #d4736a; }
+.out { font: 11px/1.4 var(--num); color: #5b646e; margin: 6px 0 0; }
+.out b { color: #e6e8eb; font-weight: 500; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; max-width: 1100px; margin: 0 0 16px; font: 11.5px var(--sans); color: #8b949e; }
+.legend div { display: flex; align-items: center; gap: 8px; }
+.legend i { display: inline-block; width: 2px; height: 10px; border-radius: 1px; }
+table.m { border-collapse: collapse; font: 11.5px/1.55 var(--sans); color: #8b949e; max-width: 1150px; }
+table.m th, table.m td { text-align: left; vertical-align: top; padding: 7px 16px 7px 0; border-bottom: 1px solid #171c21; }
+table.m th { color: #5b646e; font-weight: 500; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
+table.m b { color: #e6e8eb; font-weight: 500; }
