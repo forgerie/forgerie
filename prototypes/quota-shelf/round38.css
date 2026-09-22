@@ -1,0 +1,54 @@
+/* Round 38 · a mark for a thing that is not a quantity.
+ *
+ * Prefix q-; the shared sheets already own e-, f-, g-, k-, m-, n-, p-, t-, w-.
+ * round4.css owns a few q-* names too (q-lane is not among them: checked).
+ */
+
+.q-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+
+/* The token: 5 px, at the lane origin. One of three colours. */
+.q-token {
+  flex: 0 0 auto; width: 5px; height: 5px; border-radius: 50%;
+  background: #4d5866;
+}
+.is-low .q-token, .q-token.is-low { background: var(--warn); }
+.is-out .q-token, .q-token.is-out { background: var(--danger); }
+
+/* rail · a hairline running away from the token. It is a rail, not a bar:
+   it carries no fill and is the same in every state. */
+.q-wire { position: absolute; left: 7px; right: 0; top: 1px; height: 1px; background: #232a31; }
+.q-wire + .q-token { position: relative; }
+
+/* lamp · the token with a halo when lit, dark and unlit when out. */
+.q-lamp .q-token { box-shadow: 0 0 0 2px rgba(77, 88, 102, .22); }
+.q-lamp.is-low .q-token { box-shadow: 0 0 0 2px rgba(210, 153, 34, .28), 0 0 6px rgba(210, 153, 34, .35); }
+.q-lamp.is-out .q-token { background: #2a1416; box-shadow: inset 0 0 0 1px var(--danger); }
+
+/* line · round 37's notch, for comparison. */
+.q-line .q-seg { flex: 1 1 0; min-width: 0; height: 1px; background: #3a434d; }
+.q-line.is-low .q-seg { height: 3px; border-radius: 1px; background: var(--warn); }
+.q-line.is-out .q-seg, .q-line .q-seg.is-out { height: 3px; border-radius: 1px; background: var(--danger); }
+.q-line.q-roster { gap: 2px; }
+.q-line.q-roster.dense { gap: 1px; }
+
+/* a roster of several, drawn as tokens in a row. */
+.q-tokens { display: flex; gap: 4px; align-items: center; position: relative; }
+
+.q-unknown {
+  position: absolute; inset: 0; border-radius: 2px;
+  background: repeating-linear-gradient(90deg, #2b333b 0 2px, transparent 2px 5px);
+}
+.q-doom { position: absolute; top: 0; height: 3px; border-radius: 2px; background: #e8683f; }
+
+/* --- the comp --- */
+.matrix { display: grid; grid-template-columns: max-content repeat(4, 260px); gap: 14px 20px; align-items: center; }
+.matrix .head { font: 10px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.matrix .rowcap { font: 11px/1.45 var(--num); color: var(--dim); }
+.matrix .rowcap b { color: var(--ink); font-weight: 500; }
+.matrix .frame { width: 260px; }
+.pair { display: flex; flex-wrap: wrap; gap: 20px 30px; align-items: flex-start; }
+.pair .frame { width: 360px; }
+.big .frame { width: 360px; zoom: 2; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 6px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.shelves { display: grid; grid-template-columns: repeat(4, 360px); gap: 26px; }
