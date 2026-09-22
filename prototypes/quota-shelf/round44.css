@@ -1,0 +1,103 @@
+/* Round 44 · making the address stop looking like a broken row.
+ *
+ * Prefix x-. Checked clear of the shared sheets.
+ *
+ * The spacing fault is fixed for every candidate, because it is not one of
+ * the things being compared.
+ *
+ * Round 43 leaves 2 px under the address and 4 px between lanes, so the
+ * address sits closer to its first lane than the lanes sit to each other.
+ * The direction is right -- a heading binds to what it labels -- but 2 px
+ * reads as crushed rather than bound, and 8 px between accounts is only
+ * twice the internal gap, which is not enough to be seen as a different
+ * kind of space.
+ *
+ *   3 px   under the address   bound to its lanes
+ *   4 px   between lanes       even
+ *  11 px   between accounts    separated, and clearly a different quantity
+ */
+
+.x-shelf { container-type: inline-size; }
+
+.x-row {
+  display: grid;
+  grid-template-columns: 22px minmax(40px, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: #0c0f12;
+  box-shadow: inset 0 0 0 1px #171c21;
+}
+.x-tag { font: 11px/1 var(--num); letter-spacing: .06em; color: var(--dim); }
+
+.x-stack { display: flex; flex-direction: column; min-width: 0; }
+.x-acct { display: flex; flex-direction: column; align-items: stretch; min-width: 0; padding-left: 5px; }
+.x-stack > .x-acct + .x-acct { margin-top: 11px; }
+.x-acct.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
+.x-lanes { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.x-line { display: flex; align-items: center; min-width: 0; }
+.x-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+
+.x-doom { position: absolute; top: 0; height: 3px; border-radius: 2px; }
+.x-roster { gap: 4px; }
+.x-token { flex: 0 0 auto; width: 5px; height: 5px; border-radius: 50%; background: #4d5866; }
+.x-token.is-out { background: var(--danger); }
+.x-value { overflow: visible; }
+.x-val { font: 500 12px/12px var(--num); font-variant-numeric: tabular-nums; color: #8b949e; white-space: nowrap; }
+.x-val.tone-low { color: var(--warn); }
+.x-val.tone-out { color: var(--danger); }
+
+.x-meter, .x-pct, .x-when { flex: 0 0 auto; white-space: nowrap; font-size: 10px; line-height: 12px; }
+.x-meter { width: 58px; font-family: var(--num); color: var(--dim); letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; }
+.x-pct {
+  width: 30px; padding-left: 10px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums; color: #79838e;
+}
+.x-when {
+  width: 32px; padding-left: 8px; text-align: right;
+  font-family: var(--num); font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.x-when.tone-plain { color: #5f6b76; }
+.x-when.tone-loss { color: var(--warn); }
+.x-when.tone-dry { color: var(--danger); }
+.x-when.tone-none { color: #39414a; }
+
+/* --- the address, five ways --- */
+
+.x-who {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--sans); padding-bottom: 3px;
+}
+.x-who.is-out { text-decoration: line-through; }
+
+/* quiet: round 43. Same size, same grey, same slot as the labels below. */
+.is-quiet > .x-who { font-size: 10px; line-height: 12px; color: #79838e; }
+.is-quiet > .x-who.is-out { color: #454e57; }
+
+/* lift: bigger and brighter than the labels it governs. */
+.is-lift > .x-who, .is-step > .x-who, .is-split > .x-who {
+  font-size: 11px; line-height: 14px; font-weight: 500; color: #aeb7c0;
+}
+.is-lift > .x-who.is-out, .is-step > .x-who.is-out, .is-split > .x-who.is-out { color: #525b64; }
+
+/* indent: the lanes step in beneath the address, so the hierarchy is
+   readable from the shape of the left margin alone. 12 px of the 641 px
+   track, which is 1.9 per cent, for a structural signal that costs no
+   height whatever. */
+.is-indent > .x-who { font-size: 10px; line-height: 12px; color: #79838e; }
+.is-indent > .x-who.is-out { color: #454e57; }
+.is-indent > .x-lanes, .is-step > .x-lanes, .is-split > .x-lanes { padding-left: 12px; }
+
+/* split: the domain falls back so the local part carries the identity.
+   Five of the six live accounts share two domains between them. */
+.x-local { font-weight: 500; color: inherit; }
+.x-domain { font-weight: 400; color: #666f79; }
+.is-split > .x-who.is-out .x-domain { color: #3d454d; }
+
+/* --- the comp --- */
+.ladder { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 6px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+.big { zoom: 2.2; width: 430px; }
+.stack { display: flex; flex-direction: column; gap: 20px; }

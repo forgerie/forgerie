@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 44 · the address is not a broken row — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round2.css">
+<link rel="stylesheet" href="round4.css">
+<link rel="stylesheet" href="round14.css">
+<link rel="stylesheet" href="round44.css">
+<style>
+  body { width: 1460px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 34px 0 8px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 94ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .note code { color: var(--ink); font-family: var(--num); }
+</style>
+<h1>Round 44 · the address is not a broken row</h1>
+<p class="note">In round 43 the address is 10 px, in the same grey as the meter labels, left-aligned in the
+same slot they occupy, 2 px above the first of them. It shares every attribute with the rows beneath it, so it
+reads as one of them — specifically as <b>a lane row whose bar failed to draw</b>. That is the whole of the
+afterthought feeling, and it is not a matter of polish: a heading that uses none of a heading's tools is not a
+heading.</p>
+<p class="note">A heading has exactly three tools — <b>size and weight</b>, <b>colour</b>, and <b>position</b>.
+Round 43 uses none of them. Each candidate below adds one.</p>
+
+<h2>The spacing, fixed for all five</h2>
+<p class="note">This is a separate fault and is not one of the things being compared. Round 43 leaves 2 px
+under the address and 4 px between lanes, so the address sits <i>closer</i> to its first lane than the lanes sit
+to each other. The direction is right — a heading binds to what it labels — but 2 px reads as crushed rather
+than bound, and 8 px between accounts is only twice the internal gap, which is not enough to be seen as a
+different kind of space.</p>
+<table class="m" style="border-collapse:collapse;font:11px/1.6 var(--num);color:var(--muted)">
+  <tr><td style="padding-right:18px"><b style="color:var(--ink)">3 px</b></td><td style="padding-right:18px">under the address</td><td>bound to its lanes</td></tr>
+  <tr><td><b style="color:var(--ink)">4 px</b></td><td>between lanes</td><td>even</td></tr>
+  <tr><td><b style="color:var(--ink)">11 px</b></td><td>between accounts</td><td>separated, and clearly a different quantity</td></tr>
+</table>
+
+<h2>Antigravity at 2.2× · where it matters most</h2>
+<p class="note">Two accounts whose addresses differ only in the local part, one of them the pinned one. This is
+the hardest case on the shelf and the one that shows whether the address is doing any work.</p>
+<div class="stack" id="zoom"></div>
+
+<h2>The whole shelf, each way · 820 px</h2>
+<div class="ladder" id="shelves"></div>
+
+<script src="plan.js"></script>
+<script src="round4.js"></script>
+<script src="live.js"></script>
+<script src="round43.js"></script>
+<script src="round44.js"></script>
+<script>
+  const { shelf, providerRow, MODES } = window.QUOTA_ROUND44;
+  const payload = window.QUOTA_LIVE;
+  const now = window.QUOTA_LIVE_FETCHED_AT;
+  const antigravity = payload.providers.find((provider) => provider.id === "antigravity");
+
+  function pane(width, build) {
+    const host = document.createElement("div");
+    host.className = "x-shelf";
+    host.style.width = `${width}px`;
+    const root = document.createElement("div");
+    root.className = "w r";
+    build(root);
+    host.append(root);
+    return host;
+  }
+
+  const zoom = document.getElementById("zoom");
+  for (const mode of MODES) {
+    const box = document.createElement("div");
+    box.className = "big";
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = `<b>${mode.id}</b> · ${mode.caption}`;
+    box.append(cap, pane(410, (root) => root.append(providerRow(antigravity, now, mode.id))));
+    zoom.append(box);
+  }
+
+  const shelves = document.getElementById("shelves");
+  for (const mode of MODES) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cell-cap";
+    cap.innerHTML = `<b>${mode.id}</b>`;
+    const host = pane(820, (root) => shelf(root, payload, now, mode.id));
+    const out = document.createElement("p");
+    out.className = "cell-cap";
+    out.style.margin = "6px 0 0";
+    box.append(cap, host, out);
+    shelves.append(box);
+    requestAnimationFrame(() => {
+      const node = host.firstElementChild;
+      const track = Math.round(node.querySelector(".x-lane").getBoundingClientRect().width);
+      out.innerHTML = `<b>${node.offsetHeight} px</b> tall · <b>${track} px</b> of track`;
+    });
+  }
+</script>
+</html>
