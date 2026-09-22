@@ -14,10 +14,17 @@
 }
 .k-tag { font: 11px/1 var(--num); letter-spacing: .06em; color: var(--dim); }
 
-.k-stack { display: flex; flex-direction: column; min-width: 0; }
-/* Lanes inside an account sit close; accounts are held apart. */
+/* 4 px is the lane pitch, and it is the same whether the next lane belongs to
+   this account or the next one. Grouping adds to it; it does not create it. */
+.k-stack { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* Lanes inside an account sit close. Accounts are held apart only in a row
+   where an account owns more than one lane, because that is the only case
+   where the gap says something: with one meter per account the lane is the
+   account, and the separation just spends height. The boolean strip is
+   always held apart, being a different kind of thing. */
 .k-acct { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-left: 5px; }
-.k-acct + .k-acct { margin-top: 9px; }
+.k-stack.grouped > .k-acct + .k-acct,
+.k-acct.apart { margin-top: 5px; }
 .k-acct.pinned { box-shadow: inset 2px 0 0 #4d5a66; }
 .k-line { display: flex; align-items: center; min-width: 0; }
 .k-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; }

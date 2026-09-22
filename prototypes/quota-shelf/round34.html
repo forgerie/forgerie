@@ -23,11 +23,15 @@ drawn as an empty box. The bar is now <b>solid at every distance</b> and the int
 climbs. Amber and red stay the only saturated marks, and both still mean a problem.</p>
 <div class="ramp" id="ramp"></div>
 
-<h2>2 · Accounts are grouped</h2>
-<p class="note">Claude stacks three meters per account, so six lanes were one undifferentiated block. Lanes
-inside an account keep a 4 px gap; accounts are held apart by 9 px. The cost is <b>5 px per extra account</b>,
-measured under each frame below.</p>
+<h2>2 · Accounts are grouped, where grouping means something</h2>
+<p class="note">Claude stacks three meters per account, so six lanes were one undifferentiated block and the
+gap tells you which three belong together. <b>Codex holds one meter per account, so there is nothing to
+group</b> — the lane is the account, and a gap there only spends height. A row is separated when any of its
+accounts carries more than one lane, and otherwise its lanes sit at the plain 4 px pitch. The boolean strip is
+always held apart, being a different kind of thing from the account above it.</p>
 <div class="pair big" id="claude"></div>
+<p class="note">Codex, five single-meter accounts, with the rule applied and with the separation forced:</p>
+<div class="pair" id="codex"></div>
 
 <h2>3 · The lanes start at the same x on every row</h2>
 <p class="note">Antigravity's Gemini dots used to sit before the stack and push its bars right, so no row lined
@@ -133,8 +137,14 @@ name is a global name. The round is now on <code>k-</code>, which also took 47 p
     strips.append(box);
   }
 
+  put("codex", "<b>as designed</b> · nothing to group, so 4 px throughout", (root) => root.append(row(CODEX)));
+  put("codex", "<b>forced</b> · separated anyway, for comparison", (root) => root.append(row(CODEX, { forceGrouping: true })));
+
   const GROUPS = [CODEX, CLAUDE, ANTIGRAVITY];
   put("shelf", "<b>as designed</b>", (root) => { for (const group of GROUPS) root.append(row(group)); });
+  put("shelf", "<b>forced</b> · every account separated", (root) => {
+    for (const group of GROUPS) root.append(row(group, { forceGrouping: true }));
+  });
 
   put("align", "<b>rule at the lane origin</b>", (root) => {
     root.style.position = "relative";

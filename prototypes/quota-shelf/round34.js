@@ -7,10 +7,16 @@
  *    to save the credit climbs. That keeps the existing vocabulary, where
  *    amber and red are the only saturated marks and both mean a problem.
  *
- * 2. Accounts are grouped. Claude stacks three meters per account, so six
- *    lanes in a row were one undifferentiated block. Lanes inside an account
- *    keep their 4 px gap and accounts are separated by 9 px, which costs
- *    5 px per extra account and is measured on the page.
+ * 2. Accounts are grouped, but only where grouping means something. Claude
+ *    stacks three meters per account, so six lanes in a row were one
+ *    undifferentiated block and the gap tells you which three belong
+ *    together. Codex holds one meter per account, so there is nothing to
+ *    group: the lane is the account, and a gap there only spends height.
+ *
+ *    So a row is separated when any of its accounts carries more than one
+ *    lane, and otherwise its lanes sit at the plain 4 px pitch. The boolean
+ *    strip is always held apart, because it is a different kind of thing
+ *    from the account above it.
  *
  * 3. The lanes start at the same x on every row. Antigravity's Gemini dots
  *    used to sit before the stack and pushed its bars right, so no row lined
@@ -103,11 +109,14 @@
 
   /* -------------------------------------------------------------- one row */
 
-  function row(group) {
+  /** Grouping only earns its height when an account owns more than one lane. */
+  const needsGrouping = (group) => group.accounts.some((account) => account.lanes.length > 1);
+
+  function row(group, { forceGrouping = false } = {}) {
     const node = el("div", "k-row");
     node.append(el("span", "k-tag", group.tag));
 
-    const stack = el("span", "k-stack");
+    const stack = el("span", `k-stack${forceGrouping || needsGrouping(group) ? " grouped" : ""}`);
     for (const account of group.accounts) {
       const block = el("span", `k-acct${account.pinned ? " pinned" : ""}`);
       for (const spec of [...account.lanes].sort((a, b) => a.leftMs - b.leftMs)) {
@@ -120,7 +129,7 @@
       stack.append(block);
     }
     if (group.booleans?.length) {
-      const block = el("span", "k-acct");
+      const block = el("span", "k-acct apart");
       const line = el("span", "k-line");
       line.append(booleanLane(group.booleans));
       block.append(line);
@@ -181,5 +190,5 @@
     near: unit(Math.log(Math.max(excess, 1.0001)) / Math.log(CAP)),
   }));
 
-  window.QUOTA_ROUND34 = { row, booleanLane, CLAUDE, ANTIGRAVITY, CODEX, STRIPS, RAMP, doomColour };
+  window.QUOTA_ROUND34 = { row, booleanLane, needsGrouping, CLAUDE, ANTIGRAVITY, CODEX, STRIPS, RAMP, doomColour };
 })();
