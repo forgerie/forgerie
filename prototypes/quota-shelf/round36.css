@@ -1,0 +1,43 @@
+/* Round 36 · a lane for a balance with no maximum.
+ *
+ * Prefix is n-; e-, f-, g-, k-, m-, q-, t- and w- are taken by other rounds,
+ * and every page here loads the same shared sheets.
+ */
+
+.n-lane { position: relative; height: 3px; flex: 1 1 0; min-width: 0; }
+.n-ground { position: absolute; inset: 0; background: var(--rail); border-radius: 2px; }
+.n-fill { position: absolute; left: 0; top: 0; height: 3px; border-radius: 2px; background: #5f6b76; }
+.n-lane.dying .n-fill { background: var(--danger); }
+
+/* dot · no proportion is claimed. A hairline of time, and one mark on it. */
+.n-wire { position: absolute; left: 0; right: 0; top: 1px; height: 1px; background: #323b44; }
+.n-dot {
+  position: absolute; top: 50%; width: 5px; height: 5px; border-radius: 50%;
+  background: #8b949e; transform: translate(-50%, -50%);
+}
+.n-lane.dying .n-dot { background: var(--danger); }
+.n-lane.dying .n-ground { background: transparent; }
+
+/* Nothing known yet: draw the absence, do not guess a length. */
+.n-lane.unknown .n-ground { background: transparent; }
+.n-unknown {
+  position: absolute; inset: 0; border-radius: 2px;
+  background: repeating-linear-gradient(90deg, #2b333b 0 2px, transparent 2px 5px);
+}
+
+/* --- the comp --- */
+.matrix { display: grid; grid-template-columns: max-content repeat(5, 250px); gap: 14px 18px; align-items: center; }
+.matrix .head { font: 10px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.matrix .rowcap { font: 11px/1.45 var(--num); color: var(--dim); max-width: 36ch; }
+.matrix .rowcap b { color: var(--ink); font-weight: 500; }
+.matrix .frame { width: 250px; }
+.pair { display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: flex-start; }
+.big .frame { width: 360px; zoom: 2; }
+.cell-cap { font: 11px/1.4 var(--num); color: var(--dim); margin: 0 0 6px; }
+.cell-cap b { color: var(--muted); font-weight: 500; }
+
+table.cost { border-collapse: collapse; font: 11px/1.5 var(--num); color: var(--muted); margin: 0 0 16px; }
+table.cost th { color: var(--dim); font-weight: 500; text-align: left; padding: 4px 14px; border-bottom: 1px solid #23282e; }
+table.cost td { padding: 4px 14px; border-bottom: 1px solid #191d22; vertical-align: top; }
+table.cost td.no { color: var(--danger); }
+table.cost td.yes { color: #4f9e6a; }
