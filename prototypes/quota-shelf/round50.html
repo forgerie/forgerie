@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Round 50 · the whole shelf, consolidated — quota shelf</title>
+<link rel="stylesheet" href="shelf.css">
+<link rel="stylesheet" href="round50.css">
+<style>
+  body { width: 1480px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 38px 0 10px; color: var(--muted); }
+  h3 { font-size: 11px; font-weight: 600; margin: 22px 0 8px; color: var(--dim); letter-spacing: .05em; text-transform: uppercase; }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 100ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+  .note code { color: var(--ink); font-family: var(--num); }
+</style>
+
+<h1>Round 50 · the whole shelf, consolidated</h1>
+<p class="note">Thirty-five rounds of decisions in one page. <b>This is not a new proposal</b> — it is what
+shipped, drawn from the live payload, so the prototype and the plugin can be held against each other. Every
+constant here has the same value it has in <code>quota-shelf.js</code>.</p>
+<p class="note">The shelf answers three questions and refuses every other job: <b>what can I spend now</b>,
+<b>what expires unspent</b>, <b>what is draining too fast</b>.</p>
+
+<h2>The vocabulary</h2>
+<div class="key" id="key"></div>
+
+<h2>The shelf</h2>
+<div class="rail" id="main"></div>
+
+<h2>Width buys columns</h2>
+<p class="note">The lanes never move and never re-plot, so a mark learned in a narrow panel means the same
+thing in a wide one. Only the lane thickness changes, and only because it is free: once any text column shows,
+the line is already a 12&nbsp;px box set by the 10&nbsp;px type.</p>
+<div class="rail" id="ladder"></div>
+
+<h2>Height buys names</h2>
+<p class="note">The address is the only thing costing a whole line per account, and it answers <i>which</i>
+account rather than <i>whether to act</i>. Under 440&nbsp;px of room it comes off. Folded landscape is the
+posture that used to push Codex and OpenRouter off the bottom of the screen.</p>
+<div class="rail" id="postures"></div>
+
+<h2>When the shelf does not know</h2>
+<p class="note">Amber and red always mean a problem with the quota. Not knowing is not one, so doubt fades
+rather than reddens — <b>a stale shelf that goes amber lies in the voice it uses to tell the truth</b>.</p>
+<div class="rail" id="states"></div>
+
+<h2>Light</h2>
+<div class="rail" id="light"></div>
+
+<h2>The ledger</h2>
+<p class="note">What was chosen, what was ruled out, and why. Rounds 15 to 49.</p>
+
+<h3>Structure</h3>
+<table class="ledger">
+  <tr><th style="width:15%">chosen</th><th style="width:38%">because</th><th>ruled out</th></tr>
+  <tr>
+    <td><b>nest</b>, one lane per account</td>
+    <td>A pooled bar's length is a <b>mean</b>. Two accounts with equal and opposite overshoot average to a lane
+      drawn exactly on pace while one is about to lose nearly everything. A single loss is divided by the
+      account count; two queued losses collapse into one. Nesting never averages, and costs the same up to
+      three accounts — 27&nbsp;px either way.</td>
+    <td class="no"><b>pool</b> · signed averaging · pooled bar with an unpooled readout · telling the bar how many
+      accounts it pools · a precedence rule between the two risks</td>
+  </tr>
+  <tr>
+    <td><b>an account is always a block</b>, held apart by padding</td>
+    <td>Separating only accounts that own more than one lane made Codex's three one-meter accounts draw at the
+      same 4&nbsp;px pitch as Claude's three meters — the same picture for two different facts. The padding also
+      gives the block a height, so the routed riser is never a 3&nbsp;px stub.</td>
+    <td class="no">conditional grouping (r34) · a margin instead of padding</td>
+  </tr>
+  <tr>
+    <td><b>the address above its lanes</b></td>
+    <td>A column held 132&nbsp;px away from every lane on the shelf to carry a label that changes once per
+      account, and truncated it anyway. Above, the lanes get the width back and the address is never cut.</td>
+    <td class="no">a fixed left column · <code>trail</code>, <code>inline</code>, <code>big</code> placements ·
+      <code>lift</code>, <code>indent</code>, <code>step</code>, <code>split</code> treatments</td>
+  </tr>
+  <tr>
+    <td><b>a boolean is a token</b>, under the account that owns it</td>
+    <td>A pool that answers or refuses reports no level, so a bar would claim a measurement the provider does
+      not make. Collected into a shared strip, the tokens belonged to nobody and had to be read by position.</td>
+    <td class="no"><code>bar</code>, <code>ghost</code>, <code>count</code>, a hairline, a dot-with-wire · a
+      detached roster strip</td>
+  </tr>
+  <tr>
+    <td><b>a balance is a number</b></td>
+    <td>OpenRouter's share is spend over <i>everything ever topped up</i>, so it rises when you add money and
+      says nothing about capacity. $20 added, $9.11 spent, 45.5% used — the denominator only ever grows. No
+      scale, so no bar.</td>
+    <td class="no"><code>flat</code>, <code>topup</code>, <code>runway</code>, <code>week</code>,
+      <code>dot</code> denominators · <code>line</code>, <code>rail</code>, <code>orb</code>, <code>lamp</code>
+      marks</td>
+  </tr>
+</table>
+
+<h3>Measurement</h3>
+<table class="ledger">
+  <tr><th style="width:15%">chosen</th><th style="width:38%">because</th><th>ruled out</th></tr>
+  <tr>
+    <td><b>doom by rate</b>, <code>fill ÷ pace</code></td>
+    <td>How many times the window's natural rate you must sustain to waste nothing. Unit-free, so it reads the
+      same on a five-hour lane and a seven-day one. <b>Sooner is not worse</b>: a sliver going in 6&nbsp;h is
+      less urgent than a fortune going in 48&nbsp;h.</td>
+    <td class="no">a fixed horizon — it glowed on every five-hour lane for its whole life</td>
+  </tr>
+  <tr>
+    <td><b>solid at every distance</b>, hue amber→red, capped at 8× on a log curve</td>
+    <td>The discriminator for a ramp is its <i>floor</i>, not its ceiling: a ramp that fades to nothing can
+      erase a real warning. Intensity lives in hue, never in fill.</td>
+    <td class="no"><code>fade</code>, <code>pip</code>, <code>weight</code>, hollowing over time</td>
+  </tr>
+  <tr>
+    <td><b>no pace from a passed reset</b></td>
+    <td>Clamping to zero says "the window is over", which makes <code>fill &gt; pace</code> true for every lane
+      holding credit and paints a merely-stale payload as a shelf-wide crisis. Absence of a pace is what the
+      shelf has drawn since r33 for providers that state no window length.</td>
+    <td class="no"><code>Math.max(0, …)</code> — shipped for months, fixed in <code>f197e49</code></td>
+  </tr>
+  <tr>
+    <td><b>no runway tick</b></td>
+    <td><code>runway &lt; timeLeft</code> reduces algebraically to <code>fill &lt; pace</code>, which is the
+      hatch condition. Swept 400,599 combinations: one disagreement, a rounding tie. <b>No history reaches the
+      shelf</b>, so any rate computed from level, window and reset is a restatement of them.</td>
+    <td class="no">the tick · the runway as a mark (it survives only as a <i>number</i>, in the countdown)</td>
+  </tr>
+</table>
+
+<h3>Colour and room</h3>
+<table class="ledger">
+  <tr><th style="width:15%">chosen</th><th style="width:38%">because</th><th>ruled out</th></tr>
+  <tr>
+    <td><b>amber and red only ever mean a problem</b></td>
+    <td>Health carries no colour, and neither does doubt. A stale shelf that goes amber lies in exactly the
+      voice it uses to tell the truth.</td>
+    <td class="no">severity colouring on healthy lanes · reddening a stale payload</td>
+  </tr>
+  <tr>
+    <td><b>an arrow on the countdown</b></td>
+    <td>Amber against red is exactly the pair red-green colour blindness collapses, and the two states are
+      <b>opposite instructions</b> — spend faster, spend slower. Under simulation, <code>2h</code> and
+      <code>3d</code> became the same yellow-green. Up is credit dying; down is a lane draining.</td>
+    <td class="no">hue alone · font weight (says which is worse, not which is which)</td>
+  </tr>
+  <tr>
+    <td><b>hue keyed to the meter</b></td>
+    <td>Keyed by position, a colour would mean "the second thing here" rather than "the week": disable one
+      bucket and every lane below it changes colour.</td>
+    <td class="no">hue by row position</td>
+  </tr>
+  <tr>
+    <td><b>width buys columns, height buys names</b></td>
+    <td>One state, no toggle. Clock at 430, level at 510, address at 640, meter name at 820; addresses off
+      under 440&nbsp;px of room. Height is measured from the <i>parent</i> — an unconstrained shelf is exactly
+      as tall as its content, so measuring itself would drop the addresses, get shorter, and agree with itself
+      forever.</td>
+    <td class="no">an expand toggle · <code>slots</code> · <code>columns</code> · <code>segments</code> ·
+      viewport breakpoints</td>
+  </tr>
+  <tr>
+    <td><b>one unit, always</b> — <code>45m</code>, <code>38h</code>, <code>3d</code></td>
+    <td>Two units is four characters of noise when the fact is "about two days". Money follows the same rule:
+      cents below $10, whole dollars above.</td>
+    <td class="no"><code>1d 14h</code> · <code>$47.31</code> above ten · <code>1680m</code></td>
+  </tr>
+</table>
+
+<script src="live.js"></script>
+<script src="round50.js"></script>
+<script>
+  const { shelf, rot, RUNGS, POSTURES } = window.QUOTA_ROUND50;
+  const payload = window.QUOTA_LIVE;
+  const now = window.QUOTA_LIVE_FETCHED_AT;
+
+  function frame(width, height, options = {}, cls = "") {
+    const host = document.createElement("div");
+    host.className = `c-frame${height === undefined ? "" : " tall"}${cls ? ` ${cls}` : ""}`;
+    host.style.width = `${width}px`;
+    if (height !== undefined) host.style.height = `${height}px`;
+    shelf(host, options.payload ?? payload, now, options);
+    return host;
+  }
+
+  function cell(host, label, node, sized) {
+    const box = document.createElement("div");
+    const cap = document.createElement("p");
+    cap.className = "cap";
+    cap.innerHTML = label;
+    const shell = document.createElement("div");
+    shell.className = `box${sized ? " sized" : ""}`;
+    shell.append(node);
+    box.append(cap, shell);
+    host.append(box);
+    return box;
+  }
+
+  /* --- vocabulary --- */
+  const KEY = [
+    ["fill", "what can be spent now", (i) => { i.style.cssText = "left:0;width:58%;background:#4f7f96"; }],
+    ["pace cut", "where an even spend would stand", null],
+    ["solid bar past the cut", "credit that expires unspent — hue by rate", (i) => { i.style.cssText = "left:40%;width:46%;background:#e2622f"; }],
+    ["hatch short of the cut", "spending behind the even rate — runs dry early", (i) => { i.style.cssText = "left:26%;width:40%;background:repeating-linear-gradient(115deg,transparent 0 2px,#d29922 2px 3px)"; }],
+    ["riser", "the account the router is pinned to", null],
+    ["token", "a pool that answers or refuses — no level to draw", null],
+  ];
+  const key = document.getElementById("key");
+  for (const [name, meaning, paint] of KEY) {
+    const row = document.createElement("div");
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    if (paint !== null) { const i = document.createElement("i"); paint(i); swatch.append(i); }
+    else if (name === "pace cut") { swatch.style.background = "linear-gradient(90deg,#262d35 0 46%,transparent 46% 54%,#262d35 54%)"; }
+    else if (name === "riser") { swatch.style.cssText = "width:2px;height:18px;border-radius:1px;background:#4d5a66;margin-left:36px"; }
+    else if (name === "token") { swatch.style.cssText = "width:7px;height:7px;border-radius:50%;background:#5f6b76;margin-left:34px"; }
+    row.append(swatch, document.createTextNode(`${name} — ${meaning}`));
+    key.append(row);
+  }
+
+  /* --- the shelf, the ladder, the postures, the states, light --- */
+  cell(document.getElementById("main"), "<b>860 px</b> · everything on", frame(860, 620), true);
+
+  for (const rung of RUNGS) {
+    cell(document.getElementById("ladder"), `<b>${rung.width} px</b> · ${rung.gains}`, frame(rung.width, 620), true);
+  }
+
+  for (const posture of POSTURES) {
+    cell(document.getElementById("postures"),
+      `<b>${posture.id}</b> · ${posture.width} × ${posture.height}`,
+      frame(posture.width, posture.height), true);
+  }
+
+  const states = document.getElementById("states");
+  cell(states, "<b>live</b>", frame(700, 460), true);
+  cell(states, "<b>stale</b> · faded, flat bars, no invented crisis",
+    frame(700, 460, { payload: rot(payload, now), doubt: true, age: 28 * 3600e3 }), true);
+  cell(states, "<b>empty</b>", frame(700, 460, { empty: true }), true);
+  cell(states, "<b>as configured on zao</b> · three bars switched off",
+    frame(700, 460, { settings: { antigravity_gpt_oss: false, antigravity_claude: false, five_hour: false } }), true);
+
+  cell(document.getElementById("light"), "<b>light</b> · 860 px", frame(860, 620, {}, "light"), true);
+  cell(document.getElementById("light"), "<b>light</b> · folded portrait", frame(475, 638, {}, "light"), true);
+</script>
+</html>
