@@ -115,8 +115,7 @@ async function runYieldBatch(subsessions: SubsessionSummary[], includeSentinel =
   const messages = await runAgentLoop(
     [{ role: "user", content: "join now", timestamp: 0 }],
     {
-      systemPrompt: "",
-      messages: [],
+      messages: [{ role: "system", content: "", timestamp: 0 }],
       tools: [wrapDefinition(yieldDefinition, extensionContext()), sentinelTool],
     },
     { model, convertToLlm: (agentMessages) => agentMessages.filter(isLlmMessage) },

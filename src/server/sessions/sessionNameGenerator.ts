@@ -1,4 +1,4 @@
-import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { normalizeContext, type Api, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 
 const SESSION_NAME_TIMEOUT_MS = 10_000;
@@ -31,14 +31,14 @@ export function deterministicSessionName(firstMessage: unknown): string | undefi
 export async function generateShortSessionName<TApi extends Api>(streamFn: StreamFn, model: Model<TApi>, firstMessage: string, cancellationSignal?: AbortSignal): Promise<string | undefined> {
   const stream = await streamFn(
     model,
-    {
+    normalizeContext({
       systemPrompt: "Generate a 1-4 word retrieval label for a coding-agent chat session. Maximize signal per word. Return only the label, with no quotes or punctuation wrapper.",
       messages: [{
         role: "user",
         content: `Label this request for recognition in a session list. Prefer specific names and compact noun phrases. Keep products, components, files, errors, or decisions that distinguish it. Omit framing and generic task verbs such as understand, explore, investigate, help, fix, update, and implement. Prefer 2-3 words when they remain clear; use 1 for a distinctive standalone term and 4 only when needed.\n\nRequest:\n${truncateInput(sessionNameIntent(firstMessage))}`,
         timestamp: Date.now(),
       }],
-    },
+    }),
     {
       maxTokens: 24,
       reasoning: "minimal",

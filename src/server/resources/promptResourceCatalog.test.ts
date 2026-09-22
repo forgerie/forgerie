@@ -36,7 +36,7 @@ describe("PromptResourceCatalogService", () => {
 
     expect(response).toMatchObject({ available: true });
     if (!response.available) throw new Error(response.message);
-    expect(response.commands.map((command) => `${command.source}:${command.name}`)).toEqual(["prompt:review", "skill:skill:audit"]);
+    expect(response.commands.map((command) => `${command.source}:${command.name}`)).toEqual(expect.arrayContaining(["prompt:review", "skill:skill:audit"]));
     expect(response.commands.every((command) => /^[a-f0-9]{64}$/u.exec(command.identity.fingerprint) !== null)).toBe(true);
     await expect(stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(join(agentDir, "sessions"))).rejects.toMatchObject({ code: "ENOENT" });

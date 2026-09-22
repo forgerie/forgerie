@@ -55,9 +55,9 @@ describe("sessionNameGenerator", () => {
     const name = await generateShortSessionName(streamFn, fakeModel(), request);
 
     expect(name).toBe("Forgerie Title Ownership");
-    expect(requestedContext?.systemPrompt).toContain("1-4 word retrieval label");
-    expect(requestedContext?.messages).toHaveLength(1);
-    expect(requestedContext?.messages[0]?.content).toContain("Prefer specific names and compact noun phrases");
+    expect(requestedContext?.messages).toHaveLength(2);
+    expect(requestedContext?.messages[0]?.content).toContain("1-4 word retrieval label");
+    expect(requestedContext?.messages[1]?.content).toContain("Prefer specific names and compact noun phrases");
   });
 
   it("uses the request after an expanded skill instead of the skill instructions", async () => {
@@ -72,8 +72,8 @@ describe("sessionNameGenerator", () => {
     const name = await generateShortSessionName(streamFn, fakeModel(), expandedSkill);
 
     expect(name).toBe("Skill Session Naming");
-    expect(requestedContext?.messages[0]?.content).toContain("auto session naming has degraded when i use skills");
-    expect(requestedContext?.messages[0]?.content).not.toContain("Generic debugging workflow");
+    expect(requestedContext?.messages[1]?.content).toContain("auto session naming has degraded when i use skills");
+    expect(requestedContext?.messages[1]?.content).not.toContain("Generic debugging workflow");
   });
 
   it("returns undefined when the stream reports an error", async () => {

@@ -641,7 +641,7 @@ target`, options: { expandPromptTemplates: false } },
     fake.titleBridge.publish({ type: "intent.accepted", text: "/skill:se-debug Make Escape behave like the TUI" });
 
     await vi.waitFor(() => { expect(fake.session.sessionName).toBe("Escape Key Parity"); });
-    expect(titleContext?.messages[0]?.content).toContain("/skill:se-debug Make Escape behave like the TUI");
+    expect(titleContext?.messages[1]?.content).toContain("/skill:se-debug Make Escape behave like the TUI");
     await service.dispose();
   });
 
