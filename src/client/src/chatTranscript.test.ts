@@ -703,3 +703,68 @@ Find the duplicate chat`;
     ]);
   });
 });
+
+/**
+ * One tool call reaches the client through two channels: the assistant
+ * message that requested it, and the tool's own start/end events. Both must
+ * resolve to the same execution, or the rail shows a stuck "working" row
+ * beside the finished one.
+ */
+describe("one execution per tool call", () => {
+  const toolCallMessage = {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "Locating capability references" },
+      { type: "toolCall", id: "call-1", name: "bash", arguments: { command: "rg -l x" } },
+    ],
+  };
+  const toolStart = { type: "tool.start", toolCallId: "call-1", toolName: "bash", summary: "", args: { command: "rg -l x" } } as const;
+  const toolEnd = { type: "tool.end", toolCallId: "call-1", toolName: "bash", text: "ok", content: [{ type: "text", text: "ok" }], details: undefined, isError: false } as const;
+
+  function apply(messages: ChatLine[], ...events: Parameters<typeof applyTranscriptEvent>[1][]): ChatLine[] {
+    return events.reduce((next, event) => applyTranscriptEvent(next, event) ?? next, messages);
+  }
+
+  function executions(messages: ChatLine[]) {
+    return messages.flatMap((line) => line.parts.filter((part) => part.type === "toolExecution"));
+  }
+
+  it("starts the execution the finalized assistant message already placed", () => {
+    const started = apply([textMessage("user", "go")], { type: "message.end", message: toolCallMessage }, toolStart);
+
+    expect(executions(started)).toMatchObject([{ toolCallId: "call-1", status: "running" }]);
+
+    const ended = apply(started, toolEnd);
+    expect(executions(ended)).toMatchObject([{ toolCallId: "call-1", status: "success", resultText: "ok" }]);
+    expect(ended).toEqual(normalizeMessages([
+      { role: "user", content: "go" },
+      toolCallMessage,
+      { role: "toolResult", toolCallId: "call-1", toolName: "bash", content: toolEnd.content, isError: false },
+    ]));
+  });
+
+  it("does not re-add an execution the tool events already started", () => {
+    const messages = apply([textMessage("user", "go")], toolStart, { type: "message.end", message: toolCallMessage }, toolEnd);
+
+    expect(executions(messages)).toMatchObject([{ toolCallId: "call-1", status: "success" }]);
+  });
+
+  it("starts the execution seeded from an in-flight partial after a reload", () => {
+    const seeded = seedStreamingPartial([textMessage("user", "go")], toolCallMessage);
+    const messages = apply(seeded, toolStart, toolEnd);
+
+    expect(executions(messages)).toMatchObject([{ toolCallId: "call-1", status: "success" }]);
+  });
+
+  it("keeps separate executions for separate tool calls", () => {
+    const messages = apply(
+      [textMessage("user", "go")],
+      { type: "message.end", message: toolCallMessage },
+      toolStart,
+      toolEnd,
+      { type: "tool.start", toolCallId: "call-2", toolName: "read", summary: "", args: { path: "a.rs" } },
+    );
+
+    expect(executions(messages).map((part) => [part.toolCallId, part.status])).toEqual([["call-1", "success"], ["call-2", "running"]]);
+  });
+});

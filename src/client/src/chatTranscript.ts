@@ -127,8 +127,10 @@ function applyFinalMessage(messages: ChatLine[], rawMessage: unknown, messageInd
 
   const ended = normalizeMessages([rawMessage], messageIndex);
   if (ended.length === 0) return undefined;
+  const startedToolCallIds = toolExecutionIds(messages);
   const displayEnded = ended
     .map((line) => line.role === "assistant" ? withoutToolCalls(line) : line)
+    .map((line) => withoutToolExecutions(line, startedToolCallIds))
     .filter((line) => line.parts.length > 0);
   if (displayEnded.length === 0) return messages;
   const replacedProjection = replaceOptimisticPromptProjection(messages, displayEnded);
@@ -186,6 +188,28 @@ function withoutToolCalls(message: ChatLine): ChatLine {
   return inheritChatLineTranscriptPosition(message, { ...message, parts: message.parts.filter((part) => part.type !== "toolCall") });
 }
 
+/**
+ * A tool call reaches the transcript twice: once in the assistant message that
+ * requested it, once through its own `tool.*` events. The call id is the only
+ * link between the two, so whichever arrives second must find the first
+ * rather than add a second execution that never finishes.
+ */
+function toolExecutionIds(messages: readonly ChatLine[]): Set<string> {
+  const ids = new Set<string>();
+  for (const line of messages) {
+    for (const part of line.parts) {
+      if (part.type === "toolExecution" && part.toolCallId !== undefined && part.toolCallId !== "") ids.add(part.toolCallId);
+    }
+  }
+  return ids;
+}
+
+function withoutToolExecutions(line: ChatLine, ids: ReadonlySet<string>): ChatLine {
+  if (ids.size === 0) return line;
+  const parts = line.parts.filter((part) => !(part.type === "toolExecution" && part.toolCallId !== undefined && ids.has(part.toolCallId)));
+  return parts.length === line.parts.length ? line : inheritChatLineTranscriptPosition(line, { ...line, parts });
+}
+
 function parseSkillReadPath(path: string | undefined): { name: string; path: string } | undefined {
   if (path === undefined || path === "") return undefined;
   const normalized = path.replace(/\\/g, "/");
@@ -201,11 +225,21 @@ function appendToolExecutionStart(messages: ChatLine[], event: Extract<SessionUi
     return appendLine(messages, { role: "skill", parts: [{ type: "skillRead", ...skillRead, ...(event.toolCallId === "" ? {} : { toolCallId: event.toolCallId }) }] });
   }
 
+  const summary = event.summary || summarizeArgs(event.args);
+  if (event.toolCallId !== "" && toolExecutionIds(messages).has(event.toolCallId)) {
+    return updateToolExecution(messages, event.toolCallId, (part) => ({
+      ...part,
+      summary: part.summary || summary,
+      ...(part.args !== undefined || event.args === undefined ? {} : { args: event.args }),
+      status: part.status === "pending" ? "running" : part.status,
+    }));
+  }
+
   const part: ToolExecutionPart = {
     type: "toolExecution",
     ...(event.toolCallId === "" ? {} : { toolCallId: event.toolCallId }),
     toolName: event.toolName,
-    summary: event.summary || summarizeArgs(event.args),
+    summary,
     ...(event.args === undefined ? {} : { args: event.args }),
     status: "running",
   };
