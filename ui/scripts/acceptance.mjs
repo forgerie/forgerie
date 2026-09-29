@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+// Compare rendered Markdown with the backend source after the same public parse.
+const normalize = (text) => text.replace(/\s+/g, " ").trim();
 
 const repo = process.env.FORGERIE_ROOT ?? resolve("../..");
 const { findChrome, launchChrome, getFreePort, waitForDebugger, evaluate, sleep } = await import(pathToFileURL(join(repo, "scripts/lib/cdp.mjs")));
@@ -42,14 +49,18 @@ try {
   }]);
   await cdp.send("Page.navigate", { url });
   const read = () => evaluate(cdp, `({
-    status: document.querySelector('[role=status]')?.textContent,
+    status: document.querySelector('.connection-status')?.textContent,
     messages: [...document.querySelectorAll('.message-text')].map(e => e.textContent),
-    assistantMessages: [...document.querySelectorAll('.message-assistant .message-text')].map(e => e.textContent),
+    assistantMessages: [...document.querySelectorAll('.message-assistant .message-text')].map(e => {
+      const content = e.cloneNode(true);
+      content.querySelectorAll('.code-header').forEach(header => header.remove());
+      return content.textContent.replace(/\\s+/g, ' ').trim();
+    }),
     draft: document.querySelector('textarea')?.value,
     alert: document.querySelector('[role=alert]')?.textContent,
     width: innerWidth, height: innerHeight,
     overflow: document.documentElement.scrollWidth > innerWidth,
-    send: [...document.querySelectorAll('button')].find(b => b.textContent === 'Send')?.getBoundingClientRect().toJSON(),
+    send: document.querySelector('button[aria-label="Send message"]')?.getBoundingClientRect().toJSON(),
     composer: document.querySelector('.composer')?.getBoundingClientRect().toJSON()
   })`);
   async function until(test, timeout = 120_000) {
@@ -74,10 +85,19 @@ try {
     const texts = page.messages.filter((message) => message.role === "assistant").map((message) =>
       typeof message.content === "string" ? message.content
         : (message.content ?? []).filter((part) => part.type === "text").map((part) => part.text).join("\n"));
-    return texts.filter((text) => text !== "").at(-1);
+    const text = texts.filter((text) => text !== "").at(-1);
+    const html = renderToStaticMarkup(createElement(ReactMarkdown, {
+      remarkPlugins: [remarkGfm], children: text,
+      components: { img: ({ alt }) => createElement("span", null, alt || "Image") },
+    }));
+    return normalize(await evaluate(cdp, `(() => {
+      const node = document.createElement('div');
+      node.innerHTML = ${JSON.stringify(html)};
+      return node.textContent;
+    })()`));
   }
   const originalReply = await finalBackendText();
-  await until((s) => s.assistantMessages.at(-1) === originalReply);
+  state = await until((s) => s.messages.length > 0 && s.assistantMessages.at(-1) === originalReply);
   result.historyMessages = state.messages.length;
   assert.ok(result.historyMessages > 0, "Expected existing history");
   if (shouldSend) {
@@ -115,7 +135,7 @@ try {
     result.transitions.push({ posture: posture.name, width: state.width, height: state.height, send: state.send });
   }
   await cdp.send("Page.reload");
-  state = await until((s) => s.status === "Connected");
+  state = await until((s) => s.status === "Connected" && s.messages.length === result.historyMessages + (shouldSend ? 2 : 0));
   result.reloadMessages = state.messages.length;
   assert.equal(state.messages.length, result.historyMessages + (shouldSend ? 2 : 0), "Reload must not duplicate messages");
   const restoredReply = await finalBackendText();

@@ -1,6 +1,6 @@
 # Forgerie assistant-ui MVP
 
-A standalone React + Vite client for one existing Pi session. It uses assistant-ui's `ExternalStoreRuntime` and the existing Forgerie server. The backend and original Lit client stay unchanged.
+A standalone React + Vite client for one existing Pi session. It uses assistant-ui's `ExternalStoreRuntime` and adapts the [homepage demo UI](THIRD_PARTY_NOTICES.md), including formatted Markdown replies. The backend and original Lit client stay unchanged.
 
 ## Run
 

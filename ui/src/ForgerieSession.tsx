@@ -3,6 +3,7 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, 
 import { browserTransport, createSessionStore } from "./sessionStore";
 import { convertMessage } from "./transcript";
 import { Thread } from "./ui/Thread";
+import { SessionFrame } from "./ui/SessionFrame";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id }: { id: string }) {
@@ -36,17 +37,9 @@ export function ForgerieSession({ id }: { id: string }) {
     : state.sending ? "Sending" : state.transcript.isRunning ? "Running" : "Connected";
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    <main className="session-shell">
-      <header className="session-header">
-        <div className="session-heading"><span className="product-name">Forgerie</span>
-          <h1 title={state.session?.name ?? id}>{state.session?.name ?? "Session"}</h1>
-        </div>
-        <span className="connection-status" role="status">{status}</span>
-      </header>
-      {error && <div className="notice" role="alert"><p>{error}</p>
-        {state.connection.type === "failed" && <button onClick={() => window.location.reload()}>Reload</button>}
-      </div>}
+    <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
+      recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
       <Thread />
-    </main>
+    </SessionFrame>
   </AssistantRuntimeProvider>;
 }
