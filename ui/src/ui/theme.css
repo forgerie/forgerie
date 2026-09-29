@@ -1,0 +1,66 @@
+:root {
+  color-scheme: light dark;
+  --canvas: #f3f6fa;
+  --paper: #ffffff;
+  --ink: #203249;
+  --muted: #51647b;
+  --line: #c7d2df;
+  --accent: #294c80;
+  --accent-ink: #ffffff;
+  --user: #e6edf7;
+  --error: #8a2534;
+  --error-bg: #fff0f2;
+  --body-font: "Verdana", "DejaVu Sans", sans-serif;
+  --space: clamp(0.75rem, 2cqi, 1.5rem);
+  --small-space: 0.5rem;
+  --text-size: clamp(0.9rem, 0.85rem + 0.18cqi, 1rem);
+  --line-height: 1.65;
+  --control-height: 3rem;
+  --radius: 0.75rem;
+  --content-width: 48rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #18212e;
+    --paper: #202d3e;
+    --ink: #ecf1f8;
+    --muted: #b4c1d4;
+    --line: #485a73;
+    --accent: #b9d2ff;
+    --accent-ink: #182d4e;
+    --user: #2d405c;
+    --error: #ffbbc5;
+    --error-bg: #452833;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font-family: var(--body-font); font-size: var(--text-size); }
+button, textarea { font: inherit; }
+button { min-block-size: var(--control-height); padding: var(--small-space) var(--space); border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); color: var(--ink); cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#root { block-size: 100dvh; }
+.session-shell { container-type: size; block-size: 100%; display: flex; flex-direction: column; min-inline-size: 0; }
+.session-header { padding: clamp(0.5rem, 2cqb, 1rem) var(--space); display: flex; align-items: center; flex-wrap: wrap; gap: var(--small-space) var(--space); border-block-end: 1px solid var(--line); }
+.session-heading { display: flex; align-items: baseline; flex: 1; min-inline-size: 0; gap: var(--space); }
+.product-name { font-weight: bold; }
+h1 { margin: 0; font-size: 1em; font-weight: normal; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-status { color: var(--muted); font-size: 0.85em; }
+.notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--small-space); padding: var(--small-space) var(--space); background: var(--error-bg); color: var(--error); max-block-size: 30cqb; overflow: auto; }
+.notice p { flex: 1; margin: 0; min-inline-size: min(20rem, 100%); overflow-wrap: anywhere; }
+.thread { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
+.transcript { overflow-y: auto; scrollbar-gutter: stable; min-block-size: 0; flex: 1; padding: var(--space); scroll-behavior: auto; }
+.message { max-inline-size: var(--content-width); margin-inline: auto; padding-block: var(--space); }
+.speaker { display: block; font-size: 0.8em; font-weight: bold; color: var(--muted); margin-block-end: var(--small-space); }
+.message-text { line-height: var(--line-height); white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-user .message-text { background: var(--user); padding: var(--small-space) var(--space); border-radius: var(--radius); }
+.composer-region { padding: var(--small-space) var(--space) max(var(--small-space), env(safe-area-inset-bottom)); background: var(--canvas); position: relative; }
+.composer { max-inline-size: var(--content-width); margin-inline: auto; display: flex; align-items: end; gap: var(--small-space); padding: var(--small-space); border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); }
+.composer-input { flex: 1; min-inline-size: 0; min-block-size: var(--control-height); max-block-size: 25cqb; resize: none; border: 0; border-radius: var(--radius); background: transparent; color: var(--ink); line-height: 1.4; padding: var(--small-space); }
+.composer-input::placeholder { color: var(--muted); }
+.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.jump { display: block; margin-inline: auto; margin-block-end: var(--small-space); }
+.jump:disabled { display: none; }
+.empty { max-inline-size: var(--content-width); margin-inline: auto; color: var(--muted); }
+.setup { padding: var(--space); max-inline-size: var(--content-width); margin-inline: auto; }
+.setup h1 { font-weight: bold; }
