@@ -3,21 +3,26 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { convertMessage, type TextMessage } from "../transcript";
+import type { ToolState, TranscriptMessage } from "../transcript";
+import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
 import { SessionFrame } from "./SessionFrame";
 
 let root: Root;
-const reply: TextMessage = { id: "reply", role: "assistant", text: "Hello", status: { type: "complete", reason: "stop" } };
+const answer = (text: string, id = "reply"): TranscriptMessage => ({ id, role: "assistant", parts: [{ type: "text", text }] });
+const reply = answer("Hello");
+const tool = (id: string, state: ToolState, name = "bash", args: unknown = { command: `echo ${id}` }) =>
+  ({ type: "tool" as const, id, name, args, state });
 function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {} }: {
-  messages?: TextMessage[];
+  messages?: TranscriptMessage[];
   running?: boolean;
   loading?: boolean;
   disabled?: boolean;
   onNew?: (message: AppendMessage) => Promise<void>;
   onCancel?: () => Promise<void>;
 }) {
-  const runtime = useExternalStoreRuntime({ messages, convertMessage, onNew, onCancel,
+  const threadMessages = useThreadMessages(messages, running);
+  const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
     isRunning: running, isLoading: loading, isDisabled: disabled });
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread /></SessionFrame>
@@ -43,8 +48,8 @@ afterEach(async () => {
 describe("Homepage-derived thread", () => {
   it("renders existing history with a user bubble and formatted assistant reply", async () => {
     await render({ messages: [
-      { id: "user", role: "user", text: "Keep **this** literal" },
-      { ...reply, text: "## Implementation\n\nUse **streaming** and `cwd`.\n\n- Load history\n- Send prompts\n\n```ts\nconst cwd = '/tmp';\n```\n\n| State | Meaning |\n| --- | --- |\n| Ready | Send |" },
+      { id: "user", role: "user", parts: [{ type: "text", text: "Keep **this** literal" }] },
+      answer("## Implementation\n\nUse **streaming** and `cwd`.\n\n- Load history\n- Send prompts\n\n```ts\nconst cwd = '/tmp';\n```\n\n| State | Meaning |\n| --- | --- |\n| Ready | Send |"),
     ] });
     expect(document.querySelector('.message-user .user-bubble')?.textContent).toBe("Keep **this** literal");
     expect(document.querySelector('.message-assistant h2')?.textContent).toBe("Implementation");
@@ -58,13 +63,13 @@ describe("Homepage-derived thread", () => {
   });
 
   it("keeps unknown code languages readable and does not execute raw HTML", async () => {
-    await render({ messages: [{ ...reply, text: "```unknown-language\n<script>window.compromised = true</script>\n```\n\n<script>window.compromised = true</script>" }] });
+    await render({ messages: [answer("```unknown-language\n<script>window.compromised = true</script>\n```\n\n<script>window.compromised = true</script>")] });
     expect(document.querySelector('.code-body code')?.textContent).toContain("<script>");
     expect(document.querySelector('script')).toBeNull();
   });
 
   it("renders Markdown images as links without loading remote media", async () => {
-    await render({ messages: [{ ...reply, text: "![Diagram](https://example.test/diagram.png)" }] });
+    await render({ messages: [answer("![Diagram](https://example.test/diagram.png)")] });
     expect(document.querySelector('img')).toBeNull();
     expect(document.querySelector('.markdown a')?.getAttribute('href')).toBe("https://example.test/diagram.png");
     expect(document.querySelector('.markdown a')?.textContent).toBe("Diagram");
@@ -119,14 +124,14 @@ describe("Homepage-derived thread", () => {
   });
 
   it("updates streamed Markdown in place and keeps the current draft", async () => {
-    const messages: TextMessage[] = [{ ...reply, status: { type: "running" }, text: "## Par" }];
+    const messages: TranscriptMessage[] = [answer("## Par")];
     await render({ messages, running: true });
     const input = document.querySelector('textarea')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "next question");
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await render({ messages: [{ ...reply, text: "## Partial reply\n\nNow complete." }] });
+    await render({ messages: [answer("## Partial reply\n\nNow complete.")] });
     expect(document.querySelectorAll('.message-assistant')).toHaveLength(1);
     expect(document.querySelector('.message-assistant h2')?.textContent).toBe("Partial reply");
     expect(document.querySelector('textarea')).toBe(input);
@@ -134,12 +139,79 @@ describe("Homepage-derived thread", () => {
   });
 
   it("copies code and exposes a clipboard failure instead of a false success", async () => {
-    await render({ messages: [{ ...reply, text: "```js\nconst answer = 42;\n```" }] });
+    await render({ messages: [answer("```js\nconst answer = 42;\n```")] });
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("Permission denied"));
     await act(async () => button("Copy code").click());
     expect(writeText).toHaveBeenCalledWith("const answer = 42;\n");
     expect(document.querySelector('.copy-status')?.textContent).toBe("Copied");
     await act(async () => button("Copy code").click());
     expect(document.querySelector('.copy-status')?.textContent).toContain("Copy failed");
+  });
+});
+
+describe("Tools and reasoning", () => {
+  const summaries = () => [...document.querySelectorAll(".message-assistant summary .trace-text")].map((node) => node.textContent);
+  async function open(summary: string) {
+    const node = [...document.querySelectorAll<HTMLElement>(".message-assistant summary")].find((item) => item.querySelector(".trace-text")?.textContent === summary)!;
+    const details = node.parentElement as HTMLDetailsElement;
+    await act(async () => { details.open = true; details.dispatchEvent(new Event("toggle")); });
+    return details;
+  }
+
+  it("joins a run's messages into one reply with collapsed reasoning, a tool line, and the answer", async () => {
+    await render({ messages: [
+      { id: "q", role: "user", parts: [{ type: "text", text: "List files" }] },
+      { id: "a1", role: "assistant", parts: [{ type: "thinking", text: "Use **ls**." }, tool("t1", { type: "done", output: "a.txt\nb.txt", isError: false })] },
+      answer("Two files.", "a2"),
+    ] });
+    expect(document.querySelectorAll(".message-assistant")).toHaveLength(1);
+    expect(summaries()).toEqual(["reasoning", "ran bash echo t1"]);
+    expect([...document.querySelectorAll(".message-assistant .message-text > .markdown")].at(-1)?.textContent).toBe("Two files.");
+    const reasoning = await open("reasoning");
+    expect(reasoning.querySelector(".reasoning-text strong")?.textContent).toBe("ls");
+    const card = await open("ran bash echo t1");
+    expect([...card.querySelectorAll("pre")].map((node) => node.textContent)).toEqual(["echo t1", "a.txt\nb.txt"]);
+    expect(button("Copy response")).not.toBeNull();
+  });
+
+  it("renders output only when a tool is opened, and shows failures and stopped calls", async () => {
+    await render({ messages: [answer("x", "a0"), { id: "a1", role: "assistant", parts: [
+      tool("bad", { type: "done", output: "permission denied", isError: true }, "read", { path: "/etc/shadow" }),
+    ] }, { id: "a2", role: "user", parts: [{ type: "text", text: "next" }] },
+    { id: "a3", role: "assistant", parts: [tool("stop", { type: "interrupted" })] }] });
+    expect(summaries()).toEqual(["failed read /etc/shadow", "stopped bash echo stop"]);
+    expect(document.querySelector(".trace-pre")).toBeNull();
+    const failed = await open("failed read /etc/shadow");
+    expect(failed.dataset["tone"]).toBe("error");
+    expect(failed.querySelector("pre[data-tone=error]")?.textContent).toBe("permission denied");
+    expect([...failed.querySelectorAll("h4")].map((node) => node.textContent)).toEqual(["Input", "Error"]);
+    const stopped = await open("stopped bash echo stop");
+    expect(stopped.querySelector(".trace-empty")?.textContent).toBe("No result. The run ended before this tool finished.");
+  });
+
+  it("groups adjacent tools and names the running one while the run continues", async () => {
+    const parts = [tool("r1", { type: "done", output: "", isError: false }, "read", { path: "a.ts" }),
+      tool("r2", { type: "done", output: "", isError: false }, "read", { path: "b.ts" }),
+      tool("b1", { type: "running", output: "compiling" }, "bash", { command: "npm test" })];
+    await render({ messages: [{ id: "a", role: "assistant", parts }], running: true });
+    expect(summaries()[0]).toBe("running 3 tools: bash npm test");
+    expect(document.querySelector(".tool-group .trace-text")?.hasAttribute("data-live")).toBe(true);
+    const live = await open("running bash npm test");
+    expect(live.querySelectorAll("pre")[1]?.textContent).toBe("compiling");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [...parts.slice(0, 2), tool("b1", { type: "done", output: "ok", isError: false }, "bash", { command: "npm test" })] }] });
+    expect(summaries()[0]).toBe("ran 3 tools: read, bash");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [...parts.slice(0, 2), tool("b1", { type: "done", output: "no", isError: true }, "bash", { command: "npm test" })] }] });
+    expect(summaries()[0]).toBe("ran 3 tools, 1 failed: read, bash");
+    expect(document.querySelector<HTMLElement>(".tool-group")?.dataset["tone"]).toBe("error");
+  });
+
+  it("shows a working line while a run has no text yet", async () => {
+    await render({ messages: [{ id: "q", role: "user", parts: [{ type: "text", text: "go" }] }], running: true });
+    expect(document.querySelector(".message-assistant .trace-line .trace-text")?.textContent).toBe("working");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [tool("b", { type: "running", output: "" })] }], running: true });
+    expect(document.querySelectorAll(".message-assistant .trace-text")).toHaveLength(1);
+    await render({ messages: [{ id: "a", role: "assistant", parts: [tool("b", { type: "done", output: "", isError: false })] }], running: true });
+    expect(summaries()).toEqual(["ran bash echo b"]);
+    expect(document.querySelector(".message-assistant div.trace-line .trace-text")?.textContent).toBe("working");
   });
 });

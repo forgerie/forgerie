@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import { browserTransport, createSessionStore } from "./sessionStore";
-import { convertMessage } from "./transcript";
+import { useThreadMessages } from "./useThreadMessages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
 
@@ -22,8 +22,9 @@ export function ForgerieSession({ id }: { id: string }) {
   const onCancel = useCallback(async () => {
     try { await store.cancel(); } catch { /* The store exposes the command error. */ }
   }, [store]);
+  const messages = useThreadMessages(state.transcript.messages, state.transcript.isRunning);
   const runtime = useExternalStoreRuntime({
-    messages: state.transcript.messages, convertMessage, onNew, onCancel,
+    messages, onNew, onCancel,
     isRunning: state.transcript.isRunning,
     isLoading: state.connection.type === "loading",
     isDisabled: state.connection.type !== "ready",

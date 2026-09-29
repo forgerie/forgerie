@@ -1,7 +1,13 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { ActionBarPrimitive, ErrorPrimitive, MessagePrimitive, useAui } from "@assistant-ui/react";
+import { ActionBarPrimitive, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui } from "@assistant-ui/react";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
+import { ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
+
+const groupAssistantParts = groupPartByType({
+  reasoning: ["group-reasoning"],
+  "tool-call": ["group-tool"],
+});
 
 function ResponseCopy() {
   const aui = useAui();
@@ -17,7 +23,21 @@ export function UserMessage() {
 export function AssistantMessage() {
   return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply">
     <div className="message-text">
-      <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
+      <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
+        {({ part, children }) => {
+          switch (part.type) {
+            case "group-reasoning": return <ReasoningGroup running={part.status.type === "running"}>{children}</ReasoningGroup>;
+            case "group-tool": return part.indices.length === 1 ? <>{children}</>
+              : <ToolGroup indices={part.indices} running={part.status.type === "running"}>{children}</ToolGroup>;
+            case "text": return part.text === "" && part.status.type === "running"
+              ? <TraceLine live label="working" /> : <MarkdownText />;
+            case "reasoning": return <MarkdownText />;
+            case "tool-call": return <ToolCall {...part} />;
+            case "indicator": return <WorkingLine />;
+            default: return null;
+          }
+        }}
+      </MessagePrimitive.GroupedParts>
       <MessagePrimitive.Error><ErrorPrimitive.Root className="message-error">
         <ErrorPrimitive.Message />
       </ErrorPrimitive.Root></MessagePrimitive.Error>

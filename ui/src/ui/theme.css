@@ -44,6 +44,7 @@
   --code-number: #a64d15;
   --code-comment: #686a63;
   --code-title: #2c609a;
+  --live: #2563eb;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -59,6 +60,7 @@
     --code-number: #e5b38f;
     --code-comment: #969990;
     --code-title: #a3c3e6;
+    --live: #60a5fa;
   }
 }
 * { box-sizing: border-box; scrollbar-width: thin; }
@@ -146,6 +148,31 @@ button:disabled { cursor: default; opacity: 0.4; }
 .markdown th { font-weight: 500; background: var(--code-surface); }
 .markdown tr:last-child td { border-block-end: 0; }
 .markdown img { max-inline-size: 100%; block-size: auto; }
+/* Trace grammar from the homepage demo: one quiet monospace line per step.
+   A disclosure rotates its marker; a plain line does not. */
+.trace { margin-block: var(--space-1); }
+.trace-line { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2rem; max-inline-size: 100%; font-family: var(--code-font); font-size: 0.75rem; font-variant-ligatures: none; color: var(--muted-foreground); }
+summary.trace-line { cursor: pointer; list-style: none; border-radius: var(--radius-document); }
+summary.trace-line::-webkit-details-marker { display: none; }
+summary.trace-line:hover { color: var(--foreground); }
+.trace-marker { flex: none; color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); transition: transform 150ms; }
+.trace[open] > summary .trace-marker { transform: rotate(90deg); }
+.trace-line:has(.trace-text[data-live]) > .trace-marker { color: var(--live); }
+.trace-text { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-text[data-live] { background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: trace-shimmer 2s linear infinite; }
+@keyframes trace-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.trace[data-tone="error"] > summary .trace-label { color: var(--destructive); }
+.trace-body { margin-inline-start: 0.3rem; padding-inline-start: var(--space-4); border-inline-start: 1px solid var(--line); min-inline-size: 0; }
+.trace-section { margin-block: var(--space-2) var(--space-3); min-inline-size: 0; }
+.trace-heading { margin: 0 0 var(--space-1); font-size: var(--small-text); font-weight: 500; color: var(--muted-foreground); }
+.trace-pre { margin: 0; max-block-size: min(20rem, 45cqb); overflow: auto; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-document); background: var(--code-surface); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.trace-pre[data-tone="error"] { color: var(--destructive); }
+.trace-empty { margin: 0; font-size: var(--small-text); color: var(--muted-foreground); }
+.reasoning-text { color: var(--muted-foreground); font-size: var(--small-text); padding-block: var(--space-1) var(--space-2); }
+.message-assistant .message-text > .markdown + .trace,
+.message-assistant .message-text > .markdown + .trace-line,
+.message-assistant .message-text > .trace + .markdown,
+.message-assistant .message-text > .trace-line + .markdown { margin-block-start: var(--space-3); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal { color: var(--code-keyword); }
 .hljs-string, .hljs-regexp, .hljs-attribute { color: var(--code-string); }
 .hljs-number, .hljs-symbol { color: var(--code-number); }
@@ -154,4 +181,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .setup { padding: var(--space-6); max-inline-size: var(--thread-max-width); margin-inline: auto; }
 .setup h1 { font-size: 1.25rem; font-weight: 500; }
 .setup code { font-family: var(--code-font); }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; transition: none !important; }
+  .trace-text[data-live] { animation: none; background: none; color: var(--foreground); }
+}

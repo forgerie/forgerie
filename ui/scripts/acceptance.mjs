@@ -51,7 +51,8 @@ try {
   const read = () => evaluate(cdp, `({
     status: document.querySelector('.connection-status')?.textContent,
     messages: [...document.querySelectorAll('.message-text')].map(e => e.textContent),
-    assistantMessages: [...document.querySelectorAll('.message-assistant .message-text')].map(e => {
+    // Assistant text parts. A joined reply also holds reasoning and tool lines, and can end without text.
+    assistantMessages: [...document.querySelectorAll('.message-assistant .message-text > .markdown')].map(e => {
       const content = e.cloneNode(true);
       content.querySelectorAll('.code-header').forEach(header => header.remove());
       return content.textContent.replace(/\\s+/g, ' ').trim();
@@ -65,13 +66,15 @@ try {
   })`);
   async function until(test, timeout = 120_000) {
     const deadline = Date.now() + timeout;
+    let state;
     while (Date.now() < deadline) {
-      const state = await read();
+      state = await read();
       if (state.alert) throw new Error(state.alert);
       if (test(state)) return state;
       await sleep(40);
     }
-    throw new Error("Acceptance state timed out.");
+    const last = { status: state?.status, messages: state?.messages.length, lastAssistant: state?.assistantMessages.at(-1)?.slice(0, 300) };
+    throw new Error(`Acceptance state timed out: ${JSON.stringify(last)}`);
   }
   let state = await until((s) => s.status === "Connected");
   const catalogResponse = await fetch(new URL("/api/sessions/all", url));
