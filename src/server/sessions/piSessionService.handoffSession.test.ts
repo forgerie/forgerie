@@ -29,7 +29,7 @@ describe("PiSessionService handoffSession", () => {
     const promptTexts: string[] = [];
     destination.session.prompt = (text, options) => {
       promptTexts.push(text);
-      preflight(options)?.(true);
+      preflight(options)?.("started");
       if (promptTexts.length > 1) {
         observeContinuation?.();
         return Promise.resolve();
@@ -150,7 +150,7 @@ describe("PiSessionService handoffSession", () => {
     let observePreparation: (() => void) | undefined;
     const preparationStarted = new Promise<void>((resolve) => { observePreparation = resolve; });
     destination.session.prompt = (_text, options) => {
-      preflight(options)?.(true);
+      preflight(options)?.("started");
       observePreparation?.();
       return new Promise<void>((resolve) => {
         finishPreparation = () => {
@@ -339,7 +339,7 @@ describe("PiSessionService handoffSession", () => {
     let observePreparation: (() => void) | undefined;
     const preparationStarted = new Promise<void>((resolve) => { observePreparation = resolve; });
     destination.session.prompt = (_text, options) => {
-      preflight(options)?.(true);
+      preflight(options)?.("started");
       observePreparation?.();
       return new Promise<void>((resolve) => {
         finishPreparation = () => {
@@ -454,7 +454,7 @@ function preparableDestination(id: string, workspace: string) {
   const continuationStarted = new Promise<void>((resolve) => { observeContinuation = resolve; });
   destination.session.prompt = (text, options) => {
     prompts.push(text);
-    preflight(options)?.(true);
+    preflight(options)?.("started");
     if (prompts.length > 1) {
       observeContinuation?.();
       return Promise.resolve();
@@ -532,13 +532,13 @@ function hasSourceFilePath(transition: unknown): boolean {
   return typeof transition === "object" && transition !== null && Reflect.has(transition, "sourceSessionFile");
 }
 
-function preflight(options: unknown): ((accepted: boolean) => void) | undefined {
+function preflight(options: unknown): ((disposition: "started") => void) | undefined {
   if (typeof options !== "object" || options === null) return undefined;
   const callback: unknown = Reflect.get(options, "preflightResult");
   return isPreflightCallback(callback) ? callback : undefined;
 }
 
-function isPreflightCallback(value: unknown): value is (accepted: boolean) => void {
+function isPreflightCallback(value: unknown): value is (disposition: "started") => void {
   return typeof value === "function";
 }
 

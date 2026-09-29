@@ -27,13 +27,6 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
 
-function promptPreflightResult(options: unknown): ((accepted: boolean) => void) | undefined {
-  if (typeof options !== "object" || options === null || !("preflightResult" in options)) return undefined;
-  const preflightResult = options.preflightResult;
-  if (typeof preflightResult !== "function") return undefined;
-  return (accepted) => { Reflect.apply(preflightResult, undefined, [accepted]); };
-}
-
 beforeEach(() => {
   // Pi 0.82 uses PI_OFFLINE for refreshes after runtime creation. These tests
   // exercise local model/auth behavior and must never fetch provider catalogs.
@@ -225,8 +218,7 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
   it("does not return a delivery receipt when Pi rejects prompt preflight", async () => {
     const fake = fakeRuntime("prompt-resource-rejected-session", {
       promptTemplates: [{ name: "review", description: "Review", content: "Review $ARGUMENTS" }],
-      prompt: (_text, options) => {
-        promptPreflightResult(options)?.(false);
+      prompt: () => {
         return Promise.reject(new Error("model unavailable"));
       },
     });

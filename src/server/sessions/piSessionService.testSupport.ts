@@ -129,13 +129,13 @@ const testExtensionUiContext: ExtensionUIContext = {
   setToolsExpanded() { /* no-op */ },
 };
 
-function capturePromptOptions(options: unknown): { recorded: unknown; preflightResult?: ((accepted: boolean) => void) | undefined } {
+function capturePromptOptions(options: unknown): { recorded: unknown; preflightResult?: ((disposition: "started") => void) | undefined } {
   if (!isUnknownRecord(options)) return { recorded: options };
   const preflightResult = options["preflightResult"];
   const recorded = Object.fromEntries(Object.entries(options).filter(([key]) => key !== "preflightResult"));
   return {
     recorded: Object.keys(recorded).length === 0 ? undefined : recorded,
-    ...(typeof preflightResult === "function" ? { preflightResult: (accepted: boolean) => { Reflect.apply(preflightResult, undefined, [accepted]); } } : {}),
+    ...(typeof preflightResult === "function" ? { preflightResult: (disposition: "started") => { Reflect.apply(preflightResult, undefined, [disposition]); } } : {}),
   };
 }
 
@@ -201,7 +201,7 @@ export function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession>
     prompt: (text: string, options: unknown) => {
       sessionTitleBridgeSlot.publish({ type: "intent.accepted", text });
       const captured = capturePromptOptions(options);
-      captured.preflightResult?.(true);
+      captured.preflightResult?.("started");
       calls.prompt.push({ text, options: captured.recorded });
       return Promise.resolve();
     },

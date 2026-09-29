@@ -1,10 +1,10 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { createHandoffSessionToolDefinition } from "./handoffSessionTool.js";
 
 const dispatchModel = { provider: "anthropic", id: "claude-sonnet" };
 
-function ctxFor(sessionId: string, sessionFile: string | undefined, model?: unknown, thinkingLevel?: string): ExtensionContext {
+function ctxFor(sessionId: string, sessionFile: string | undefined, model?: unknown, thinkingLevel?: string): ExtensionToolContext {
   const sessionManager = {
     getSessionId: () => sessionId,
     getSessionFile: () => sessionFile,
@@ -12,7 +12,7 @@ function ctxFor(sessionId: string, sessionFile: string | undefined, model?: unkn
   };
   // The handoff tool reads only the current session identity, file, model, and thinking level.
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test stub with the minimal surface the tool reads.
-  return { sessionManager, ...(model === undefined ? {} : { model }), ...(thinkingLevel === undefined ? {} : { thinkingLevel }) } as unknown as ExtensionContext;
+  return { sessionManager, ...(model === undefined ? {} : { model }), ...(thinkingLevel === undefined ? {} : { thinkingLevel }) } as unknown as ExtensionToolContext;
 }
 
 describe("createHandoffSessionToolDefinition", () => {
