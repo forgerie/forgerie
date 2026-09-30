@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Session picker: state sheet (prototype)</title>
+<style>
+/* ---- tokens: copied from .worktree/new-ui-mvp/src/ui/theme.css ---- */
+@font-face { font-family: "Public Sans Variable"; font-weight: 100 900; font-display: swap; src: url(fonts/public-sans-latin-wght-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono Variable"; font-weight: 100 800; font-display: swap; src: url(fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2"); }
+:root {
+  color-scheme: light dark;
+  --tint: 106;
+  --background: oklch(0.992 0.002 var(--tint));
+  --foreground: oklch(0.145 0.006 var(--tint));
+  --primary: oklch(0.205 0.006 var(--tint));
+  --primary-foreground: oklch(0.985 0.003 var(--tint));
+  --muted: oklch(0.97 0.004 var(--tint));
+  --muted-foreground: oklch(0.556 0.007 var(--tint));
+  --destructive: oklch(0.577 0.245 27.325);
+  --live: #2563eb;
+  --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --line-focus: color-mix(in oklab, var(--foreground) 25%, transparent);
+  --code-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+  --body-font: "Public Sans Variable", sans-serif;
+  --code-font: "JetBrains Mono Variable", monospace;
+  --text-size: 0.9375rem;
+  --small-text: 0.8125rem;
+  --code-size: 0.78125rem;
+  --radius-thread: 1rem;
+  --radius-control: 0.5rem;
+  --radius-document: 0.375rem;
+  --control-size: 2.75rem;
+  --header-size: 3rem;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.25rem; --space-6: 1.5rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.17 0.003 var(--tint));
+    --foreground: oklch(0.985 0.002 var(--tint));
+    --primary: oklch(0.922 0.002 var(--tint));
+    --primary-foreground: oklch(0.215 0.003 var(--tint));
+    --muted: oklch(0.275 0.004 var(--tint));
+    --muted-foreground: oklch(0.708 0.004 var(--tint));
+    --destructive: oklch(0.704 0.191 22.216);
+    --live: #60a5fa;
+  }
+}
+* { box-sizing: border-box; scrollbar-width: thin; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; padding: 0; }
+:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+
+/* ---- sheet chrome (not part of the design) ---- */
+.sheet { padding: var(--space-6) clamp(1rem, 3vw, 2.5rem) 6rem; max-inline-size: 1400px; margin-inline: auto; }
+.sheet > h1 { font-size: 1.25rem; font-weight: 500; margin: 0 0 var(--space-2); }
+.sheet > p.lede { color: var(--muted-foreground); font-size: var(--small-text); max-inline-size: 60ch; margin: 0 0 var(--space-6); line-height: 1.5; }
+.sheet h2 { font-size: 1rem; font-weight: 600; margin: 3rem 0 var(--space-2); }
+.sheet h2 + p { margin: 0 0 var(--space-4); color: var(--muted-foreground); font-size: var(--small-text); max-inline-size: 70ch; line-height: 1.5; }
+.ladder { display: flex; flex-wrap: wrap; gap: var(--space-5); align-items: flex-start; }
+.frame { flex: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.frame > figcaption { font-family: var(--code-font); font-size: var(--code-size); color: var(--muted-foreground); }
+.frame > .box { border: 1px solid var(--line-focus); border-radius: var(--radius-document); overflow: hidden; background: var(--background); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--space-5); }
+.grid .frame { display: block; }
+.grid .frame .box { margin-block-start: var(--space-2); }
+table.cov { border-collapse: collapse; font-size: var(--small-text); inline-size: 100%; max-inline-size: 70rem; }
+table.cov th, table.cov td { text-align: start; padding: var(--space-2) var(--space-3); border-block-end: 1px solid var(--line); vertical-align: top; }
+table.cov th { font-weight: 500; color: var(--muted-foreground); }
+table.cov td:first-child { font-family: var(--code-font); font-size: var(--code-size); white-space: nowrap; }
+kbd { font-family: var(--code-font); font-size: var(--code-size); border: 1px solid var(--line-focus); border-radius: 4px; padding: 0 0.35em; }
+
+/* ============ THE PICKER ============ */
+.picker { position: relative; container: picker / inline-size; display: flex; flex-direction: column; block-size: 100%; min-inline-size: 0; background: var(--background); color: var(--foreground); }
+
+/* header */
+.ph { flex: none; min-block-size: var(--header-size); display: flex; align-items: center; gap: var(--space-1); padding-inline: var(--space-3) var(--space-2); border-block-end: 1px solid var(--line); }
+.ph h2 { margin: 0; flex: 1; min-inline-size: 0; font-size: var(--small-text); font-weight: 600; }
+.ph .group-by { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); max-inline-size: 100%; border-radius: var(--radius-control); padding-inline: var(--space-2); margin-inline-start: calc(-1 * var(--space-2)); }
+.ph .group-by:hover { background: var(--code-surface); }
+.ph .gb { font-weight: 400; color: var(--muted-foreground); white-space: nowrap; }
+.ph .gb::after { content: " ▾"; font-size: 0.7em; }
+.ph .new { min-block-size: 2.25rem; padding-inline: var(--space-3); border-radius: var(--radius-control); background: var(--primary); color: var(--primary-foreground); font-weight: 500; font-size: var(--small-text); }
+.ph .icon { inline-size: var(--control-size); block-size: var(--control-size); display: grid; place-items: center; border-radius: var(--radius-control); color: var(--muted-foreground); }
+.ph .icon:hover { color: var(--foreground); background: var(--code-surface); }
+.ph .icon.attn { position: relative; }
+.ph .icon.attn::after { content: ""; position: absolute; inset-block-start: 10px; inset-inline-end: 10px; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--foreground); }
+@container picker (max-width: 319px) { .ph .gb { display: none; } }
+
+/* notices */
+.pnote { flex: none; display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-2) var(--space-3); font-size: var(--small-text); color: var(--muted-foreground); border-block-end: 1px solid var(--line); background: var(--code-surface); }
+.pnote[data-tone="error"] { color: var(--destructive); background: color-mix(in oklab, var(--destructive) 5%, var(--background)); }
+.pnote .pn-mark { font-family: var(--code-font); color: var(--live); }
+.pnote button { text-decoration: underline; text-underline-offset: 2px; margin-inline-start: auto; white-space: nowrap; }
+
+/* list */
+.plist { flex: 1; min-block-size: 0; overflow-y: auto; scrollbar-gutter: stable; padding-block-end: var(--space-3); }
+.gh { inline-size: 100%; display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.5rem; padding-inline: var(--space-3); font-size: var(--small-text); color: var(--muted-foreground); text-align: start; }
+.gh:hover { color: var(--foreground); }
+.gh .chev { font-family: var(--code-font); font-size: 0.7rem; transition: transform 150ms; color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
+.gh[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.gh .gl { font-weight: 500; }
+.gh[data-kind="blocked"] .gl, .gh[data-kind="pinned"] .gl { color: var(--foreground); }
+.gh .gc { font-family: var(--code-font); font-size: var(--code-size); font-variant-numeric: tabular-nums; }
+.band { display: flex; align-items: baseline; gap: var(--space-2); padding: var(--space-3) var(--space-3) 0; font-size: var(--code-size); font-family: var(--code-font); color: var(--muted-foreground); }
+.band::after { content: ""; flex: 1; border-block-end: 1px solid var(--line); align-self: center; }
+
+/* row */
+.row { position: relative; display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto; column-gap: var(--space-2); align-items: start; min-block-size: var(--control-size); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); margin-inline: var(--space-1); border-radius: var(--radius-control); cursor: pointer; }
+.row:hover { background: var(--code-surface); }
+.row[aria-selected="true"] { background: var(--muted); }
+.row[aria-disabled="true"] { cursor: default; color: var(--muted-foreground); }
+.row[data-dim] { opacity: 0.55; }
+.row.compact { min-block-size: 2.25rem; padding-block: 0.375rem; }
+.mark { grid-row: 1 / span 2; inline-size: 1.25rem; block-size: 1.5rem; display: grid; place-items: center; color: var(--muted-foreground); }
+.mark i { display: block; inline-size: 7px; block-size: 7px; border-radius: 50%; }
+.row[data-state="blocked"] .mark i { border-radius: 1px; background: var(--foreground); }
+.row[data-state="errored"] .mark i { background: var(--destructive); }
+.row[data-state="working"] .mark i { border: 1.5px solid var(--live); background: transparent; animation: pulse 1.6s ease-in-out infinite; }
+.row[data-state="unread"] .mark i { background: var(--foreground); }
+.row[data-state="starting"] .mark i { border: 1.5px dashed var(--muted-foreground); background: transparent; }
+.row[data-state="open"] .mark i, .row[data-state="archived"] .mark i { display: none; }
+.mark svg { inline-size: 12px; block-size: 12px; fill: none; stroke: currentColor; stroke-width: 1.75; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.rt { display: flex; align-items: baseline; gap: var(--space-2); min-inline-size: 0; }
+.title { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; line-height: 1.5rem; }
+.row[data-state="blocked"] .title, .row[data-state="unread"] .title { font-weight: 600; }
+.row[data-state="open"] .title, .row[data-state="archived"] .title { font-weight: 450; }
+.row[data-state="archived"] .title { color: var(--muted-foreground); }
+.time { grid-column: 3; font-family: var(--code-font); font-size: var(--code-size); color: var(--muted-foreground); font-variant-numeric: tabular-nums; line-height: 1.5rem; white-space: nowrap; }
+.time[data-live] { color: var(--live); }
+.time .short { display: none; }
+@container picker (max-width: 319px) { .time .long { display: none; } .time .short { display: inline; } }
+.rs { grid-column: 2 / span 2; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); row-gap: 0; min-inline-size: 0; font-size: var(--small-text); color: var(--muted-foreground); line-height: 1.375rem; }
+.rs:empty { display: none; }
+.where { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.where .br { color: var(--foreground); opacity: 0.8; }
+.where[data-missing] { font-style: italic; }
+.work { font-family: var(--code-font); font-size: var(--code-size); white-space: nowrap; }
+.tr { display: inline-flex; gap: var(--space-2); min-inline-size: 0; max-inline-size: 100%; font-family: var(--code-font); font-size: 0.75rem; }
+.tr .tm { color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
+.tr .tt { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr[data-tone="error"] .tt { color: var(--destructive); }
+.tr[data-tone="ask"] .tt { color: var(--foreground); }
+.tr .tt[data-live] { background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2s linear infinite; }
+.tr[data-tone="ask"] .tm { color: var(--foreground); }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@container picker (max-width: 419px) { .rs .tr { flex-basis: 100%; } }
+.more { position: absolute; inset-inline-end: var(--space-2); inset-block-end: 0.3rem; inline-size: 2rem; block-size: 1.375rem; display: none; place-items: center; border-radius: var(--radius-document); color: var(--muted-foreground); font-weight: 600; letter-spacing: 0.05em; }
+.row[aria-selected="true"] .more, .row:focus-within .more, .row[data-focus] .more { display: grid; }
+.row[aria-selected="true"] .rs, .row:focus-within .rs, .row[data-focus] .rs { padding-inline-end: 2.25rem; }
+.row[data-focus] { outline: 2px solid var(--foreground); outline-offset: -2px; }
+.pin { grid-column: 3; grid-row: 1; justify-self: end; align-self: center; margin-inline-start: var(--space-2); }
+.pin svg { inline-size: 11px; block-size: 11px; fill: none; stroke: var(--muted-foreground); stroke-width: 1.75; vertical-align: -1px; }
+.rt .pin { display: inline; margin: 0; }
+
+/* empty states */
+.pstate { flex: 1; display: grid; place-content: center; text-align: center; gap: var(--space-2); padding: var(--space-6) var(--space-4); color: var(--muted-foreground); font-size: var(--small-text); }
+.pstate strong { color: var(--foreground); font-weight: 500; font-size: var(--text-size); }
+.pstate button { text-decoration: underline; text-underline-offset: 2px; justify-self: center; }
+.pstate[data-inline] { flex: none; padding-block: var(--space-4) var(--space-2); }
+.skel { display: block; block-size: 0.875rem; border-radius: var(--radius-control); background: var(--muted); margin: 0.6rem 0; }
+
+/* undo toast */
+.undo { flex: none; display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) var(--space-2) var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--code-surface); font-size: var(--small-text); }
+.undo span { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.undo em { font-style: normal; color: var(--foreground); }
+.undo .u { min-block-size: 2rem; padding-inline: var(--space-2); font-weight: 500; border-radius: var(--radius-document); }
+.undo .u:hover { background: var(--muted); }
+.undo .x { inline-size: 2rem; block-size: 2rem; display: grid; place-items: center; color: var(--muted-foreground); }
+
+/* shelf */
+.shelf { flex: none; border-block-start: 1px solid var(--line); padding: var(--space-2) var(--space-3); font-size: var(--code-size); font-family: var(--code-font); color: var(--muted-foreground); }
+
+/* menus (transient: at window level in the real thing) */
+.menu { position: absolute; z-index: 2; min-inline-size: 13rem; padding: var(--space-1); border: 1px solid var(--line-focus); border-radius: var(--radius-control); background: var(--background); box-shadow: 0 8px 24px color-mix(in oklab, var(--foreground) 12%, transparent); font-size: var(--small-text); }
+.menu .mh { padding: var(--space-2) var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--code-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu button { display: flex; inline-size: 100%; align-items: baseline; gap: var(--space-3); min-block-size: var(--control-size); padding-inline: var(--space-3); border-radius: var(--radius-document); text-align: start; }
+.menu button:hover { background: var(--code-surface); }
+.menu button[aria-checked="true"]::before { content: "✓"; font-family: var(--code-font); }
+.menu button[role="menuitemradio"][aria-checked="false"]::before { content: ""; inline-size: 0.8em; }
+.menu button[role="menuitemcheckbox"][aria-checked="true"]::before { content: ""; }
+.menu button[role="menuitemcheckbox"][aria-checked="true"] small::before { content: "on · "; }
+.menu button.danger { color: var(--destructive); }
+.menu button:disabled { cursor: default; opacity: 1; color: var(--muted-foreground); }
+.menu button small { margin-inline-start: auto; font-size: var(--code-size); font-family: var(--code-font); color: var(--muted-foreground); }
+.menu hr { border: 0; border-block-start: 1px solid var(--line); margin: var(--space-1) 0; }
+.rowmenu-host { position: relative; }
+
+/* in-situ thread mock */
+.shell { display: grid; grid-template-columns: 300px 1fr; block-size: 100%; }
+.shell .picker { border-inline-end: 1px solid var(--line); }
+.tmock { display: flex; flex-direction: column; container-type: inline-size; }
+.session-header { min-block-size: var(--header-size); display: flex; align-items: center; gap: var(--space-3); padding-inline: var(--space-4); border-block-end: 1px solid var(--line); font-size: var(--small-text); }
+.session-header .product-name { font-weight: 600; }
+.session-header .stitle { font-weight: 500; flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-header .stitle::before { content: "/"; color: var(--muted-foreground); margin-inline-end: var(--space-3); }
+.session-header .cs { color: var(--muted-foreground); }
+.session-header .opener { inline-size: var(--control-size); block-size: var(--control-size); display: grid; place-items: center; border-radius: var(--radius-control); color: var(--muted-foreground); margin-inline-start: calc(-1 * var(--space-2)); position: relative; }
+.session-header .opener svg { inline-size: 16px; block-size: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; }
+.opener[data-attn="unread"]::after, .opener[data-attn="blocked"]::after { content: ""; position: absolute; inset-block-start: 11px; inset-inline-end: 11px; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--foreground); }
+.opener[data-attn="blocked"]::after { border-radius: 1px; }
+.tbody { flex: 1; padding: var(--space-5) var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); max-inline-size: 42rem; }
+.ub { align-self: flex-end; max-inline-size: 80%; background: var(--muted); border-radius: var(--radius-thread); padding: var(--space-2) var(--space-4); }
+.trace-line { display: flex; gap: var(--space-2); font-family: var(--code-font); font-size: 0.75rem; color: var(--muted-foreground); min-block-size: 2rem; align-items: center; }
+.composer-shell { margin: auto var(--space-6) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-thread); background: color-mix(in oklab, var(--muted) 30%, var(--background)); min-block-size: 5rem; display: flex; align-items: flex-end; justify-content: flex-end; padding: var(--space-2); color: var(--muted-foreground); }
+.composer-shell::before { content: "Send a message..."; margin: var(--space-2) auto var(--space-2) var(--space-3); }
+.composer-shell i { inline-size: var(--control-size); block-size: var(--control-size); border-radius: var(--radius-control); background: var(--primary); }
+@media (prefers-reduced-motion: reduce) { .mark i, .tt { animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+<h1>Session picker: every state, one visual language</h1>
+<p class="lede">Prototype. The same render function draws every frame; only the data and the container width change. Sessions from all machines share one list, and the machine appears only as part of a row's location. Tokens, type, and the trace line come from the new client's <code>theme.css</code>.</p>
+
+<h2>1. The size ladder</h2>
+<p>Same sessions, five container widths. 260 px is the narrowest docked column. 475 px is the sheet on the folded phone. 704 px is the full-width overlay on the unfolded phone. The last frame sits beside the thread at 932 px, the unfolded-landscape shell.</p>
+<div class="ladder" id="ladder"></div>
+
+<h2>2. Board states</h2>
+<p>What the whole picker looks like when the data is not simply "a list of sessions".</p>
+<div class="grid" id="boards"></div>
+
+<h2>3. Every row state</h2>
+<p>One frame per state, in the order the board classifies them. The precedence is archived, blocked, errored, working, unread, open. Pinned changes the group, not the state.</p>
+<div class="grid" id="rows"></div>
+
+<h2>4. Menus and confirmations</h2>
+<p>These open at window level in the real client, never clipped by the pane. Long press, right click, the Menu key, or the ⋯ on the selected row open the row menu.</p>
+<div class="grid" id="menus"></div>
+
+<h2>5. The picker when it is closed</h2>
+<p>The thread header carries the opener. It shows one mark: a square when a session is blocked on you, a dot when something finished unread, nothing otherwise. Nothing else about the machine or the inbox leaks into the thread.</p>
+<div class="grid" id="openers"></div>
+
+<h2>6. Keys and gestures</h2>
+<p>Carried over from the current client. Every command that a key reaches is also on a menu.</p>
+<table class="cov">
+<tr><th>Input</th><th>Does</th></tr>
+<tr><td><kbd>J</kbd> / <kbd>K</kbd>, <kbd>↓</kbd> / <kbd>↑</kbd></td><td>Move through the visible rows, in the order drawn. Collapsed groups are skipped.</td></tr>
+<tr><td><kbd>Enter</kbd>, <kbd>Space</kbd></td><td>Open the row.</td></tr>
+<tr><td><kbd>G</kbd></td><td>Switch grouping between state and project.</td></tr>
+<tr><td><kbd>A</kbd></td><td>Show or hide archived sessions.</td></tr>
+<tr><td><kbd>E</kbd></td><td>Archive the selected session. Shows the undo toast.</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>F10</kbd>, Menu key, right click, long press</td><td>Open the row menu.</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Close a menu. Then close the sheet.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>New session. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> starts in rapidfire mode.</td></tr>
+</table>
+
+<h2>7. Coverage against the inventory</h2>
+<p>Every numbered item from <code>docs/briefs/2026-09-29-session-picker-responsibilities.md</code>, and where this sheet shows it. "Elsewhere" means the capability is kept but not drawn inside the picker.</p>
+<table class="cov" id="coverage"></table>
+</div>
+
+<script>
+// ---------- fixture ----------
+const NOW = Date.parse("2026-09-29T18:40:00");
+const min = (n) => new Date(NOW - n * 60000).toISOString();
+const hr = (n) => min(n * 60);
+const day = (n) => hr(n * 24);
+const MACHINES_MULTI = ["zao", "laptop"];
+const S = (o) => ({ state: "open", machine: "zao", project: "forgerie", branch: null, pinned: false, agents: 0, procs: 0, ...o });
+const FIXTURE = [
+  S({ id: "p1", title: "Session picker design", state: "working", pinned: true, modified: min(3), since: min(41), branch: "proto/session-picker-states" }),
+  S({ id: "b1", title: "Step 3: ask_user form in the composer", state: "blocked", ask: "Keep the draft when an ask times out?", modified: min(9), branch: "new-ui-mvp" }),
+  S({ id: "b2", title: "Reconcile stale activity by timestamp", state: "blocked", dialog: "Extension needs permission", modified: min(22), machine: "laptop", project: "pi-web" }),
+  S({ id: "e1", title: "Update Pi runtime to 0.99.1", state: "errored", error: "provider returned 529 overloaded", modified: min(31) }),
+  S({ id: "w1", title: "Automatic reconnect and resync", state: "working", detail: "compacting context", modified: min(1), since: min(12), branch: "new-ui-mvp" }),
+  S({ id: "w2", title: "Voice content prototype", state: "working", detail: "running a command", modified: min(2), since: min(5), agents: 2, procs: 1, project: "voice-content", machine: "laptop" }),
+  S({ id: "u1", title: "Tool call dedupe across message and tool events", state: "unread", modified: min(48) }),
+  S({ id: "u2", title: "Quota shelf: put every account on one axis", state: "unread", modified: hr(2), project: "pi-quota", machine: "laptop" }),
+  S({ id: "o1", title: "Handoff record prototype", modified: min(35) }),
+  S({ id: "o2", title: "Fix rapidfire destination lock", modified: hr(3), branch: "fix/rapidfire-destination-lock" }),
+  S({ id: "o3", title: "Backlog observability brief", modified: hr(5), project: "forgerie", machine: "laptop" }),
+  S({ id: "o4", title: "Panel peek gesture", modified: day(1) }),
+  S({ id: "o5", title: "Table reflow", modified: day(1.2) }),
+  S({ id: "o6", title: "Obsidian tabs study", modified: day(4), project: "notes", machine: "laptop" }),
+  S({ id: "o7", title: "Keyboard-free composer", modified: day(12) }),
+  S({ id: "o8", title: "Docker image for zao", modified: day(40), project: "infra" }),
+  S({ id: "a1", title: "Upstream review 2026-08", state: "archived", modified: day(9) }),
+  S({ id: "a2", title: "Mobile chrome study", state: "archived", modified: day(20) }),
+  S({ id: "a3", title: "Old speech worker", state: "archived", modified: day(60), project: "voice-content", machine: "laptop" }),
+];
+
+const GROUPS = [
+  ["pinned", "Pinned"], ["blocked", "Blocked on you"], ["errored", "Errored"], ["working", "Working"], ["unread", "Unread"], ["open", "Open"], ["archived", "Archived"],
+];
+const BANDS = [["hour", "Last hour"], ["today", "Earlier today"], ["yesterday", "Yesterday"], ["week", "Earlier this week"], ["month", "This month"], ["older", "Older"]];
+const DEFAULT_COLLAPSED = new Set(["week", "month", "older"]);
+
+function band(iso) {
+  const at = Date.parse(iso); const d = new Date(NOW); d.setHours(0, 0, 0, 0);
+  const mid = (n) => { const x = new Date(d); x.setDate(x.getDate() - n); return x.getTime(); };
+  if (at >= NOW - 3600e3) return "hour"; if (at >= mid(0)) return "today"; if (at >= mid(1)) return "yesterday";
+  if (at >= mid(7)) return "week"; if (at >= mid(30)) return "month"; return "older";
+}
+function rel(iso) {
+  const s = Math.max(0, Math.round((NOW - Date.parse(iso)) / 1000));
+  if (s < 60) return "now"; if (s < 3600) return `${Math.floor(s / 60)}m`; if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`; return `${Math.floor(s / 604800)}w`;
+}
+function elapsed(iso) { const s = Math.round((NOW - Date.parse(iso)) / 1000); const m = Math.floor(s / 60); return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const PIN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/></svg>';
+const byRecency = (a, b) => Date.parse(b.modified) - Date.parse(a.modified);
+const groupKind = (s) => s.state === "archived" ? "archived" : s.pinned ? "pinned" : s.state === "starting" ? "working" : s.state;
+
+// ---------- render ----------
+function where(s, o) {
+  if (s.missing) return `<span class="where" data-missing>workspace removed</span>`;
+  if (s.unknown) return `<span class="where" title="${esc(s.unknown)}">${esc(s.unknown.split("/").pop())}</span>`;
+  const multi = o.machines.length > 1;
+  const br = s.branch ? `<span class="br">${esc(s.branch)}</span>` : "";
+  if (o.groupBy === "project") return br ? `<span class="where">${br}</span>` : "";
+  const head = multi ? `${esc(s.machine)} / ${esc(s.project)}` : esc(s.project);
+  return `<span class="where">${head}${br ? ` · ${br}` : ""}</span>`;
+}
+function trace(s) {
+  if (s.state === "blocked") return `<span class="tr" data-tone="ask"><span class="tm">?</span><span class="tt">${esc(s.ask ?? s.dialog)}</span></span>`;
+  if (s.state === "errored") return `<span class="tr" data-tone="error"><span class="tm">&gt;</span><span class="tt">failed · ${esc(s.error)}</span></span>`;
+  if (s.state === "working") return `<span class="tr"><span class="tm">&gt;</span><span class="tt" data-live>${esc(s.detail ?? "working")}</span></span>`;
+  if (s.state === "starting") return `<span class="tr"><span class="tm">&gt;</span><span class="tt" data-live>starting</span></span>`;
+  return "";
+}
+function row(s, o) {
+  const dis = s.missing ? ' aria-disabled="true"' : "";
+  const sel = o.selected === s.id ? ' aria-selected="true"' : ' aria-selected="false"';
+  const dim = s.machine && o.unreachable?.includes(s.machine) ? " data-dim" : "";
+  const focus = o.focus === s.id ? " data-focus" : "";
+  const work = (s.agents || s.procs) ? `<span class="work">${[s.agents ? `${s.agents} agent${s.agents > 1 ? "s" : ""}` : "", s.procs ? `${s.procs} process${s.procs > 1 ? "es" : ""}` : ""].filter(Boolean).join(" · ")}</span>` : "";
+  const time = s.state === "working" && s.since ? `<span class="time" data-live><span class="long">${elapsed(s.since)}</span><span class="short">${rel(s.since)}</span></span>` : s.state === "starting" ? `<span class="time"></span>` : `<span class="time">${rel(s.modified)}</span>`;
+  const sub = [where(s, o), work, trace(s)].filter(Boolean).join("");
+  return `<div class="row${o.compact ? " compact" : ""}" role="option" tabindex="0" data-state="${s.state}"${sel}${dis}${dim}${focus} data-id="${s.id}">
+    <span class="mark"><i></i></span>
+    <div class="rt"><span class="title">${s.pinned ? `<span class="pin">${PIN}</span> ` : ""}${esc(s.title)}</span></div>
+    ${time}
+    ${sub ? `<div class="rs">${sub}</div>` : ""}
+    <button class="more" aria-label="Session commands">⋯</button>
+  </div>`;
+}
+function header(o) {
+  const gb = o.groupBy === "project" ? "by project" : "by state";
+  return `<header class="ph">
+    <h2><button class="group-by" aria-haspopup="menu">Sessions <span class="gb">${gb}</span></button></h2>
+    <button class="new">New</button>
+    <button class="icon" aria-label="More">⋯</button>
+    ${o.overlay ? '<button class="icon" aria-label="Close">×</button>' : ""}
+  </header>`;
+}
+function groupHeader(kind, label, count, open) {
+  return `<button class="gh" aria-expanded="${open}" data-kind="${kind}"><span class="chev">▾</span><span class="gl">${label}</span><span class="gc">${count}</span></button>`;
+}
+function sections(list, o) {
+  const collapsed = o.collapsed ?? DEFAULT_COLLAPSED;
+  let html = "";
+  const rowsOf = (arr) => arr.sort(byRecency).map((s) => row(s, o)).join("");
+  if (o.groupBy === "project") {
+    const map = new Map();
+    for (const s of list) { if (s.state === "archived" && !o.showArchived) continue; const k = (o.machines.length > 1 ? `${s.machine} / ` : "") + (s.missing ? "removed" : s.project); (map.get(k) ?? map.set(k, []).get(k)).push(s); }
+    for (const [k, arr] of [...map].sort((a, b) => a[0].localeCompare(b[0]))) { const open = !collapsed.has(k); html += groupHeader("project", esc(k), arr.length, open); if (open) html += rowsOf(arr); }
+    return html;
+  }
+  for (const [kind, label] of GROUPS) {
+    const arr = list.filter((s) => groupKind(s) === kind);
+    if (kind === "archived" && !o.showArchived) continue;
+    if (kind === "open") {
+      if (arr.length === 0) continue;
+      html += `<div class="band">Open · ${arr.length} · by age</div>`;
+      for (const [bk, bl] of BANDS) { const b = arr.filter((s) => band(s.modified) === bk); if (!b.length) continue; const open = !collapsed.has(bk); html += groupHeader("band", bl, b.length, open); if (open) html += rowsOf(b); }
+      continue;
+    }
+    if (!arr.length) continue;
+    const open = !collapsed.has(kind);
+    html += groupHeader(kind, label, arr.length, open); if (open) html += rowsOf(arr);
+  }
+  return html;
+}
+function picker(o) {
+  o = { machines: MACHINES_MULTI, groupBy: "state", sessions: FIXTURE, ...o };
+  if (o.bare) return `<div class="picker"><div class="plist" role="listbox" style="padding-block:var(--space-2)">${o.sessions.map((s) => row(s, o)).join("")}</div>${o.menu ?? ""}</div>`;
+  let body = "";
+  if (o.status === "failed" && o.sessions.length === 0) body = `<div class="pstate"><strong>Could not load sessions</strong><span>The server did not answer. Retrying every few seconds.</span><button>Retry now</button></div>`;
+  else if (o.status === "loading") body = `<div class="plist" style="padding:var(--space-3)">${"<span class=skel style=width:38%></span><span class=skel style=width:90%></span><span class=skel style=width:70%></span>".repeat(3)}</div>`;
+  else if (o.sessions.length === 0) body = `<div class="pstate"><strong>No sessions yet</strong><span>Start one and it appears here.</span><button>New session</button></div>`;
+  else {
+    const live = o.sessions.filter((s) => s.state !== "archived" && s.state !== "open").length;
+    const allClear = live === 0 ? `<div class="pstate" data-inline><strong>Nothing is waiting for you</strong></div>` : "";
+    body = `<div class="plist" role="listbox" aria-label="Sessions">${allClear}${sections(o.sessions, o)}</div>`;
+  }
+  const notes = [];
+  if (o.status === "stale") notes.push(`<div class="pnote"><span class="pn-mark">&gt;</span>Reconnecting…</div>`);
+  if (o.status === "failed" && o.sessions.length > 0) notes.push(`<div class="pnote" data-tone="error">Could not refresh sessions.<button>Retry now</button></div>`);
+  for (const m of o.unreachable ?? []) notes.push(`<div class="pnote"><span class="pn-mark">&gt;</span><span>${esc(m)} is unreachable. Showing its last known sessions.</span><button>Retry now</button></div>`);
+  const undo = o.undo ? `<div class="undo" role="status"><span>Archived <em>${esc(o.undo)}</em></span><button class="u">Undo</button><button class="x" aria-label="Dismiss">×</button></div>` : "";
+  const shelf = o.shelf ? `<div class="shelf">plugin shelf · ${esc(o.shelf)}</div>` : "";
+  return `<div class="picker">${header(o)}${notes.join("")}${body}${undo}${shelf}${o.menu ?? ""}</div>`;
+}
+function frame(caption, w, h, inner, extraClass = "") {
+  return `<figure class="frame ${extraClass}" style="margin:0;width:${w}px"><figcaption>${caption}</figcaption><div class="box" style="height:${h}px">${inner}</div></figure>`;
+}
+function thread(pickerHtml, attn) {
+  return `<div class="shell">${pickerHtml}<div class="tmock">
+    <div class="session-header"><span class="product-name">Forgerie</span><span class="stitle">Step 3: ask_user form in the composer</span><span class="cs">Live</span></div>
+    <div class="tbody"><div class="ub">Design the ask form so the composer and the form are never on screen together.</div>
+      <div class="trace-line"><span>&gt;</span><span>ran read src/ui/Composer.tsx</span></div>
+      <div class="trace-line"><span>&gt;</span><span>ran edit src/ui/theme.css</span></div>
+      <p style="margin:0;line-height:1.625">The composer shell already owns the border and radius. The ask form can reuse the shell and swap the body, so the two are the same element in two modes.</p></div>
+    <div class="composer-shell"><i></i></div></div></div>`;
+}
+function thinThread(attn, title) {
+  return `<div class="tmock"><div class="session-header"><button class="opener" data-attn="${attn}" aria-label="Sessions"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button><span class="product-name">Forgerie</span><span class="stitle">${esc(title)}</span><span class="cs">Live</span></div>
+    <div class="tbody" style="padding-block:var(--space-4)"><div class="ub">hello</div></div></div>`;
+}
+
+// ---------- 1. ladder ----------
+const sel = "b1";
+document.getElementById("ladder").innerHTML = [
+  frame("260 × 620 · docked column, single machine", 260, 620, picker({ selected: sel, machines: ["zao"] })),
+  frame("360 × 620 · docked, two machines", 360, 620, picker({ selected: sel })),
+  frame("475 × 638 · sheet over the folded phone", 475, 638, picker({ selected: sel, overlay: true, shelf: "quota 41% · resets 02:10" })),
+  frame("704 × 560 · full-width overlay, unfolded portrait", 704, 560, picker({ selected: sel, overlay: true })),
+  frame("932 × 553 · beside the thread, unfolded landscape", 932, 553, thread(picker({ selected: sel }))),
+].join("");
+
+// ---------- 2. board states ----------
+const openOnly = FIXTURE.filter((s) => s.state === "open" || s.state === "archived").map((s) => ({ ...s, pinned: false }));
+document.getElementById("boards").innerHTML = [
+  frame("loading · first snapshot in flight", 340, 300, picker({ status: "loading" })),
+  frame("empty · a fresh install", 340, 300, picker({ sessions: [] })),
+  frame("all clear · only open and archived rows remain", 340, 420, picker({ sessions: openOnly })),
+  frame("stale · socket dropped, last snapshot shown", 340, 420, picker({ status: "stale", selected: sel })),
+  frame("failed · snapshot rejected, retry offered", 340, 300, picker({ status: "failed", sessions: [] })),
+  frame("one machine unreachable · its rows stay, dimmed", 340, 520, picker({ unreachable: ["laptop"], selected: sel })),
+  frame("archived revealed · via ⋯ or A", 340, 560, picker({ showArchived: true, collapsed: new Set(["pinned", "blocked", "errored", "working", "unread", "hour", "today", "yesterday", "week", "month", "older"]) })),
+  frame("grouped by project · G", 340, 560, picker({ groupBy: "project", selected: sel })),
+  frame("undo toast · 5 s after an archive", 340, 460, picker({ undo: "Handoff record prototype", sessions: FIXTURE.filter((s) => s.id !== "o1"), selected: "b2" })),
+  frame("all groups collapsed · counts stay visible", 340, 360, picker({ collapsed: new Set(["pinned", "blocked", "errored", "working", "unread", "hour", "today", "yesterday", "week", "month", "older"]) })),
+].join("");
+
+// ---------- 3. row states ----------
+const one = (s, o = {}) => picker({ sessions: [s], machines: o.machines ?? MACHINES_MULTI, collapsed: new Set(), bare: true, ...o });
+const R = (o) => S({ id: "x", modified: min(7), ...o });
+document.getElementById("rows").innerHTML = [
+  ["blocked on an ask", R({ title: "Step 3: ask_user form in the composer", state: "blocked", ask: "Keep the draft when an ask times out?" })],
+  ["blocked on an extension dialog", R({ title: "Reconcile stale activity", state: "blocked", dialog: "pi-processes wants to write stdin" })],
+  ["errored", R({ title: "Update Pi runtime to 0.99.1", state: "errored", error: "provider returned 529 overloaded" })],
+  ["working · streaming", R({ title: "Automatic reconnect and resync", state: "working", since: min(12) })],
+  ["working · compacting", R({ title: "Automatic reconnect and resync", state: "working", detail: "compacting context", since: min(2) })],
+  ["working · running a command", R({ title: "Voice content prototype", state: "working", detail: "running a command", since: min(5) })],
+  ["working · 2 agents, 1 process", R({ title: "Voice content prototype", state: "working", agents: 2, procs: 1, since: min(58) })],
+  ["unread", R({ title: "Tool call dedupe across message and tool events", state: "unread", modified: min(48) })],
+  ["open · main checkout", R({ title: "Handoff record prototype" })],
+  ["open · worktree branch", R({ title: "Fix rapidfire destination lock", branch: "fix/rapidfire-destination-lock" })],
+  ["open · other machine", R({ title: "Backlog observability brief", machine: "laptop" })],
+  ["open · single machine configured", R({ title: "Backlog observability brief" }), { machines: ["zao"] }],
+  ["pinned · keeps its own state (blocked)", R({ title: "Session picker design", state: "blocked", ask: "Which grouping is the default?", pinned: true })],
+  ["pinned · idle", R({ title: "Session picker design", pinned: true })],
+  ["archived", R({ title: "Upstream review 2026-08", state: "archived", modified: day(9) }), { showArchived: true }],
+  ["starting · browser knows it before the server", R({ title: "Migrate quota shelf to the new client", state: "starting" })],
+  ["workspace removed · row disabled", R({ title: "Old worktree experiment", missing: true })],
+  ["unknown workspace · cwd not in any project", R({ title: "Scratch run", unknown: "/home/simonwjackson/tmp/scratch" })],
+  ["selected · ⋯ visible", R({ title: "Automatic reconnect and resync", state: "working", since: min(12), branch: "new-ui-mvp" }), { selected: "x" }],
+  ["keyboard focus · not selected", R({ title: "Handoff record prototype" }), { focus: "x" }],
+  ["long title, long branch, narrow pane", R({ title: "A very long session title that will not fit in the column no matter what", state: "blocked", ask: "This question is also long enough to need the ellipsis at the end of the trace line", branch: "feature/some-extremely-long-branch-name-here" })],
+].map(([cap, s, o]) => frame(cap, 340, 100, one(s, o))).join("")
++ frame("compact density · two rows for comparison", 340, 100, picker({ bare: true, compact: true, machines: MACHINES_MULTI, sessions: [R({ id: "c1", title: "Handoff record prototype" }), R({ id: "c2", title: "Fix rapidfire destination lock", branch: "fix/rapidfire" })] }));
+
+// ---------- 4. menus ----------
+const MENU = (top, items) => `<div class="menu" style="left:52px;top:${top}px" role="menu">${items}</div>`;
+const M = (label, opt = {}) => `<button role="${opt.role ?? "menuitem"}"${opt.checked !== undefined ? ` aria-checked="${opt.checked}"` : ""}${opt.disabled ? " disabled" : ""} class="${opt.danger ? "danger" : ""}">${label}${opt.hint ? `<small>${opt.hint}</small>` : ""}</button>`;
+const rowTop = 8;
+const full = (s, o = {}) => picker({ sessions: [s], machines: MACHINES_MULTI, collapsed: new Set(), ...o });
+document.getElementById("menus").innerHTML = [
+  frame("row menu · open session", 340, 300, one(R({ title: "Handoff record prototype" }), { selected: "x", menu: MENU(rowTop + 50, M("Pin to top") + M("Archive", { hint: "E" }) + M("Copy workspace path")) })),
+  frame("row menu · running session · archive refused by the server", 340, 300, one(R({ title: "Automatic reconnect and resync", state: "working", since: min(12) }), { selected: "x", menu: MENU(rowTop + 50, M("Pin to top") + M("Archive", { disabled: true, hint: "stop the run first" }) + M("Copy workspace path") + `<hr>` + M("Stop the run")) })),
+  frame("row menu · pinned session", 340, 220, one(R({ title: "Session picker design", pinned: true }), { selected: "x", menu: MENU(rowTop + 50, M("Unpin") + M("Copy workspace path")) })),
+  frame("row menu · archived session", 340, 260, one(R({ title: "Upstream review 2026-08", state: "archived", modified: day(9) }), { showArchived: true, selected: "x", menu: MENU(rowTop + 50, M("Restore") + M("Delete permanently", { danger: true }) + M("Copy workspace path")) })),
+  frame("row menu · delete asks twice, in place", 340, 260, one(R({ title: "Upstream review 2026-08", state: "archived", modified: day(9) }), { showArchived: true, selected: "x", menu: MENU(rowTop + 50, M("Restore") + M("Delete for good?", { danger: true }) + M("Copy workspace path")) })),
+  frame("grouping menu · from the title", 340, 300, picker({ sessions: [], menu: MENU(46, M("By state", { role: "menuitemradio", checked: true }) + M("By project", { role: "menuitemradio", checked: false })) })),
+  frame("board menu · from ⋯", 340, 360, picker({ sessions: [], menu: `<div class="menu" style="right:8px;top:46px" role="menu">${M("Show archived", { role: "menuitemcheckbox", checked: false, hint: "3 · A" })}${M("Manage projects and workspaces")}${M("Clean up sessions")}<hr>${M("Actions", { hint: "Ctrl K" })}${M("Reload app")}</div>` })),
+].join("");
+
+// ---------- 5. openers ----------
+document.getElementById("openers").innerHTML = [
+  frame("nothing waiting", 420, 130, thinThread("none", "Handoff record prototype")),
+  frame("unread · a session finished while you were away", 420, 130, thinThread("unread", "Handoff record prototype")),
+  frame("blocked · a session is waiting on you", 420, 130, thinThread("blocked", "Handoff record prototype")),
+].join("");
+
+// ---------- 7. coverage ----------
+const COV = [
+  ["2.1–2.9", "Load, live sync, buffering, reconnect, retry, per-machine store, optimistic rows", "§2 loading, stale, failed, one machine unreachable; §3 starting. One list now merges every machine's snapshot."],
+  ["3.1–3.3", "State classification, group order, age bands", "§1 all frames; §2 all groups collapsed"],
+  ["3.4", "Group by project", "§2 grouped by project; §4 grouping menu"],
+  ["3.5–3.6", "Pinned first, pin keeps state", "§3 pinned rows"],
+  ["3.7", "Agent-spawned sessions hidden", "Not drawn. Kept as a data rule."],
+  ["3.8", "cwd to project, workspace, branch", "§3 main checkout, worktree branch, unknown workspace"],
+  ["3.9–3.11", "Archived hidden by default, collapse persisted, selected group auto-expands", "§2 archived revealed, all collapsed; §6 A key"],
+  ["3.12", "Loading, empty, all clear", "§2"],
+  ["4.1–4.7", "Title, location chip, detail line, live-work counts, pin, time or timer, tone", "§3 every row"],
+  ["4.8", "Row density setting", "§3 compact density. Open question in README."],
+  ["4.9", "Rows whose workspace is gone", "§3 workspace removed"],
+  ["5.1–5.2", "Unread set, mark read when chat is seen", "§3 unread. Read rule unchanged."],
+  ["5.3", "Unread dot per machine", "Replaced. No machine chooser exists, so the dot moves to the opener (§5) and to rows."],
+  ["5.4", "Attention on the closed drawer's opener", "§5"],
+  ["5.5", "Blocked group with the question", "§1, §3"],
+  ["6.1–6.9", "Open, archive with undo, restore, pin, delete twice, copy path, long press and context menu", "§4 row menus; §2 undo toast; §6 keys"],
+  ["7.1", "New session", "Header New in every frame"],
+  ["7.2–7.3", "Grouping menu, ⋯ menu with Show archived, Manage, Actions", "§4"],
+  ["7.4", "Manage projects and workspaces", "§4 board menu. The dialog itself is out of scope here."],
+  ["7.5", "App refresh control (PWA)", "§4 board menu, Reload app"],
+  ["7.6", "Panel pin and close", "§1 overlay frames show ×. Pin is a shell decision, not drawn."],
+  ["8.1–8.6", "Cross-workspace open, preview, stale-pick guard, draft recovery, close sheet, URL", "Behaviour, not drawn. Kept."],
+  ["8.7", "Archive and next", "§6 E key; composer button is a thread concern"],
+  ["8.8", "Keys", "§6"],
+  ["8.9", "Open and promote spawned children", "Elsewhere (workspace Agents panel). Unchanged."],
+  ["9.1–9.4", "New session composer, rapidfire, agent choices, startup progress", "§3 starting; §6 shortcuts. Composer is its own step."],
+  ["10.1–10.2", "List machines, switch machine with memory", "Removed on purpose. One list. Machine is a location fact (§3 other machine)."],
+  ["10.3", "Machine health", "§2 one machine unreachable"],
+  ["10.4", "Machine activity", "Folded into rows: working state and live-work counts"],
+  ["10.5–10.6", "Add and remove machine", "Elsewhere: actions palette (§4 board menu, Actions)"],
+  ["11.1–11.4", "Sheet, docked, overlay, resize", "§1 ladder"],
+  ["11.5", "Radial menu target", "Unchanged, not drawn"],
+  ["11.6", "Container queries, no breakpoints", "§1; thresholds 320 and 420 px live in the CSS"],
+  ["12.1", "Plugin shelves", "§1 475 px frame"],
+  ["13 cleanup", "Clean up sessions", "§4 board menu, one step closer than today"],
+];
+document.getElementById("coverage").innerHTML = `<tr><th>Inventory</th><th>Responsibility</th><th>Where in this sheet</th></tr>` + COV.map(([a, b, c]) => `<tr><td>${a}</td><td>${b}</td><td>${c}</td></tr>`).join("");
+</script>
+</body>
+</html>
