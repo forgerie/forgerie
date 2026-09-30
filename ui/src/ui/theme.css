@@ -289,6 +289,9 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-group-label { font-weight: 500; }
 .picker-group[data-kind="blocked"] .picker-group-label, .picker-group[data-kind="pinned"] .picker-group-label { color: var(--foreground); }
 .picker-count { font-family: var(--code-font); font-size: var(--code-size); font-variant-numeric: tabular-nums; }
+/* The pinned cap's way out. Indented to the title column so it reads as part of the group. */
+.picker-more { display: block; min-block-size: 2.25rem; margin-inline: var(--space-1); padding: 0 var(--space-2) 0 calc(var(--space-3) + 1.25rem + var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); text-align: start; inline-size: calc(100% - 2 * var(--space-1)); }
+.picker-more:hover { color: var(--foreground); background: var(--code-surface); }
 .picker-row { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto; column-gap: var(--space-2); min-block-size: var(--control-size); margin-inline: var(--space-1); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border-radius: var(--radius-control); cursor: pointer; }
 .picker-row:hover { background: var(--code-surface); }
 .picker-row[aria-selected="true"] { background: var(--muted); }

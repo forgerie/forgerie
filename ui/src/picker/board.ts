@@ -71,7 +71,9 @@ export interface Row {
 }
 export type Section =
   | { type: "label"; key: string; text: string }
-  | { type: "group"; key: string; label: string; kind: GroupKind | "band" | "project"; rows: Row[] };
+  | { type: "group"; key: string; label: string; kind: GroupKind | "band" | "project"; rows: Row[];
+      /** Rows left out by the pinned cap. Present only on a capped Pinned group. */
+      hidden?: number };
 export type Grouping = "state" | "project";
 
 /**
@@ -175,7 +177,26 @@ const byPinnedThenRecency = (a: Row, b: Row) =>
  * group is replaced by its age bands under one label. Archived appears only
  * when asked for.
  */
-export function sections(all: readonly Row[], options: { grouping: Grouping; showArchived: boolean; now: number }): Section[] {
+/**
+ * Pins shown before "Show all" (user, 2026-09-29). With 12 pins the group
+ * filled the sheet and pushed Blocked and Working below the fold.
+ */
+export const PINNED_VISIBLE = 3;
+const WANTS_YOU: ReadonlySet<RowState> = new Set(["blocked", "errored", "working", "unread"]);
+
+/**
+ * The pins to draw. A pin that wants the reader, and the open session, always
+ * show, even past the cap: the cap saves space, it never hides a request.
+ * Recency fills what is left. Drawn order stays by recency.
+ */
+export function capPinned(pins: readonly Row[], selectedId: string | undefined, limit = PINNED_VISIBLE): { rows: Row[]; hidden: number } {
+  const keep = new Set(pins.filter((row) => WANTS_YOU.has(row.state) || row.session.id === selectedId).map((row) => row.session.id));
+  for (const row of pins) { if (keep.size >= limit) break; keep.add(row.session.id); }
+  const rows = pins.filter((row) => keep.has(row.session.id));
+  return { rows, hidden: pins.length - rows.length };
+}
+
+export function sections(all: readonly Row[], options: { grouping: Grouping; showArchived: boolean; now: number; allPinned?: boolean; selectedId?: string | undefined }): Section[] {
   const visible = options.showArchived ? [...all] : all.filter((row) => row.state !== "archived");
   if (options.grouping === "project") {
     const byProject = new Map<string, Row[]>();
@@ -189,6 +210,11 @@ export function sections(all: readonly Row[], options: { grouping: Grouping; sho
   for (const group of GROUPS) {
     const groupRows = visible.filter((row) => row.group === group.kind).sort(byPinnedThenRecency);
     if (groupRows.length === 0) continue;
+    if (group.kind === "pinned" && options.allPinned !== true) {
+      const capped = capPinned(groupRows, options.selectedId);
+      out.push({ type: "group", key: group.kind, label: group.label, kind: group.kind, rows: capped.rows, ...(capped.hidden > 0 ? { hidden: capped.hidden } : {}) });
+      continue;
+    }
     if (group.kind !== "open") { out.push({ type: "group", key: group.kind, label: group.label, kind: group.kind, rows: groupRows }); continue; }
     out.push({ type: "label", key: "open-label", text: `Open · ${String(groupRows.length)} · by age` });
     for (const band of AGE_BANDS) {

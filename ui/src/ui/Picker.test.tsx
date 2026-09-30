@@ -34,10 +34,18 @@ function Harness({ pickerView, initial, onSelect, onPrefs, onRetry }: {
   const [prefs, setPrefs] = useState(initial);
   return <Picker view={pickerView} prefs={prefs} onPrefs={(next) => { setPrefs(next); onPrefs(next); }} actions={{ onSelect, onRetry }} />;
 }
-const defaults: PickerPrefs = { grouping: "state", showArchived: false, collapsed: DEFAULT_COLLAPSED };
+const defaults: PickerPrefs = { grouping: "state", showArchived: false, allPinned: false, collapsed: DEFAULT_COLLAPSED };
 function render(pickerView: PickerView, onSelect = vi.fn<(row: Row) => void>(), onPrefs = vi.fn<(prefs: PickerPrefs) => void>(), onRetry = vi.fn(), initial = defaults) {
   act(() => root.render(<Harness pickerView={pickerView} initial={initial} onSelect={onSelect} onPrefs={onPrefs} onRetry={onRetry} />));
   return { onSelect, onPrefs, onRetry };
+}
+/** Derives sections from its own prefs, as usePicker does, so prefs that reshape the list take effect. */
+function LiveHarness({ sessions, selectedId }: { sessions: PickerSession[]; selectedId?: string }) {
+  const [prefs, setPrefs] = useState(defaults);
+  const all = rows({ sessions, statuses: {}, activities: {}, unread: new Set(), locate, now: NOW });
+  const pickerView: PickerView = { connection: { type: "ready" }, machines: 1, selectedId, archivedCount: 0,
+    sections: sections(all, { grouping: prefs.grouping, showArchived: prefs.showArchived, allPinned: prefs.allPinned, selectedId, now: NOW }) };
+  return <Picker view={pickerView} prefs={prefs} onPrefs={setPrefs} actions={{ onSelect: () => {}, onRetry: () => {} }} />;
 }
 const text = () => host.textContent ?? "";
 const list = () => host.querySelector<HTMLElement>('[role="listbox"]');
@@ -122,6 +130,26 @@ describe("picker", () => {
     expect(host.querySelector('[data-session="a"]')).not.toBeNull();
   });
 
+  it("caps Pinned at three, keeps the full count, and expands on request", () => {
+    const pins = Array.from({ length: 12 }, (_, index) => S(`p${String(index)}`, { pinned: true, modified: ago(index + 1) }));
+    act(() => root.render(<LiveHarness sessions={pins} />));
+    const pinned = () => host.querySelector('[data-kind="pinned"]');
+    expect(pinned()?.querySelector(".picker-count")?.textContent).toBe("12");
+    expect(pinned()?.querySelectorAll(".picker-row")).toHaveLength(3);
+    const more = () => pinned()?.querySelector<HTMLButtonElement>(".picker-more");
+    expect(more()?.textContent?.trim()).toBe("Show all 12");
+    act(() => more()?.click());
+    expect(pinned()?.querySelectorAll(".picker-row")).toHaveLength(12);
+    expect(more()?.textContent?.trim()).toBe("Show fewer");
+    act(() => more()?.click());
+    expect(pinned()?.querySelectorAll(".picker-row")).toHaveLength(3);
+  });
+
+  it("shows no Show all control when there are three pins or fewer", () => {
+    act(() => root.render(<LiveHarness sessions={[S("a", { pinned: true }), S("b", { pinned: true })]} />));
+    expect(host.querySelector(".picker-more")).toBeNull();
+  });
+
   it("says when nothing is waiting", () => {
     render(view([S("a")]));
     expect(text()).toContain("Nothing is waiting for you");
@@ -132,8 +160,8 @@ describe("picker", () => {
 
 describe("picker prefs storage", () => {
   it("round-trips grouping and collapse, but never archive visibility", () => {
-    writePrefs(localStorage, { grouping: "project", showArchived: true, collapsed: new Set(["hour"]) });
-    expect(readPrefs(localStorage)).toEqual({ grouping: "project", showArchived: false, collapsed: new Set(["hour"]) });
+    writePrefs(localStorage, { grouping: "project", showArchived: true, allPinned: true, collapsed: new Set(["hour"]) });
+    expect(readPrefs(localStorage)).toEqual({ grouping: "project", showArchived: false, allPinned: false, collapsed: new Set(["hour"]) });
   });
   it("falls back to defaults on missing or corrupt data", () => {
     expect(readPrefs(localStorage)).toEqual(defaults);

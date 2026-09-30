@@ -121,10 +121,14 @@ export function Picker({ view, prefs, onPrefs, actions }: {
         : <div key={section.key} className="picker-group" data-kind={section.kind}>
           <button className="picker-group-header" aria-expanded={!collapsed.has(section.key)} onClick={() => toggle(section.key)}>
             <span className="picker-chevron" aria-hidden="true">▾</span><span className="picker-group-label">{section.label}</span>
-            <span className="picker-count">{section.rows.length}</span>
+            <span className="picker-count">{section.rows.length + (section.hidden ?? 0)}</span>
           </button>
           {collapsed.has(section.key) ? null : <div role="group" aria-label={section.label}>
             {section.rows.map((row) => <PickerRow key={row.session.id} row={row} selected={row.session.id === view.selectedId} onSelect={actions.onSelect} />)}
+            {section.hidden ? <button className="picker-more" onClick={() => change({ ...prefs, allPinned: true })}>
+              Show all {section.rows.length + section.hidden}</button>
+              : section.kind === "pinned" && prefs.allPinned ? <button className="picker-more" onClick={() => change({ ...prefs, allPinned: false })}>
+                Show fewer</button> : null}
           </div>}
         </div>)}
     </div>}

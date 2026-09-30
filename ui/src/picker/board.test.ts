@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageBand, attention, createLocationResolver, navigable, rowState, rows, sections, shortAge, type BoardInput, type PickerSession } from "./board";
+import { ageBand, attention, capPinned, createLocationResolver, navigable, PINNED_VISIBLE, rowState, rows, sections, shortAge, type BoardInput, type PickerSession } from "./board";
 
 const NOW = new Date(2026, 8, 29, 18, 40).getTime();
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
@@ -89,6 +89,24 @@ describe("sections", () => {
   it("walks only expanded groups, in drawn order", () => {
     const list = sections(all, { grouping: "state", showArchived: false, now: NOW });
     expect(navigable(list, new Set(["month"])).map((row) => row.session.id)).toEqual(["pin", "ask", "new"]);
+  });
+  it("caps Pinned but never hides a pin that wants you or the open session", () => {
+    const pins = rows(input({
+      sessions: Array.from({ length: 12 }, (_, index) => session(`p${String(index)}`, { pinned: true, modified: ago(index + 1) })),
+      statuses: { p9: { ...idle, blocked: true }, p10: { ...idle, isStreaming: true } },
+    }));
+    const plain = capPinned(pins.filter((row) => row.state === "open"), undefined);
+    expect(plain.rows.map((row) => row.session.id)).toEqual(["p0", "p1", "p2"]);
+    expect(plain.rows).toHaveLength(PINNED_VISIBLE);
+    const urgent = capPinned(pins, "p7");
+    // p9 blocked, p10 working, and p7 open all show; nothing else fits.
+    expect(urgent.rows.map((row) => row.session.id)).toEqual(["p7", "p9", "p10"]);
+    expect(urgent.hidden).toBe(9);
+    const list = sections(pins, { grouping: "state", showArchived: false, now: NOW, selectedId: "p7" });
+    expect(list[0]).toMatchObject({ key: "pinned", hidden: 9 });
+    const expanded = sections(pins, { grouping: "state", showArchived: false, now: NOW, allPinned: true });
+    expect(expanded[0]).not.toHaveProperty("hidden");
+    expect(expanded[0]?.type === "group" && expanded[0].rows).toHaveLength(12);
   });
   it("reports blocked over unread for the closed picker", () => {
     expect(attention(all)).toBe("blocked");

@@ -24,11 +24,11 @@ export function usePicker(selectedId: string | undefined) {
     [state.sessions, state.statuses, state.activities, state.unread, locate, now]);
   const view: PickerView = useMemo(() => ({
     connection: state.connection,
-    sections: boardSections(rows, { grouping: prefs.grouping, showArchived: prefs.showArchived, now }),
+    sections: boardSections(rows, { grouping: prefs.grouping, showArchived: prefs.showArchived, allPinned: prefs.allPinned, selectedId, now }),
     machines: 1,
     selectedId,
     archivedCount: rows.filter((row) => row.state === "archived").length,
-  }), [state.connection, rows, prefs.grouping, prefs.showArchived, now, selectedId]);
+  }), [state.connection, rows, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId]);
   const find = useCallback((id: string) => {
     const session = state.sessions.find((candidate) => candidate.id === id);
     return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}) } : undefined;
