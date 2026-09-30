@@ -4,6 +4,7 @@ import { browserTransport, createSessionStore } from "./sessionStore";
 import { useThreadMessages } from "./useThreadMessages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
+import { AskForm } from "./ui/AskForm";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id }: { id: string }) {
@@ -37,12 +38,18 @@ export function ForgerieSession({ id }: { id: string }) {
   const status = state.connection.type === "loading" ? "Connecting"
     : state.connection.type === "reconnecting" ? "Reconnecting"
     : state.connection.type === "failed" ? "Disconnected"
-    : state.sending ? "Sending" : state.transcript.isRunning ? "Running" : "Connected";
+    : state.sending ? "Sending" : state.transcript.isRunning ? "Running"
+    : state.ask.type === "open" ? "Waiting for you" : "Connected";
+  const ask = state.ask.type === "open"
+    ? <AskForm key={state.ask.ask.askId} ask={state.ask.ask} phase={state.ask.phase}
+      offline={state.connection.type !== "ready"}
+      onSubmit={(answers) => void store.submitAsk(answers)} onDismiss={() => void store.dismissAsk()} />
+    : undefined;
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
-      <Thread />
+      <Thread ask={ask} />
     </SessionFrame>
   </AssistantRuntimeProvider>;
 }

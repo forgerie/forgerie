@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { acceptedSchema, catalogSchema, errorSchema, historySchema, parseEvent, snapshotSchema, statusSchema, type Session, type SessionEvent } from "./contracts";
+import { acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, parseEvent, snapshotSchema, statusSchema, type AskAnswer, type AskEvent, type Session, type SessionEvent } from "./contracts";
+import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { fromHistory, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 
 export type Connection = { type: "loading" } | { type: "ready" }
@@ -8,6 +9,7 @@ export interface SessionState {
   connection: Connection;
   session?: Session;
   transcript: Transcript;
+  ask: AskState;
   sending: boolean;
   commandError?: string;
 }
@@ -43,6 +45,7 @@ interface Join {
   controller: AbortController;
   socket?: WebSocket;
   buffered: SessionEvent[];
+  askBuffered: AskEvent[];
   seeding: boolean;
   seq: number;
 }
@@ -56,7 +59,7 @@ function permanent(error: unknown) {
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}) {
-  let state: SessionState = { connection: { type: "loading" }, transcript: fromHistory([]), sending: false };
+  let state: SessionState = { connection: { type: "loading" }, transcript: fromHistory([]), ask: noAsk, sending: false };
   const listeners = new Set<() => void>();
   const lifetime = new AbortController();
   let join: Join | undefined;
@@ -107,7 +110,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   }
   async function connect() {
     if (lifetime.signal.aborted) return;
-    const attempt: Join = { controller: new AbortController(), buffered: [], seeding: true, seq: -1 };
+    const attempt: Join = { controller: new AbortController(), buffered: [], askBuffered: [], seeding: true, seq: -1 };
     join = attempt;
     const read = <T>(path: string, schema: z.ZodType<T>) => request(path, schema, {}, attempt.controller.signal);
     try {
@@ -133,7 +136,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
           const parsed = parseEvent(JSON.parse(payload));
           if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
           if (parsed.seq !== undefined) attempt.seq = parsed.seq;
-          if (attempt.seeding) attempt.buffered.push(parsed);
+          if (isAskEvent(parsed)) {
+            if (attempt.seeding) attempt.askBuffered.push(parsed);
+            else update({ ...state, ask: reduceAskEvent(state.ask, parsed) });
+          } else if (attempt.seeding) attempt.buffered.push(parsed);
           else update({ ...state, transcript: reduceEvent(state.transcript, parsed) });
         } catch (error) { stop(new Error(`Invalid session event: ${messageOf(error)}`)); }
       });
@@ -164,11 +170,17 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       // Keep persisted message identities, including messages first seen live,
       // so existing disclosures do not remount when fresh history replaces them.
       const transcript = reconcileTranscriptIdentity(state.transcript, seeded);
+      // Status is read after the snapshot, so it covers every ask event up to
+      // the watermark. Later events may be older or newer than the status read;
+      // opens and closes are keyed by ask ID, so replaying them is safe.
+      const ask = attempt.askBuffered.filter((event) => (event.seq ?? Infinity) > snapshot.seq)
+        .reduce(reduceAskEvent, resyncAsk(state.ask, status.pendingAsk));
       attempt.seq = Math.max(attempt.seq, snapshot.seq);
       attempt.seeding = false;
       attempt.buffered.length = 0;
+      attempt.askBuffered.length = 0;
       retryDelay = initialDelay; // A socket open alone is not a successful join.
-      update({ ...state, connection: { type: "ready" }, transcript });
+      update({ ...state, connection: { type: "ready" }, transcript, ask });
     } catch (error) {
       if (!current(attempt)) return;
       if (permanent(error)) stop(error);
@@ -205,12 +217,38 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       throw error;
     } finally { update({ ...state, sending: false }); }
   }
+  /**
+   * Submit or dismiss the open ask. The form stays open until the server
+   * confirms, and a failure keeps the user's answers. Never retried: the
+   * server may have closed the ask even if its reply was lost.
+   */
+  async function closeAsk(action: AskAction, answers: AskAnswer[] = []) {
+    const session = state.session;
+    const open = state.ask;
+    if (!session || state.connection.type !== "ready" || open.type !== "open" || open.phase.type !== "answering") return;
+    const { askId } = open.ask;
+    update({ ...state, ask: { ...open, phase: { type: "sending", action } } });
+    try {
+      const response = await request(`${root}/ask/${action === "submit" ? "submit" : "cancel"}`, askCloseResponseSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: session.cwd, askId, ...(action === "submit" ? { answers } : {}) }),
+      });
+      // `stale` means another browser or a newer ask won. Either way the
+      // returned status names the open ask now.
+      const pending = response.sessionStatus.pendingAsk;
+      update({ ...state, ask: whileOpen(state.ask, askId, () => resyncAsk(noAsk, pending?.askId === askId ? undefined : pending)) });
+    } catch (error) {
+      update({ ...state, ask: whileOpen(state.ask, askId, (current) => ({ ...current, phase: { type: "answering", error: messageOf(error) } })) });
+    }
+  }
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start,
     send: (text: string) => command("prompt", text),
     cancel: () => command("abort"),
+    submitAsk: (answers: AskAnswer[]) => closeAsk("submit", answers),
+    dismissAsk: () => closeAsk("dismiss"),
     dispose: () => { lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); listeners.clear(); },
   };
 }

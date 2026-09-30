@@ -21,10 +21,30 @@ export const catalogSchema = z.object({ sessions: z.array(sessionSchema) });
 export const historySchema = z.object({
   messages: z.array(piMessageSchema), start: z.number(), total: z.number(),
 });
+export const askQuestionSchema = z.object({
+  id: z.string().min(1),
+  question: z.string(),
+  detail: z.string().optional(),
+  options: z.array(z.object({ value: z.string().min(1), label: z.string(), detail: z.string().optional() })),
+  multiple: z.boolean().optional(),
+});
+export type AskQuestion = z.infer<typeof askQuestionSchema>;
+/** The session's open `ask_user` question set. The daemon owns it. */
+export const pendingAskSchema = z.object({
+  askId: z.string().min(1), askedAt: z.string(), questions: z.array(askQuestionSchema),
+});
+export type PendingAsk = z.infer<typeof pendingAskSchema>;
+/** One reply. A question without an entry is reported to the model as unanswered. */
+export interface AskAnswer { id: string; values: string[]; otherText?: string }
 export const statusSchema = z.object({
   isStreaming: z.boolean(),
   isCompacting: z.boolean(),
   isBashRunning: z.boolean(),
+  pendingAsk: pendingAskSchema.optional(),
+});
+/** `stale` is an ordinary race: the ask already closed. The status is current in both cases. */
+export const askCloseResponseSchema = z.object({
+  result: z.enum(["closed", "stale"]), sessionStatus: statusSchema,
 });
 export const snapshotSchema = z.object({ seq: z.number(), partial: piMessageSchema.nullable() });
 export const acceptedSchema = z.object({ accepted: z.literal(true) });
@@ -67,10 +87,21 @@ const eventBodySchema = z.discriminatedUnion("type", [
 ]);
 export const eventSchema = eventBodySchema.and(z.object({ seq: z.number().optional() }));
 export type SessionEvent = z.infer<typeof eventSchema>;
+// Ask events change what the input region shows, not the transcript.
+const askEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("ask.opened"), ask: pendingAskSchema }),
+  // The reason is informational. New server reasons must not break the socket.
+  z.object({ type: z.literal("ask.closed"), askId: z.string(), reason: z.string() }),
+]).and(z.object({ seq: z.number().optional() }));
+export type AskEvent = z.infer<typeof askEventSchema>;
 const eventEnvelope = z.object({ type: z.string() });
 const consumedTypes = new Set(["message.append", "message.end", "assistant.delta", "assistant.thinking.delta",
   "tool.start", "tool.update", "tool.end", "agent.start", "agent.end", "session.error"]);
-export function parseEvent(value: unknown): SessionEvent | undefined {
+export function parseEvent(value: unknown): SessionEvent | AskEvent | undefined {
   const envelope = eventEnvelope.parse(value);
+  if (envelope.type === "ask.opened" || envelope.type === "ask.closed") return askEventSchema.parse(value);
   return consumedTypes.has(envelope.type) ? eventSchema.parse(value) : undefined;
+}
+export function isAskEvent(event: SessionEvent | AskEvent): event is AskEvent {
+  return event.type === "ask.opened" || event.type === "ask.closed";
 }

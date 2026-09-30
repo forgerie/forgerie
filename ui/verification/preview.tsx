@@ -1,11 +1,13 @@
 // Separate dev-only entry point. This preview has no transport or network data.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
 import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transcript";
 import { useThreadMessages } from "../src/useThreadMessages";
 import { Thread } from "../src/ui/Thread";
 import { SessionFrame } from "../src/ui/SessionFrame";
+import { AskForm } from "../src/ui/AskForm";
+import type { PendingAsk } from "../src/contracts";
 import "../src/ui/theme.css";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
@@ -41,14 +43,37 @@ const toolMessages = (running: boolean): TranscriptMessage[] => [
       { type: "text", text: "Fixed. `tool.start` now advances the execution that `message.end` created, so each call shows **one** line." }] },
 ];
 
+const planAsk: PendingAsk = { askId: "plan", askedAt: "2026-09-29T00:00:00Z", questions: [
+  { id: "store", question: "Where should session drafts be kept?", detail: "Both survive a reconnect. Only storage survives a reload.", options: [
+    { value: "memory", label: "In memory", detail: "Lost on reload. No new storage." },
+    { value: "local", label: "Local storage", detail: "Survives reload on this browser only." },
+    { value: "server", label: "On the server", detail: "Follows you across devices. Needs a new endpoint." }] },
+  { id: "checks", question: "Which checks should run before each commit?", multiple: true, options: [
+    { value: "lint", label: "Lint" }, { value: "types", label: "Typecheck" }, { value: "tests", label: "Unit tests" }] },
+  { id: "name", question: "What should the new module be called?", options: [] },
+] };
+const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", questions: [
+  { id: "target", question: `Which deployment target should this change ship to first, given that ${"the staging cluster and the edge fleet both run the old build ".repeat(2)}?`,
+    detail: "The edge fleet updates overnight. Staging updates on every merge. ".repeat(3),
+    options: Array.from({ length: 12 }, (_, index) => ({ value: `t${index}`, label: `Region ${index + 1}: ${["us-east", "eu-west", "ap-south"][index % 3]}-${index + 1}`,
+      ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
+] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
+const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk };
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
 };
 function Preview() {
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
   const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "reconnecting-running");
-  const recovering = scenario === "reconnecting" || scenario === "reconnecting-running";
+  const recovering = scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
+  const [ask, setAsk] = useState<PendingAsk | undefined>(scenarioAsk[scenario]);
+  // `ask-delayed` opens the ask after load, so a draft can be typed first.
+  useEffect(() => {
+    if (scenario !== "ask-delayed") return;
+    const timer = setTimeout(() => setAsk(planAsk), Number(new URLSearchParams(location.search).get("delay") ?? 1500));
+    return () => clearTimeout(timer);
+  }, []);
   async function onNew(message: AppendMessage) {
     const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
     setMessages((current) => [...current, say(`user-${current.length}`, "user", text),
@@ -58,10 +83,11 @@ function Preview() {
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false),
     isRunning: running, isLoading: scenario === "loading", isDisabled: scenario === "loading" || scenario === "disconnected" || recovering });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : "Connected"}
+    <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
-      <Thread />
+      <Thread ask={ask && <AskForm key={ask.askId} ask={ask} phase={{ type: "answering" }} offline={recovering}
+        onSubmit={() => setAsk(undefined)} onDismiss={() => setAsk(undefined)} />} />
     </SessionFrame>
   </AssistantRuntimeProvider>;
 }

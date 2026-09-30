@@ -1,5 +1,43 @@
 # Verification and limits
 
+## Ask form
+
+Checked on 2026-09-29. The standalone client on 8510 uses the unchanged Forgerie backend on 8504. No production service was restarted.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | Build, TypeScript, ESLint, and 76 tests passed. Store tests use a real HTTP/WebSocket server. They cover rehydration from status, live open and close, supersede order, a late close of a replaced ask, submit and dismiss bodies, a `stale` reply that names a newer ask, a failed send with no retry, reconnect with the ask open, an ask closed while offline, and no send while disconnected. UI tests run the real assistant-ui runtime. They cover the composer swap, the draft returning after the ask closes, Back and Next, several choices, the own answer, Skip, errors, offline and sending states, and a replacement ask starting blank. |
+| Real end to end. | `scripts/real-ask-acceptance.mjs` created its own scratch session and prompted it twice to call `ask_user`. On page load the form came from `status.pendingAsk`, and Skip closed it as `cancelled`. A live `ask.opened` then replaced the composer while a draft was typed. The form sent `[{ id: "color-second", values: ["blue"] }, { id: "note-second", values: [], otherText: "sent from the new UI" }]`, the server recorded `submitted`, and the composer came back with the draft. The script archives the scratch session. No existing session was prompted. |
+| Fixture checks. | `scripts/ask-acceptance.mjs` passed. The composer and the form were never visible together, including 10 samples during the entry animation. Focus moved to the question. Ctrl+Enter advanced. The draft returned after Send answers. At the four postures, a 475 × 280 keyboard emulation, and a 280 × 500 pane, in both themes, the page did not overflow, the form stayed inside the viewport and at most 72% of the session height, and Skip, Back, and Next or Send stayed on screen with 44 px targets. The fixture made no API requests. `scripts/visual-acceptance.mjs` still passes. |
+| Visual review. | All 24 captures in `verification/local/ask-shots/` (`scripts/ask-shots.sh`) were read. The form has one structure at every posture. When options run past the form, a shadow at the bottom edge shows that more exist. |
+
+Design decisions:
+
+- The form takes the composer's place in the same footer slot. `Thread` renders the form or the composer, never both. assistant-ui keeps the composer text in its runtime, so removing the composer does not lose the draft. A test and the real run confirm this.
+- One question at a time, with a step rail when there are several. The rail marks answered questions and the current one, and it jumps to a question. Back and Next also move. The last step sends. Every question takes a typed answer; a question with no options is typed only.
+- In a single-choice question, typing an own answer clears the chosen option. Choosing an option keeps the typed text but leaves it out of the reply.
+- Skip calls `/ask/cancel`. The server then tells the model the user dismissed the questions and starts a turn.
+- The form stays open until the server replies. A failed send keeps the answers and shows the server's error. Sends are never retried, because the server may have closed the ask even if its reply was lost.
+- Reconnect keeps the form and its answers. Inputs stay editable, but Skip and Send wait for the connection.
+- The [Claude question card](https://mobbin.com/screens/2640dc90-cc24-4e23-a513-99ad8bde162e) informed the one-question pager in the input slot. The [Perplexity inline questions](https://mobbin.com/screens/f721480e-fc00-48b9-b7c8-230aa6a526a2) were rejected because they keep the composer visible under the form.
+
+Limits:
+
+- There is no "reply in chat instead" path. The server supports it as `answered-in-chat`, but the composer is hidden while an ask is open. Today the user can Skip and then write, which reports `cancelled` and starts a turn first.
+- The transcript does not show what was answered. The `pi-web.ask.answers` record is a `custom` message, and the transcript reducer drops `custom` messages.
+- The step rail's buttons are 28 px tall, below the 44 px target. Back and Next give the same navigation with full-size targets.
+- A brand-new session that has not been persisted is missing from `/api/sessions/all`, so the MVP cannot open it by ID. The acceptance script waits for the first prompt to persist it.
+- A run that is still streaming while an ask is open loses its Stop button, because Stop lives in the composer. `ask_user` ends its run, so this window is short.
+- Physical Fold keyboard and touch behavior remain unverified.
+
+Repeat the checks from this worktree, with the dev server on 8510:
+
+```sh
+./scripts/ask-acceptance.mjs
+./scripts/ask-shots.sh
+./scripts/real-ask-acceptance.mjs   # prompts a scratch session twice; costs model usage
+```
+
 ## Automatic reconnect
 
 Checked on 2026-09-29. The standalone client on 8510 uses the unchanged Forgerie backend on 8504. No prompt was sent and no production service was restarted.
