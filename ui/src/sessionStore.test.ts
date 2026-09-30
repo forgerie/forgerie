@@ -83,6 +83,16 @@ describe("session transport", () => {
     await store.cancel();
     expect(api.requests.at(-1)).toEqual({ path: "/api/sessions/known/abort", body: { cwd: "/workspace with spaces" } });
   });
+  it("skips the machine catalog when the caller already knows the session", async () => {
+    const api = await server();
+    const store = createSessionStore("known", api.transport, {}, { id: "known", cwd: "/workspace with spaces", name: "From the picker" });
+    cleanup.push(store.dispose);
+    // The title is there before any request finishes.
+    expect(store.getSnapshot().session?.name).toBe("From the picker");
+    await store.start();
+    expect(store.getSnapshot().connection.type).toBe("ready");
+    expect(api.requests.map((request) => request.path)).not.toContain("/api/sessions/all");
+  });
   it("exposes a rejected prompt without inventing a sent user message", async () => {
     const api = await server({ promptFailure: true });
     const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);

@@ -58,8 +58,13 @@ function permanent(error: unknown) {
 }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
-export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}) {
-  let state: SessionState = { connection: { type: "loading" }, transcript: fromHistory([]), ask: noAsk, sending: false };
+/**
+ * `known` lets a caller that already holds the session (the picker) skip the
+ * machine catalog read: 2.7 MB and ~0.4 s on the reference machine. Without
+ * it, the store finds the session's cwd in `/api/sessions/all` itself.
+ */
+export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session) {
+  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false };
   const listeners = new Set<() => void>();
   const lifetime = new AbortController();
   let join: Join | undefined;

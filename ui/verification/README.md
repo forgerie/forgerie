@@ -1,5 +1,41 @@
 # Verification and limits
 
+## Session picker, slice 1 (read-only, one machine)
+
+Checked on 2026-09-29 against Forgerie on 8504 (3,249 sessions: 944 archived, 2,126 agent-spawned, 12 pinned). No prompt was sent and no production service was restarted.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | Build, TypeScript, ESLint, and 112 tests passed. `picker/board.test.ts` covers state precedence, shorthand time, calendar age bands, location, grouping, J/K order, and the closed-picker mark. `picker/catalogStore.test.ts` runs a real HTTP and WebSocket server: join, asks catalog, live events, events during the snapshot, reconnect with a changed catalog, and an unreadable catalog. `ui/Picker.test.tsx` covers the view in happy-dom and dock rule A at 999 and 1000 px. |
+| Real browser, all four Fold postures. | `scripts/picker-acceptance.mjs` opened the app with nothing selected, picked two sessions from the picker, and pressed Back. Every posture used the overlay layout. Each thread took the clicked row's exact title. Back reselected the first row. No page exception and no POST, PUT, or DELETE to `/api`. |
+| Visual review. | Captured the empty, open-thread, and open-sheet states in both schemes at all four postures with the main posture script and read them. The sheet is the same element and the same width rule in every posture. Two defects were found and fixed: a hint behind the default-open sheet was cut off, and the closed sheet left a 1 px border on the screen edge. |
+
+Design rules this slice carries, all from review on 2026-09-29:
+
+- No machine chooser. One machine exists today, so machine names never appear.
+- Rows carry no chat text and no status words. An unnamed session reads "Untitled session".
+- Time is always shorthand. A working row shows how long the current run has lasted, in blue.
+- Live work is the agents and terminal icons with a count, hidden at zero.
+- Dock rule A: the picker is a sheet below 1000 px of shell width and docks at or above it. `AppShell.tsx` measures the shell, not the viewport. The picker element is mounted once and only its presentation changes, so its scroll position survives a fold or rotate.
+
+Changed beyond the picker: `createSessionStore` takes an optional known session. The picker passes the row it opened, so switching sessions no longer downloads the 2.7 MB machine catalog (about 0.4 s) before the thread can start. A direct `?session=` load still reads the catalog.
+
+Not in this slice, and the costs:
+
+- Row actions (pin, archive, restore, delete, copy path) and the "New" button. The header has no New button, because nothing stands behind it yet.
+- Marking sessions read. Rows show Unread from the server catalog, but opening one does not clear it. The old client on 8504 still clears it.
+- Workspace branch names. Locations come from the project list and the path, so a worktree shows its folder name (`live-session-overlay`), not its branch (`feat/live-session-overlay`). Loading every project's workspaces costs 29 requests.
+- Many machines. The store reads `/api` only.
+- The real Fold keyboard and touch gestures are still untested. There is no swipe to open the sheet.
+
+Known issue for review: 12 pinned sessions fill the first screen of the sheet in every posture, so Blocked and Working groups start below the fold.
+
+Repeat the browser check from this worktree:
+
+```sh
+CHROME_BIN=$(command -v chromium) node scripts/picker-acceptance.mjs
+```
+
 ## Ask mode
 
 Checked on 2026-09-29. The standalone client on 8510 uses the unchanged Forgerie backend on 8504. No production service was restarted.

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import { browserTransport, createSessionStore } from "./sessionStore";
+import type { Session } from "./contracts";
 import { useThreadMessages } from "./useThreadMessages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
 import type { AskBinding } from "./ui/useAskMode";
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id }: { id: string }) {
-  const [store] = useState(() => createSessionStore(id, browserTransport));
+export function ForgerieSession({ id, known }: { id: string; known?: Session | undefined }) {
+  const [store] = useState(() => createSessionStore(id, browserTransport, {}, known));
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   useEffect(() => { void store.start(); return store.dispose; }, [store]);
