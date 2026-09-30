@@ -6,7 +6,7 @@ import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transc
 import { useThreadMessages } from "../src/useThreadMessages";
 import { Thread } from "../src/ui/Thread";
 import { SessionFrame } from "../src/ui/SessionFrame";
-import { AskForm } from "../src/ui/AskForm";
+
 import type { PendingAsk } from "../src/contracts";
 import "../src/ui/theme.css";
 
@@ -75,7 +75,9 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   async function onNew(message: AppendMessage) {
-    const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
+    exchange(message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n"));
+  }
+  function exchange(text: string) {
     setMessages((current) => [...current, say(`user-${current.length}`, "user", text),
       say(`reply-${current.length}`, "assistant", "This is a local preview. No prompt was sent to Pi.")]);
   }
@@ -86,8 +88,9 @@ function Preview() {
     <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
-      <Thread ask={ask && <AskForm key={ask.askId} ask={ask} phase={{ type: "answering" }} offline={recovering}
-        onSubmit={() => setAsk(undefined)} onDismiss={() => setAsk(undefined)} />} />
+      <Thread ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+        onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
+        onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
     </SessionFrame>
   </AssistantRuntimeProvider>;
 }

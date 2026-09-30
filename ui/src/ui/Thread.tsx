@@ -1,14 +1,13 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import type { ReactNode } from "react";
 import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import { Composer } from "./Composer";
+import type { AskBinding } from "./useAskMode";
 import { AssistantMessage, SystemMessage, UserMessage } from "./Messages";
 
 // System organism: assistant-ui owns message, composer, and scroll state.
-// `ask` takes the composer's place. The two are never on screen together; the
-// composer's draft lives in the runtime, so it returns intact.
-export function Thread({ ask }: { ask?: ReactNode }) {
+// `ask` puts the one composer into ask mode.
+export function Thread({ ask }: { ask?: AskBinding }) {
   return <ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
@@ -28,7 +27,7 @@ export function Thread({ ask }: { ask?: ReactNode }) {
           <ThreadPrimitive.ScrollToBottom className="jump icon-button" aria-label="Scroll to bottom" title="Scroll to bottom">
             <ArrowDownIcon aria-hidden size={16} />
           </ThreadPrimitive.ScrollToBottom>
-          {ask ?? <Composer />}
+          <Composer ask={ask} />
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>

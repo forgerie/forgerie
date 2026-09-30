@@ -1,33 +1,36 @@
 # Verification and limits
 
-## Ask form
+## Ask mode
 
 Checked on 2026-09-29. The standalone client on 8510 uses the unchanged Forgerie backend on 8504. No production service was restarted.
 
+There is one input bar. When the agent calls `ask_user`, the bar gains a question layer on top, and its own input answers the current question. There is never a second input. This replaces the first cut (`0b2bd26f`), where a separate form took the bar's place. The user rejected that cut because the form lost the bar's features. The layout follows the approved mockup in `verification/ask-mockup.html` (`57072007`).
+
 | Check | Result |
 | --- | --- |
-| Automated checks. | Build, TypeScript, ESLint, and 76 tests passed. Store tests use a real HTTP/WebSocket server. They cover rehydration from status, live open and close, supersede order, a late close of a replaced ask, submit and dismiss bodies, a `stale` reply that names a newer ask, a failed send with no retry, reconnect with the ask open, an ask closed while offline, and no send while disconnected. UI tests run the real assistant-ui runtime. They cover the composer swap, the draft returning after the ask closes, Back and Next, several choices, the own answer, Skip, errors, offline and sending states, and a replacement ask starting blank. |
-| Real end to end. | `scripts/real-ask-acceptance.mjs` created its own scratch session and prompted it twice to call `ask_user`. On page load the form came from `status.pendingAsk`, and Skip closed it as `cancelled`. A live `ask.opened` then replaced the composer while a draft was typed. The form sent `[{ id: "color-second", values: ["blue"] }, { id: "note-second", values: [], otherText: "sent from the new UI" }]`, the server recorded `submitted`, and the composer came back with the draft. The script archives the scratch session. No existing session was prompted. |
-| Fixture checks. | `scripts/ask-acceptance.mjs` passed. The composer and the form were never visible together, including 10 samples during the entry animation. Focus moved to the question. Ctrl+Enter advanced. The draft returned after Send answers. At the four postures, a 475 × 280 keyboard emulation, and a 280 × 500 pane, in both themes, the page did not overflow, the form stayed inside the viewport and at most 72% of the session height, and Skip, Back, and Next or Send stayed on screen with 44 px targets. The fixture made no API requests. `scripts/visual-acceptance.mjs` still passes. |
-| Visual review. | All 24 captures in `verification/local/ask-shots/` (`scripts/ask-shots.sh`) were read. The form has one structure at every posture. When options run past the form, a shadow at the bottom edge shows that more exist. |
+| Automated checks. | Build, TypeScript, ESLint, and 78 tests passed. Store tests use a real HTTP/WebSocket server. They cover rehydration from status, live open and close, supersede order, a late close of a replaced ask, submit and dismiss bodies, a `stale` reply that names a newer ask, a failed send with no retry, reconnect with the ask open, an ask closed while offline, and no send while disconnected. UI tests run the real assistant-ui runtime. They cover one input element in both modes, the draft set aside and put back, answers per question across Back and the step rail, Enter and Shift+Enter, one choice and typed text replacing each other, several choices beside typed text, slash-command routing and its failure, Skip, errors, offline and sending states, and a replacement ask starting blank. |
+| Real end to end. | `scripts/real-ask-acceptance.mjs` created its own scratch session and prompted it twice to call `ask_user`. On page load, ask mode came from `status.pendingAsk`, and Skip closed it as `cancelled`. A live `ask.opened` then put the bar into ask mode while a draft was typed. The input and the options sent `[{ id: "color-second", values: ["blue"] }, { id: "note-second", values: [], otherText: "sent from the new UI" }]`, the server recorded `submitted`, and the draft came back. The script archives its scratch session. No existing session was prompted. |
+| Fixture checks. | `scripts/ask-acceptance.mjs` passed. The page had one composer input before, during (10 samples through the entry animation), and after the ask. The chat Send button was absent in ask mode. Focus stayed in the input, the draft was set aside, and it returned after Send answers. At the four postures, a 475 × 280 keyboard emulation, and a 280 × 500 pane, in both themes, the page did not overflow, the bar and its input stayed inside the viewport, the question layer used at most 42% of the session height, and every action kept a 44 px target. The fixture made no API requests. `scripts/visual-acceptance.mjs` still passes. |
+| Visual review. | All 24 captures in `verification/local/ask-shots/` (`scripts/ask-shots.sh`) were read. The bar has one structure at every posture. Options gain a second column when the bar is wide enough. A shadow at the layer's bottom edge shows when more options are below. |
 
-Design decisions:
+Behavior:
 
-- The form takes the composer's place in the same footer slot. `Thread` renders the form or the composer, never both. assistant-ui keeps the composer text in its runtime, so removing the composer does not lose the draft. A test and the real run confirm this.
-- One question at a time, with a step rail when there are several. The rail marks answered questions and the current one, and it jumps to a question. Back and Next also move. The last step sends. Every question takes a typed answer; a question with no options is typed only.
-- In a single-choice question, typing an own answer clears the chosen option. Choosing an option keeps the typed text but leaves it out of the reply.
-- Skip calls `/ask/cancel`. The server then tells the model the user dismissed the questions and starts a turn.
-- The form stays open until the server replies. A failed send keeps the answers and shows the server's error. Sends are never retried, because the server may have closed the ask even if its reply was lost.
-- Reconnect keeps the form and its answers. Inputs stay editable, but Skip and Send wait for the connection.
-- The [Claude question card](https://mobbin.com/screens/2640dc90-cc24-4e23-a513-99ad8bde162e) informed the one-question pager in the input slot. The [Perplexity inline questions](https://mobbin.com/screens/f721480e-fc00-48b9-b7c8-230aa6a526a2) were rejected because they keep the composer visible under the form.
+- The composer's input answers the current question. Enter moves to the next question, and on the last one it sends the answers. Shift+Enter adds a line. Back, the step rail, and Next also move between questions, and each question keeps its answer.
+- In a one-choice question, picking an option clears the typed text, and typing replaces the option. What the bar shows is what is sent. In a several-choice question, the options and the typed text are sent together.
+- Text that starts with `/` is a command. The questions fold to the step row, a note says the command goes as a chat message, and the action becomes Send message. The server then closes the ask as `answered-in-chat`. A failed send puts the text back.
+- The draft from before the ask is set aside when the ask opens and put back when it closes, however it closes. Typed answers of an ask that closed elsewhere are dropped.
+- Skip calls `/ask/cancel`. Answers stay in the bar until the server replies. A failed send shows the server's error. Sends are never retried.
+- Reconnect keeps ask mode and the answers. Skip and Send wait for the connection.
+- Attachments, dictation, and the slash-command list are not in the new UI yet. They are assistant-ui composer features (`addAttachment`, `startDictation`), so when they are added to this bar they work in ask mode too. An attached image will need the same chat routing as a command, because `/ask/submit` carries only text.
 
 Limits:
 
-- There is no "reply in chat instead" path. The server supports it as `answered-in-chat`, but the composer is hidden while an ask is open. Today the user can Skip and then write, which reports `cancelled` and starts a turn first.
+- On the folded cover screen held sideways (711 × 374), a long question and its detail fill the whole question layer. The options are one scroll away, and the shadow shows that more exists.
 - The transcript does not show what was answered. The `pi-web.ask.answers` record is a `custom` message, and the transcript reducer drops `custom` messages.
-- The step rail's buttons are 28 px tall, below the 44 px target. Back and Next give the same navigation with full-size targets.
-- A brand-new session that has not been persisted is missing from `/api/sessions/all`, so the MVP cannot open it by ID. The acceptance script waits for the first prompt to persist it.
-- A run that is still streaming while an ask is open loses its Stop button, because Stop lives in the composer. `ask_user` ends its run, so this window is short.
+- The step rail's buttons are 28 px tall. Back and Next give the same navigation with 44 px targets.
+- Stop is not offered in ask mode. `ask_user` ends its run, so a run is rarely active while an ask is open.
+- The slash-command route was tested in the UI only. The real run did not send a command.
+- A session that has not been persisted is missing from `/api/sessions/all`, so the MVP cannot open it by ID.
 - Physical Fold keyboard and touch behavior remain unverified.
 
 Repeat the checks from this worktree, with the dev server on 8510:

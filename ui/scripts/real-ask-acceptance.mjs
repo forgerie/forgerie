@@ -72,7 +72,7 @@ try {
   const url = new URL(app); url.searchParams.set("session", id);
   await cdp.send("Page.navigate", { url: url.href });
   await until(`document.querySelector('.ask-question')?.textContent.startsWith('Which color should the first')`, 30_000);
-  assert.equal(await shown("Message"), false);
+  assert.equal(await shown("Send message"), false); assert.equal(await shown("Message"), true);
   step("page load rehydrated the open ask from status", { status: await evaluate(cdp, `document.querySelector('.connection-status').textContent`) });
   await click("Skip");
   await until(`!!document.querySelector('[aria-label="Message"]')`, 15_000);
@@ -81,17 +81,17 @@ try {
   await waitUntil("reply to the dismissal ends", async () => { const s = await status(id); return !s.isStreaming && !s.pendingAsk; });
   await until(`document.querySelector('.connection-status')?.textContent === 'Connected'`, 30_000);
 
-  // 2. A live ask replaces the composer; answers reach the server; the draft returns.
+  // 2. A live ask puts the composer into ask mode; answers reach the server; the draft returns.
   await evaluate(cdp, `document.querySelector('[aria-label="Message"]').focus()`);
   await cdp.send("Input.insertText", { text: "draft kept across the ask" });
   await call(`/api/sessions/${id}/prompt`, { cwd, text: askPrompt("second") });
   await until(`!!document.querySelector('[aria-label="Questions from the agent"]')`);
-  assert.equal(await shown("Message"), false);
-  step("live ask.opened replaced the composer", { askId: (await status(id)).pendingAsk?.askId });
+  assert.equal(await shown("Send message"), false); assert.equal(await shown("Message"), true);
+  step("live ask.opened put the composer into ask mode", { askId: (await status(id)).pendingAsk?.askId });
   await evaluate(cdp, `[...document.querySelectorAll('.ask-option')].find((n) => n.textContent.startsWith('Blue')).querySelector('input').click()`);
   await click("Next");
   await until(`document.querySelector('.ask-question')?.textContent.startsWith('Any note')`, 5000);
-  await evaluate(cdp, `document.querySelector('[aria-label="Your answer"]').focus()`);
+  await evaluate(cdp, `document.querySelector('[aria-label="Message"]').focus()`);
   await cdp.send("Input.insertText", { text: "sent from the new UI" });
   await click("Send answers");
   await until(`!document.querySelector('[aria-label="Questions from the agent"]')`, 15_000);

@@ -4,7 +4,7 @@ import { browserTransport, createSessionStore } from "./sessionStore";
 import { useThreadMessages } from "./useThreadMessages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
-import { AskForm } from "./ui/AskForm";
+import type { AskBinding } from "./ui/useAskMode";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id }: { id: string }) {
@@ -40,11 +40,11 @@ export function ForgerieSession({ id }: { id: string }) {
     : state.connection.type === "failed" ? "Disconnected"
     : state.sending ? "Sending" : state.transcript.isRunning ? "Running"
     : state.ask.type === "open" ? "Waiting for you" : "Connected";
-  const ask = state.ask.type === "open"
-    ? <AskForm key={state.ask.ask.askId} ask={state.ask.ask} phase={state.ask.phase}
-      offline={state.connection.type !== "ready"}
-      onSubmit={(answers) => void store.submitAsk(answers)} onDismiss={() => void store.dismissAsk()} />
-    : undefined;
+  const ask: AskBinding | undefined = state.ask.type === "open" ? {
+    ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
+    onSubmit: (answers) => void store.submitAsk(answers), onDismiss: () => void store.dismissAsk(),
+    onChat: (text) => store.send(text),
+  } : undefined;
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}

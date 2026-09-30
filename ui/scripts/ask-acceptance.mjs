@@ -1,6 +1,6 @@
 #!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
-// Ask form acceptance on the network-free fixture: the composer and the form are
-// never on screen together, the draft returns, and the form fits every posture.
+// Ask mode acceptance on the network-free fixture: one bar with one input, the
+// draft returns, and the bar fits every posture.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -38,8 +38,14 @@ try {
     }
     throw new Error(`Timed out: ${expression}`);
   }
+  // One bar: exactly one input. The question layer lives inside the composer.
   const surfaces = () => evaluate(cdp, `(() => { const visible = ${shown};
-    return { composer: visible('[aria-label="Message"]'), ask: visible('[aria-label="Questions from the agent"]') }; })()`);
+    return { inputs: document.querySelectorAll('.composer textarea').length, input: visible('[aria-label="Message"]'),
+      questions: visible('.composer [aria-label="Questions from the agent"]'), chatSend: visible('[aria-label="Send message"]') }; })()`);
+  const pressEnter = async () => {
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  };
 
   // 1. Type a draft, let the ask open, answer through the real form, and get the draft back.
   url.searchParams.set("scenario", "ask-delayed");
@@ -48,30 +54,30 @@ try {
   await until(`!!document.querySelector('[aria-label="Message"]')`);
   await evaluate(cdp, `document.querySelector('[aria-label="Message"]').focus()`);
   await cdp.send("Input.insertText", { text: "draft typed before the ask" });
-  assert.deepEqual(await surfaces(), { composer: true, ask: false });
+  assert.deepEqual(await surfaces(), { inputs: 1, input: true, questions: false, chatSend: true });
   await until(`!!document.querySelector('[aria-label="Questions from the agent"]')`);
-  assert.deepEqual(await surfaces(), { composer: false, ask: true });
-  result.swap.focusOnQuestion = await evaluate(cdp, `document.activeElement?.classList.contains('ask-question')`);
-  assert.equal(result.swap.focusOnQuestion, true);
-  // Sample through the whole entry animation: at no frame are both visible.
+  // Sample through the entry animation: one input throughout, no chat Send.
   for (let frame = 0; frame < 10; frame++) {
-    assert.deepEqual(await surfaces(), { composer: false, ask: true });
+    assert.deepEqual(await surfaces(), { inputs: 1, input: true, questions: true, chatSend: false });
     await sleep(20);
   }
+  result.swap.focusStaysInInput = await evaluate(cdp, `document.activeElement?.getAttribute('aria-label') === 'Message'`);
+  result.swap.draftSetAside = await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value === ''`);
+  assert.equal(result.swap.focusStaysInInput, true);
+  assert.equal(result.swap.draftSetAside, true);
   await evaluate(cdp, `[...document.querySelectorAll('.ask-option')].find((n) => n.textContent.startsWith('Local storage')).querySelector('input').click()`);
   await evaluate(cdp, `[...document.querySelectorAll('button')].find((n) => n.textContent === 'Next').click()`);
   await until(`document.querySelector('.ask-question')?.textContent.startsWith('Which checks')`);
-  await evaluate(cdp, `document.querySelector('[aria-label="Your own answer"]').focus()`);
+  await evaluate(cdp, `document.querySelector('[aria-label="Message"]').focus()`);
   await cdp.send("Input.insertText", { text: "format" });
-  // Ctrl+Enter advances like Next.
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
+  // Enter in the input advances like Next.
+  await pressEnter();
   await until(`document.querySelector('.ask-question')?.textContent.startsWith('What should')`);
   result.swap.rail = await evaluate(cdp, `[...document.querySelectorAll('.ask-step')].map((n) => n.getAttribute('aria-label'))`);
   assert.deepEqual(result.swap.rail, ["Question 1, answered", "Question 2, answered", "Question 3, not answered"]);
   await evaluate(cdp, `[...document.querySelectorAll('button')].find((n) => n.textContent === 'Send answers').click()`);
   await until(`!document.querySelector('[aria-label="Questions from the agent"]')`);
-  assert.deepEqual(await surfaces(), { composer: true, ask: false });
+  assert.deepEqual(await surfaces(), { inputs: 1, input: true, questions: false, chatSend: true });
   result.swap.draftAfterClose = await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`);
   assert.equal(result.swap.draftAfterClose, "draft typed before the ask");
 
@@ -91,20 +97,21 @@ try {
         const state = await evaluate(cdp, `(() => {
           const box = (s) => document.querySelector(s)?.getBoundingClientRect().toJSON();
           const body = document.querySelector('.ask-body');
-          const buttons = [...document.querySelectorAll('.ask-actions button')].map((n) => ({ text: n.textContent || n.getAttribute('aria-label'), ...n.getBoundingClientRect().toJSON() }));
+          const buttons = [...document.querySelectorAll('.composer-actions button, .ask-head > button')].map((n) => ({ text: n.textContent || n.getAttribute('aria-label'), ...n.getBoundingClientRect().toJSON() }));
           return { width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth,
-            ask: box('.ask'), composer: !!document.querySelector('[aria-label="Message"]'), buttons,
+            ask: box('.composer'), input: box('[aria-label="Message"]'), inputs: document.querySelectorAll('.composer textarea').length, buttons,
             bodyScrolls: body.scrollHeight > body.clientHeight + 1, shadow: getComputedStyle(body).backgroundImage.includes('radial-gradient'),
             share: document.querySelector('.ask').getBoundingClientRect().height / document.querySelector('.session-shell').getBoundingClientRect().height };
         })()`);
         assert.equal(state.overflow, false, `${scenario} ${posture.name} overflows`);
-        assert.equal(state.composer, false);
-        assert.ok(state.ask.y >= 0 && state.ask.bottom <= state.height + 0.5, `${scenario} ${posture.name} form leaves the viewport`);
+        assert.equal(state.inputs, 1);
+        assert.ok(state.ask.y >= 0 && state.ask.bottom <= state.height + 0.5, `${scenario} ${posture.name} bar leaves the viewport`);
+        assert.ok(state.input.height >= 44 && state.input.bottom <= state.height, `${scenario} ${posture.name} input is cut off`);
         for (const button of state.buttons) {
           assert.ok(button.height >= 44 && button.width >= 44, `${button.text} target is ${button.width}x${button.height}`);
           assert.ok(button.x >= 0 && button.right <= state.width && button.y >= 0 && button.bottom <= state.height, `${button.text} is off screen at ${posture.name}`);
         }
-        assert.ok(state.share <= 0.73, `${scenario} ${posture.name} form takes ${state.share}`);
+        assert.ok(state.share <= 0.43, `${scenario} ${posture.name} question layer takes ${state.share}`);
         assert.equal(state.shadow, true);
         result.postures.push({ scenario, scheme, posture: posture.name, bodyScrolls: state.bodyScrolls, share: Number(state.share.toFixed(2)) });
       }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskState } from "./ask";
-import { chooseOther, blankDraft, isAnswered, pickOption, toAnswers, writeOther } from "./askDraft";
+import { blankDraft, isAnswered, pickOption, routeOf, settle, toAnswers } from "./askDraft";
 import type { AskQuestion, PendingAsk } from "./contracts";
 
 const one: AskQuestion = { id: "db", question: "Which database?", options: [{ value: "pg", label: "Postgres" }, { value: "lite", label: "SQLite" }] };
@@ -30,32 +30,30 @@ describe("ask state", () => {
 });
 
 describe("ask drafts", () => {
-  it("replaces a single choice and moves between an option and an own answer without losing text", () => {
-    let draft = pickOption(one, blankDraft, "pg");
-    draft = pickOption(one, draft, "lite");
-    expect(draft.values).toEqual(["lite"]);
-    draft = writeOther(one, draft, "MySQL");
-    expect(draft).toEqual({ values: [], other: "MySQL", otherChosen: true });
-    draft = pickOption(one, draft, "pg");
-    expect(draft).toEqual({ values: ["pg"], other: "MySQL", otherChosen: false });
-    draft = chooseOther(one, draft, true);
-    expect(draft).toEqual({ values: [], other: "MySQL", otherChosen: true });
+  it("lets one choice replace typed text, and typed text replace one choice", () => {
+    const typed = { values: [], text: "MySQL" };
+    expect(pickOption(one, typed, "pg")).toEqual({ values: ["pg"], text: "" });
+    expect(settle(one, { values: ["pg"], text: "DuckDB" })).toEqual({ values: [], text: "DuckDB" });
+    expect(settle(one, { values: ["pg"], text: "  " })).toEqual({ values: ["pg"], text: "  " });
   });
-  it("toggles several choices alongside an own answer", () => {
-    let draft = pickOption(many, blankDraft, "lint");
+  it("toggles several choices and keeps typed text beside them", () => {
+    let draft = pickOption(many, { values: [], text: "typecheck" }, "lint");
     draft = pickOption(many, draft, "test");
     draft = pickOption(many, draft, "lint");
-    draft = writeOther(many, draft, "typecheck");
-    expect(draft).toEqual({ values: ["test"], other: "typecheck", otherChosen: true });
-    expect(chooseOther(many, draft, false).values).toEqual(["test"]);
+    expect(draft).toEqual({ values: ["test"], text: "typecheck" });
+    expect(settle(many, draft)).toBe(draft);
   });
-  it("counts blank own answers as unanswered and sends answers in question order", () => {
-    expect(isAnswered(writeOther(one, blankDraft, "   "))).toBe(false);
-    const answers = toAnswers(ask("a"), {
-      checks: writeOther(many, pickOption(many, blankDraft, "test"), "  typecheck  "),
-      db: chooseOther(one, writeOther(one, blankDraft, "draft only"), false),
-    });
-    expect(answers).toEqual([{ id: "checks", values: ["test"], otherText: "typecheck" }]);
+  it("counts blank text as unanswered and sends settled answers in question order", () => {
+    expect(isAnswered(one, { values: [], text: "   " })).toBe(false);
+    expect(toAnswers(ask("a"), {
+      checks: { values: ["test"], text: "  typecheck  " },
+      db: { values: ["pg"], text: "DuckDB" },
+    })).toEqual([{ id: "db", values: [], otherText: "DuckDB" }, { id: "checks", values: ["test"], otherText: "typecheck" }]);
     expect(toAnswers(ask("a"), { db: pickOption(one, blankDraft, "pg") })).toEqual([{ id: "db", values: ["pg"] }]);
+  });
+  it("routes slash commands to chat and everything else to the form", () => {
+    expect(routeOf("  /review")).toBe("chat");
+    expect(routeOf("use /tmp for it")).toBe("answer");
+    expect(routeOf("")).toBe("answer");
   });
 });
