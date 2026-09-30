@@ -128,6 +128,7 @@ kbd { font-family: var(--code-font); font-size: var(--code-size); border: 1px so
 .row[data-state="blocked"] .title, .row[data-state="unread"] .title { font-weight: 600; }
 .row[data-state="open"] .title, .row[data-state="archived"] .title { font-weight: 450; }
 .row[data-state="archived"] .title { color: var(--muted-foreground); }
+.title .untitled { color: var(--muted-foreground); font-weight: 450; }
 .time { grid-column: 3; font-family: var(--code-font); font-size: var(--code-size); color: var(--muted-foreground); font-variant-numeric: tabular-nums; line-height: 1.5rem; white-space: nowrap; }
 .time[data-live] { color: var(--live); }
 .time .short { display: none; }
@@ -264,9 +265,9 @@ const MACHINES_MULTI = ["zao", "laptop"];
 const S = (o) => ({ state: "open", machine: "zao", project: "forgerie", branch: null, pinned: false, agents: 0, procs: 0, ...o });
 const FIXTURE = [
   S({ id: "p1", title: "Session picker design", state: "working", pinned: true, modified: min(3), since: min(41), branch: "proto/session-picker-states" }),
-  S({ id: "b1", title: "Step 3: ask_user form in the composer", state: "blocked", ask: "Keep the draft when an ask times out?", modified: min(9), branch: "new-ui-mvp" }),
-  S({ id: "b2", title: "Reconcile stale activity by timestamp", state: "blocked", dialog: "Extension needs permission", modified: min(22), machine: "laptop", project: "pi-web" }),
-  S({ id: "e1", title: "Update Pi runtime to 0.99.1", state: "errored", error: "provider returned 529 overloaded", modified: min(31) }),
+  S({ id: "b1", title: "Step 3: ask_user form in the composer", state: "blocked", modified: min(9), branch: "new-ui-mvp" }),
+  S({ id: "b2", title: "Reconcile stale activity by timestamp", state: "blocked", dialog: true, modified: min(22), machine: "laptop", project: "pi-web" }),
+  S({ id: "e1", title: "Update Pi runtime to 0.99.1", state: "errored", modified: min(31) }),
   S({ id: "w1", title: "Automatic reconnect and resync", state: "working", detail: "compacting context", modified: min(1), since: min(12), branch: "new-ui-mvp" }),
   S({ id: "w2", title: "Voice content prototype", state: "working", detail: "running a command", modified: min(2), since: min(5), agents: 2, procs: 1, project: "voice-content", machine: "laptop" }),
   S({ id: "u1", title: "Tool call dedupe across message and tool events", state: "unread", modified: min(48) }),
@@ -318,8 +319,10 @@ function where(s, o) {
   return `<span class="where">${head}${br ? ` · ${br}` : ""}</span>`;
 }
 function trace(s) {
-  if (s.state === "blocked") return `<span class="tr" data-tone="ask"><span class="tm">?</span><span class="tt">${esc(s.ask ?? s.dialog)}</span></span>`;
-  if (s.state === "errored") return `<span class="tr" data-tone="error"><span class="tm">&gt;</span><span class="tt">failed · ${esc(s.error)}</span></span>`;
+  // Fixed status words only. No text from the transcript: not the question,
+  // not the dialog title, not the error message.
+  if (s.state === "blocked") return `<span class="tr" data-tone="ask"><span class="tm">?</span><span class="tt">${s.dialog ? "needs your decision" : "needs your answer"}</span></span>`;
+  if (s.state === "errored") return `<span class="tr" data-tone="error"><span class="tm">&gt;</span><span class="tt">failed</span></span>`;
   if (s.state === "working") return `<span class="tr"><span class="tm">&gt;</span><span class="tt" data-live>${esc(s.detail ?? "working")}</span></span>`;
   if (s.state === "starting") return `<span class="tr"><span class="tm">&gt;</span><span class="tt" data-live>starting</span></span>`;
   return "";
@@ -334,7 +337,7 @@ function row(s, o) {
   const sub = [where(s, o), work, trace(s)].filter(Boolean).join("");
   return `<div class="row${o.compact ? " compact" : ""}" role="option" tabindex="0" data-state="${s.state}"${sel}${dis}${dim}${focus} data-id="${s.id}">
     <span class="mark"><i></i></span>
-    <div class="rt"><span class="title">${s.pinned ? `<span class="pin">${PIN}</span> ` : ""}${esc(s.title)}</span></div>
+    <div class="rt"><span class="title">${s.pinned ? `<span class="pin">${PIN}</span> ` : ""}${s.title ? esc(s.title) : `<span class="untitled">Untitled session</span>`}</span></div>
     ${time}
     ${sub ? `<div class="rs">${sub}</div>` : ""}
     <button class="more" aria-label="Session commands">⋯</button>
@@ -443,9 +446,10 @@ document.getElementById("boards").innerHTML = [
 const one = (s, o = {}) => picker({ sessions: [s], machines: o.machines ?? MACHINES_MULTI, collapsed: new Set(), bare: true, ...o });
 const R = (o) => S({ id: "x", modified: min(7), ...o });
 document.getElementById("rows").innerHTML = [
-  ["blocked on an ask", R({ title: "Step 3: ask_user form in the composer", state: "blocked", ask: "Keep the draft when an ask times out?" })],
-  ["blocked on an extension dialog", R({ title: "Reconcile stale activity", state: "blocked", dialog: "pi-processes wants to write stdin" })],
-  ["errored", R({ title: "Update Pi runtime to 0.99.1", state: "errored", error: "provider returned 529 overloaded" })],
+  ["blocked on an ask", R({ title: "Step 3: ask_user form in the composer", state: "blocked" })],
+  ["blocked on an extension dialog", R({ title: "Reconcile stale activity", state: "blocked", dialog: true })],
+  ["errored", R({ title: "Update Pi runtime to 0.99.1", state: "errored" })],
+  ["untitled · no name yet, first message not shown", R({ title: undefined })],
   ["working · streaming", R({ title: "Automatic reconnect and resync", state: "working", since: min(12) })],
   ["working · compacting", R({ title: "Automatic reconnect and resync", state: "working", detail: "compacting context", since: min(2) })],
   ["working · running a command", R({ title: "Voice content prototype", state: "working", detail: "running a command", since: min(5) })],
@@ -455,7 +459,7 @@ document.getElementById("rows").innerHTML = [
   ["open · worktree branch", R({ title: "Fix rapidfire destination lock", branch: "fix/rapidfire-destination-lock" })],
   ["open · other machine", R({ title: "Backlog observability brief", machine: "laptop" })],
   ["open · single machine configured", R({ title: "Backlog observability brief" }), { machines: ["zao"] }],
-  ["pinned · keeps its own state (blocked)", R({ title: "Session picker design", state: "blocked", ask: "Which grouping is the default?", pinned: true })],
+  ["pinned · keeps its own state (blocked)", R({ title: "Session picker design", state: "blocked", pinned: true })],
   ["pinned · idle", R({ title: "Session picker design", pinned: true })],
   ["archived", R({ title: "Upstream review 2026-08", state: "archived", modified: day(9) }), { showArchived: true }],
   ["starting · browser knows it before the server", R({ title: "Migrate quota shelf to the new client", state: "starting" })],
@@ -463,7 +467,7 @@ document.getElementById("rows").innerHTML = [
   ["unknown workspace · cwd not in any project", R({ title: "Scratch run", unknown: "/home/simonwjackson/tmp/scratch" })],
   ["selected · ⋯ visible", R({ title: "Automatic reconnect and resync", state: "working", since: min(12), branch: "new-ui-mvp" }), { selected: "x" }],
   ["keyboard focus · not selected", R({ title: "Handoff record prototype" }), { focus: "x" }],
-  ["long title, long branch, narrow pane", R({ title: "A very long session title that will not fit in the column no matter what", state: "blocked", ask: "This question is also long enough to need the ellipsis at the end of the trace line", branch: "feature/some-extremely-long-branch-name-here" })],
+  ["long title, long branch, narrow pane", R({ title: "A very long session title that will not fit in the column no matter what", state: "blocked", branch: "feature/some-extremely-long-branch-name-here" })],
 ].map(([cap, s, o]) => frame(cap, 340, 100, one(s, o))).join("")
 + frame("compact density · two rows for comparison", 340, 100, picker({ bare: true, compact: true, machines: MACHINES_MULTI, sessions: [R({ id: "c1", title: "Handoff record prototype" }), R({ id: "c2", title: "Fix rapidfire destination lock", branch: "fix/rapidfire" })] }));
 
@@ -499,7 +503,7 @@ const COV = [
   ["3.8", "cwd to project, workspace, branch", "§3 main checkout, worktree branch, unknown workspace"],
   ["3.9–3.11", "Archived hidden by default, collapse persisted, selected group auto-expands", "§2 archived revealed, all collapsed; §6 A key"],
   ["3.12", "Loading, empty, all clear", "§2"],
-  ["4.1–4.7", "Title, location chip, detail line, live-work counts, pin, time or timer, tone", "§3 every row"],
+  ["4.1–4.7", "Title, location chip, detail line, live-work counts, pin, time or timer, tone", "§3 every row. Changed: the detail line is a fixed status word. The question, dialog title, and error text stay in the thread. An unnamed session shows 'Untitled session', not its first message."],
   ["4.8", "Row density setting", "§3 compact density. Open question in README."],
   ["4.9", "Rows whose workspace is gone", "§3 workspace removed"],
   ["5.1–5.2", "Unread set, mark read when chat is seen", "§3 unread. Read rule unchanged."],

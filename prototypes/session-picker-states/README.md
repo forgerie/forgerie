@@ -85,6 +85,17 @@ Each one is a proposal for review, not a done deal.
 5. Add machine, remove machine, and clean up sessions live in the actions
    palette, reached from the picker's "⋯" menu. They are not picker rows.
 
+## Rules from review
+
+- No chat text in the picker (user, 2026-09-29). A row shows the session
+  name, its location, and a fixed status word. It never shows the ask
+  question, an extension dialog's title, an error message, or the first
+  message. Status words: `needs your answer`, `needs your decision`,
+  `failed`, `working`, `compacting context`, `running a command`,
+  `starting`. A session with no name shows "Untitled session". This
+  replaces inventory items 4.1 (title falls back to the first message) and
+  4.3 (detail line quotes the question or error).
+
 ## Open questions
 
 - Search: none exists today. Add one, or leave it out of the MVP?
