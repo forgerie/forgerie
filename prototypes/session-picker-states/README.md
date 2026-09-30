@@ -40,6 +40,13 @@ one pale attention tint for the machine notice.
   device.
 - State lives in three places only: the group heading, the marker, and the
   time column. Rows carry no status words.
+- Live work is two icons with counts, no words (user, 2026-09-29): the
+  current client's agents drawing (one node delegating to several) for
+  delegated agents working, and its terminal drawing for managed processes
+  running. Both are blue because blue means running, and both sit at the end
+  of the second line so they form a column. Each is hidden at zero. They
+  are independent of the row state: an idle session can still have a dev
+  server running, and a blocked session can still have an agent working.
 - Time is always shorthand (`<1m`, `41m`, `2h`, `3d`, `1w`), never a clock
   (user, 2026-09-29). An idle row shows how long since it last changed. A
   working row shows, in blue, how long the current run has lasted.

@@ -131,12 +131,17 @@ kbd { font-family: var(--code-font); font-size: var(--code-size); border: 1px so
 .title .untitled { color: var(--muted-foreground); font-weight: 450; }
 .time { grid-column: 3; font-family: var(--code-font); font-size: var(--code-size); color: var(--muted-foreground); font-variant-numeric: tabular-nums; line-height: 1.5rem; white-space: nowrap; }
 .time[data-live] { color: var(--live); }
-.rs { grid-column: 2 / span 2; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); row-gap: 0; min-inline-size: 0; font-size: var(--small-text); color: var(--muted-foreground); line-height: 1.375rem; }
+.rs { grid-column: 2 / span 2; display: flex; flex-wrap: nowrap; align-items: center; column-gap: var(--space-3); row-gap: 0; min-inline-size: 0; font-size: var(--small-text); color: var(--muted-foreground); line-height: 1.375rem; }
 .rs:empty { display: none; }
-.where { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.where { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .where .br { color: var(--foreground); opacity: 0.8; }
 .where[data-missing] { font-style: italic; }
-.work { font-family: var(--code-font); font-size: var(--code-size); white-space: nowrap; }
+/* Live work: the current client's agents and terminal icons, each with a
+   count. Blue because blue already means running. Pushed to the end of the
+   second line so the icons form a column down the list. */
+.work { flex: none; display: inline-flex; gap: var(--space-3); margin-inline-start: auto; white-space: nowrap; color: var(--live); font-family: var(--code-font); font-size: var(--code-size); font-variant-numeric: tabular-nums; }
+.work span { display: inline-flex; align-items: center; gap: 3px; }
+.work svg { inline-size: 14px; block-size: 14px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 .more { position: absolute; inset-inline-end: var(--space-2); inset-block-end: 0.3rem; inline-size: 2rem; block-size: 1.375rem; display: none; place-items: center; border-radius: var(--radius-document); color: var(--muted-foreground); font-weight: 600; letter-spacing: 0.05em; }
 .row[aria-selected="true"] .more, .row:focus-within .more, .row[data-focus] .more { display: grid; }
@@ -255,14 +260,14 @@ const MACHINES_MULTI = ["zao", "laptop"];
 const S = (o) => ({ state: "open", machine: "zao", project: "forgerie", branch: null, pinned: false, agents: 0, procs: 0, ...o });
 const FIXTURE = [
   S({ id: "p1", title: "Session picker design", state: "working", pinned: true, modified: min(3), since: min(41), branch: "proto/session-picker-states" }),
-  S({ id: "b1", title: "Step 3: ask_user form in the composer", state: "blocked", modified: min(9), branch: "new-ui-mvp" }),
+  S({ id: "b1", title: "Step 3: ask_user form in the composer", state: "blocked", modified: min(9), branch: "new-ui-mvp", agents: 1 }),
   S({ id: "b2", title: "Reconcile stale activity by timestamp", state: "blocked", dialog: true, modified: min(22), machine: "laptop", project: "pi-web" }),
   S({ id: "e1", title: "Update Pi runtime to 0.99.1", state: "errored", modified: min(31) }),
-  S({ id: "w1", title: "Automatic reconnect and resync", state: "working", detail: "compacting context", modified: min(1), since: min(12), branch: "new-ui-mvp" }),
+  S({ id: "w1", title: "Automatic reconnect and resync", state: "working", detail: "compacting context", modified: min(1), since: min(12), branch: "new-ui-mvp", agents: 3 }),
   S({ id: "w2", title: "Voice content prototype", state: "working", detail: "running a command", modified: min(2), since: min(5), agents: 2, procs: 1, project: "voice-content", machine: "laptop" }),
   S({ id: "u1", title: "Tool call dedupe across message and tool events", state: "unread", modified: min(48) }),
   S({ id: "u2", title: "Quota shelf: put every account on one axis", state: "unread", modified: hr(2), project: "pi-quota", machine: "laptop" }),
-  S({ id: "o1", title: "Handoff record prototype", modified: min(35) }),
+  S({ id: "o1", title: "Handoff record prototype", modified: min(35), procs: 1 }),
   S({ id: "o2", title: "Fix rapidfire destination lock", modified: hr(3), branch: "fix/rapidfire-destination-lock" }),
   S({ id: "o3", title: "Backlog observability brief", modified: hr(5), project: "forgerie", machine: "laptop" }),
   S({ id: "o4", title: "Panel peek gesture", modified: day(1) }),
@@ -296,6 +301,9 @@ function rel(iso) {
 function elapsed(iso) { return (NOW - Date.parse(iso)) < 60000 ? "<1m" : rel(iso); }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const PIN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/></svg>';
+// Copied from src/client/src/components/tabIcons.ts, so both clients use one drawing per concept.
+const ICON_AGENTS = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 11 16.5 6.8"/><path d="M7.5 13 16.5 17.2"/></svg>';
+const ICON_TERMINAL = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 3-3 3"/><path d="M12 16h5"/></svg>';
 const byRecency = (a, b) => Date.parse(b.modified) - Date.parse(a.modified);
 const groupKind = (s) => s.state === "archived" ? "archived" : s.pinned ? "pinned" : s.state === "starting" ? "working" : s.state;
 
@@ -314,7 +322,8 @@ function row(s, o) {
   const sel = o.selected === s.id ? ' aria-selected="true"' : ' aria-selected="false"';
   const dim = s.machine && o.unreachable?.includes(s.machine) ? " data-dim" : "";
   const focus = o.focus === s.id ? " data-focus" : "";
-  const work = (s.agents || s.procs) ? `<span class="work">${[s.agents ? `${s.agents} agent${s.agents > 1 ? "s" : ""}` : "", s.procs ? `${s.procs} process${s.procs > 1 ? "es" : ""}` : ""].filter(Boolean).join(" · ")}</span>` : "";
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const work = (s.agents || s.procs) ? `<span class="work">${s.agents ? `<span title="${plural(s.agents, "agent", "agents")} working" aria-label="${plural(s.agents, "agent", "agents")} working">${ICON_AGENTS}${s.agents}</span>` : ""}${s.procs ? `<span title="${plural(s.procs, "process", "processes")} running" aria-label="${plural(s.procs, "process", "processes")} running">${ICON_TERMINAL}${s.procs}</span>` : ""}</span>` : "";
   const time = s.state === "working" && s.since ? `<span class="time" data-live>${elapsed(s.since)}</span>` : s.state === "starting" ? `<span class="time"></span>` : `<span class="time">${rel(s.modified)}</span>`;
   const sub = [where(s, o), work].filter(Boolean).join("");
   return `<div class="row${o.compact ? " compact" : ""}" role="option" tabindex="0" data-state="${s.state}"${sel}${dis}${dim}${focus} data-id="${s.id}">
@@ -435,7 +444,12 @@ document.getElementById("rows").innerHTML = [
   ["working · streaming", R({ title: "Automatic reconnect and resync", state: "working", since: min(12) })],
   ["working · compacting", R({ title: "Automatic reconnect and resync", state: "working", detail: "compacting context", since: min(2) })],
   ["working · running a command", R({ title: "Voice content prototype", state: "working", detail: "running a command", since: min(5) })],
-  ["working · 2 agents, 1 process", R({ title: "Voice content prototype", state: "working", agents: 2, procs: 1, since: min(58) })],
+  ["working · 2 agents and 1 process", R({ title: "Voice content prototype", state: "working", agents: 2, procs: 1, since: min(58) })],
+  ["working · 1 agent", R({ title: "Session picker design", state: "working", agents: 1, since: min(9) })],
+  ["working · 12 agents, 3 processes (a swarm)", R({ title: "Port the ask form to every posture", state: "working", agents: 12, procs: 3, since: min(26), branch: "new-ui-mvp" })],
+  ["idle · a process still running (dev server)", R({ title: "Handoff record prototype", procs: 1 })],
+  ["blocked · its agent keeps working", R({ title: "Step 3: ask_user form in the composer", state: "blocked", agents: 1 })],
+  ["errored · a process outlived the turn", R({ title: "Update Pi runtime to 0.99.1", state: "errored", procs: 2 })],
   ["unread", R({ title: "Tool call dedupe across message and tool events", state: "unread", modified: min(48) })],
   ["open · main checkout", R({ title: "Handoff record prototype" })],
   ["open · worktree branch", R({ title: "Fix rapidfire destination lock", branch: "fix/rapidfire-destination-lock" })],
@@ -449,8 +463,8 @@ document.getElementById("rows").innerHTML = [
   ["unknown workspace · cwd not in any project", R({ title: "Scratch run", unknown: "/home/simonwjackson/tmp/scratch" })],
   ["selected · ⋯ visible", R({ title: "Automatic reconnect and resync", state: "working", since: min(12), branch: "new-ui-mvp" }), { selected: "x" }],
   ["keyboard focus · not selected", R({ title: "Handoff record prototype" }), { focus: "x" }],
-  ["long title, long branch, narrow pane", R({ title: "A very long session title that will not fit in the column no matter what", state: "blocked", branch: "feature/some-extremely-long-branch-name-here" })],
-].map(([cap, s, o]) => frame(cap, 340, 100, one(s, o))).join("")
+  ["long title, long branch, live work, narrow pane", R({ title: "A very long session title that will not fit in the column no matter what", state: "blocked", agents: 4, procs: 2, branch: "feature/some-extremely-long-branch-name-here" })],
+].map(([cap, s, o]) => frame(cap, cap.startsWith("long") ? 260 : 340, cap.startsWith("long") ? 120 : 100, one(s, o))).join("")
 + frame("compact density · two rows for comparison", 340, 100, picker({ bare: true, compact: true, machines: MACHINES_MULTI, sessions: [R({ id: "c1", title: "Handoff record prototype" }), R({ id: "c2", title: "Fix rapidfire destination lock", branch: "fix/rapidfire" })] }));
 
 // ---------- 4. menus ----------
@@ -485,7 +499,7 @@ const COV = [
   ["3.8", "cwd to project, workspace, branch", "§3 main checkout, worktree branch, unknown workspace"],
   ["3.9–3.11", "Archived hidden by default, collapse persisted, selected group auto-expands", "§2 archived revealed, all collapsed; §6 A key"],
   ["3.12", "Loading, empty, all clear", "§2"],
-  ["4.1–4.7", "Title, location chip, detail line, live-work counts, pin, time or timer, tone", "§3 every row. Changed by review: no detail line and no status words. State shows as group, marker, and running timer. An unnamed session shows Untitled session."],
+  ["4.1–4.7", "Title, location chip, detail line, live-work counts, pin, time or timer, tone", "§3 every row. Changed by review: no detail line and no status words. State shows as group, marker, and running timer. An unnamed session shows Untitled session. Live work (4.4) is the agents and terminal icons with a count, in blue, at the end of the second line."],
   ["4.8", "Row density setting", "§3 compact density. Open question in README."],
   ["4.9", "Rows whose workspace is gone", "§3 workspace removed"],
   ["5.1–5.2", "Unread set, mark read when chat is seen", "§3 unread. Read rule unchanged."],
