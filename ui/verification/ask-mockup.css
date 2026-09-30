@@ -1,0 +1,70 @@
+/* Ask mode: one bar. The question layer sits above the normal input, and the
+   input keeps every tool. The layer takes at most 42% of the session height and
+   scrolls inside; the input row never moves off screen. */
+.askbar[data-mode="ask"] .composer-shell { border-color: var(--line-focus); }
+.askbar-questions { display: flex; flex-direction: column; max-block-size: min(24rem, 42cqb); border-block-end: 1px solid var(--line); transition: opacity 150ms; }
+.askbar-questions[data-muted] { opacity: 0.45; }
+.askbar-head { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4) 0 var(--space-1); }
+.askbar-rail { flex: 1; display: flex; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.askbar-rail li { flex: 1; block-size: 3px; border-radius: 2px; background: var(--line-focus); }
+.askbar-rail li[data-answered] { background: var(--muted-foreground); }
+.askbar-rail li[data-current] { background: var(--live); }
+.askbar-count { flex: none; color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.askbar-body { --surface: color-mix(in oklab, var(--muted) 30%, var(--background)); --shade: color-mix(in oklab, var(--foreground) 30%, transparent);
+  flex: 1 1 auto; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--space-4) var(--space-3);
+  background:
+    linear-gradient(var(--surface) 50%, transparent) top / 100% 2.5rem no-repeat local,
+    linear-gradient(transparent, var(--surface) 50%) bottom / 100% 2.5rem no-repeat local,
+    radial-gradient(farthest-side at 50% 0, var(--shade), transparent) top / 100% 1rem no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, var(--shade), transparent) bottom / 100% 1rem no-repeat scroll; }
+.askbar-question { margin: 0; font-size: 1rem; font-weight: 600; line-height: 1.4; letter-spacing: -0.005em; overflow-wrap: anywhere; }
+.askbar-detail { margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+/* Options gain columns from width, never from a breakpoint. */
+.askbar-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr)); gap: 0 var(--space-2); margin: var(--space-2) calc(-1 * var(--space-2)) 0; }
+.askbar-option { display: flex; align-items: flex-start; gap: var(--space-3); min-block-size: var(--control-size); padding: 0.6875rem var(--space-2); border-radius: var(--radius-control); cursor: pointer; }
+.askbar-option:hover { background: var(--code-surface); }
+.askbar-option:has(input:checked) { background: var(--muted); }
+.askbar-option input { appearance: none; flex: none; inline-size: 1.125rem; block-size: 1.125rem; margin: 0.1875rem 0 0; border: 1.5px solid var(--muted-foreground); border-radius: 50%; background: var(--background); display: grid; place-items: center; }
+.askbar-options[data-kind="checkbox"] input { border-radius: 0.3125rem; }
+.askbar-option input:checked { border-color: var(--foreground); background: var(--foreground); }
+.askbar-option input:checked::after { content: ""; inline-size: 0.4375rem; block-size: 0.4375rem; border-radius: 50%; background: var(--background); }
+.askbar-options[data-kind="checkbox"] input:checked::after { inline-size: 0.3125rem; block-size: 0.5625rem; border-radius: 0; background: none; border: solid var(--background); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+.askbar-option-text { display: flex; flex-direction: column; min-inline-size: 0; line-height: 1.5; }
+.askbar-option-text small { color: var(--muted-foreground); font-size: var(--small-text); }
+.askbar-input { position: relative; }
+.askbar-text { min-block-size: var(--header-size); white-space: pre-wrap; overflow-wrap: anywhere; }
+.askbar-placeholder { color: var(--muted-foreground); }
+.askbar-interim { color: var(--muted-foreground); }
+.askbar-caret { display: inline-block; inline-size: 1.5px; block-size: 1.1em; margin-inline-start: 1px; vertical-align: text-bottom; background: var(--foreground); }
+.askbar-actions { gap: var(--space-1); padding-inline-start: var(--space-1); }
+.askbar-spacer { flex: 1; }
+.askbar-mic[data-live] { color: var(--live); background: color-mix(in oklab, var(--live) 14%, transparent); }
+.askbar-listening { color: var(--live); font-size: var(--small-text); }
+.askbar-skip { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.askbar-skip:hover { color: var(--foreground); background: var(--code-surface); }
+.askbar-primary { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-4); border: 0; border-radius: var(--radius-control); font-weight: 500; white-space: nowrap; }
+.askbar-key { opacity: 0.6; }
+/* Routing notice: shown only when the input holds something a form answer cannot carry. */
+.askbar-route { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0; padding: var(--space-2) var(--space-4) 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; }
+.askbar-route svg { flex: none; margin-block-start: 0.15rem; color: var(--live); }
+.askbar-attachments { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-3) 0; }
+.askbar-chip { display: inline-flex; align-items: center; gap: var(--space-2); max-inline-size: 100%; padding-inline: var(--space-3) 0; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--background); font-size: var(--small-text); }
+.askbar-chip-remove { display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; border: 0; background: transparent; color: var(--muted-foreground); }
+/* Transient: escapes the bar and covers the question layer, not the input. */
+.askbar-popover { position: absolute; inset-inline: var(--space-2); inset-block-end: calc(100% + var(--space-1)); z-index: 2; padding: var(--space-1); border: 1px solid var(--line-focus); border-radius: var(--radius-control); background: var(--background); box-shadow: 0 0.5rem 1.5rem color-mix(in oklab, var(--foreground) 12%, transparent); }
+.askbar-command { display: flex; align-items: baseline; gap: var(--space-3); min-block-size: var(--control-size); padding: 0.6875rem var(--space-3); border-radius: var(--radius-document); color: var(--muted-foreground); font-size: var(--small-text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.askbar-command[aria-selected="true"] { background: var(--muted); color: var(--foreground); }
+.askbar-command-name { font-family: var(--code-font); color: var(--foreground); }
+
+/* Review sheet: every state in a folded-portrait frame (475 x 638). */
+.mock-sheet-page, .mock-sheet-page body { block-size: auto; }
+.mock-sheet-page #root { block-size: auto; }
+.mock-sheet { display: grid; grid-template-columns: repeat(auto-fill, 475px); gap: 2rem; padding: 2rem; justify-content: center; }
+.mock-frame { margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.mock-frame figcaption { display: flex; flex-direction: column; gap: 0.25rem; min-block-size: 3.5rem; font-size: var(--small-text); color: var(--muted-foreground); }
+.mock-frame figcaption strong { color: var(--foreground); font-size: 0.9375rem; font-weight: 600; }
+.mock-device { inline-size: 475px; block-size: 638px; border: 1px solid var(--line-focus); border-radius: 1.25rem; overflow: hidden; }
+/* A chat-routed message closes the questions, so they fold to the step row. */
+.askbar-questions[data-muted] { border-block-end-color: transparent; }
+.askbar-questions[data-muted] .askbar-body { display: none; }
+.askbar-text { max-block-size: min(12rem, 24cqb); overflow-y: auto; }
