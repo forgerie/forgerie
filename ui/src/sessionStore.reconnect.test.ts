@@ -1,0 +1,271 @@
+import { createServer } from "node:http";
+import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
+import { afterEach, describe, expect, it } from "vitest";
+import { createSessionStore, type SessionStore, type SessionTransport } from "./sessionStore";
+import type { PiMessage, SessionEvent } from "./contracts";
+import { messageText } from "./transcript";
+
+const disposals: (() => void | Promise<void>)[] = [];
+afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) await dispose(); });
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+const user = (text: string, timestamp: number): PiMessage => ({ role: "user", content: text, timestamp });
+const answer = (text: string, timestamp: number): PiMessage => ({ role: "assistant", content: text, timestamp });
+
+async function recoveryServer() {
+  const state = {
+    history: [user("before", 1), answer("history answer", 2)],
+    partial: null as PiMessage | null, seq: 0, running: false,
+    connections: 0, histories: 0, prompts: 0, failures: 0, rejectSockets: 0,
+    readFailureStatus: 503, gate: undefined as ReturnType<typeof deferred> | undefined,
+    ignoreAbort: false,
+  };
+  let socket: ServerSocket | undefined;
+  let wake: (() => void) | undefined;
+  let watching = false;
+  const ws = new WebSocketServer({ noServer: true });
+  const http = createServer(async (request, response) => {
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const send = (body: unknown, status = 200) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    if (path.endsWith("/prompt")) { state.prompts++; send({ error: "Request outcome unknown" }, 503); return; }
+    if (path === "/api/sessions/all") { send({ sessions: [{ id: "known", cwd: "/test", name: "Recovery test" }] }); return; }
+    if (state.failures > 0) { state.failures--; send({ error: "Temporarily unavailable" }, state.readFailureStatus); return; }
+    if (path.endsWith("/messages")) {
+      state.histories++;
+      const history = state.history.slice();
+      await state.gate?.promise;
+      send({ messages: history, start: 0, total: history.length });
+    } else if (path.endsWith("/stream-snapshot")) { send({ partial: state.partial, seq: state.seq }); }
+    else if (path.endsWith("/status")) { send({ isStreaming: state.running, isCompacting: false, isBashRunning: false }); }
+    else send({ error: "Not found" }, 404);
+  });
+  http.on("upgrade", (request, stream, head) => {
+    state.connections++;
+    if (state.rejectSockets > 0) { state.rejectSockets--; stream.destroy(); return; }
+    ws.handleUpgrade(request, stream, head, (client) => { socket = client; });
+  });
+  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+  const address = http.address();
+  if (!address || typeof address === "string") throw new Error("No test port");
+  const origin = `http://127.0.0.1:${address.port}`;
+  const transport: SessionTransport = {
+    request: (path, init) => fetch(origin + path, state.ignoreAbort ? { ...init, signal: undefined } : init),
+    connect: (path) => new WebSocket(origin.replace("http:", "ws:") + path),
+    watchRecovery: (recover) => { wake = recover; watching = true; return () => { watching = false; }; },
+  };
+  disposals.push(async () => {
+    state.gate?.resolve();
+    for (const client of ws.clients) client.terminate();
+    ws.close();
+    http.closeAllConnections();
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+  });
+  const store = createSessionStore("known", transport, { retryDelayMs: 10, maxRetryDelayMs: 20 });
+  disposals.push(store.dispose);
+  const emit = (event: SessionEvent) => socket?.send(Buffer.from(JSON.stringify(event)));
+  return { state, store, emit, emitRaw: (payload: string) => socket?.send(Buffer.from(payload)),
+    close: () => socket?.terminate(), wake: () => wake?.(), watching: () => watching };
+}
+async function until(predicate: () => boolean) {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("Recovery did not settle");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+function ready(store: SessionStore) { return store.getSnapshot().connection.type === "ready"; }
+function texts(store: SessionStore) { return store.getSnapshot().transcript.messages.map(messageText); }
+
+describe("automatic connection recovery", () => {
+  it("retains history while disconnected and recovers work completed offline without sending a prompt", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    const oldIds = api.store.getSnapshot().transcript.messages.map((message) => message.id);
+    api.state.history.push(user("offline question", 3), answer("offline answer", 4));
+    api.state.seq = 20;
+    api.close();
+    await until(() => api.store.getSnapshot().connection.type === "reconnecting");
+    expect(texts(api.store)).toEqual(["before", "history answer"]);
+    await expect(api.store.send("hello")).rejects.toThrow("not connected");
+    await until(() => ready(api.store));
+    expect(texts(api.store)).toEqual(["before", "history answer", "offline question", "offline answer"]);
+    expect(api.store.getSnapshot().transcript.messages.slice(0, 2).map((message) => message.id)).toEqual(oldIds);
+    expect(api.state.prompts).toBe(0);
+    expect(api.state.connections).toBe(2);
+  });
+
+  it("keeps retained message IDs unique when authoritative history changes", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    const old = api.store.getSnapshot().transcript.messages;
+    api.state.history.unshift(answer("earlier message", 0));
+    api.wake();
+    await until(() => api.state.connections === 2 && ready(api.store));
+    const messages = api.store.getSnapshot().transcript.messages;
+    expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
+    expect(messages.slice(1).map((message) => message.id)).toEqual(old.map((message) => message.id));
+  });
+
+  it("joins a new partial with thinking and tools, then accepts lower sequence numbers after a daemon restart", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    api.emit({ type: "agent.start", seq: 90 });
+    api.emit({ type: "assistant.delta", text: "old partial", seq: 91 });
+    await until(() => texts(api.store).at(-1) === "old partial");
+    api.state.history.push(user("new run", 3));
+    api.state.partial = { role: "assistant", content: [
+      { type: "thinking", thinking: "inspect" }, { type: "text", text: "new partial" },
+      { type: "toolCall", id: "read-1", name: "read", arguments: { path: "file.ts" } },
+    ] };
+    api.state.running = true;
+    api.state.seq = 1;
+    api.close();
+    await until(() => api.state.connections === 2 && ready(api.store));
+    expect(texts(api.store)).toEqual(["before", "history answer", "new run", "new partial"]);
+    api.emit({ type: "tool.start", toolName: "read", toolCallId: "read-1", args: { path: "file.ts" }, seq: 2 });
+    api.emit({ type: "tool.end", toolName: "read", toolCallId: "read-1", text: "contents", isError: false, seq: 3 });
+    api.emit({ type: "assistant.thinking.delta", text: " again", seq: 4 });
+    api.emit({ type: "assistant.delta", text: " done", seq: 5 });
+    await until(() => texts(api.store).at(-1) === "new partial\n done");
+    const parts = api.store.getSnapshot().transcript.messages.flatMap((message) => message.parts);
+    expect(parts.filter((part) => part.type === "tool")).toEqual([
+      expect.objectContaining({ id: "read-1", state: { type: "done", output: "contents", isError: false } }),
+    ]);
+    expect(parts.filter((part) => part.type === "thinking").map((part) => part.text)).toEqual(["inspect", " again"]);
+  });
+
+  it("buffers events during recovery, skips covered deltas, and keeps finalized messages before the next partial", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    api.state.gate = deferred();
+    api.close();
+    await until(() => api.state.histories === 2);
+    api.emit({ type: "message.end", message: answer("finished during join", 3), seq: 2 });
+    api.emit({ type: "assistant.delta", text: "seed", seq: 3 });
+    api.state.partial = { role: "assistant", content: "seed" };
+    api.state.seq = 3;
+    api.state.running = true;
+    api.state.gate.resolve();
+    await until(() => ready(api.store));
+    api.emit({ type: "assistant.delta", text: " live", seq: 4 });
+    await until(() => texts(api.store).at(-1) === "seed live");
+    expect(texts(api.store)).toEqual(["before", "history answer", "finished during join", "seed live"]);
+  });
+
+  it("keeps retrying socket and HTTP failures and ignores work from a superseded join", async () => {
+    const api = await recoveryServer();
+    api.state.rejectSockets = 2;
+    api.state.failures = 2;
+    await api.store.start();
+    await until(() => ready(api.store));
+    expect(api.state.connections).toBe(5);
+    api.state.gate = deferred();
+    api.state.ignoreAbort = true;
+    api.wake();
+    await until(() => api.state.histories === 2);
+    const oldGate = api.state.gate;
+    api.state.gate = undefined;
+    api.state.ignoreAbort = false;
+    api.state.history.push(answer("fresh state", 3));
+    api.wake();
+    await until(() => ready(api.store));
+    oldGate.resolve();
+    expect(texts(api.store)).toEqual(["before", "history answer", "fresh state"]);
+    api.emit({ type: "assistant.delta", text: "current socket", seq: 1 });
+    await until(() => texts(api.store).at(-1) === "current socket");
+    expect(api.state.connections).toBe(7);
+  });
+
+  it("uses wake recovery even when a half-open socket has not reported a close", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    api.state.history.push(answer("missed answer", 3));
+    api.wake();
+    await until(() => api.state.connections === 2 && ready(api.store));
+    expect(texts(api.store)).toEqual(["before", "history answer", "missed answer"]);
+  });
+
+  it("stops on permanent read failures rather than looping forever", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    api.state.failures = 1;
+    api.state.readFailureStatus = 404;
+    api.close();
+    await until(() => api.store.getSnapshot().connection.type === "failed");
+    expect(api.store.getSnapshot().connection).toMatchObject({ message: "Temporarily unavailable" });
+    expect(texts(api.store)).toEqual(["before", "history answer"]);
+    api.wake();
+    expect(api.state.connections).toBe(2);
+  });
+
+  it("settles a run completed offline with one finalized tool result and no stale partial", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    api.emit({ type: "agent.start", seq: 1 });
+    api.emit({ type: "assistant.delta", text: "Reading", seq: 2 });
+    api.emit({ type: "tool.start", toolName: "read", toolCallId: "read-1", args: { path: "file.ts" }, seq: 3 });
+    await until(() => api.store.getSnapshot().transcript.messages.flatMap((message) => message.parts).some((part) => part.type === "tool"));
+    api.state.history.push({ role: "assistant", timestamp: 3, content: [
+      { type: "thinking", thinking: "Read the file" }, { type: "text", text: "Reading" },
+      { type: "toolCall", id: "read-1", name: "read", arguments: { path: "file.ts" } },
+    ] }, { role: "toolResult", toolCallId: "read-1", toolName: "read", content: "file contents", timestamp: 4 }, answer("Done", 5));
+    api.state.seq = 8;
+    api.close();
+    await until(() => api.state.connections === 2 && ready(api.store));
+    expect(api.store.getSnapshot().transcript.isRunning).toBe(false);
+    expect(texts(api.store)).toEqual(["before", "history answer", "Reading", "Done"]);
+    const tools = api.store.getSnapshot().transcript.messages.flatMap((message) => message.parts).filter((part) => part.type === "tool");
+    expect(tools).toEqual([expect.objectContaining({ id: "read-1", state: { type: "done", output: "file contents", isError: false } })]);
+  });
+
+  it("cancels scheduled retries on disposal", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    api.close();
+    await until(() => api.store.getSnapshot().connection.type === "reconnecting");
+    api.store.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(api.state.connections).toBe(1);
+  });
+
+  it("stops a malformed stream without applying it or retrying a broken contract", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    api.emitRaw('{"type":"assistant.delta","text":42}');
+    await until(() => api.store.getSnapshot().connection.type === "failed");
+    expect(api.store.getSnapshot().connection).toMatchObject({ message: expect.stringContaining("Invalid session event") });
+    expect(texts(api.store)).toEqual(["before", "history answer"]);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(api.state.connections).toBe(1);
+  });
+
+  it("never retries a prompt whose HTTP outcome is unknown", async () => {
+    const api = await recoveryServer();
+    await api.store.start();
+    await expect(api.store.send("hello")).rejects.toThrow("Request outcome unknown");
+    api.close();
+    await until(() => api.state.connections === 2 && ready(api.store));
+    expect(api.state.prompts).toBe(1);
+    expect(api.store.getSnapshot().commandError).toBe("Request outcome unknown");
+  });
+
+  it("disposes an outstanding join and wake listeners without opening another socket", async () => {
+    const api = await recoveryServer();
+    api.state.gate = deferred();
+    const started = api.store.start();
+    await until(() => api.state.histories === 1);
+    api.store.dispose();
+    expect(api.watching()).toBe(false);
+    api.wake();
+    api.state.gate.resolve();
+    await started;
+    expect(api.state.connections).toBe(1);
+    expect(api.store.getSnapshot().connection.type).not.toBe("ready");
+  });
+});

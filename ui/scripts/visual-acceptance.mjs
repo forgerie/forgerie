@@ -82,7 +82,7 @@ try {
   assert.equal(olderCopyActions.length, 3);
   assert.ok(olderCopyActions.every(action => action.visibility === 'visible' && action.display !== 'none' && action.target >= 44));
   result.olderResponsesRemainCopyable = true;
-  for (const scenario of ["empty", "loading", "running", "disconnected"]) {
+  for (const scenario of ["empty", "loading", "running", "disconnected", "reconnecting", "reconnecting-running"]) {
     url.searchParams.set("scenario", scenario);
     await cdp.send("Page.navigate", { url: url.href });
     await until(`document.querySelector('.connection-status') !== null`);
@@ -93,11 +93,19 @@ try {
       loading: !!document.querySelector('[aria-label="Loading conversation"]'),
       disabled: document.querySelector('textarea').disabled,
       stop: !!document.querySelector('[aria-label="Stop generating"]'),
+      stopDisabled: document.querySelector('[aria-label="Stop generating"]')?.disabled,
+      sendDisabled: document.querySelector('[aria-label="Send message"]')?.disabled,
       alert: document.querySelector('[role="alert"]')?.textContent
     })`);
     if (scenario === "empty") assert.equal(state.welcome, true);
     if (scenario === "loading") { assert.equal(state.loading, true); assert.equal(state.welcome, false); assert.equal(state.disabled, true); }
     if (scenario === "disconnected") { assert.equal(state.disabled, true); assert.ok(state.alert.includes("Reload")); }
+    if (scenario.startsWith("reconnecting")) {
+      assert.equal(state.disabled, true);
+      assert.equal(state.status, "Reconnecting");
+      assert.ok(state.alert.includes("automatically"));
+      assert.equal(scenario === "reconnecting" ? state.sendDisabled : state.stopDisabled, true);
+    }
     if (scenario === "running") {
       assert.equal(state.stop, true);
       await evaluate(cdp, `document.querySelector('[aria-label="Stop generating"]').click()`);

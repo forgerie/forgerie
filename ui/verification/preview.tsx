@@ -47,7 +47,8 @@ const scenarios: Record<string, TranscriptMessage[]> = {
 };
 function Preview() {
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
-  const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running");
+  const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "reconnecting-running");
+  const recovering = scenario === "reconnecting" || scenario === "reconnecting-running";
   async function onNew(message: AppendMessage) {
     const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
     setMessages((current) => [...current, say(`user-${current.length}`, "user", text),
@@ -55,10 +56,10 @@ function Preview() {
   }
   const threadMessages = useThreadMessages(messages, running);
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false),
-    isRunning: running, isLoading: scenario === "loading", isDisabled: scenario === "loading" || scenario === "disconnected" });
+    isRunning: running, isLoading: scenario === "loading", isDisabled: scenario === "loading" || scenario === "disconnected" || recovering });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : "Connected"}
-      error={scenario === "disconnected" ? "Connection lost. Reload to reconnect." : undefined}
+    <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : "Connected"}
+      error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
       <Thread />
     </SessionFrame>

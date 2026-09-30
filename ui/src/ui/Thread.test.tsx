@@ -138,6 +138,24 @@ describe("Homepage-derived thread", () => {
     expect(input.value).toBe("next question");
   });
 
+  it("retains the draft while recovery disables commands, then permits sending again", async () => {
+    await render({ messages: [reply] });
+    const input = document.querySelector('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "unsent draft");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await render({ messages: [answer("Hello")], disabled: true });
+    expect(document.querySelector('textarea')).toBe(input);
+    expect(input.value).toBe("unsent draft");
+    expect(button("Send message").disabled).toBe(true);
+    await render({ messages: [answer("Hello")] });
+    expect(input.value).toBe("unsent draft");
+    expect(button("Send message").disabled).toBe(false);
+    await render({ messages: [reply], running: true, disabled: true });
+    expect(button("Stop generating").disabled).toBe(true);
+  });
+
   it("copies code and exposes a clipboard failure instead of a false success", async () => {
     await render({ messages: [answer("```js\nconst answer = 42;\n```")] });
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("Permission denied"));

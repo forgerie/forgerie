@@ -1,5 +1,38 @@
 # Verification and limits
 
+## Automatic reconnect
+
+Checked on 2026-09-29. The standalone client on 8510 uses the unchanged Forgerie backend on 8504. No prompt was sent and no production service was restarted.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | Build, TypeScript, ESLint, and 58 tests passed. Recovery tests use a real HTTP/WebSocket server. They cover socket and HTTP failures, completion offline, tools and thinking, join buffering, a sequence reset, superseded responses, permanent failures, disposal, and prompt non-retry. |
+| Real browser recovery. | `scripts/reconnect-acceptance.mjs` took Chromium offline at each of the four Fold postures. It observed 16 socket attempts and 5 history fetches. The first recovery used the timer alone. Later recoveries used the online signal. Every recovery retained the draft, transcript, and open disclosure. Scroll position remained at 80 CSS pixels. No API mutation or uncaught exception occurred. |
+| Real history, read-only. | `scripts/real-trace-check.mjs` matched 13 API tool calls with 13 rendered tool lines, including 1 failure. All 8 thinking parts appeared. No page overflow or exceptions occurred. |
+| Fixture checks. | `scripts/visual-acceptance.mjs` passed in both themes, including the new reconnecting and reconnecting-running states. Send and Stop remain disabled during recovery. The fixture made no API requests. |
+| Visual review. | All eight reconnecting screenshots in `verification/local/reconnect-shots/` were captured with the main posture script and read. The notice stayed readable and the composer remained inside the viewport. The layout does not change between postures. |
+
+Recovery behavior:
+
+- Unexpected close, socket error, connection timeout, network read failure, and HTTP 5xx trigger automatic retry. Delays start at 500 ms, grow by 1.6, and stop growing at 5 s. Only a complete successful join resets the delay.
+- Returning to a visible page, an online event, or a BFCache restore starts a fresh subscription. This also recovers a half-open socket that never reported a close.
+- Each connection subscribes before fetching history, stream snapshot, and status. It buffers events during those reads and reconciles them with the snapshot watermark. A new connection never reuses the previous connection's sequence number.
+- Forgerie's server does not replay missed frames by cursor. Recovery refetches authoritative state. Persisted message identities survive the reload so existing disclosures do not remount. Unfinished partials can be replaced by authoritative content.
+- The thread/runtime stays mounted. The composer retains its draft, but input, Send, and Stop remain disabled until the join succeeds. assistant-ui's `isDisabled` alone did not disable Send in a regression test, so command buttons now explicitly respect it and the binding also sets `isSendDisabled`.
+- Invalid consumed event data, malformed successful responses, missing sessions, and HTTP 4xx other than 408/429 stop automatic retry. The error and Reload action remain visible. Prompt and abort requests are never retried automatically because an acknowledgement can be lost after the server accepts a command.
+
+The cost is a full history fetch on every restored connection and every return to the page. Large sessions still have no paging or virtualization. Timers run only when the browser schedules them. These checks use Chromium network and posture emulation, not physical sleep/wake or the Fold's keyboard.
+
+The [Podia disconnected conversation](https://mobbin.com/screens/469ef97c-ed6f-463a-b2df-f3777866bb3e) informed the retained transcript plus one connection notice. This revision reuses the existing notice and header rather than adding a blocking dialog or changing the homepage-derived styling.
+
+Repeat the read-only browser check from this worktree:
+
+```sh
+SESSION_ID=<existing-idle-id> nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/reconnect-acceptance.mjs
+```
+
+Evidence stays in ignored `verification/local/reconnect-acceptance.json` and `verification/local/reconnect-shots/`. For the main posture script, set `CHROME_BIN` to the Chromium executable if its login-shell discovery cannot see the Nix shell's PATH.
+
 ## Tools and reasoning
 
 Checked on 2026-09-29 against Forgerie on port 8504. No prompt was sent for this step.
@@ -109,7 +142,7 @@ The [ChatGPT reference](https://mobbin.com/screens/fa707eb9-8ecd-48e1-b94d-647c0
 
 Gutters and message spacing follow the container. The same layout holds across all postures without device-width breakpoints. The composer is sticky inside the thread's viewport, matching the homepage structure. Code and tables have local scroll regions rather than widening the conversation.
 
-Open `http://127.0.0.1:8510/verification/preview.html` for the separate dev-only fixture entry point. It imports the shipped presentation and uses an in-memory runtime without a network data source. Its scenarios are `history`, `empty`, `loading`, `running`, `disconnected`, `stress`, `tools`, and `tools-running`, selected with `?scenario=<name>`. This HTML entry point is not included in the production build.
+Open `http://127.0.0.1:8510/verification/preview.html` for the separate dev-only fixture entry point. It imports the shipped presentation and uses an in-memory runtime without a network data source. Its scenarios are `history`, `empty`, `loading`, `running`, `disconnected`, `reconnecting`, `reconnecting-running`, `stress`, `tools`, and `tools-running`, selected with `?scenario=<name>`. This HTML entry point is not included in the production build.
 
 From the worktree, run the browser fixture checks with:
 
@@ -138,6 +171,6 @@ This is a private standalone MVP on an orphan branch, not a production client re
 
 Text, thinking, and tool calls are converted. Thinking shows as collapsed reasoning. Every tool uses one generic card with its input and text output; there are no custom `edit` diff or `bash` cards yet. Image parts in tool output show as `[image]`. Shell (`!` command) events and skill-read lines are not shown. Assistant text supports Markdown headings, lists, links, tables, and code fences. User messages retain their literal text. Markdown images become links, not remote media requests. Math and diagrams remain text. Ask forms, dialogs, and process cards are excluded. System messages render in full, including very long system prompts. A session waiting for an excluded form can stay Running until answered in the original Forgerie UI.
 
-A closed socket disables sending and asks for a manual reload. There is no automatic reconnect, queue, branch switching, or persisted draft across reloads. Rotation preserves the current draft because it does not remount the app. Initial snapshot reconciliation is covered by tests, but complete reconnect/replay parity is not claimed.
+A closed socket triggers automatic reconnect and authoritative resync. The transcript and draft remain in memory, but commands and input stay disabled during recovery. Permanent contract/session failures still require Reload. There is no queue, branch switching, or persisted draft across page reloads. Rotation and reconnect preserve the current draft because they do not remount the app. Physical sleep/wake and keyboard behavior remain unverified.
 
-History loads as one full response. There is no paging or virtualization yet. The production JavaScript bundle is about 996 kB before gzip and 305 kB after gzip. Vite reports its size warning. Stop's HTTP body is tested against the transport contract, but a real model run was not interrupted during acceptance.
+History loads as one full response. There is no paging or virtualization yet. The production JavaScript bundle is about 998 kB before gzip and 306 kB after gzip. Vite reports its size warning. Stop's HTTP body is tested against the transport contract, but a real model run was not interrupted during acceptance.

@@ -28,12 +28,14 @@ export function ForgerieSession({ id }: { id: string }) {
     isRunning: state.transcript.isRunning,
     isLoading: state.connection.type === "loading",
     isDisabled: state.connection.type !== "ready",
-    isSendDisabled: state.sending,
+    isSendDisabled: state.sending || state.connection.type !== "ready",
   });
   useEffect(() => { runtimeRef.current = runtime; }, [runtime]);
-  const error = state.connection.type === "failed" ? state.connection.message
+  const error = state.connection.type === "reconnecting" ? "Reconnecting automatically. Your draft stays here."
+    : state.connection.type === "failed" ? state.connection.message
     : state.commandError ?? state.transcript.error;
   const status = state.connection.type === "loading" ? "Connecting"
+    : state.connection.type === "reconnecting" ? "Reconnecting"
     : state.connection.type === "failed" ? "Disconnected"
     : state.sending ? "Sending" : state.transcript.isRunning ? "Running" : "Connected";
 

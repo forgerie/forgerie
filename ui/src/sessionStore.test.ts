@@ -96,7 +96,7 @@ describe("session transport", () => {
     const api = await server();
     const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
     await store.start(); api.close();
-    await waitFor(store, () => store.getSnapshot().connection.type === "failed");
+    await waitFor(store, () => store.getSnapshot().connection.type === "reconnecting");
     await expect(store.send("hello")).rejects.toThrow("not connected");
     expect(api.requests.some((request) => request.path.endsWith("prompt"))).toBe(false);
   });

@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { acceptedSchema, catalogSchema, errorSchema, historySchema, parseEvent, snapshotSchema, statusSchema, type Session, type SessionEvent } from "./contracts";
-import { fromHistory, reduceEvent, seedTranscript, type Transcript } from "./transcript";
+import { fromHistory, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 
-export type Connection = { type: "loading" } | { type: "ready" } | { type: "failed"; message: string };
+export type Connection = { type: "loading" } | { type: "ready" }
+  | { type: "reconnecting"; message: string } | { type: "failed"; message: string };
 export interface SessionState {
   connection: Connection;
   session?: Session;
@@ -13,6 +14,7 @@ export interface SessionState {
 export interface SessionTransport {
   request: (path: string, init: RequestInit) => Promise<Response>;
   connect: (path: string) => WebSocket;
+  watchRecovery?: (recover: () => void) => () => void;
 }
 export const browserTransport: SessionTransport = {
   request: (path, init) => fetch(path, init),
@@ -21,85 +23,170 @@ export const browserTransport: SessionTransport = {
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return new WebSocket(url);
   },
+  watchRecovery: (recover) => {
+    // Mobile sleep can leave a half-open socket without a close event. A return
+    // to the page always opens a fresh subscription and authoritative join.
+    const visible = () => { if (document.visibilityState === "visible") recover(); };
+    const restored = (event: PageTransitionEvent) => { if (event.persisted) recover(); };
+    window.addEventListener("online", recover);
+    document.addEventListener("visibilitychange", visible);
+    window.addEventListener("pageshow", restored);
+    return () => {
+      window.removeEventListener("online", recover);
+      document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("pageshow", restored);
+    };
+  },
 };
-export function createSessionStore(id: string, transport: SessionTransport) {
+interface RecoveryTiming { retryDelayMs?: number; maxRetryDelayMs?: number; openTimeoutMs?: number }
+interface Join {
+  controller: AbortController;
+  socket?: WebSocket;
+  buffered: SessionEvent[];
+  seeding: boolean;
+  seq: number;
+}
+class ReadFailure extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+function permanent(error: unknown) {
+  return error instanceof z.ZodError || error instanceof SyntaxError
+    || error instanceof ReadFailure && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+}
+const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}) {
   let state: SessionState = { connection: { type: "loading" }, transcript: fromHistory([]), sending: false };
   const listeners = new Set<() => void>();
-  const controller = new AbortController();
-  let socket: WebSocket | undefined;
+  const lifetime = new AbortController();
+  let join: Join | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  const initialDelay = timing.retryDelayMs ?? 500;
+  let retryDelay = initialDelay;
+  let unwatch: (() => void) | undefined;
   let started = false;
-  const buffered: SessionEvent[] = [];
-  let bootstrapping = true;
   const update = (next: SessionState) => {
-    if (controller.signal.aborted) return;
+    if (lifetime.signal.aborted) return;
     state = next;
     for (const listener of listeners) listener();
   };
-  const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
-  const fail = (error: unknown) => update({ ...state, connection: { type: "failed", message: messageOf(error) } });
-  async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
+  const current = (attempt: Join) => join === attempt && !lifetime.signal.aborted;
+  function closeJoin() {
+    const old = join;
+    join = undefined; // Invalidate before close/abort can publish callbacks.
+    old?.controller.abort();
+    old?.socket?.close();
+  }
+  function stop(error: unknown) {
+    clearTimeout(retryTimer);
+    closeJoin();
+    update({ ...state, connection: { type: "failed", message: messageOf(error) } });
+  }
+  function retry(attempt: Join, error: unknown) {
+    if (!current(attempt)) return;
+    closeJoin();
+    update({ ...state, connection: { type: "reconnecting", message: messageOf(error) } });
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => { void connect(); }, retryDelay);
+    retryDelay = Math.min(retryDelay * 1.6, timing.maxRetryDelayMs ?? 5000);
+  }
+  async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, signal = lifetime.signal): Promise<T> {
     const response = await transport.request(path, {
-      ...init, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
+      ...init, signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
     });
-    const body: unknown = await response.json();
     if (!response.ok) {
+      const body: unknown = await response.json().catch(() => undefined);
       const error = errorSchema.safeParse(body);
-      throw new Error(error.success ? error.data.error : `Request failed: HTTP ${response.status}`);
+      throw new ReadFailure(error.success ? error.data.error : `Request failed: HTTP ${response.status}`, response.status);
     }
-    return schema.parse(body);
+    return schema.parse(await response.json());
   }
   const root = `/api/sessions/${encodeURIComponent(id)}`;
   function readPath(endpoint: string, session: Session) {
     return `${root}/${endpoint}?${new URLSearchParams({ cwd: session.cwd })}`;
   }
-  async function start() {
-    if (started) return;
-    started = true;
+  async function connect() {
+    if (lifetime.signal.aborted) return;
+    const attempt: Join = { controller: new AbortController(), buffered: [], seeding: true, seq: -1 };
+    join = attempt;
+    const read = <T>(path: string, schema: z.ZodType<T>) => request(path, schema, {}, attempt.controller.signal);
     try {
-      const catalog = await request("/api/sessions/all", catalogSchema);
-      const session = catalog.sessions.find((item) => item.id === id);
-      if (!session) throw new Error(`Session ${id} was not found. Check the session ID in the URL.`);
-      update({ ...state, session });
-      socket = transport.connect(`${root}/events`);
-      // Forgerie's proxy forwards upstream Buffers as binary frames. Decode
-      // synchronously to preserve delta/final event order without Blob awaits.
+      let session = state.session;
+      if (!session) {
+        const catalog = await read("/api/sessions/all", catalogSchema);
+        if (!current(attempt)) return;
+        session = catalog.sessions.find((item) => item.id === id);
+        if (!session) { stop(new Error(`Session ${id} was not found. Check the session ID in the URL.`)); return; }
+        update({ ...state, session });
+      }
+      const socket = transport.connect(`${root}/events`);
+      attempt.socket = socket;
+      // Decode synchronously: the proxy forwards binary frames and Blob awaits
+      // can reorder deltas and completed messages.
       socket.binaryType = "arraybuffer";
       socket.addEventListener("message", (event) => {
+        if (!current(attempt)) return;
         try {
           const payload = typeof event.data === "string" ? event.data
             : event.data instanceof ArrayBuffer ? new TextDecoder().decode(event.data) : undefined;
           if (payload === undefined) throw new Error("Unsupported WebSocket payload.");
           const parsed = parseEvent(JSON.parse(payload));
-          if (!parsed) return;
-          if (bootstrapping) buffered.push(parsed);
+          if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
+          if (parsed.seq !== undefined) attempt.seq = parsed.seq;
+          if (attempt.seeding) attempt.buffered.push(parsed);
           else update({ ...state, transcript: reduceEvent(state.transcript, parsed) });
-        } catch (error) { fail(new Error(`Invalid session event: ${messageOf(error)}`)); }
+        } catch (error) { stop(new Error(`Invalid session event: ${messageOf(error)}`)); }
       });
-      socket.addEventListener("close", () => fail(new Error("Live connection closed. Reload to load current history and reconnect.")));
-      socket.addEventListener("error", () => fail(new Error("Live connection failed. Check Forgerie on port 8504 and reload.")));
+      socket.addEventListener("close", () => retry(attempt, new Error("Live connection closed.")));
+      socket.addEventListener("error", () => retry(attempt, new Error("Live connection failed.")));
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("Live connection timed out.")), 15_000);
         const cleanup = () => {
           clearTimeout(timeout);
-          controller.signal.removeEventListener("abort", onAbort);
+          attempt.controller.signal.removeEventListener("abort", onAbort);
+          socket.removeEventListener("open", onOpen);
         };
-        const onAbort = () => { cleanup(); reject(new Error("Session closed.")); };
-        controller.signal.addEventListener("abort", onAbort, { once: true });
-        socket!.addEventListener("open", () => { cleanup(); resolve(); }, { once: true });
-        socket!.addEventListener("error", () => { cleanup(); reject(new Error("Cannot open the live connection.")); }, { once: true });
-        socket!.addEventListener("close", () => { cleanup(); reject(new Error("Live connection closed.")); }, { once: true });
+        const onAbort = () => { cleanup(); reject(new Error("Connection attempt ended.")); };
+        const onOpen = () => { cleanup(); resolve(); };
+        const timeout = setTimeout(() => { cleanup(); reject(new Error("Live connection timed out.")); }, timing.openTimeoutMs ?? 15_000);
+        attempt.controller.signal.addEventListener("abort", onAbort, { once: true });
+        socket.addEventListener("open", onOpen, { once: true });
       });
-      // Subscribe before fetching so sends from another browser are not lost.
-      const history = await request(readPath("messages", session), historySchema);
-      const snapshot = await request(readPath("stream-snapshot", session), snapshotSchema);
-      const status = await request(readPath("status", session), statusSchema);
-      if (state.connection.type === "failed") return;
-      const transcript = seedTranscript(history.messages, snapshot.partial, snapshot.seq,
-        status.isStreaming || status.isCompacting || status.isBashRunning, buffered);
-      bootstrapping = false;
-      buffered.length = 0;
+      // Every connection gets its own buffer and watermark. A previous hub's
+      // sequence is meaningless after a daemon restart. Subscribe before reads.
+      const history = await read(readPath("messages", session), historySchema);
+      if (!current(attempt)) return;
+      const snapshot = await read(readPath("stream-snapshot", session), snapshotSchema);
+      if (!current(attempt)) return;
+      const status = await read(readPath("status", session), statusSchema);
+      if (!current(attempt)) return;
+      const seeded = seedTranscript(history.messages, snapshot.partial, snapshot.seq,
+        status.isStreaming || status.isCompacting || status.isBashRunning, attempt.buffered);
+      // Keep persisted message identities, including messages first seen live,
+      // so existing disclosures do not remount when fresh history replaces them.
+      const transcript = reconcileTranscriptIdentity(state.transcript, seeded);
+      attempt.seq = Math.max(attempt.seq, snapshot.seq);
+      attempt.seeding = false;
+      attempt.buffered.length = 0;
+      retryDelay = initialDelay; // A socket open alone is not a successful join.
       update({ ...state, connection: { type: "ready" }, transcript });
-    } catch (error) { fail(error); }
+    } catch (error) {
+      if (!current(attempt)) return;
+      if (permanent(error)) stop(error);
+      else retry(attempt, error);
+    }
+  }
+  function recover() {
+    if (!started || lifetime.signal.aborted || state.connection.type === "failed") return;
+    clearTimeout(retryTimer);
+    closeJoin();
+    update({ ...state, connection: { type: "reconnecting", message: "Refreshing the live connection." } });
+    void connect();
+  }
+  async function start() {
+    if (started || lifetime.signal.aborted) return;
+    started = true;
+    unwatch = transport.watchRecovery?.(recover);
+    await connect();
   }
   async function command(endpoint: "prompt" | "abort", text?: string) {
     const session = state.session;
@@ -107,6 +194,8 @@ export function createSessionStore(id: string, transport: SessionTransport) {
     if (endpoint === "prompt" && (state.transcript.isRunning || state.sending)) throw new Error("Wait for the current run to finish.");
     update({ ...state, sending: true, commandError: undefined });
     try {
+      // Never automatically retry a mutation: the server may have accepted it
+      // even if its HTTP acknowledgement was lost.
       await request(`${root}/${endpoint}`, endpoint === "prompt" ? acceptedSchema : z.unknown(), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd: session.cwd, ...(text === undefined ? {} : { text }) }),
@@ -122,7 +211,7 @@ export function createSessionStore(id: string, transport: SessionTransport) {
     start,
     send: (text: string) => command("prompt", text),
     cancel: () => command("abort"),
-    dispose: () => { controller.abort(); socket?.close(); listeners.clear(); },
+    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); listeners.clear(); },
   };
 }
 export type SessionStore = ReturnType<typeof createSessionStore>;

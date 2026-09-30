@@ -153,6 +153,24 @@ export function fromHistory(history: readonly PiMessage[], isRunning = false): T
   return { ...state, messages, nextId: Math.max(state.nextId, history.length) };
 }
 
+/** Retain persisted identities across an authoritative reload without ID collisions. */
+export function reconcileTranscriptIdentity(previous: Transcript, refreshed: Transcript): Transcript {
+  const ids = new Map(previous.messages.flatMap((message) => message.key ? [[message.key, message.id]] : []));
+  const reserved = new Set(refreshed.messages.flatMap((message) => {
+    const id = message.key ? ids.get(message.key) : undefined;
+    return id === undefined ? [] : [id];
+  }));
+  let nextId = Math.max(previous.nextId, refreshed.nextId);
+  let liveId = refreshed.liveId;
+  const messages = refreshed.messages.map((message) => {
+    const retained = message.key ? ids.get(message.key) : undefined;
+    const id = retained ?? (reserved.has(message.id) ? `resync-${nextId++}` : message.id);
+    if (message.id === refreshed.liveId) liveId = id;
+    return { ...message, id };
+  });
+  return { ...refreshed, messages, nextId, liveId };
+}
+
 export function reduceEvent(state: Transcript, event: SessionEvent): Transcript {
   switch (event.type) {
     case "agent.start": return { ...state, isRunning: true, error: undefined };
