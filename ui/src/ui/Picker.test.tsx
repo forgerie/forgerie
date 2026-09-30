@@ -158,6 +158,108 @@ describe("picker", () => {
   });
 });
 
+describe("row commands", () => {
+  function renderCommands(pickerView: PickerView) {
+    const onCommand = vi.fn<(row: Row, kind: string) => void>();
+    const onSelect = vi.fn<(row: Row) => void>();
+    const onUndo = vi.fn();
+    const onDismissToast = vi.fn();
+    act(() => root.render(<Picker view={pickerView} prefs={{ ...defaults, showArchived: true }} onPrefs={() => {}}
+      actions={{ onSelect, onRetry: () => {}, onCommand, onUndo, onDismissToast }} />));
+    return { onCommand, onSelect, onUndo, onDismissToast };
+  }
+  const rowOf = (id: string) => host.querySelector<HTMLElement>(`[data-session="${id}"]`);
+  const items = () => [...host.querySelectorAll<HTMLButtonElement>('.picker-row-menu [role="menuitem"]')];
+  const labels = () => items().map((item) => item.textContent);
+  const rightClick = (id: string) => act(() => { rowOf(id)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+
+  it("opens the row menu on right click without opening the session", () => {
+    const { onSelect } = renderCommands(view([S("a")]));
+    rightClick("a");
+    expect(labels()).toEqual(["Pin to top", "ArchiveE", "Copy workspace path"]);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(items()[0]);
+  });
+
+  it("shows archive disabled with its reason on a running session", () => {
+    renderCommands(view([S("a")], { statuses: { a: { ...idle, isStreaming: true } } }));
+    rightClick("a");
+    const archive = items().find((item) => item.dataset["command"] === "archive");
+    expect(archive?.disabled).toBe(true);
+    expect(archive?.textContent).toBe("ArchiveStop the run first");
+  });
+
+  it("runs a command and closes the menu", () => {
+    const { onCommand } = renderCommands(view([S("a")]));
+    rightClick("a");
+    act(() => items()[0]?.click());
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ session: expect.objectContaining({ id: "a" }) }), "pin");
+    expect(host.querySelector(".picker-row-menu")).toBeNull();
+  });
+
+  it("asks twice, in place, before a permanent delete", () => {
+    const { onCommand } = renderCommands(view([S("x", { archived: true })], { showArchived: true }));
+    rightClick("x");
+    expect(labels()).toEqual(["Restore", "Delete permanently", "Copy workspace path"]);
+    const del = () => items().find((item) => item.dataset["command"] === "delete");
+    act(() => del()?.click());
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(del()?.textContent).toBe("Delete for good?");
+    act(() => del()?.click());
+    expect(onCommand).toHaveBeenCalledWith(expect.anything(), "delete");
+  });
+
+  it("opens the selected row's menu from its visible ⋯ and from the Menu key", () => {
+    const { onSelect } = renderCommands(view([S("a"), S("b")], { selectedId: "a" }));
+    act(() => rowOf("a")?.querySelector<HTMLButtonElement>(".picker-row-more")?.click());
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(host.querySelector("#picker-menu-a")).not.toBeNull();
+    act(() => { host.querySelector(".picker-row-menu")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(host.querySelector(".picker-row-menu")).toBeNull();
+    press("ContextMenu");
+    expect(host.querySelector("#picker-menu-a")).not.toBeNull();
+  });
+
+  it("archives the selected row with E, and not a running one", () => {
+    const { onCommand } = renderCommands(view([S("a")], { selectedId: "a" }));
+    press("e");
+    expect(onCommand).toHaveBeenCalledWith(expect.anything(), "archive");
+    const running = renderCommands(view([S("a")], { selectedId: "a", statuses: { a: { ...idle, isStreaming: true } } }));
+    press("e");
+    expect(running.onCommand).not.toHaveBeenCalled();
+  });
+
+  it("opens the menu on a touch hold, and the release does not open the session", () => {
+    vi.useFakeTimers();
+    try {
+      const { onSelect } = renderCommands(view([S("a")]));
+      const row = rowOf("a");
+      act(() => { row?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch", clientX: 10, clientY: 10 })); });
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(host.querySelector("#picker-menu-a")).not.toBeNull();
+      act(() => { row?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" })); row?.click(); });
+      expect(onSelect).not.toHaveBeenCalled();
+      // A scroll is not a hold.
+      act(() => { host.querySelector<HTMLElement>(".picker-group-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+      act(() => { row?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch", clientX: 10, clientY: 10 })); });
+      act(() => { row?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "touch", clientX: 10, clientY: 40 })); });
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(host.querySelector(".picker-row-menu")).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("offers undo after an archive and reports a refusal as an alert", () => {
+    const { onUndo } = renderCommands({ ...view([S("a")]), toast: { type: "undo", target: { id: "z", cwd: "/c", name: "Zed" } } });
+    expect(host.querySelector('.picker-toast[role="status"]')?.textContent).toContain("Archived Zed");
+    act(() => host.querySelector<HTMLButtonElement>(".picker-toast-undo")?.click());
+    expect(onUndo).toHaveBeenCalled();
+    const refused = renderCommands({ ...view([S("a")]), toast: { type: "error", text: "Unpin session before archiving" } });
+    expect(host.querySelector('.picker-toast[role="alert"]')?.textContent).toContain("Unpin session before archiving");
+    act(() => host.querySelector<HTMLButtonElement>('.picker-toast [aria-label="Dismiss"]')?.click());
+    expect(refused.onDismissToast).toHaveBeenCalled();
+  });
+});
+
 describe("picker prefs storage", () => {
   it("round-trips grouping and collapse, but never archive visibility", () => {
     writePrefs(localStorage, { grouping: "project", showArchived: true, allPinned: true, collapsed: new Set(["hour"]) });

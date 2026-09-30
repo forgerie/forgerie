@@ -13,7 +13,16 @@ export function App() {
   const [selectedId, setSelectedId] = useState(readSelected);
   // With nothing selected there is nothing to cover, so the sheet starts open.
   const [open, setOpen] = useState(() => readSelected() === undefined);
-  const picker = usePicker(selectedId);
+  // A deleted session cannot stay open: its thread has nothing left to load.
+  // The URL is the source of truth for the selection, so read it there.
+  const onDeleted = useCallback((id: string) => {
+    if (readSelected() !== id) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("session");
+    window.history.replaceState({}, "", url);
+    setSelectedId(undefined);
+  }, []);
+  const picker = usePicker(selectedId, { onDeleted });
   useEffect(() => {
     const onPop = () => setSelectedId(readSelected());
     window.addEventListener("popstate", onPop);
@@ -30,7 +39,7 @@ export function App() {
 
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention}
     picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
-      actions={{ onSelect: select, onRetry: picker.retry, onClose: layout === "overlay" && selectedId ? () => setOpen(false) : undefined }} />}
+      actions={{ ...picker.actions, onSelect: select, onClose: layout === "overlay" && selectedId ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
     thread={selectedId ? <ForgerieSession key={selectedId} id={selectedId} known={picker.find(selectedId)} />

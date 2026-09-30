@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
 import type { CatalogConnection } from "../picker/catalogStore";
+import { commandForKey, rowCommands, type RowCommandKind } from "../picker/commands";
 import type { PickerPrefs } from "../picker/prefs";
+import { readRowPress, ROW_PRESS } from "../picker/press";
+import type { Toast } from "../picker/rowActions";
 
 /** What the picker draws. Built by the binding; the view does no I/O. */
 export interface PickerView {
@@ -11,11 +14,18 @@ export interface PickerView {
   machines: number;
   selectedId?: string | undefined;
   archivedCount: number;
+  /** The one message line under the list. */
+  toast?: Toast | undefined;
+  /** Rows with a write in flight. */
+  pending?: ReadonlySet<string> | undefined;
 }
 export interface PickerActions {
   onSelect: (row: Row) => void;
   onRetry: () => void;
   onClose?: (() => void) | undefined;
+  onCommand?: ((row: Row, kind: RowCommandKind) => void) | undefined;
+  onUndo?: (() => void) | undefined;
+  onDismissToast?: (() => void) | undefined;
 }
 
 const PIN = <svg className="picker-pin" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z" /><path d="M12 15v5" /></svg>;
@@ -23,11 +33,44 @@ const PIN = <svg className="picker-pin" viewBox="0 0 24 24" aria-hidden="true"><
 const AGENTS = <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M7.5 11 16.5 6.8" /><path d="M7.5 13 16.5 17.2" /></svg>;
 const TERMINAL = <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m7 10 3 3-3 3" /><path d="M12 16h5" /></svg>;
 const count = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
+const menuId = (id: string) => `picker-menu-${id}`;
 
-function PickerRow({ row, selected, onSelect }: { row: Row; selected: boolean; onSelect: (row: Row) => void }) {
+interface Press { x: number; y: number; at: number; timer: ReturnType<typeof setTimeout> }
+
+function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu, onCloseMenu }: {
+  row: Row; selected: boolean; pending: boolean; menuOpen: boolean; onSelect: (row: Row) => void; onMenu: (id: string) => void; onCloseMenu: () => void;
+}) {
   const { session, location } = row;
+  const press = useRef<Press | undefined>(undefined);
+  // A hold that opened the menu must not also open the session on release.
+  const swallowClick = useRef(false);
+  const cancel = () => { if (press.current) clearTimeout(press.current.timer); press.current = undefined; };
+  useEffect(() => cancel, []);
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch") return;
+    cancel();
+    // The hold must land while the finger is still down, so it is a timer.
+    press.current = { x: event.clientX, y: event.clientY, at: Date.now(), timer: setTimeout(() => {
+      press.current = undefined; swallowClick.current = true; onMenu(session.id);
+    }, ROW_PRESS.holdMs) };
+  };
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const origin = press.current;
+    if (!origin || event.pointerType !== "touch") return;
+    if (readRowPress(Math.hypot(event.clientX - origin.x, event.clientY - origin.y), Date.now() - origin.at) === "abandoned") cancel();
+  };
+  const onContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // A touch browser raises contextmenu from its own hold timer, racing ours.
+    // Mid-press means the finger is still down, so its release is not a tap.
+    if (press.current) { cancel(); swallowClick.current = true; }
+    onMenu(session.id);
+  };
   return <div id={`picker-row-${session.id}`} className="picker-row" role="option" aria-selected={selected} data-state={row.state}
-    data-session={session.id} onClick={() => onSelect(row)}>
+    data-session={session.id} aria-busy={pending || undefined}
+    onClick={() => { if (swallowClick.current) { swallowClick.current = false; return; } onSelect(row); }}
+    onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={cancel} onPointerCancel={cancel} onContextMenu={onContextMenu}>
     <span className="picker-mark" aria-hidden="true"><i /></span>
     <span className="picker-title">{session.pinned ? <>{PIN} </> : null}
       {session.name ? session.name : <span className="picker-untitled">Untitled session</span>}</span>
@@ -39,17 +82,63 @@ function PickerRow({ row, selected, onSelect }: { row: Row; selected: boolean; o
         {row.processes ? <span title={`${count(row.processes, "process", "processes")} running`} aria-label={`${count(row.processes, "process", "processes")} running`}>{TERMINAL}{row.processes}</span> : null}
       </span> : null}
     </span>
+    <button className="picker-row-more" aria-label="Session commands" aria-haspopup="menu" aria-expanded={menuOpen}
+      aria-controls={menuOpen ? menuId(session.id) : undefined} tabIndex={-1}
+      onClick={(event) => { event.stopPropagation(); if (menuOpen) onCloseMenu(); else onMenu(session.id); }}>⋯</button>
+  </div>;
+}
+
+/**
+ * A row's commands, opened under that row as part of the list. A floating
+ * panel inside the transformed sheet is clipped by it (the Lit client lost its
+ * row menu that way); a drawer in the list cannot be cut off.
+ */
+function RowMenu({ row, confirming, onConfirm, onRun, onClose }: {
+  row: Row; confirming: boolean; onConfirm: () => void; onRun: (kind: RowCommandKind) => void; onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { ref.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true }); }, []);
+  useEffect(() => { ref.current?.scrollIntoView({ block: "nearest" }); }, []);
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    event.stopPropagation(); // The list's own keys (J, K, E) must not run under an open menu.
+    if (event.key === "Escape" || event.key === "Tab") { if (event.key === "Escape") event.preventDefault(); onClose(); return; }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const items = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+    const index = items.findIndex((item) => item === document.activeElement);
+    items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+  };
+  return <div ref={ref} id={menuId(row.session.id)} className="picker-row-menu" role="menu" aria-label="Session commands" onKeyDown={onKeyDown}>
+    {rowCommands(row).map((command) => {
+      const asking = command.danger === true && confirming;
+      return <button key={command.kind} role="menuitem" data-command={command.kind} disabled={command.disabled !== undefined}
+        data-tone={command.danger ? "danger" : undefined}
+        onClick={() => { if (command.danger && !confirming) onConfirm(); else onRun(command.kind); }}>
+        {asking ? "Delete for good?" : command.label}
+        {command.disabled ? <small>{command.disabled}</small> : command.key ? <small>{command.key}</small> : null}
+      </button>;
+    })}
+  </div>;
+}
+
+function ToastLine({ toast, onUndo, onDismiss }: { toast: Toast; onUndo?: (() => void) | undefined; onDismiss?: (() => void) | undefined }) {
+  return <div className="picker-toast" data-tone={toast.type === "error" ? "error" : undefined} role={toast.type === "error" ? "alert" : "status"}>
+    <span>{toast.type === "undo" ? <>Archived <em>{toast.target.name ?? "Untitled session"}</em></> : toast.text}</span>
+    {toast.type === "undo" && onUndo ? <button className="picker-toast-undo" onClick={onUndo}>Undo</button> : null}
+    {onDismiss ? <button className="picker-toast-close" aria-label="Dismiss" onClick={onDismiss}>×</button> : null}
   </div>;
 }
 
 /**
  * The session picker. Pure view: sessions and the reader's arrangement come
- * in; selections and arrangement changes go out. Only open menus live here.
+ * in; selections, commands, and arrangement changes go out. Only open menus
+ * live here.
  */
 export function Picker({ view, prefs, onPrefs, actions }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
 }) {
   const [menu, setMenu] = useState<"grouping" | "board" | undefined>();
+  const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
   const listRef = useRef<HTMLDivElement>(null);
   const change = onPrefs;
 
@@ -61,15 +150,24 @@ export function Picker({ view, prefs, onPrefs, actions }: {
     const next = new Set(prefs.collapsed); next.delete(selectedKey); return next;
   }, [prefs.collapsed, selectedKey]);
   const order = useMemo(() => navigable(view.sections, collapsed), [view.sections, collapsed]);
+  const selectedRow = order.find((row) => row.session.id === view.selectedId);
 
   const toggle = (key: string) => {
     const next = new Set(collapsed);
     if (next.has(key)) next.delete(key); else next.add(key);
     change({ ...prefs, collapsed: next });
   };
+  const openRowMenu = (id: string) => { setMenu(undefined); setRowMenu({ id, confirming: false }); };
+  const closeRowMenu = () => { setRowMenu(undefined); listRef.current?.focus({ preventScroll: true }); };
+  const run = (row: Row, kind: RowCommandKind) => { closeRowMenu(); actions.onCommand?.(row, kind); };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target instanceof HTMLElement && event.target.closest("input, textarea, [contenteditable]")) return;
     if (event.key === "Escape") { if (menu) setMenu(undefined); else actions.onClose?.(); return; }
+    if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") {
+      event.preventDefault();
+      if (selectedRow) openRowMenu(selectedRow.session.id);
+      return;
+    }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === "j" || key === "k" || event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -80,20 +178,39 @@ export function Picker({ view, prefs, onPrefs, actions }: {
       if (next && next.session.id !== view.selectedId) actions.onSelect(next);
     } else if (key === "g") change({ ...prefs, grouping: prefs.grouping === "state" ? "project" : "state" });
     else if (key === "a") change({ ...prefs, showArchived: !prefs.showArchived });
+    else if (selectedRow && actions.onCommand) {
+      const command = commandForKey(selectedRow, key);
+      if (command) { event.preventDefault(); actions.onCommand(selectedRow, command.kind); }
+    }
   };
   useEffect(() => {
     listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [view.selectedId]);
+  // A press anywhere outside the open row menu closes it, and that press then
+  // does what it was aimed at.
+  const openMenuId = rowMenu?.id;
+  useEffect(() => {
+    if (openMenuId === undefined) return;
+    const onDown = (event: Event) => {
+      if (!(event.target instanceof Element)) return;
+      // The row's own ⋯ toggles the menu itself.
+      if (document.getElementById(menuId(openMenuId))?.contains(event.target) || event.target.closest(`[aria-controls="${menuId(openMenuId)}"]`)) return;
+      setRowMenu(undefined);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [openMenuId]);
 
   const { connection } = view;
   const empty = view.sections.length === 0;
+  const rowWithMenu = rowMenu ? order.find((row) => row.session.id === rowMenu.id) : undefined;
   return <section className="picker" aria-label="Sessions" onKeyDown={onKeyDown}>
     <header className="picker-header">
       <h2><button className="picker-grouping" aria-haspopup="menu" aria-expanded={menu === "grouping"}
-        onClick={() => setMenu(menu === "grouping" ? undefined : "grouping")}>
+        onClick={() => { setRowMenu(undefined); setMenu(menu === "grouping" ? undefined : "grouping"); }}>
         Sessions <span className="picker-grouping-value">by {prefs.grouping}</span></button></h2>
       <button className="picker-icon" aria-label="More session commands" aria-haspopup="menu" aria-expanded={menu === "board"}
-        onClick={() => setMenu(menu === "board" ? undefined : "board")}>⋯</button>
+        onClick={() => { setRowMenu(undefined); setMenu(menu === "board" ? undefined : "board"); }}>⋯</button>
       {actions.onClose ? <button className="picker-icon" aria-label="Close sessions" onClick={actions.onClose}>×</button> : null}
       {menu === "grouping" ? <div className="picker-menu" role="menu" aria-label="Group sessions">
         {(["state", "project"] as const).map((grouping) => <button key={grouping} role="menuitemradio" aria-checked={prefs.grouping === grouping}
@@ -124,7 +241,12 @@ export function Picker({ view, prefs, onPrefs, actions }: {
             <span className="picker-count">{section.rows.length + (section.hidden ?? 0)}</span>
           </button>
           {collapsed.has(section.key) ? null : <div role="group" aria-label={section.label}>
-            {section.rows.map((row) => <PickerRow key={row.session.id} row={row} selected={row.session.id === view.selectedId} onSelect={actions.onSelect} />)}
+            {section.rows.map((row) => <div key={row.session.id} role="none">
+              <PickerRow row={row} selected={row.session.id === view.selectedId} pending={view.pending?.has(row.session.id) === true}
+                menuOpen={rowWithMenu?.session.id === row.session.id} onSelect={actions.onSelect} onMenu={openRowMenu} onCloseMenu={closeRowMenu} />
+              {rowMenu && rowWithMenu?.session.id === row.session.id ? <RowMenu row={row} confirming={rowMenu.confirming}
+                onConfirm={() => setRowMenu({ ...rowMenu, confirming: true })} onRun={(kind) => run(row, kind)} onClose={closeRowMenu} /> : null}
+            </div>)}
             {section.hidden ? <button className="picker-more" onClick={() => change({ ...prefs, allPinned: true })}>
               Show all {section.rows.length + section.hidden}</button>
               : section.kind === "pinned" && prefs.allPinned ? <button className="picker-more" onClick={() => change({ ...prefs, allPinned: false })}>
@@ -132,5 +254,6 @@ export function Picker({ view, prefs, onPrefs, actions }: {
           </div>}
         </div>)}
     </div>}
+    {view.toast ? <ToastLine toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : null}
   </section>;
 }

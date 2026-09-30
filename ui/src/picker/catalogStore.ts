@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { asksSchema, listingSchema, parseCatalogEvent, projectsSchema, unreadSchema, type CatalogEvent, type WireStatus } from "./contracts";
+import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, unreadSchema, type CatalogEvent, type WireStatus } from "./contracts";
 import type { PickerActivity, PickerProject, PickerSession, PickerStatus } from "./board";
 import type { SessionTransport } from "../sessionStore";
 
@@ -25,11 +25,39 @@ const toStatus = (status: WireStatus): PickerStatus => ({
   blocked: status.pendingAsk !== undefined || (status.pendingDialogs?.length ?? 0) > 0,
 });
 
-/** Apply one live event. Pure so replay after a snapshot uses the same rules. */
-export function applyCatalogEvent(state: CatalogState, event: CatalogEvent): CatalogState {
+/**
+ * Changes this client made and the server confirmed. The server broadcasts pins
+ * but not archive, restore, or delete, so the store applies those itself.
+ */
+export type LocalChange =
+  | { type: "local.archived"; sessionId: string; archived: boolean }
+  | { type: "local.deleted"; sessionId: string };
+
+/** Apply one live event or confirmed local change. Pure so replay after a snapshot uses the same rules. */
+export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | LocalChange): CatalogState {
   switch (event.type) {
-    case "status.update": return { ...state, statuses: { ...state.statuses, [event.status.sessionId]: toStatus(event.status) } };
-    case "activity.update": return { ...state, activities: { ...state.activities, [event.activity.sessionId]: event.activity } };
+    case "local.archived":
+      return { ...state, sessions: state.sessions.map((session) => session.id === event.sessionId
+        // An archived session is never pinned: the server refuses both at once.
+        ? { ...session, archived: event.archived, ...(event.archived ? { pinned: false } : {}) } : session) };
+    case "local.deleted": {
+      const unread = new Set(state.unread);
+      unread.delete(event.sessionId);
+      return { ...state, unread, sessions: state.sessions.filter((session) => session.id !== event.sessionId) };
+    }
+    // The server sends these tens of times a second while sessions run, mostly
+    // with nothing the picker draws changed. An unchanged event returns the same
+    // state, so the picker does not rebuild thousands of rows for it.
+    case "status.update": {
+      const next = toStatus(event.status);
+      return sameFields(state.statuses[event.status.sessionId], next) ? state
+        : { ...state, statuses: { ...state.statuses, [event.status.sessionId]: next } };
+    }
+    case "activity.update": {
+      const next = toActivity(event.activity);
+      return sameFields(state.activities[event.activity.sessionId], next) ? state
+        : { ...state, activities: { ...state.activities, [event.activity.sessionId]: next } };
+    }
     case "session.created":
       return state.sessions.some((session) => session.id === event.session.id) ? state
         : { ...state, sessions: [event.session, ...state.sessions] };
@@ -46,6 +74,24 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent): Cat
 }
 
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+/** About one frame at 60 Hz. */
+const LIVE_FRAME_MS = 16;
+const toActivity = (activity: PickerActivity): PickerActivity =>
+  ({ phase: activity.phase, ...(activity.activeSince ? { activeSince: activity.activeSince } : {}) });
+function sameFields<T extends object>(a: T | undefined, b: T): boolean {
+  if (!a) return false;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof T>;
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
+}
+
+/** A refused write. `status` lets a caller tell "already gone" (404) from other refusals. */
+export class MutationError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+/** The identity every session write needs: the server resolves a session by id within its cwd. */
+export interface SessionRef { id: string; cwd: string }
+const errorBody = z.object({ error: z.string() });
 
 /**
  * One machine's session catalog, kept live.
@@ -65,13 +111,25 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   const initialDelay = options.timing?.retryDelayMs ?? 500;
   let retryDelay = initialDelay;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
-  let attempt: { controller: AbortController; socket?: WebSocket; buffer?: CatalogEvent[] } | undefined;
+  let attempt: { controller: AbortController; socket?: WebSocket; buffer?: (CatalogEvent | LocalChange)[] } | undefined;
   let unwatch: (() => void) | undefined;
 
+  let frame: ReturnType<typeof setTimeout> | undefined;
+  const notify = () => { clearTimeout(frame); frame = undefined; for (const listener of listeners) listener(); };
   const update = (next: CatalogState) => {
-    if (lifetime.signal.aborted) return;
+    if (lifetime.signal.aborted || next === state) return;
     state = next;
-    for (const listener of listeners) listener();
+    notify();
+  };
+  /**
+   * Live events land in the state at once but tell the view at most once per
+   * frame. A busy machine sends dozens a second; each one rebuilding every row
+   * kept the page's main thread busy about 75% of the time while idle.
+   */
+  const updateLive = (next: CatalogState) => {
+    if (lifetime.signal.aborted || next === state) return;
+    state = next;
+    frame ??= setTimeout(notify, LIVE_FRAME_MS);
   };
   async function read<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal): Promise<T> {
     const response = await transport.request(path, { signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]) });
@@ -109,7 +167,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         try { event = parseCatalogEvent(JSON.parse(text)); }
         catch (error) { console.warn("Picker ignored a malformed machine event.", error); return; }
         if (!event) return;
-        if (current.buffer) current.buffer.push(event); else update(applyCatalogEvent(state, event));
+        if (current.buffer) current.buffer.push(event); else updateLive(applyCatalogEvent(state, event));
       });
       socket.addEventListener("close", () => retry(current));
       socket.addEventListener("error", () => retry(current));
@@ -136,7 +194,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         connection: { type: "ready" },
         sessions: listing.sessions,
         statuses,
-        activities: Object.fromEntries(listing.activities.map((activity) => [activity.sessionId, activity])),
+        activities: Object.fromEntries(listing.activities.map((activity) => [activity.sessionId, toActivity(activity)])),
         unread: new Set(unread.sessions.map((entry) => entry.sessionId)),
         projects,
       };
@@ -154,6 +212,50 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
       retry(current);
     }
   }
+  /** A confirmed change also joins a snapshot in flight, so an older snapshot cannot undo it. */
+  function record(change: LocalChange) {
+    attempt?.buffer?.push(change);
+    update(applyCatalogEvent(state, change));
+  }
+  async function write<T>(path: string, body: unknown, schema: z.ZodType<T>): Promise<T> {
+    const response = await transport.request(path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(20_000)]),
+    });
+    const parsed: unknown = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      const error = errorBody.safeParse(parsed);
+      throw new MutationError(error.success ? error.data.error : `Request failed: HTTP ${String(response.status)}`, response.status);
+    }
+    return schema.parse(parsed);
+  }
+  const sessionPath = (ref: SessionRef, action: string) => `${prefix}/sessions/${encodeURIComponent(ref.id)}/${action}`;
+  const accepted = z.object({}).passthrough();
+  /**
+   * Session writes. Each resolves once the server confirmed and the catalog
+   * shows the result, or rejects with the server's own reason and leaves the
+   * catalog unchanged. None is retried: a write the reader did not see land is
+   * one they can repeat.
+   */
+  const mutations = {
+    async setPinned(ref: SessionRef, pinned: boolean) {
+      await write(sessionPath(ref, pinned ? "pin" : "unpin"), { cwd: ref.cwd }, accepted);
+      // The server also broadcasts session.pinned. Applying it now keeps the
+      // row from waiting on the socket; the event then changes nothing.
+      update(applyCatalogEvent(state, { type: "session.pinned", sessionId: ref.id, pinned }));
+    },
+    async setArchived(ref: SessionRef, archived: boolean) {
+      await write(sessionPath(ref, archived ? "archive" : "restore"), { cwd: ref.cwd }, accepted);
+      record({ type: "local.archived", sessionId: ref.id, archived });
+    },
+    /** Delete one archived session for good. The route is a bulk one that reports per-session failures with HTTP 200. */
+    async deleteArchived(ref: SessionRef) {
+      const result = await write(`${prefix}/sessions/bulk/delete-archived`, { sessions: [{ id: ref.id, cwd: ref.cwd }] }, deleteArchivedSchema);
+      const failure = result.failures.find((entry) => entry.sessionId === ref.id);
+      if (failure || !result.deletedSessionIds.includes(ref.id)) throw new MutationError(failure?.error ?? "The server did not delete the session.", failure?.error === "Archived session not found" ? 404 : 400);
+      record({ type: "local.deleted", sessionId: ref.id });
+    },
+  };
   function recover() {
     if (lifetime.signal.aborted || state.connection.type === "failed") return;
     clearTimeout(retryTimer);
@@ -165,7 +267,8 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start: () => { unwatch = transport.watchRecovery?.(recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
-    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); closeAttempt(); unwatch?.(); listeners.clear(); },
+    ...mutations,
+    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); },
   };
 }
 export type CatalogStore = ReturnType<typeof createCatalogStore>;

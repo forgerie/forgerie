@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
-import { createCatalogStore, type CatalogStore } from "./catalogStore";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { applyCatalogEvent, createCatalogStore, type CatalogState, type CatalogStore } from "./catalogStore";
 import type { SessionTransport } from "../sessionStore";
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -22,13 +22,33 @@ async function machine(options: { holdListing?: Promise<void>; badListing?: bool
   let asks: { sessions: unknown[] } = { sessions: [] };
   const clients = new Set<ServerSocket>();
   let reads = 0;
+  let hold = options.holdListing;
+  const writes: { path: string; body: unknown }[] = [];
+  const refusals = new Map<string, { status: number; body: unknown }>();
   const sockets = new WebSocketServer({ noServer: true });
   const http = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://x").pathname;
-    const send = (body: unknown) => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(body)); };
+    const send = (body: unknown, status = 200) => { response.writeHead(status, { "Content-Type": "application/json" }); response.end(JSON.stringify(body)); };
+    if (request.method === "POST") {
+      let raw = "";
+      request.on("data", (chunk: Buffer) => { raw += chunk.toString(); });
+      request.on("end", () => {
+        const body: unknown = JSON.parse(raw);
+        writes.push({ path, body });
+        const refusal = refusals.get(path);
+        if (refusal) { send(refusal.body, refusal.status); return; }
+        if (path === "/api/sessions/bulk/delete-archived") {
+          const ids = (body as { sessions: { id: string }[] }).sessions.map((session) => session.id);
+          send({ deleted: true, deletedSessionIds: ids, failures: [], generatedAt: "now" });
+        } else send({ ok: true });
+      });
+      return;
+    }
     if (path === "/api/sessions/all") {
       reads += 1;
-      void (options.holdListing ?? Promise.resolve()).then(() => send(options.badListing ? { sessions: "nope" } : listing));
+      // The reply carries the catalog as it was when the read arrived.
+      const snapshot = listing;
+      void (hold ?? Promise.resolve()).then(() => send(options.badListing ? { sessions: "nope" } : snapshot));
     } else if (path === "/api/sessions/asks") send(asks);
     else if (path === "/api/sessions/unread") send({ catalogId: "c", catalogRevision: 1, sessions: [] });
     else if (path === "/api/machines/local/projects") send([{ id: "p", name: "forgerie", path: "/code/forgerie" }]);
@@ -58,6 +78,9 @@ async function machine(options: { holdListing?: Promise<void>; badListing?: bool
     setListing: (next: typeof listing) => { listing = next; },
     setAsks: (next: typeof asks) => { asks = next; },
     reads: () => reads,
+    writes,
+    refuse: (path: string, status: number, body: unknown) => { refusals.set(path, { status, body }); },
+    holdListing: (next: Promise<void>) => { hold = next; },
   };
 }
 function until(store: CatalogStore, predicate: () => boolean) {
@@ -73,6 +96,33 @@ function start(api: Awaited<ReturnType<typeof machine>>) {
   void store.start();
   return store;
 }
+
+describe("live event cost", () => {
+  const base: CatalogState = { connection: { type: "ready" }, sessions: [], statuses: {}, activities: {}, unread: new Set(), projects: [] };
+  it("returns the same state for an event that changes nothing the picker draws", () => {
+    const status = { sessionId: "a", ...idle, workingAgents: 1 };
+    const once = applyCatalogEvent(base, { type: "status.update", status });
+    expect(once).not.toBe(base);
+    expect(applyCatalogEvent(once, { type: "status.update", status: { ...status } })).toBe(once);
+    const activity = { sessionId: "a", phase: "active" as const, activeSince: "2026-09-29T18:00:00.000Z" };
+    const active = applyCatalogEvent(once, { type: "activity.update", activity });
+    expect(applyCatalogEvent(active, { type: "activity.update", activity: { ...activity } })).toBe(active);
+    expect(applyCatalogEvent(active, { type: "activity.update", activity: { ...activity, phase: "idle" } })).not.toBe(active);
+  });
+
+  it("tells the view once for a burst of live events", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    let calls = 0;
+    const stop = store.subscribe(() => { calls += 1; });
+    for (let n = 1; n <= 50; n += 1) api.emit({ type: "status.update", status: { sessionId: "a", ...idle, workingAgents: n } });
+    await until(store, () => store.getSnapshot().statuses["a"]?.workingAgents === 50);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    stop();
+    expect(calls).toBeLessThan(10);
+  });
+});
 
 describe("machine catalog", () => {
   it("joins with sessions, statuses, activities, and projects", async () => {
@@ -130,6 +180,67 @@ describe("machine catalog", () => {
     expect(store.getSnapshot().sessions.map((session) => session.id)).toEqual(["a", "b"]);
     await until(store, () => store.getSnapshot().connection.type === "ready" && store.getSnapshot().sessions[0]?.id === "z");
     expect(api.reads()).toBe(2);
+  });
+
+  it("pins, archives, restores, and deletes through the server, and shows each result", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    const a = { id: "a", cwd: "/code/forgerie" };
+    const find = (id: string) => store.getSnapshot().sessions.find((session) => session.id === id);
+    await store.setPinned(a, true);
+    expect(find("a")?.pinned).toBe(true);
+    await store.setPinned(a, false);
+    await store.setArchived(a, true);
+    expect(find("a")).toMatchObject({ archived: true, pinned: false });
+    await store.setArchived(a, false);
+    expect(find("a")?.archived).toBe(false);
+    await store.deleteArchived({ id: "b", cwd: "/code/forgerie" });
+    expect(find("b")).toBeUndefined();
+    expect(api.writes).toEqual([
+      { path: "/api/sessions/a/pin", body: { cwd: "/code/forgerie" } },
+      { path: "/api/sessions/a/unpin", body: { cwd: "/code/forgerie" } },
+      { path: "/api/sessions/a/archive", body: { cwd: "/code/forgerie" } },
+      { path: "/api/sessions/a/restore", body: { cwd: "/code/forgerie" } },
+      { path: "/api/sessions/bulk/delete-archived", body: { sessions: [{ id: "b", cwd: "/code/forgerie" }] } },
+    ]);
+  });
+
+  it("rejects with the server's reason and leaves the catalog unchanged", async () => {
+    const api = await machine();
+    api.refuse("/api/sessions/a/archive", 400, { error: "Stop current session activity before archiving" });
+    api.refuse("/api/sessions/a/restore", 404, { error: "Session not found" });
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    const a = { id: "a", cwd: "/code/forgerie" };
+    await expect(store.setArchived(a, true)).rejects.toMatchObject({ message: "Stop current session activity before archiving", status: 400 });
+    await expect(store.setArchived(a, false)).rejects.toMatchObject({ status: 404 });
+    expect(store.getSnapshot().sessions.find((session) => session.id === "a")?.archived).toBeUndefined();
+  });
+
+  it("treats a per-session failure in the bulk delete reply as a refusal", async () => {
+    const api = await machine();
+    api.refuse("/api/sessions/bulk/delete-archived", 200, { deleted: true, deletedSessionIds: [], failures: [{ sessionId: "b", error: "Archived session not found" }], generatedAt: "now" });
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    await expect(store.deleteArchived({ id: "b", cwd: "/code/forgerie" })).rejects.toMatchObject({ message: "Archived session not found", status: 404 });
+    expect(store.getSnapshot().sessions.map((session) => session.id)).toEqual(["a", "b"]);
+  });
+
+  it("keeps a confirmed archive when an older snapshot lands after it", async () => {
+    let release = () => {};
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    // The next join reads the catalog before the archive, and its reply is held.
+    api.holdListing(new Promise<void>((resolve) => { release = resolve; }));
+    api.drop();
+    await until(store, () => store.getSnapshot().connection.type === "reconnecting");
+    await vi.waitFor(() => { expect(api.reads()).toBe(2); });
+    await store.setArchived({ id: "a", cwd: "/code/forgerie" }, true);
+    release();
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    expect(store.getSnapshot().sessions.find((session) => session.id === "a")?.archived).toBe(true);
   });
 
   it("fails visibly on a catalog it cannot read, and does not retry", async () => {

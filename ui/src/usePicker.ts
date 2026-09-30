@@ -1,18 +1,27 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { attention, createLocationResolver, rows as boardRows, sections as boardSections } from "./picker/board";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { attention, createLocationResolver, rows as boardRows, sections as boardSections, type Row } from "./picker/board";
 import { createCatalogStore } from "./picker/catalogStore";
+import type { RowCommandKind } from "./picker/commands";
 import { readPrefs, writePrefs, type PickerPrefs } from "./picker/prefs";
+import { createRowActions } from "./picker/rowActions";
+import { writeClipboardText } from "./clipboard";
 import { browserTransport } from "./sessionStore";
-import type { PickerView } from "./ui/Picker";
+import type { PickerActions, PickerView } from "./ui/Picker";
 
 const MINUTE = 60_000;
 const storage = () => { try { return window.localStorage; } catch { return undefined; } };
 
-/** Binding: the only hook that reads the machine catalog. Views get a PickerView. */
-export function usePicker(selectedId: string | undefined) {
+/** Binding: the only hook that reads or writes the machine catalog. Views get a PickerView. */
+export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void } = {}) {
   const [store] = useState(() => createCatalogStore(browserTransport));
+  const onDeleted = useRef(options.onDeleted);
+  useEffect(() => { onDeleted.current = options.onDeleted; }, [options.onDeleted]);
+  const [commands] = useState(() => createRowActions({
+    writes: store, copy: writeClipboardText, onDeleted: (id) => onDeleted.current?.(id),
+  }));
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  useEffect(() => { void store.start(); return store.dispose; }, [store]);
+  const actionState = useSyncExternalStore(commands.subscribe, commands.getSnapshot);
+  useEffect(() => { void store.start(); return () => { store.dispose(); commands.dispose(); }; }, [store, commands]);
   // Shorthand time changes at most once a minute, so re-derive once a minute.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), MINUTE); return () => clearInterval(timer); }, []);
@@ -28,10 +37,18 @@ export function usePicker(selectedId: string | undefined) {
     machines: 1,
     selectedId,
     archivedCount: rows.filter((row) => row.state === "archived").length,
-  }), [state.connection, rows, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId]);
+    toast: actionState.toast,
+    pending: actionState.pending,
+  }), [state.connection, rows, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId, actionState]);
   const find = useCallback((id: string) => {
     const session = state.sessions.find((candidate) => candidate.id === id);
     return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}) } : undefined;
   }, [state.sessions]);
-  return { view, prefs, setPrefs, find, attention: attention(rows), retry: store.retry };
+  const rowActions: Omit<PickerActions, "onSelect" | "onClose"> = useMemo(() => ({
+    onRetry: store.retry,
+    onCommand: (row: Row, kind: RowCommandKind) => void commands.run(kind, { id: row.session.id, cwd: row.session.cwd, name: row.session.name }),
+    onUndo: () => void commands.undo(),
+    onDismissToast: commands.dismiss,
+  }), [store, commands]);
+  return { view, prefs, setPrefs, find, attention: attention(rows), actions: rowActions };
 }

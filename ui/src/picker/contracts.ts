@@ -36,6 +36,10 @@ export const listingSchema = z.object({
 });
 export const asksSchema = z.object({ sessions: z.array(z.object({ id: z.string(), ...blockers })) });
 export const unreadSchema = z.object({ sessions: z.array(z.object({ sessionId: z.string() })) });
+export const deleteArchivedSchema = z.object({
+  deletedSessionIds: z.array(z.string()),
+  failures: z.array(z.object({ sessionId: z.string(), error: z.string() })),
+});
 export const projectsSchema = z.array(z.object({ id: z.string(), name: z.string(), path: z.string() }));
 
 const catalogEventSchema = z.discriminatedUnion("type", [

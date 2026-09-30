@@ -1,5 +1,39 @@
 # Verification and limits
 
+## Session picker, slice 2 (row actions)
+
+Checked on 2026-09-29 against Forgerie on 8504. Every write went to one scratch session that the test created and then deleted for good. No existing session was changed.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | Build, TypeScript, ESLint, and 145 tests passed. `picker/commands.test.ts` covers the menu for each state, archive disabled while the server would refuse it, E, and the touch hold rule. `picker/rowActions.test.ts` covers the 5 s undo offer, a second archive replacing the first, undo after a delete ("Session was already deleted"), refusals that stay until dismissed, one write per session at a time, and copy. `picker/catalogStore.test.ts` runs the writes against a real HTTP server: the request paths and bodies, a refusal leaves the catalog unchanged, a per-session failure in the bulk delete reply, a confirmed archive that survives an older snapshot, and one view update for a burst of 50 live events. `ui/Picker.test.tsx` covers right click, the visible ⋯, the Menu key, delete asking twice, E, a touch hold whose release does not open the session, and the message line. The race test and the hold test were each seen to fail with their fix removed. |
+| Real browser, all four Fold postures, both schemes. | `scripts/row-actions-acceptance.mjs` created a scratch session, then in each of the 8 posture and scheme pairs opened its menu by a real right click, archived it, and pressed Undo. The server state was checked after each step. At folded portrait it then checked: a real touch hold (CDP touch events) opens the menu and does not open the session; pin moves the row to Pinned and the pinned menu is Unpin and Copy; copy reports "Copied workspace path"; E archives the open session; the undo line leaves after 5 s; A shows archived; Restore; Delete asks "Delete for good?", the first press deletes nothing, the second removes the row and the session and closes it. 15 steps, 22 writes, all to the scratch session, no page exceptions. `scripts/picker-acceptance.mjs` (slice 1, read-only) still passes. |
+| Visual review. | Read the menu and undo captures for all 8 pairs, plus the pinned menu and the delete confirmation. One defect was fixed: menu labels sat at the top of their 44 px items. At folded landscape (374 px high) the whole menu scrolls into view. |
+
+Behavior:
+
+- Menus follow the approved sheet. Open or unread: Pin to top, Archive (E), Copy workspace path. Running (streaming, compacting, or running a command): Archive is shown disabled with "Stop the run first", because the server refuses it. Pinned: Unpin, Copy workspace path, because the server refuses to archive a pin. Archived: Restore, Delete permanently, Copy workspace path. Delete asks twice in place.
+- The menu opens by right click, a 500 ms touch hold (10 px travel allowed, ported from the Lit client's `rowPress.ts`), the Menu key or Shift+F10 on the selected row, or the ⋯ shown on the selected, focused, or hovered row. A hold or right click never also opens the session.
+- Change from the sheet: the menu opens as a panel under its row, inside the list, not floating over it. The Lit client moved to the same shape after its floating menu was clipped by the transformed sheet. It pushes the rows below it down.
+- One message line under the list. It holds the undo offer for 5 s after an archive, "Restored …", "Deleted …", or "Copied workspace path" for 2.5 s, or a server refusal until dismissed. A refused clipboard gives the path in the message instead.
+- Archive, restore, and delete send no live event, so the store applies them when the server confirms. A confirmed change also joins a snapshot in flight, so a reconnect cannot undo it on screen.
+- Deleting the open session closes it and clears `?session=`. Archiving the open session keeps it open.
+
+Fixed on the way, from slice 1: the idle page spent about 3.7 s of script in every 5 s. The server sends about 170 `status.update` and 170 `activity.update` frames per 5 s while sessions run, and each rebuilt every row. Unchanged events now leave the state as it was, and live events tell the view at most once per 16 ms. Measured with `scripts/idle-cost.mjs`: 0.26 s of script per 5 s, with 2.7 times more frames arriving during that run. This was also why the first acceptance runs hung.
+
+Not in this slice, and the costs:
+
+- "Stop the run" is in the sheet's menu for running sessions but was not agreed for this slice.
+- Archive does not move to the next session that needs you (inventory 8.7). Archiving the open session leaves it open.
+- The copy fallback for plain HTTP (`document.execCommand`) is untested. The headless run used 127.0.0.1, a secure context. The Fold reaches 8510 over plain HTTP, so it takes the fallback.
+- The real Fold is still untested, including the hold timing against the browser's own long press.
+
+Repeat the browser check from this worktree. It prompts one scratch session once, which costs one model reply:
+
+```sh
+CHROME_BIN=$(command -v chromium) node scripts/row-actions-acceptance.mjs
+```
+
 ## Session picker, slice 1 (read-only, one machine)
 
 Checked on 2026-09-29 against Forgerie on 8504 (3,249 sessions: 944 archived, 2,126 agent-spawned, 12 pinned). No prompt was sent and no production service was restarted.
@@ -22,7 +56,7 @@ Changed beyond the picker: `createSessionStore` takes an optional known session.
 
 Not in this slice, and the costs:
 
-- Row actions (pin, archive, restore, delete, copy path) and the "New" button. The header has no New button, because nothing stands behind it yet.
+- The "New" button. The header has none, because nothing stands behind it yet. Row actions are slice 2.
 - Marking sessions read. Rows show Unread from the server catalog, but opening one does not clear it. The old client on 8504 still clears it.
 - Workspace branch names. Locations come from the project list and the path, so a worktree shows its folder name (`live-session-overlay`), not its branch (`feat/live-session-overlay`). Loading every project's workspaces costs 29 requests.
 - Many machines. The store reads `/api` only.

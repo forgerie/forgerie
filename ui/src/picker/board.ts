@@ -66,6 +66,13 @@ export interface Row {
   /** Shorthand: "<1m", "41m", "2h". While working, the length of the current run. */
   time: string;
   working: boolean;
+  /**
+   * The server's own test for refusing an archive: streaming, compacting, or
+   * running a command (`piSessionService.archive`). Narrower than `working`,
+   * which also counts an active phase with no run behind it. A blocked session
+   * is usually busy too, because the question is a running tool call.
+   */
+  busy: boolean;
   agents: number;
   processes: number;
 }
@@ -158,8 +165,9 @@ export function rows(input: BoardInput): Row[] {
     const group: GroupKind = state === "archived" ? "archived" : session.pinned === true ? "pinned" : state;
     const working = state === "working";
     const since = working ? activity?.activeSince ?? session.modified : session.modified;
+    const busy = status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true;
     return {
-      session, state, group, working,
+      session, state, group, working, busy,
       location: input.locate(session.cwd),
       time: shortAge(since, input.now),
       agents: status?.workingAgents ?? 0,
