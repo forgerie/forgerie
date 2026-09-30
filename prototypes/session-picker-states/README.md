@@ -36,11 +36,13 @@ one pale attention tint for the machine notice.
   and counts.
 - Layout. One row is: marker, title, time on the first line; location and
   live-work counts on the second. Below 320 px the grouping control moves
-  into the overflow menu and the working timer shortens. Thresholds are
-  guesses until measured on the device.
+  into the overflow menu. Thresholds are guesses until measured on the
+  device.
 - State lives in three places only: the group heading, the marker, and the
-  time column (a blue running timer while working). Rows carry no status
-  words.
+  time column. Rows carry no status words.
+- Time is always shorthand (`<1m`, `41m`, `2h`, `3d`, `1w`), never a clock
+  (user, 2026-09-29). An idle row shows how long since it last changed. A
+  working row shows, in blue, how long the current run has lasted.
 
 Things the plan rejects on purpose: state badges in five colors (the old
 client), avatars and initials (chat apps), ALL CAPS group labels, and

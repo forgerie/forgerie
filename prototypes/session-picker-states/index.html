@@ -131,8 +131,6 @@ kbd { font-family: var(--code-font); font-size: var(--code-size); border: 1px so
 .title .untitled { color: var(--muted-foreground); font-weight: 450; }
 .time { grid-column: 3; font-family: var(--code-font); font-size: var(--code-size); color: var(--muted-foreground); font-variant-numeric: tabular-nums; line-height: 1.5rem; white-space: nowrap; }
 .time[data-live] { color: var(--live); }
-.time .short { display: none; }
-@container picker (max-width: 319px) { .time .long { display: none; } .time .short { display: inline; } }
 .rs { grid-column: 2 / span 2; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); row-gap: 0; min-inline-size: 0; font-size: var(--small-text); color: var(--muted-foreground); line-height: 1.375rem; }
 .rs:empty { display: none; }
 .where { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -294,7 +292,8 @@ function rel(iso) {
   if (s < 60) return "now"; if (s < 3600) return `${Math.floor(s / 60)}m`; if (s < 86400) return `${Math.floor(s / 3600)}h`;
   if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`; return `${Math.floor(s / 604800)}w`;
 }
-function elapsed(iso) { const s = Math.round((NOW - Date.parse(iso)) / 1000); const m = Math.floor(s / 60); return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; }
+// Working time in the same shorthand as every other row: <1m, 41m, 2h, 3d.
+function elapsed(iso) { return (NOW - Date.parse(iso)) < 60000 ? "<1m" : rel(iso); }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const PIN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/></svg>';
 const byRecency = (a, b) => Date.parse(b.modified) - Date.parse(a.modified);
@@ -316,7 +315,7 @@ function row(s, o) {
   const dim = s.machine && o.unreachable?.includes(s.machine) ? " data-dim" : "";
   const focus = o.focus === s.id ? " data-focus" : "";
   const work = (s.agents || s.procs) ? `<span class="work">${[s.agents ? `${s.agents} agent${s.agents > 1 ? "s" : ""}` : "", s.procs ? `${s.procs} process${s.procs > 1 ? "es" : ""}` : ""].filter(Boolean).join(" · ")}</span>` : "";
-  const time = s.state === "working" && s.since ? `<span class="time" data-live><span class="long">${elapsed(s.since)}</span><span class="short">${rel(s.since)}</span></span>` : s.state === "starting" ? `<span class="time"></span>` : `<span class="time">${rel(s.modified)}</span>`;
+  const time = s.state === "working" && s.since ? `<span class="time" data-live>${elapsed(s.since)}</span>` : s.state === "starting" ? `<span class="time"></span>` : `<span class="time">${rel(s.modified)}</span>`;
   const sub = [where(s, o), work].filter(Boolean).join("");
   return `<div class="row${o.compact ? " compact" : ""}" role="option" tabindex="0" data-state="${s.state}"${sel}${dis}${dim}${focus} data-id="${s.id}">
     <span class="mark"><i></i></span>
