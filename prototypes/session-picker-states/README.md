@@ -31,18 +31,16 @@ one pale attention tint for the machine notice.
 - Color. The thread already gives two hues a meaning: `--live` blue means
   running, `--destructive` red means failed. The picker uses the same two and
   nothing else. Blocked is not a third color. It is weight: a filled square
-  marker, a 600 title, and the question in the trace voice. Unread is a dot.
-  Open is quiet.
-- Type. Public Sans for titles, headers, and menus. JetBrains Mono for the
-  detail line, times, and counts. The detail line is the transcript's trace
-  line (`> compacting context`), so what a row says about a session reads the
-  same as what the transcript says.
-- Layout. One row is: marker, title, time on the first line; location,
-  live-work counts, and the trace on the second. The second line wraps. Below
-  420 px the trace takes its own line. Below 320 px the grouping control moves
-  into the overflow menu. Thresholds are guesses until measured on the device.
-- The memorable thing. The trace line inside the row. Everything else is
-  restrained so that line carries the state.
+  marker and a 600 title. Unread is a dot. Open is quiet.
+- Type. Public Sans for titles, headers, and menus. JetBrains Mono for times
+  and counts.
+- Layout. One row is: marker, title, time on the first line; location and
+  live-work counts on the second. Below 320 px the grouping control moves
+  into the overflow menu and the working timer shortens. Thresholds are
+  guesses until measured on the device.
+- State lives in three places only: the group heading, the marker, and the
+  time column (a blue running timer while working). Rows carry no status
+  words.
 
 Things the plan rejects on purpose: state badges in five colors (the old
 client), avatars and initials (chat apps), ALL CAPS group labels, and
@@ -87,14 +85,17 @@ Each one is a proposal for review, not a done deal.
 
 ## Rules from review
 
-- No chat text in the picker (user, 2026-09-29). A row shows the session
-  name, its location, and a fixed status word. It never shows the ask
+- No chat text in the picker (user, 2026-09-29). A row never shows the ask
   question, an extension dialog's title, an error message, or the first
-  message. Status words: `needs your answer`, `needs your decision`,
-  `failed`, `working`, `compacting context`, `running a command`,
-  `starting`. A session with no name shows "Untitled session". This
-  replaces inventory items 4.1 (title falls back to the first message) and
-  4.3 (detail line quotes the question or error).
+  message. A session with no name shows "Untitled session". This replaces
+  inventory item 4.1 (title falls back to the first message).
+- No status words in the picker (user, 2026-09-29). The second line holds
+  only the location and the live-work counts. `needs your answer`,
+  `needs your decision`, `failed`, `working`, `compacting context`,
+  `running a command`, and `starting` are gone. This replaces inventory item
+  4.3 (detail line). What is lost: the picker no longer tells an ask from an
+  extension dialog, or compacting and running a command from plain
+  streaming. Both remain visible inside the thread.
 
 ## Open questions
 

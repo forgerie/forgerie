@@ -139,15 +139,7 @@ kbd { font-family: var(--code-font); font-size: var(--code-size); border: 1px so
 .where .br { color: var(--foreground); opacity: 0.8; }
 .where[data-missing] { font-style: italic; }
 .work { font-family: var(--code-font); font-size: var(--code-size); white-space: nowrap; }
-.tr { display: inline-flex; gap: var(--space-2); min-inline-size: 0; max-inline-size: 100%; font-family: var(--code-font); font-size: 0.75rem; }
-.tr .tm { color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
-.tr .tt { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tr[data-tone="error"] .tt { color: var(--destructive); }
-.tr[data-tone="ask"] .tt { color: var(--foreground); }
-.tr .tt[data-live] { background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2s linear infinite; }
-.tr[data-tone="ask"] .tm { color: var(--foreground); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@container picker (max-width: 419px) { .rs .tr { flex-basis: 100%; } }
 .more { position: absolute; inset-inline-end: var(--space-2); inset-block-end: 0.3rem; inline-size: 2rem; block-size: 1.375rem; display: none; place-items: center; border-radius: var(--radius-document); color: var(--muted-foreground); font-weight: 600; letter-spacing: 0.05em; }
 .row[aria-selected="true"] .more, .row:focus-within .more, .row[data-focus] .more { display: grid; }
 .row[aria-selected="true"] .rs, .row:focus-within .rs, .row[data-focus] .rs { padding-inline-end: 2.25rem; }
@@ -318,15 +310,6 @@ function where(s, o) {
   const head = multi ? `${esc(s.machine)} / ${esc(s.project)}` : esc(s.project);
   return `<span class="where">${head}${br ? ` · ${br}` : ""}</span>`;
 }
-function trace(s) {
-  // Fixed status words only. No text from the transcript: not the question,
-  // not the dialog title, not the error message.
-  if (s.state === "blocked") return `<span class="tr" data-tone="ask"><span class="tm">?</span><span class="tt">${s.dialog ? "needs your decision" : "needs your answer"}</span></span>`;
-  if (s.state === "errored") return `<span class="tr" data-tone="error"><span class="tm">&gt;</span><span class="tt">failed</span></span>`;
-  if (s.state === "working") return `<span class="tr"><span class="tm">&gt;</span><span class="tt" data-live>${esc(s.detail ?? "working")}</span></span>`;
-  if (s.state === "starting") return `<span class="tr"><span class="tm">&gt;</span><span class="tt" data-live>starting</span></span>`;
-  return "";
-}
 function row(s, o) {
   const dis = s.missing ? ' aria-disabled="true"' : "";
   const sel = o.selected === s.id ? ' aria-selected="true"' : ' aria-selected="false"';
@@ -334,7 +317,7 @@ function row(s, o) {
   const focus = o.focus === s.id ? " data-focus" : "";
   const work = (s.agents || s.procs) ? `<span class="work">${[s.agents ? `${s.agents} agent${s.agents > 1 ? "s" : ""}` : "", s.procs ? `${s.procs} process${s.procs > 1 ? "es" : ""}` : ""].filter(Boolean).join(" · ")}</span>` : "";
   const time = s.state === "working" && s.since ? `<span class="time" data-live><span class="long">${elapsed(s.since)}</span><span class="short">${rel(s.since)}</span></span>` : s.state === "starting" ? `<span class="time"></span>` : `<span class="time">${rel(s.modified)}</span>`;
-  const sub = [where(s, o), work, trace(s)].filter(Boolean).join("");
+  const sub = [where(s, o), work].filter(Boolean).join("");
   return `<div class="row${o.compact ? " compact" : ""}" role="option" tabindex="0" data-state="${s.state}"${sel}${dis}${dim}${focus} data-id="${s.id}">
     <span class="mark"><i></i></span>
     <div class="rt"><span class="title">${s.pinned ? `<span class="pin">${PIN}</span> ` : ""}${s.title ? esc(s.title) : `<span class="untitled">Untitled session</span>`}</span></div>
@@ -503,7 +486,7 @@ const COV = [
   ["3.8", "cwd to project, workspace, branch", "§3 main checkout, worktree branch, unknown workspace"],
   ["3.9–3.11", "Archived hidden by default, collapse persisted, selected group auto-expands", "§2 archived revealed, all collapsed; §6 A key"],
   ["3.12", "Loading, empty, all clear", "§2"],
-  ["4.1–4.7", "Title, location chip, detail line, live-work counts, pin, time or timer, tone", "§3 every row. Changed: the detail line is a fixed status word. The question, dialog title, and error text stay in the thread. An unnamed session shows 'Untitled session', not its first message."],
+  ["4.1–4.7", "Title, location chip, detail line, live-work counts, pin, time or timer, tone", "§3 every row. Changed by review: no detail line and no status words. State shows as group, marker, and running timer. An unnamed session shows Untitled session."],
   ["4.8", "Row density setting", "§3 compact density. Open question in README."],
   ["4.9", "Rows whose workspace is gone", "§3 workspace removed"],
   ["5.1–5.2", "Unread set, mark read when chat is seen", "§3 unread. Read rule unchanged."],
