@@ -28,7 +28,7 @@ Not in this slice, and the costs:
 - Many machines. The store reads `/api` only.
 - The real Fold keyboard and touch gestures are still untested. There is no swipe to open the sheet.
 
-Known issue for review: 12 pinned sessions fill the first screen of the sheet in every posture, so Blocked and Working groups start below the fold.
+Pinned cap (user, 2026-09-29): the Pinned group shows three pins, then "Show all 12". The header keeps the full count. A pin that is blocked, errored, working, or unread, and the open session, always show, even past three, so the cap never hides a request. "Show all" resets on every load, like "Show archived". Checked with the live 12 pins at all four postures in both schemes: the Working group now starts on the first screen of the sheet in every posture. Before the cap, 12 pins filled the first screen and pushed Working below the fold.
 
 Repeat the browser check from this worktree:
 
