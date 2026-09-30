@@ -12,6 +12,7 @@ Checked on 2026-09-29 against Forgerie on 8504. Every write went to one scratch 
 
 Behavior:
 
+- The "Open · N · by age" heading is gone (user, 2026-09-29: unnecessary). The age bands follow the state groups directly, and each keeps its own count.
 - Menus follow the approved sheet. Open or unread: Pin to top, Archive (E), Copy workspace path. Running (streaming, compacting, or running a command): Archive is shown disabled with "Stop the run first", because the server refuses it. Pinned: Unpin, Copy workspace path, because the server refuses to archive a pin. Archived: Restore, Delete permanently, Copy workspace path. Delete asks twice in place.
 - The menu opens by right click, a 500 ms touch hold (10 px travel allowed, ported from the Lit client's `rowPress.ts`), the Menu key or Shift+F10 on the selected row, or the ⋯ shown on the selected, focused, or hovered row. A hold or right click never also opens the session.
 - Change from the sheet: the menu opens as a panel under its row, inside the list, not floating over it. The Lit client moved to the same shape after its floating menu was clipped by the transformed sheet. It pushes the rows below it down.

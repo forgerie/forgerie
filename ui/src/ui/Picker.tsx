@@ -143,8 +143,7 @@ export function Picker({ view, prefs, onPrefs, actions }: {
   const change = onPrefs;
 
   // The selected row's group opens, so the current session is never hidden.
-  const selectedKey = useMemo(() => view.sections.find((section) => section.type === "group"
-    && section.rows.some((row) => row.session.id === view.selectedId))?.key, [view.sections, view.selectedId]);
+  const selectedKey = useMemo(() => view.sections.find((section) => section.rows.some((row) => row.session.id === view.selectedId))?.key, [view.sections, view.selectedId]);
   const collapsed = useMemo(() => {
     if (!selectedKey || !prefs.collapsed.has(selectedKey)) return prefs.collapsed;
     const next = new Set(prefs.collapsed); next.delete(selectedKey); return next;
@@ -231,11 +230,9 @@ export function Picker({ view, prefs, onPrefs, actions }: {
     </div> : empty ? <div className="picker-state"><strong>No sessions yet</strong><span>Start one and it appears here.</span></div>
     : <div className="picker-list" role="listbox" aria-label="Sessions" tabIndex={0} ref={listRef}
         aria-activedescendant={view.selectedId ? `picker-row-${view.selectedId}` : undefined}>
-      {view.sections.every((section) => section.type === "label" || section.kind === "band" || section.kind === "archived" || section.kind === "project")
+      {view.sections.every((section) => section.kind === "band" || section.kind === "archived" || section.kind === "project")
         && prefs.grouping === "state" ? <p className="picker-clear">Nothing is waiting for you</p> : null}
-      {view.sections.map((section) => section.type === "label"
-        ? <div key={section.key} className="picker-band">{section.text}</div>
-        : <div key={section.key} className="picker-group" data-kind={section.kind}>
+      {view.sections.map((section) => <div key={section.key} className="picker-group" data-kind={section.kind}>
           <button className="picker-group-header" aria-expanded={!collapsed.has(section.key)} onClick={() => toggle(section.key)}>
             <span className="picker-chevron" aria-hidden="true">▾</span><span className="picker-group-label">{section.label}</span>
             <span className="picker-count">{section.rows.length + (section.hidden ?? 0)}</span>

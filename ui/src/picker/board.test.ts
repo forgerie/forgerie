@@ -76,7 +76,7 @@ describe("sections", () => {
   });
   it("orders groups by triage and splits Open into age bands", () => {
     const list = sections(all, { grouping: "state", showArchived: false, now: NOW });
-    expect(list.map((section) => section.key)).toEqual(["pinned", "blocked", "open-label", "hour", "month"]);
+    expect(list.map((section) => section.key)).toEqual(["pinned", "blocked", "hour", "month"]);
   });
   it("shows Archived only when asked", () => {
     expect(sections(all, { grouping: "state", showArchived: true, now: NOW }).at(-1)?.key).toBe("archived");
@@ -84,7 +84,7 @@ describe("sections", () => {
   it("groups by project as the other mode", () => {
     const list = sections(all, { grouping: "project", showArchived: false, now: NOW });
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ type: "group", label: "forgerie" });
+    expect(list[0]).toMatchObject({ kind: "project", label: "forgerie" });
   });
   it("walks only expanded groups, in drawn order", () => {
     const list = sections(all, { grouping: "state", showArchived: false, now: NOW });
@@ -106,7 +106,7 @@ describe("sections", () => {
     expect(list[0]).toMatchObject({ key: "pinned", hidden: 9 });
     const expanded = sections(pins, { grouping: "state", showArchived: false, now: NOW, allPinned: true });
     expect(expanded[0]).not.toHaveProperty("hidden");
-    expect(expanded[0]?.type === "group" && expanded[0].rows).toHaveLength(12);
+    expect(expanded[0]?.rows).toHaveLength(12);
   });
   it("reports blocked over unread for the closed picker", () => {
     expect(attention(all)).toBe("blocked");

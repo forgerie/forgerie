@@ -76,11 +76,14 @@ export interface Row {
   agents: number;
   processes: number;
 }
-export type Section =
-  | { type: "label"; key: string; text: string }
-  | { type: "group"; key: string; label: string; kind: GroupKind | "band" | "project"; rows: Row[];
-      /** Rows left out by the pinned cap. Present only on a capped Pinned group. */
-      hidden?: number };
+export interface Section {
+  key: string;
+  label: string;
+  kind: GroupKind | "band" | "project";
+  rows: Row[];
+  /** Rows left out by the pinned cap. Present only on a capped Pinned group. */
+  hidden?: number;
+}
 export type Grouping = "state" | "project";
 
 /**
@@ -182,7 +185,8 @@ const byPinnedThenRecency = (a: Row, b: Row) =>
 
 /**
  * The list in drawn order. Empty groups are omitted. In state mode the Open
- * group is replaced by its age bands under one label. Archived appears only
+ * group is replaced by its age bands, with no heading of its own (user,
+ * 2026-09-29: "Open · 164 · by age" was unnecessary). Archived appears only
  * when asked for.
  */
 /**
@@ -212,7 +216,7 @@ export function sections(all: readonly Row[], options: { grouping: Grouping; sho
     return [...byProject.values()]
       .map((groupRows) => groupRows.sort(byPinnedThenRecency))
       .sort((a, b) => (a[0]?.location.project ?? "").localeCompare(b[0]?.location.project ?? ""))
-      .map((groupRows) => ({ type: "group", key: `project:${groupRows[0]?.location.projectKey ?? ""}`, label: groupRows[0]?.location.project ?? "", kind: "project", rows: groupRows }));
+      .map((groupRows) => ({ key: `project:${groupRows[0]?.location.projectKey ?? ""}`, label: groupRows[0]?.location.project ?? "", kind: "project", rows: groupRows }));
   }
   const out: Section[] = [];
   for (const group of GROUPS) {
@@ -220,14 +224,13 @@ export function sections(all: readonly Row[], options: { grouping: Grouping; sho
     if (groupRows.length === 0) continue;
     if (group.kind === "pinned" && options.allPinned !== true) {
       const capped = capPinned(groupRows, options.selectedId);
-      out.push({ type: "group", key: group.kind, label: group.label, kind: group.kind, rows: capped.rows, ...(capped.hidden > 0 ? { hidden: capped.hidden } : {}) });
+      out.push({ key: group.kind, label: group.label, kind: group.kind, rows: capped.rows, ...(capped.hidden > 0 ? { hidden: capped.hidden } : {}) });
       continue;
     }
-    if (group.kind !== "open") { out.push({ type: "group", key: group.kind, label: group.label, kind: group.kind, rows: groupRows }); continue; }
-    out.push({ type: "label", key: "open-label", text: `Open · ${String(groupRows.length)} · by age` });
+    if (group.kind !== "open") { out.push({ key: group.kind, label: group.label, kind: group.kind, rows: groupRows }); continue; }
     for (const band of AGE_BANDS) {
       const bandRows = groupRows.filter((row) => ageBand(row.session.modified, options.now) === band.kind);
-      if (bandRows.length > 0) out.push({ type: "group", key: band.kind, label: band.label, kind: "band", rows: bandRows });
+      if (bandRows.length > 0) out.push({ key: band.kind, label: band.label, kind: "band", rows: bandRows });
     }
   }
   return out;
@@ -235,7 +238,7 @@ export function sections(all: readonly Row[], options: { grouping: Grouping; sho
 
 /** Rows a keyboard walks: expanded groups only, in drawn order. */
 export function navigable(list: readonly Section[], collapsed: ReadonlySet<string>): Row[] {
-  return list.flatMap((section) => section.type === "group" && !collapsed.has(section.key) ? section.rows : []);
+  return list.flatMap((section) => collapsed.has(section.key) ? [] : section.rows);
 }
 
 /** The one mark the closed picker can show. Blocked outranks unread. */

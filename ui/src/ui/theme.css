@@ -280,8 +280,6 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-state strong { color: var(--foreground); font-size: var(--text-size); font-weight: 500; }
 .picker-state button { margin: 0; justify-self: center; }
 .picker-clear { margin: 0; padding: var(--space-4) var(--space-3) var(--space-2); text-align: center; font-weight: 500; }
-.picker-band { display: flex; align-items: baseline; gap: var(--space-2); padding: var(--space-3) var(--space-3) 0; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--code-size); }
-.picker-band::after { content: ""; flex: 1; align-self: center; border-block-end: 1px solid var(--line); }
 .picker-group-header { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: 2.5rem; padding: 0 var(--space-3); border: 0; background: transparent; color: var(--muted-foreground); font-size: var(--small-text); text-align: start; }
 .picker-group-header:hover { color: var(--foreground); }
 .picker-chevron { font-family: var(--code-font); font-size: 0.7rem; color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); transition: transform 150ms; }
