@@ -48,6 +48,9 @@ Set `APP_URL` for another port. Set `SHOT_DIR` to change the screenshot director
 | Composer and session binding. | Tests exercise explicit buttons and Enter, ordinary-send blocking, ask precedence, one input, failure restoration, and Stop. The two ask-transition regressions failed before the recovery fix. |
 | Browser fixtures. | 72 scenario, theme, and size combinations passed. The script checked explicit slash selection, queued/running/completed transitions, queue clearing, preserved drafts across Fold transitions, no overflow, and no API mutations or browser exceptions. |
 | Visual review. | Queued, running, and complete captures cover all four Fold postures in both themes. The notice, Stop, queue clearing, completion details, and composer remain reachable. |
+| Running client. | After integration, the HTTPS client on `https://zao.hummingbird-lake.ts.net:8510/` passed all 72 fixture combinations again. Read-only real history matched 135 tool calls, 2 failures, and 28 reasoning parts, with no overflow or browser exception. Build, lint, and all 343 tests also passed in the integrated worktree. |
+
+The feature worktree and branch were removed. Only the standalone MVP dev server remains running. Main stays at `96d96310`; no production service restarted.
 
 Independent review found two ask-transition defects in draft restoration. Both regression tests failed before the fix. The follow-up review verified the fixes, session boundaries, and single-attempt mutations, with no further serious finding. The existing ask browser check also passed.
 
