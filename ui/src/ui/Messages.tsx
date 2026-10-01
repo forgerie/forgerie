@@ -4,6 +4,7 @@ import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
 import { ChainOfThoughtGroup, ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
 import { UserMessageAttachments } from "./Attachments";
+import { ReplyGallery } from "./ImageGallery";
 
 // A shared prefix groups consecutive reasoning and tools. Text stays outside.
 const groupAssistantParts = groupPartByType({
@@ -39,6 +40,8 @@ export function AssistantMessage() {
               ? <TraceLine live label="working" /> : <MarkdownText />;
             case "reasoning": return <MarkdownText />;
             case "tool-call": return <ToolCall {...part} />;
+            // Images gather in the reply gallery below the text.
+            case "image": return null;
             case "indicator": return <WorkingLine />;
             default: return null;
           }
@@ -48,6 +51,7 @@ export function AssistantMessage() {
         <ErrorPrimitive.Message />
       </ErrorPrimitive.Root></MessagePrimitive.Error>
     </div>
+    <ReplyGallery />
     <ActionBarPrimitive.Root hideWhenRunning autohide="never" className="message-actions">
       <ResponseCopy />
     </ActionBarPrimitive.Root>

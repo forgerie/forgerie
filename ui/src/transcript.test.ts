@@ -228,3 +228,43 @@ describe("event parsing", () => {
     expect(parseEvent({ type: "tool.end", toolCallId: "a", toolName: "bash", text: "", isError: false, seq: 3 })).toMatchObject({ seq: 3 });
   });
 });
+
+describe("images", () => {
+  const png = { type: "image", mimeType: "image/png", data: "aGk=" };
+  const pngUrl = "data:image/png;base64,aGk=";
+  const imageResult = (id: string, ...content: unknown[]): PiMessage =>
+    ({ role: "toolResult", toolCallId: id, toolName: "read", content: [{ type: "text", text: "Read image file" }, ...content], timestamp: 9 });
+  const doneImages = (state: Transcript) => tools(state).map((part) => part.state.type === "done" ? part.state.images : undefined);
+
+  it("keeps tool images from history beside the textual output", () => {
+    const state = fromHistory([user("look"), asking(2, call("a", "read", { path: "a.png" })),
+      imageResult("a", png, { type: "image", mimeType: "image/svg+xml", data: "PHN2Zz4=" }, { type: "image", mimeType: "image/png" })]);
+    expect(doneImages(state)).toEqual([[pngUrl]]);
+    expect(tools(state)[0]!.state).toMatchObject({ output: "Read image file\n[image]\n[image]\n[image]" });
+  });
+  it("takes live tool images from the event's raw content", () => {
+    let state = fromHistory([user("look"), asking(2, call("a", "read"))], true);
+    state = apply(state, { type: "tool.end", toolCallId: "a", toolName: "read", text: "Read image file\n[image]", isError: false,
+      content: [{ type: "text", text: "Read image file" }, png] });
+    expect(doneImages(state)).toEqual([[pngUrl]]);
+    // The persisted result that follows describes the same execution once.
+    state = apply(state, { type: "message.end", message: imageResult("a", png) });
+    expect(doneImages(state)).toEqual([[pngUrl]]);
+  });
+  it("carries no image list when a tool returned none", () => {
+    const state = fromHistory([user("go"), asking(2, call("a")), result("a", "ok")]);
+    expect(doneImages(state)).toEqual([undefined]);
+    expect(convertMessage(state.messages[1]!).content[0]).toMatchObject({ artifact: { state: "done" } });
+  });
+  it("converts tool images onto the artifact and assistant images into image parts", () => {
+    const state = fromHistory([user("draw"), asking(2, call("a", "read")), imageResult("a", png),
+      { role: "assistant", content: [{ type: "text", text: "Here" }, png], timestamp: 10 }]);
+    expect(convertMessage(state.messages[1]!).content[0]).toMatchObject({ artifact: { state: "done", images: [pngUrl] } });
+    expect(convertMessage(state.messages[2]!).content).toEqual([{ type: "text", text: "Here" }, { type: "image", image: pngUrl }]);
+  });
+  it("keeps an image-only assistant reply instead of dropping it as empty", () => {
+    const state = fromHistory([user("draw"), { role: "assistant", content: [png], timestamp: 2 }]);
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]!.parts).toEqual([{ type: "image", src: pngUrl }]);
+  });
+});

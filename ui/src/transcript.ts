@@ -1,5 +1,6 @@
 import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
 import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contracts";
+import { imageSource } from "./images";
 
 /**
  * One tool execution. A call id owns exactly one state, whether the call
@@ -8,11 +9,13 @@ import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contract
 export type ToolState =
   | { type: "pending" }
   | { type: "running"; output: string }
-  | { type: "done"; output: string; isError: boolean }
+  | { type: "done"; output: string; isError: boolean; images?: readonly string[] }
   | { type: "interrupted" };
 export type TranscriptPart =
   | { type: "text"; text: string }
   | { type: "thinking"; text: string }
+  /** An image the assistant itself produced. User images are attachments. */
+  | { type: "image"; src: string }
   | { type: "tool"; id: string; name: string; args: unknown; state: ToolState };
 export interface TranscriptMessage {
   id: string;
@@ -35,13 +38,24 @@ type ToolPart = Extract<TranscriptPart, { type: "tool" }>;
 function keyOf(message: PiMessage): string | undefined {
   return message.timestamp === undefined ? undefined : `${message.role}:${message.timestamp}`;
 }
+/** Renderable images in tool output, as data URLs. Unsupported or empty parts are skipped. */
+export function imagesOf(content: unknown): readonly string[] {
+  if (!Array.isArray(content)) return [];
+  return partsOf({ role: "toolResult", content }).flatMap((part) => {
+    const src = part.type === "image" ? imageSource(part) : undefined;
+    return src ? [src] : [];
+  });
+}
 function toParts(message: PiMessage): TranscriptPart[] {
   const parts = partsOf(message).flatMap((part): TranscriptPart[] => {
     switch (part.type) {
       case "text": return part.text === "" ? [] : [{ type: "text", text: part.text }];
       case "thinking": return part.thinking.trim() === "" ? [] : [{ type: "thinking", text: part.thinking }];
       case "toolCall": return [{ type: "tool", id: part.id, name: part.name, args: part.arguments, state: { type: "pending" } }];
-      case "image": return [];
+      case "image": {
+        const src = message.role === "assistant" ? imageSource(part) : undefined;
+        return src ? [{ type: "image", src }] : [];
+      }
     }
   });
   const hasText = parts.some((part) => part.type === "text");
@@ -52,9 +66,10 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   if (role !== "user" && role !== "assistant" && role !== "system") return undefined;
   const parts = toParts(message);
   const attachments: CompleteAttachment[] = role === "user" ? partsOf(message).flatMap((part, index) => {
-    if (part.type !== "image" || !part.data || !["image/jpeg", "image/png", "image/gif", "image/webp"].includes(part.mimeType ?? "")) return [];
+    const image = part.type === "image" ? imageSource(part) : undefined;
+    if (part.type !== "image" || !image) return [];
     return [{ id: `${id}-image-${index}`, type: "image", name: `Image ${index + 1}`, contentType: part.mimeType,
-      status: { type: "complete" }, content: [{ type: "image", image: `data:${part.mimeType};base64,${part.data}` }] }];
+      status: { type: "complete" }, content: [{ type: "image", image }] }];
   }) : [];
   if (parts.length === 0 && attachments.length === 0) return undefined;
   const failure = role !== "assistant" ? undefined
@@ -81,9 +96,10 @@ function toolMessage(state: Transcript, part: ToolPart): Transcript {
   return { ...state, nextId: state.nextId + 1,
     messages: [...state.messages, { id: `tool-${state.nextId}`, role: "assistant", parts: [part] }] };
 }
-function finishTool(state: Transcript, id: string | undefined, name: string, output: string, isError: boolean): Transcript {
+function finishTool(state: Transcript, id: string | undefined, name: string, output: string, isError: boolean,
+  images: readonly string[]): Transcript {
   if (!id) return state;
-  const done: ToolState = { type: "done", output, isError };
+  const done: ToolState = { type: "done", output, isError, ...(images.length ? { images } : {}) };
   const messages = mapTool(state.messages, id, (part) => ({ ...part, state: done }));
   return messages ? { ...state, messages } : toolMessage(state, { type: "tool", id, name, args: undefined, state: done });
 }
@@ -124,7 +140,7 @@ function appendLive(state: Transcript, type: "text" | "thinking", text: string):
   return { ...state, messages: state.messages.map((message) => message === live ? { ...live, parts } : message) };
 }
 function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): Transcript {
-  if (raw.role === "toolResult") return finishTool(state, raw.toolCallId, raw.toolName ?? "tool", outputOf(raw), raw.isError === true);
+  if (raw.role === "toolResult") return finishResult(state, raw);
   const key = keyOf(raw);
   if (key !== undefined && state.messages.some((message) => message.key === key)) return state;
   const parsed = asMessage(raw, `message-${state.nextId}`);
@@ -141,6 +157,9 @@ function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): 
     : state.messages.flatMap((current) => current !== replaced ? [current] : empty ? [] : [next]);
   return { ...state, nextId: state.nextId + 1, liveId, messages, error: raw.errorMessage ?? state.error };
 }
+function finishResult(state: Transcript, raw: PiMessage): Transcript {
+  return finishTool(state, raw.toolCallId, raw.toolName ?? "tool", outputOf(raw), raw.isError === true, imagesOf(raw.content));
+}
 export function messageText(message: TranscriptMessage): string {
   return message.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
 }
@@ -149,7 +168,7 @@ export function fromHistory(history: readonly PiMessage[], isRunning = false): T
   let state: Transcript = { messages: [], nextId: 0, isRunning };
   history.forEach((raw, index) => {
     const parsed = raw.role === "toolResult" ? undefined : asMessage(raw, `history-${index}`);
-    state = raw.role === "toolResult" ? finishTool(state, raw.toolCallId, raw.toolName ?? "tool", outputOf(raw), raw.isError === true)
+    state = raw.role === "toolResult" ? finishResult(state, raw)
       : parsed ? { ...state, messages: [...state.messages, reconcileTools(parsed, state.messages)] } : state;
   });
   // Only the current turn of a running session can still have open tools.
@@ -202,7 +221,7 @@ export function reduceEvent(state: Transcript, event: SessionEvent): Transcript 
         ? part : { ...part, state: { type: "running", output: event.text } });
       return messages ? { ...state, messages } : state;
     }
-    case "tool.end": return finishTool(state, event.toolCallId, event.toolName, event.text, event.isError);
+    case "tool.end": return finishTool(state, event.toolCallId, event.toolName, event.text, event.isError, imagesOf(event.content));
     case "message.append":
     case "message.end": return event.message ? applyMessage(state, event.message, event.type === "message.append") : state;
   }
@@ -245,7 +264,7 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
 }
 
 /** UI-only state of a tool call, carried as the part's artifact. */
-export type ToolArtifact = { state: ToolState["type"] };
+export type ToolArtifact = { state: ToolState["type"]; images?: readonly string[] };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role !== "assistant") {
     return { id: message.id, role: message.role, content: [{ type: "text", text: messageText(message) }],
@@ -257,10 +276,12 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
       switch (part.type) {
         case "text": return { type: "text", text: part.text };
         case "thinking": return { type: "reasoning", text: part.text };
+        case "image": return { type: "image", image: part.src };
         case "tool": return {
           type: "tool-call", toolCallId: part.id, toolName: part.name,
           args: isArgs(part.args) ? part.args : {},
-          artifact: { state: part.state.type } satisfies ToolArtifact,
+          artifact: { state: part.state.type, ...(part.state.type === "done" && part.state.images
+            ? { images: part.state.images } : {}) } satisfies ToolArtifact,
           ...toolResult(part.state),
         };
       }

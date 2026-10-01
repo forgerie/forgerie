@@ -5,6 +5,7 @@ import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react"
 import { useState, type ReactNode } from "react";
 import type { ToolArtifact, ToolState } from "../transcript";
 import { clipOutput, formatToolArgs, summarizeToolArgs } from "../toolSummary";
+import { ImageGallery, useReplyImages } from "./ImageGallery";
 
 function TraceText({ live, label, detail }: { live: boolean; label: string; detail?: string }) {
   return <span className="trace-text" data-live={live || undefined}>
@@ -60,17 +61,27 @@ function outputText(result: unknown): string {
 }
 
 /** Fallback card for every tool: name, argument summary, expandable input and output. */
-export function ToolCall({ toolName, args, result, isError, artifact }:
-  Pick<ToolCallMessagePartProps, "toolName" | "args" | "result" | "isError" | "artifact">) {
+export function ToolCall({ toolCallId, toolName, args, result, isError, artifact }:
+  Pick<ToolCallMessagePartProps, "toolCallId" | "toolName" | "args" | "result" | "isError" | "artifact">) {
   const view = toolView({ artifact, result, isError });
   const summary = summarizeToolArgs(args);
   return <Disclosure live={isLive(view)} label={toolLabels[view]} detail={summary ? `${toolName} ${summary}` : toolName}
     className="tool-call" {...(view === "failed" ? { tone: "error" as const } : {})}>
-    {(open) => open ? <ToolBody view={view} input={formatToolArgs(args)} output={outputText(result)} /> : null}
+    {(open) => open ? <ToolBody view={view} input={formatToolArgs(args)} output={outputText(result)}>
+      <ToolImages toolCallId={toolCallId} />
+    </ToolBody> : null}
   </Disclosure>;
 }
 
-function ToolBody({ view, input, output }: { view: ToolView; input: string; output: string }) {
+/** This call's images. They open inside the reply's full set. */
+function ToolImages({ toolCallId }: { toolCallId: string }) {
+  const browse = useReplyImages();
+  const images = browse.filter((image) => image.toolCallId === toolCallId);
+  return images.length > 0 ? <ImageGallery images={images} browse={browse}
+    label={`${images.length} ${images.length === 1 ? "image" : "images"} from this tool`} /> : null;
+}
+
+function ToolBody({ view, input, output, children }: { view: ToolView; input: string; output: string; children?: ReactNode }) {
   const clipped = clipOutput(output);
   const empty = view === "interrupted" ? "No result. The run ended before this tool finished."
     : isLive(view) ? "Waiting for output." : "No output.";
@@ -84,6 +95,7 @@ function ToolBody({ view, input, output }: { view: ToolView; input: string; outp
       {output ? <pre className="trace-pre" tabIndex={0} data-tone={view === "failed" ? "error" : undefined}>{clipped.text}</pre>
         : <p className="trace-empty">{empty}</p>}
       {clipped.hidden > 0 ? <p className="trace-empty">{clipped.hidden.toLocaleString()} more characters not shown.</p> : null}
+      {children}
     </section>
   </>;
 }

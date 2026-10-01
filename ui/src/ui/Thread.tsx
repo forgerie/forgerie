@@ -7,11 +7,12 @@ import type { MentionSource } from "../mentionSource";
 import { AssistantMessage, SystemMessage, UserMessage } from "./Messages";
 import type { CommandBinding } from "./SlashCommands";
 import { CommandResultPanel, type CommandResultBinding } from "./CommandResultPanel";
+import { ImageViewerProvider } from "./ImageViewer";
 
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode.
 export function Thread({ ask, mentions, commands, commandResult }: { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding }) {
-  return <ThreadPrimitive.Root className="thread">
+  return <ImageViewerProvider><ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
         <AuiIf condition={(s) => s.thread.isLoading && s.thread.messages.length === 0}>
@@ -35,5 +36,5 @@ export function Thread({ ask, mentions, commands, commandResult }: { ask?: AskBi
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>
-  </ThreadPrimitive.Root>;
+  </ThreadPrimitive.Root></ImageViewerProvider>;
 }

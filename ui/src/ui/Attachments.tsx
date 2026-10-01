@@ -1,20 +1,23 @@
 // Adapted from assistant-ui's attachment registry. See THIRD_PARTY_NOTICES.md.
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useState } from "react";
 import { AttachmentPrimitive, ComposerPrimitive, MessagePrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
 import { FileTextIcon, PlusIcon, XIcon } from "lucide-react";
+import { attachmentImage, attachmentImages, type ViewerImage } from "../images";
+import { useImageViewer } from "./ImageViewer";
 
-/** System molecule: one file chip, shared by composer and user messages. */
-function Attachment() {
+/**
+ * System molecule: one file chip, shared by composer and user messages.
+ * `browse` is the image set the viewer moves through; without it the chip's
+ * own image opens alone.
+ */
+function Attachment({ browse }: { browse?: readonly ViewerImage[] }) {
   const aui = useAui();
+  const openViewer = useImageViewer();
   const attachment = useAuiState((s) => s.attachment);
   const removable = aui.attachment.source !== "message";
   const disabled = useAuiState((s) => s.thread.isDisabled || s.composer.submission !== undefined);
   const [source, setSource] = useState<string>();
-  const [open, setOpen] = useState(false);
-  const dialog = useRef<HTMLDialogElement>(null);
-  const image = attachment.content?.find((part) => part.type === "image");
-  const inline = image?.type === "image" && /^data:image\/(jpeg|png|gif|webp);base64,/.test(image.image) ? image.image : undefined;
+  const inline = attachmentImage(attachment);
   const file = attachment.file;
   useEffect(() => {
     if (attachment.type === "image" && file && typeof URL.createObjectURL === "function") {
@@ -25,12 +28,17 @@ function Attachment() {
     setSource(inline);
     return undefined;
   }, [file, inline, attachment.type]);
-  useEffect(() => { if (open) dialog.current?.showModal(); }, [open]);
+  const open = () => {
+    if (!source) return;
+    const index = browse?.findIndex((image) => image.id === attachment.id) ?? -1;
+    if (browse && index >= 0) openViewer(browse, index);
+    else openViewer([{ id: attachment.id, src: source, alt: attachment.name }], 0);
+  };
   const failure = attachment.status.type === "incomplete" && attachment.status.reason === "error" ? attachment.status : undefined;
   const failed = failure !== undefined;
   const uploading = attachment.status.type === "running";
   return <AttachmentPrimitive.Root className="attachment" data-error={failed || undefined}>
-    {source ? <button type="button" className="attachment-image" aria-label={`Preview ${attachment.name}`} onClick={() => setOpen(true)}>
+    {source ? <button type="button" className="attachment-image" aria-label={`Preview ${attachment.name}`} onClick={open}>
       <img src={source} alt={attachment.name} />
     </button> : <FileTextIcon aria-hidden className="attachment-file" size={20} />}
     <div className="attachment-info">
@@ -40,10 +48,6 @@ function Attachment() {
     </div>
     {removable && <AttachmentPrimitive.Remove className="icon-button quiet-button attachment-remove" disabled={disabled}
       aria-label={`Remove ${attachment.name}`} title={`Remove ${attachment.name}`}><XIcon aria-hidden size={14} /></AttachmentPrimitive.Remove>}
-    {open && source && createPortal(<dialog ref={dialog} className="attachment-dialog" onClose={() => setOpen(false)} aria-label={attachment.name}>
-      <button type="button" className="icon-button quiet-button" autoFocus aria-label="Close image preview" onClick={() => dialog.current?.close()}><XIcon aria-hidden size={18} /></button>
-      <img src={source} alt={attachment.name} />
-    </dialog>, document.body)}
   </AttachmentPrimitive.Root>;
 }
 
@@ -51,7 +55,9 @@ export function ComposerAttachments() {
   return <div className="composer-attachments"><ComposerPrimitive.Attachments>{() => <Attachment />}</ComposerPrimitive.Attachments></div>;
 }
 export function UserMessageAttachments() {
-  return <div className="message-attachments"><MessagePrimitive.Attachments>{() => <Attachment />}</MessagePrimitive.Attachments></div>;
+  const attachments = useAuiState((s) => s.message.attachments);
+  const browse = useMemo(() => attachmentImages(attachments ?? []), [attachments]);
+  return <div className="message-attachments"><MessagePrimitive.Attachments>{() => <Attachment browse={browse} />}</MessagePrimitive.Attachments></div>;
 }
 export function AddAttachment({ disabled }: { disabled: boolean }) {
   return <ComposerPrimitive.AddAttachment className="icon-button quiet-button composer-add-attachment" disabled={disabled} multiple

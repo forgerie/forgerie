@@ -192,12 +192,36 @@ button:disabled { cursor: default; opacity: 0.4; }
 .attachment-file, .attachment-remove { flex: none; }
 .attachment[data-error] { border-color: var(--destructive); }
 .attachment-error { font-size: var(--label-text); color: var(--destructive); overflow-wrap: anywhere; }
+/* Reply and tool images. Tiles never draw narrower than --gallery-tile; the
+   column count comes from galleryPlan, so the last tile can open the rest. */
+.image-gallery { margin-block-start: var(--space-3); min-inline-size: 0; }
+.trace-section .image-gallery { margin-block-start: var(--space-2); }
+.gallery-single, .gallery-tile { display: block; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--muted); overflow: hidden; cursor: zoom-in; transition: border-color 150ms; }
+.gallery-single:hover, .gallery-tile:hover { border-color: var(--line-focus); }
+.gallery-single { max-inline-size: min(100%, 24rem); }
+.gallery-single img { display: block; max-inline-size: 100%; max-block-size: min(20rem, 45cqb); inline-size: auto; block-size: auto; object-fit: contain; }
+.gallery-grid { display: grid; grid-template-columns: repeat(var(--gallery-columns), minmax(var(--gallery-tile), 1fr)); gap: var(--gallery-gap); max-inline-size: 100%; }
+.gallery-tile { position: relative; aspect-ratio: 1; }
+.gallery-tile img { inline-size: 100%; block-size: 100%; object-fit: cover; }
+.gallery-more img { opacity: 0.35; }
+.gallery-more span { position: absolute; inset: 0; display: grid; place-items: center; font-size: var(--text-size); font-weight: 500; font-variant-numeric: tabular-nums; }
+/* The viewer is the page frame while open, so it sizes from the viewport. */
+.image-viewer { position: fixed; inset: 0; inline-size: 100dvw; block-size: 100dvh; max-inline-size: none; max-block-size: none; margin: 0; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border: 0; background: var(--background); color: var(--foreground); overflow: hidden; overscroll-behavior: none; }
+.image-viewer[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.image-viewer::backdrop { background: var(--background); }
+.viewer-bar { display: flex; align-items: center; gap: var(--space-1); min-inline-size: 0; padding-inline: var(--space-2); }
+.image-viewer .icon-button, .viewer-scale { inline-size: var(--control-size); block-size: var(--control-size); }
+.viewer-count { flex: 1; min-inline-size: 0; margin: 0; padding-inline-start: var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.viewer-zoom { display: flex; align-items: center; }
+.viewer-scale { inline-size: 3.5rem; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.viewer-scale:not(:disabled):hover { color: var(--foreground); }
+.viewer-stage { display: flex; align-items: center; justify-content: center; min-inline-size: 0; min-block-size: 0; padding: clamp(0rem, 2vmin, 1rem); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.viewer-stage[data-zoomed] { cursor: grab; }
+.viewer-stage[data-zoomed]:active { cursor: grabbing; }
+.viewer-stage img { display: block; max-inline-size: 100%; max-block-size: 100%; inline-size: auto; block-size: auto; object-fit: contain; border-radius: var(--radius-document); transform-origin: center; will-change: transform; -webkit-user-drag: none; }
+.viewer-foot .viewer-caption { flex: 1; min-inline-size: 0; margin: 0; padding-inline: var(--space-2); text-align: center; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .attachment-notice { margin: 0; padding: var(--space-2) var(--space-4); color: var(--destructive); font-size: var(--small-text); }
 .attachment-notice button { margin-inline-start: var(--space-2); }
-.attachment-dialog { max-inline-size: calc(100% - var(--space-8)); max-block-size: calc(100% - var(--space-8)); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-thread); background: var(--background); color: var(--foreground); }
-.attachment-dialog::backdrop { background: rgb(0 0 0 / 50%); }
-.attachment-dialog > button { display: block; margin-inline-start: auto; margin-block-end: var(--space-3); }
-.attachment-dialog img { display: block; max-inline-size: 100%; max-block-size: 75dvh; object-fit: contain; }
 /* Ask mode: the same bar with a question layer on top. The layer takes at most
    42% of the session height and scrolls inside; the input and its action row
    never move off screen. */

@@ -4,6 +4,10 @@
 
 The React MVP supports `@` file discovery and `#` qualified model references in the shared chat and ask composer. See [mention behavior, verification, and limits](mentions.md).
 
+## Image viewing
+
+Tool images and images the assistant returns now show in a gallery below each reply. All images, including user attachments, open in one shared viewer with zoom, pinch, swipe, and next/previous. See [behavior, checks, and limits](images.md).
+
 ## Streamdown renderer
 
 The assistant and reasoning renderer now repairs unfinished Markdown with Streamdown while retaining the existing code sheets, copy controls, and image-link policy. See [integration, checks, and bundle cost](streamdown.md).

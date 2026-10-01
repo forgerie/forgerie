@@ -102,10 +102,49 @@ const previewMentions: MentionSource = {
 };
 const pixel = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAMElEQVR4nGMwTVxNEjp+5SlJiGHUglELRi0YtWDUglELRi0YtWDUglELRi0YKhYAANtngmqrX9EgAAAAAElFTkSuQmCC";
 const attachmentPreview = scenario.startsWith("attachments");
+/** A labelled stand-in screenshot, drawn locally so the preview needs no files. */
+function screenshot(label: string, hue: number, width = 1280, height = 800): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext("2d")!;
+  const gradient = context.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, `hsl(${hue} 45% 82%)`); gradient.addColorStop(1, `hsl(${hue + 40} 40% 55%)`);
+  context.fillStyle = gradient; context.fillRect(0, 0, width, height);
+  context.fillStyle = "rgb(255 255 255 / 0.85)";
+  context.fillRect(width * 0.08, height * 0.12, width * 0.84, height * 0.12);
+  for (let row = 0; row < 4; row++) context.fillRect(width * 0.08, height * (0.32 + row * 0.14), width * (0.84 - row * 0.12), height * 0.08);
+  context.fillStyle = "rgb(20 20 20 / 0.8)";
+  context.font = `600 ${Math.round(height / 12)}px sans-serif`;
+  context.fillText(label, width * 0.11, height * 0.205);
+  return canvas.toDataURL("image/png");
+}
+const imageMessages = (): TranscriptMessage[] => {
+  const postures = ["Unfolded portrait", "Unfolded landscape", "Folded portrait", "Folded landscape", "Dark theme", "Light theme", "Ask mode"];
+  // The gallery that overflows comes last, so a capture at the bottom shows it.
+  return [
+    say("img-q2", "user", "Show only the folded portrait capture."),
+    { id: "img-a2", role: "assistant", parts: [
+      tool("shot-single", "read", { path: "verification/local/shots/folded-portrait.png" },
+        { type: "done", output: "Read image file [image/png]\n[image]", isError: false, images: [screenshot("Folded portrait", 200, 950, 1276)] }),
+      { type: "text", text: "Here it is." },
+    ] },
+    { id: "img-q", role: "user", parts: [{ type: "text", text: "Compare these two layouts." }], attachments: [
+      { id: "img-before", type: "image", name: "before.png", contentType: "image/png", status: { type: "complete" }, content: [{ type: "image", image: screenshot("Before", 20, 900, 1200) }] },
+      { id: "img-after", type: "image", name: "after.png", contentType: "image/png", status: { type: "complete" }, content: [{ type: "image", image: screenshot("After", 140, 900, 1200) }] },
+    ] },
+    { id: "img-a", role: "assistant", parts: [
+      { type: "thinking", text: "Capture every posture, then compare the composer position." },
+      ...postures.map((label, index) => tool(`shot-${index}`, "read", { path: `verification/local/shots/${label.toLowerCase().replaceAll(" ", "-")}.png` },
+        { type: "done", output: "Read image file [image/png]\n[image]", isError: false, images: [screenshot(label, index * 45)] })),
+      { type: "text", text: "The composer stays inside every posture. The folded landscape capture is the tightest: the bar keeps all four actions." },
+    ] },
+  ];
+};
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
+  ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
 };
 function Preview() {
   const [dictation] = useState(() => new ForgerieDictationAdapter({
@@ -134,6 +173,16 @@ function Preview() {
   useEffect(() => {
     if (scenario !== "ask-delayed") return;
     const timer = setTimeout(() => setAsk(planAsk), Number(new URLSearchParams(location.search).get("delay") ?? 1500));
+    return () => clearTimeout(timer);
+  }, []);
+  // `images-viewer` opens the viewer on the second capture for screenshots.
+  useEffect(() => {
+    if (scenario !== "images-viewer") return;
+    const timer = setTimeout(() => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="Open unfolded-portrait.png"]')?.click();
+      setTimeout(() => document.querySelector("dialog.image-viewer")
+        ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })), 50);
+    }, 300);
     return () => clearTimeout(timer);
   }, []);
   async function onNew(message: AppendMessage) {

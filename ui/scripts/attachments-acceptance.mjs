@@ -92,7 +92,7 @@ try {
         await shape(cdp, `${scheme}-${posture.name}-${scenario}`);
         await click(cdp, "Preview sample.png");
         await wait(() => evaluate(cdp, `!!document.querySelector('dialog[open]')`), "preview dialog");
-        await click(cdp, "Close image preview");
+        await click(cdp, "Close image viewer");
         cdp.close();
       }
     }

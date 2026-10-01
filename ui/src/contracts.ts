@@ -80,7 +80,9 @@ const eventBodySchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("assistant.thinking.delta"), text: z.string() }),
   z.object({ type: z.literal("tool.start"), toolCallId: z.string(), toolName: z.string(), args: z.unknown() }),
   z.object({ type: z.literal("tool.update"), toolCallId: z.string(), toolName: z.string(), text: z.string() }),
-  z.object({ type: z.literal("tool.end"), toolCallId: z.string(), toolName: z.string(), text: z.string(), isError: z.boolean() }),
+  // `content` is the raw result. It carries images that `text` only names.
+  z.object({ type: z.literal("tool.end"), toolCallId: z.string(), toolName: z.string(), text: z.string(), isError: z.boolean(),
+    content: z.unknown().optional() }),
   z.object({ type: z.literal("agent.start") }),
   z.object({ type: z.literal("agent.end") }),
   z.object({ type: z.literal("session.error"), message: z.string() }),
