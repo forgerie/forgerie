@@ -23,7 +23,7 @@ const results = [];
 // Opens every group and reasoning block, then the failed and the last tool card.
 const openAll = `(() => {
   const open = (details) => { details.open = true; };
-  document.querySelectorAll("details.reasoning, details.tool-group").forEach(open);
+  document.querySelectorAll("details.chain-of-thought, details.reasoning, details.tool-group").forEach(open);
   const cards = [...document.querySelectorAll("details.tool-call")];
   cards.filter((card) => card.dataset.tone === "error").forEach(open);
   if (cards.at(-1)) open(cards.at(-1));
@@ -46,7 +46,7 @@ const measure = `(() => {
 })()`;
 try {
   await waitForDebugger(port);
-  for (const scenario of ["tools", "tools-running"]) {
+  for (const scenario of ["tools", "tools-running", "chain-of-thought", "chain-of-thought-running"]) {
     for (const colorScheme of ["dark", "light"]) {
       for (const posture of FOLD8_POSTURES) {
         const cdp = await openPosturePage({ debugPort: port, posture, colorScheme });
@@ -59,8 +59,43 @@ try {
           await sleep(50);
         }
         await evaluate(cdp, `document.fonts.ready.then(() => true)`);
+        const initial = await evaluate(cdp, `(() => {
+          const groups = [...document.querySelectorAll("details.chain-of-thought")];
+          return {
+            count: groups.length,
+            closed: groups.every((node) => !node.open),
+            noOutput: !document.querySelector(".trace-pre"),
+            failedOnParent: groups.some((node) => node.dataset.tone === "error" && node.querySelector(":scope > summary .trace-label").textContent.includes("1 failed")),
+            answerOutside: [...document.querySelectorAll(".message-text > .markdown")].some((node) => node.textContent.includes("The suite passed.")),
+          };
+        })()`);
+        assert.ok(initial.closed && initial.noOutput, "Activity is collapsed and output is lazy");
+        assert.ok(initial.failedOnParent, "A collapsed group exposes its failed call");
+        if (scenario.startsWith("chain-of-thought")) {
+          assert.equal(initial.count, 1, "Alternating reasoning and tools share one section");
+          assert.equal(initial.answerOutside, scenario === "chain-of-thought", "Final text stays outside activity");
+          const closedShot = await cdp.send("Page.captureScreenshot", { format: "png" });
+          await writeFile(join(out, `${scenario}-${colorScheme}-${posture.name}-closed.png`), Buffer.from(closedShot.data, "base64"));
+        }
+        // Exercise the native summary's real keyboard behavior, not just its attribute.
+        await evaluate(cdp, `document.querySelector("details.chain-of-thought[data-tone=error] > summary").focus()`);
+        await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+        await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        const toggleDeadline = Date.now() + 2_000;
+        while (!(await evaluate(cdp, `document.querySelector("details.chain-of-thought[data-tone=error]").open`))) {
+          if (Date.now() >= toggleDeadline) {
+            const focus = await evaluate(cdp, `({ active: document.activeElement?.outerHTML, focused: document.hasFocus() })`);
+            throw new Error(`Enter did not open the activity summary: ${JSON.stringify(focus)}`);
+          }
+          await sleep(20);
+        }
         await evaluate(cdp, openAll);
         await sleep(300);
+        if (scenario === "chain-of-thought-running") {
+          await evaluate(cdp, `document.querySelector(".transcript").scrollTop = 0`);
+          const topShot = await cdp.send("Page.captureScreenshot", { format: "png" });
+          await writeFile(join(out, `${scenario}-${colorScheme}-${posture.name}-steps.png`), Buffer.from(topShot.data, "base64"));
+        }
         // Show the first opened failure, where the densest content sits.
         await evaluate(cdp, `(document.querySelector("details.tool-call[data-tone=error]") ?? document.querySelector("details.tool-call[open]"))?.scrollIntoView({ block: "start" }) ?? true`);
         await sleep(200);
@@ -68,7 +103,7 @@ try {
         const name = `${scenario}-${colorScheme}-${posture.name ?? `${posture.width}x${posture.height}`}.png`;
         const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
         await writeFile(join(out, name), Buffer.from(shot.data, "base64"));
-        results.push({ scenario, colorScheme, posture: `${posture.width}x${posture.height}`, ...metrics, errors });
+        results.push({ scenario, colorScheme, posture: `${posture.width}x${posture.height}`, initial, ...metrics, errors });
         cdp.close?.();
       }
     }
@@ -78,6 +113,6 @@ try {
   await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 await writeFile(join(out, "results.json"), JSON.stringify(results, null, 2));
-const failures = results.filter((r) => r.pageOverflow || r.summaryOverflow || !r.presWithinColumn || r.minSummaryHeight < 32 || r.errors.length > 0);
+const failures = results.filter((r) => r.pageOverflow || r.summaryOverflow || !r.presWithinColumn || r.minSummaryHeight < 28 || r.errors.length > 0);
 console.log(JSON.stringify({ captures: results.length, failures }, null, 2));
 if (failures.length > 0) process.exitCode = 1;

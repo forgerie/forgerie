@@ -1,5 +1,50 @@
 # Verification and limits
 
+## Chain-of-thought grouping
+
+The assistant reply now uses the shared `group-chainOfThought` prefix from
+[assistant-ui's guide](https://www.assistant-ui.com/docs/guides/chain-of-thought).
+Consecutive reasoning and tool parts share one collapsed section. Text ends
+that section and stays visible. Nested reasoning and tool disclosures retain
+inputs, output, errors, stopped calls, and partial output. The parent shows
+failure and stopped counts even while collapsed. Tools without reasoning read
+as tool activity, not invented reasoning. No backend, model, or transport code
+changed, and no hidden reasoning is requested.
+
+This change stays on the standalone `new-ui-mvp` branch. It does not enter
+`main` or restart production services.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | `npm run verify` passed the build, TypeScript, lint, and 149 tests. Four new runtime tests cover alternating reasoning/tool parts, text and turn boundaries, parent failure/stopped counts, text-only copy, preliminary output, stable disclosures through updates and authoritative reload, and tools without reasoning. They failed before the presentation change. |
+| Read-only real history. | `scripts/real-trace-check.mjs` matched 89 API tool calls to 89 tool lines, including 2 failures, and all 19 thinking parts. No page overflow or browser exception occurred. No prompt was sent. |
+| Reconnect and posture transitions. | `scripts/reconnect-acceptance.mjs` preserved the draft, transcript, open outer disclosure, and 80 px scroll position through network recovery at all four Fold postures. It recorded no API mutations or browser exceptions. |
+| Fixture browser acceptance. | `scripts/trace-acceptance.mjs` passed 32 scenario/theme/posture combinations. It checked collapsed defaults, lazy output, visible parent failures, native Enter activation, no horizontal overflow, output within the reading column, and 28 px summary rows. Alternating reasoning/tool fixtures produced one outer section with final text outside. |
+| Visual review. | The eight running-state PNGs from the canonical posture script were read individually. Closed and expanded trace captures were reviewed in labelled contact sheets. Eight expanded-step captures were also read individually. The composer stayed visible, error counts remained legible, and expanded output stayed within the column at every posture in both themes. |
+
+The presentation retains the homepage's palette, fonts, trace styling, and
+container sizing. It adds no dependency or width breakpoint. The quiet
+activity line in [Mistral AI](https://mobbin.com/screens/62857b90-6df6-4b6f-ac54-6d3cbcdf75e6)
+supported retaining an inline disclosure. The separate thinking panel in
+[Google Gemini](https://mobbin.com/screens/19fa8a36-4f95-4ea2-ad23-533e31965ddb)
+was not adopted because this task keeps activity beside the reply.
+
+Cost: opening individual reasoning or tool content now takes one more
+outer disclosure. Large sessions still render every part. Physical Fold
+keyboard and touch acceptance remains unverified. Existing Vite bundle-size
+and Picker test `act` warnings remain.
+
+Repeat from this app directory with its dev server running:
+
+```sh
+./scripts/trace-acceptance.mjs
+SESSION_ID=<existing-idle-session> ./scripts/real-trace-check.mjs
+SESSION_ID=<existing-idle-session> ./scripts/reconnect-acceptance.mjs
+```
+
+Set `APP_URL` when testing a port other than 8510. Evidence is ignored under
+`verification/local/`; real-session content must not enter git.
+
 ## Realignment with the assistant-ui homepage
 
 Checked on 2026-09-30 against Forgerie on 8504 and the homepage demo source at assistant-ui `90f47502f`. The drift audit, with every change and the differences that remain, is in [`ui-drift-audit.md`](ui-drift-audit.md). Behaviour is unchanged: no store, transcript, reducer, or picker logic changed. The picker's grouping control moved into its "⋯" menu; it is still two taps, and G still switches it.

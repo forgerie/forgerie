@@ -168,7 +168,7 @@ describe("Homepage-derived thread", () => {
 });
 
 describe("Tools and reasoning", () => {
-  const summaries = () => [...document.querySelectorAll(".message-assistant summary .trace-text")].map((node) => node.textContent);
+  const summaries = () => [...document.querySelectorAll(".message-assistant details:not(.chain-of-thought) > summary .trace-text")].map((node) => node.textContent);
   async function open(summary: string) {
     const node = [...document.querySelectorAll<HTMLElement>(".message-assistant summary")].find((item) => item.querySelector(".trace-text")?.textContent === summary)!;
     const details = node.parentElement as HTMLDetailsElement;
@@ -223,11 +223,94 @@ describe("Tools and reasoning", () => {
     expect(document.querySelector<HTMLElement>(".tool-group")?.dataset["tone"]).toBe("error");
   });
 
+  it("groups alternating reasoning and tools together without swallowing text or another turn", async () => {
+    await render({ messages: [
+      { id: "q", role: "user", parts: [{ type: "text", text: "Check the code" }] },
+      { id: "a", role: "assistant", parts: [
+        { type: "thinking", text: "First inspect the file." }, tool("read", { type: "done", output: "file", isError: false }),
+        { type: "thinking", text: "Then verify the change." }, tool("test", { type: "done", output: "ok", isError: false }),
+        { type: "text", text: "The check passed." },
+        { type: "thinking", text: "One more check." }, tool("extra", { type: "interrupted" }),
+      ] },
+      { id: "q2", role: "user", parts: [{ type: "text", text: "Another question" }] },
+      answer("A text-only answer.", "a2"),
+    ] });
+    const groups = [...document.querySelectorAll<HTMLDetailsElement>("details.chain-of-thought")];
+    expect(groups).toHaveLength(2);
+    expect(groups.every((group) => !group.open)).toBe(true);
+    expect(groups[0]?.querySelectorAll("details.reasoning")).toHaveLength(2);
+    expect(groups[0]?.querySelectorAll("details.tool-call")).toHaveLength(2);
+    expect(groups[1]?.querySelectorAll("details.tool-call")).toHaveLength(1);
+    expect(groups.some((group) => group.textContent?.includes("The check passed."))).toBe(false);
+    expect(groups.some((group) => group.textContent?.includes("A text-only answer."))).toBe(false);
+    expect(groups[0]?.querySelector(":scope > summary .trace-text")?.textContent).toBe("reasoning 2 tools");
+    expect(groups[1]?.querySelector(":scope > summary .trace-text")?.textContent).toBe("reasoning, 1 stopped 1 tool");
+  });
+
+  it("keeps failures visible on the collapsed outer group and leaves response copying text-only", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [
+      { type: "thinking", text: "Inspect the request." },
+      tool("bad", { type: "done", output: "denied", isError: true }),
+      tool("stop", { type: "interrupted" }),
+      { type: "text", text: "The command failed." },
+    ] }] });
+    const group = document.querySelector<HTMLDetailsElement>("details.chain-of-thought")!;
+    expect(group.open).toBe(false);
+    expect(group.dataset["tone"]).toBe("error");
+    expect(group.querySelector(":scope > summary .trace-label")?.textContent).toBe("reasoning, 1 failed, 1 stopped");
+    expect(document.querySelector(".trace-pre")).toBeNull();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    await act(async () => button("Copy response").click());
+    expect(writeText).toHaveBeenCalledWith("The command failed.");
+  });
+
+  it("keeps the outer and inner disclosures open through streaming and authoritative reload", async () => {
+    const parts = [{ type: "thinking" as const, text: "Run the tests." },
+      tool("test", { type: "running", output: "first chunk" }, "bash", { command: "npm test" })];
+    await render({ messages: [{ id: "a", role: "assistant", parts }], running: true });
+    const group = document.querySelector<HTMLDetailsElement>("details.chain-of-thought")!;
+    expect(group.querySelector(":scope > summary .trace-text")?.textContent).toBe("thinking 1 tool: bash npm test");
+    expect(group.querySelector(":scope > summary .trace-text")?.hasAttribute("data-live")).toBe(true);
+    await act(async () => { group.open = true; group.dispatchEvent(new Event("toggle")); });
+    const card = await open("running bash npm test");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
+      tool("test", { type: "running", output: "second chunk" }, "bash", { command: "npm test" })] }], running: true });
+    expect(document.querySelector("details.chain-of-thought")).toBe(group);
+    expect(group.open).toBe(true);
+    expect(document.querySelector("details.tool-call")).toBe(card);
+    expect(card.open).toBe(true);
+    expect(card.querySelectorAll("pre")[1]?.textContent).toBe("second chunk");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
+      tool("test", { type: "done", output: "passed", isError: false }, "bash", { command: "npm test" }),
+      { type: "text", text: "Done." }] }] });
+    expect(group.open).toBe(true);
+    expect(card.open).toBe(true);
+    expect(group.querySelector(":scope > summary .trace-text")?.textContent).toBe("reasoning 1 tool");
+    expect(group.querySelector(":scope > summary .trace-text")?.hasAttribute("data-live")).toBe(false);
+    expect(card.querySelectorAll("pre")[1]?.textContent).toBe("passed");
+    // Reload from equivalent authoritative data without changing persisted IDs.
+    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
+      tool("test", { type: "done", output: "passed", isError: false }, "bash", { command: "npm test" }),
+      { type: "text", text: "Done." }] }], disabled: true });
+    expect(document.querySelector("details.chain-of-thought")).toBe(group);
+    expect(group.open).toBe(true);
+    expect(card.open).toBe(true);
+  });
+
+  it("labels tools without reasoning as tool activity and does not create a group for text alone", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [tool("only", { type: "pending" })] }], running: true });
+    expect(document.querySelector(".chain-of-thought > summary .trace-label")?.textContent).toBe("running tools");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [tool("only", { type: "done", output: "ok", isError: false })] }] });
+    expect(document.querySelector(".chain-of-thought > summary .trace-label")?.textContent).toBe("tool activity");
+    await render({ messages: [reply] });
+    expect(document.querySelector("details.chain-of-thought")).toBeNull();
+  });
+
   it("shows a working line while a run has no text yet", async () => {
     await render({ messages: [{ id: "q", role: "user", parts: [{ type: "text", text: "go" }] }], running: true });
     expect(document.querySelector(".message-assistant .trace-line .trace-text")?.textContent).toBe("working");
     await render({ messages: [{ id: "a", role: "assistant", parts: [tool("b", { type: "running", output: "" })] }], running: true });
-    expect(document.querySelectorAll(".message-assistant .trace-text")).toHaveLength(1);
+    expect(document.querySelectorAll(".message-assistant details:not(.chain-of-thought) > summary .trace-text")).toHaveLength(1);
     await render({ messages: [{ id: "a", role: "assistant", parts: [tool("b", { type: "done", output: "", isError: false })] }], running: true });
     expect(summaries()).toEqual(["ran bash echo b"]);
     expect(document.querySelector(".message-assistant div.trace-line .trace-text")?.textContent).toBe("working");

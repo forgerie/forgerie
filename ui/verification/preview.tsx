@@ -43,6 +43,20 @@ const toolMessages = (running: boolean): TranscriptMessage[] => [
       { type: "text", text: "Fixed. `tool.start` now advances the execution that `message.end` created, so each call shows **one** line." }] },
 ];
 
+// One continuous activity block, including a failure visible while another tool runs.
+const chainMessages = (running: boolean): TranscriptMessage[] => [
+  say("chain-q", "user", "Check the session client before shipping."),
+  { id: "chain-a", role: "assistant", parts: [
+    { type: "thinking", text: "Read the **session store** and its tests before checking the build." },
+    tool("chain-read", "read", { path: "src/sessionStore.ts" }, done("export function createSessionStore(session) { /* … */ }")),
+    tool("chain-tests", "read", { path: "src/sessionStore.test.ts" }, done("describe(\"session recovery\", () => { /* … */ })")),
+    { type: "thinking", text: "The recovery tests cover retained message identity. Run the focused checks, then the complete suite." },
+    tool("chain-fail", "bash", { command: "npm test -- missing.test.ts" }, done("No test files found. Check the test path.", true)),
+    tool("chain-run", "bash", { command: "npm test" }, running ? { type: "running", output: testOutput } : done(testOutput)),
+    ...running ? [] : [{ type: "text" as const, text: "The suite passed. The earlier command used the wrong test path. No server or model settings changed." }],
+  ] },
+];
+
 const planAsk: PendingAsk = { askId: "plan", askedAt: "2026-09-29T00:00:00Z", questions: [
   { id: "store", question: "Where should session drafts be kept?", detail: "Both survive a reconnect. Only storage survives a reload.", options: [
     { value: "memory", label: "In memory", detail: "Lost on reload. No new storage." },
@@ -62,10 +76,11 @@ const scenario = new URLSearchParams(location.search).get("scenario") ?? "histor
 const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk };
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
+  "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
 };
 function Preview() {
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
-  const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "reconnecting-running");
+  const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running");
   const recovering = scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
   const [ask, setAsk] = useState<PendingAsk | undefined>(scenarioAsk[scenario]);
   // `ask-delayed` opens the ask after load, so a draft can be typed first.

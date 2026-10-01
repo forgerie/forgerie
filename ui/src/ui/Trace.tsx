@@ -113,6 +113,36 @@ export function ToolGroup({ indices, running, children }: { indices: readonly nu
   </Disclosure>;
 }
 
+/** Consecutive reasoning and tools share one disclosure, without inferred steps or timing. */
+export function ChainOfThoughtGroup({ indices, running, children }: { indices: readonly number[]; running: boolean; children: ReactNode }) {
+  const failed = useAuiState((s) => indices.filter((index) => {
+    const part = s.message.parts[index];
+    return part?.type === "tool-call" && part.isError === true && !part.isPreliminary;
+  }).length);
+  const label = useAuiState((s) => {
+    const parts = indices.flatMap((index) => s.message.parts[index] ? [s.message.parts[index]!] : []);
+    const reasoning = parts.some((part) => part.type === "reasoning");
+    const tools = parts.filter((part) => part.type === "tool-call");
+    const stopped = tools.filter((part) => isToolArtifact(part.artifact) && part.artifact.state === "interrupted").length;
+    const state = reasoning ? running ? "thinking" : "reasoning" : running ? "running tools" : "tool activity";
+    return `${state}${failed > 0 ? `, ${failed} failed` : ""}${stopped > 0 ? `, ${stopped} stopped` : ""}`;
+  });
+  const detail = useAuiState((s) => {
+    const tools = indices.flatMap((index) => {
+      const part = s.message.parts[index];
+      return part?.type === "tool-call" ? [part] : [];
+    });
+    if (tools.length === 0) return "";
+    const current = running ? tools.findLast((part) => part.result === undefined || part.isPreliminary) : undefined;
+    const count = `${tools.length} ${tools.length === 1 ? "tool" : "tools"}`;
+    return current ? `${count}: ${current.toolName} ${summarizeToolArgs(current.args)}`.trim() : count;
+  });
+  return <Disclosure live={running} label={label} {...(detail ? { detail } : {})} className="chain-of-thought"
+    {...(failed > 0 ? { tone: "error" as const } : {})}>
+    {() => children}
+  </Disclosure>;
+}
+
 /** Model reasoning, collapsed by default. */
 export function ReasoningGroup({ running, children }: { running: boolean; children: ReactNode }) {
   return <Disclosure live={running} label={running ? "thinking" : "reasoning"} className="reasoning">

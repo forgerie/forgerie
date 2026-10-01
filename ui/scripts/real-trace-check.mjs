@@ -54,6 +54,8 @@ try {
       toolLines: cards.length,
       byLabel: cards.reduce((acc, node) => ({ ...acc, [label(node)]: (acc[label(node)] ?? 0) + 1 }), {}),
       groups: document.querySelectorAll("details.tool-group").length,
+      chainGroups: document.querySelectorAll("details.chain-of-thought").length,
+      failedChains: document.querySelectorAll("details.chain-of-thought[data-tone=error]").length,
       reasoningBlocks: document.querySelectorAll("details.reasoning").length,
       reasoningParts: document.querySelectorAll("details.reasoning .reasoning-text > .markdown").length,
       assistantReplies: document.querySelectorAll(".message-assistant").length,
@@ -63,6 +65,8 @@ try {
   // Open the first group and its first card, then capture that region.
   await evaluate(cdp, `(() => {
     const group = document.querySelector("details.tool-group");
+    const chain = (group ?? document.querySelector("details.tool-call"))?.closest("details.chain-of-thought");
+    if (chain) chain.open = true;
     if (group) group.open = true;
     const card = (group ?? document).querySelector("details.tool-call");
     if (card) card.open = true;
@@ -79,6 +83,8 @@ try {
 await writeFile(join(out, "result.json"), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
 assert.equal(result.rendered.toolLines, expected.toolCalls, "One tool line per call id");
+if (expected.toolCalls + expected.thinkingParts > 0) assert.ok(result.rendered.chainGroups > 0, "Activity has a shared disclosure");
+if (expected.failedResults > 0) assert.ok(result.rendered.failedChains > 0, "Collapsed activity exposes failures");
 assert.equal(result.rendered.byLabel.failed ?? 0, expected.failedResults, "Failures match");
 assert.equal(result.rendered.reasoningParts, expected.thinkingParts, "Every thinking part renders");
 assert.deepEqual(result.errors, []);

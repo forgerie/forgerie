@@ -2,11 +2,12 @@
 import { ActionBarPrimitive, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui } from "@assistant-ui/react";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
-import { ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
+import { ChainOfThoughtGroup, ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
 
+// A shared prefix groups consecutive reasoning and tools. Text stays outside.
 const groupAssistantParts = groupPartByType({
-  reasoning: ["group-reasoning"],
-  "tool-call": ["group-tool"],
+  reasoning: ["group-chainOfThought", "group-reasoning"],
+  "tool-call": ["group-chainOfThought", "group-tool"],
 });
 
 function ResponseCopy() {
@@ -26,6 +27,7 @@ export function AssistantMessage() {
       <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
         {({ part, children }) => {
           switch (part.type) {
+            case "group-chainOfThought": return <ChainOfThoughtGroup indices={part.indices} running={part.status.type === "running"}>{children}</ChainOfThoughtGroup>;
             case "group-reasoning": return <ReasoningGroup running={part.status.type === "running"}>{children}</ReasoningGroup>;
             case "group-tool": return part.indices.length === 1 ? <>{children}</>
               : <ToolGroup indices={part.indices} running={part.status.type === "running"}>{children}</ToolGroup>;
