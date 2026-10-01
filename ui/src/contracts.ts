@@ -53,7 +53,7 @@ const contentPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("thinking"), thinking: z.string() }),
   z.object({ type: z.literal("toolCall"), id: z.string(), name: z.string(), arguments: z.unknown() }),
-  z.object({ type: z.literal("image") }),
+  z.object({ type: z.literal("image"), data: z.string().optional(), mimeType: z.string().optional() }),
 ]);
 export type ContentPart = z.infer<typeof contentPartSchema>;
 /** The consumed content parts, in order. Unknown or malformed parts are skipped. */

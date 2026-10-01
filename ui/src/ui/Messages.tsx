@@ -3,6 +3,7 @@ import { ActionBarPrimitive, ErrorPrimitive, groupPartByType, MessagePrimitive, 
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
 import { ChainOfThoughtGroup, ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
+import { UserMessageAttachments } from "./Attachments";
 
 // A shared prefix groups consecutive reasoning and tools. Text stays outside.
 const groupAssistantParts = groupPartByType({
@@ -17,6 +18,7 @@ function ResponseCopy() {
 
 export function UserMessage() {
   return <MessagePrimitive.Root className="message message-user" data-role="user" aria-label="Your message">
+    <UserMessageAttachments />
     <div className="user-bubble message-text"><MessagePrimitive.Parts /></div>
   </MessagePrimitive.Root>;
 }

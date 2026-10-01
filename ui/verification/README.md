@@ -68,6 +68,64 @@ The first live attempt failed because the test read the old document before relo
 
 See [the resume contract and limits](resumable-streams.md) for the mapping to the assistant-ui guide and repeat commands. This is Pi transcript recovery, not byte replay or recovery across a sessiond restart. Physical Fold sleep/wake, keyboard, and touch remain unverified.
 
+## Attachments
+
+The assistant-ui attachment adapter uses the unchanged Forgerie server on 8504.
+The new UI stays on `new-ui-mvp`. Main and its production services are unchanged.
+
+- The + button supports multiple files. Paste and drop use assistant-ui's input
+  and dropzone primitives. Chips show names, errors, remove actions, and image
+  previews. The image dialog opens at document level, not inside the composer.
+- JPEG, PNG, GIF, and WebP up to 4.5 MiB go to `/prompt` as native images.
+  Larger images and other files go to `/attachments` on send, then their saved
+  `@path` references go to `/prompt`. The upload uses JSON base64, not multipart.
+- Files are capped at 16 MiB each and 16 per message. Combined inline base64 is
+  capped at 48 MiB to leave headroom under the server's default 64 MiB body limit.
+  A server configured with a lower body limit can still refuse an upload.
+  Pi can omit malformed native images. A browser preview does not prove that
+  Pi's image decoder accepts the file.
+- Attachment-only sends work. During an ask, files use Send message, not the
+  text-only answer endpoint. The original text draft returns when the ask closes.
+  Unsent files remain in the one composer across ask close and reconnect.
+  Slash-command endpoints cannot receive files. A command with attachments is
+  refused with a remove-attachments message instead of silently dropping them.
+- Upload failure returns the file and text to the composer. A failed prompt keeps
+  completed attachments and their references, so manual retry does not upload
+  saved files again. New text typed during a failed send is not overwritten.
+  A lost acknowledgement can mean Pi already accepted the prompt. The error
+  tells the user to check the transcript before sending again. No automatic retry.
+- Cancelling attachment preparation aborts the read/upload and prevents a late
+  result from sending. Unmounting the session also aborts preparation.
+- Removing a chip never deletes a saved workspace file. There is no deletion
+  endpoint for uploaded files. Saved files can remain after cancel or refusal.
+  Inline images render again from persisted history after reload. General files
+  persist as `@path` text, not as download chips. Drafts remain memory-only and
+  are not retained across reload or leaving the session.
+
+Checks use unit tests, real HTTP/WebSocket test servers, the actual assistant-ui
+runtime, and a browser against a scratch Pi session. The browser script verifies
+one workspace-file upload, a combined file/image prompt, a live image-only
+prompt, the saved bytes, persisted images after reload, all four Fold transitions, image
+modal interaction, 24 posture/theme/scenario layouts, and two reduced-size panes.
+It rejects API traffic from the network-free fixtures and mutations outside its
+scratch session. It archives and deletes the scratch session on exit.
+
+The first native-image run exposed an invalid PNG fixture. Pi's image reader
+omitted it. The replacement PNG was checked with Pi's own `resizeImage`, not
+only the browser decoder.
+
+Repeat from this worktree, with the UI on 8514:
+
+```sh
+nix shell nixpkgs#nodejs_22 -c npm run verify
+./scripts/attachments-acceptance.mjs  # creates its own session; costs three model replies
+./scripts/attachment-shots.sh
+```
+
+Set `ATTACHMENT_URL` for another port, such as the shared server on 8510. Evidence
+is under ignored `verification/local/attachments/`. Captures use the main
+`capture-postures.mjs` harness. Physical Fold keyboard, file-picker, and gesture
+checks remain unverified.
 
 ## Realignment with the assistant-ui homepage
 

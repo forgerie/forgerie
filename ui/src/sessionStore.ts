@@ -3,6 +3,7 @@ import { acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, his
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { fromHistory, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatalog, type CommandResult } from "./commands";
+import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
 
 export type Connection = { type: "loading" } | { type: "ready" }
   | { type: "reconnecting"; message: string } | { type: "failed"; message: string };
@@ -242,7 +243,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       throw error;
     } finally { update({ ...state, sending: false }); }
   }
-  async function command(endpoint: "prompt" | "abort", text?: string) {
+  async function command(endpoint: "prompt" | "abort", text?: string, attachments?: PromptAttachment[]) {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
     if (endpoint === "prompt" && (state.transcript.isRunning || state.sending)) throw new Error("Wait for the current run to finish.");
@@ -252,7 +253,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       // even if its HTTP acknowledgement was lost.
       await request(`${root}/${endpoint}`, endpoint === "prompt" ? acceptedSchema : z.unknown(), {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: session.cwd, ...(text === undefined ? {} : { text }) }),
+        body: JSON.stringify({ cwd: session.cwd, ...(text === undefined ? {} : { text }), ...(attachments?.length ? { attachments } : {}) }),
       });
     } catch (error) {
       update({ ...state, commandError: messageOf(error) });
@@ -287,10 +288,25 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start,
-    send: (text: string) => isCommand(text) ? runSlash("commands/run", { text }) : command("prompt", text),
+    send: async (text: string, attachments?: PromptAttachment[]) => {
+      if (isCommand(text)) {
+        if (attachments?.length) throw new Error("Remove attachments before running a slash command.");
+        return runSlash("commands/run", { text });
+      }
+      return command("prompt", text, attachments);
+    },
     respondToCommand: (requestId: string, value: string) => runSlash("commands/respond", { requestId, value }),
     dismissCommand: () => update({ ...state, commandResult: undefined }),
     loadCommands,
+    saveAttachment: async (attachment: PromptAttachment, signal?: AbortSignal) => {
+      const session = state.session;
+      if (!session || state.connection.type !== "ready") throw new Error("The session is not connected. Your file stays here.");
+      const response = await request(`${root}/attachments`, savedAttachmentsSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: session.cwd, attachments: [attachment] }),
+      }, signal === undefined ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]));
+      return response.attachments[0]!;
+    },
     cancel: () => command("abort"),
     submitAsk: (answers: AskAnswer[]) => closeAsk("submit", answers),
     dismissAsk: () => closeAsk("dismiss"),

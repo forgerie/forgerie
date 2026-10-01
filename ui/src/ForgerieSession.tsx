@@ -10,6 +10,8 @@ import type { CommandResult } from "./commands";
 import { createMentionSource } from "./mentionSource";
 import { ForgerieDictationAdapter } from "./speech/ForgerieDictationAdapter";
 import { DictationProvider } from "./DictationProvider";
+import { createAttachmentAdapter, type PromptAttachment } from "./attachments";
+import { sendMessage } from "./sendMessage";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
@@ -24,28 +26,25 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   const cwd = state.session?.cwd;
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
-  useEffect(() => { void store.start(); return store.dispose; }, [store]);
+  const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
+  const [sendError, setSendError] = useState<string>();
+  useEffect(() => { void store.start(); return () => { attachments.dispose(); store.dispose(); }; }, [store, attachments]);
   const applyResult = useCallback((result: CommandResult | void) => {
     if (!runtimeRef.current || result?.type !== "done") return;
     if (result.session && result.session.id !== id) onSwitchSession(result.session, result.promptDraft);
-    else if (result.promptDraft !== undefined) runtimeRef.current?.thread.composer.setText(result.promptDraft);
+    else if (result.promptDraft !== undefined) runtimeRef.current.thread.composer.setText(result.promptDraft);
   }, [id, onSwitchSession]);
-  const send = useCallback(async (text: string) => { applyResult(await store.send(text)); }, [store, applyResult]);
+  const send = useCallback(async (text: string, images?: PromptAttachment[]) => { applyResult(await store.send(text, images)); }, [store, applyResult]);
   const onNew = useCallback(async (message: AppendMessage) => {
-    const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
-    try { await send(text); }
-    catch {
-      // assistant-ui clears the composer before onNew. Preserve a failed draft.
-      runtimeRef.current?.thread.composer.setText(text);
-    }
+    setSendError(undefined);
+    await sendMessage(message, send, () => runtimeRef.current?.thread.composer, setSendError);
   }, [send]);
   const onCancel = useCallback(async () => {
     try { await store.cancel(); } catch { /* The store exposes the command error. */ }
   }, [store]);
   const messages = useThreadMessages(state.transcript.messages, state.transcript.isRunning);
   const runtime = useExternalStoreRuntime({
-    messages, onNew, onCancel,
-    adapters: { dictation },
+    messages, onNew, onCancel, adapters: { dictation, attachments },
     isRunning: state.transcript.isRunning,
     isLoading: state.connection.type === "loading",
     isDisabled: state.connection.type !== "ready",
@@ -55,7 +54,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   useEffect(() => { if (initialDraft !== undefined) runtime.thread.composer.setText(initialDraft); }, [initialDraft, runtime]);
   const error = state.connection.type === "reconnecting" ? "Reconnecting automatically. Your draft stays here."
     : state.connection.type === "failed" ? state.connection.message
-    : state.commandError ?? state.transcript.error;
+    : sendError ?? state.commandError ?? state.transcript.error;
   const status = state.connection.type === "loading" ? "Connecting"
     : state.connection.type === "reconnecting" ? "Reconnecting"
     : state.connection.type === "failed" ? "Disconnected"

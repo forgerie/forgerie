@@ -14,6 +14,16 @@ const tools = (state: Transcript) => state.messages.flatMap((message) => message
 const apply = (state: Transcript, ...events: SessionEvent[]) => events.reduce(reduceEvent, state);
 
 describe("transcript history", () => {
+  it("keeps image-only user messages and converts their persisted images into attachments", () => {
+    const state = fromHistory([{ role: "user", timestamp: 1, content: [{ type: "image", mimeType: "image/png", data: "aGk=" }] }]);
+    expect(state.messages).toHaveLength(1);
+    expect(convertMessage(state.messages[0]!)).toMatchObject({ role: "user", attachments: [{
+      type: "image", contentType: "image/png", content: [{ type: "image", image: "data:image/png;base64,aGk=" }],
+    }] });
+    const next = reduceEvent(state, { type: "message.end", message: { role: "user", timestamp: 1,
+      content: [{ type: "image", mimeType: "image/png", data: "aGk=" }] } });
+    expect(next.messages).toHaveLength(1);
+  });
   it("keeps text, thinking, and tool calls in order and attaches each tool result to its call", () => {
     const state = fromHistory([user("hello"),
       asking(2, { type: "thinking", thinking: "look first" }, { type: "text", text: "Checking." }, call("a")),
@@ -37,6 +47,16 @@ describe("transcript history", () => {
 });
 
 describe("live transcript", () => {
+  it("keeps a live image-only echo and its persisted replacement", () => {
+    const content = [{ type: "image", mimeType: "image/png", data: "aGk=" }];
+    const echoed = reduceEvent(fromHistory([]), { type: "message.append", message: { role: "user", content } });
+    expect(echoed.messages).toHaveLength(1);
+    expect(echoed.messages[0]!.attachments).toHaveLength(1);
+    const completed = reduceEvent(echoed, { type: "message.end", message: { role: "user", content, timestamp: 1 } });
+    expect(completed.messages).toHaveLength(1);
+    expect(completed.messages[0]!.id).toBe(echoed.messages[0]!.id);
+    expect(completed.messages[0]!.attachments).toHaveLength(1);
+  });
   it("reconciles the timestamp-free echo with the completed user message", () => {
     let state = reduceEvent(fromHistory([]), { type: "message.append", message: { role: "user", content: "hello" } });
     const id = state.messages[0]?.id;

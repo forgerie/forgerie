@@ -1,4 +1,4 @@
-import type { ThreadMessageLike } from "@assistant-ui/react";
+import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
 import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contracts";
 
 /**
@@ -18,6 +18,7 @@ export interface TranscriptMessage {
   id: string;
   role: "user" | "assistant" | "system";
   parts: readonly TranscriptPart[];
+  attachments?: CompleteAttachment[];
   key?: string;
   provisional?: boolean;
   failure?: "error" | "cancelled";
@@ -50,10 +51,15 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   const role = message.role;
   if (role !== "user" && role !== "assistant" && role !== "system") return undefined;
   const parts = toParts(message);
-  if (parts.length === 0) return undefined;
+  const attachments: CompleteAttachment[] = role === "user" ? partsOf(message).flatMap((part, index) => {
+    if (part.type !== "image" || !part.data || !["image/jpeg", "image/png", "image/gif", "image/webp"].includes(part.mimeType ?? "")) return [];
+    return [{ id: `${id}-image-${index}`, type: "image", name: `Image ${index + 1}`, contentType: part.mimeType,
+      status: { type: "complete" }, content: [{ type: "image", image: `data:${part.mimeType};base64,${part.data}` }] }];
+  }) : [];
+  if (parts.length === 0 && attachments.length === 0) return undefined;
   const failure = role !== "assistant" ? undefined
     : message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "cancelled" : undefined;
-  return { id, role, parts, key: keyOf(message), ...(failure ? { failure } : {}) };
+  return { id, role, parts, ...(attachments.length ? { attachments } : {}), key: keyOf(message), ...(failure ? { failure } : {}) };
 }
 
 function toolIds(messages: readonly TranscriptMessage[], except?: string): Set<string> {
@@ -130,7 +136,7 @@ function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): 
     : last?.role === "user" && last.provisional && messageText(last) === messageText(parsed) ? last.id : undefined;
   const replaced = state.messages.find((message) => message.id === replaceId);
   const next = { ...reconcileTools(parsed, state.messages, replaced), id: replaced?.id ?? parsed.id, provisional };
-  const empty = next.parts.length === 0;
+  const empty = next.parts.length === 0 && !next.attachments?.length;
   const messages = replaced === undefined ? (empty ? state.messages : [...state.messages, next])
     : state.messages.flatMap((current) => current !== replaced ? [current] : empty ? [] : [next]);
   return { ...state, nextId: state.nextId + 1, liveId, messages, error: raw.errorMessage ?? state.error };
@@ -242,7 +248,8 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
 export type ToolArtifact = { state: ToolState["type"] };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role !== "assistant") {
-    return { id: message.id, role: message.role, content: [{ type: "text", text: messageText(message) }] };
+    return { id: message.id, role: message.role, content: [{ type: "text", text: messageText(message) }],
+      ...(message.role === "user" && message.attachments ? { attachments: message.attachments } : {}) };
   }
   return {
     id: message.id, role: "assistant",

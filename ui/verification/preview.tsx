@@ -13,6 +13,7 @@ import type { PendingAsk } from "../src/contracts";
 import type { CommandBinding } from "../src/ui/SlashCommands";
 import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
+import { createAttachmentAdapter } from "../src/attachments";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const tool = (id: string, name: string, args: unknown, state: ToolState): TranscriptPart => ({ type: "tool", id, name, args, state });
@@ -86,7 +87,7 @@ const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", qu
       ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
 ] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
-const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk };
+const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk };
 const mentionFiles = ["src/main.ts", "src/file with spaces.ts", "src/ui/Composer.tsx", "vendor/", "dir with space/",
   ...Array.from({ length: 9 }, (_, i) => `src/very-long-folder-name-${i}/nested-folder/mention-source-${i}.test.ts`)];
 const previewMentions: MentionSource = {
@@ -99,6 +100,8 @@ const previewMentions: MentionSource = {
   models: async (query) => Array.from({ length: 12 }, (_, i) => ({ id: `provider/model-${i}`, type: "model", label: `provider/model-${i}`,
     description: `Coding model ${i}` })).filter((item) => item.id.includes(query)),
 };
+const pixel = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAMElEQVR4nGMwTVxNEjp+5SlJiGHUglELRi0YtWDUglELRi0YtWDUglELRi0YKhYAANtngmqrX9EgAAAAAElFTkSuQmCC";
+const attachmentPreview = scenario.startsWith("attachments");
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
@@ -138,6 +141,10 @@ function Preview() {
     if (scenario === "streamdown-live") {
       setMessages(streamdownMessages(streamdownFrames[0]!).map((part) => part.role === "user" ? say(part.id, "user", text) : part));
       setRunning(true);
+    } else if (attachmentPreview) {
+      setAsk(undefined);
+      setMessages((current) => [...current, { ...say(`user-${current.length}`, "user", message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")), attachments: [...message.attachments ?? []] },
+        say(`reply-${current.length}`, "assistant", "The attachment stayed in this local preview. No prompt was sent to Pi.")]);
     } else exchange(text);
   }
   function exchange(text: string) {
@@ -145,12 +152,25 @@ function Preview() {
       say(`reply-${current.length}`, "assistant", "This is a local preview. No prompt was sent to Pi.")]);
   }
   const threadMessages = useThreadMessages(messages, running);
-  const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false), adapters: { dictation },
+  const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false),
+    adapters: { dictation, ...(attachmentPreview ? { attachments: createAttachmentAdapter(async () => {
+      if (scenario === "attachments-error") throw new Error("The workspace is read only. Your file stays here.");
+      return { path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 };
+    }) } : {}) },
     isRunning: running, isLoading: scenario === "loading", isDisabled: scenario === "loading" || scenario === "disconnected" || recovering });
   useEffect(() => {
-    if (scenario !== "slash-capture") return;
-    runtime.thread.composer.setText("/");
-    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+    if (scenario === "slash-capture") {
+      runtime.thread.composer.setText("/");
+      document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+    }
+    if (!attachmentPreview) return;
+    void (async () => {
+      const bytes = Uint8Array.from(atob(pixel), (char) => char.charCodeAt(0));
+      await runtime.thread.composer.addAttachment(new File([bytes], "sample.png", { type: "image/png" }));
+      await runtime.thread.composer.addAttachment(new File(["notes"], "deployment-notes-with-a-long-filename.txt", { type: "text/plain" }));
+      runtime.thread.composer.setText("Review these files before changing the deployment.");
+      if (scenario === "attachments-error") runtime.thread.composer.send();
+    })();
   }, [runtime]);
   useEffect(() => {
     // Only this network-free preview accepts an initial mention query, so the

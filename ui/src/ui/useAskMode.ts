@@ -31,6 +31,8 @@ export function useAskMode(binding: AskBinding | undefined) {
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const disabled = useAuiState((s) => s.thread.isDisabled);
   const { cancel } = useDictation();
+  const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0 || s.composer.submission !== undefined);
+  const preparing = useAuiState((s) => s.composer.submission !== undefined);
   const headingId = useId();
   const askId = binding?.ask.askId;
   const [saved, setProgress] = useState<Progress>({ askId, index: 0, drafts: {} });
@@ -64,11 +66,11 @@ export function useAskMode(binding: AskBinding | undefined) {
 
   if (!binding || !question) return undefined;
   const { phase, offline } = binding;
-  const sending = phase.type === "sending";
+  const sending = phase.type === "sending" || preparing;
   const tooLong = questions.some((item) => current(item).text.trim().length > OTHER_TEXT_MAX_LENGTH);
   const blocked = sending || offline || dictating || tooLong;
   const last = index >= questions.length - 1;
-  const route: AskRoute = routeOf(text);
+  const route: AskRoute = hasAttachments ? "chat" : routeOf(text);
 
   function go(next: number) {
     cancel();
@@ -86,7 +88,9 @@ export function useAskMode(binding: AskBinding | undefined) {
     if (next.text !== text) aui.composer.setText(next.text);
   }
   async function sendChat() {
-    if (blocked || text.trim() === "" || !binding) return;
+    if (blocked || !binding) return;
+    if (hasAttachments) { await aui.composer.send(); return; }
+    if (text.trim() === "") return;
     // Clear first: the ask can close, and restore the old draft, before the reply arrives.
     aui.composer.setText("");
     try { await binding.onChat(text); } catch { aui.composer.setText(text); }

@@ -9,11 +9,14 @@ import { useDictation } from "../DictationProvider";
 import { ComposerDictation } from "./ComposerDictation";
 import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
+import { AddAttachment, AttachmentErrors, ComposerAttachments } from "./Attachments";
+import { MAX_ATTACHMENTS } from "../attachments";
 
 /**
  * System molecule: the one input bar. While an ask is open it gains a question
  * layer on top, and its own input answers the current question. There is never
  * a second input. Input capabilities belong to this bar in both modes.
+ * An attached file routes the input as chat, never as a text-only ask submission.
  */
 type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding };
 export function Composer(props: ComposerProps) {
@@ -21,6 +24,9 @@ export function Composer(props: ComposerProps) {
 }
 function ComposerBar({ ask, mentions, commands }: ComposerProps) {
   const disabled = useAuiState((s) => s.thread.isDisabled);
+  const preparing = useAuiState((s) => s.composer.submission !== undefined);
+  const count = useAuiState((s) => s.composer.attachments.length);
+  const tooMany = count > MAX_ATTACHMENTS;
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const { state } = useDictation();
   const control = useAskMode(ask);
@@ -37,14 +43,20 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
     for (const trigger of triggers.getTriggers().values()) {
       if (trigger.resource.handleKeyDown(event)) return;
     }
-    control?.onKeyDown(event);
+    if (!tooMany) control?.onKeyDown(event);
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
   return <ComposerPrimitive.Root className="composer">
-    <div ref={anchor} className="composer-shell" data-mode={control ? "ask" : "chat"}>
+    <ComposerPrimitive.AttachmentDropzone ref={anchor} className="composer-shell" data-mode={control ? "ask" : "chat"}
+      disabled={disabled || preparing || !!control?.sending}>
       {control && <AskQuestions control={control} />}
+      <ComposerAttachments />
+      <AttachmentErrors />
+      {tooMany && <p role="alert" className="attachment-notice">Send at most 16 attachments. Remove a file to continue.</p>}
       {control?.route === "chat" && <p className="ask-route" role="status">
-        <InfoIcon aria-hidden size={14} />Commands run in Pi. Questions stay open unless Pi closes them.
+        <InfoIcon aria-hidden size={14} />{count > 0 || preparing
+          ? "Attachments run as chat messages. Sending closes these questions."
+          : "Commands run in Pi. Questions stay open unless Pi closes them."}
       </p>}
       {control?.error && <p className="ask-error" role="alert">{control.error}</p>}
       {state.type === "failed" && <p className="ask-error" role="alert">{state.message}</p>}
@@ -53,13 +65,16 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
         aria-describedby={control?.headingId}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        submitMode={control || tooMany ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
-        <ComposerDictation disabled={disabled || !!control?.sending} />
-        {control ? <AskActions control={control} /> : <>
+        <AddAttachment disabled={disabled || preparing || !!control?.sending || count >= MAX_ATTACHMENTS} />
+        <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
+        {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
+          <SquareIcon aria-hidden size={12} fill="currentColor" />
+        </ComposerPrimitive.Cancel> : control ? <AskActions control={{ ...control, blocked: control.blocked || tooMany }} /> : <>
           <AuiIf condition={(s) => !s.thread.isRunning}>
-            <ComposerPrimitive.Send disabled={disabled || dictating} className="primary icon-button" aria-label="Send message" title="Send message">
+            <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
               <ArrowUpIcon aria-hidden size={16} />
             </ComposerPrimitive.Send>
           </AuiIf>
@@ -70,11 +85,12 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
           </AuiIf>
         </>}
       </div>
-    </div>
+    </ComposerPrimitive.AttachmentDropzone>
     {commands && <SlashCommands binding={commands} anchor={anchor} />}
     {mentions && (["@", "!@", "#"] as const).map((char) => <MentionPopover key={`${scopeKey}:${char}`}
       source={mentions} char={char} input={input} snapshot={snapshot} enabled={!disabled && !control?.sending} />)}
   </ComposerPrimitive.Root>;
+
 }
 
 /** The question layer: step row, question, and options. It scrolls inside a height budget. */
