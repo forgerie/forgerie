@@ -3,13 +3,14 @@ import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import { Composer } from "./Composer";
 import type { AskBinding } from "./useAskMode";
+import type { MentionSource } from "../mentionSource";
 import { AssistantMessage, SystemMessage, UserMessage } from "./Messages";
 import type { CommandBinding } from "./SlashCommands";
 import { CommandResultPanel, type CommandResultBinding } from "./CommandResultPanel";
 
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode.
-export function Thread({ ask, commands, commandResult }: { ask?: AskBinding; commands?: CommandBinding; commandResult?: CommandResultBinding }) {
+export function Thread({ ask, mentions, commands, commandResult }: { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding }) {
   return <ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
@@ -30,7 +31,7 @@ export function Thread({ ask, commands, commandResult }: { ask?: AskBinding; com
             <ArrowDownIcon aria-hidden size={16} />
           </ThreadPrimitive.ScrollToBottom>
           {commandResult && <CommandResultPanel {...commandResult} />}
-          <Composer ask={ask} commands={commands} />
+          <Composer ask={ask} mentions={mentions} commands={commands} />
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>

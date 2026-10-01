@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Composer mentions
+
+The React MVP supports `@` file discovery and `#` qualified model references in the shared chat and ask composer. See [mention behavior, verification, and limits](mentions.md).
+
 ## Streamdown renderer
 
 The assistant and reasoning renderer now repairs unfinished Markdown with Streamdown while retaining the existing code sheets, copy controls, and image-link policy. See [integration, checks, and bundle cost](streamdown.md).

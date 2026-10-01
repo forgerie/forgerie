@@ -1,6 +1,8 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useRef } from "react";
-import { AuiIf, ComposerPrimitive, unstable_useTriggerPopoverAriaProps, useAuiState } from "@assistant-ui/react";
+import { useRef, type KeyboardEvent } from "react";
+import { AuiIf, ComposerPrimitive, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
+import type { MentionSource } from "../mentionSource";
+import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
 import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, SquareIcon } from "lucide-react";
 import { OTHER_TEXT_MAX_LENGTH } from "../askDraft";
 import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
@@ -9,21 +11,45 @@ import { SlashCommands, type CommandBinding } from "./SlashCommands";
 /**
  * System molecule: the one input bar. While an ask is open it gains a question
  * layer on top, and its own input answers the current question. There is never
- * a second input. Unsupported attachments, model selection, and voice are not
- * offered yet; when they arrive they belong to this bar in both modes.
+ * a second input. Input capabilities belong to this bar in both modes.
  */
-export function Composer({ ask, commands }: { ask?: AskBinding; commands?: CommandBinding }) {
+type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding };
+export function Composer(props: ComposerProps) {
+  return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
+}
+function ComposerBar({ ask, mentions, commands }: ComposerProps) {
   const disabled = useAuiState((s) => s.thread.isDisabled);
   const control = useAskMode(ask);
   const anchor = useRef<HTMLDivElement>(null);
-  return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerPrimitive.Root className="composer">
+  const input = useRef<HTMLTextAreaElement>(null);
+  const snapshot = useRef<MentionInputSnapshot>(null);
+  const rememberInput = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
+  const triggers = unstable_useTriggerPopoverRootContext();
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing) return;
+    rememberInput();
+    // Input's custom handler runs before SDK plugins. Trigger selection consumes
+    // Enter before ask mode can advance or submit the current question.
+    for (const trigger of triggers.getTriggers().values()) {
+      if (trigger.resource.handleKeyDown(event)) return;
+    }
+    control?.onKeyDown(event);
+  }
+  const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
+  return <ComposerPrimitive.Root className="composer">
     <div ref={anchor} className="composer-shell" data-mode={control ? "ask" : "chat"}>
       {control && <AskQuestions control={control} />}
       {control?.route === "chat" && <p className="ask-route" role="status">
         <InfoIcon aria-hidden size={14} />Commands run in Pi. Questions stay open unless Pi closes them.
       </p>}
       {control?.error && <p className="ask-error" role="alert">{control.error}</p>}
-      <ComposerInput control={control} />
+      <ComposerPrimitive.Input ref={input} aria-label="Message" rows={1} className="composer-input"
+        placeholder={control?.placeholder ?? "Send a message..."}
+        aria-describedby={control?.headingId}
+        enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
+        maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
+        submitMode={control ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        disabled={control?.sending || undefined} />
       <div className="composer-actions">
         {control ? <AskActions control={control} /> : <>
           <AuiIf condition={(s) => !s.thread.isRunning}>
@@ -40,20 +66,9 @@ export function Composer({ ask, commands }: { ask?: AskBinding; commands?: Comma
       </div>
     </div>
     {commands && <SlashCommands binding={commands} anchor={anchor} />}
-  </ComposerPrimitive.Root></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
-}
-
-function ComposerInput({ control }: { control: AskControl | undefined }) {
-  const popover = unstable_useTriggerPopoverAriaProps();
-  return <ComposerPrimitive.Input aria-label="Message" rows={1} className="composer-input"
-    placeholder={control?.placeholder ?? "Send a message..."} aria-describedby={control?.headingId}
-    enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
-    maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-    submitMode={control ? "none" : "enter"}
-    // The library runs this handler before its plugins. Let an open palette
-    // consume Enter first instead of sending the command or advancing the ask.
-    onKeyDown={(event) => { if (!popover["aria-expanded"]) control?.onKeyDown(event); }}
-    disabled={control?.sending || undefined} />;
+    {mentions && (["@", "!@", "#"] as const).map((char) => <MentionPopover key={`${scopeKey}:${char}`}
+      source={mentions} char={char} input={input} snapshot={snapshot} enabled={!disabled && !control?.sending} />)}
+  </ComposerPrimitive.Root>;
 }
 
 /** The question layer: step row, question, and options. It scrolls inside a height budget. */

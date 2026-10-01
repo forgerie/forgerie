@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import { browserTransport, createSessionStore } from "./sessionStore";
 import type { Session } from "./contracts";
@@ -7,6 +7,7 @@ import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
 import type { AskBinding } from "./ui/useAskMode";
 import type { CommandResult } from "./commands";
+import { createMentionSource } from "./mentionSource";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
@@ -16,6 +17,10 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known));
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
+  const sessionId = state.session?.id;
+  const cwd = state.session?.cwd;
+  const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
+    [sessionId, cwd]);
   useEffect(() => { void store.start(); return store.dispose; }, [store]);
   const applyResult = useCallback((result: CommandResult | void) => {
     if (!runtimeRef.current || result?.type !== "done") return;
@@ -61,7 +66,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
-      <Thread ask={ask} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
+      <Thread ask={ask} mentions={mentions} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         commandResult={state.commandResult ? {
           result: state.commandResult, disabled: state.sending || state.connection.type !== "ready",
           onChoose: (requestId, value) => { void store.respondToCommand(requestId, value).then(applyResult).catch(() => { /* Store exposes the error and keeps the choices. */ }); },

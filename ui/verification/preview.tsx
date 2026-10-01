@@ -9,6 +9,7 @@ import { SessionFrame } from "../src/ui/SessionFrame";
 
 import type { PendingAsk } from "../src/contracts";
 import type { CommandBinding } from "../src/ui/SlashCommands";
+import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
@@ -83,7 +84,19 @@ const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", qu
       ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
 ] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
-const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "slash-ask": planAsk };
+const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk };
+const mentionFiles = ["src/main.ts", "src/file with spaces.ts", "src/ui/Composer.tsx", "vendor/", "dir with space/",
+  ...Array.from({ length: 9 }, (_, i) => `src/very-long-folder-name-${i}/nested-folder/mention-source-${i}.test.ts`)];
+const previewMentions: MentionSource = {
+  key: "preview",
+  files: async (query) => {
+    if (query === "error") throw new Error("File suggestions unavailable. Edit the query to try again.");
+    return mentionFiles.filter((path) => path.toLowerCase().includes(query.toLowerCase())).slice(0, 12)
+      .map((path) => ({ id: path, type: "file", label: path, description: "tracked" }));
+  },
+  models: async (query) => Array.from({ length: 12 }, (_, i) => ({ id: `provider/model-${i}`, type: "model", label: `provider/model-${i}`,
+    description: `Coding model ${i}` })).filter((item) => item.id.includes(query)),
+};
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
@@ -127,11 +140,25 @@ function Preview() {
     runtime.thread.composer.setText("/");
     document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
   }, [runtime]);
+  useEffect(() => {
+    // Only this network-free preview accepts an initial mention query, so the
+    // canonical posture script can capture an already-open suggestion list.
+    const query = new URLSearchParams(location.search).get("mention");
+    if (!scenario.startsWith("mentions") || query === null) return;
+    const timer = setTimeout(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('[aria-label="Message"]');
+      if (!input) return;
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, query);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
-      <Thread commands={scenario.startsWith("slash") ? previewCommands : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+      <Thread commands={scenario.startsWith("slash") || scenario.startsWith("mentions") ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
     </SessionFrame>

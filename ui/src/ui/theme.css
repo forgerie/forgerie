@@ -82,6 +82,23 @@
 html { overscroll-behavior: none; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); -webkit-font-smoothing: antialiased; }
 button, textarea { font: inherit; }
+/* Trigger suggestions reuse the homepage popover palette, type and radii.
+   Window geometry comes from mentionPlacement; rows retain independent touch targets. */
+.mention-popover { position: fixed; z-index: 100; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover);
+  padding: var(--space-1); box-shadow: 0 var(--space-1) var(--space-3) var(--line); font-size: var(--small-text); }
+.mention-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  padding-inline: var(--space-2); color: var(--muted-foreground); font-size: var(--label-text); }
+.mention-close { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
+  background: transparent; border: 0; border-radius: var(--radius-control); }
+.mention-close:hover { background: var(--hover-surface); }
+.mention-option { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
+  padding: var(--space-2); border: 0; border-radius: var(--radius-document); background: transparent; text-align: start; }
+.mention-option[data-highlighted] { background: var(--active-surface); }
+.mention-option > svg { flex: none; color: var(--muted-foreground); }
+.mention-description { display: flex; flex-direction: column; min-inline-size: 0; overflow-wrap: anywhere; }
+.mention-description small { color: var(--muted-foreground); font-size: var(--label-text); }
+.mention-status { margin: 0; padding: var(--space-2); color: var(--muted-foreground); overflow-wrap: anywhere; }
 button { color: inherit; cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.4; }
 :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
