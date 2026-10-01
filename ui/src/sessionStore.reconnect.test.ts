@@ -35,6 +35,7 @@ async function recoveryServer() {
     };
     if (path.endsWith("/prompt")) { state.prompts++; send({ error: "Request outcome unknown" }, 503); return; }
     if (path === "/api/sessions/all") { send({ sessions: [{ id: "known", cwd: "/test", name: "Recovery test" }] }); return; }
+    if (path.endsWith("/commands")) { send([]); return; }
     if (state.failures > 0) { state.failures--; send({ error: "Temporarily unavailable" }, state.readFailureStatus); return; }
     if (path.endsWith("/messages")) {
       state.histories++;

@@ -1,8 +1,10 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { AuiIf, ComposerPrimitive, useAuiState } from "@assistant-ui/react";
+import { useRef } from "react";
+import { AuiIf, ComposerPrimitive, unstable_useTriggerPopoverAriaProps, useAuiState } from "@assistant-ui/react";
 import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, SquareIcon } from "lucide-react";
 import { OTHER_TEXT_MAX_LENGTH } from "../askDraft";
 import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
+import { SlashCommands, type CommandBinding } from "./SlashCommands";
 
 /**
  * System molecule: the one input bar. While an ask is open it gains a question
@@ -10,23 +12,18 @@ import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
  * a second input. Unsupported attachments, model selection, and voice are not
  * offered yet; when they arrive they belong to this bar in both modes.
  */
-export function Composer({ ask }: { ask?: AskBinding }) {
+export function Composer({ ask, commands }: { ask?: AskBinding; commands?: CommandBinding }) {
   const disabled = useAuiState((s) => s.thread.isDisabled);
   const control = useAskMode(ask);
-  return <ComposerPrimitive.Root className="composer">
-    <div className="composer-shell" data-mode={control ? "ask" : "chat"}>
+  const anchor = useRef<HTMLDivElement>(null);
+  return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerPrimitive.Root className="composer">
+    <div ref={anchor} className="composer-shell" data-mode={control ? "ask" : "chat"}>
       {control && <AskQuestions control={control} />}
       {control?.route === "chat" && <p className="ask-route" role="status">
-        <InfoIcon aria-hidden size={14} />Commands run as chat messages. Sending closes these questions.
+        <InfoIcon aria-hidden size={14} />Commands run in Pi. Questions stay open unless Pi closes them.
       </p>}
       {control?.error && <p className="ask-error" role="alert">{control.error}</p>}
-      <ComposerPrimitive.Input aria-label="Message" rows={1} className="composer-input"
-        placeholder={control?.placeholder ?? "Send a message..."}
-        aria-describedby={control?.headingId}
-        enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
-        maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control ? "none" : "enter"} onKeyDown={control?.onKeyDown}
-        disabled={control?.sending || undefined} />
+      <ComposerInput control={control} />
       <div className="composer-actions">
         {control ? <AskActions control={control} /> : <>
           <AuiIf condition={(s) => !s.thread.isRunning}>
@@ -42,7 +39,21 @@ export function Composer({ ask }: { ask?: AskBinding }) {
         </>}
       </div>
     </div>
-  </ComposerPrimitive.Root>;
+    {commands && <SlashCommands binding={commands} anchor={anchor} />}
+  </ComposerPrimitive.Root></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
+}
+
+function ComposerInput({ control }: { control: AskControl | undefined }) {
+  const popover = unstable_useTriggerPopoverAriaProps();
+  return <ComposerPrimitive.Input aria-label="Message" rows={1} className="composer-input"
+    placeholder={control?.placeholder ?? "Send a message..."} aria-describedby={control?.headingId}
+    enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
+    maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
+    submitMode={control ? "none" : "enter"}
+    // The library runs this handler before its plugins. Let an open palette
+    // consume Enter first instead of sending the command or advancing the ask.
+    onKeyDown={(event) => { if (!popover["aria-expanded"]) control?.onKeyDown(event); }}
+    disabled={control?.sending || undefined} />;
 }
 
 /** The question layer: step row, question, and options. It scrolls inside a height budget. */

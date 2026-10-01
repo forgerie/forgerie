@@ -7,7 +7,7 @@ import { messageText } from "./transcript";
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); });
 
-async function server(options: { promptFailure?: boolean; unknownSession?: boolean } = {}) {
+async function server(options: { promptFailure?: boolean; unknownSession?: boolean; catalogFailure?: boolean; commandResults?: unknown[] } = {}) {
   const requests: { path: string; body: unknown }[] = [];
   let client: ServerSocket | undefined;
   const sockets = new WebSocketServer({ noServer: true });
@@ -23,6 +23,8 @@ async function server(options: { promptFailure?: boolean; unknownSession?: boole
     };
     if (url.pathname === "/api/sessions/all") {
       send({ sessions: options.unknownSession ? [] : [{ id: "known", cwd: "/workspace with spaces", name: "Existing conversation" }] });
+    } else if (url.pathname.endsWith("/commands/run") || url.pathname.endsWith("/commands/respond")) {
+      send(options.commandResults?.shift() ?? { type: "done", message: "Command completed" });
     } else if (url.pathname.endsWith("/prompt")) {
       if (options.promptFailure) { send({ error: "Model unavailable" }, 400); return; }
       expect(body).toEqual({ cwd: "/workspace with spaces", text: "hello" });
@@ -30,6 +32,9 @@ async function server(options: { promptFailure?: boolean; unknownSession?: boole
       // Acknowledgement is not completion. Emit the run after the HTTP response.
     } else if (url.pathname.endsWith("/abort")) { send({ aborted: true }); }
     else if (url.searchParams.get("cwd") !== "/workspace with spaces") { send({ error: "cwd required" }, 400); }
+    else if (url.pathname.endsWith("/commands")) {
+      send(options.catalogFailure ? { error: "Discovery unavailable" } : [{ name: "session", source: "builtin", description: "Session stats" }, { name: "review", source: "prompt" }], options.catalogFailure ? 503 : 200);
+    }
     else if (url.pathname.endsWith("/messages")) {
       send({ messages: [{ role: "user", content: "before", timestamp: 1 }, { role: "assistant", content: [{ type: "text", text: "history answer" }], timestamp: 2 }], start: 0, total: 2 });
     } else if (url.pathname.endsWith("/stream-snapshot")) { send({ partial: null, seq: 0 }); }
@@ -60,6 +65,68 @@ function waitFor(store: SessionStore, predicate: () => boolean) {
     });
   });
 }
+
+describe("Pi command transport", () => {
+  it("discovers commands for the session and sends plain arguments to commands/run, never prompt", async () => {
+    const api = await server();
+    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    await store.start();
+    await waitFor(store, () => store.getSnapshot().commands.type === "ready");
+    expect(store.getSnapshot().commands).toMatchObject({ type: "ready", commands: [{ name: "session" }, { name: "review" }] });
+    await store.send("/name Ledger service");
+    expect(api.requests.at(-1)).toEqual({ path: "/api/sessions/known/commands/run", body: { cwd: "/workspace with spaces", text: "/name Ledger service" } });
+    expect(api.requests.some((request) => request.path.endsWith("/prompt"))).toBe(false);
+    expect(store.getSnapshot().commandResult).toEqual({ type: "done", message: "Command completed" });
+    expect(store.getSnapshot().transcript.messages).toHaveLength(2);
+  });
+  it("reports catalog failure without disabling the live session, and can retry", async () => {
+    const options = { catalogFailure: true };
+    const api = await server(options);
+    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    await store.start();
+    await waitFor(store, () => store.getSnapshot().commands.type === "failed");
+    expect(store.getSnapshot().commands).toEqual({ type: "failed", message: "Discovery unavailable" });
+    expect(store.getSnapshot().connection.type).toBe("ready");
+    options.catalogFailure = false;
+    await store.loadCommands();
+    expect(store.getSnapshot().commands.type).toBe("ready");
+  });
+  it("keeps rejected commands observable without retries or invented transcript messages", async () => {
+    const api = await server({ commandResults: [{ type: "unsupported", message: "Unknown command: /bad" }] });
+    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    await store.start();
+    await expect(store.send("/bad")).rejects.toThrow("Unknown command: /bad");
+    expect(store.getSnapshot().commandError).toBe("Unknown command: /bad");
+    expect(store.getSnapshot().sending).toBe(false);
+    expect(api.requests.filter((request) => request.path.endsWith("/commands/run"))).toHaveLength(1);
+    expect(store.getSnapshot().transcript.messages).toHaveLength(2);
+  });
+  it("responds to the exact selection and returns the new session with its draft", async () => {
+    const selection = { type: "select", requestId: "fork-1", title: "Fork from", options: [{ value: "entry-1", label: "First message" }] };
+    const done = { type: "done", message: "Session forked", session: { id: "child", cwd: "/workspace with spaces", name: "Child" }, promptDraft: "original question" };
+    const api = await server({ commandResults: [selection, done] });
+    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    await store.start();
+    await store.send("/fork");
+    expect(store.getSnapshot().commandResult).toEqual(selection);
+    expect(await store.respondToCommand("fork-1", "entry-1")).toEqual(done);
+    expect(api.requests.at(-1)).toEqual({ path: "/api/sessions/known/commands/respond", body: { cwd: "/workspace with spaces", requestId: "fork-1", value: "entry-1" } });
+    expect(store.getSnapshot().session?.id).toBe("known");
+    store.dismissCommand();
+    expect(store.getSnapshot().commandResult).toBeUndefined();
+  });
+  it("updates the current session name and refreshes discovery after reload", async () => {
+    const api = await server({ commandResults: [{ type: "done", session: { id: "known", cwd: "/workspace with spaces", name: "Renamed" } }] });
+    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    await store.start();
+    await waitFor(store, () => store.getSnapshot().commands.type === "ready");
+    await store.send("/name Renamed");
+    expect(store.getSnapshot().session?.name).toBe("Renamed");
+    await store.send("/reload");
+    await waitFor(store, () => store.getSnapshot().commands.type === "ready");
+    expect(api.requests.filter((request) => request.path.endsWith("/commands"))).toHaveLength(2);
+  });
+});
 
 describe("session transport", () => {
   it("loads an existing session, sends cwd and text, and streams until agent.end", async () => {

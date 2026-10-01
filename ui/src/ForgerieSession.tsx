@@ -6,21 +6,31 @@ import { useThreadMessages } from "./useThreadMessages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
 import type { AskBinding } from "./ui/useAskMode";
+import type { CommandResult } from "./commands";
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known }: { id: string; known?: Session | undefined }) {
+export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
+  id: string; known?: Session | undefined; initialDraft?: string;
+  onSwitchSession: (session: Session, draft?: string) => void;
+}) {
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known));
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   useEffect(() => { void store.start(); return store.dispose; }, [store]);
+  const applyResult = useCallback((result: CommandResult | void) => {
+    if (!runtimeRef.current || result?.type !== "done") return;
+    if (result.session && result.session.id !== id) onSwitchSession(result.session, result.promptDraft);
+    else if (result.promptDraft !== undefined) runtimeRef.current?.thread.composer.setText(result.promptDraft);
+  }, [id, onSwitchSession]);
+  const send = useCallback(async (text: string) => { applyResult(await store.send(text)); }, [store, applyResult]);
   const onNew = useCallback(async (message: AppendMessage) => {
     const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
-    try { await store.send(text); }
+    try { await send(text); }
     catch {
       // assistant-ui clears the composer before onNew. Preserve a failed draft.
       runtimeRef.current?.thread.composer.setText(text);
     }
-  }, [store]);
+  }, [send]);
   const onCancel = useCallback(async () => {
     try { await store.cancel(); } catch { /* The store exposes the command error. */ }
   }, [store]);
@@ -32,7 +42,8 @@ export function ForgerieSession({ id, known }: { id: string; known?: Session | u
     isDisabled: state.connection.type !== "ready",
     isSendDisabled: state.sending || state.connection.type !== "ready",
   });
-  useEffect(() => { runtimeRef.current = runtime; }, [runtime]);
+  useEffect(() => { runtimeRef.current = runtime; return () => { runtimeRef.current = null; }; }, [runtime]);
+  useEffect(() => { if (initialDraft !== undefined) runtime.thread.composer.setText(initialDraft); }, [initialDraft, runtime]);
   const error = state.connection.type === "reconnecting" ? "Reconnecting automatically. Your draft stays here."
     : state.connection.type === "failed" ? state.connection.message
     : state.commandError ?? state.transcript.error;
@@ -44,13 +55,18 @@ export function ForgerieSession({ id, known }: { id: string; known?: Session | u
   const ask: AskBinding | undefined = state.ask.type === "open" ? {
     ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
     onSubmit: (answers) => void store.submitAsk(answers), onDismiss: () => void store.dismissAsk(),
-    onChat: (text) => store.send(text),
+    onChat: send,
   } : undefined;
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
-      <Thread ask={ask} />
+      <Thread ask={ask} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
+        commandResult={state.commandResult ? {
+          result: state.commandResult, disabled: state.sending || state.connection.type !== "ready",
+          onChoose: (requestId, value) => { void store.respondToCommand(requestId, value).then(applyResult).catch(() => { /* Store exposes the error and keeps the choices. */ }); },
+          onClose: store.dismissCommand,
+        } : undefined} />
     </SessionFrame>
   </AssistantRuntimeProvider>;
 }

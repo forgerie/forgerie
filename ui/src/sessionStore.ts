@@ -2,6 +2,7 @@ import { z } from "zod";
 import { acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, parseEvent, snapshotSchema, statusSchema, type AskAnswer, type AskEvent, type Session, type SessionEvent } from "./contracts";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { fromHistory, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
+import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatalog, type CommandResult } from "./commands";
 
 export type Connection = { type: "loading" } | { type: "ready" }
   | { type: "reconnecting"; message: string } | { type: "failed"; message: string };
@@ -12,6 +13,8 @@ export interface SessionState {
   ask: AskState;
   sending: boolean;
   commandError?: string;
+  commands: CommandCatalog;
+  commandResult?: CommandResult;
 }
 export interface SessionTransport {
   request: (path: string, init: RequestInit) => Promise<Response>;
@@ -64,7 +67,7 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * it, the store finds the session's cwd in `/api/sessions/all` itself.
  */
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session) {
-  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false };
+  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" } };
   const listeners = new Set<() => void>();
   const lifetime = new AbortController();
   let join: Join | undefined;
@@ -112,6 +115,19 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   const root = `/api/sessions/${encodeURIComponent(id)}`;
   function readPath(endpoint: string, session: Session) {
     return `${root}/${endpoint}?${new URLSearchParams({ cwd: session.cwd })}`;
+  }
+  let catalogAttempt = 0;
+  async function loadCommands() {
+    const session = state.session;
+    if (!session || lifetime.signal.aborted) return;
+    const attempt = ++catalogAttempt;
+    update({ ...state, commands: { type: "loading" } });
+    try {
+      const commands = await request(readPath("commands", session), commandCatalogSchema);
+      if (attempt === catalogAttempt) update({ ...state, commands: { type: "ready", commands } });
+    } catch (error) {
+      if (attempt === catalogAttempt) update({ ...state, commands: { type: "failed", message: messageOf(error) } });
+    }
   }
   async function connect() {
     if (lifetime.signal.aborted) return;
@@ -186,6 +202,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       attempt.askBuffered.length = 0;
       retryDelay = initialDelay; // A socket open alone is not a successful join.
       update({ ...state, connection: { type: "ready" }, transcript, ask });
+      void loadCommands(); // Discovery failure must not break history or the live connection.
     } catch (error) {
       if (!current(attempt)) return;
       if (permanent(error)) stop(error);
@@ -204,6 +221,26 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     started = true;
     unwatch = transport.watchRecovery?.(recover);
     await connect();
+  }
+  async function runSlash(endpoint: "commands/run" | "commands/respond", body: { text: string } | { requestId: string; value: string }): Promise<CommandResult> {
+    const session = state.session;
+    if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
+    if (state.sending) throw new Error("Wait for the current command to finish.");
+    update({ ...state, sending: true, commandError: undefined });
+    try {
+      const result = await request(`${root}/${endpoint}`, commandResultSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: session.cwd, ...body }),
+      });
+      if (result.type === "unsupported") throw new Error(result.message);
+      update({ ...state, commandResult: result,
+        ...(result.type === "done" && result.session?.id === id ? { session: result.session } : {}) });
+      if (endpoint === "commands/run" && "text" in body && /^\/reload(?:\s|$)/u.test(body.text)) void loadCommands();
+      return result;
+    } catch (error) {
+      update({ ...state, commandError: messageOf(error) });
+      throw error;
+    } finally { update({ ...state, sending: false }); }
   }
   async function command(endpoint: "prompt" | "abort", text?: string) {
     const session = state.session;
@@ -250,7 +287,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start,
-    send: (text: string) => command("prompt", text),
+    send: (text: string) => isCommand(text) ? runSlash("commands/run", { text }) : command("prompt", text),
+    respondToCommand: (requestId: string, value: string) => runSlash("commands/respond", { requestId, value }),
+    dismissCommand: () => update({ ...state, commandResult: undefined }),
+    loadCommands,
     cancel: () => command("abort"),
     submitAsk: (answers: AskAnswer[]) => closeAsk("submit", answers),
     dismissAsk: () => closeAsk("dismiss"),

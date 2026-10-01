@@ -136,6 +136,25 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer-input::placeholder { color: var(--muted-foreground); }
 .composer-input:focus-visible { outline: none; }
 .composer-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); padding: 0 var(--space-2) var(--space-2); }
+/* Pi picker: same homepage menu tokens, window-level so the transcript cannot
+   clip it. Its anchor measures the available height, including keyboard insets. */
+.command-popover { position: fixed; z-index: 100; max-block-size: min(22rem, calc(var(--command-room, 22rem) - var(--space-2))); overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--space-1); margin-block-end: var(--space-1); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); box-shadow: 0 var(--space-2) var(--space-6) var(--line); }
+.command-option { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--space-1); inline-size: 100%; min-block-size: var(--control-size);
+  padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; text-align: start; overflow-wrap: anywhere; }
+.command-option:hover, .command-option[data-highlighted] { background: var(--active-surface); }
+.command-option small, .command-hint { color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+.command-hint { margin: 0; padding: var(--space-2) var(--space-3); overflow-wrap: anywhere; }
+.command-hint p { margin: 0 0 var(--space-2); }
+.command-hint button, .command-result-head button { min-block-size: var(--control-size); border: 0; border-radius: var(--radius-control); padding-inline: var(--space-3); background: var(--muted); }
+.command-result { display: flex; flex-direction: column; max-block-size: 30cqb; border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); }
+.command-result-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) var(--space-3); font-size: var(--small-text); }
+.command-result-head h2 { margin: 0; font-size: inherit; font-weight: 500; overflow-wrap: anywhere; }
+.command-result-body { min-block-size: 0; overflow-y: auto; padding: var(--space-2) var(--space-3); font-size: var(--small-text); overflow-wrap: anywhere; }
+.command-result-body p { margin: 0; white-space: pre-wrap; }
+.command-tree { padding-inline-start: var(--space-5); }
+.command-tree li { padding-block: var(--space-2); }
+.command-tree li[aria-current] { background: var(--active-surface); }
 /* Ask mode: the same bar with a question layer on top. The layer takes at most
    42% of the session height and scrolls inside; the input and its action row
    never move off screen. */

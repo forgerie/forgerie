@@ -5,6 +5,7 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage }
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskPhase } from "../ask";
 import type { AskAnswer, PendingAsk } from "../contracts";
+import type { CommandCatalog } from "../commands";
 import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
 
@@ -21,12 +22,13 @@ interface Props {
   ask?: PendingAsk; phase?: AskPhase; offline?: boolean;
   onSubmit?: (answers: AskAnswer[]) => void; onDismiss?: () => void; onChat?: (text: string) => Promise<void>;
   onNew?: (message: AppendMessage) => Promise<void>;
+  commands?: CommandCatalog; onRetry?: () => void;
 }
 function Fixture({ ask, phase = { type: "answering" }, offline = false, onSubmit = () => {}, onDismiss = () => {},
-  onChat = async () => {}, onNew = async () => {} }: Props) {
+  onChat = async () => {}, onNew = async () => {}, commands, onRetry = () => {} }: Props) {
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], false), onNew, isDisabled: offline });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <main className="session-shell"><Thread ask={ask && { ask, phase, offline, onSubmit, onDismiss, onChat }} /></main>
+    <main className="session-shell"><Thread ask={ask && { ask, phase, offline, onSubmit, onDismiss, onChat }} commands={commands && { catalog: commands, onRetry }} /></main>
   </AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
@@ -42,6 +44,7 @@ function choose(label: string) {
 function type(text: string) {
   return act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+    input().setSelectionRange(text.length, text.length);
     input().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
@@ -57,6 +60,66 @@ afterEach(async () => {
   await act(async () => root.unmount());
   document.body.replaceChildren();
   vi.unstubAllGlobals();
+});
+
+const commandList: CommandCatalog = { type: "ready", commands: [
+  { name: "name", source: "builtin", description: "Set session name" },
+  { name: "review", source: "prompt", description: "Review changes" },
+  { name: "skill:test", source: "skill", description: "Write tests" },
+] };
+
+describe("assistant-ui slash palette", () => {
+  it("filters and completes plain Pi text with keyboard, then sends only after confirmation", async () => {
+    const onNew = vi.fn<(message: AppendMessage) => Promise<void>>().mockResolvedValue(undefined);
+    await render({ commands: commandList, onNew });
+    await type("/re");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(document.querySelector('[role="option"]')?.textContent).toBe("/reviewReview changes");
+    await press({ key: "Enter" });
+    expect(onNew).not.toHaveBeenCalled();
+    expect(input().value).toBe("/review ");
+    await type("/review src/sessionStore.ts");
+    expect(document.querySelector(".command-popover")).toBeNull();
+    await press({ key: "Enter" });
+    expect(onNew.mock.calls[0]?.[0].content).toEqual([{ type: "text", text: "/review src/sessionStore.ts" }]);
+  });
+  it("completes on touch and Escape dismisses without losing text", async () => {
+    await render({ commands: commandList });
+    await type("/");
+    await click(document.querySelector<HTMLElement>('[role="option"]'));
+    expect(input().value).toBe("/name ");
+    await type("/sk");
+    await press({ key: "Escape" });
+    expect(input().value).toBe("/sk");
+    expect(document.querySelector(".command-popover")).toBeNull();
+    await type("/skill:");
+    expect(document.querySelector('[role="option"]')?.textContent).toContain("/skill:test");
+  });
+  it("gives the palette Enter precedence over ask submission and keeps the single input", async () => {
+    const onSubmit = vi.fn();
+    const onChat = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    await render({ ask: single, commands: commandList, onSubmit, onChat });
+    await type("/na");
+    await press({ key: "Enter" });
+    expect(input().value).toBe("/name ");
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onChat).not.toHaveBeenCalled();
+    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    await type("/name New name");
+    await press({ key: "Enter" });
+    expect(onChat).toHaveBeenCalledWith("/name New name");
+  });
+  it("shows discovery failure and retries, and reports no matches", async () => {
+    const onRetry = vi.fn();
+    await render({ commands: { type: "failed", message: "offline catalog" }, onRetry });
+    await type("/");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("offline catalog");
+    await click(byText("Retry"));
+    expect(onRetry).toHaveBeenCalledOnce();
+    await render({ commands: commandList });
+    await type("/missing");
+    expect(document.querySelector(".command-hint")?.textContent).toContain("No matching commands");
+  });
 });
 
 describe("Composer in ask mode", () => {
@@ -129,7 +192,7 @@ describe("Composer in ask mode", () => {
     const onSubmit = vi.fn();
     await render({ ask: single, onChat, onSubmit });
     await type("/review");
-    expect(document.querySelector(".ask-route")?.textContent).toContain("Sending closes these questions");
+    expect(document.querySelector(".ask-route")?.textContent).toContain("Questions stay open unless Pi closes them");
     expect(document.querySelector(".ask")?.hasAttribute("data-folded")).toBe(true);
     expect(byText("Skip")).toBeUndefined();
     await press({ key: "Enter" });

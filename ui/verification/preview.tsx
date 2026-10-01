@@ -8,6 +8,7 @@ import { Thread } from "../src/ui/Thread";
 import { SessionFrame } from "../src/ui/SessionFrame";
 
 import type { PendingAsk } from "../src/contracts";
+import type { CommandBinding } from "../src/ui/SlashCommands";
 import "../src/ui/theme.css";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
@@ -73,7 +74,7 @@ const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", qu
       ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
 ] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
-const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk };
+const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "slash-ask": planAsk };
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
@@ -99,16 +100,30 @@ function Preview() {
   const threadMessages = useThreadMessages(messages, running);
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false),
     isRunning: running, isLoading: scenario === "loading", isDisabled: scenario === "loading" || scenario === "disconnected" || recovering });
+  useEffect(() => {
+    if (scenario !== "slash-capture") return;
+    runtime.thread.composer.setText("/");
+    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+  }, [runtime]);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
-      <Thread ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+      <Thread commands={scenario.startsWith("slash") ? previewCommands : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
     </SessionFrame>
   </AssistantRuntimeProvider>;
 }
+const previewCommands: CommandBinding = { catalog: { type: "ready", commands: [
+  { name: "name", source: "builtin", description: "Set session display name" },
+  { name: "session", source: "builtin", description: "Show session info and stats" },
+  { name: "compact", source: "builtin", description: "Manually compact session context" },
+  { name: "reload", source: "builtin", description: "Reload Pi runtime resources for this session" },
+  { name: "review", source: "prompt", description: "Review the current changes" },
+  { name: "skill:testing", source: "skill", description: "Write regression tests" },
+  ...Array.from({ length: 20 }, (_, index) => ({ name: `extension-${index + 1}`, source: "extension" as const, description: "An extension command with a description that wraps in a narrow pane." })),
+] }, onRetry: () => {} };
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing preview root");
 createRoot(root).render(<Preview />);
