@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { hitRect } from "./lib/hit.mjs";
 
 // Compare rendered Markdown with the backend source after the same public parse.
 const normalize = (text) => text.replace(/\s+/g, " ").trim();
@@ -62,6 +63,7 @@ try {
     width: innerWidth, height: innerHeight,
     overflow: document.documentElement.scrollWidth > innerWidth,
     send: document.querySelector('button[aria-label="Send message"]')?.getBoundingClientRect().toJSON(),
+    sendHit: (() => { const node = document.querySelector('button[aria-label="Send message"]'); return node ? (${hitRect})(node) : undefined; })(),
     composer: document.querySelector('.composer')?.getBoundingClientRect().toJSON()
   })`);
   async function until(test, timeout = 120_000) {
@@ -134,7 +136,7 @@ try {
     assert.equal(state.width, posture.width);
     assert.equal(state.overflow, false);
     assert.ok(state.send && state.send.x >= 0 && state.send.right <= state.width && state.send.bottom <= state.height);
-    assert.ok(state.send.height >= 44, "Send target must stay reachable");
+    assert.ok(state.sendHit.height >= 44 && state.sendHit.width >= 44, "Send target must stay reachable");
     result.transitions.push({ posture: posture.name, width: state.width, height: state.height, send: state.send });
   }
   await cdp.send("Page.reload");

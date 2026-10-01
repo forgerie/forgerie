@@ -51,10 +51,13 @@ function AskQuestions({ control }: { control: AskControl }) {
   const kind = question.multiple ? "checkbox" : "radio";
   return <section className="ask" aria-label="Questions from the agent" aria-busy={control.sending}
     data-folded={control.route === "chat" || undefined}>
-    <div className="ask-head">
+    {/* Like the homepage branch picker (hideWhenSingleBranch), the step row
+        appears only when there is more than one question, or when a command
+        folds the questions to it. */}
+    {(count > 1 || control.route === "chat") && <div className="ask-head">
       {count > 1 && <button type="button" className="icon-button quiet-button" aria-label="Previous question" title="Previous question"
         disabled={index === 0 || control.sending} onClick={() => control.go(index - 1)}>
-        <ChevronLeftIcon aria-hidden size={18} />
+        <ChevronLeftIcon aria-hidden size={16} />
       </button>}
       {count > 1 && <ol className="ask-rail" aria-label="Questions">
         {ask.questions.map((item, position) => {
@@ -67,7 +70,7 @@ function AskQuestions({ control }: { control: AskControl }) {
         })}
       </ol>}
       <span className="ask-count" aria-hidden>{index + 1} of {count}</span>
-    </div>
+    </div>}
     <div className="ask-body">
       <h2 className="ask-question" id={control.headingId}>{question.question}</h2>
       {question.detail && <p className="ask-detail">{question.detail}</p>}

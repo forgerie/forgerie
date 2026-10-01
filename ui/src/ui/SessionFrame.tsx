@@ -19,9 +19,9 @@ export function SessionFrame({ name, status, error, recovery, children }: {
   return <main className="session-shell">
     <header className="session-header">
       {leading}
-      <div className="session-heading"><span className="product-name">Forgerie</span>
-        <h1 className="session-title" title={name}>{name}</h1>
-      </div>
+      {/* The homepage thread header names the thread only; the product name
+          lives in the picker header, as it does in the homepage sidebar. */}
+      <div className="session-heading"><h1 className="session-title" title={name}>{name}</h1></div>
       <span className="connection-status" role="status">{status}</span>
     </header>
     {error && <div className="notice" role="alert"><p>{error}</p>{recovery}</div>}

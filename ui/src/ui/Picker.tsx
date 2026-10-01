@@ -1,3 +1,5 @@
+import { AnvilIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+  type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
 import type { CatalogConnection } from "../picker/catalogStore";
@@ -28,7 +30,11 @@ export interface PickerActions {
   onDismissToast?: (() => void) | undefined;
 }
 
-const PIN = <svg className="picker-pin" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z" /><path d="M12 15v5" /></svg>;
+const PIN = <PinIcon className="picker-pin" aria-hidden />;
+// The homepage's row menu icons (thread-list-item.tsx), one per command.
+const COMMAND_ICONS: Record<RowCommandKind, LucideIcon> = {
+  pin: PinIcon, unpin: PinOffIcon, archive: ArchiveIcon, restore: ArchiveRestoreIcon, delete: Trash2Icon, copyPath: CopyIcon,
+};
 // Same drawings as the Lit client's tabIcons.ts, so one concept has one picture.
 const AGENTS = <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M7.5 11 16.5 6.8" /><path d="M7.5 13 16.5 17.2" /></svg>;
 const TERMINAL = <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m7 10 3 3-3 3" /><path d="M12 16h5" /></svg>;
@@ -84,7 +90,7 @@ function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu, onClose
     </span>
     <button className="picker-row-more" aria-label="Session commands" aria-haspopup="menu" aria-expanded={menuOpen}
       aria-controls={menuOpen ? menuId(session.id) : undefined} tabIndex={-1}
-      onClick={(event) => { event.stopPropagation(); if (menuOpen) onCloseMenu(); else onMenu(session.id); }}>⋯</button>
+      onClick={(event) => { event.stopPropagation(); if (menuOpen) onCloseMenu(); else onMenu(session.id); }}><EllipsisIcon aria-hidden /></button>
   </div>;
 }
 
@@ -111,10 +117,11 @@ function RowMenu({ row, confirming, onConfirm, onRun, onClose }: {
   return <div ref={ref} id={menuId(row.session.id)} className="picker-row-menu" role="menu" aria-label="Session commands" onKeyDown={onKeyDown}>
     {rowCommands(row).map((command) => {
       const asking = command.danger === true && confirming;
+      const Icon = COMMAND_ICONS[command.kind];
       return <button key={command.kind} role="menuitem" data-command={command.kind} disabled={command.disabled !== undefined}
         data-tone={command.danger ? "danger" : undefined}
         onClick={() => { if (command.danger && !confirming) onConfirm(); else onRun(command.kind); }}>
-        {asking ? "Delete for good?" : command.label}
+        <Icon aria-hidden />{asking ? "Delete for good?" : command.label}
         {command.disabled ? <small>{command.disabled}</small> : command.key ? <small>{command.key}</small> : null}
       </button>;
     })}
@@ -125,7 +132,7 @@ function ToastLine({ toast, onUndo, onDismiss }: { toast: Toast; onUndo?: (() =>
   return <div className="picker-toast" data-tone={toast.type === "error" ? "error" : undefined} role={toast.type === "error" ? "alert" : "status"}>
     <span>{toast.type === "undo" ? <>Archived <em>{toast.target.name ?? "Untitled session"}</em></> : toast.text}</span>
     {toast.type === "undo" && onUndo ? <button className="picker-toast-undo" onClick={onUndo}>Undo</button> : null}
-    {onDismiss ? <button className="picker-toast-close" aria-label="Dismiss" onClick={onDismiss}>×</button> : null}
+    {onDismiss ? <button className="picker-toast-close" aria-label="Dismiss" onClick={onDismiss}><XIcon aria-hidden /></button> : null}
   </div>;
 }
 
@@ -137,7 +144,7 @@ function ToastLine({ toast, onUndo, onDismiss }: { toast: Toast; onUndo?: (() =>
 export function Picker({ view, prefs, onPrefs, actions }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
 }) {
-  const [menu, setMenu] = useState<"grouping" | "board" | undefined>();
+  const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
   const listRef = useRef<HTMLDivElement>(null);
   const change = onPrefs;
@@ -205,20 +212,20 @@ export function Picker({ view, prefs, onPrefs, actions }: {
   const rowWithMenu = rowMenu ? order.find((row) => row.session.id === rowMenu.id) : undefined;
   return <section className="picker" aria-label="Sessions" onKeyDown={onKeyDown}>
     <header className="picker-header">
-      <h2><button className="picker-grouping" aria-haspopup="menu" aria-expanded={menu === "grouping"}
-        onClick={() => { setRowMenu(undefined); setMenu(menu === "grouping" ? undefined : "grouping"); }}>
-        Sessions <span className="picker-grouping-value">by {prefs.grouping}</span></button></h2>
+      {/* The homepage sidebar header: product mark and name. */}
+      <h2 className="picker-brand"><AnvilIcon aria-hidden />Forgerie<span className="sr-only"> sessions</span></h2>
       <button className="picker-icon" aria-label="More session commands" aria-haspopup="menu" aria-expanded={menu === "board"}
-        onClick={() => { setRowMenu(undefined); setMenu(menu === "board" ? undefined : "board"); }}>⋯</button>
-      {actions.onClose ? <button className="picker-icon" aria-label="Close sessions" onClick={actions.onClose}>×</button> : null}
-      {menu === "grouping" ? <div className="picker-menu" role="menu" aria-label="Group sessions">
+        title="Grouping and archived sessions"
+        onClick={() => { setRowMenu(undefined); setMenu(menu === "board" ? undefined : "board"); }}><EllipsisIcon aria-hidden size={16} /></button>
+      {actions.onClose ? <button className="picker-icon" aria-label="Close sessions" title="Close sessions" onClick={actions.onClose}><XIcon aria-hidden size={16} /></button> : null}
+      {menu === "board" ? <div className="picker-menu" role="menu" aria-label="Session commands">
         {(["state", "project"] as const).map((grouping) => <button key={grouping} role="menuitemradio" aria-checked={prefs.grouping === grouping}
-          onClick={() => { setMenu(undefined); change({ ...prefs, grouping }); }}>By {grouping}</button>)}
-      </div> : null}
-      {menu === "board" ? <div className="picker-menu picker-menu-end" role="menu" aria-label="Session commands">
+          onClick={() => { setMenu(undefined); change({ ...prefs, grouping }); }}>
+          <CheckIcon aria-hidden />Group by {grouping}{prefs.grouping === grouping ? null : <small>G</small>}</button>)}
+        <div className="picker-menu-separator" role="separator" />
         <button role="menuitemcheckbox" aria-checked={prefs.showArchived} disabled={view.archivedCount === 0}
           onClick={() => { setMenu(undefined); change({ ...prefs, showArchived: !prefs.showArchived }); }}>
-          Show archived <small>{view.archivedCount} · A</small></button>
+          <CheckIcon aria-hidden />Show archived <small>{view.archivedCount} · A</small></button>
       </div> : null}
     </header>
     {connection.type === "reconnecting" ? <p className="picker-notice" role="status"><span aria-hidden="true">&gt;</span> Reconnecting…</p> : null}
@@ -234,10 +241,10 @@ export function Picker({ view, prefs, onPrefs, actions }: {
         && prefs.grouping === "state" ? <p className="picker-clear">Nothing is waiting for you</p> : null}
       {view.sections.map((section) => <div key={section.key} className="picker-group" data-kind={section.kind}>
           <button className="picker-group-header" aria-expanded={!collapsed.has(section.key)} onClick={() => toggle(section.key)}>
-            <span className="picker-chevron" aria-hidden="true">▾</span><span className="picker-group-label">{section.label}</span>
+            <ChevronDownIcon className="picker-chevron" aria-hidden /><span className="picker-group-label">{section.label}</span>
             <span className="picker-count">{section.rows.length + (section.hidden ?? 0)}</span>
           </button>
-          {collapsed.has(section.key) ? null : <div role="group" aria-label={section.label}>
+          {collapsed.has(section.key) ? null : <div className="picker-group-rows" role="group" aria-label={section.label}>
             {section.rows.map((row) => <div key={row.session.id} role="none">
               <PickerRow row={row} selected={row.session.id === view.selectedId} pending={view.pending?.has(row.session.id) === true}
                 menuOpen={rowWithMenu?.session.id === row.session.id} onSelect={actions.onSelect} onMenu={openRowMenu} onCloseMenu={closeRowMenu} />

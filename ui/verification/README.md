@@ -1,5 +1,21 @@
 # Verification and limits
 
+## Realignment with the assistant-ui homepage
+
+Checked on 2026-09-30 against Forgerie on 8504 and the homepage demo source at assistant-ui `90f47502f`. The drift audit, with every change and the differences that remain, is in [`ui-drift-audit.md`](ui-drift-audit.md). Behaviour is unchanged: no store, transcript, reducer, or picker logic changed. The picker's grouping control moved into its "⋯" menu; it is still two taps, and G still switches it.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | Build, TypeScript, ESLint, and 145 tests passed. |
+| Fixture checks. | `visual-acceptance.mjs`, `ask-acceptance.mjs`, and `trace-acceptance.mjs` passed. The 44 px target assertions now measure the hit area (`scripts/lib/hit.mjs`), because controls are drawn at the homepage's 24 to 32 px. |
+| Real session, read only. | `acceptance.mjs` and `reconnect-acceptance.mjs` passed against an existing session: 22 messages matched the API after reload, the draft survived all four postures and the reconnect. |
+| Picker, real catalog. | `picker-acceptance.mjs` passed read-only. `row-actions-acceptance.mjs` passed with 22 writes to its own scratch session, which it deleted: menu, archive, and undo at all 8 posture and scheme pairs, touch hold, pin, copy, E, undo expiry, restore, and delete. |
+| Visual review. | Before, after, and reference captures are in `verification/local/realign/` (ignored). Read: thread, picker sheet, picker with the session menu and the "⋯" menu, undo line, history fixture, tools fixture, ask and long-ask fixtures, across the four postures and both schemes, plus a 1280 × 860 docked capture beside the homepage demo at the same size. |
+
+Two defects were found in review and fixed. A one-question ask showed "1 of 1"; the step row now appears only with more than one question, like the homepage branch picker, or when a command folds the questions. Without the step row, the question layer covered the bar's rounded top corners; it now follows the bar's radius.
+
+Not verified: the physical Fold and its keyboard. Desktop docked layout was checked only at 1280 × 860.
+
 ## Session picker, slice 2 (row actions)
 
 Checked on 2026-09-29 against Forgerie on 8504. Every write went to one scratch session that the test created and then deleted for good. No existing session was changed.

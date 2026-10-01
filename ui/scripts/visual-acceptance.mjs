@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { hitRect } from "./lib/hit.mjs";
 const repo = process.env.FORGERIE_ROOT ?? resolve("../..");
 const { launchChrome, getFreePort, waitForDebugger, evaluate, sleep } = await import(pathToFileURL(join(repo, "scripts/lib/cdp.mjs")));
 const { openPosturePage } = await import(pathToFileURL(join(repo, "scripts/lib/posture-page.mjs")));
@@ -50,6 +51,7 @@ try {
         draft: document.querySelector('textarea').value,
         overflow: document.documentElement.scrollWidth > innerWidth,
         send: document.querySelector('[aria-label="Send message"]').getBoundingClientRect().toJSON(),
+        sendHit: (${hitRect})(document.querySelector('[aria-label="Send message"]')),
         textarea: document.querySelector('textarea').getBoundingClientRect().toJSON(),
         column: document.querySelector('.thread-column').getBoundingClientRect().width,
         bubble: document.querySelector('.user-bubble').getBoundingClientRect().width,
@@ -58,7 +60,7 @@ try {
       assert.equal(state.draft, "Unsent draft survives fold and rotation");
       assert.equal(state.overflow, false);
       assert.equal(state.width, posture.width);
-      assert.ok(state.send.width >= 44 && state.send.height >= 44);
+      assert.ok(state.sendHit.width >= 44 && state.sendHit.height >= 44);
       assert.ok(state.send.x >= 0 && state.send.right <= state.width && state.send.y >= 0 && state.send.bottom <= state.height);
       assert.ok(state.textarea.y >= 0 && state.textarea.bottom <= state.height);
       assert.ok(state.bubble <= state.column * 0.8 + 1);
@@ -77,7 +79,7 @@ try {
   const olderCopyActions = await evaluate(cdp, `[...document.querySelectorAll('.message-actions')].map(element => ({
     visibility: getComputedStyle(element).visibility,
     display: getComputedStyle(element).display,
-    target: element.querySelector('button').getBoundingClientRect().width
+    target: Math.min((${hitRect})(element.querySelector('button')).width, (${hitRect})(element.querySelector('button')).height)
   }))`);
   assert.equal(olderCopyActions.length, 3);
   assert.ok(olderCopyActions.every(action => action.visibility === 'visible' && action.display !== 'none' && action.target >= 44));

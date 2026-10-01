@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { hitRect } from "./lib/hit.mjs";
 const repo = process.env.FORGERIE_ROOT ?? resolve("../..");
 const { launchChrome, getFreePort, waitForDebugger, evaluate, sleep } = await import(pathToFileURL(join(repo, "scripts/lib/cdp.mjs")));
 const { openPosturePage } = await import(pathToFileURL(join(repo, "scripts/lib/posture-page.mjs")));
@@ -97,7 +98,7 @@ try {
         const state = await evaluate(cdp, `(() => {
           const box = (s) => document.querySelector(s)?.getBoundingClientRect().toJSON();
           const body = document.querySelector('.ask-body');
-          const buttons = [...document.querySelectorAll('.composer-actions button, .ask-head > button')].map((n) => ({ text: n.textContent || n.getAttribute('aria-label'), ...n.getBoundingClientRect().toJSON() }));
+          const buttons = [...document.querySelectorAll('.composer-actions button, .ask-head > button')].map((n) => ({ text: n.textContent || n.getAttribute('aria-label'), ...n.getBoundingClientRect().toJSON(), hit: (${hitRect})(n) }));
           return { width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth,
             ask: box('.composer'), input: box('[aria-label="Message"]'), inputs: document.querySelectorAll('.composer textarea').length, buttons,
             bodyScrolls: body.scrollHeight > body.clientHeight + 1, shadow: getComputedStyle(body).backgroundImage.includes('radial-gradient'),
@@ -108,7 +109,7 @@ try {
         assert.ok(state.ask.y >= 0 && state.ask.bottom <= state.height + 0.5, `${scenario} ${posture.name} bar leaves the viewport`);
         assert.ok(state.input.height >= 44 && state.input.bottom <= state.height, `${scenario} ${posture.name} input is cut off`);
         for (const button of state.buttons) {
-          assert.ok(button.height >= 44 && button.width >= 44, `${button.text} target is ${button.width}x${button.height}`);
+          assert.ok(button.hit.height >= 44 && button.hit.width >= 44, `${button.text} target is ${button.hit.width}x${button.hit.height}`);
           assert.ok(button.x >= 0 && button.right <= state.width && button.y >= 0 && button.bottom <= state.height, `${button.text} is off screen at ${posture.name}`);
         }
         assert.ok(state.share <= 0.43, `${scenario} ${posture.name} question layer takes ${state.share}`);

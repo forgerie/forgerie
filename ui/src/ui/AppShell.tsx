@@ -1,3 +1,4 @@
+import { PanelLeftIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { SessionFrameLeading } from "./SessionFrame";
 
@@ -36,7 +37,7 @@ export function AppShell({ picker, thread, open, onOpenChange, attention }: {
   const hidden = layout === "overlay" && !open;
   const opener = layout === "overlay" ? <button className="app-opener" aria-label="Sessions" title="Sessions" aria-expanded={open}
     aria-controls="app-picker" data-attention={attention} onClick={() => onOpenChange(true)}>
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+    <PanelLeftIcon aria-hidden size={16} />
   </button> : null;
   return <div ref={ref} className="app-shell" data-layout={layout} data-sheet={hidden ? "closed" : "open"}>
     <aside id="app-picker" className="app-picker" aria-hidden={hidden} inert={hidden}>{picker(layout)}</aside>
