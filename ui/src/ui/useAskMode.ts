@@ -3,6 +3,7 @@ import { useAui, useAuiState } from "@assistant-ui/react";
 import type { AskPhase } from "../ask";
 import type { AskAnswer, AskQuestion, PendingAsk } from "../contracts";
 import { useDictation } from "../DictationProvider";
+import type { ChatDraft } from "../chatDraft";
 import { OTHER_TEXT_MAX_LENGTH, draftOf, isAnswered, pickOption, routeOf, settle, toAnswers, type AskDrafts, type AskRoute, type QuestionDraft } from "../askDraft";
 
 /** What the binding hands the composer while an ask is open. */
@@ -25,7 +26,7 @@ interface Progress { askId?: string; index: number; drafts: AskDrafts }
  * question, so every input feature works in ask mode too. The draft from before
  * the ask is set aside when the ask opens and put back when it closes.
  */
-export function useAskMode(binding: AskBinding | undefined) {
+export function useAskMode(binding: AskBinding | undefined, chatDraft: ChatDraft) {
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
   const dictating = useAuiState((s) => s.composer.dictation != null);
@@ -47,12 +48,8 @@ export function useAskMode(binding: AskBinding | undefined) {
     return () => { cancel(); aui.composer.stopDictation(); };
   }, [askId, questionId, disabled, cancel, aui]);
 
-  useLayoutEffect(() => {
-    if (askId === undefined) return;
-    const stash = aui.composer.getState().text;
-    aui.composer.setText("");
-    return () => aui.composer.setText(stash);
-  }, [askId, aui]);
+  useLayoutEffect(() => { chatDraft.setAsk(askId); }, [askId, chatDraft]);
+  useLayoutEffect(() => () => chatDraft.setAsk(undefined), [chatDraft]);
 
   const questions = binding?.ask.questions ?? [];
   const index = Math.min(progress.index, Math.max(questions.length - 1, 0));

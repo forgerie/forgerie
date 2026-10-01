@@ -12,6 +12,7 @@ import { ForgerieDictationAdapter } from "./speech/ForgerieDictationAdapter";
 import { DictationProvider } from "./DictationProvider";
 import { createAttachmentAdapter, type PromptAttachment } from "./attachments";
 import { sendMessage } from "./sendMessage";
+import { createChatDraft } from "./chatDraft";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
@@ -22,6 +23,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   const [dictation] = useState(() => new ForgerieDictationAdapter());
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
+  const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer));
   const sessionId = state.session?.id;
   const cwd = state.session?.cwd;
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
@@ -40,8 +42,11 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
     await sendMessage(message, send, () => runtimeRef.current?.thread.composer, setSendError);
   }, [send]);
   const onCancel = useCallback(async () => {
-    try { await store.cancel(); } catch { /* The store exposes the command error. */ }
-  }, [store]);
+    try {
+      const restored = await store.cancel();
+      chatDraft.restore(restored.map((message) => message.text).join("\n\n"));
+    } catch { /* The store exposes the command error. */ }
+  }, [store, chatDraft]);
   const messages = useThreadMessages(state.transcript.messages, state.transcript.isRunning);
   const runtime = useExternalStoreRuntime({
     messages, onNew, onCancel, adapters: { dictation, attachments },
@@ -58,7 +63,8 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   const status = state.connection.type === "loading" ? "Connecting"
     : state.connection.type === "reconnecting" ? "Reconnecting"
     : state.connection.type === "failed" ? "Disconnected"
-    : state.sending ? "Sending" : state.transcript.isRunning ? "Running"
+    : state.sending ? "Sending" : state.compaction.type === "running" ? "Compacting"
+    : state.compaction.type === "queued" ? "Compaction queued" : state.transcript.isRunning ? "Running"
     : state.ask.type === "open" ? "Waiting for you" : "Connected";
   const ask: AskBinding | undefined = state.ask.type === "open" ? {
     ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
@@ -70,7 +76,11 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
     <DictationProvider adapter={dictation}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
-      <Thread ask={ask} mentions={mentions} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
+      <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
+        compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",
+          queueCount: state.status?.queuedMessages.length ?? 0, onSend: send,
+          onClearQueue: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); },
+          onDismiss: store.dismissCompaction }}
         commandResult={state.commandResult ? {
           result: state.commandResult, disabled: state.sending || state.connection.type !== "ready",
           onChoose: (requestId, value) => { void store.respondToCommand(requestId, value).then(applyResult).catch(() => { /* Store exposes the error and keeps the choices. */ }); },

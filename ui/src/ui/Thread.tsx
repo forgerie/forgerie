@@ -8,10 +8,12 @@ import { AssistantMessage, SystemMessage, UserMessage } from "./Messages";
 import type { CommandBinding } from "./SlashCommands";
 import { CommandResultPanel, type CommandResultBinding } from "./CommandResultPanel";
 import { ImageViewerProvider } from "./ImageViewer";
+import { CompactionNotice, type CompactionBinding } from "./CompactionNotice";
+import type { ChatDraft } from "../chatDraft";
 
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode.
-export function Thread({ ask, mentions, commands, commandResult }: { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding }) {
+export function Thread({ ask, mentions, commands, commandResult, compaction, chatDraft }: { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; chatDraft?: ChatDraft }) {
   return <ImageViewerProvider><ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
@@ -32,7 +34,8 @@ export function Thread({ ask, mentions, commands, commandResult }: { ask?: AskBi
             <ArrowDownIcon aria-hidden size={16} />
           </ThreadPrimitive.ScrollToBottom>
           {commandResult && <CommandResultPanel {...commandResult} />}
-          <Composer ask={ask} mentions={mentions} commands={commands} />
+          {compaction && <CompactionNotice {...compaction} />}
+          <Composer ask={ask} mentions={mentions} commands={commands} compaction={compaction} chatDraft={chatDraft} />
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>

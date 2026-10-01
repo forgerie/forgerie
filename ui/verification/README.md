@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Session compaction
+
+The one composer supports explicit compaction during idle work or queueing during an active run. Live status and server receipts appear above it. See [compaction behavior, queue clearing, verification, and limits](compaction.md).
+
 ## Composer mentions
 
 The React MVP supports `@` file discovery and `#` qualified model references in the shared chat and ask composer. See [mention behavior, verification, and limits](mentions.md).
@@ -437,6 +441,6 @@ This is a private standalone MVP on an orphan branch, not a production client re
 
 Text, thinking, and tool calls are converted. Thinking shows as collapsed reasoning. Every tool uses one generic card with its input and text output; there are no custom `edit` diff or `bash` cards yet. Image parts in tool output show as `[image]`. Shell (`!` command) events and skill-read lines are not shown. Assistant text supports Markdown headings, lists, links, tables, and code fences. User messages retain their literal text. Markdown images become links, not remote media requests. Math and diagrams remain text. Ask forms, dialogs, and process cards are excluded. System messages render in full, including very long system prompts. A session waiting for an excluded form can stay Running until answered in the original Forgerie UI.
 
-A closed socket triggers automatic reconnect and authoritative resync. The transcript and draft remain in memory, but commands and input stay disabled during recovery. Permanent contract/session failures still require Reload. There is no queue, branch switching, or persisted draft across page reloads. Rotation and reconnect preserve the current draft because they do not remount the app. Physical sleep/wake and keyboard behavior remain unverified.
+A closed socket triggers automatic reconnect and authoritative resync. The transcript and draft remain in memory, but commands and input stay disabled during recovery. Permanent contract/session failures still require Reload. The queue workflow covers `/compact` only. There is no branch switching or persisted draft across page reloads. Rotation and reconnect preserve the current draft because they do not remount the app. Physical sleep/wake and keyboard behavior remain unverified.
 
 History loads as one full response. There is no paging or virtualization yet. The production JavaScript bundle is about 998 kB before gzip and 306 kB after gzip. Vite reports its size warning. Stop's HTTP body is tested against the transport contract, but a real model run was not interrupted during acceptance.

@@ -14,6 +14,7 @@ import type { CommandBinding } from "../src/ui/SlashCommands";
 import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { createAttachmentAdapter } from "../src/attachments";
+import { idleCompaction, type CompactionState } from "../src/compaction";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const tool = (id: string, name: string, args: unknown, state: ToolState): TranscriptPart => ({ type: "tool", id, name, args, state });
@@ -87,7 +88,7 @@ const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", qu
       ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
 ] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
-const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk };
+const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
 const mentionFiles = ["src/main.ts", "src/file with spaces.ts", "src/ui/Composer.tsx", "vendor/", "dir with space/",
   ...Array.from({ length: 9 }, (_, i) => `src/very-long-folder-name-${i}/nested-folder/mention-source-${i}.test.ts`)];
 const previewMentions: MentionSource = {
@@ -140,6 +141,15 @@ const imageMessages = (): TranscriptMessage[] => {
     ] },
   ];
 };
+const compactionPreview = scenario.startsWith("compaction");
+const compactionSummary = "Compaction complete.\nTokens before: 84,120\n\nThe session keeps its deployment decisions and test plan.\n" + "Keep the runtime server-owned and do not retry mutations. ".repeat(30);
+const compactionScenarios: Record<string, CompactionState> = {
+  "compaction-queued": { type: "queued", text: "/compact retain the test plan, release decisions, and deployment notes" },
+  "compaction-running": { type: "running" },
+  "compaction-complete": { type: "finished", outcome: "complete", message: compactionSummary },
+  "compaction-error": { type: "finished", outcome: "failed", message: "Compaction failed: The provider is unavailable. Try again after the provider recovers." },
+  "compaction-reconnecting": { type: "queued", text: "/compact retain the deployment decisions" },
+};
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
@@ -158,7 +168,8 @@ function Preview() {
     transcribe: async () => ({ text: "This is a local dictation preview." }),
   }));
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
-  const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
+  const [compaction, setCompaction] = useState<CompactionState>(compactionScenarios[scenario] ?? idleCompaction);
+  const [running, setRunning] = useState(scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
   useEffect(() => {
     if (scenario !== "streamdown-live" || !running) return;
     const timers = streamdownFrames.slice(1).map((text, index) => setTimeout(() => {
@@ -167,7 +178,17 @@ function Preview() {
     }, (index + 1) * 1500));
     return () => timers.forEach(clearTimeout);
   }, [running]);
-  const recovering = scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
+  useEffect(() => {
+    if (scenario !== "compaction-live" || compaction.type !== "queued") return;
+    const timer = setTimeout(() => setCompaction({ type: "running" }), 700);
+    return () => clearTimeout(timer);
+  }, [compaction]);
+  useEffect(() => {
+    if (scenario !== "compaction-live" || compaction.type !== "running") return;
+    const timer = setTimeout(() => { setCompaction({ type: "finished", outcome: "complete", message: compactionSummary }); setRunning(false); }, 700);
+    return () => clearTimeout(timer);
+  }, [compaction]);
+  const recovering = scenario === "compaction-reconnecting" || scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
   const [ask, setAsk] = useState<PendingAsk | undefined>(scenarioAsk[scenario]);
   // `ask-delayed` opens the ask after load, so a draft can be typed first.
   useEffect(() => {
@@ -237,10 +258,14 @@ function Preview() {
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
-    <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
+    <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : compaction.type === "running" ? "Compacting" : compaction.type === "queued" ? "Compaction queued" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
-      <Thread commands={scenario.startsWith("slash") || scenario.startsWith("mentions") ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+      <Thread compaction={compactionPreview ? { state: compaction, disabled: recovering, queueCount: 2,
+        onSend: async (text) => setCompaction({ type: "queued", text }),
+        onClearQueue: () => setCompaction({ type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." }),
+        onDismiss: () => setCompaction(idleCompaction),
+      } : undefined} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
     </SessionFrame>

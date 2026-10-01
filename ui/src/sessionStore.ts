@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, parseEvent, snapshotSchema, statusSchema, type AskAnswer, type AskEvent, type Session, type SessionEvent } from "./contracts";
+import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, parseEvent, snapshotSchema, statusSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { fromHistory, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatalog, type CommandResult } from "./commands";
 import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
+import { compactionFromOutput, compactionFromStatus, idleCompaction, isCompactCommand, type CompactionState } from "./compaction";
 
 export type Connection = { type: "loading" } | { type: "ready" }
   | { type: "reconnecting"; message: string } | { type: "failed"; message: string };
@@ -16,6 +17,8 @@ export interface SessionState {
   commandError?: string;
   commands: CommandCatalog;
   commandResult?: CommandResult;
+  status?: SessionStatus;
+  compaction: CompactionState;
 }
 export interface SessionTransport {
   request: (path: string, init: RequestInit) => Promise<Response>;
@@ -50,6 +53,7 @@ interface Join {
   socket?: WebSocket;
   buffered: SessionEvent[];
   askBuffered: AskEvent[];
+  operationBuffered: OperationEvent[];
   seeding: boolean;
   seq: number;
 }
@@ -68,7 +72,8 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * it, the store finds the session's cwd in `/api/sessions/all` itself.
  */
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session) {
-  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" } };
+  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction };
+  let statusVersion = 0;
   const listeners = new Set<() => void>();
   const lifetime = new AbortController();
   let join: Join | undefined;
@@ -130,9 +135,32 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (attempt === catalogAttempt) update({ ...state, commands: { type: "failed", message: messageOf(error) } });
     }
   }
+  function withStatus(next: SessionState, status: SessionStatus): SessionState {
+    return { ...next, status, compaction: compactionFromStatus(next.compaction, status),
+      transcript: { ...next.transcript, isRunning: status.isStreaming || status.isCompacting || status.isBashRunning } };
+  }
+  function withOperation(next: SessionState, event: OperationEvent): SessionState {
+    if (event.type === "status.update") return withStatus(next, event.status);
+    const compaction = compactionFromOutput(event);
+    return compaction ? { ...next, compaction } : { ...next, commandResult: { type: "done", message: event.message },
+      ...(event.level === "error" ? { commandError: event.message } : {}) };
+  }
+  async function refreshStatus() {
+    const session = state.session;
+    const attempt = join;
+    const version = statusVersion;
+    if (!session || !attempt) return;
+    try {
+      const status = await request(readPath("status", session), statusSchema, {}, attempt.controller.signal);
+      if (current(attempt) && version === statusVersion) { statusVersion++; update(withStatus(state, status)); }
+    } catch {
+      // The mutation already succeeded. Recover reads only; never restore its text as an unsent command.
+      if (current(attempt)) recover();
+    }
+  }
   async function connect() {
     if (lifetime.signal.aborted) return;
-    const attempt: Join = { controller: new AbortController(), buffered: [], askBuffered: [], seeding: true, seq: -1 };
+    const attempt: Join = { controller: new AbortController(), buffered: [], askBuffered: [], operationBuffered: [], seeding: true, seq: -1 };
     join = attempt;
     const read = <T>(path: string, schema: z.ZodType<T>) => request(path, schema, {}, attempt.controller.signal);
     try {
@@ -161,6 +189,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
           if (isAskEvent(parsed)) {
             if (attempt.seeding) attempt.askBuffered.push(parsed);
             else update({ ...state, ask: reduceAskEvent(state.ask, parsed) });
+          } else if (isOperationEvent(parsed)) {
+            if (parsed.type === "status.update") statusVersion++;
+            if (attempt.seeding) attempt.operationBuffered.push(parsed);
+            else update(withOperation(state, parsed));
           } else if (attempt.seeding) attempt.buffered.push(parsed);
           else update({ ...state, transcript: reduceEvent(state.transcript, parsed) });
         } catch (error) { stop(new Error(`Invalid session event: ${messageOf(error)}`)); }
@@ -185,6 +217,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (!current(attempt)) return;
       const snapshot = await read(readPath("stream-snapshot", session), snapshotSchema);
       if (!current(attempt)) return;
+      const beforeStatusRead = attempt.operationBuffered.length;
       const status = await read(readPath("status", session), statusSchema);
       if (!current(attempt)) return;
       const seeded = seedTranscript(history.messages, snapshot.partial, snapshot.seq,
@@ -201,8 +234,18 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       attempt.seeding = false;
       attempt.buffered.length = 0;
       attempt.askBuffered.length = 0;
+      // Outputs are not persisted in the transcript, so even outputs below its
+      // watermark must survive. Pre-read statuses yield to the authoritative GET.
+      let joined: SessionState = { ...state, connection: { type: "ready" }, transcript, ask };
+      for (const event of attempt.operationBuffered.slice(0, beforeStatusRead)) {
+        if (event.type === "command.output") joined = withOperation(joined, event);
+      }
+      joined = withStatus(joined, status);
+      for (const event of attempt.operationBuffered.slice(beforeStatusRead)) joined = withOperation(joined, event);
+      attempt.operationBuffered.length = 0;
+      statusVersion++;
       retryDelay = initialDelay; // A socket open alone is not a successful join.
-      update({ ...state, connection: { type: "ready" }, transcript, ask });
+      update(joined);
       void loadCommands(); // Discovery failure must not break history or the live connection.
     } catch (error) {
       if (!current(attempt)) return;
@@ -227,6 +270,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
     if (state.sending) throw new Error("Wait for the current command to finish.");
+    const previousCompaction = state.compaction;
     update({ ...state, sending: true, commandError: undefined });
     try {
       const result = await request(`${root}/${endpoint}`, commandResultSchema, {
@@ -234,8 +278,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         body: JSON.stringify({ cwd: session.cwd, ...body }),
       });
       if (result.type === "unsupported") throw new Error(result.message);
-      update({ ...state, commandResult: result,
+      const compact = endpoint === "commands/run" && "text" in body && isCompactCommand(body.text);
+      update({ ...state, ...(compact ? (state.compaction === previousCompaction && (previousCompaction.type === "idle" || previousCompaction.type === "finished")
+        ? { compaction: { type: "checking" as const } } : {}) : { commandResult: result }),
         ...(result.type === "done" && result.session?.id === id ? { session: result.session } : {}) });
+      if (compact) void refreshStatus();
       if (endpoint === "commands/run" && "text" in body && /^\/reload(?:\s|$)/u.test(body.text)) void loadCommands();
       return result;
     } catch (error) {
@@ -246,15 +293,39 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   async function command(endpoint: "prompt" | "abort", text?: string, attachments?: PromptAttachment[]) {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
-    if (endpoint === "prompt" && (state.transcript.isRunning || state.sending)) throw new Error("Wait for the current run to finish.");
+    if (endpoint === "prompt" && (state.transcript.isRunning || state.compaction.type === "checking" || state.compaction.type === "queued" || state.compaction.type === "running" || state.sending)) throw new Error("Wait for the current run to finish.");
     update({ ...state, sending: true, commandError: undefined });
     try {
       // Never automatically retry a mutation: the server may have accepted it
       // even if its HTTP acknowledgement was lost.
-      await request(`${root}/${endpoint}`, endpoint === "prompt" ? acceptedSchema : z.unknown(), {
+      const result = await request<z.infer<typeof acceptedSchema> | z.infer<typeof abortResultSchema>>(`${root}/${endpoint}`, endpoint === "prompt" ? acceptedSchema : abortResultSchema, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd: session.cwd, ...(text === undefined ? {} : { text }), ...(attachments?.length ? { attachments } : {}) }),
       });
+      if (endpoint === "abort") void refreshStatus();
+      return "restoredMessages" in result ? result.restoredMessages : [];
+    } catch (error) {
+      update({ ...state, commandError: messageOf(error) });
+      throw error;
+    } finally { update({ ...state, sending: false }); }
+  }
+  async function clearQueue() {
+    const session = state.session;
+    if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
+    if (state.sending) throw new Error("Wait for the current command to finish.");
+    const version = statusVersion;
+    const wasQueued = state.compaction.type === "queued";
+    update({ ...state, sending: true, commandError: undefined });
+    try {
+      const status = await request(`${root}/queue/clear`, statusSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd }),
+      });
+      let next = state;
+      if (version === statusVersion) { statusVersion++; next = withStatus(state, status); }
+      if (wasQueued && next.compaction.type === "finished" && next.compaction.outcome === "unknown") next = {
+        ...next, compaction: { type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." },
+      };
+      update(next);
     } catch (error) {
       update({ ...state, commandError: messageOf(error) });
       throw error;
@@ -293,11 +364,13 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         if (attachments?.length) throw new Error("Remove attachments before running a slash command.");
         return runSlash("commands/run", { text });
       }
-      return command("prompt", text, attachments);
+      await command("prompt", text, attachments);
     },
     respondToCommand: (requestId: string, value: string) => runSlash("commands/respond", { requestId, value }),
     dismissCommand: () => update({ ...state, commandResult: undefined }),
     loadCommands,
+    clearQueue,
+    dismissCompaction: () => { if (state.compaction.type === "finished") update({ ...state, compaction: idleCompaction }); },
     saveAttachment: async (attachment: PromptAttachment, signal?: AbortSignal) => {
       const session = state.session;
       if (!session || state.connection.type !== "ready") throw new Error("The session is not connected. Your file stays here.");

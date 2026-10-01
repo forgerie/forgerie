@@ -156,7 +156,21 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer-input { display: block; color: var(--foreground); background: transparent; inline-size: 100%; max-block-size: min(12rem, 24cqb); field-sizing: content; resize: none; border: 0; border-radius: var(--radius-thread); padding: var(--space-3) var(--space-4) var(--space-2); font-size: 1rem; line-height: var(--space-6); outline: none; }
 .composer-input::placeholder { color: var(--muted-foreground); }
 .composer-input:focus-visible { outline: none; }
-.composer-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4); padding: 0 var(--space-2) var(--space-2); }
+.composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-4); padding: 0 var(--space-2) var(--space-2); }
+.compact-send { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); }
+/* Operational feedback uses the homepage's trace text and menu controls, not a second input or a progress estimate. */
+.compaction-notice { color: var(--muted-foreground); font-size: var(--small-text); min-inline-size: 0; }
+.compaction-notice[data-phase="running"] { color: var(--live); }
+.compaction-notice[data-error] { color: var(--destructive); }
+.compaction-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); }
+.compaction-head > span { flex: 1; min-inline-size: min(12rem, 100%); overflow-wrap: anywhere; }
+.compaction-head button { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; font-size: inherit; color: var(--muted-foreground); }
+.compaction-head button:hover { background: var(--hover-surface); }
+.compaction-detail { min-inline-size: 0; }
+.compaction-detail summary { cursor: pointer; min-block-size: var(--control-size); display: flex; align-items: center; gap: var(--space-1); }
+.compaction-detail summary::before { content: ">"; }
+.compaction-detail[open] summary::before { content: "⌄"; }
+.compaction-detail pre { margin: 0; max-block-size: 20cqb; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .composer-dictation { display: flex; align-items: center; gap: var(--space-4); flex: 1; min-inline-size: 0; }
 .dictation-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small-text); color: var(--muted-foreground); }
 /* Pi picker: same homepage menu tokens, window-level so the transcript cannot

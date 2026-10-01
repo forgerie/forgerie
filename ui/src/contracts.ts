@@ -41,6 +41,12 @@ export const statusSchema = z.object({
   isCompacting: z.boolean(),
   isBashRunning: z.boolean(),
   pendingAsk: pendingAskSchema.optional(),
+  queuedMessages: z.array(z.object({ kind: z.enum(["steer", "followUp"]), text: z.string() })).default([]),
+});
+export type SessionStatus = z.infer<typeof statusSchema>;
+export const abortResultSchema = z.object({
+  aborted: z.literal(true),
+  restoredMessages: z.array(z.object({ kind: z.enum(["steer", "followUp"]), text: z.string() })).default([]),
 });
 /** `stale` is an ordinary race: the ask already closed. The status is current in both cases. */
 export const askCloseResponseSchema = z.object({
@@ -99,11 +105,22 @@ export type AskEvent = z.infer<typeof askEventSchema>;
 const eventEnvelope = z.object({ type: z.string() });
 const consumedTypes = new Set(["message.append", "message.end", "assistant.delta", "assistant.thinking.delta",
   "tool.start", "tool.update", "tool.end", "agent.start", "agent.end", "session.error"]);
-export function parseEvent(value: unknown): SessionEvent | AskEvent | undefined {
+const operationEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("status.update"), status: statusSchema }),
+  z.object({ type: z.literal("command.output"), level: z.enum(["info", "success", "error"]), message: z.string() }),
+]).and(z.object({ seq: z.number().optional() }));
+export type OperationEvent = z.infer<typeof operationEventSchema>;
+export type CommandOutput = Extract<OperationEvent, { type: "command.output" }>;
+export type UiEvent = SessionEvent | AskEvent | OperationEvent;
+export function isOperationEvent(event: UiEvent): event is OperationEvent {
+  return event.type === "status.update" || event.type === "command.output";
+}
+export function parseEvent(value: unknown): UiEvent | undefined {
   const envelope = eventEnvelope.parse(value);
   if (envelope.type === "ask.opened" || envelope.type === "ask.closed") return askEventSchema.parse(value);
+  if (envelope.type === "status.update" || envelope.type === "command.output") return operationEventSchema.parse(value);
   return consumedTypes.has(envelope.type) ? eventSchema.parse(value) : undefined;
 }
-export function isAskEvent(event: SessionEvent | AskEvent): event is AskEvent {
+export function isAskEvent(event: UiEvent): event is AskEvent {
   return event.type === "ask.opened" || event.type === "ask.closed";
 }

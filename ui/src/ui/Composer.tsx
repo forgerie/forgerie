@@ -1,6 +1,6 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useRef, type KeyboardEvent } from "react";
-import { AuiIf, ComposerPrimitive, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
+import { useRef, useState, type KeyboardEvent } from "react";
+import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
 import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, SquareIcon } from "lucide-react";
@@ -11,6 +11,9 @@ import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
 import { AddAttachment, AttachmentErrors, ComposerAttachments } from "./Attachments";
 import { MAX_ATTACHMENTS } from "../attachments";
+import { isCompactCommand } from "../compaction";
+import type { CompactionBinding } from "./CompactionNotice";
+import { createChatDraft, type ChatDraft } from "../chatDraft";
 
 /**
  * System molecule: the one input bar. While an ask is open it gains a question
@@ -18,18 +21,35 @@ import { MAX_ATTACHMENTS } from "../attachments";
  * a second input. Input capabilities belong to this bar in both modes.
  * An attached file routes the input as chat, never as a text-only ask submission.
  */
-type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding };
+type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; compaction?: CompactionBinding | undefined; chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
-  return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
+  const aui = useAui();
+  const latest = useRef(aui);
+  latest.current = aui;
+  const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
+  return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands }: ComposerProps) {
+function ComposerBar({ ask, mentions, commands, compaction, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+  const aui = useAui();
+  const text = useAuiState((s) => s.composer.text);
+  const running = useAuiState((s) => s.thread.isRunning);
   const disabled = useAuiState((s) => s.thread.isDisabled);
   const preparing = useAuiState((s) => s.composer.submission !== undefined);
   const count = useAuiState((s) => s.composer.attachments.length);
   const tooMany = count > MAX_ATTACHMENTS;
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const { state } = useDictation();
-  const control = useAskMode(ask);
+  const control = useAskMode(ask, chatDraft);
+  const compactDraft = !!compaction && !control && count === 0 && !preparing && isCompactCommand(text);
+  const compactBlocked = disabled || dictating || compaction?.disabled || compaction?.state.type === "checking" || compaction?.state.type === "queued" || compaction?.state.type === "running";
+  async function sendCompaction() {
+    if (!compactDraft || compactBlocked || !compaction) return;
+    aui.composer.setText("");
+    try { await compaction.onSend(text); }
+    catch {
+      chatDraft.restore(text, "if-empty");
+    }
+  }
   const anchor = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const snapshot = useRef<MentionInputSnapshot>(null);
@@ -43,6 +63,7 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
     for (const trigger of triggers.getTriggers().values()) {
       if (trigger.resource.handleKeyDown(event)) return;
     }
+    if (compactDraft && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendCompaction(); return; }
     if (!tooMany) control?.onKeyDown(event);
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
@@ -65,7 +86,7 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
         aria-describedby={control?.headingId}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || tooMany ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        submitMode={control || tooMany || compactDraft ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
         <AddAttachment disabled={disabled || preparing || !!control?.sending || count >= MAX_ATTACHMENTS} />
@@ -73,13 +94,15 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
         {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
           <SquareIcon aria-hidden size={12} fill="currentColor" />
         </ComposerPrimitive.Cancel> : control ? <AskActions control={{ ...control, blocked: control.blocked || tooMany }} /> : <>
-          <AuiIf condition={(s) => !s.thread.isRunning}>
+          {compactDraft ? <button type="button" className="primary compact-send" disabled={compactBlocked} onClick={() => void sendCompaction()}>
+            {running ? "Queue compaction" : "Compact history"}
+          </button> : <AuiIf condition={(s) => !s.thread.isRunning}>
             <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
               <ArrowUpIcon aria-hidden size={16} />
             </ComposerPrimitive.Send>
-          </AuiIf>
+          </AuiIf>}
           <AuiIf condition={(s) => s.thread.isRunning}>
-            <ComposerPrimitive.Cancel disabled={disabled} className="primary icon-button" aria-label="Stop generating" title="Stop generating">
+            <ComposerPrimitive.Cancel disabled={disabled} className="primary icon-button" aria-label={compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"} title={compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"}>
               <SquareIcon aria-hidden size={12} fill="currentColor" />
             </ComposerPrimitive.Cancel>
           </AuiIf>
