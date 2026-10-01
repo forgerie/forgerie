@@ -4,21 +4,28 @@ import { artifactDoor } from "../transcript";
 import { SessionDoorCall } from "./SessionDoor";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
-import { ChainOfThoughtGroup, ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
+import { ChainOfThoughtGroup, ReasoningGroup, SkillLoad, SkillLoadGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
 import { UserMessageAttachments } from "./Attachments";
 import { ReplyGallery } from "./ImageGallery";
+import { SkillInvocationRecord } from "./SkillInvocation";
+import { skillLoadOf } from "../skills";
 
 // A shared prefix groups consecutive reasoning and tools. Text stays outside.
-const groupActivity = groupPartByType({
+type GroupKey = "group-chainOfThought" | "group-reasoning" | "group-tool" | "group-skills";
+const groupActivity = groupPartByType<GroupKey>({
   reasoning: ["group-chainOfThought", "group-reasoning"],
   "tool-call": ["group-chainOfThought", "group-tool"],
 });
+const skillGroup = ["group-skills"] as const;
 // A call that created a session stands outside the collapsed activity, so its
 // door is never hidden, and the activity does not count the same call again.
-// The helper groups by tool name; this branches on the call's result, so it is
-// a stable module-level function instead.
-function groupAssistantParts(part: PartState, context: GroupByContext) {
-  return part.type === "tool-call" && artifactDoor(part.artifact) ? [] : groupActivity(part, context);
+// Skill loads also stay visible beside the activity, and adjacent loads share
+// a line. The helper groups by tool name; this branches on a call's arguments
+// and result, so it is a stable module-level function instead.
+function groupAssistantParts(part: PartState, context: GroupByContext): readonly GroupKey[] {
+  if (part.type !== "tool-call") return groupActivity(part, context);
+  if (artifactDoor(part.artifact)) return [];
+  return skillLoadOf(part.toolName, part.args) ? skillGroup : groupActivity(part, context);
 }
 
 function ResponseCopy() {
@@ -26,9 +33,13 @@ function ResponseCopy() {
   return <CopyButton label="Copy response" getText={() => aui.message.getCopyText()} />;
 }
 
+// The invocation renders apart from the bubble, which keeps only the typed argument.
+const invocationParts = { Text: () => null, data: { by_name: { skill: SkillInvocationRecord } } };
+
 export function UserMessage() {
   return <MessagePrimitive.Root className="message message-user" data-role="user" aria-label="Your message">
     <UserMessageAttachments />
+    <MessagePrimitive.Parts components={invocationParts} />
     <AuiIf condition={(s) => s.message.content.some((part) => part.type === "text" && part.text.length > 0)}>
       <div className="user-bubble message-text"><MessagePrimitive.Parts /></div>
     </AuiIf>
@@ -45,12 +56,15 @@ export function AssistantMessage() {
             case "group-reasoning": return <ReasoningGroup running={part.status.type === "running"}>{children}</ReasoningGroup>;
             case "group-tool": return part.indices.length === 1 ? <>{children}</>
               : <ToolGroup indices={part.indices} running={part.status.type === "running"}>{children}</ToolGroup>;
+            case "group-skills": return part.indices.length === 1 ? <>{children}</>
+              : <SkillLoadGroup indices={part.indices} running={part.status.type === "running"}>{children}</SkillLoadGroup>;
             case "text": return part.text === "" && part.status.type === "running"
               ? <TraceLine live label="working" /> : <MarkdownText />;
             case "reasoning": return <MarkdownText />;
             case "tool-call": {
               const door = artifactDoor(part.artifact);
-              return door ? <SessionDoorCall {...part} door={door} /> : <ToolCall {...part} />;
+              return door ? <SessionDoorCall {...part} door={door} />
+                : skillLoadOf(part.toolName, part.args) ? <SkillLoad {...part} /> : <ToolCall {...part} />;
             }
             // Images gather in the reply gallery below the text.
             case "image": return null;

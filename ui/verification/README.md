@@ -4,6 +4,10 @@
 
 Unsent chat text and partial `ask_user` answers survive a session switch and a page reload. They are kept in this browser only, one record per session. See [draft behavior, storage, verification, and limits](drafts.md).
 
+## Skill records
+
+A `/skill:name` command shows as a chip on the user's message, with the typed argument in the bubble. A skill the agent loads shows as its own trace line beside the tool activity. See [record behavior, verification, and limits](skills.md).
+
 ## Session compaction
 
 The one composer supports explicit compaction during idle work or queueing during an active run. Live status and server receipts appear above it. See [compaction behavior, queue clearing, verification, and limits](compaction.md).

@@ -134,6 +134,22 @@ button:disabled { cursor: default; opacity: 0.4; }
 .message-user { display: flex; flex-direction: column; align-items: flex-end; }
 .user-bubble { max-inline-size: 80%; border-radius: var(--radius-thread); background: var(--muted); padding: var(--space-2) var(--space-4); white-space: pre-wrap; }
 .user-bubble p, .message-system p { margin: 0; }
+/* A skill invocation rides on the user's message like an attachment (Tana's
+   skill chip): the command stays in view and the skill text opens below it
+   at the column's full width. The typed argument stays in the bubble. */
+.skill-invocation { max-inline-size: 100%; margin-block-end: var(--space-2); }
+.skill-invocation:last-child { margin-block-end: 0; }
+.skill-invocation[open] { align-self: stretch; }
+.skill-chip { display: flex; align-items: center; gap: var(--space-2); inline-size: fit-content; max-inline-size: 100%; min-block-size: var(--control-size); margin-inline-start: auto; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--muted); color: var(--muted-foreground); cursor: pointer; list-style: none; transition: border-color 150ms; }
+.skill-chip::-webkit-details-marker { display: none; }
+.skill-chip:hover { border-color: var(--line-focus); }
+.skill-chip svg { flex: none; }
+.skill-chip code { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
+.skill-chip-chevron { transition: transform 150ms; }
+.skill-invocation[open] .skill-chip-chevron { transform: rotate(180deg); }
+.skill-invocation-body { margin-block-start: var(--space-2); min-inline-size: 0; }
+.skill-location { margin: 0 0 var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
+.skill-location code { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
 .message-system { color: var(--muted-foreground); font-size: var(--small-text); padding-inline-start: var(--space-3); border-inline-start: 2px solid var(--line-focus); }
 .system-label { display: block; font-weight: 500; margin-block-end: var(--space-1); }
 /* Action bar from messages.tsx and action-bar.tsx: mt-2, gap-1.5, and

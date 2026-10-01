@@ -354,6 +354,20 @@ describe("Tools and reasoning", () => {
     expect(document.querySelector("details.chain-of-thought")).toBeNull();
   });
 
+  it("keeps a skill load out of the activity group and counts only the other tools there", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [
+      { type: "thinking", text: "Load guidance first." },
+      tool("s1", { type: "done", output: "# Simple English", isError: false }, "read", { path: "/home/me/.agents/skills/simple-english/SKILL.md" }),
+      tool("t1", { type: "done", output: "clean", isError: false }, "bash", { command: "git status" }),
+      { type: "text", text: "Ready." },
+    ] }] });
+    const groups = [...document.querySelectorAll<HTMLDetailsElement>("details.chain-of-thought")];
+    expect(groups.map((group) => group.querySelector(":scope > summary .trace-text")?.textContent)).toEqual(["reasoning", "tool activity 1 tool"]);
+    expect(groups.some((group) => group.querySelector(".skill-load"))).toBe(false);
+    expect(document.querySelector(".message-assistant .message-text > details.skill-load > summary .trace-text")?.textContent)
+      .toBe("loaded skill simple-english");
+  });
+
   it("shows a working line while a run has no text yet", async () => {
     await render({ messages: [{ id: "q", role: "user", parts: [{ type: "text", text: "go" }] }], running: true });
     expect(document.querySelector(".message-assistant .trace-line .trace-text")?.textContent).toBe("working");
@@ -362,5 +376,80 @@ describe("Tools and reasoning", () => {
     await render({ messages: [{ id: "a", role: "assistant", parts: [tool("b", { type: "done", output: "", isError: false })] }], running: true });
     expect(summaries()).toEqual(["ran bash echo b"]);
     expect(document.querySelector(".message-assistant div.trace-line .trace-text")?.textContent).toBe("working");
+  });
+});
+
+describe("Skill records", () => {
+  const handoff = { name: "handoff", location: "/skills/handoff/SKILL.md", content: "References are relative to /skills/handoff.\n\n# Handoff\n\nCall the tool." };
+  const skillRead = (id: string, name: string, state: ToolState) =>
+    tool(id, state, "read", { path: `/home/me/.agents/skills/${name}/SKILL.md` });
+  const loads = () => [...document.querySelectorAll(".message-assistant details.skill-load > summary .trace-text, .message-assistant details.skill-loads > summary .trace-text")]
+    .map((node) => node.textContent);
+  async function toggle(details: HTMLDetailsElement) {
+    await act(async () => { details.open = !details.open; details.dispatchEvent(new Event("toggle")); });
+  }
+
+  it("shows a skill invocation as the typed command beside the user's argument, with the skill text on request", async () => {
+    await render({ messages: [{ id: "u", role: "user", skill: handoff, parts: [{ type: "text", text: "Sending while working" }] }, reply] });
+    const record = document.querySelector<HTMLDetailsElement>(".message-user details.skill-invocation")!;
+    expect(record.querySelector("summary")?.textContent).toBe("/skill:handoff");
+    expect(record.open).toBe(false);
+    expect(record.querySelector("pre")).toBeNull();
+    expect(document.querySelector(".message-user .user-bubble")?.textContent).toBe("Sending while working");
+    expect(document.querySelector(".message-user .user-bubble")?.textContent).not.toContain("<skill");
+    await toggle(record);
+    expect(record.querySelector(".skill-location")?.textContent).toContain("/skills/handoff/SKILL.md");
+    expect(record.querySelector("pre")?.textContent).toBe(handoff.content);
+  });
+
+  it("shows only the command when the invocation had no argument", async () => {
+    await render({ messages: [{ id: "u", role: "user", skill: handoff, parts: [] }] });
+    expect(document.querySelector(".message-user summary")?.textContent).toBe("/skill:handoff");
+    expect(document.querySelector(".message-user .user-bubble")).toBeNull();
+  });
+
+  it("names a loaded skill and opens to its path and text", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [skillRead("s", "simple-english", { type: "done", output: "# Simple English\n\nShort sentences.", isError: false })] }] });
+    expect(loads()).toEqual(["loaded skill simple-english"]);
+    expect(document.querySelector("details.chain-of-thought")).toBeNull();
+    const load = document.querySelector<HTMLDetailsElement>("details.skill-load")!;
+    expect(load.querySelector(".trace-pre")).toBeNull();
+    await toggle(load);
+    expect([...load.querySelectorAll("h4")].map((node) => node.textContent)).toEqual(["Path", "Skill text"]);
+    expect([...load.querySelectorAll("pre")].map((node) => node.textContent))
+      .toEqual(["/home/me/.agents/skills/simple-english/SKILL.md", "# Simple English\n\nShort sentences."]);
+  });
+
+  it("collapses adjacent loads into one line that keeps every name and any failure visible", async () => {
+    const parts = [skillRead("a", "simple-english", { type: "done", output: "a", isError: false }),
+      skillRead("b", "unslop", { type: "running", output: "" })];
+    await render({ messages: [{ id: "a", role: "assistant", parts }], running: true });
+    expect(loads()[0]).toBe("loading 2 skills: simple-english, unslop");
+    expect(document.querySelector(".skill-loads > summary .trace-text")?.hasAttribute("data-live")).toBe(true);
+    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
+      skillRead("b", "unslop", { type: "done", output: "ENOENT: no such file", isError: true })] }] });
+    const group = document.querySelector<HTMLDetailsElement>("details.skill-loads")!;
+    expect(group.querySelector(":scope > summary .trace-text")?.textContent).toBe("loaded 2 skills, 1 failed: simple-english, unslop");
+    expect(group.dataset["tone"]).toBe("error");
+    await toggle(group);
+    const failed = [...group.querySelectorAll<HTMLDetailsElement>("details.skill-load")][1]!;
+    expect(failed.querySelector("summary .trace-text")?.textContent).toBe("failed to load skill unslop");
+    expect(failed.dataset["tone"]).toBe("error");
+    await toggle(failed);
+    expect(failed.querySelector("pre[data-tone=error]")?.textContent).toBe("ENOENT: no such file");
+  });
+
+  it("reports a load the run stopped instead of a finished one", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [skillRead("s", "relay", { type: "interrupted" })] }] });
+    expect(loads()).toEqual(["stopped loading skill relay"]);
+    const load = document.querySelector<HTMLDetailsElement>("details.skill-load")!;
+    await toggle(load);
+    expect(load.querySelector(".trace-empty")?.textContent).toBe("No result. The run ended before this tool finished.");
+  });
+
+  it("keeps an ordinary read of another file as a tool", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [tool("r", { type: "done", output: "x", isError: false }, "read", { path: "docs/SKILL-notes.md" })] }] });
+    expect(loads()).toEqual([]);
+    expect(document.querySelector("details.chain-of-thought details.tool-call > summary .trace-text")?.textContent).toBe("ran read docs/SKILL-notes.md");
   });
 });

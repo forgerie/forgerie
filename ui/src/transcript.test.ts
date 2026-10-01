@@ -311,3 +311,59 @@ describe("handoff doors", () => {
     expect(doneDoors(state)).toEqual([door]);
   });
 });
+
+describe("skill invocations", () => {
+  const skillText = (argument?: string) => `<skill name="handoff" location="/skills/handoff/SKILL.md">\nReferences are relative to /skills/handoff.\n\n# Handoff\n</skill>${argument === undefined ? "" : `\n\n${argument}`}`;
+  const invocation = { name: "handoff", location: "/skills/handoff/SKILL.md", content: "References are relative to /skills/handoff.\n\n# Handoff" };
+
+  it("turns Pi's expanded skill block into one user message that carries the invocation and the typed argument", () => {
+    const state = fromHistory([user(skillText("Sending while working")), assistant("On it.")]);
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({ role: "user", skill: invocation, parts: [{ type: "text", text: "Sending while working" }] });
+    expect(convertMessage(state.messages[0]!).content).toEqual([
+      { type: "data-skill", data: invocation },
+      { type: "text", text: "Sending while working" },
+    ]);
+  });
+
+  it("keeps an invocation without an argument instead of dropping an empty message", () => {
+    const state = fromHistory([user(skillText())]);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ skill: invocation, parts: [] });
+    expect(convertMessage(state.messages[0]!).content).toEqual([{ type: "data-skill", data: invocation }, { type: "text", text: "" }]);
+  });
+
+  it("keeps a live invocation without an argument, from its echo through its persisted message and a join replay", () => {
+    let state = reduceEvent(fromHistory([]), { type: "message.append", message: { role: "user", content: skillText() } });
+    expect(state.messages).toHaveLength(1);
+    state = reduceEvent(state, { type: "message.end", message: user(skillText(), 7) });
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ skill: invocation, parts: [], provisional: false });
+    const joined = seedTranscript([], null, 0, true, [
+      { type: "message.append", message: { role: "user", content: skillText() }, seq: 1 },
+      { type: "message.end", message: user(skillText(), 7), seq: 2 },
+    ]);
+    expect(joined.messages.map((message) => message.skill?.name)).toEqual(["handoff"]);
+  });
+
+  it("reads the same record from a live message and replaces its echo once", () => {
+    let state = reduceEvent(fromHistory([]), { type: "message.append", message: { role: "user", content: skillText("go") } });
+    expect(state.messages[0]).toMatchObject({ skill: invocation, provisional: true });
+    const id = state.messages[0]!.id;
+    state = reduceEvent(state, { type: "message.end", message: user(skillText("go"), 7) });
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ id, skill: invocation, provisional: false });
+  });
+
+  it("does not take a different skill's message as the echo of an invocation with the same argument", () => {
+    let state = reduceEvent(fromHistory([]), { type: "message.append", message: { role: "user", content: skillText("go") } });
+    state = reduceEvent(state, { type: "message.end", message: user(skillText("go").replace('name="handoff"', 'name="relay"'), 7) });
+    expect(state.messages.map((message) => message.skill?.name)).toEqual(["handoff", "relay"]);
+  });
+
+  it("leaves assistant text and ordinary user text that mention a skill unchanged", () => {
+    const state = fromHistory([user(`Explain this:\n${skillText()}`), assistant(skillText())]);
+    expect(state.messages.map((message) => message.skill)).toEqual([undefined, undefined]);
+    expect(texts(state)).toEqual([`Explain this:\n${skillText()}`, skillText()]);
+  });
+});

@@ -5,6 +5,7 @@ import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react"
 import { useState, type ReactNode } from "react";
 import type { ToolArtifact, ToolState } from "../transcript";
 import { clipOutput, formatToolArgs, summarizeToolArgs } from "../toolSummary";
+import { skillLoadOf } from "../skills";
 import { ImageGallery, useReplyImages } from "./ImageGallery";
 
 function TraceText({ live, label, detail }: { live: boolean; label: string; detail?: string }) {
@@ -81,17 +82,19 @@ function ToolImages({ toolCallId }: { toolCallId: string }) {
     label={`${images.length} ${images.length === 1 ? "image" : "images"} from this tool`} /> : null;
 }
 
-function ToolBody({ view, input, output, children }: { view: ToolView; input: string; output: string; children?: ReactNode }) {
+function ToolBody({ view, input, output, labels = { input: "Input", output: "Output" }, children }:
+  { view: ToolView; input: string; output: string; labels?: { input: string; output: string }; children?: ReactNode }) {
   const clipped = clipOutput(output);
   const empty = view === "interrupted" ? "No result. The run ended before this tool finished."
     : isLive(view) ? "Waiting for output." : "No output.";
+  const outputLabel = view === "failed" ? "Error" : labels.output;
   return <>
-    {input ? <section className="trace-section" aria-label="Input">
-      <h4 className="trace-heading">Input</h4>
+    {input ? <section className="trace-section" aria-label={labels.input}>
+      <h4 className="trace-heading">{labels.input}</h4>
       <pre className="trace-pre" tabIndex={0}>{input}</pre>
     </section> : null}
-    <section className="trace-section" aria-label="Output">
-      <h4 className="trace-heading">{view === "failed" ? "Error" : "Output"}</h4>
+    <section className="trace-section" aria-label={outputLabel}>
+      <h4 className="trace-heading">{outputLabel}</h4>
       {output ? <pre className="trace-pre" tabIndex={0} data-tone={view === "failed" ? "error" : undefined}>{clipped.text}</pre>
         : <p className="trace-empty">{empty}</p>}
       {clipped.hidden > 0 ? <p className="trace-empty">{clipped.hidden.toLocaleString()} more characters not shown.</p> : null}
@@ -120,6 +123,47 @@ export function ToolGroup({ indices, running, children }: { indices: readonly nu
   });
   const label = `${running ? "running" : "ran"} ${indices.length} tools${failed > 0 ? `, ${failed} failed` : ""}:`;
   return <Disclosure live={running} label={label} detail={detail} className="tool-group"
+    {...(failed > 0 ? { tone: "error" as const } : {})}>
+    {() => children}
+  </Disclosure>;
+}
+
+const skillLabels: Record<ToolView, string> = {
+  pending: "loading skill", running: "loading skill", done: "loaded skill", failed: "failed to load skill", interrupted: "stopped loading skill",
+};
+
+/**
+ * The agent reading a skill's SKILL.md. It names the instructions the agent now
+ * follows, so it stays a visible record instead of joining the tool activity.
+ */
+export function SkillLoad({ toolName, args, result, isError, artifact }:
+  Pick<ToolCallMessagePartProps, "toolName" | "args" | "result" | "isError" | "artifact">) {
+  const skill = skillLoadOf(toolName, args);
+  const view = toolView({ artifact, result, isError });
+  return <Disclosure live={isLive(view)} label={skillLabels[view]} detail={skill?.name ?? toolName} className="skill-load"
+    {...(view === "failed" ? { tone: "error" as const } : {})}>
+    {(open) => open ? <ToolBody view={view} input={skill?.path ?? ""} output={outputText(result)}
+      labels={{ input: "Path", output: "Skill text" }} /> : null}
+  </Disclosure>;
+}
+
+/** Adjacent skill loads share one line that names every skill and counts failures and stops. */
+export function SkillLoadGroup({ indices, running, children }: { indices: readonly number[]; running: boolean; children: ReactNode }) {
+  // Selectors return primitives, so an unchanged summary does not re-render.
+  const failed = useAuiState((s) => indices.filter((index) => {
+    const part = s.message.parts[index];
+    return part?.type === "tool-call" && part.isError === true && !part.isPreliminary;
+  }).length);
+  const stopped = useAuiState((s) => indices.filter((index) => {
+    const part = s.message.parts[index];
+    return part?.type === "tool-call" && isToolArtifact(part.artifact) && part.artifact.state === "interrupted";
+  }).length);
+  const names = useAuiState((s) => [...new Set(indices.flatMap((index) => {
+    const part = s.message.parts[index];
+    return part?.type === "tool-call" ? [skillLoadOf(part.toolName, part.args)?.name ?? part.toolName] : [];
+  }))].join(", "));
+  const label = `${running ? "loading" : "loaded"} ${indices.length} skills${failed > 0 ? `, ${failed} failed` : ""}${stopped > 0 ? `, ${stopped} stopped` : ""}:`;
+  return <Disclosure live={running} label={label} detail={names} className="skill-loads"
     {...(failed > 0 ? { tone: "error" as const } : {})}>
     {() => children}
   </Disclosure>;

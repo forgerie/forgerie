@@ -2,6 +2,7 @@ import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react"
 import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contracts";
 import { imageSource } from "./images";
 import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
+import { parseSkillInvocation, type SkillInvocation } from "./skills";
 
 /**
  * One tool execution. A call id owns exactly one state, whether the call
@@ -18,11 +19,14 @@ export type TranscriptPart =
   /** An image the assistant itself produced. User images are attachments. */
   | { type: "image"; src: string }
   | { type: "tool"; id: string; name: string; args: unknown; state: ToolState };
+/** The skill a user message invoked. Its typed argument stays in the message's text. */
+export type SkillRecord = Omit<SkillInvocation, "argument">;
 export interface TranscriptMessage {
   id: string;
   role: "user" | "assistant" | "system";
   parts: readonly TranscriptPart[];
   attachments?: CompleteAttachment[];
+  skill?: SkillRecord;
   key?: string;
   provisional?: boolean;
   failure?: "error" | "cancelled";
@@ -62,20 +66,30 @@ function toParts(message: PiMessage): TranscriptPart[] {
   const hasText = parts.some((part) => part.type === "text");
   return !hasText && message.errorMessage ? [...parts, { type: "text", text: message.errorMessage }] : parts;
 }
+/** A user message that is exactly Pi's expanded skill block becomes the invocation plus its argument. */
+function skillOf(message: PiMessage): { skill: SkillRecord; parts: TranscriptPart[] } | undefined {
+  const texts = partsOf(message).filter((part) => part.type === "text");
+  const invocation = texts.length === 1 ? parseSkillInvocation(texts[0]!.text) : undefined;
+  if (!invocation) return undefined;
+  const { argument, ...skill } = invocation;
+  return { skill, parts: argument === undefined ? [] : [{ type: "text", text: argument }] };
+}
 function asMessage(message: PiMessage, id: string): TranscriptMessage | undefined {
   const role = message.role;
   if (role !== "user" && role !== "assistant" && role !== "system") return undefined;
-  const parts = toParts(message);
+  const invoked = role === "user" ? skillOf(message) : undefined;
+  const parts = invoked?.parts ?? toParts(message);
   const attachments: CompleteAttachment[] = role === "user" ? partsOf(message).flatMap((part, index) => {
     const image = part.type === "image" ? imageSource(part) : undefined;
     if (part.type !== "image" || !image) return [];
     return [{ id: `${id}-image-${index}`, type: "image", name: `Image ${index + 1}`, contentType: part.mimeType,
       status: { type: "complete" }, content: [{ type: "image", image }] }];
   }) : [];
-  if (parts.length === 0 && attachments.length === 0) return undefined;
+  if (parts.length === 0 && attachments.length === 0 && !invoked) return undefined;
   const failure = role !== "assistant" ? undefined
     : message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "cancelled" : undefined;
-  return { id, role, parts, ...(attachments.length ? { attachments } : {}), key: keyOf(message), ...(failure ? { failure } : {}) };
+  return { id, role, parts, ...(attachments.length ? { attachments } : {}), ...(invoked ? { skill: invoked.skill } : {}),
+    key: keyOf(message), ...(failure ? { failure } : {}) };
 }
 
 function toolIds(messages: readonly TranscriptMessage[], except?: string): Set<string> {
@@ -154,10 +168,11 @@ function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): 
   const last = state.messages.at(-1);
   // Pi echoes a user without a timestamp before emitting its persisted message_end.
   const replaceId = raw.role === "assistant" ? state.liveId
-    : last?.role === "user" && last.provisional && messageText(last) === messageText(parsed) ? last.id : undefined;
+    : last?.role === "user" && last.provisional && messageText(last) === messageText(parsed)
+      && last.skill?.name === parsed.skill?.name ? last.id : undefined;
   const replaced = state.messages.find((message) => message.id === replaceId);
   const next = { ...reconcileTools(parsed, state.messages, replaced), id: replaced?.id ?? parsed.id, provisional };
-  const empty = next.parts.length === 0 && !next.attachments?.length;
+  const empty = next.parts.length === 0 && !next.attachments?.length && !next.skill;
   const messages = replaced === undefined ? (empty ? state.messages : [...state.messages, next])
     : state.messages.flatMap((current) => current !== replaced ? [current] : empty ? [] : [next]);
   return { ...state, nextId: state.nextId + 1, liveId, messages, error: raw.errorMessage ?? state.error };
@@ -281,7 +296,8 @@ export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
 }
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role !== "assistant") {
-    return { id: message.id, role: message.role, content: [{ type: "text", text: messageText(message) }],
+    return { id: message.id, role: message.role,
+      content: [...(message.skill ? [{ type: "data-skill" as const, data: message.skill }] : []), { type: "text", text: messageText(message) }],
       ...(message.role === "user" && message.attachments ? { attachments: message.attachments } : {}) };
   }
   return {

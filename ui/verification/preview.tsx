@@ -74,6 +74,31 @@ const chainMessages = (running: boolean): TranscriptMessage[] => [
   ] },
 ];
 
+// Skill records: a typed invocation, a batch of loads beside other tools, a load with no argument, and a failed load.
+const skillDoc = (name: string) => `---\nname: ${name}\ndescription: Guidance the agent loads before it writes or changes code.\n---\n\n# ${name}\n\n${"Use short sentences. Name the cost of each choice. ".repeat(8)}`;
+const skillMessages = (running: boolean): TranscriptMessage[] => [
+  { id: "skill-q", role: "user", skill: { name: "handoff", location: "/home/me/code/forgerie/skills/handoff/SKILL.md",
+    content: `References are relative to /home/me/code/forgerie/skills/handoff.\n\n# Handoff\n\nCall \`handoff_session\` immediately. Do not summarize the conversation, inspect files, write a handoff document, or do any other preparation in this session.\n\n${"The destination session owns all context preparation. ".repeat(6)}` },
+  parts: [{ type: "text", text: "Sending while working: follow-up queue, steering, showing and clearing queued messages, and restoring queued prompts after Stop." }] },
+  { id: "skill-a", role: "assistant", parts: [
+    { type: "thinking", text: "Load the writing and engineering guidance before planning." },
+    tool("sk-1", "read", { path: "/home/me/.agents/skills/simple-english/SKILL.md" }, done(skillDoc("simple-english"))),
+    tool("sk-2", "read", { path: "/home/me/.agents/skills/unslop/SKILL.md" }, done(skillDoc("unslop"))),
+    tool("sk-3", "read", { path: "/home/me/.pi/packages/pi-bedrock-principals/skills/bedrock-principles/SKILL.md" },
+      running ? { type: "running", output: "" } : done(skillDoc("bedrock-principles"))),
+    ...running ? [] : [tool("sk-git", "bash", { command: "git status --short" }, done(" M src/transcript.ts")),
+      { type: "text" as const, text: "The queue already exists on the server. I'll read the session store next." }],
+  ] },
+  ...running ? [] : [
+    { id: "skill-q2", role: "user" as const, skill: { name: "testing-guide", location: "/home/me/code/forgerie/.agents/skills/testing-guide/SKILL.md", content: skillDoc("testing-guide") }, parts: [] },
+    { id: "skill-a2", role: "assistant" as const, parts: [
+      tool("sk-4", "read", { path: "/home/me/.agents/skills/a-skill-name-that-is-much-longer-than-any-pane-is-wide/SKILL.md" },
+        done("ENOENT: no such file or directory, access '/home/me/.agents/skills/a-skill-name-that-is-much-longer-than-any-pane-is-wide/SKILL.md'", true)),
+      { type: "text" as const, text: "That skill is not installed. I'll follow the repository testing guide instead." },
+    ] },
+  ],
+];
+
 const planAsk: PendingAsk = { askId: "plan", askedAt: "2026-09-29T00:00:00Z", questions: [
   { id: "store", question: "Where should session drafts be kept?", detail: "Both survive a reconnect. Only storage survives a reload.", options: [
     { value: "memory", label: "In memory", detail: "Lost on reload. No new storage." },
@@ -183,6 +208,7 @@ const compactionScenarios: Record<string, CompactionState> = {
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
+  skills: skillMessages(false), "skills-open": skillMessages(false), "skills-invocation": skillMessages(false), "skills-running": skillMessages(true),
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
   handoff: handoffMessages, "handoff-open": handoffMessages,
@@ -200,7 +226,19 @@ function Preview() {
   }));
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
   const [compaction, setCompaction] = useState<CompactionState>(compactionScenarios[scenario] ?? idleCompaction);
-  const [running, setRunning] = useState(scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
+  // `skills-open` opens every skill record for screenshots. `skills-invocation`
+  // opens the first command and scrolls it to the top of the transcript.
+  useEffect(() => {
+    if (scenario !== "skills-open" && scenario !== "skills-invocation") return;
+    const timer = setTimeout(() => {
+      const selector = scenario === "skills-open" ? ".skill-invocation, details.skill-loads, details.skill-load" : ".skill-invocation";
+      const records = [...document.querySelectorAll<HTMLDetailsElement>(selector)];
+      for (const details of records) details.open = true;
+      if (scenario === "skills-invocation") setTimeout(() => records[0]?.scrollIntoView({ block: "start" }), 200);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, []);
+  const [running, setRunning] = useState(scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
   useEffect(() => {
     if (scenario !== "streamdown-live" || !running) return;
     const timers = streamdownFrames.slice(1).map((text, index) => setTimeout(() => {
