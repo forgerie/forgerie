@@ -17,8 +17,11 @@ interface Props {
 function Fixture({ state = { type: "idle" }, running = false, waits, offline = false, sending = false, queueCount = 1,
   onSend = async () => {}, onClear = () => {}, onDismiss = () => {}, onCancel = async () => {}, ask }: Props) {
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], running), onNew: async () => {}, onCancel, isRunning: running, isDisabled: offline });
-  return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} compaction={{ state, queueCount, disabled: offline || sending, ...(waits === undefined ? {} : { waits }),
-    onSend, onClearQueue: onClear, onDismiss }} /></AssistantRuntimeProvider>;
+  // Pi lists a queued compaction as a follow-up, here after other clients' work.
+  const items = state.type === "queued" ? [...Array.from({ length: queueCount - 1 }, (_, index) => ({ kind: "followUp" as const, text: `queued ${index + 1}` })),
+    { kind: "followUp" as const, text: state.text }] : [];
+  return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} compaction={{ state, disabled: offline || sending, ...(waits === undefined ? {} : { waits }), onSend, onDismiss }}
+    queue={{ items, disabled: offline || sending, onClear }} /></AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
 const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
@@ -77,7 +80,8 @@ describe("compaction in the one composer", () => {
     const onClear = vi.fn();
     const state: CompactionState = { type: "queued", text: "/compact retain the release plan" };
     await render({ state, running: true, queueCount: 3, offline: true, onClear });
-    expect(document.querySelector(".compaction-head [role=status]")?.textContent).toBe("Compaction queued");
+    expect(document.querySelector(".compaction-notice")).toBeNull();
+    expect([...document.querySelectorAll("section.queue .queue-item")].at(-1)?.textContent).toBe("Compaction/compact retain the release plan");
     expect(button("Clear entire queue (3)")?.disabled).toBe(true);
     await click(button("Clear entire queue (3)")); expect(onClear).not.toHaveBeenCalled();
     await render({ state, running: true, queueCount: 3, onClear }); await type("unfinished thought");

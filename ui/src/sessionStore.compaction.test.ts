@@ -34,6 +34,7 @@ async function compactionServer(initial: SessionStatus = idle) {
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
     if (url.pathname.endsWith("/messages")) { state.historyReads++; await state.historyGate?.promise; send({ messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: 1 }); }
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: state.seq, partial: null });
+    else if (url.pathname.endsWith("/prompt")) send({ accepted: true });
     else if (url.pathname.endsWith("/commands/run")) {
       state.beforeCommandReply?.();
       await state.commandGate?.promise;
@@ -85,13 +86,21 @@ describe("compaction transport and recovery", () => {
     const api = await compactionServer(queued);
     await api.store.start();
     expect(api.store.getSnapshot().compaction).toEqual({ type: "queued", text: "/compact preserve tests" });
-    await expect(api.store.send("ordinary follow-up")).rejects.toThrow("Wait for the current run");
     await api.store.send("/compact preserve tests");
     expect(api.requests.filter(({ path }) => path.endsWith("/commands/run"))).toEqual([
       { path: "/api/sessions/test/commands/run", body: { cwd: "/work tree", text: "/compact preserve tests" } },
     ]);
     expect(api.requests.some(({ path }) => path.endsWith("/prompt"))).toBe(false);
     expect(api.store.getSnapshot().transcript.messages).toHaveLength(1);
+  });
+  it("queues an ordinary message behind a queued compaction as a follow-up, never as a steer", async () => {
+    const api = await compactionServer(queued);
+    await api.store.start();
+    await expect(api.store.send("change course", undefined, { steer: true })).rejects.toThrow("Steering works only");
+    await api.store.send("ordinary follow-up");
+    expect(api.requests.filter(({ path }) => path.endsWith("/prompt"))).toEqual([
+      { path: "/api/sessions/test/prompt", body: { cwd: "/work tree", text: "ordinary follow-up", streamingBehavior: "followUp" } },
+    ]);
   });
   it.each([
     ["success", "Compaction complete.\nTokens before: 123\n\nSummary", "complete"],

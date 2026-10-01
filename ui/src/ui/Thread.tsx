@@ -10,10 +10,13 @@ import { CommandResultPanel, type CommandResultBinding } from "./CommandResultPa
 import { ImageViewerProvider } from "./ImageViewer";
 import { CompactionNotice, type CompactionBinding } from "./CompactionNotice";
 import type { ChatDraft } from "../chatDraft";
+import { QueuedMessages, type QueueBinding } from "./QueuedMessages";
+import type { WorkingSend } from "../queue";
 
 // System organism: assistant-ui owns message, composer, and scroll state.
-// `ask` puts the one composer into ask mode.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, chatDraft }: { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; shell?: ShellBinding; chatDraft?: ChatDraft }) {
+// `ask` puts the one composer into ask mode. `working` says what a draft can
+// do while the session works; `queue` is what already waits.
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, queue, working, chatDraft }: { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; shell?: ShellBinding; queue?: QueueBinding; working?: WorkingSend; chatDraft?: ChatDraft }) {
   return <ImageViewerProvider><ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
@@ -35,7 +38,9 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
           </ThreadPrimitive.ScrollToBottom>
           {commandResult && <CommandResultPanel {...commandResult} />}
           {compaction && <CompactionNotice {...compaction} />}
-          <Composer ask={ask} mentions={mentions} commands={commands} compaction={compaction} shell={shell} chatDraft={chatDraft} />
+          {queue && <QueuedMessages {...queue} />}
+          <Composer ask={ask} mentions={mentions} commands={commands} compaction={compaction} shell={shell} working={working}
+            queued={queue ? queue.items.length > 0 : false} chatDraft={chatDraft} />
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>

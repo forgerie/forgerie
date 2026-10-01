@@ -108,8 +108,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* Drawn small, pressed large. Every control listed here is drawn at the
    homepage size and keeps a --control-size hit area through an invisible
    ::before centred on it. */
-.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
-.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .picker-toast button::before, .session-door-open::before {
+.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .steer-send, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
+.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .steer-send::before, .picker-toast button::before, .session-door-open::before {
   content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -174,6 +174,25 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer-input:focus-visible { outline: none; }
 .composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-4); padding: 0 var(--space-2) var(--space-2); }
 .compact-send { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); }
+/* While the agent works, Stop keeps Send's slot. Queue sits beside it, outlined
+   so the filled Stop stays the one primary shape, and Steer is a quiet word. */
+.queue-send { border: 1px solid var(--line-focus); color: var(--foreground); }
+.queue-send:not(:disabled):hover, .steer-send:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.steer-send { block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; transition: color 150ms; }
+/* Pi's queue, after assistant-ui's message-queue element: pending sends sit on
+   the composer's own surface, above it, in delivery order. Rows wrap so every
+   word stays readable; the list scrolls inside a height budget so the input
+   never leaves the screen. A tag moves above its text when a row is narrow. */
+.queue { display: flex; flex-direction: column; gap: var(--space-1); min-inline-size: 0; font-size: var(--small-text); }
+.queue-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--space-2); padding-inline-start: var(--space-1); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.queue-head button { min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--small-text); }
+.queue-head button:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.queue-items { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; max-block-size: min(9rem, 22cqb); overflow-y: auto; overscroll-behavior: contain; }
+.queue-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-surface); background: color-mix(in oklab, var(--muted) 30%, var(--background)); }
+.queue-kind { flex: none; min-inline-size: 4.75rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
+.queue-item[data-kind="steer"] .queue-kind { color: var(--foreground); }
+.queue-text { flex: 1 1 12rem; min-inline-size: 0; color: color-mix(in oklab, var(--foreground) 75%, transparent); line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
+.queue-item[data-kind="compaction"] .queue-text { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
 /* Operational feedback uses the homepage's trace text and menu controls, not a second input or a progress estimate. */
 .compaction-notice { color: var(--muted-foreground); font-size: var(--small-text); min-inline-size: 0; }
 .compaction-notice[data-phase="running"] { color: var(--live); }

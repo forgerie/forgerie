@@ -1,7 +1,8 @@
 // Separate dev-only entry point. This preview has no transport or network data.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
+import type { QueuedMessage } from "../src/queue";
 import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transcript";
 import { useThreadMessages } from "../src/useThreadMessages";
 import { Thread } from "../src/ui/Thread";
@@ -14,7 +15,7 @@ import type { CommandBinding } from "../src/ui/SlashCommands";
 import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { createAttachmentAdapter } from "../src/attachments";
-import { idleCompaction, type CompactionState } from "../src/compaction";
+import { idleCompaction, isCompactCommand, type CompactionState } from "../src/compaction";
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
 import type { HandoffDoor } from "../src/handoffDoor";
 import type { ShellResult, ShellRun } from "../src/shellRun";
@@ -198,6 +199,20 @@ const handoffMessages: TranscriptMessage[] = [
 /** The preview cannot navigate, so it records which session a door opened. */
 const openPreviewDoor = (door: HandoffDoor) => { document.documentElement.dataset["openedSession"] = door.sessionId; };
 const compactionPreview = scenario.startsWith("compaction");
+// Sending while working: Pi's queue as status reports it, in delivery order.
+const queuePreview = scenario.startsWith("queue");
+const queueScenarios: Record<string, QueuedMessage[]> = {
+  queue: [{ kind: "steer", text: "Use the existing retry helper instead of writing a new one." },
+    { kind: "followUp", text: "After this, add tests for the reconnect path and run the full suite." },
+    { kind: "followUp", text: `Then update the verification notes. ${"Keep the wording short and name each check that ran. ".repeat(4)}` }],
+  "queue-compaction": [{ kind: "followUp", text: "Summarize what changed for the release notes." },
+    { kind: "followUp", text: "/compact keep the release decisions and the test plan" }],
+  "compaction-queued": [{ kind: "followUp", text: "Another window queued this follow-up." },
+    { kind: "followUp", text: "/compact retain the test plan, release decisions, and deployment notes" }],
+  "compaction-reconnecting": [{ kind: "followUp", text: "/compact retain the deployment decisions" }],
+};
+const queueDrafts: Record<string, string> = { queue: "Also check the folded landscape layout.", "queue-compaction": "Then open a pull request.",
+  "queue-attachments": "Review this screenshot after the run." };
 const compactionSummary = "Compaction complete.\nTokens before: 84,120\n\nThe session keeps its deployment decisions and test plan.\n" + "Keep the runtime server-owned and do not retry mutations. ".repeat(30);
 const compactionScenarios: Record<string, CompactionState> = {
   "compaction-queued": { type: "queued", text: "/compact retain the test plan, release decisions, and deployment notes" },
@@ -205,6 +220,7 @@ const compactionScenarios: Record<string, CompactionState> = {
   "compaction-complete": { type: "finished", outcome: "complete", message: compactionSummary },
   "compaction-error": { type: "finished", outcome: "failed", message: "Compaction failed: The provider is unavailable. Try again after the provider recovers." },
   "compaction-reconnecting": { type: "queued", text: "/compact retain the deployment decisions" },
+  "queue-compaction": { type: "queued", text: "/compact keep the release decisions and the test plan" },
 };
 const shellPreview = scenario.startsWith("shell");
 const shellRow = (id: string, run: ShellRun): TranscriptMessage => ({ id, role: "shell", parts: [{ type: "shell", run }] });
@@ -258,7 +274,8 @@ function Preview() {
     }, 300);
     return () => clearTimeout(timer);
   }, []);
-  const [running, setRunning] = useState(scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
+  const [queue, setQueue] = useState<QueuedMessage[]>(queueScenarios[scenario] ?? []);
+  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
   useEffect(() => {
     if (scenario !== "streamdown-live" || !running) return;
     const timers = streamdownFrames.slice(1).map((text, index) => setTimeout(() => {
@@ -269,7 +286,8 @@ function Preview() {
   }, [running]);
   useEffect(() => {
     if (scenario !== "compaction-live" || compaction.type !== "queued") return;
-    const timer = setTimeout(() => setCompaction({ type: "running" }), 700);
+    // Pi takes a compaction off the queue when it starts.
+    const timer = setTimeout(() => { setCompaction({ type: "running" }); setQueue((current) => current.filter((item) => !isCompactCommand(item.text))); }, 700);
     return () => clearTimeout(timer);
   }, [compaction]);
   useEffect(() => {
@@ -323,7 +341,11 @@ function Preview() {
   }, []);
   async function onNew(message: AppendMessage) {
     const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
-    if (scenario === "streamdown-live") {
+    if (queuePreview && running) {
+      // Pi delivers steers before follow-ups.
+      setQueue((current) => message.steer ? [...current.filter((item) => item.kind === "steer"), { kind: "steer", text },
+        ...current.filter((item) => item.kind !== "steer")] : [...current, { kind: "followUp", text }]);
+    } else if (scenario === "streamdown-live") {
       setMessages(streamdownMessages(streamdownFrames[0]!).map((part) => part.role === "user" ? say(part.id, "user", text) : part));
       setRunning(true);
     } else if (attachmentPreview) {
@@ -337,12 +359,30 @@ function Preview() {
       say(`reply-${current.length}`, "assistant", "This is a local preview. No prompt was sent to Pi.")]);
   }
   const threadMessages = useThreadMessages(messages, running);
-  const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false),
-    adapters: { dictation, ...(attachmentPreview ? { attachments: createAttachmentAdapter(async () => {
+  const runtimeRef = useRef<AssistantRuntime | null>(null);
+  // Stop returns queued work to the draft in delivery order, ahead of what is typed.
+  async function onCancel() {
+    const composer = runtimeRef.current?.thread.composer;
+    if (composer && queue.length) composer.setText([...queue.map((item) => item.text), composer.getState().text].filter((part) => part.trim()).join("\n\n"));
+    setQueue([]);
+    setRunning(false);
+  }
+  const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
+    adapters: { dictation, ...(attachmentPreview || scenario === "queue-attachments" ? { attachments: createAttachmentAdapter(async () => {
       if (scenario === "attachments-error") throw new Error("The workspace is read only. Your file stays here.");
       return { path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 };
     }) } : {}) },
     isRunning: running, isLoading: scenario === "loading", isDisabled: scenario === "loading" || scenario === "disconnected" || recovering });
+  runtimeRef.current = runtime;
+  useEffect(() => {
+    const draft = queueDrafts[scenario];
+    if (draft !== undefined) runtime.thread.composer.setText(draft);
+    if (scenario !== "queue-attachments") return;
+    const bytes = Uint8Array.from(atob(pixel), (char) => char.charCodeAt(0));
+    void runtime.thread.composer.addAttachment(new File([bytes], "layout.png", { type: "image/png" }));
+  }, [runtime]);
+  const compactionWaits = compaction.type === "queued" || compaction.type === "running";
+  const working = queuePreview || compactionPreview ? { queue: running, steer: running && !compactionWaits } : undefined;
   useEffect(() => {
     if (scenario === "slash-capture") {
       runtime.thread.composer.setText("/");
@@ -377,9 +417,8 @@ function Preview() {
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
-      <Thread compaction={compactionPreview ? { state: compaction, disabled: recovering, queueCount: 2,
-        onSend: async (text) => setCompaction({ type: "queued", text }),
-        onClearQueue: () => setCompaction({ type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." }),
+      <Thread compaction={compactionPreview || queuePreview ? { state: compaction, disabled: recovering,
+        onSend: async (text) => { setCompaction({ type: "queued", text }); setQueue((current) => [...current, { kind: "followUp", text }]); },
         onDismiss: () => setCompaction(idleCompaction),
       } : undefined} shell={shellPreview ? {
         availability: shellRunning ? { type: "blocked", reason: "Wait for the running shell command to finish." } : { type: "ready" },
@@ -389,7 +428,10 @@ function Preview() {
           setMessages((current) => [...current, shellRow(`shell-run-${current.length}`, { command, excludeFromContext,
             result: shellDone(`Local preview. Pi did not run "${command}".\n`, 0) })]);
         },
-      } : undefined} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+      } : undefined} queue={compactionPreview || queuePreview ? { items: queue, disabled: recovering, onClear: () => {
+        setQueue([]);
+        if (compaction.type === "queued") setCompaction({ type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." });
+      } } : undefined} working={working} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
       </SessionDoorsProvider>

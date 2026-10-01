@@ -15,9 +15,13 @@ import { isCompactCommand } from "../compaction";
 import type { CompactionBinding } from "./CompactionNotice";
 import { createChatDraft, type ChatDraft } from "../chatDraft";
 import { shellDraftOf, type ShellAvailability } from "../shellDraft";
+import { isCommand } from "../commands";
+import type { WorkingSend } from "../queue";
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
+
+const sendsNow: WorkingSend = { queue: false, steer: false };
 
 /**
  * System molecule: the one input bar. While an ask is open it gains a question
@@ -26,7 +30,12 @@ export interface ShellBinding { availability: ShellAvailability; onRun: (text: s
  * An attached file routes the input as chat, never as a text-only ask submission.
  */
 type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; compaction?: CompactionBinding | undefined;
-  shell?: ShellBinding | undefined; chatDraft?: ChatDraft | undefined };
+  shell?: ShellBinding | undefined;
+  /** What a draft can do while the session works. Without it, sending waits for the run. */
+  working?: WorkingSend | undefined;
+  /** Pi holds queued work that Stop would return to the draft. */
+  queued?: boolean;
+  chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
   const latest = useRef(aui);
@@ -34,9 +43,10 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
+  const canSend = useAuiState((s) => s.composer.canSend);
   const running = useAuiState((s) => s.thread.isRunning);
   const disabled = useAuiState((s) => s.thread.isDisabled);
   const preparing = useAuiState((s) => s.composer.submission !== undefined);
@@ -68,6 +78,17 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: 
     try { await shell.onRun(shellDraft.text); }
     catch { chatDraft.restore(shellDraft.text, "if-empty"); }
   }
+  // While the agent works, an ordinary draft can wait as a follow-up or steer
+  // the current response. Pi owns that queue. Commands and shell commands keep
+  // their own rules, and attachments must wait, because Stop can return only
+  // queued text.
+  const workingDraft = running && working.queue && !control && !compactDraft && !shellMode && !preparing
+    && !isCommand(text) && (text.trim() !== "" || count > 0);
+  const queueBlocked = disabled || dictating || tooMany || count > 0 || !canSend;
+  function sendWhileWorking(steer: boolean) {
+    if (!workingDraft || queueBlocked || (steer && !working.steer)) return;
+    void aui.composer.send(steer ? { steer: true } : undefined);
+  }
   const anchor = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const snapshot = useRef<MentionInputSnapshot>(null);
@@ -83,6 +104,14 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: 
     }
     if (shellMode && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void runShell(); return; }
     if (compactDraft && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendCompaction(); return; }
+    // assistant-ui's keys: Enter queues, Ctrl or Cmd+Shift+Enter steers, Shift+Enter is a new line.
+    if (workingDraft && event.key === "Enter") {
+      const steer = event.shiftKey && (event.ctrlKey || event.metaKey);
+      if (event.shiftKey && !steer) return;
+      event.preventDefault();
+      sendWhileWorking(steer);
+      return;
+    }
     if (!tooMany) control?.onKeyDown(event);
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
@@ -98,6 +127,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: 
           ? "Attachments run as chat messages. Sending closes these questions."
           : "Commands run in Pi. Questions stay open unless Pi closes them."}
       </p>}
+      {workingDraft && count > 0 && <p className="ask-route" role="status">
+        <InfoIcon aria-hidden size={14} />Queued messages are text only. Remove the attachments to queue this message.
+      </p>}
       {control?.error && <p className="ask-error" role="alert">{control.error}</p>}
       {state.type === "failed" && <p className="ask-error" role="alert">{state.message}</p>}
       {shellDraft.type !== "chat" && <p className="composer-hint" role="status" data-blocked={shellReason !== undefined || undefined}>
@@ -109,7 +141,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: 
         aria-describedby={control?.headingId}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || tooMany || compactDraft || shellMode ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        submitMode={control || tooMany || compactDraft || shellMode || running ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
         <AddAttachment disabled={disabled || preparing || !!control?.sending || count >= MAX_ATTACHMENTS} />
@@ -127,8 +159,17 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: 
               <ArrowUpIcon aria-hidden size={16} />
             </ComposerPrimitive.Send>
           </AuiIf>}
+          {workingDraft && <>
+            {working.steer && <button type="button" className="steer-send" disabled={queueBlocked} onClick={() => sendWhileWorking(true)}
+              title="Send now. The agent reads it after its current step. Ctrl or Cmd+Shift+Enter">Steer</button>}
+            <button type="button" className="icon-button queue-send" aria-label="Queue message" disabled={queueBlocked}
+              onClick={() => sendWhileWorking(false)} title="Send when the current work finishes. Enter">
+              <ArrowUpIcon aria-hidden size={16} />
+            </button>
+          </>}
           <AuiIf condition={(s) => s.thread.isRunning}>
-            <ComposerPrimitive.Cancel disabled={disabled} className="primary icon-button" aria-label={compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"} title={compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"}>
+            <ComposerPrimitive.Cancel disabled={disabled} className="primary icon-button" aria-label={compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"}
+              title={queued ? "Stop and return queued messages to the draft" : compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"}>
               <SquareIcon aria-hidden size={12} fill="currentColor" />
             </ComposerPrimitive.Cancel>
           </AuiIf>

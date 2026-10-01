@@ -1,5 +1,6 @@
 import type { AppendMessage, ComposerRuntime } from "@assistant-ui/react";
 import { promptOf, reusableAttachment, type PromptAttachment } from "./attachments";
+import { NotSentError } from "./sessionStore";
 
 /** The binding's send boundary. An uncertain acknowledgement never auto-retries. */
 export async function sendMessage(message: AppendMessage, send: (text: string, attachments?: PromptAttachment[]) => Promise<void>,
@@ -10,7 +11,9 @@ export async function sendMessage(message: AppendMessage, send: (text: string, a
   } catch (error) {
     const composer = currentComposer();
     if (composer) {
-      report(`${error instanceof Error ? error.message : String(error)} Check the transcript before sending again.`);
+      // A refusal before any request cannot have reached the transcript.
+      report(error instanceof NotSentError ? error.message
+        : `${error instanceof Error ? error.message : String(error)} Check the transcript before sending again.`);
       const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
       composer.setText([text, composer.getState().text].filter(Boolean).join("\n"));
       for (const attachment of message.attachments ?? []) await composer.addAttachment(reusableAttachment(attachment));

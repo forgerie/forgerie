@@ -16,6 +16,7 @@ import { createChatDraft } from "./chatDraft";
 import type { HandoffDoor } from "./handoffDoor";
 import { SessionDoorsProvider } from "./ui/SessionDoor";
 import type { DraftStore } from "./draftStore";
+import { workingSend } from "./queue";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSession }: {
@@ -43,10 +44,14 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
     else if (result.promptDraft !== undefined) runtimeRef.current.thread.composer.setText(result.promptDraft);
   }, [id, onSwitchSession]);
   const openDoor = useCallback((door: HandoffDoor) => onSwitchSession({ id: door.sessionId, cwd: door.cwd }), [onSwitchSession]);
-  const send = useCallback(async (text: string, images?: PromptAttachment[]) => { applyResult(await store.send(text, images)); }, [store, applyResult]);
+  const send = useCallback(async (text: string, images?: PromptAttachment[], options?: { steer?: boolean }) => {
+    applyResult(await store.send(text, images, options));
+  }, [store, applyResult]);
   const onNew = useCallback(async (message: AppendMessage) => {
     setSendError(undefined);
-    await sendMessage(message, send, () => runtimeRef.current?.thread.composer, setSendError);
+    // assistant-ui marks a steer on the message itself (composer.send({ steer: true })).
+    await sendMessage(message, (text, images) => send(text, images, { steer: message.steer === true }),
+      () => runtimeRef.current?.thread.composer, setSendError);
   }, [send]);
   const onCancel = useCallback(async () => {
     try {
@@ -98,10 +103,11 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",
           waits: state.transcript.isRunning || isBashRunning(state),
-          queueCount: state.status?.queuedMessages.length ?? 0, onSend: send,
-          onClearQueue: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); },
-          onDismiss: store.dismissCompaction }}
+          onSend: send, onDismiss: store.dismissCompaction }}
         shell={{ availability: shellAvailabilityOf(state), onRun: send }}
+        queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
+          onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
+        working={workingSend(state.status, state.compaction)}
         commandResult={state.commandResult ? {
           result: state.commandResult, disabled: state.sending || state.connection.type !== "ready",
           onChoose: (requestId, value) => { void store.respondToCommand(requestId, value).then(applyResult).catch(() => { /* Store exposes the error and keeps the choices. */ }); },

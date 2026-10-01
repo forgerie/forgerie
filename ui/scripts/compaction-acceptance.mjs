@@ -49,7 +49,7 @@ try {
       return { overflow: document.documentElement.scrollWidth > innerWidth,
         inputs: document.querySelectorAll('.composer textarea').length, input: box(document.querySelector('.composer textarea')),
         footer: box(document.querySelector('.composer-region')), notice: box(document.querySelector('.compaction-notice')),
-        buttons: [...document.querySelectorAll('.composer-actions button,.compaction-head button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
+        buttons: [...document.querySelectorAll('.composer-actions button,.compaction-head button,.queue-head button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
         draft: document.querySelector('.composer textarea').value };
     })()`);
     assert.equal(state.overflow, false, `${scenario}: overflow`);
@@ -82,7 +82,8 @@ try {
   assert.equal(await evaluate(cdp, "!!document.querySelector('.compaction-notice')"), false);
   await input("/compact keep release decisions");
   await pressCombo(cdp, "enter");
-  await until("document.querySelector('.compaction-notice')?.dataset.phase === 'queued'");
+  // A queued compaction is a row of the queue, not a notice of its own.
+  await until("!!document.querySelector('section.queue .queue-item[data-kind=compaction]')");
   await until("document.querySelector('.compaction-notice')?.dataset.phase === 'running'");
   await until("document.querySelector('.compaction-notice')?.dataset.phase === 'finished'");
   assert.equal(await evaluate(cdp, "document.querySelector('.compaction-head [role=status]').textContent"), "Compaction complete.");
