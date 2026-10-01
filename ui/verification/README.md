@@ -8,6 +8,10 @@ Unsent chat text and partial `ask_user` answers survive a session switch and a p
 
 A `/skill:name` command shows as a chip on the user's message, with the typed argument in the bubble. A skill the agent loads shows as its own trace line beside the tool activity. See [record behavior, verification, and limits](skills.md).
 
+## Shell commands
+
+Type `!command` in the one composer to run it in the session's folder, or `!!command` to keep the output out of the agent's context. Output streams into a shell row, and saved commands reload in transcript order. A running command cannot be stopped from this client yet. See [shell behavior, the join contract, verification, and limits](shell.md).
+
 ## Session compaction
 
 The one composer supports explicit compaction during idle work or queueing during an active run. Live status and server receipts appear above it. See [compaction behavior, queue clearing, verification, and limits](compaction.md).

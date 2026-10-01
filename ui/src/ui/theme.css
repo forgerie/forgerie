@@ -187,6 +187,30 @@ button:disabled { cursor: default; opacity: 0.4; }
 .compaction-detail summary::before { content: ">"; }
 .compaction-detail[open] summary::before { content: "⌄"; }
 .compaction-detail pre { margin: 0; max-block-size: 20cqb; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+/* A `!` command row: the homepage code sheet (tinted 11px mono header, code
+   surface body). The command always shows in full; only the output scrolls,
+   inside the same height budget as tool output. Readouts wrap before the
+   copy control is squeezed. */
+.shell-header { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-3); min-block-size: 2.25rem; padding-inline: var(--space-3) var(--space-1); background: var(--tint-surface); border: 1px solid var(--line); border-radius: var(--radius-document) var(--radius-document) 0 0; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
+.shell-label { flex: none; }
+.shell-readouts { flex: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: var(--space-3); min-inline-size: 0; font-variant-numeric: tabular-nums; }
+.shell-status[data-live] { color: var(--live); }
+.shell-status[data-tone="error"] { color: var(--destructive); }
+.shell-header .copy-action { flex: none; }
+.shell-header .icon-button { inline-size: 1.5rem; block-size: 1.5rem; color: var(--muted-foreground); }
+.shell-header .icon-button:hover { color: var(--foreground); }
+.shell-header .icon-button svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.shell-body { min-inline-size: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-block-start: 0; border-radius: 0 0 var(--radius-document) var(--radius-document); background: var(--code-surface); font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; line-height: 1.6; }
+.shell-command { margin: 0; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.shell-prompt { font-weight: 400; color: var(--muted-foreground); user-select: none; }
+.shell-unknown, .shell-empty, .shell-error { font-family: var(--body-font); font-size: var(--small-text); font-weight: 400; color: var(--muted-foreground); }
+.shell-output { margin: var(--space-1) 0 0; max-block-size: min(20rem, 45cqb); overflow: auto; overscroll-behavior: contain; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.shell-empty, .shell-error { margin: var(--space-1) 0 0; }
+.shell-error { color: var(--destructive); overflow-wrap: anywhere; }
+.shell-notes { margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
+.shell-notes p { margin: 0; }
+/* Shell mode: the draft is set as code, so the bar reads as a command line. */
+.composer-shell[data-shell] .composer-input { font-family: var(--code-font); font-variant-ligatures: none; }
 .composer-dictation { display: flex; align-items: center; gap: var(--space-4); flex: 1; min-inline-size: 0; }
 .dictation-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small-text); color: var(--muted-foreground); }
 /* Pi picker: same homepage menu tokens, window-level so the transcript cannot
@@ -296,9 +320,10 @@ button:disabled { cursor: default; opacity: 0.4; }
 .ask-option input:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
 .ask-option-text { display: flex; flex-direction: column; min-inline-size: 0; font-size: var(--text-size); line-height: 1.5; overflow-wrap: anywhere; }
 .ask-option-text small { color: var(--muted-foreground); font-size: var(--small-text); }
-.ask-route, .ask-error { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0; padding: var(--space-2) var(--space-4) 0; font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
-.ask-route { color: var(--muted-foreground); }
-.ask-route svg { flex: none; margin-block-start: 0.15rem; color: var(--live); }
+.ask-route, .ask-error, .composer-hint { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0; padding: var(--space-2) var(--space-4) 0; font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
+.ask-route, .composer-hint { color: var(--muted-foreground); }
+.ask-route svg, .composer-hint svg { flex: none; margin-block-start: 0.15rem; color: var(--live); }
+.composer-hint[data-blocked] svg { color: var(--muted-foreground); }
 .ask-error { color: var(--destructive); }
 /* Text buttons from EditComposer: h-8 px-3 13px, primary bg-primary medium. */
 .composer-shell[data-mode="ask"] .composer-actions { gap: var(--space-4); }

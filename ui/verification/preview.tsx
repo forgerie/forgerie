@@ -17,6 +17,7 @@ import { createAttachmentAdapter } from "../src/attachments";
 import { idleCompaction, type CompactionState } from "../src/compaction";
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
 import type { HandoffDoor } from "../src/handoffDoor";
+import type { ShellResult, ShellRun } from "../src/shellRun";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const tool = (id: string, name: string, args: unknown, state: ToolState): TranscriptPart => ({ type: "tool", id, name, args, state });
@@ -115,7 +116,7 @@ const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", qu
       ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
 ] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
-const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
+const scenarioAsk: Record<string, PendingAsk> = { "shell-ask": planAsk, ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
 const mentionFiles = ["src/main.ts", "src/file with spaces.ts", "src/ui/Composer.tsx", "vendor/", "dir with space/",
   ...Array.from({ length: 9 }, (_, i) => `src/very-long-folder-name-${i}/nested-folder/mention-source-${i}.test.ts`)];
 const previewMentions: MentionSource = {
@@ -205,7 +206,26 @@ const compactionScenarios: Record<string, CompactionState> = {
   "compaction-error": { type: "finished", outcome: "failed", message: "Compaction failed: The provider is unavailable. Try again after the provider recovers." },
   "compaction-reconnecting": { type: "queued", text: "/compact retain the deployment decisions" },
 };
+const shellPreview = scenario.startsWith("shell");
+const shellRow = (id: string, run: ShellRun): TranscriptMessage => ({ id, role: "shell", parts: [{ type: "shell", run }] });
+const shellDone = (output: string, exitCode: number, extra: Partial<Extract<ShellResult, { type: "done" }>> = {}): ShellResult =>
+  ({ type: "done", output, exitCode, cancelled: false, truncated: false, ...extra });
+const gitLog = Array.from({ length: 30 }, (_, index) => `${(0x9c1a3e + index * 4099).toString(16)} feat(ui): change number ${index + 1} to the session client`).join("\n");
+const shellMessages = (live: boolean): TranscriptMessage[] => [
+  say("shell-q", "user", "Check the branch before we commit."),
+  say("shell-a", "assistant", "Run `git status` and the focused tests yourself, so the output stays visible here."),
+  shellRow("shell-1", { command: "git status --short", excludeFromContext: false, result: shellDone(" M src/sessionStore.ts\n M src/transcript.ts\n?? src/shellRun.ts\n", 0) }),
+  shellRow("shell-2", { command: "true", excludeFromContext: false, result: shellDone("", 0) }),
+  shellRow("shell-3", { command: `npm test -- --run src/transcript.shell.test.ts src/sessionStore.shell.test.ts ${"--reporter=verbose ".repeat(3)}`, excludeFromContext: true,
+    result: shellDone("FAIL src/sessionStore.shell.test.ts > blocks a second command\nAssertionError: expected 'ready' to be 'blocked'\n", 1,
+      { truncated: true, fullOutputPath: "/tmp/pi-bash-6f1c2e8a9b7d4c3e2f1a0b9c8d7e6f5a4b3c2d1e.log" }) }),
+  shellRow("shell-4", { command: "make deploy", excludeFromContext: false, result: { type: "failed", output: "", error: "spawn /bin/bash ENOENT" } }),
+  shellRow("shell-5", { command: "git log --oneline -30", excludeFromContext: false,
+    result: live ? { type: "running", output: gitLog.split("\n").slice(0, 12).join("\n") + "\n" } : shellDone(`${gitLog}\n`, 0) }),
+];
 const scenarios: Record<string, TranscriptMessage[]> = {
+  shell: shellMessages(false), "shell-running": shellMessages(true), "shell-blocked": shellMessages(true),
+  "shell-agent": [...shellMessages(false), ...toolMessages(true).slice(0, 2)], "shell-ask": shellMessages(false),
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
   skills: skillMessages(false), "skills-open": skillMessages(false), "skills-invocation": skillMessages(false), "skills-running": skillMessages(true),
@@ -238,7 +258,7 @@ function Preview() {
     }, 300);
     return () => clearTimeout(timer);
   }, []);
-  const [running, setRunning] = useState(scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
+  const [running, setRunning] = useState(scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
   useEffect(() => {
     if (scenario !== "streamdown-live" || !running) return;
     const timers = streamdownFrames.slice(1).map((text, index) => setTimeout(() => {
@@ -257,6 +277,20 @@ function Preview() {
     const timer = setTimeout(() => { setCompaction({ type: "finished", outcome: "complete", message: compactionSummary }); setRunning(false); }, 700);
     return () => clearTimeout(timer);
   }, [compaction]);
+  // `shell-running` streams the last command's remaining lines, then finishes it.
+  useEffect(() => {
+    if (scenario !== "shell-running") return;
+    const lines = gitLog.split("\n").slice(12);
+    const timers = lines.map((line, index) => setTimeout(() => setMessages((current) => current.map((message) => {
+      const part = message.parts[0];
+      if (message.id !== "shell-5" || part?.type !== "shell") return message;
+      const last = index === lines.length - 1;
+      const output = `${part.run.result.output}${line}\n`;
+      return shellRow(message.id, { ...part.run, result: last ? shellDone(output, 0) : { type: "running", output } });
+    })), 400 + index * 250));
+    return () => timers.forEach(clearTimeout);
+  }, []);
+  const shellRunning = messages.some((message) => message.parts[0]?.type === "shell" && message.parts[0].run.result.type === "running");
   const recovering = scenario === "compaction-reconnecting" || scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
   const [ask, setAsk] = useState<PendingAsk | undefined>(scenarioAsk[scenario]);
   // `ask-delayed` opens the ask after load, so a draft can be typed first.
@@ -326,8 +360,8 @@ function Preview() {
   useEffect(() => {
     // Only this network-free preview accepts an initial mention query, so the
     // canonical posture script can capture an already-open suggestion list.
-    const query = new URLSearchParams(location.search).get("mention");
-    if (!scenario.startsWith("mentions") || query === null) return;
+    const query = new URLSearchParams(location.search).get("mention") ?? new URLSearchParams(location.search).get("draft");
+    if (!scenario.startsWith("mentions") && !shellPreview || query === null) return;
     const timer = setTimeout(() => {
       const input = document.querySelector<HTMLTextAreaElement>('[aria-label="Message"]');
       if (!input) return;
@@ -339,7 +373,7 @@ function Preview() {
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
-    <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : compaction.type === "running" ? "Compacting" : compaction.type === "queued" ? "Compaction queued" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
+    <SessionFrame name="Session client" status={shellRunning && !running ? "Running shell command" : scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : compaction.type === "running" ? "Compacting" : compaction.type === "queued" ? "Compaction queued" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
@@ -347,6 +381,14 @@ function Preview() {
         onSend: async (text) => setCompaction({ type: "queued", text }),
         onClearQueue: () => setCompaction({ type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." }),
         onDismiss: () => setCompaction(idleCompaction),
+      } : undefined} shell={shellPreview ? {
+        availability: shellRunning ? { type: "blocked", reason: "Wait for the running shell command to finish." } : { type: "ready" },
+        onRun: async (text) => {
+          const excludeFromContext = text.startsWith("!!");
+          const command = text.slice(excludeFromContext ? 2 : 1).trim();
+          setMessages((current) => [...current, shellRow(`shell-run-${current.length}`, { command, excludeFromContext,
+            result: shellDone(`Local preview. Pi did not run "${command}".\n`, 0) })]);
+        },
       } : undefined} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, parseEvent, snapshotSchema, statusSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
-import { fromHistory, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
+import { fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
+import { shellAvailability, shellDraftOf, type ShellAvailability } from "./shellDraft";
 import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatalog, type CommandResult } from "./commands";
 import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
 import { compactionFromOutput, compactionFromStatus, idleCompaction, isCompactCommand, type CompactionState } from "./compaction";
@@ -65,6 +66,15 @@ function permanent(error: unknown) {
     || error instanceof ReadFailure && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
 }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+/** A user's `!` command runs. Status lags its start, so an open shell row counts too. */
+export function isBashRunning(state: SessionState): boolean {
+  return state.status?.isBashRunning === true || hasRunningShell(state.transcript);
+}
+export function shellAvailabilityOf(state: SessionState): ShellAvailability {
+  return shellAvailability({ connected: state.connection.type === "ready", sending: state.sending,
+    bashRunning: isBashRunning(state), compaction: state.compaction });
+}
 
 /**
  * `known` lets a caller that already holds the session (the picker) skip the
@@ -136,8 +146,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     }
   }
   function withStatus(next: SessionState, status: SessionStatus): SessionState {
+    // A shell command is not an agent run: Stop cannot end it and prompts may start beside it.
     return { ...next, status, compaction: compactionFromStatus(next.compaction, status),
-      transcript: { ...next.transcript, isRunning: status.isStreaming || status.isCompacting || status.isBashRunning } };
+      transcript: { ...next.transcript, isRunning: status.isStreaming || status.isCompacting } };
   }
   function withOperation(next: SessionState, event: OperationEvent): SessionState {
     if (event.type === "status.update") return withStatus(next, event.status);
@@ -221,7 +232,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       const status = await read(readPath("status", session), statusSchema);
       if (!current(attempt)) return;
       const seeded = seedTranscript(history.messages, snapshot.partial, snapshot.seq,
-        status.isStreaming || status.isCompacting || status.isBashRunning, attempt.buffered);
+        status.isStreaming || status.isCompacting, attempt.buffered, status.isBashRunning);
       // Keep persisted message identities, including messages first seen live,
       // so existing disclosures do not remount when fresh history replaces them.
       const transcript = reconcileTranscriptIdentity(state.transcript, seeded);
@@ -288,6 +299,27 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     } catch (error) {
       update({ ...state, commandError: messageOf(error) });
       throw error;
+    } finally { update({ ...state, sending: false }); }
+  }
+  /** Never retried: a lost acknowledgement does not prove the command did not run. */
+  async function runShell(text: string) {
+    const session = state.session;
+    const availability = shellAvailabilityOf(state);
+    if (!session || availability.type === "blocked") {
+      const message = availability.type === "blocked" ? availability.reason : "The session is not connected.";
+      update({ ...state, commandError: message });
+      throw new Error(message);
+    }
+    update({ ...state, sending: true, commandError: undefined });
+    try {
+      await request(`${root}/shell`, acceptedSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd, text }),
+      });
+    } catch (error) {
+      const message = error instanceof ReadFailure ? error.message
+        : `${messageOf(error)} The command may have started. Check the conversation before running it again.`;
+      update({ ...state, commandError: message });
+      throw new Error(message, { cause: error });
     } finally { update({ ...state, sending: false }); }
   }
   async function command(endpoint: "prompt" | "abort", text?: string, attachments?: PromptAttachment[]) {
@@ -360,6 +392,12 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start,
     send: async (text: string, attachments?: PromptAttachment[]) => {
+      const shell = shellDraftOf(text);
+      if (shell.type !== "chat") {
+        if (attachments?.length) throw new Error("Remove attachments before running a shell command.");
+        if (shell.type === "empty") throw new Error("Type a command after !.");
+        return runShell(shell.text);
+      }
       if (isCommand(text)) {
         if (attachments?.length) throw new Error("Remove attachments before running a slash command.");
         return runSlash("commands/run", { text });

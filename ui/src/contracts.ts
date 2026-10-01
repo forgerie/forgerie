@@ -13,6 +13,14 @@ export const piMessageSchema = z.object({
   isError: z.boolean().optional(),
   // Tool-specific result facts, such as the session a handoff created.
   details: z.unknown().optional(),
+  // bashExecution messages only: a `!` or `!!` command the user ran.
+  command: z.string().optional(),
+  output: z.string().optional(),
+  exitCode: z.number().nullable().optional(),
+  cancelled: z.boolean().optional(),
+  truncated: z.boolean().optional(),
+  fullOutputPath: z.string().optional(),
+  excludeFromContext: z.boolean().optional(),
 });
 export type PiMessage = z.infer<typeof piMessageSchema>;
 export const sessionSchema = z.object({
@@ -95,6 +103,13 @@ const eventBodySchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent.start") }),
   z.object({ type: z.literal("agent.end") }),
   z.object({ type: z.literal("session.error"), message: z.string() }),
+  // A user's `!` command. No message event announces its saved record.
+  z.object({ type: z.literal("shell.start"), command: z.string(), excludeFromContext: z.boolean().optional() }),
+  z.object({ type: z.literal("shell.chunk"), chunk: z.string() }),
+  // `output` is the whole result. With `isError`, it is the failure message instead.
+  z.object({ type: z.literal("shell.end"), output: z.string().optional(), exitCode: z.number().nullable().optional(),
+    cancelled: z.boolean().optional(), truncated: z.boolean().optional(), fullOutputPath: z.string().optional(),
+    isError: z.boolean().optional() }),
 ]);
 export const eventSchema = eventBodySchema.and(z.object({ seq: z.number().optional() }));
 export type SessionEvent = z.infer<typeof eventSchema>;
@@ -107,7 +122,8 @@ const askEventSchema = z.discriminatedUnion("type", [
 export type AskEvent = z.infer<typeof askEventSchema>;
 const eventEnvelope = z.object({ type: z.string() });
 const consumedTypes = new Set(["message.append", "message.end", "assistant.delta", "assistant.thinking.delta",
-  "tool.start", "tool.update", "tool.end", "agent.start", "agent.end", "session.error"]);
+  "tool.start", "tool.update", "tool.end", "agent.start", "agent.end", "session.error",
+  "shell.start", "shell.chunk", "shell.end"]);
 const operationEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("status.update"), status: statusSchema }),
   z.object({ type: z.literal("command.output"), level: z.enum(["info", "success", "error"]), message: z.string() }),

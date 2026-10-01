@@ -19,6 +19,8 @@ Type `/` at the start of the composer to discover Pi commands. Select a command,
 
 When the agent hands off to a new session or spawns one, the reply shows an "Open session" button beside that call. See [handoff navigation](verification/handoff-navigation.md).
 
+Type `!command` to run a shell command in the session's folder, or `!!command` to keep its output out of the agent's context. See [shell commands](verification/shell.md) for behavior and limits, including that a running command cannot be stopped from this client yet.
+
 This worktree uses the orphan branch `new-ui-mvp`. It has no shared history with `main`. It is not a replacement deployment or an npm release.
 
 ## Verify

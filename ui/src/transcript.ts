@@ -3,6 +3,8 @@ import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contract
 import { imageSource } from "./images";
 import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
 import { parseSkillInvocation, type SkillInvocation } from "./skills";
+import { appendOutput, finishRun, interruptRun, isRecordOf, runFromRecord, shellText, startedRun, unknownRun,
+  type ShellEnd, type ShellRun } from "./shellRun";
 
 /**
  * One tool execution. A call id owns exactly one state, whether the call
@@ -18,12 +20,14 @@ export type TranscriptPart =
   | { type: "thinking"; text: string }
   /** An image the assistant itself produced. User images are attachments. */
   | { type: "image"; src: string }
-  | { type: "tool"; id: string; name: string; args: unknown; state: ToolState };
+  | { type: "tool"; id: string; name: string; args: unknown; state: ToolState }
+  /** A `!` command the user ran. It is the only part of a `shell` message. */
+  | { type: "shell"; run: ShellRun };
 /** The skill a user message invoked. Its typed argument stays in the message's text. */
 export type SkillRecord = Omit<SkillInvocation, "argument">;
 export interface TranscriptMessage {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "shell";
   parts: readonly TranscriptPart[];
   attachments?: CompleteAttachment[];
   skill?: SkillRecord;
@@ -76,6 +80,7 @@ function skillOf(message: PiMessage): { skill: SkillRecord; parts: TranscriptPar
 }
 function asMessage(message: PiMessage, id: string): TranscriptMessage | undefined {
   const role = message.role;
+  if (role === "bashExecution") return { id, role: "shell", parts: [{ type: "shell", run: runFromRecord(message) }], key: keyOf(message) };
   if (role !== "user" && role !== "assistant" && role !== "system") return undefined;
   const invoked = role === "user" ? skillOf(message) : undefined;
   const parts = invoked?.parts ?? toParts(message);
@@ -158,6 +163,42 @@ function appendLive(state: Transcript, type: "text" | "thinking", text: string):
     : [...live.parts, { type, text }];
   return { ...state, messages: state.messages.map((message) => message === live ? { ...live, parts } : message) };
 }
+function shellRunOf(message: TranscriptMessage): ShellRun | undefined {
+  const part = message.role === "shell" ? message.parts[0] : undefined;
+  return part?.type === "shell" ? part.run : undefined;
+}
+export function hasRunningShell(transcript: Transcript): boolean {
+  return transcript.messages.some((message) => shellRunOf(message)?.result.type === "running");
+}
+function appendShell(state: Transcript, run: ShellRun): Transcript {
+  return { ...state, nextId: state.nextId + 1,
+    messages: [...state.messages, { id: `shell-${state.nextId}`, role: "shell", parts: [{ type: "shell", run }] }] };
+}
+/** The server runs one command at a time, so the last running row is the current one. */
+function updateRunningShell(state: Transcript, update: (run: ShellRun) => ShellRun): Transcript | undefined {
+  const index = state.messages.findLastIndex((message) => shellRunOf(message)?.result.type === "running");
+  if (index < 0) return undefined;
+  const message = state.messages[index]!;
+  const run = update(shellRunOf(message)!);
+  return { ...state, messages: state.messages.map((current, i) => i === index ? { ...message, parts: [{ type: "shell", run }] } : current) };
+}
+function interruptOpenShells(messages: readonly TranscriptMessage[]): readonly TranscriptMessage[] {
+  return messages.map((message) => {
+    const run = shellRunOf(message);
+    return run?.result.type === "running" ? { ...message, parts: [{ type: "shell", run: interruptRun(run) }] } : message;
+  });
+}
+function reduceShell(state: Transcript, event: Extract<SessionEvent, { type: `shell.${string}` }>): Transcript {
+  switch (event.type) {
+    case "shell.start": return appendShell({ ...state, messages: interruptOpenShells(state.messages) },
+      startedRun(event.command, event.excludeFromContext));
+    case "shell.chunk": return updateRunningShell(state, (run) => appendOutput(run, event.chunk))
+      ?? appendShell(state, appendOutput(unknownRun, event.chunk));
+    case "shell.end": return updateRunningShell(state, (run) => finishRun(run, event))
+      ?? appendShell(state, finishRun(unknownRun, event));
+  }
+}
+
 function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): Transcript {
   if (raw.role === "toolResult") return finishResult(state, raw);
   const key = keyOf(raw);
@@ -244,15 +285,46 @@ export function reduceEvent(state: Transcript, event: SessionEvent): Transcript 
     }
     case "tool.end": return finishTool(state, event.toolCallId, event.toolName,
       settled(event.toolName, event.text, event.isError, event.content, event.details));
+    case "shell.start":
+    case "shell.chunk":
+    case "shell.end": return reduceShell(state, event);
     case "message.append":
     case "message.end": return event.message ? applyMessage(state, event.message, event.type === "message.append") : state;
   }
 }
 
+/**
+ * Buffered shell events whose command the history read already returned. The
+ * history read precedes the watermark, so a finished command may be in both.
+ * Saved records keep execution order, so the observed commands that were saved
+ * form a prefix of the buffer and match the last saved records, in order.
+ */
+function savedShellEvents(state: Transcript, buffered: readonly SessionEvent[], seq: number): Set<SessionEvent> {
+  const executions: { events: SessionEvent[]; command?: string; end?: ShellEnd }[] = [];
+  let open: (typeof executions)[number] | undefined;
+  for (const event of buffered) {
+    if (event.type !== "shell.start" && event.type !== "shell.chunk" && event.type !== "shell.end") continue;
+    if (event.type === "shell.start" || !open) { open = { events: [], ...(event.type === "shell.start" ? { command: event.command } : {}) }; executions.push(open); }
+    open.events.push(event);
+    if (event.type === "shell.end") { open.end = event; open = undefined; }
+  }
+  const finished = executions.filter((execution) => execution.end && (execution.end.seq ?? Infinity) <= seq);
+  const saved = state.messages.flatMap((message) => { const run = shellRunOf(message); return run ? [run] : []; });
+  for (let count = Math.min(finished.length, saved.length); count > 0; count--) {
+    const tail = saved.slice(saved.length - count);
+    if (finished.slice(0, count).every((execution, index) => isRecordOf(tail[index]!, { command: execution.command, end: execution.end! }))) {
+      return new Set(finished.slice(0, count).flatMap((execution) => execution.events));
+    }
+  }
+  return new Set();
+}
+
 export function seedTranscript(history: readonly PiMessage[], partial: PiMessage | null, seq: number,
-  isRunning: boolean, buffered: readonly SessionEvent[]): Transcript {
+  isRunning: boolean, buffered: readonly SessionEvent[], bashRunning = false): Transcript {
   let state = fromHistory(history, isRunning);
+  const saved = savedShellEvents(state, buffered, seq);
   const events = buffered.filter((event, index) => {
+    if (saved.has(event)) return false;
     if (event.type !== "message.append" || event.message.role !== "user") return true;
     const end = buffered.slice(index + 1).find((next) => next.type === "message.end" && next.message?.role === "user");
     const key = end?.type === "message.end" && end.message ? keyOf(end.message) : undefined;
@@ -267,7 +339,8 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
   for (const event of events) {
     if ((event.seq ?? Infinity) > seq) continue;
     const toolEvent = event.type === "tool.start" || event.type === "tool.update" || event.type === "tool.end";
-    if (event.type === "message.end" || event.type === "message.append"
+    const shellEvent = event.type === "shell.start" || event.type === "shell.chunk" || event.type === "shell.end";
+    if (event.type === "message.end" || event.type === "message.append" || shellEvent
       || toolEvent && !completedTools.has(event.toolCallId)) {
       state = reduceEvent(state, event);
     }
@@ -282,6 +355,9 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
   for (const event of events) {
     if ((event.seq ?? Infinity) > seq) state = reduceEvent(state, event);
   }
+  // Status read after the buffer started covers every shell event before it.
+  if (bashRunning && !hasRunningShell(state)) state = appendShell(state, unknownRun);
+  if (!bashRunning) state = { ...state, messages: interruptOpenShells(state.messages) };
   return state.isRunning ? state : { ...state, messages: interruptOpenTools(state.messages) };
 }
 
@@ -294,7 +370,14 @@ export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
   return typeof door === "object" && door !== null && "sessionId" in door && "cwd" in door
     && typeof door.sessionId === "string" && typeof door.cwd === "string" ? { sessionId: door.sessionId, cwd: door.cwd } : undefined;
 }
+/** UI data of a shell row, carried as the system message's custom metadata. */
+export type ShellArtifact = { shell: ShellRun };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
+  if (message.role === "shell") {
+    const run = shellRunOf(message)!;
+    return { id: message.id, role: "system", content: [{ type: "text", text: shellText(run) }],
+      metadata: { custom: { shell: run } satisfies ShellArtifact } };
+  }
   if (message.role !== "assistant") {
     return { id: message.id, role: message.role,
       content: [...(message.skill ? [{ type: "data-skill" as const, data: message.skill }] : []), { type: "text", text: messageText(message) }],
@@ -302,17 +385,19 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   }
   return {
     id: message.id, role: "assistant",
-    content: message.parts.map((part) => {
+    content: message.parts.flatMap((part): Exclude<ThreadMessageLike["content"], string>[number][] => {
       switch (part.type) {
-        case "text": return { type: "text", text: part.text };
-        case "thinking": return { type: "reasoning", text: part.text };
-        case "image": return { type: "image", image: part.src };
-        case "tool": return {
+        case "text": return [{ type: "text", text: part.text }];
+        case "thinking": return [{ type: "reasoning", text: part.text }];
+        case "image": return [{ type: "image", image: part.src }];
+        case "tool": return [{
           type: "tool-call", toolCallId: part.id, toolName: part.name,
           args: isArgs(part.args) ? part.args : {},
           artifact: toolArtifact(part.state),
           ...toolResult(part.state),
-        };
+        }];
+        // Shell runs are their own messages, never parts of a reply.
+        case "shell": return [];
       }
     }),
     // Only failures are explicit. assistant-ui derives running and complete

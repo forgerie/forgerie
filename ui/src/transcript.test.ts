@@ -222,7 +222,8 @@ describe("assistant-ui conversion", () => {
 
 describe("event parsing", () => {
   it("ignores unrelated events and rejects malformed consumed events", () => {
-    expect(parseEvent({ type: "shell.start", command: "ls" })).toBeUndefined();
+    expect(parseEvent({ type: "pi.event", eventType: "bash_execution_update" })).toBeUndefined();
+    expect(() => parseEvent({ type: "shell.chunk" })).toThrow();
     expect(() => parseEvent({ type: "assistant.delta", text: 5 })).toThrow();
     expect(() => parseEvent({ type: "tool.start", toolName: "bash" })).toThrow();
     expect(parseEvent({ type: "tool.end", toolCallId: "a", toolName: "bash", text: "", isError: false, seq: 3 })).toMatchObject({ seq: 3 });

@@ -51,9 +51,13 @@ describe("ask drafts", () => {
     })).toEqual([{ id: "db", values: [], otherText: "DuckDB" }, { id: "checks", values: ["test"], otherText: "typecheck" }]);
     expect(toAnswers(ask("a"), { db: pickOption(one, blankDraft, "pg") })).toEqual([{ id: "db", values: ["pg"] }]);
   });
-  it("routes slash commands to chat and everything else to the form", () => {
+  it("routes slash and shell commands to chat and everything else to the form", () => {
     expect(routeOf("  /review")).toBe("chat");
+    expect(routeOf("!ls src")).toBe("chat");
+    expect(routeOf("!! git log")).toBe("chat");
     expect(routeOf("use /tmp for it")).toBe("answer");
+    expect(routeOf("!")).toBe("answer");
+    expect(routeOf("!@src/app.ts")).toBe("answer");
     expect(routeOf("")).toBe("answer");
   });
 });

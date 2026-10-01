@@ -1,7 +1,8 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, type GroupByContext, type PartState } from "@assistant-ui/react";
-import { artifactDoor } from "../transcript";
+import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
+import { artifactDoor, type ShellArtifact } from "../transcript";
 import { SessionDoorCall } from "./SessionDoor";
+import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
 import { ChainOfThoughtGroup, ReasoningGroup, SkillLoad, SkillLoadGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
@@ -84,7 +85,16 @@ export function AssistantMessage() {
   </MessagePrimitive.Root>;
 }
 
+function isShellArtifact(value: Record<string, unknown> | undefined): value is ShellArtifact {
+  const shell = value?.["shell"];
+  return typeof shell === "object" && shell !== null && "result" in shell;
+}
+/** System messages carry Pi system text or a user's `!` command, which selects its own view. */
 export function SystemMessage() {
+  const custom = useAuiState((s) => s.message.metadata.custom);
+  if (isShellArtifact(custom)) return <MessagePrimitive.Root className="message message-shell" data-role="shell">
+    <ShellRun run={custom.shell} />
+  </MessagePrimitive.Root>;
   return <MessagePrimitive.Root className="message message-system" data-role="system">
     <span className="system-label">System</span>
     <div className="message-text"><MessagePrimitive.Parts /></div>

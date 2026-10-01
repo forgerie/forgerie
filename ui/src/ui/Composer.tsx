@@ -3,7 +3,7 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
-import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, SquareIcon } from "lucide-react";
+import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, SquareIcon, TerminalIcon } from "lucide-react";
 import { OTHER_TEXT_MAX_LENGTH } from "../askDraft";
 import { useDictation } from "../DictationProvider";
 import { ComposerDictation } from "./ComposerDictation";
@@ -14,6 +14,10 @@ import { MAX_ATTACHMENTS } from "../attachments";
 import { isCompactCommand } from "../compaction";
 import type { CompactionBinding } from "./CompactionNotice";
 import { createChatDraft, type ChatDraft } from "../chatDraft";
+import { shellDraftOf, type ShellAvailability } from "../shellDraft";
+
+/** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
+export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
 
 /**
  * System molecule: the one input bar. While an ask is open it gains a question
@@ -21,7 +25,8 @@ import { createChatDraft, type ChatDraft } from "../chatDraft";
  * a second input. Input capabilities belong to this bar in both modes.
  * An attached file routes the input as chat, never as a text-only ask submission.
  */
-type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; compaction?: CompactionBinding | undefined; chatDraft?: ChatDraft | undefined };
+type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; compaction?: CompactionBinding | undefined;
+  shell?: ShellBinding | undefined; chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
   const latest = useRef(aui);
@@ -29,7 +34,7 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
   const running = useAuiState((s) => s.thread.isRunning);
@@ -50,6 +55,19 @@ function ComposerBar({ ask, mentions, commands, compaction, chatDraft }: Compose
       chatDraft.restore(text, "if-empty");
     }
   }
+  // Ask mode routes shell text itself, through its chat action.
+  const shellDraft = shell && !control ? shellDraftOf(text) : { type: "chat" as const };
+  const shellMode = shellDraft.type !== "chat";
+  const shellReason = !shellMode || !shell ? undefined : count > 0 ? "Remove attachments to run a shell command."
+    : shellDraft.type === "empty" ? "Type a command after !."
+    : shell.availability.type === "blocked" ? shell.availability.reason : undefined;
+  const shellBlocked = disabled || preparing || dictating || shellReason !== undefined;
+  async function runShell() {
+    if (shellDraft.type !== "shell" || shellBlocked || !shell) return;
+    aui.composer.setText("");
+    try { await shell.onRun(shellDraft.text); }
+    catch { chatDraft.restore(shellDraft.text, "if-empty"); }
+  }
   const anchor = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const snapshot = useRef<MentionInputSnapshot>(null);
@@ -63,12 +81,13 @@ function ComposerBar({ ask, mentions, commands, compaction, chatDraft }: Compose
     for (const trigger of triggers.getTriggers().values()) {
       if (trigger.resource.handleKeyDown(event)) return;
     }
+    if (shellMode && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void runShell(); return; }
     if (compactDraft && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendCompaction(); return; }
     if (!tooMany) control?.onKeyDown(event);
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
   return <ComposerPrimitive.Root className="composer">
-    <ComposerPrimitive.AttachmentDropzone ref={anchor} className="composer-shell" data-mode={control ? "ask" : "chat"}
+    <ComposerPrimitive.AttachmentDropzone ref={anchor} className="composer-shell" data-mode={control ? "ask" : "chat"} data-shell={shellMode || undefined}
       disabled={disabled || preparing || !!control?.sending}>
       {control && <AskQuestions control={control} />}
       <ComposerAttachments />
@@ -81,21 +100,28 @@ function ComposerBar({ ask, mentions, commands, compaction, chatDraft }: Compose
       </p>}
       {control?.error && <p className="ask-error" role="alert">{control.error}</p>}
       {state.type === "failed" && <p className="ask-error" role="alert">{state.message}</p>}
+      {shellDraft.type !== "chat" && <p className="composer-hint" role="status" data-blocked={shellReason !== undefined || undefined}>
+        <TerminalIcon aria-hidden size={14} />{shellReason ?? (shellDraft.excludeFromContext
+          ? "Shell command. Its output stays out of the agent's context." : "Shell command. The agent sees its output.")}
+      </p>}
       <ComposerPrimitive.Input ref={input} aria-label="Message" rows={1} className="composer-input"
         placeholder={control?.placeholder ?? "Send a message..."}
         aria-describedby={control?.headingId}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || tooMany || compactDraft ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        submitMode={control || tooMany || compactDraft || shellMode ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
         <AddAttachment disabled={disabled || preparing || !!control?.sending || count >= MAX_ATTACHMENTS} />
         <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
         {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
           <SquareIcon aria-hidden size={12} fill="currentColor" />
-        </ComposerPrimitive.Cancel> : control ? <AskActions control={{ ...control, blocked: control.blocked || tooMany }} /> : <>
+        </ComposerPrimitive.Cancel> : control ? <AskActions control={{ ...control, blocked: control.blocked || tooMany }}
+          chatLabel={shellDraftOf(text).type === "shell" ? "Run command" : "Send message"} /> : <>
           {compactDraft ? <button type="button" className="primary compact-send" disabled={compactBlocked} onClick={() => void sendCompaction()}>
             {running ? "Queue compaction" : "Compact history"}
+          </button> : shellMode ? <button type="button" className="primary compact-send" disabled={shellBlocked} onClick={() => void runShell()}>
+            Run command
           </button> : <AuiIf condition={(s) => !s.thread.isRunning}>
             <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
               <ArrowUpIcon aria-hidden size={16} />
@@ -111,7 +137,7 @@ function ComposerBar({ ask, mentions, commands, compaction, chatDraft }: Compose
     </ComposerPrimitive.AttachmentDropzone>
     {commands && <SlashCommands binding={commands} anchor={anchor} />}
     {mentions && (["@", "!@", "#"] as const).map((char) => <MentionPopover key={`${scopeKey}:${char}`}
-      source={mentions} char={char} input={input} snapshot={snapshot} enabled={!disabled && !control?.sending} />)}
+      source={mentions} char={char} input={input} snapshot={snapshot} enabled={!disabled && !control?.sending && !shellMode} />)}
   </ComposerPrimitive.Root>;
 
 }
@@ -159,12 +185,12 @@ function AskQuestions({ control }: { control: AskControl }) {
   </section>;
 }
 
-function AskActions({ control }: { control: AskControl }) {
+function AskActions({ control, chatLabel }: { control: AskControl; chatLabel: string }) {
   const { phase, route, last, count } = control;
   const sending = (action: "submit" | "dismiss") => phase.type === "sending" && phase.action === action;
   if (route === "chat") {
     return <button type="button" className="primary ask-primary" disabled={control.blocked} onClick={control.primary}>
-      Send message<ArrowUpIcon aria-hidden size={16} />
+      {chatLabel}<ArrowUpIcon aria-hidden size={16} />
     </button>;
   }
   return <>

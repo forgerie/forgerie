@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
-import { browserTransport, createSessionStore } from "./sessionStore";
+import { browserTransport, createSessionStore, isBashRunning, shellAvailabilityOf } from "./sessionStore";
 import type { Session } from "./contracts";
 import { useThreadMessages } from "./useThreadMessages";
 import { Thread } from "./ui/Thread";
@@ -82,6 +82,7 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
     : state.connection.type === "failed" ? "Disconnected"
     : state.sending ? "Sending" : state.compaction.type === "running" ? "Compacting"
     : state.compaction.type === "queued" ? "Compaction queued" : state.transcript.isRunning ? "Running"
+    : isBashRunning(state) ? "Running shell command"
     : state.ask.type === "open" ? "Waiting for you" : "Connected";
   const ask: AskBinding | undefined = state.ask.type === "open" ? {
     ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
@@ -99,6 +100,7 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
           queueCount: state.status?.queuedMessages.length ?? 0, onSend: send,
           onClearQueue: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); },
           onDismiss: store.dismissCompaction }}
+        shell={{ availability: shellAvailabilityOf(state), onRun: send }}
         commandResult={state.commandResult ? {
           result: state.commandResult, disabled: state.sending || state.connection.type !== "ready",
           onChoose: (requestId, value) => { void store.respondToCommand(requestId, value).then(applyResult).catch(() => { /* Store exposes the error and keeps the choices. */ }); },

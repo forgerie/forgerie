@@ -1,4 +1,5 @@
 import type { AskAnswer, AskQuestion, PendingAsk } from "./contracts";
+import { shellDraftOf } from "./shellDraft";
 
 /**
  * The user's unsent reply to one question. `text` is what the composer input
@@ -49,10 +50,10 @@ export function toAnswers(ask: PendingAsk, drafts: AskDrafts): AskAnswer[] {
 
 /**
  * Where the input's text goes while an ask is open. A form answer carries only
- * text, so a slash command goes out as a chat message. The server then closes
- * the ask as answered in chat.
+ * text, so a slash or `!` command goes out through the chat route instead.
+ * Pi decides whether a command closes the ask; a shell command never does.
  */
 export type AskRoute = "answer" | "chat";
 export function routeOf(text: string): AskRoute {
-  return text.trimStart().startsWith("/") ? "chat" : "answer";
+  return text.trimStart().startsWith("/") || shellDraftOf(text).type === "shell" ? "chat" : "answer";
 }
