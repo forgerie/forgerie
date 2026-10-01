@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Streamdown renderer
+
+The assistant and reasoning renderer now repairs unfinished Markdown with Streamdown while retaining the existing code sheets, copy controls, and image-link policy. See [integration, checks, and bundle cost](streamdown.md).
+
 ## Chain-of-thought grouping
 
 The assistant reply now uses the shared `group-chainOfThought` prefix from

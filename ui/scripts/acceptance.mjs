@@ -11,8 +11,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { hitRect } from "./lib/hit.mjs";
 
-// Compare rendered Markdown with the backend source after the same public parse.
+// Compare rendered Markdown with an independent parse of the backend source.
 const normalize = (text) => text.replace(/\s+/g, " ").trim();
+// Renderers split Markdown blocks differently. Compare semantic block text,
+// not incidental newline text nodes between react-markdown's elements.
+function blockText(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  const text = [...node.childNodes].map(blockText).join("");
+  return /^(P|H[1-6]|LI|TH|TD|PRE|BLOCKQUOTE|HR)$/.test(node.nodeName) ? ` ${text} ` : text;
+}
 
 const repo = process.env.FORGERIE_ROOT ?? resolve("../..");
 const { findChrome, launchChrome, getFreePort, waitForDebugger, evaluate, sleep } = await import(pathToFileURL(join(repo, "scripts/lib/cdp.mjs")));
@@ -56,7 +63,7 @@ try {
     assistantMessages: [...document.querySelectorAll('.message-assistant .message-text > .markdown')].map(e => {
       const content = e.cloneNode(true);
       content.querySelectorAll('.code-header').forEach(header => header.remove());
-      return content.textContent.replace(/\\s+/g, ' ').trim();
+      return (${blockText})(content).replace(/\\s+/g, ' ').trim();
     }),
     draft: document.querySelector('textarea')?.value,
     alert: document.querySelector('[role=alert]')?.textContent,
@@ -98,7 +105,7 @@ try {
     return normalize(await evaluate(cdp, `(() => {
       const node = document.createElement('div');
       node.innerHTML = ${JSON.stringify(html)};
-      return node.textContent;
+      return (${blockText})(node);
     })()`));
   }
   const originalReply = await finalBackendText();
@@ -139,7 +146,9 @@ try {
     assert.ok(state.sendHit.height >= 44 && state.sendHit.width >= 44, "Send target must stay reachable");
     result.transitions.push({ posture: posture.name, width: state.width, height: state.height, send: state.send });
   }
+  const loaded = cdp.waitForEvent("Page.loadEventFired", 20_000);
   await cdp.send("Page.reload");
+  await loaded;
   state = await until((s) => s.status === "Connected" && s.messages.length === result.historyMessages + (shouldSend ? 2 : 0));
   result.reloadMessages = state.messages.length;
   assert.equal(state.messages.length, result.historyMessages + (shouldSend ? 2 : 0), "Reload must not duplicate messages");

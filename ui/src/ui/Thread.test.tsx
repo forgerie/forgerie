@@ -75,6 +75,14 @@ describe("Homepage-derived thread", () => {
     expect(document.querySelector('.markdown a')?.textContent).toBe("Diagram");
   });
 
+  it("preserves workspace-relative links instead of labeling them blocked", async () => {
+    await render({ messages: [answer("Read [the source](src/sessionStore.ts) and [the section](#details).")] });
+    const links = document.querySelectorAll<HTMLAnchorElement>('.markdown a');
+    expect(links[0]?.href).toBe(new URL("src/sessionStore.ts", window.location.href).href);
+    expect(links[1]?.getAttribute('href')).toBe("#details");
+    expect(document.querySelector('.markdown')?.textContent).toBe("Read the source and the section.");
+  });
+
   it("copies a response and reports clipboard denial", async () => {
     await render({ messages: [reply] });
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("Denied"));
@@ -136,6 +144,46 @@ describe("Homepage-derived thread", () => {
     expect(document.querySelector('.message-assistant h2')?.textContent).toBe("Partial reply");
     expect(document.querySelector('textarea')).toBe(input);
     expect(input.value).toBe("next question");
+  });
+
+  it("repairs unfinished Markdown only while streaming and keeps the composer mounted", async () => {
+    await render({ messages: [answer("A **partial")], running: true });
+    const input = document.querySelector('textarea')!;
+    expect(document.querySelector('.message-assistant strong')?.textContent).toBe("partial");
+    expect(document.querySelector('.message-assistant [data-status]')?.getAttribute('data-status')).toBe("running");
+    await render({ messages: [answer("A **partial reply** with `cwd")], running: true });
+    expect(document.querySelector('.message-assistant strong')?.textContent).toBe("partial reply");
+    expect(document.querySelector('.message-assistant code')?.textContent).toBe("cwd");
+    expect(document.querySelector('textarea')).toBe(input);
+    await render({ messages: [answer("A **partial")] });
+    expect(document.querySelector('.message-assistant strong')).toBeNull();
+    expect(document.querySelector('.markdown')?.textContent).toBe("A **partial");
+    expect(document.querySelector('textarea')).toBe(input);
+  });
+
+  it("streams an unfinished code fence then highlights and copies its final source", async () => {
+    await render({ messages: [answer("```ts\nconst count =")], running: true });
+    const code = document.querySelector('.code-body code')!;
+    expect(code.textContent).toContain("const count =");
+    expect(code.querySelector('.hljs-keyword')).toBeNull();
+    await render({ messages: [answer("```ts\nconst count = 1;\n```")] });
+    expect(document.querySelectorAll('.code-header')).toHaveLength(1);
+    expect(document.querySelector('.code-body code')?.textContent).toBe("const count = 1;\n");
+    expect(document.querySelector('.hljs-keyword')?.textContent).toBe("const");
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValueOnce(undefined);
+    await act(async () => button("Copy code").click());
+    expect(writeText).toHaveBeenCalledWith("const count = 1;\n");
+  });
+
+  it("does not make unfinished links or unsafe URLs actionable", async () => {
+    await render({ messages: [answer("Read [the guide](https://example.test/unfinished")], running: true });
+    expect(document.querySelector('.markdown a[href]')).toBeNull();
+    await render({ messages: [answer("Read [the guide](https://example.test/complete)")] });
+    expect(document.querySelector('.markdown a')?.getAttribute('href')).toBe("https://example.test/complete");
+    await render({ messages: [answer("[Bad](javascript:alert%281%29)\n\n![Bad image](data:image/svg+xml;base64,PHN2Zy8+)\n\n<iframe src=\"https://example.test\"></iframe>")] });
+    expect(document.querySelector('.markdown a[href^="javascript:"]')).toBeNull();
+    expect(document.querySelector('.markdown a[href^="data:"]')).toBeNull();
+    expect(document.querySelector('img, iframe, script')).toBeNull();
   });
 
   it("retains the draft while recovery disables commands, then permits sending again", async () => {

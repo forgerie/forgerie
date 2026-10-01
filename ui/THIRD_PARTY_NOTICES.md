@@ -8,7 +8,7 @@ The chat presentation adapts the actual [assistant-ui homepage demo](https://git
 | `apps/docs/components/pages/home/demo/messages.tsx` and `action-bar.tsx` | `src/ui/Messages.tsx` preserves right-aligned user bubbles, unboxed assistant replies, and response copying. |
 | `apps/docs/components/pages/home/demo/composer.tsx` | `src/ui/Composer.tsx` preserves the textarea, bordered shell, and arrow/stop actions. |
 | `apps/docs/components/pages/home/demo/trace.tsx`, `apps/docs/components/shared/trace-line.tsx`, and the grouped-parts switch in `messages.tsx` | `src/ui/Trace.tsx` preserves the trace grammar: one quiet monospace line per step, a `>` marker that rotates when a disclosure opens, running/ran labels with a live shimmer, adjacent tool calls grouped under one line, and reasoning collapsed under a thinking/reasoning line. Native `<details>` replaces the site's Collapsible. The expandable input/output body, failure and stopped states, and the failure count on group lines are Forgerie additions. |
-| `apps/docs/components/assistant-ui/elements/markdown-text.tsx` | `src/ui/MarkdownText.tsx` preserves formatted replies and code sheets. It uses assistant-ui's Markdown renderer with GFM. |
+| `apps/docs/components/assistant-ui/elements/markdown-text.tsx` | `src/ui/MarkdownText.tsx` preserves formatted replies and code sheets. It uses assistant-ui's Streamdown renderer with GFM and incomplete-token repair. |
 | `apps/docs/styles/globals.css` and `apps/docs/app/layout.tsx` | `src/ui/theme.css` preserves the light/dark palette, popover colour, Public Sans, JetBrains Mono, the system display face for headings, and the thread/surface/control/document radii. |
 | `apps/docs/components/pages/home/demo/shell.tsx` | `src/ui/SessionFrame.tsx` and `src/ui/AppShell.tsx` preserve the 48 px thread header with a `PanelLeft` opener and the title alone, the tinted 15rem sidebar with `border-r` when docked, and the 18rem Sheet with a black/50 scrim when not. |
 | `apps/docs/components/pages/home/demo/sidebar.tsx`, `thread-list-item.tsx`, and `styles.ts` | `src/ui/Picker.tsx` preserves the sidebar header (mark and product name), 12 px section labels, 13 px muted row titles with the hover and active tints, the `MoreHorizontal` row trigger, and the menu panel and item styles with lucide icons. Forgerie rows keep a second 12 px line for the project and live work. |
@@ -21,6 +21,12 @@ The content column remains 42rem. Message spacing and page gutters scale with th
 ## assistant-ui
 
 Copyright (c) 2026 AgentbaseAI Inc. Licensed under the MIT License. The full license is included at [`public/licenses/assistant-ui.txt`](public/licenses/assistant-ui.txt), and Vite copies it into the built app at `/licenses/assistant-ui.txt`.
+
+## Streamdown
+
+The renderer uses [`@assistant-ui/react-streamdown`](https://www.assistant-ui.com/docs/guides/streamdown) 0.3.17 and Vercel Streamdown 2.6.0. The assistant-ui adapter is MIT licensed. Streamdown is Copyright 2023 Vercel, Inc., licensed under Apache-2.0. Its distributed license notice is included at [`public/licenses/streamdown.txt`](public/licenses/streamdown.txt) and copied into the built app at `/licenses/streamdown.txt`.
+
+The existing code header, Highlight.js highlighter, safe image links, and table scroll regions replace Streamdown's stock controls. The app does not install its optional Shiki, math, Mermaid, or CJK plugins. See [integration and verification](verification/streamdown.md).
 
 ## Fonts
 

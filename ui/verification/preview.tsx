@@ -22,6 +22,15 @@ const initialMessages: TranscriptMessage[] = [
 ];
 const stressMessages: TranscriptMessage[] = [initialMessages[0]!, say("answer", "assistant",
   `## Long content\n\nhttps://example.test/${"long-segment/".repeat(30)}\n\n\`\`\`ts\nconst path = '${"directory/".repeat(40)}';\n\`\`\`\n\n| One | Two | Three | Four | Five | Six |\n| --- | --- | --- | --- | --- | --- |\n| Value | Value | Value | Value | Value | Value |`)];
+const streamdownMessages = (text: string): TranscriptMessage[] => [
+  say("markdown-question", "user", "Show the streaming Markdown renderer."), say("markdown-answer", "assistant", text),
+];
+const streamdownFrames = [
+  "An **unfinished",
+  "An **unfinished phrase**.\n\n```ts\nconst count =",
+  "An **unfinished phrase**.\n\n```ts\nconst count = 1;\n```\n\n| Part | State |\n| --- | --- |\n| Code | Ready |\n\nRead [the guide](https://example.test/unfinished",
+  "An **unfinished phrase**.\n\n```ts\nconst count = 1;\n```\n\n| Part | State |\n| --- | --- |\n| Code | Ready |\n\nRead [the guide](https://example.test/complete).\n\n![Diagram](https://example.test/diagram.png)",
+];
 const testOutput = Array.from({ length: 40 }, (_, index) => ` ✓ src/transcript.test.ts > case ${index + 1} (${index % 7 + 1} ms)`).join("\n");
 // A coding turn: reasoning, a group of reads, a failed command, an edit, and the answer.
 const toolMessages = (running: boolean): TranscriptMessage[] => [
@@ -78,10 +87,19 @@ const scenarioAsk: Record<string, PendingAsk> = { ask: planAsk, "ask-long": long
 const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
+  "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
 };
 function Preview() {
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
-  const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running");
+  const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
+  useEffect(() => {
+    if (scenario !== "streamdown-live" || !running) return;
+    const timers = streamdownFrames.slice(1).map((text, index) => setTimeout(() => {
+      setMessages((current) => current.map((message) => message.id === "markdown-answer" ? say(message.id, "assistant", text) : message));
+      if (index === streamdownFrames.length - 2) setRunning(false);
+    }, (index + 1) * 1500));
+    return () => timers.forEach(clearTimeout);
+  }, [running]);
   const recovering = scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
   const [ask, setAsk] = useState<PendingAsk | undefined>(scenarioAsk[scenario]);
   // `ask-delayed` opens the ask after load, so a draft can be typed first.
@@ -91,7 +109,11 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   async function onNew(message: AppendMessage) {
-    exchange(message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n"));
+    const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
+    if (scenario === "streamdown-live") {
+      setMessages(streamdownMessages(streamdownFrames[0]!).map((part) => part.role === "user" ? say(part.id, "user", text) : part));
+      setRunning(true);
+    } else exchange(text);
   }
   function exchange(text: string) {
     setMessages((current) => [...current, say(`user-${current.length}`, "user", text),
