@@ -41,6 +41,9 @@ export function App() {
     setSelectedId(session.id);
   }, [selectedId]);
   const select = useCallback((row: Row) => switchSession(row.session), [switchSession]);
+  // A handoff door knows only the id and workspace. The catalog may also know the title.
+  const known = !selectedId ? undefined : commandSelection?.session.id === selectedId
+    ? { ...picker.find(selectedId), ...commandSelection.session } : picker.find(selectedId);
 
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention}
     picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
@@ -48,7 +51,7 @@ export function App() {
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
     thread={selectedId ? <ForgerieSession key={selectedId} id={selectedId}
-      known={commandSelection?.session.id === selectedId ? commandSelection.session : picker.find(selectedId)}
+      known={known}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       onSwitchSession={switchSession} />
       // The picker covers this area whenever nothing is selected, so it holds no

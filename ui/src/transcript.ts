@@ -1,6 +1,7 @@
 import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
 import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contracts";
 import { imageSource } from "./images";
+import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
 
 /**
  * One tool execution. A call id owns exactly one state, whether the call
@@ -9,7 +10,7 @@ import { imageSource } from "./images";
 export type ToolState =
   | { type: "pending" }
   | { type: "running"; output: string }
-  | { type: "done"; output: string; isError: boolean; images?: readonly string[] }
+  | { type: "done"; output: string; isError: boolean; images?: readonly string[]; door?: HandoffDoor }
   | { type: "interrupted" };
 export type TranscriptPart =
   | { type: "text"; text: string }
@@ -96,10 +97,14 @@ function toolMessage(state: Transcript, part: ToolPart): Transcript {
   return { ...state, nextId: state.nextId + 1,
     messages: [...state.messages, { id: `tool-${state.nextId}`, role: "assistant", parts: [part] }] };
 }
-function finishTool(state: Transcript, id: string | undefined, name: string, output: string, isError: boolean,
-  images: readonly string[]): Transcript {
+/** A finished call: its text, its images, and the session it created, if any. */
+function settled(toolName: string, output: string, isError: boolean, content: unknown, details: unknown): ToolState {
+  const images = imagesOf(content);
+  const door = handoffDoorOf({ toolName, isError, details });
+  return { type: "done", output, isError, ...(images.length ? { images } : {}), ...(door ? { door } : {}) };
+}
+function finishTool(state: Transcript, id: string | undefined, name: string, done: ToolState): Transcript {
   if (!id) return state;
-  const done: ToolState = { type: "done", output, isError, ...(images.length ? { images } : {}) };
   const messages = mapTool(state.messages, id, (part) => ({ ...part, state: done }));
   return messages ? { ...state, messages } : toolMessage(state, { type: "tool", id, name, args: undefined, state: done });
 }
@@ -158,7 +163,8 @@ function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): 
   return { ...state, nextId: state.nextId + 1, liveId, messages, error: raw.errorMessage ?? state.error };
 }
 function finishResult(state: Transcript, raw: PiMessage): Transcript {
-  return finishTool(state, raw.toolCallId, raw.toolName ?? "tool", outputOf(raw), raw.isError === true, imagesOf(raw.content));
+  const name = raw.toolName ?? "tool";
+  return finishTool(state, raw.toolCallId, name, settled(name, outputOf(raw), raw.isError === true, raw.content, raw.details));
 }
 export function messageText(message: TranscriptMessage): string {
   return message.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
@@ -221,7 +227,8 @@ export function reduceEvent(state: Transcript, event: SessionEvent): Transcript 
         ? part : { ...part, state: { type: "running", output: event.text } });
       return messages ? { ...state, messages } : state;
     }
-    case "tool.end": return finishTool(state, event.toolCallId, event.toolName, event.text, event.isError, imagesOf(event.content));
+    case "tool.end": return finishTool(state, event.toolCallId, event.toolName,
+      settled(event.toolName, event.text, event.isError, event.content, event.details));
     case "message.append":
     case "message.end": return event.message ? applyMessage(state, event.message, event.type === "message.append") : state;
   }
@@ -264,7 +271,14 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
 }
 
 /** UI-only state of a tool call, carried as the part's artifact. */
-export type ToolArtifact = { state: ToolState["type"]; images?: readonly string[] };
+export type ToolArtifact = { state: ToolState["type"]; images?: readonly string[]; door?: HandoffDoor };
+/** The session a converted tool call created, read back from its artifact. */
+export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
+  if (typeof artifact !== "object" || artifact === null || !("door" in artifact)) return undefined;
+  const door: unknown = artifact.door;
+  return typeof door === "object" && door !== null && "sessionId" in door && "cwd" in door
+    && typeof door.sessionId === "string" && typeof door.cwd === "string" ? { sessionId: door.sessionId, cwd: door.cwd } : undefined;
+}
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role !== "assistant") {
     return { id: message.id, role: message.role, content: [{ type: "text", text: messageText(message) }],
@@ -280,8 +294,7 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
         case "tool": return {
           type: "tool-call", toolCallId: part.id, toolName: part.name,
           args: isArgs(part.args) ? part.args : {},
-          artifact: { state: part.state.type, ...(part.state.type === "done" && part.state.images
-            ? { images: part.state.images } : {}) } satisfies ToolArtifact,
+          artifact: toolArtifact(part.state),
           ...toolResult(part.state),
         };
       }
@@ -290,6 +303,10 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
     // from the run state, and its join keeps the first explicit status.
     ...(message.failure ? { status: { type: "incomplete", reason: message.failure } } : {}),
   };
+}
+function toolArtifact(state: ToolState): ToolArtifact {
+  if (state.type !== "done") return { state: state.type };
+  return { state: state.type, ...(state.images ? { images: state.images } : {}), ...(state.door ? { door: state.door } : {}) };
 }
 function toolResult(state: ToolState) {
   switch (state.type) {

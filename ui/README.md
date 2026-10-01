@@ -17,6 +17,8 @@ The app resolves the session's `cwd` through `/api/sessions/all`, loads its hist
 
 Type `/` at the start of the composer to discover Pi commands. Select a command, add arguments, then Send. See [slash commands](verification/slash-commands.md) for behavior, endpoint checks, and the read-only `/tree` limit.
 
+When the agent hands off to a new session or spawns one, the reply shows an "Open session" button beside that call. See [handoff navigation](verification/handoff-navigation.md).
+
 This worktree uses the orphan branch `new-ui-mvp`. It has no shared history with `main`. It is not a replacement deployment or an npm release.
 
 ## Verify

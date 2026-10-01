@@ -108,8 +108,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* Drawn small, pressed large. Every control listed here is drawn at the
    homepage size and keeps a --control-size hit area through an invisible
    ::before centred on it. */
-.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .picker-toast button, .code-header .icon-button { position: relative; }
-.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .picker-toast button::before {
+.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
+.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .picker-toast button::before, .session-door-open::before {
   content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -367,10 +367,20 @@ summary.trace-line:hover { color: var(--foreground); }
 .trace-pre[data-tone="error"] { color: var(--destructive); }
 .trace-empty { margin: 0; font-size: var(--small-text); color: var(--muted-foreground); }
 .reasoning-text { color: var(--muted-foreground); font-size: var(--small-text); padding-block: var(--space-1) var(--space-2); }
+/* A call that created a session: its tool line, then the way in, on one row.
+   The line's text truncates first; the button keeps its label. Only when the
+   row cannot give the line 10rem does the button wrap below it. */
+.session-door { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 var(--space-2); margin-block: var(--space-1); min-inline-size: 0; }
+.session-door > .trace { flex: 1 1 10rem; min-inline-size: 0; margin-block: 0; }
+.session-door-open { flex: none; display: inline-flex; align-items: center; max-inline-size: min(100%, 12rem); block-size: 1.75rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font-size: var(--label-text); font-weight: 500; white-space: nowrap; transition: border-color 150ms, background-color 150ms; }
+.session-door-open > span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.session-door-open:hover { border-color: var(--line-focus); background: var(--hover-surface); }
 .message-assistant .message-text > .markdown + .trace,
 .message-assistant .message-text > .markdown + .trace-line,
 .message-assistant .message-text > .trace + .markdown,
-.message-assistant .message-text > .trace-line + .markdown { margin-block-start: var(--space-3); }
+.message-assistant .message-text > .trace-line + .markdown,
+.message-assistant .message-text > .markdown + .session-door,
+.message-assistant .message-text > .session-door + .markdown { margin-block-start: var(--space-3); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal { color: var(--code-keyword); }
 .hljs-string, .hljs-regexp, .hljs-attribute { color: var(--code-string); }
 .hljs-number, .hljs-symbol { color: var(--code-number); }

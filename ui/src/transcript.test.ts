@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEvent, type PiMessage, type SessionEvent } from "./contracts";
+import { historySchema, parseEvent, type PiMessage, type SessionEvent } from "./contracts";
 import { convertMessage, fromHistory, messageText, reduceEvent, seedTranscript, type Transcript, type TranscriptPart } from "./transcript";
 
 const user = (text: string, timestamp = 1): PiMessage => ({ role: "user", content: text, timestamp });
@@ -266,5 +266,48 @@ describe("images", () => {
     const state = fromHistory([user("draw"), { role: "assistant", content: [png], timestamp: 2 }]);
     expect(state.messages).toHaveLength(2);
     expect(state.messages[1]!.parts).toEqual([{ type: "image", src: pngUrl }]);
+  });
+});
+
+describe("handoff doors", () => {
+  const details = { handoffId: "h1", sourceSessionId: "source", destinationSessionId: "destination",
+    cwd: "/work/forgerie", model: "provider/model", state: "preparing" };
+  const door = { sessionId: "destination", cwd: "/work/forgerie" };
+  const handoff = (id: string) => asking(2, call(id, "handoff_session", { focus: "Next slice" }));
+  const handoffResult = (id: string, isError = false): PiMessage => ({ role: "toolResult", toolCallId: id, toolName: "handoff_session",
+    content: [{ type: "text", text: "Started detached handoff h1." }], isError, timestamp: 9, details });
+  const doneDoors = (state: Transcript) => tools(state).map((part) => part.state.type === "done" ? part.state.door : undefined);
+
+  it("carries the created session from a persisted result, as history arrives on the wire", () => {
+    const history = historySchema.parse({ start: 0, total: 3, messages: [user("hand off"), handoff("h"), handoffResult("h")] });
+    const state = fromHistory(history.messages);
+    expect(doneDoors(state)).toEqual([door]);
+    expect(convertMessage(state.messages[1]!).content[0]).toMatchObject({ artifact: { state: "done", door } });
+  });
+  it("carries the created session from the live result event, and keeps it once the result is persisted", () => {
+    let state = fromHistory([user("hand off"), handoff("h")], true);
+    const end = parseEvent({ type: "tool.end", toolCallId: "h", toolName: "handoff_session", text: "Started.", isError: false,
+      content: [{ type: "text", text: "Started." }], details, seq: 4 });
+    state = apply(state, end as SessionEvent);
+    expect(doneDoors(state)).toEqual([door]);
+    state = apply(state, { type: "message.end", message: handoffResult("h") }, { type: "agent.end" });
+    expect(doneDoors(state)).toEqual([door]);
+  });
+  it("has no door while the call runs, after it fails, or for a tool that creates nothing", () => {
+    const running = reduceEvent(fromHistory([user("hand off"), handoff("h")], true),
+      { type: "tool.start", toolCallId: "h", toolName: "handoff_session", args: {} });
+    expect(convertMessage(running.messages[1]!).content[0]).toMatchObject({ artifact: { state: "running" } });
+    expect(doneDoors(fromHistory([user("hand off"), handoff("h"), handoffResult("h", true)]))).toEqual([undefined]);
+    const other = fromHistory([user("go"), asking(2, call("a")), { ...result("a", "ok"), details }]);
+    expect(doneDoors(other)).toEqual([undefined]);
+    expect(convertMessage(other.messages[1]!).content[0]).toEqual(expect.objectContaining({ artifact: { state: "done" } }));
+  });
+  it("keeps one door for one call when a reconnect replays the result that history already holds", () => {
+    const state = seedTranscript([user("hand off"), handoff("h"), handoffResult("h")], null, 5, false, [
+      { type: "tool.end", toolCallId: "h", toolName: "handoff_session", text: "Started.", isError: false, seq: 4 },
+      { type: "agent.end", seq: 5 },
+    ]);
+    expect(tools(state)).toHaveLength(1);
+    expect(doneDoors(state)).toEqual([door]);
   });
 });

@@ -15,6 +15,8 @@ import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { createAttachmentAdapter } from "../src/attachments";
 import { idleCompaction, type CompactionState } from "../src/compaction";
+import { SessionDoorsProvider } from "../src/ui/SessionDoor";
+import type { HandoffDoor } from "../src/handoffDoor";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const tool = (id: string, name: string, args: unknown, state: ToolState): TranscriptPart => ({ type: "tool", id, name, args, state });
@@ -141,6 +143,34 @@ const imageMessages = (): TranscriptMessage[] => {
     ] },
   ];
 };
+// Turns that created sessions: a handoff here, a spawn in another workspace,
+// and a failed handoff, which earns no door.
+const previewCwd = "/home/simon/code/forgerie";
+const handoffMessages: TranscriptMessage[] = [
+  say("handoff-q", "user", "Hand off the next slice to a fresh session."),
+  { id: "handoff-a", role: "assistant", parts: [
+    { type: "thinking", text: "The user asked for a detached handoff. Pass their words as the focus." },
+    tool("handoff-call", "handoff_session", { focus: "Handoff navigation: A direct link from a handoff/spawn result to its destination session." },
+      { type: "done", output: "Started detached handoff b7443b44. Destination session 01a0f7f2 is preparing in /home/simon/code/forgerie.", isError: false,
+        door: { sessionId: "01a0f7f2", cwd: previewCwd } }),
+  ] },
+  say("spawn-q", "user", "Start an independent audit of the documentation site."),
+  { id: "spawn-a", role: "assistant", parts: [
+    tool("spawn-read", "read", { path: "docs/README.md" }, done("# Documentation")),
+    tool("spawn-call", "spawn_session", { prompt: "Audit every page for broken links and stale commands. Report each page with its fix.", cwd: "/home/simon/code/forgerie-documentation-site" },
+      { type: "done", output: "Started independent session 01a0f801 in /home/simon/code/forgerie-documentation-site.", isError: false,
+        door: { sessionId: "01a0f801", cwd: "/home/simon/code/forgerie-documentation-site" } }),
+    { type: "text", text: "The audit runs in its own session. Open it from the line above." },
+  ] },
+  say("failed-q", "user", "Hand off again with the old model."),
+  { id: "failed-a", role: "assistant", parts: [
+    { type: "thinking", text: "Use the model the user named." },
+    tool("failed-call", "handoff_session", { focus: "Retry", model: "provider/retired-model" }, done("Model provider/retired-model is not available.", true)),
+    { type: "text", text: "The handoff failed because that model is not available. No session was created." },
+  ] },
+];
+/** The preview cannot navigate, so it records which session a door opened. */
+const openPreviewDoor = (door: HandoffDoor) => { document.documentElement.dataset["openedSession"] = door.sessionId; };
 const compactionPreview = scenario.startsWith("compaction");
 const compactionSummary = "Compaction complete.\nTokens before: 84,120\n\nThe session keeps its deployment decisions and test plan.\n" + "Keep the runtime server-owned and do not retry mutations. ".repeat(30);
 const compactionScenarios: Record<string, CompactionState> = {
@@ -155,6 +185,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
+  handoff: handoffMessages, "handoff-open": handoffMessages,
 };
 function Preview() {
   const [dictation] = useState(() => new ForgerieDictationAdapter({
@@ -203,6 +234,18 @@ function Preview() {
       document.querySelector<HTMLButtonElement>('button[aria-label="Open unfolded-portrait.png"]')?.click();
       setTimeout(() => document.querySelector("dialog.image-viewer")
         ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })), 50);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, []);
+  // `handoff-open` expands the first door's call and scrolls to it, so captures
+  // show its body beside the button.
+  useEffect(() => {
+    if (scenario !== "handoff-open") return;
+    const timer = setTimeout(() => {
+      const call = document.querySelector<HTMLDetailsElement>(".session-door > details");
+      if (!call) return;
+      call.open = true;
+      setTimeout(() => call.closest(".message")?.scrollIntoView({ block: "start" }), 100);
     }, 300);
     return () => clearTimeout(timer);
   }, []);
@@ -261,6 +304,7 @@ function Preview() {
     <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : compaction.type === "running" ? "Compacting" : compaction.type === "queued" ? "Compaction queued" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
+      <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
       <Thread compaction={compactionPreview ? { state: compaction, disabled: recovering, queueCount: 2,
         onSend: async (text) => setCompaction({ type: "queued", text }),
         onClearQueue: () => setCompaction({ type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." }),
@@ -268,6 +312,7 @@ function Preview() {
       } : undefined} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
+      </SessionDoorsProvider>
     </SessionFrame>
     </DictationProvider>
   </AssistantRuntimeProvider>;

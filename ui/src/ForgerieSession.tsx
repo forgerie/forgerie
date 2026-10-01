@@ -13,6 +13,8 @@ import { DictationProvider } from "./DictationProvider";
 import { createAttachmentAdapter, type PromptAttachment } from "./attachments";
 import { sendMessage } from "./sendMessage";
 import { createChatDraft } from "./chatDraft";
+import type { HandoffDoor } from "./handoffDoor";
+import { SessionDoorsProvider } from "./ui/SessionDoor";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
@@ -36,6 +38,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
     if (result.session && result.session.id !== id) onSwitchSession(result.session, result.promptDraft);
     else if (result.promptDraft !== undefined) runtimeRef.current.thread.composer.setText(result.promptDraft);
   }, [id, onSwitchSession]);
+  const openDoor = useCallback((door: HandoffDoor) => onSwitchSession({ id: door.sessionId, cwd: door.cwd }), [onSwitchSession]);
   const send = useCallback(async (text: string, images?: PromptAttachment[]) => { applyResult(await store.send(text, images)); }, [store, applyResult]);
   const onNew = useCallback(async (message: AppendMessage) => {
     setSendError(undefined);
@@ -76,6 +79,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
     <DictationProvider adapter={dictation}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
+      <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",
           queueCount: state.status?.queuedMessages.length ?? 0, onSend: send,
@@ -86,6 +90,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
           onChoose: (requestId, value) => { void store.respondToCommand(requestId, value).then(applyResult).catch(() => { /* Store exposes the error and keeps the choices. */ }); },
           onClose: store.dismissCommand,
         } : undefined} />
+      </SessionDoorsProvider>
     </SessionFrame>
     </DictationProvider>
   </AssistantRuntimeProvider>;

@@ -1,5 +1,7 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui } from "@assistant-ui/react";
+import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, type GroupByContext, type PartState } from "@assistant-ui/react";
+import { artifactDoor } from "../transcript";
+import { SessionDoorCall } from "./SessionDoor";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
 import { ChainOfThoughtGroup, ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
@@ -7,10 +9,17 @@ import { UserMessageAttachments } from "./Attachments";
 import { ReplyGallery } from "./ImageGallery";
 
 // A shared prefix groups consecutive reasoning and tools. Text stays outside.
-const groupAssistantParts = groupPartByType({
+const groupActivity = groupPartByType({
   reasoning: ["group-chainOfThought", "group-reasoning"],
   "tool-call": ["group-chainOfThought", "group-tool"],
 });
+// A call that created a session stands outside the collapsed activity, so its
+// door is never hidden, and the activity does not count the same call again.
+// The helper groups by tool name; this branches on the call's result, so it is
+// a stable module-level function instead.
+function groupAssistantParts(part: PartState, context: GroupByContext) {
+  return part.type === "tool-call" && artifactDoor(part.artifact) ? [] : groupActivity(part, context);
+}
 
 function ResponseCopy() {
   const aui = useAui();
@@ -39,7 +48,10 @@ export function AssistantMessage() {
             case "text": return part.text === "" && part.status.type === "running"
               ? <TraceLine live label="working" /> : <MarkdownText />;
             case "reasoning": return <MarkdownText />;
-            case "tool-call": return <ToolCall {...part} />;
+            case "tool-call": {
+              const door = artifactDoor(part.artifact);
+              return door ? <SessionDoorCall {...part} door={door} /> : <ToolCall {...part} />;
+            }
             // Images gather in the reply gallery below the text.
             case "image": return null;
             case "indicator": return <WorkingLine />;

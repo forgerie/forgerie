@@ -4,6 +4,10 @@
 
 The one composer supports explicit compaction during idle work or queueing during an active run. Live status and server receipts appear above it. See [compaction behavior, queue clearing, verification, and limits](compaction.md).
 
+## Handoff navigation
+
+A successful `handoff_session` or `spawn_session` call shows its tool line outside the collapsed activity, with an "Open session" button that opens the created session. See [behavior, checks, and limits](handoff-navigation.md).
+
 ## Composer mentions
 
 The React MVP supports `@` file discovery and `#` qualified model references in the shared chat and ask composer. See [mention behavior, verification, and limits](mentions.md).

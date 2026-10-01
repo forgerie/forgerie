@@ -11,6 +11,8 @@ export const piMessageSchema = z.object({
   toolCallId: z.string().optional(),
   toolName: z.string().optional(),
   isError: z.boolean().optional(),
+  // Tool-specific result facts, such as the session a handoff created.
+  details: z.unknown().optional(),
 });
 export type PiMessage = z.infer<typeof piMessageSchema>;
 export const sessionSchema = z.object({
@@ -87,8 +89,9 @@ const eventBodySchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tool.start"), toolCallId: z.string(), toolName: z.string(), args: z.unknown() }),
   z.object({ type: z.literal("tool.update"), toolCallId: z.string(), toolName: z.string(), text: z.string() }),
   // `content` is the raw result. It carries images that `text` only names.
+  // `details` carries tool-specific facts, such as the session a handoff created.
   z.object({ type: z.literal("tool.end"), toolCallId: z.string(), toolName: z.string(), text: z.string(), isError: z.boolean(),
-    content: z.unknown().optional() }),
+    content: z.unknown().optional(), details: z.unknown().optional() }),
   z.object({ type: z.literal("agent.start") }),
   z.object({ type: z.literal("agent.end") }),
   z.object({ type: z.literal("session.error"), message: z.string() }),
