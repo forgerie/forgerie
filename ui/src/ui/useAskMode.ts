@@ -2,7 +2,8 @@ import { useId, useLayoutEffect, useState, type KeyboardEvent } from "react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import type { AskPhase } from "../ask";
 import type { AskAnswer, AskQuestion, PendingAsk } from "../contracts";
-import { draftOf, isAnswered, pickOption, routeOf, settle, toAnswers, type AskDrafts, type AskRoute, type QuestionDraft } from "../askDraft";
+import { useDictation } from "../DictationProvider";
+import { OTHER_TEXT_MAX_LENGTH, draftOf, isAnswered, pickOption, routeOf, settle, toAnswers, type AskDrafts, type AskRoute, type QuestionDraft } from "../askDraft";
 
 /** What the binding hands the composer while an ask is open. */
 export interface AskBinding {
@@ -27,11 +28,22 @@ interface Progress { askId?: string; index: number; drafts: AskDrafts }
 export function useAskMode(binding: AskBinding | undefined) {
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
+  const dictating = useAuiState((s) => s.composer.dictation != null);
+  const disabled = useAuiState((s) => s.thread.isDisabled);
+  const { cancel } = useDictation();
   const headingId = useId();
   const askId = binding?.ask.askId;
   const [saved, setProgress] = useState<Progress>({ askId, index: 0, drafts: {} });
   // A new ask starts blank on its first question.
   const progress: Progress = saved.askId === askId ? saved : { askId, index: 0, drafts: {} };
+
+  // Invalidate capture before an ask, question, or connection replaces its input owner.
+  const questionId = binding?.ask.questions[progress.index]?.id;
+  useLayoutEffect(() => {
+    cancel();
+    aui.composer.stopDictation();
+    return () => { cancel(); aui.composer.stopDictation(); };
+  }, [askId, questionId, disabled, cancel, aui]);
 
   useLayoutEffect(() => {
     if (askId === undefined) return;
@@ -53,17 +65,22 @@ export function useAskMode(binding: AskBinding | undefined) {
   if (!binding || !question) return undefined;
   const { phase, offline } = binding;
   const sending = phase.type === "sending";
-  const blocked = sending || offline;
+  const tooLong = questions.some((item) => current(item).text.trim().length > OTHER_TEXT_MAX_LENGTH);
+  const blocked = sending || offline || dictating || tooLong;
   const last = index >= questions.length - 1;
   const route: AskRoute = routeOf(text);
 
   function go(next: number) {
+    cancel();
+    aui.composer.stopDictation();
     const drafts = flushed();
     setProgress({ askId, index: next, drafts });
     aui.composer.setText(draftOf(drafts, questions[next]!).text);
   }
   function pick(value: string) {
     if (!question || sending) return;
+    cancel();
+    aui.composer.stopDictation();
     const next = pickOption(question, current(question), value);
     setProgress({ ...progress, drafts: { ...progress.drafts, [question.id]: next } });
     if (next.text !== text) aui.composer.setText(next.text);
@@ -75,6 +92,7 @@ export function useAskMode(binding: AskBinding | undefined) {
     try { await binding.onChat(text); } catch { aui.composer.setText(text); }
   }
   function advance() {
+    if (blocked) return;
     if (!last) { go(index + 1); return; }
     if (blocked || !binding) return;
     const drafts = flushed();
@@ -89,7 +107,8 @@ export function useAskMode(binding: AskBinding | undefined) {
   }
   return {
     ask: binding.ask, question, index, count: questions.length, last, route, headingId,
-    sending, blocked, phase, error: phase.type === "answering" ? phase.error : undefined,
+    sending, blocked, phase, error: tooLong ? `An answer exceeds ${OTHER_TEXT_MAX_LENGTH} characters. Shorten it before sending.`
+      : phase.type === "answering" ? phase.error : undefined,
     values: settle(question, current(question)).values,
     answered: (position: number) => isAnswered(questions[position]!, current(questions[position]!)),
     placeholder: question.options.length > 0 ? "Or answer in your own words" : "Type your answer",

@@ -8,6 +8,8 @@ import { SessionFrame } from "./ui/SessionFrame";
 import type { AskBinding } from "./ui/useAskMode";
 import type { CommandResult } from "./commands";
 import { createMentionSource } from "./mentionSource";
+import { ForgerieDictationAdapter } from "./speech/ForgerieDictationAdapter";
+import { DictationProvider } from "./DictationProvider";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
@@ -15,6 +17,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   onSwitchSession: (session: Session, draft?: string) => void;
 }) {
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known));
+  const [dictation] = useState(() => new ForgerieDictationAdapter());
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   const sessionId = state.session?.id;
@@ -42,6 +45,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   const messages = useThreadMessages(state.transcript.messages, state.transcript.isRunning);
   const runtime = useExternalStoreRuntime({
     messages, onNew, onCancel,
+    adapters: { dictation },
     isRunning: state.transcript.isRunning,
     isLoading: state.connection.type === "loading",
     isDisabled: state.connection.type !== "ready",
@@ -64,6 +68,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   } : undefined;
 
   return <AssistantRuntimeProvider runtime={runtime}>
+    <DictationProvider adapter={dictation}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
       <Thread ask={ask} mentions={mentions} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
@@ -73,5 +78,6 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
           onClose: store.dismissCommand,
         } : undefined} />
     </SessionFrame>
+    </DictationProvider>
   </AssistantRuntimeProvider>;
 }

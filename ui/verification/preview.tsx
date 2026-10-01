@@ -6,6 +6,8 @@ import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transc
 import { useThreadMessages } from "../src/useThreadMessages";
 import { Thread } from "../src/ui/Thread";
 import { SessionFrame } from "../src/ui/SessionFrame";
+import { ForgerieDictationAdapter } from "../src/speech/ForgerieDictationAdapter";
+import { DictationProvider } from "../src/DictationProvider";
 
 import type { PendingAsk } from "../src/contracts";
 import type { CommandBinding } from "../src/ui/SlashCommands";
@@ -103,6 +105,16 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
 };
 function Preview() {
+  const [dictation] = useState(() => new ForgerieDictationAdapter({
+    ready: async () => {},
+    capture: async () => {
+      if (scenario === "dictation-error") throw new Error("Microphone permission was denied.");
+      return { actualSampleRateHz: 16_000, failure: undefined, endpointWindow: () => new Float32Array(1_600),
+        finalize: () => new Float32Array(1_600), synchronize: async () => {}, abort: async () => {},
+        stopAndFinalize: async () => new Float32Array(1_600) };
+    },
+    transcribe: async () => ({ text: "This is a local dictation preview." }),
+  }));
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
   const [running, setRunning] = useState(scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
   useEffect(() => {
@@ -133,7 +145,7 @@ function Preview() {
       say(`reply-${current.length}`, "assistant", "This is a local preview. No prompt was sent to Pi.")]);
   }
   const threadMessages = useThreadMessages(messages, running);
-  const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false),
+  const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel: async () => setRunning(false), adapters: { dictation },
     isRunning: running, isLoading: scenario === "loading", isDisabled: scenario === "loading" || scenario === "disconnected" || recovering });
   useEffect(() => {
     if (scenario !== "slash-capture") return;
@@ -155,6 +167,7 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
+    <DictationProvider adapter={dictation}>
     <SessionFrame name="Session client" status={scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
       recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
@@ -162,6 +175,7 @@ function Preview() {
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
     </SessionFrame>
+    </DictationProvider>
   </AssistantRuntimeProvider>;
 }
 const previewCommands: CommandBinding = { catalog: { type: "ready", commands: [

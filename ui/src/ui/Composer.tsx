@@ -5,6 +5,8 @@ import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
 import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, SquareIcon } from "lucide-react";
 import { OTHER_TEXT_MAX_LENGTH } from "../askDraft";
+import { useDictation } from "../DictationProvider";
+import { ComposerDictation } from "./ComposerDictation";
 import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
 
@@ -19,6 +21,8 @@ export function Composer(props: ComposerProps) {
 }
 function ComposerBar({ ask, mentions, commands }: ComposerProps) {
   const disabled = useAuiState((s) => s.thread.isDisabled);
+  const dictating = useAuiState((s) => s.composer.dictation != null);
+  const { state } = useDictation();
   const control = useAskMode(ask);
   const anchor = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -43,6 +47,7 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
         <InfoIcon aria-hidden size={14} />Commands run in Pi. Questions stay open unless Pi closes them.
       </p>}
       {control?.error && <p className="ask-error" role="alert">{control.error}</p>}
+      {state.type === "failed" && <p className="ask-error" role="alert">{state.message}</p>}
       <ComposerPrimitive.Input ref={input} aria-label="Message" rows={1} className="composer-input"
         placeholder={control?.placeholder ?? "Send a message..."}
         aria-describedby={control?.headingId}
@@ -51,9 +56,10 @@ function ComposerBar({ ask, mentions, commands }: ComposerProps) {
         submitMode={control ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
+        <ComposerDictation disabled={disabled || !!control?.sending} />
         {control ? <AskActions control={control} /> : <>
           <AuiIf condition={(s) => !s.thread.isRunning}>
-            <ComposerPrimitive.Send disabled={disabled} className="primary icon-button" aria-label="Send message" title="Send message">
+            <ComposerPrimitive.Send disabled={disabled || dictating} className="primary icon-button" aria-label="Send message" title="Send message">
               <ArrowUpIcon aria-hidden size={16} />
             </ComposerPrimitive.Send>
           </AuiIf>
@@ -125,7 +131,7 @@ function AskActions({ control }: { control: AskControl }) {
   return <>
     <button type="button" className="ask-skip" disabled={control.blocked} onClick={control.dismiss}
       title="Close these questions without answering them">{sending("dismiss") ? "Skipping…" : "Skip"}</button>
-    <button type="button" className="primary ask-primary" disabled={last && control.blocked} onClick={control.primary}>
+    <button type="button" className="primary ask-primary" disabled={control.blocked} onClick={control.primary}>
       {!last ? <>Next<CornerDownLeftIcon aria-hidden size={14} className="ask-key" /></>
         : sending("submit") ? "Sending…" : count > 1 ? "Send answers" : "Send answer"}
     </button>
