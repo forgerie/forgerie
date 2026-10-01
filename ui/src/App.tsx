@@ -6,6 +6,7 @@ import type { Session } from "./contracts";
 import { AppShell } from "./ui/AppShell";
 import { Picker } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
+import { browserStorage, createDraftStore } from "./draftStore";
 
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
 
@@ -13,18 +14,21 @@ const readSelected = () => new URLSearchParams(window.location.search).get("sess
 export function App() {
   const [selectedId, setSelectedId] = useState(readSelected);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string }>();
+  // Unsent drafts outlive a session switch and a reload, in this browser only.
+  const [drafts] = useState(() => createDraftStore(browserStorage()));
   // With nothing selected there is nothing to cover, so the sheet starts open.
   const [open, setOpen] = useState(() => readSelected() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
   // The URL is the source of truth for the selection, so read it there.
   const onDeleted = useCallback((id: string) => {
+    drafts.forget(id);
     if (readSelected() !== id) return;
     const url = new URL(window.location.href);
     url.searchParams.delete("session");
     window.history.replaceState({}, "", url);
     setSelectedId(undefined);
     setCommandSelection(undefined);
-  }, []);
+  }, [drafts]);
   const picker = usePicker(selectedId, { onDeleted });
   useEffect(() => {
     const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); };
@@ -53,7 +57,7 @@ export function App() {
     thread={selectedId ? <ForgerieSession key={selectedId} id={selectedId}
       known={known}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
-      onSwitchSession={switchSession} />
+      drafts={drafts} onSwitchSession={switchSession} />
       // The picker covers this area whenever nothing is selected, so it holds no
       // message of its own: the picker is the instruction.
       : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>} />;

@@ -1,9 +1,10 @@
-import { useId, useLayoutEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useState, type KeyboardEvent } from "react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import type { AskPhase } from "../ask";
 import type { AskAnswer, AskQuestion, PendingAsk } from "../contracts";
 import { useDictation } from "../DictationProvider";
 import type { ChatDraft } from "../chatDraft";
+import type { SessionDrafts } from "../draftStore";
 import { OTHER_TEXT_MAX_LENGTH, draftOf, isAnswered, pickOption, routeOf, settle, toAnswers, type AskDrafts, type AskRoute, type QuestionDraft } from "../askDraft";
 
 /** What the binding hands the composer while an ask is open. */
@@ -16,6 +17,8 @@ export interface AskBinding {
   onDismiss: () => void;
   /** Sends the input as a chat message. The server closes the ask as answered in chat. */
   onChat: (text: string) => Promise<void>;
+  /** Where unsent answers outlive the view. Without it, they last only while it is mounted. */
+  answers?: Pick<SessionDrafts, "answers" | "saveAnswers"> | undefined;
 }
 export type AskControl = NonNullable<ReturnType<typeof useAskMode>>;
 
@@ -48,18 +51,39 @@ export function useAskMode(binding: AskBinding | undefined, chatDraft: ChatDraft
     return () => { cancel(); aui.composer.stopDictation(); };
   }, [askId, questionId, disabled, cancel, aui]);
 
-  useLayoutEffect(() => { chatDraft.setAsk(askId); }, [askId, chatDraft]);
+  const questions = binding?.ask.questions ?? [];
+  // An ask takes the input with its saved answers, or blank on its first question.
+  useLayoutEffect(() => {
+    chatDraft.setAsk(askId);
+    if (askId === undefined) return;
+    const restored = binding?.answers?.answers(askId) ?? { index: 0, drafts: {} };
+    setProgress({ askId, ...restored });
+    const shown = questions[Math.min(restored.index, Math.max(questions.length - 1, 0))];
+    const text = shown ? draftOf(restored.drafts, shown).text : "";
+    if (text) aui.composer.setText(text);
+    // Only a new ask restores. Later bindings of the same ask carry the same store.
+  }, [askId, chatDraft]);
   useLayoutEffect(() => () => chatDraft.setAsk(undefined), [chatDraft]);
 
-  const questions = binding?.ask.questions ?? [];
   const index = Math.min(progress.index, Math.max(questions.length - 1, 0));
   const question = questions[index];
   const current = (item: AskQuestion): QuestionDraft => item === question
     ? { values: draftOf(progress.drafts, item).values, text } : draftOf(progress.drafts, item);
   /** Every draft, with the input's text written into the current question. */
-  const flushed = (): AskDrafts => question
-    ? { ...progress.drafts, [question.id]: settle(question, { values: draftOf(progress.drafts, question).values, text }) }
+  const flushed = (input = text): AskDrafts => question
+    ? { ...progress.drafts, [question.id]: settle(question, { values: draftOf(progress.drafts, question).values, text: input }) }
     : progress.drafts;
+
+  const answerStore = binding?.answers;
+  useEffect(() => {
+    // Save only once this ask's progress is in place: the first render of a new ask is blank.
+    if (askId === undefined || saved.askId !== askId || !question || !answerStore) return;
+    // The render's text can lag one change behind the input. Right after an ask
+    // takes the input it can still be the parked chat draft, which must never
+    // be saved as an answer, so save what the input holds now.
+    answerStore.saveAnswers(askId, { index, drafts: flushed(chatDraft.inputText() ?? text) });
+    // flushed() reads only saved, question, and the input.
+  }, [answerStore, askId, saved, index, question, text, chatDraft]);
 
   if (!binding || !question) return undefined;
   const { phase, offline } = binding;

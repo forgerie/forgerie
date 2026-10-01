@@ -15,17 +15,21 @@ import { sendMessage } from "./sendMessage";
 import { createChatDraft } from "./chatDraft";
 import type { HandoffDoor } from "./handoffDoor";
 import { SessionDoorsProvider } from "./ui/SessionDoor";
+import type { DraftStore } from "./draftStore";
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
-  id: string; known?: Session | undefined; initialDraft?: string;
+export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSession }: {
+  id: string; known?: Session | undefined; initialDraft?: string | undefined;
+  /** Where unsent drafts outlive this view. Without it, they last only while the view is mounted. */
+  drafts?: DraftStore | undefined;
   onSwitchSession: (session: Session, draft?: string) => void;
 }) {
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known));
   const [dictation] = useState(() => new ForgerieDictationAdapter());
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
-  const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer));
+  const [saved] = useState(() => drafts?.session(id));
+  const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer, saved));
   const sessionId = state.session?.id;
   const cwd = state.session?.cwd;
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
@@ -59,7 +63,17 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
     isSendDisabled: state.sending || state.connection.type !== "ready",
   });
   useEffect(() => { runtimeRef.current = runtime; return () => { runtimeRef.current = null; }; }, [runtime]);
+  // Bring back the saved chat draft, then save every change. A fork's prompt draft, set next, replaces it.
+  useEffect(() => {
+    if (!saved) return;
+    chatDraft.hydrate(saved.chat());
+    return runtime.thread.composer.subscribe(chatDraft.sync);
+  }, [runtime, chatDraft, saved]);
   useEffect(() => { if (initialDraft !== undefined) runtime.thread.composer.setText(initialDraft); }, [initialDraft, runtime]);
+  // Once joined, the store names the open ask. Answers saved for any other ask can never be sent.
+  const openAskId = state.ask.type === "open" ? state.ask.ask.askId : undefined;
+  const joined = state.connection.type === "ready";
+  useEffect(() => { if (joined) saved?.keepAnswers(openAskId); }, [saved, joined, openAskId]);
   const error = state.connection.type === "reconnecting" ? "Reconnecting automatically. Your draft stays here."
     : state.connection.type === "failed" ? state.connection.message
     : sendError ?? state.commandError ?? state.transcript.error;
@@ -72,7 +86,7 @@ export function ForgerieSession({ id, known, initialDraft, onSwitchSession }: {
   const ask: AskBinding | undefined = state.ask.type === "open" ? {
     ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
     onSubmit: (answers) => void store.submitAsk(answers), onDismiss: () => void store.dismissAsk(),
-    onChat: send,
+    onChat: send, answers: saved,
   } : undefined;
 
   return <AssistantRuntimeProvider runtime={runtime}>
