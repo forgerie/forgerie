@@ -97,6 +97,7 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",
+          waits: state.transcript.isRunning || isBashRunning(state),
           queueCount: state.status?.queuedMessages.length ?? 0, onSend: send,
           onClearQueue: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); },
           onDismiss: store.dismissCompaction }}

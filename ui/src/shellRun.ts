@@ -60,6 +60,23 @@ export function isRecordOf(saved: ShellRun, observed: { command?: string | undef
     && saved.result.cancelled === (end.cancelled === true);
 }
 
+/** True when `saved`, a history record, is the stored copy of `live`, a finished row seen through events. */
+export function isSavedCopy(saved: ShellRun, live: ShellRun): boolean {
+  if (saved.result.type !== "done" || live.result.type !== "done") return false;
+  if (live.command !== undefined && saved.command !== live.command) return false;
+  return saved.result.output === live.result.output && saved.result.exitCode === live.result.exitCode
+    && saved.result.cancelled === live.result.cancelled;
+}
+/** True when two rows show the same finished command. */
+export function isSameRun(a: ShellRun, b: ShellRun): boolean {
+  return a.command === b.command && a.result.type === b.result.type && a.result.output === b.result.output
+    && (a.result.type !== "done" || b.result.type !== "done" || a.result.exitCode === b.result.exitCode);
+}
+/** A late event revives a row the join closed, because its result was still on the way. */
+export function reopenRun(run: ShellRun): ShellRun {
+  return run.result.type === "interrupted" ? { ...run, result: { type: "running", output: run.result.output } } : run;
+}
+
 /** Plain text for copying: the command line, then its output. */
 export function shellText(run: ShellRun): string {
   const error = run.result.type === "failed" ? run.result.error : "";

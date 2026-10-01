@@ -54,7 +54,8 @@ async function shellServer(options: { status?: SessionStatus; shell?: "accept" |
   };
   void store.start();
   await until(() => store.getSnapshot().connection.type === "ready");
-  return { store, requests, emit, state };
+  const drop = () => { for (const socket of ws.clients) socket.terminate(); };
+  return { store, requests, emit, state, drop };
 }
 const posted = (requests: { path: string }[]) => requests.filter((request) => /\/(shell|prompt|commands\/run)$/u.test(request.path)).map((request) => request.path.split("/").at(-1));
 const image: PromptAttachment = { kind: "image", name: "a.png", mimeType: "image/png", data: "aGk=" };
@@ -103,6 +104,21 @@ describe("shell commands from the one composer", () => {
     await expect(store.send("!make deploy")).rejects.toThrow();
     expect(store.getSnapshot().commandError).toMatch(/may have started\. Check the conversation before running it again\.$/u);
     expect(posted(requests)).toEqual(["shell"]);
+  });
+});
+
+describe("shell rows across a reconnect", () => {
+  it("keeps a finished row whose record Pi has not saved yet, with the same identity", async () => {
+    const { store, emit, drop, requests } = await shellServer({ status: { ...idle, isStreaming: true } });
+    emit({ type: "shell.start", command: "date", excludeFromContext: false });
+    emit({ type: "shell.end", output: "now\n", exitCode: 0, cancelled: false, truncated: false });
+    const shellRow = () => store.getSnapshot().transcript.messages.find((message) => message.role === "shell");
+    await until(() => JSON.stringify(shellRow()?.parts).includes("now"));
+    const id = shellRow()!.id;
+    drop();
+    const historyReads = () => requests.filter((request) => request.path.endsWith("/messages")).length;
+    await until(() => historyReads() === 2 && store.getSnapshot().connection.type === "ready");
+    expect(store.getSnapshot().transcript.messages.filter((message) => message.role === "shell").map((message) => message.id)).toEqual([id]);
   });
 });
 

@@ -3,6 +3,8 @@ import type { CompactionState } from "../compaction";
 export interface CompactionBinding {
   state: CompactionState;
   disabled: boolean;
+  /** The server will queue compaction: an agent run or a shell command holds the session. Defaults to the thread's run state. */
+  waits?: boolean;
   queueCount: number;
   onSend: (text: string) => Promise<void>;
   onClearQueue: () => void;

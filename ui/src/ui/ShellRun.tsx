@@ -24,8 +24,11 @@ export function ShellRun({ run }: { run: Run }) {
   const status = statusOf(result);
   const output = useRef<HTMLPreElement>(null);
   const following = useRef(true);
+  const wasRunning = useRef(result.type === "running");
   useLayoutEffect(() => {
-    if (result.type === "running" && following.current && output.current) output.current.scrollTop = output.current.scrollHeight;
+    // The final output replaces the streamed text, so a reader following the end stays there.
+    if ((result.type === "running" || wasRunning.current) && following.current && output.current) output.current.scrollTop = output.current.scrollHeight;
+    wasRunning.current = result.type === "running";
   }, [result]);
   const onScroll = () => {
     const node = output.current;
@@ -39,14 +42,14 @@ export function ShellRun({ run }: { run: Run }) {
         {run.excludeFromContext && <span className="shell-context" title="The agent does not see this output">excluded from context</span>}
         <span className="shell-status" role="status" data-tone={status.tone} data-live={status.live || undefined}>{status.label}</span>
       </span>
-      <CopyButton label="Copy output" getText={() => result.output} />
+      <CopyButton label="Copy output" getText={() => result.type === "failed" ? `${result.output}${result.error}` : result.output} />
     </div>
     <div className="shell-body">
       <p className="shell-command"><span className="shell-prompt" aria-hidden>$ </span>
         {run.command ?? <span className="shell-unknown">Started before this page connected.</span>}</p>
       {result.output ? <pre ref={output} className="shell-output" tabIndex={0} onScroll={onScroll}>{result.output}</pre>
         : empty ? <p className="shell-empty">{empty}</p> : null}
-      {result.type === "failed" && <p className="shell-error" role="alert">{result.error}</p>}
+      {result.type === "failed" && <p className="shell-error">{result.error}</p>}
     </div>
     <ShellNotes result={result} />
   </section>;

@@ -119,7 +119,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, chatDraft }: 
         </ComposerPrimitive.Cancel> : control ? <AskActions control={{ ...control, blocked: control.blocked || tooMany }}
           chatLabel={shellDraftOf(text).type === "shell" ? "Run command" : "Send message"} /> : <>
           {compactDraft ? <button type="button" className="primary compact-send" disabled={compactBlocked} onClick={() => void sendCompaction()}>
-            {running ? "Queue compaction" : "Compact history"}
+            {compaction?.waits ?? running ? "Queue compaction" : "Compact history"}
           </button> : shellMode ? <button type="button" className="primary compact-send" disabled={shellBlocked} onClick={() => void runShell()}>
             Run command
           </button> : <AuiIf condition={(s) => !s.thread.isRunning}>

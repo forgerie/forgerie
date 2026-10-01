@@ -10,14 +10,14 @@ import { useThreadMessages } from "../useThreadMessages";
 
 let root: Root;
 interface Props {
-  state?: CompactionState; running?: boolean; offline?: boolean; sending?: boolean; queueCount?: number;
+  state?: CompactionState; running?: boolean; waits?: boolean; offline?: boolean; sending?: boolean; queueCount?: number;
   onSend?: (text: string) => Promise<void>; onClear?: () => void; onDismiss?: () => void;
   onCancel?: () => Promise<void>; ask?: AskBinding;
 }
-function Fixture({ state = { type: "idle" }, running = false, offline = false, sending = false, queueCount = 1,
+function Fixture({ state = { type: "idle" }, running = false, waits, offline = false, sending = false, queueCount = 1,
   onSend = async () => {}, onClear = () => {}, onDismiss = () => {}, onCancel = async () => {}, ask }: Props) {
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], running), onNew: async () => {}, onCancel, isRunning: running, isDisabled: offline });
-  return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} compaction={{ state, queueCount, disabled: offline || sending,
+  return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} compaction={{ state, queueCount, disabled: offline || sending, ...(waits === undefined ? {} : { waits }),
     onSend, onClearQueue: onClear, onDismiss }} /></AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
@@ -55,6 +55,12 @@ describe("compaction in the one composer", () => {
     expect(document.querySelectorAll("textarea")).toHaveLength(1);
     await click(button("Stop generating"));
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+  it("names queueing when a shell command, not an agent run, holds the session", async () => {
+    await render({ waits: true });
+    await type("/compact");
+    expect(button("Queue compaction")).toBeDefined();
+    expect(button("Stop generating")).toBeUndefined();
   });
   it("uses explicit Enter confirmation and restores instructions after rejection", async () => {
     const onSend = vi.fn<(text: string) => Promise<void>>().mockRejectedValueOnce(new Error("Cannot compact")).mockResolvedValue(undefined);

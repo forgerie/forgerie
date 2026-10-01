@@ -3,7 +3,7 @@ import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contract
 import { imageSource } from "./images";
 import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
 import { parseSkillInvocation, type SkillInvocation } from "./skills";
-import { appendOutput, finishRun, interruptRun, isRecordOf, runFromRecord, shellText, startedRun, unknownRun,
+import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
 /**
@@ -174,13 +174,19 @@ function appendShell(state: Transcript, run: ShellRun): Transcript {
   return { ...state, nextId: state.nextId + 1,
     messages: [...state.messages, { id: `shell-${state.nextId}`, role: "shell", parts: [{ type: "shell", run }] }] };
 }
-/** The server runs one command at a time, so the last running row is the current one. */
+/**
+ * The server runs one command at a time, so output belongs to the newest shell
+ * row while it runs. A join can close that row before its last events arrive,
+ * because the status read and the socket are separate connections, so late
+ * output reopens it instead of starting a second row.
+ */
 function updateRunningShell(state: Transcript, update: (run: ShellRun) => ShellRun): Transcript | undefined {
-  const index = state.messages.findLastIndex((message) => shellRunOf(message)?.result.type === "running");
-  if (index < 0) return undefined;
-  const message = state.messages[index]!;
-  const run = update(shellRunOf(message)!);
-  return { ...state, messages: state.messages.map((current, i) => i === index ? { ...message, parts: [{ type: "shell", run }] } : current) };
+  const index = state.messages.findLastIndex((message) => shellRunOf(message) !== undefined);
+  const message = state.messages[index];
+  const current = message && shellRunOf(message);
+  if (!message || !current || current.result.type !== "running" && current.result.type !== "interrupted") return undefined;
+  const run = update(reopenRun(current));
+  return { ...state, messages: state.messages.map((item, i) => i === index ? { ...message, parts: [{ type: "shell", run }] } : item) };
 }
 function interruptOpenShells(messages: readonly TranscriptMessage[]): readonly TranscriptMessage[] {
   return messages.map((message) => {
@@ -238,6 +244,37 @@ export function fromHistory(history: readonly PiMessage[], isRunning = false): T
   const messages = isRunning ? interruptOpenTools(state.messages.slice(0, lastUser + 1)).concat(state.messages.slice(lastUser + 1))
     : interruptOpenTools(state.messages);
   return { ...state, messages, nextId: Math.max(state.nextId, history.length) };
+}
+
+/**
+ * A finished shell row lives only in memory until Pi saves its record, and Pi
+ * defers that to the end of an agent run. No event announces the save, so a
+ * join keeps such rows, after the message they followed, until the history
+ * returns the record or the join replayed the same row. Failed commands are
+ * never saved, so their rows stay for the life of the page.
+ */
+export function carryUnsavedShellRows(previous: Transcript, refreshed: Transcript): Transcript {
+  const messages = [...refreshed.messages];
+  const ids = new Set(messages.map((message) => message.id));
+  const carried = new Set<string>();
+  let nextId = refreshed.nextId;
+  let anchor: string | undefined;
+  for (const message of previous.messages) {
+    if (message.key) { anchor = message.key; continue; }
+    const run = shellRunOf(message);
+    if (!run || run.result.type !== "done" && run.result.type !== "failed") continue;
+    const at = anchor === undefined ? -1 : messages.findIndex((item) => item.key === anchor);
+    const replayed = messages.some((item) => !item.key && !carried.has(item.id) && shellRunOf(item) && isSameRun(shellRunOf(item)!, run));
+    // Only a record after the anchor can be this row's: an earlier one is an older identical command.
+    const saved = messages.slice(at + 1).some((item) => item.key && shellRunOf(item) && isSavedCopy(shellRunOf(item)!, run));
+    if (replayed || saved) continue;
+    let index = anchor === undefined ? 0 : at < 0 ? messages.length : at + 1;
+    while (index < messages.length && carried.has(messages[index]!.id)) index++;
+    const id = ids.has(message.id) ? `carried-${nextId++}` : message.id;
+    ids.add(id); carried.add(id);
+    messages.splice(index, 0, { ...message, id });
+  }
+  return carried.size === 0 ? refreshed : { ...refreshed, messages, nextId };
 }
 
 /** Retain persisted identities across an authoritative reload without ID collisions. */
@@ -308,7 +345,8 @@ function savedShellEvents(state: Transcript, buffered: readonly SessionEvent[], 
     open.events.push(event);
     if (event.type === "shell.end") { open.end = event; open = undefined; }
   }
-  const finished = executions.filter((execution) => execution.end && (execution.end.seq ?? Infinity) <= seq);
+  // Pi never saves a command that failed to run, so it cannot match a record.
+  const finished = executions.filter((execution) => execution.end && execution.end.isError !== true && (execution.end.seq ?? Infinity) <= seq);
   const saved = state.messages.flatMap((message) => { const run = shellRunOf(message); return run ? [run] : []; });
   for (let count = Math.min(finished.length, saved.length); count > 0; count--) {
     const tail = saved.slice(saved.length - count);
@@ -355,8 +393,9 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
   for (const event of events) {
     if ((event.seq ?? Infinity) > seq) state = reduceEvent(state, event);
   }
-  // Status read after the buffer started covers every shell event before it.
-  if (bashRunning && !hasRunningShell(state)) state = appendShell(state, unknownRun);
+  // A command that status reports with no events yet started before this join.
+  // A buffered end means it already finished: the socket can beat the status read.
+  if (bashRunning && !hasRunningShell(state) && !buffered.some((event) => event.type === "shell.end")) state = appendShell(state, unknownRun);
   if (!bashRunning) state = { ...state, messages: interruptOpenShells(state.messages) };
   return state.isRunning ? state : { ...state, messages: interruptOpenTools(state.messages) };
 }

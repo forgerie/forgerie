@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, parseEvent, snapshotSchema, statusSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
-import { fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
+import { carryUnsavedShellRows, fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 import { shellAvailability, shellDraftOf, type ShellAvailability } from "./shellDraft";
 import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatalog, type CommandResult } from "./commands";
 import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
@@ -235,7 +235,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         status.isStreaming || status.isCompacting, attempt.buffered, status.isBashRunning);
       // Keep persisted message identities, including messages first seen live,
       // so existing disclosures do not remount when fresh history replaces them.
-      const transcript = reconcileTranscriptIdentity(state.transcript, seeded);
+      // Shell rows whose records Pi has not saved yet are not in the history.
+      const transcript = reconcileTranscriptIdentity(state.transcript, carryUnsavedShellRows(state.transcript, seeded));
       // Status is read after the snapshot, so it covers every ask event up to
       // the watermark. Later events may be older or newer than the status read;
       // opens and closes are keyed by ask ID, so replaying them is safe.

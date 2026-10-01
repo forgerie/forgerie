@@ -71,7 +71,9 @@ describe("shell rows in the thread", () => {
     const rows = [...document.querySelectorAll<HTMLElement>(".shell-run")];
     expect(rows.map((node) => node.querySelector(".shell-status")?.textContent)).toEqual(["exit 0", "failed", "no result", "cancelled"]);
     expect(rows[0]!.textContent).toContain("No output.");
-    expect(rows[1]!.querySelector("[role=alert]")?.textContent).toBe("spawn ENOENT");
+    expect(rows[1]!.querySelector(".shell-error")?.textContent).toBe("spawn ENOENT");
+    // Saved failures must not interrupt a screen reader on every load; the status readout announces live ones.
+    expect(document.querySelectorAll(".shell-run [role=alert]")).toHaveLength(0);
     expect(rows[2]!.querySelector(".shell-command")?.textContent).toBe("$ Started before this page connected.");
     expect(rows[2]!.textContent).toContain("The result did not arrive. Reload to see the saved result.");
   });

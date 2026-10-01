@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseEvent, type PiMessage, type SessionEvent } from "./contracts";
-import { convertMessage, fromHistory, reduceEvent, seedTranscript, type Transcript } from "./transcript";
+import { carryUnsavedShellRows, convertMessage, fromHistory, reduceEvent, seedTranscript, type Transcript, type TranscriptMessage } from "./transcript";
 import { LIVE_OUTPUT_LIMIT, type ShellRun } from "./shellRun";
 
 const record = (command: string, output: string, timestamp: number, extra: Partial<PiMessage> = {}): PiMessage =>
@@ -111,5 +111,44 @@ describe("shell rows across a join", () => {
   it("closes a replayed row that cannot finish because no command is running", () => {
     const state = seed([], [start("ls", 3), chunk("a\n", 4)], 6, false);
     expect(runs(state)[0]!.result).toEqual({ type: "interrupted", output: "a\n" });
+  });
+  it("adds no running placeholder when the end of the reported command was buffered first", () => {
+    // Socket and status read are separate connections: the end can arrive before the status response.
+    const state = seed([], [end("done\n", 0, 8)], 6, true);
+    expect(runs(state).map((run) => run.result.type)).toEqual(["done"]);
+  });
+  it("finishes an interrupted row when its end arrives after the status read", () => {
+    const state = reduceEvent(seed([], [start("ls", 3)], 6, false), end("a\n", 0, 9));
+    expect(runs(state)).toEqual([{ command: "ls", excludeFromContext: false, result: { type: "done", output: "a\n", exitCode: 0, cancelled: false, truncated: false } }]);
+  });
+  it("skips failed commands, which Pi never saves, when matching saved records", () => {
+    const state = seed([record("ls", "a\n", 9)], [start("bad", 2), { type: "shell.end", output: "spawn failed", isError: true, seq: 3 },
+      start("ls", 4), end("a\n", 0, 5)], 6);
+    expect(runs(state).map((run) => [run.command, run.result.type])).toEqual([["ls", "done"], ["bad", "failed"]]);
+  });
+});
+
+describe("unsaved shell rows across a reload", () => {
+  const done = (output: string) => ({ type: "done" as const, output, exitCode: 0, cancelled: false, truncated: false });
+  const live = (command: string, output: string, id: string): TranscriptMessage =>
+    ({ id, role: "shell", parts: [{ type: "shell", run: { command, excludeFromContext: false, result: done(output) } }] });
+  const keyed = (role: "user" | "assistant", text: string, timestamp: number): TranscriptMessage =>
+    ({ id: `${role}-${timestamp}`, role, key: `${role}:${timestamp}`, parts: [{ type: "text", text }] });
+  const transcript = (...messages: TranscriptMessage[]): Transcript => ({ messages, nextId: 40, isRunning: false });
+  it("keeps a finished row whose record Pi has not saved yet, after the message it followed", () => {
+    const previous = transcript(keyed("user", "go", 1), live("date", "now\n", "shell-7"), keyed("assistant", "ok", 2));
+    const refreshed = transcript(keyed("user", "go", 1), keyed("assistant", "ok", 2), keyed("assistant", "more", 3));
+    const carried = carryUnsavedShellRows(previous, refreshed);
+    expect(carried.messages.map((message) => message.id)).toEqual(["user-1", "shell-7", "assistant-2", "assistant-3"]);
+  });
+  it("drops the row once the reload returns its saved record, or the join replayed it", () => {
+    const previous = transcript(live("date", "now\n", "shell-7"), live("pwd", "/w\n", "shell-8"));
+    const refreshed = transcript(...fromHistory([record("date", "now\n", 5)]).messages, live("pwd", "/w\n", "shell-41"));
+    expect(carryUnsavedShellRows(previous, refreshed)).toEqual(refreshed);
+  });
+  it("does not carry rows still running or rows that came from history", () => {
+    const running: TranscriptMessage = { id: "shell-9", role: "shell", parts: [{ type: "shell", run: { result: { type: "running", output: "" } } }] };
+    const saved = { ...live("ls", "a\n", "history-1"), key: "bashExecution:4" };
+    expect(carryUnsavedShellRows(transcript(saved, running), transcript())).toEqual(transcript());
   });
 });
