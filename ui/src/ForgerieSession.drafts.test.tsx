@@ -118,9 +118,14 @@ describe("draft protection across session switches and reloads", () => {
 
     await open("b", drafts);
     expect(document.querySelector(".ask")).toBeNull();
+    const writes = vi.spyOn(window.localStorage, "setItem");
     await open("a", reload());
     await until(() => question() === "What should the service be called?");
     expect(input().value).toBe("billing");
+    // Restoring never rewrites the progress, not even for one render: no write moves the answer to question 1.
+    const saved = writes.mock.calls.map(([, value]) => JSON.parse(value).ask).filter(Boolean);
+    expect(saved.filter((ask) => ask.index !== 1 || ask.drafts.db?.text)).toEqual([]);
+    writes.mockRestore();
     await click(document.querySelector('[aria-label="Previous question"]'));
     expect(checked()).toEqual(["Postgres"]);
     expect(input().value).toBe("");

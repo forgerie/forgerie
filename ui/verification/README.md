@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Draft protection
+
+Unsent chat text and partial `ask_user` answers survive a session switch and a page reload. They are kept in this browser only, one record per session. See [draft behavior, storage, verification, and limits](drafts.md).
+
 ## Session compaction
 
 The one composer supports explicit compaction during idle work or queueing during an active run. Live status and server receipts appear above it. See [compaction behavior, queue clearing, verification, and limits](compaction.md).
@@ -111,8 +115,9 @@ The new UI stays on `new-ui-mvp`. Main and its production services are unchanged
 - Removing a chip never deletes a saved workspace file. There is no deletion
   endpoint for uploaded files. Saved files can remain after cancel or refusal.
   Inline images render again from persisted history after reload. General files
-  persist as `@path` text, not as download chips. Drafts remain memory-only and
-  are not retained across reload or leaving the session.
+  persist as `@path` text, not as download chips. Draft text now survives a
+  reload or a session switch, but attachments in an unsent draft do not. See
+  [draft protection](drafts.md).
 
 Checks use unit tests, real HTTP/WebSocket test servers, the actual assistant-ui
 runtime, and a browser against a scratch Pi session. The browser script verifies

@@ -25,7 +25,7 @@ The snapshot contains assistant content, not tool execution progress or results.
 - Every recovery fetches full history. Large sessions have no paging or virtualization in this client.
 - This is transcript recovery, not byte-for-byte replay. Tool progress produced entirely while disconnected is not recoverable from the assistant snapshot. Its final persisted result is recoverable when the tool ends.
 - An active run survives browser closure and reload. A sessiond restart kills active runs. No model request resumes across daemon or host failure.
-- Drafts survive connection recovery while the runtime stays mounted. This change does not persist drafts through a full page reload.
+- Drafts survive connection recovery while the runtime stays mounted. [Draft protection](drafts.md) now also keeps draft text through a full page reload.
 - Forgerie relies on Tailscale access, not application authentication. A session ID is an identifier, not a credential.
 
 ## Repeat the checks

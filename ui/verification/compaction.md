@@ -27,7 +27,7 @@ The client consumes validated `status.update` and `command.output` events. Statu
 
 Operational receipts stay outside transcript messages. They are not persisted. Join buffering retains receipts even below the transcript snapshot watermark. Newer live statuses win over older HTTP responses. Reconnect reads authoritative status without resending a mutation.
 
-The current API has no command ID. Receipt detection therefore depends on Pi's existing completion, cancellation, and failure prefixes. A future backend wording change needs a corresponding contract update. Automatic compaction can finish without a command receipt. Reload does not recover an earlier receipt or an unsent draft. This is not a general steering or follow-up queue editor.
+The current API has no command ID. Receipt detection therefore depends on Pi's existing completion, cancellation, and failure prefixes. A future backend wording change needs a corresponding contract update. Automatic compaction can finish without a command receipt. Reload does not recover an earlier receipt. An unsent draft survives reload through [draft protection](drafts.md). This is not a general steering or follow-up queue editor.
 
 ## Verification
 
