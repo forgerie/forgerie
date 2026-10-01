@@ -211,10 +211,17 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
     const key = end?.type === "message.end" && end.message ? keyOf(end.message) : undefined;
     return key === undefined || !state.messages.some((message) => message.key === key);
   });
-  // Finish messages between the history read and snapshot BEFORE seeding the
-  // new partial. Otherwise an earlier answer can replace the next live answer.
+  const completedTools = new Set(state.messages.flatMap((message) => message.parts.flatMap((part) =>
+    part.type === "tool" && part.state.type === "done" ? [part.id] : [])));
+  // The watermark covers assistant deltas, but the snapshot contains no tool
+  // progress/results. Recover those events too, without overwriting results
+  // already persisted in history. Finish messages BEFORE seeding the new
+  // partial, so an earlier answer cannot replace the next live answer.
   for (const event of events) {
-    if ((event.seq ?? Infinity) <= seq && (event.type === "message.end" || event.type === "message.append")) {
+    if ((event.seq ?? Infinity) > seq) continue;
+    const toolEvent = event.type === "tool.start" || event.type === "tool.update" || event.type === "tool.end";
+    if (event.type === "message.end" || event.type === "message.append"
+      || toolEvent && !completedTools.has(event.toolCallId)) {
       state = reduceEvent(state, event);
     }
   }
@@ -228,7 +235,7 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
   for (const event of events) {
     if ((event.seq ?? Infinity) > seq) state = reduceEvent(state, event);
   }
-  return state;
+  return state.isRunning ? state : { ...state, messages: interruptOpenTools(state.messages) };
 }
 
 /** UI-only state of a tool call, carried as the part's artifact. */

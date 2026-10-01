@@ -45,6 +45,22 @@ SESSION_ID=<existing-idle-session> ./scripts/reconnect-acceptance.mjs
 Set `APP_URL` when testing a port other than 8510. Evidence is ignored under
 `verification/local/`; real-session content must not enter git.
 
+## Resumable Pi streams
+
+Checked on 2026-09-30 against Forgerie on 8504, with the isolated app on 8511. The user chose to keep the rebuild isolated and land on `new-ui-mvp`, not main. No production service restarted.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | Build, TypeScript, ESLint, and 155 tests passed after rebasing onto the concurrent chain-of-thought change. Six new tests cover reload reattachment, independent tab readers, covered tool progress/results, and persisted result precedence. Two regression tests failed before the reconciliation fix. |
+| Real Pi producer. | `scripts/resume-acceptance.mjs` passed with one scratch prompt, one local producer invocation, and one persisted tool result. Reload resumed the active run. A second tab attached, and closing the first reader did not cancel the producer. The follower received the final answer, and another reload loaded its persisted history. Browser mutations and uncaught exceptions were both zero. The scratch session was archived. |
+| Connection-loss regression. | The existing read-only browser check passed at all four postures on an idle session. Five history joins retained the draft, transcript, open disclosure, and scroll position at 80 CSS pixels. Browser mutations and uncaught exceptions were both zero. An initial attempt used the archived scratch session after its temporary workspace was removed; the server correctly refused to open that missing workspace. |
+| Fold posture review. | Read all eight captures from the active-run check. The same thread, reasoning/tool lines, composer, and visible Stop control remain available in every posture and theme. No horizontal overflow. No presentation code changed in this task. |
+
+The first live attempt failed because the test read the old document before reload completed. The script now waits for `Page.loadEventFired`. All attempts used their own scratch session. Repeating the successful check after the chain-of-thought rebase brought the verification cost to three model prompts total. The eight rebased captures were also read. Independent review found no reconciliation blocker; its harness cleanup and evidence-wording findings were fixed. A real local HTTP failure check verified that an API cleanup failure remains observable, temporary directories are removed, and the evidence record is refreshed. That check made no model call.
+
+See [the resume contract and limits](resumable-streams.md) for the mapping to the assistant-ui guide and repeat commands. This is Pi transcript recovery, not byte replay or recovery across a sessiond restart. Physical Fold sleep/wake, keyboard, and touch remain unverified.
+
+
 ## Realignment with the assistant-ui homepage
 
 Checked on 2026-09-30 against Forgerie on 8504 and the homepage demo source at assistant-ui `90f47502f`. The drift audit, with every change and the differences that remain, is in [`ui-drift-audit.md`](ui-drift-audit.md). Behaviour is unchanged: no store, transcript, reducer, or picker logic changed. The picker's grouping control moved into its "⋯" menu; it is still two taps, and G still switches it.

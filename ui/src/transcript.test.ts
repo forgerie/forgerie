@@ -132,6 +132,32 @@ describe("joining a running session", () => {
     expect(state.messages.at(-1)?.parts.map((part) => part.type)).toEqual(["thinking", "tool"]);
     expect(tools(state).map((part) => part.state)).toEqual([{ type: "running", output: "out" }]);
   });
+  it("resumes tool progress covered by the watermark because the partial does not contain it", () => {
+    const state = seedTranscript([user("hello"), asking(2, call("a"))], assistant("Next", 3), 5, true, [
+      { type: "tool.start", toolCallId: "a", toolName: "bash", args: { command: "ls" }, seq: 3 },
+      { type: "tool.update", toolCallId: "a", toolName: "bash", text: "progress", seq: 4 },
+      { type: "assistant.delta", text: "Next", seq: 5 },
+      { type: "assistant.delta", text: " answer", seq: 6 },
+    ]);
+    expect(tools(state).map((part) => part.state)).toEqual([{ type: "running", output: "progress" }]);
+    expect(texts(state)).toEqual(["hello", "", "Next answer"]);
+  });
+  it("keeps a tool result received between history and snapshot even when the run is already idle", () => {
+    const state = seedTranscript([user("hello"), asking(2, call("a"))], null, 5, false, [
+      { type: "tool.end", toolCallId: "a", toolName: "bash", text: "completed", isError: false, seq: 4 },
+      { type: "agent.end", seq: 5 },
+    ]);
+    expect(tools(state).map((part) => part.state)).toEqual([{ type: "done", output: "completed", isError: false }]);
+    expect(state.isRunning).toBe(false);
+  });
+  it("does not replace an authoritative history result with earlier buffered tool output", () => {
+    const state = seedTranscript([user("hello"), asking(2, call("a")), result("a", "persisted result")], null, 5, false, [
+      { type: "tool.start", toolCallId: "a", toolName: "bash", args: {}, seq: 3 },
+      { type: "tool.update", toolCallId: "a", toolName: "bash", text: "progress", seq: 4 },
+      { type: "tool.end", toolCallId: "a", toolName: "bash", text: "event result", isError: false, seq: 5 },
+    ]);
+    expect(tools(state).map((part) => part.state)).toEqual([{ type: "done", output: "persisted result", isError: false }]);
+  });
   it("avoids replaying a user echo whose final message already exists in history", () => {
     const state = seedTranscript([user("hello")], null, 5, false, [
       { type: "message.append", message: { role: "user", content: "hello" }, seq: 1 },

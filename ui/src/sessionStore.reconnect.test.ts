@@ -68,8 +68,10 @@ async function recoveryServer() {
   });
   const store = createSessionStore("known", transport, { retryDelayMs: 10, maxRetryDelayMs: 20 });
   disposals.push(store.dispose);
-  const emit = (event: SessionEvent) => socket?.send(Buffer.from(JSON.stringify(event)));
-  return { state, store, emit, emitRaw: (payload: string) => socket?.send(Buffer.from(payload)),
+  const emit = (event: SessionEvent) => {
+    for (const client of ws.clients) client.send(Buffer.from(JSON.stringify(event)));
+  };
+  return { state, store, transport, emit, emitRaw: (payload: string) => socket?.send(Buffer.from(payload)),
     close: () => socket?.terminate(), wake: () => wake?.(), watching: () => watching };
 }
 async function until(predicate: () => boolean) {
@@ -81,6 +83,81 @@ async function until(predicate: () => boolean) {
 }
 function ready(store: SessionStore) { return store.getSnapshot().connection.type === "ready"; }
 function texts(store: SessionStore) { return store.getSnapshot().transcript.messages.map(messageText); }
+
+describe("resuming a server-owned run", () => {
+  it("reattaches after a page reload without sending or restarting the prompt", async () => {
+    const api = await recoveryServer();
+    api.state.partial = { role: "assistant", content: [
+      { type: "thinking", thinking: "initial reasoning" }, { type: "text", text: "partial answer" },
+    ], timestamp: 3 };
+    api.state.seq = 40;
+    api.state.running = true;
+    await api.store.start();
+    expect(texts(api.store).at(-1)).toBe("partial answer");
+    api.store.dispose();
+    // The server owns the run and continues producing without the old reader.
+    api.state.partial = { role: "assistant", content: [
+      { type: "thinking", thinking: "initial reasoning" }, { type: "text", text: "partial answer continues" },
+    ], timestamp: 3 };
+    api.state.seq = 42;
+    const reloaded = createSessionStore("known", api.transport);
+    disposals.push(reloaded.dispose);
+    await reloaded.start();
+    expect(reloaded.getSnapshot().transcript.isRunning).toBe(true);
+    expect(texts(reloaded)).toEqual(["before", "history answer", "partial answer continues"]);
+    api.emit({ type: "assistant.delta", text: " live", seq: 43 });
+    await until(() => texts(reloaded).at(-1) === "partial answer continues live");
+    api.emit({ type: "message.end", message: answer("partial answer continues live", 3), seq: 44 });
+    api.emit({ type: "agent.end", seq: 45 });
+    await until(() => !reloaded.getSnapshot().transcript.isRunning);
+    expect(texts(reloaded)).toEqual(["before", "history answer", "partial answer continues live"]);
+    expect(api.state.prompts).toBe(0);
+  });
+
+  it("lets an independent tab attach to the same run without owning or cancelling it", async () => {
+    const api = await recoveryServer();
+    api.state.partial = { role: "assistant", content: "shared partial", timestamp: 3 };
+    api.state.seq = 10;
+    api.state.running = true;
+    await api.store.start();
+    const follower = createSessionStore("known", api.transport);
+    disposals.push(follower.dispose);
+    await follower.start();
+    api.emit({ type: "assistant.delta", text: " for both", seq: 11 });
+    await until(() => texts(api.store).at(-1) === "shared partial for both" && texts(follower).at(-1) === "shared partial for both");
+    api.store.dispose();
+    api.emit({ type: "assistant.delta", text: " after the first tab closes", seq: 12 });
+    await until(() => texts(follower).at(-1)?.endsWith("after the first tab closes") === true);
+    api.emit({ type: "message.end", message: answer("shared partial for both after the first tab closes", 3), seq: 13 });
+    api.emit({ type: "agent.end", seq: 14 });
+    await until(() => !follower.getSnapshot().transcript.isRunning);
+    expect(follower.getSnapshot().transcript.messages).toHaveLength(3);
+    expect(api.state.prompts).toBe(0);
+  });
+
+  it("recovers a tool result covered by the snapshot while joining a running session", async () => {
+    const api = await recoveryServer();
+    api.state.history.push({ role: "assistant", timestamp: 3, content: [
+      { type: "toolCall", id: "read-join", name: "read", arguments: { path: "file.ts" } },
+    ] });
+    api.state.running = true;
+    api.state.gate = deferred();
+    const started = api.store.start();
+    await until(() => api.state.histories === 1);
+    api.emit({ type: "tool.end", toolCallId: "read-join", toolName: "read", text: "joined result", isError: false, seq: 1 });
+    api.emit({ type: "assistant.delta", text: "next partial", seq: 2 });
+    api.state.partial = { role: "assistant", content: "next partial", timestamp: 4 };
+    api.state.seq = 2;
+    api.state.gate.resolve();
+    await started;
+    expect(api.store.getSnapshot().transcript.messages.flatMap((message) => message.parts).filter((part) => part.type === "tool"))
+      .toEqual([expect.objectContaining({ id: "read-join", state: { type: "done", output: "joined result", isError: false } })]);
+    expect(texts(api.store)).toEqual(["before", "history answer", "", "next partial"]);
+    api.emit({ type: "assistant.delta", text: " live", seq: 3 });
+    await until(() => texts(api.store).at(-1) === "next partial live");
+    expect(api.state.prompts).toBe(0);
+  });
+});
 
 describe("automatic connection recovery", () => {
   it("retains history while disconnected and recovers work completed offline without sending a prompt", async () => {
