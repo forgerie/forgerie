@@ -1,5 +1,5 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { ActionBarPrimitive, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui } from "@assistant-ui/react";
+import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui } from "@assistant-ui/react";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
 import { ChainOfThoughtGroup, ReasoningGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
@@ -19,7 +19,9 @@ function ResponseCopy() {
 export function UserMessage() {
   return <MessagePrimitive.Root className="message message-user" data-role="user" aria-label="Your message">
     <UserMessageAttachments />
-    <div className="user-bubble message-text"><MessagePrimitive.Parts /></div>
+    <AuiIf condition={(s) => s.message.content.some((part) => part.type === "text" && part.text.length > 0)}>
+      <div className="user-bubble message-text"><MessagePrimitive.Parts /></div>
+    </AuiIf>
   </MessagePrimitive.Root>;
 }
 

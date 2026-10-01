@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime, type ThreadMessage } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAttachmentAdapter, type SaveAttachment } from "../attachments";
 import type { PendingAsk } from "../contracts";
@@ -12,12 +12,12 @@ let root: Root;
 let runtime: AssistantRuntime;
 let send: (message: AppendMessage) => Promise<void>;
 let save: ReturnType<typeof vi.fn<SaveAttachment>>;
-const messages: ThreadMessage[] = [];
+const messages: ThreadMessageLike[] = [];
 const ask: PendingAsk = { askId: "ask", askedAt: "now", questions: [{ id: "answer", question: "Which file?", options: [] }] };
 function Fixture({ pendingAsk, offline = false }: { pendingAsk?: PendingAsk; offline?: boolean }) {
   const [adapter] = useState(() => createAttachmentAdapter(save));
   useEffect(() => () => adapter.dispose(), [adapter]);
-  runtime = useExternalStoreRuntime({ messages, onNew: (message: AppendMessage) => send(message), adapters: { attachments: adapter }, isDisabled: offline, isSendDisabled: offline });
+  runtime = useExternalStoreRuntime({ messages, convertMessage: (message) => message, onNew: (message: AppendMessage) => send(message), adapters: { attachments: adapter }, isDisabled: offline, isSendDisabled: offline });
   return <AssistantRuntimeProvider runtime={runtime}><Thread ask={pendingAsk && { ask: pendingAsk, phase: { type: "answering" }, offline,
     onSubmit: () => { throw new Error("Attachments must not be submitted as answers"); }, onDismiss: () => {}, onChat: async () => { throw new Error("Use runtime.send for attachments"); } }} /></AssistantRuntimeProvider>;
 }
@@ -27,6 +27,7 @@ const input = () => document.querySelector<HTMLTextAreaElement>("textarea")!;
 const add = (file = new File(["notes"], "notes.txt", { type: "text/plain" })) => act(async () => runtime.thread.composer.addAttachment(file));
 const click = (element: HTMLElement) => act(async () => element.click());
 beforeEach(() => {
+  messages.length = 0;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   save = vi.fn<SaveAttachment>().mockResolvedValue({ path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 });
@@ -35,6 +36,15 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 describe("assistant-ui attachment composer", () => {
+  it("shows a persisted image-only message without an empty text bubble", async () => {
+    messages.push({ id: "image-only", role: "user", content: [{ type: "text", text: "" }], attachments: [{
+      id: "image", type: "image", name: "Image", status: { type: "complete" },
+      content: [{ type: "image", image: "data:image/png;base64,aGk=" }],
+    }] });
+    await render();
+    expect(document.querySelectorAll(".message-attachments .attachment-image")).toHaveLength(1);
+    expect(document.querySelector(".user-bubble")).toBeNull();
+  });
   it("adds and removes a named chip with no upload until send", async () => {
     await render(); await add();
     expect(document.querySelectorAll(".attachment")).toHaveLength(1);

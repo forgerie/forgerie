@@ -167,6 +167,7 @@ try {
   assert.equal(writes.filter((request) => request.path.endsWith("/attachments")).length, 1, "image-only does not upload");
   const loaded = cdp.waitForEvent("Page.loadEventFired", 20000); await cdp.send("Page.reload"); await loaded;
   await wait(() => evaluate(cdp, `document.querySelectorAll('.message-attachments .attachment-image').length >= 2`), "image survives reload");
+  assert.equal(await evaluate(cdp, `Array.from(document.querySelectorAll('.user-bubble')).some((bubble) => bubble.textContent.trim() === '')`), false, "image-only has no empty text bubble");
   const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
   await writeFile(join(out, "real-image-after-reload.png"), Buffer.from(data, "base64"));
   cdp.close();

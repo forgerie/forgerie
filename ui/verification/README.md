@@ -114,12 +114,19 @@ The first native-image run exposed an invalid PNG fixture. Pi's image reader
 omitted it. The replacement PNG was checked with Pi's own `resizeImage`, not
 only the browser decoder.
 
-Repeat from this worktree, with the UI on 8514:
+The integrated client passed build, TypeScript, ESLint, and 280 tests. The
+running HTTPS app passed 30 browser checks with no page exceptions. All 24
+chat, ask, and upload-error captures were reviewed in light and dark across the
+four Fold viewports. A live image-only regression test caught a dropped user
+message; the browser check also caught an empty text bubble after reload. Both
+are fixed and covered by tests.
+
+Repeat from this app directory, against the running HTTPS UI:
 
 ```sh
 nix shell nixpkgs#nodejs_22 -c npm run verify
-./scripts/attachments-acceptance.mjs  # creates its own session; costs three model replies
-./scripts/attachment-shots.sh
+ATTACHMENT_URL=https://zao.hummingbird-lake.ts.net:8510 ./scripts/attachments-acceptance.mjs  # costs three model replies
+ATTACHMENT_URL=https://zao.hummingbird-lake.ts.net:8510 ./scripts/attachment-shots.sh
 ```
 
 Set `ATTACHMENT_URL` for another port, such as the shared server on 8510. Evidence
