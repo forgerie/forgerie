@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { sessionSchema } from "./contracts";
+import { sessionTreeSnapshotSchema } from "./sessionTree";
 
 export const slashCommandSchema = z.object({
   name: z.string().min(1), description: z.string().optional(),
@@ -14,10 +15,7 @@ export const commandResultSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("unsupported"), message: z.string() }),
   z.object({ type: z.literal("select"), requestId: z.string().min(1), title: z.string(),
     options: z.array(z.object({ value: z.string(), label: z.string(), description: z.string().optional() })) }),
-  z.object({ type: z.literal("tree"), tree: z.object({
-    nodes: z.array(z.object({ id: z.string(), parentId: z.string().nullable(), kind: z.string(), summary: z.string() })),
-    activeLeafId: z.string().nullable(), activePathIds: z.array(z.string()),
-  }) }),
+  z.object({ type: z.literal("tree"), tree: sessionTreeSnapshotSchema }),
 ]);
 export type CommandResult = z.infer<typeof commandResultSchema>;
 

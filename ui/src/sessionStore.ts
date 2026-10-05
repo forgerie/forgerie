@@ -7,6 +7,7 @@ import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatal
 import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
 import { compactionFromOutput, compactionFromStatus, idleCompaction, isCompactCommand, type CompactionState } from "./compaction";
 import { isAlreadyQueued, workingSend } from "./queue";
+import { afterFork, afterNavigate, closedTree, openTree, treeForkResultSchema, treeNavigateResultSchema, withOperation as withTreeOperation, type SessionTreeSummaryChoice, type TreeNavigator, type TreeOutcome } from "./sessionTree";
 
 export type Connection = { type: "loading" } | { type: "ready" }
   | { type: "reconnecting"; message: string } | { type: "failed"; message: string };
@@ -21,6 +22,7 @@ export interface SessionState {
   commandResult?: CommandResult;
   status?: SessionStatus;
   compaction: CompactionState;
+  tree: TreeNavigator;
 }
 export interface SessionTransport {
   request: (path: string, init: RequestInit) => Promise<Response>;
@@ -85,7 +87,7 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
  * it, the store finds the session's cwd in `/api/sessions/all` itself.
  */
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session) {
-  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction };
+  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree };
   let statusVersion = 0;
   const listeners = new Set<() => void>();
   const lifetime = new AbortController();
@@ -275,6 +277,13 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     update({ ...state, connection: { type: "reconnecting", message: "Refreshing the live connection." } });
     void connect();
   }
+  /** Re-read history after the branch moved. The join stays "ready": nothing was lost, only replaced. */
+  function reload() {
+    if (!started || lifetime.signal.aborted || state.connection.type === "failed") return;
+    clearTimeout(retryTimer);
+    closeJoin();
+    void connect();
+  }
   async function start() {
     if (started || lifetime.signal.aborted) return;
     started = true;
@@ -295,7 +304,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (result.type === "unsupported") throw new Error(result.message);
       const compact = endpoint === "commands/run" && "text" in body && isCompactCommand(body.text);
       update({ ...state, ...(compact ? (state.compaction === previousCompaction && (previousCompaction.type === "idle" || previousCompaction.type === "finished")
-        ? { compaction: { type: "checking" as const } } : {}) : { commandResult: result }),
+        ? { compaction: { type: "checking" as const } } : {}) : result.type === "tree" ? { tree: openTree(result.tree) } : { commandResult: result }),
         ...(result.type === "done" && result.session?.id === id ? { session: result.session } : {}) });
       if (compact) void refreshStatus();
       if (endpoint === "commands/run" && "text" in body && /^\/reload(?:\s|$)/u.test(body.text)) void loadCommands();
@@ -387,6 +396,54 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       throw new Error(`${messageOf(error)} The ${endpoint === "model" ? "model" : "thinking level"} may have changed. Check it before you try again.`, { cause: error });
     }
   }
+  /**
+   * One tree action at a time, against the tree the navigator showed. Never
+   * retried: a lost acknowledgement does not prove the session did not move.
+   */
+  async function treeAction<T>(operation: "continuing" | "forking", summarizing: boolean, path: string, schema: z.ZodType<T>,
+    body: Record<string, unknown>, settle: (result: T) => { outcome: TreeOutcome; notice?: { tone: "status" | "error"; message: string } }): Promise<TreeOutcome> {
+    const session = state.session;
+    const navigator = state.tree;
+    if (!session || navigator.type !== "open" || navigator.operation.type !== "idle") return { type: "unchanged" };
+    update({ ...state, tree: withTreeOperation(navigator, operation === "forking" ? { type: "forking" } : { type: "continuing", summarizing, aborting: false }) });
+    try {
+      const result = await request(`${root}/${path}`, schema, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: session.cwd, expectedLeafId: navigator.tree.activeLeafId, ...body }),
+      });
+      const { outcome, notice } = settle(result);
+      if (outcome.type === "unchanged") {
+        update({ ...state, tree: withTreeOperation(state.tree, { type: "idle", ...(notice ? { notice } : {}) }) });
+        return outcome;
+      }
+      update({ ...state, tree: closedTree });
+      if (outcome.type === "continued") reload();
+      return outcome;
+    } catch (error) {
+      const message = error instanceof ReadFailure ? error.message
+        : `${messageOf(error)} The session may have changed. Close and reopen the tree to check before you try again.`;
+      update({ ...state, tree: withTreeOperation(state.tree, { type: "idle", notice: { tone: "error", message } }) });
+      return { type: "unchanged" };
+    }
+  }
+  async function abortTree() {
+    const session = state.session;
+    const navigator = state.tree;
+    if (!session || navigator.type !== "open") return;
+    const operation = navigator.operation;
+    if (operation.type !== "continuing" || !operation.summarizing || operation.aborting) return;
+    update({ ...state, tree: withTreeOperation(navigator, { ...operation, aborting: true }) });
+    try {
+      await request(`${root}/abort`, abortResultSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd }),
+      });
+    } catch (error) {
+      const current = state.tree;
+      if (current.type === "open" && current.operation.type === "continuing") update({ ...state,
+        tree: withTreeOperation(current, { ...current.operation, aborting: false,
+          notice: { tone: "error", message: `Could not stop the summary: ${messageOf(error)}` } }) });
+    }
+  }
   async function clearQueue() {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
@@ -452,6 +509,13 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     },
     respondToCommand: (requestId: string, value: string) => runSlash("commands/respond", { requestId, value }),
     dismissCommand: () => update({ ...state, commandResult: undefined }),
+    openTree: () => runSlash("commands/run", { text: "/tree" }),
+    continueTree: (targetId: string, summary: SessionTreeSummaryChoice) => treeAction("continuing", summary.mode !== "none",
+      "tree/navigate", treeNavigateResultSchema, { targetId, summary }, afterNavigate),
+    forkTree: (entryId: string) => treeAction("forking", false, "tree/fork", treeForkResultSchema, { entryId }, afterFork),
+    abortTree,
+    /** Closing is refused while an action runs: its result must reach the user. */
+    closeTree: () => { if (state.tree.type === "open" && state.tree.operation.type === "idle") update({ ...state, tree: closedTree }); },
     loadCommands,
     clearQueue,
     listModels: async (signal?: AbortSignal) => (await readForPicker("models", modelsResponseSchema, signal)).models,

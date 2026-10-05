@@ -27,12 +27,10 @@ describe("Pi command follow-up", () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(document.querySelector(".message")).toBeNull();
   });
-  it("labels tree limitations and identifies the current entry", async () => {
+  it("leaves a tree to the session tree navigator", async () => {
     await act(async () => root.render(<CommandResultPanel result={{ type: "tree", tree: {
       nodes: [{ id: "a", parentId: null, kind: "user", summary: "First question" }], activeLeafId: "a", activePathIds: ["a"],
     } }} disabled={false} onChoose={() => {}} onClose={() => {}} />));
-    expect(document.body.textContent).toContain("read-only");
-    expect(document.body.textContent).toContain("use the current Forgerie client");
-    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("First question");
+    expect(document.querySelector(".command-result")).toBeNull();
   });
 });

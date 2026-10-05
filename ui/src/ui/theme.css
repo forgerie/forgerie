@@ -62,6 +62,8 @@
   --code-title: #2c609a;
   /* text-blue-500, the homepage's one live colour, in both themes. */
   --live: oklch(0.623 0.214 259.815);
+  --scrim: oklch(0 0 0 / 0.32);
+  --scrim-shadow: oklch(0 0 0 / 0.16);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -79,6 +81,8 @@
     --code-number: #e5b38f;
     --code-comment: #969990;
     --code-title: #a3c3e6;
+    --scrim: oklch(0 0 0 / 0.55);
+    --scrim-shadow: oklch(0 0 0 / 0.4);
   }
 }
 * { box-sizing: border-box; scrollbar-width: thin; }
@@ -288,9 +292,84 @@ button:disabled { cursor: default; opacity: 0.4; }
 .command-result-head h2 { margin: 0; font-size: inherit; font-weight: 500; overflow-wrap: anywhere; }
 .command-result-body { min-block-size: 0; overflow-y: auto; padding: var(--space-2) var(--space-3); font-size: var(--small-text); overflow-wrap: anywhere; }
 .command-result-body p { margin: 0; white-space: pre-wrap; }
-.command-tree { padding-inline-start: var(--space-5); }
-.command-tree li { padding-block: var(--space-2); }
-.command-tree li[aria-current] { background: var(--active-surface); }
+/* Session tree. A card while the window has room around it; as the room runs
+   out, each axis gives up its own margin and the card meets that edge. There
+   is no width or height where the layout flips. The dialog is the page frame
+   while open, so it sizes from the viewport, like the image viewer. */
+.tree-dialog {
+  --tree-width: 45rem; --tree-height: 46rem;
+  --tree-room-inline: clamp(0px, (100dvw - var(--tree-width)) / 2, 1.5rem);
+  --tree-room-block: clamp(0px, (100dvh - var(--tree-height)) / 2, 1.5rem);
+  position: fixed; inset: 0; margin: auto; padding: 0;
+  inline-size: min(var(--tree-width), 100dvw - 2 * var(--tree-room-inline));
+  block-size: min(var(--tree-height), 100dvh - 2 * var(--tree-room-block));
+  max-inline-size: none; max-block-size: none; overflow: hidden;
+  border: 1px solid var(--line); border-radius: min(var(--radius-thread), var(--tree-room-inline), var(--tree-room-block));
+  background: var(--background); color: var(--foreground); box-shadow: 0 var(--space-4) var(--space-8) var(--scrim-shadow);
+}
+.tree-dialog[open] { display: flex; }
+.tree-dialog::backdrop { background: var(--scrim); }
+.tree-sheet { --tree-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0;
+  padding: max(0px, env(safe-area-inset-top) - var(--tree-room-block)) max(0px, env(safe-area-inset-right) - var(--tree-room-inline))
+    max(0px, env(safe-area-inset-bottom) - var(--tree-room-block)) max(0px, env(safe-area-inset-left) - var(--tree-room-inline)); }
+.tree-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-block-size: var(--header-size); padding-inline: var(--tree-pad) var(--space-2); border-block-end: 1px solid var(--line); }
+.tree-head h2 { margin: 0; font-size: var(--text-size); font-weight: 500; }
+.tree-head .icon-button { inline-size: var(--control-size); block-size: var(--control-size); }
+.tree-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--tree-pad); }
+.tree-search { flex: 1 1 12rem; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: 2.5rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: color-mix(in oklab, var(--muted) 30%, var(--background)); color: var(--muted-foreground); transition: border-color 150ms; }
+.tree-search:focus-within { border-color: var(--line-focus); }
+.tree-search input, .tree-focus input { flex: 1; min-inline-size: 0; border: 0; background: transparent; color: var(--foreground); font: inherit; font-size: 1rem; outline: none; }
+.tree-search input::placeholder, .tree-focus input::placeholder { color: var(--muted-foreground); }
+.tree-readouts { display: flex; align-items: center; gap: var(--space-2); }
+.tree-count { color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Lenses wrap rather than scroll, so every one stays in view. Drawn small, pressed large. */
+.tree-lenses { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.tree-lenses button, .tree-copy { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; }
+.tree-lenses button::before, .tree-copy::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.tree-lenses button:hover, .tree-copy:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.tree-lenses button[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); }
+.tree-copied { flex: none; margin: 0; padding: 0 var(--tree-pad) var(--space-2); color: var(--muted-foreground); font-size: var(--label-text); }
+/* The one scroller. Rows are at least a touch target tall. */
+.tree-list, .tree-empty { flex: 1 1 auto; min-block-size: 0; border-block: 1px solid var(--line); }
+.tree-list { overflow-y: auto; overscroll-behavior: contain; }
+.tree-empty { margin: 0; padding: var(--space-6) var(--tree-pad); color: var(--muted-foreground); font-size: var(--small-text); text-align: center; }
+.tree-row { --lane: 0.875rem; display: grid; grid-template-columns: auto 0.75rem minmax(0, 1fr); align-items: center; column-gap: var(--space-2); min-block-size: var(--control-size); padding: var(--space-2) var(--tree-pad); cursor: pointer; outline: none; }
+.tree-list[data-branching] .tree-row { grid-template-columns: auto 0.75rem 1.75rem minmax(0, 1fr); column-gap: var(--space-1); }
+.tree-row + .tree-row { border-block-start: 1px solid color-mix(in oklab, var(--foreground) 5%, transparent); }
+.tree-row:hover { background: var(--hover-surface); }
+.tree-row[aria-selected="true"] { background: var(--active-surface); box-shadow: inset 2px 0 var(--foreground); }
+.tree-row:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
+/* The consequence is drawn before it is chosen: entries the new position would leave fade, and keep their shape. */
+.tree-row[data-leaving] { opacity: 0.45; }
+.tree-row[data-leaving]:hover { opacity: 0.75; }
+/* Branch rails: one hairline per open fork, an elbow where a row joins its fork. */
+.tree-rails { align-self: stretch; display: flex; margin-block: calc(-1 * var(--space-2)); }
+.tree-lane { position: relative; flex: none; inline-size: var(--lane); }
+.tree-lane[data-line]::before, .tree-lane[data-elbow]::before { content: ""; position: absolute; inset-inline-start: 50%; inset-block: 0 50%; border-inline-start: 1px solid var(--line-focus); }
+.tree-lane[data-line]::before, .tree-lane[data-elbow="branch"]::before { inset-block-end: 0; }
+.tree-lane[data-elbow]::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: 50%; border-block-start: 1px solid var(--line-focus); }
+.tree-marker { justify-self: center; inline-size: 0.4375rem; block-size: 0.4375rem; border-radius: 50%; }
+.tree-row[data-path] .tree-marker { background: var(--muted-foreground); }
+.tree-row[data-path] .tree-marker[data-leaf] { background: transparent; box-shadow: inset 0 0 0 2px var(--live); }
+.tree-fold { align-self: stretch; display: grid; place-items: center; margin-block: calc(-1 * var(--space-2)); border-radius: var(--radius-document); color: var(--muted-foreground); }
+.tree-fold:has(svg):hover { background: var(--hover-surface); color: var(--foreground); }
+/* Summary and readouts share one line while both fit; then the readouts move under the summary. */
+.tree-entry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.125rem var(--space-3); min-inline-size: 0; }
+.tree-summary { flex: 1 1 16rem; min-inline-size: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.45; overflow-wrap: anywhere; }
+.tree-row[data-bookkeeping] .tree-summary { color: var(--muted-foreground); font-size: var(--small-text); }
+.tree-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); max-inline-size: 100%; margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); white-space: nowrap; }
+.tree-label { max-inline-size: 10rem; overflow: hidden; text-overflow: ellipsis; padding-inline: var(--space-1); border-radius: var(--radius-document); background: var(--muted); color: var(--foreground); }
+.tree-current { color: var(--live); font-weight: 500; }
+.tree-meta time { font-variant-numeric: tabular-nums; }
+.tree-focus { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.5rem; margin: var(--space-3) var(--tree-pad) 0; padding-inline: var(--space-3); border: 1px solid var(--line-focus); border-radius: var(--radius-control); color: var(--muted-foreground); }
+.tree-notice { flex: none; max-block-size: 6rem; overflow-y: auto; margin: var(--space-3) var(--tree-pad) 0; color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
+.tree-notice[data-tone="error"] { color: var(--destructive); }
+.tree-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--tree-pad); }
+.tree-actions button { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); white-space: nowrap; transition: border-color 150ms, background-color 150ms; }
+.tree-actions button:not(:disabled):hover { border-color: var(--line-focus); }
+.tree-actions .tree-summarize[aria-pressed="true"] { border-color: var(--line-focus); background: var(--active-surface); }
+.tree-actions .tree-continue { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
+.tree-actions .tree-stop { margin-inline-end: auto; color: var(--destructive); }
 .composer-add-attachment { flex: none; }
 .composer-attachments, .message-attachments { display: flex; flex-wrap: wrap; gap: var(--space-2); min-inline-size: 0; }
 .composer-attachments:not(:empty) { padding: var(--space-3) var(--space-4) 0; max-block-size: max(4.75rem, 24cqb); overflow-y: auto; scrollbar-width: thin; }

@@ -8,11 +8,13 @@ import { createContext, useContext, type ReactNode } from "react";
 export const SessionFrameLeading = createContext<ReactNode>(null);
 
 // System template: the binding supplies labels and actions, never transport objects.
-export function SessionFrame({ name, status, error, recovery, children }: {
+export function SessionFrame({ name, status, error, recovery, actions, children }: {
   name: string;
   status: string;
   error?: string;
   recovery?: ReactNode;
+  /** Session-level controls, drawn at the trailing end of the header. */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const leading = useContext(SessionFrameLeading);
@@ -23,6 +25,7 @@ export function SessionFrame({ name, status, error, recovery, children }: {
           lives in the picker header, as it does in the homepage sidebar. */}
       <div className="session-heading"><h1 className="session-title" title={name}>{name}</h1></div>
       <span className="connection-status" role="status">{status}</span>
+      {actions}
     </header>
     {error && <div className="notice" role="alert"><p>{error}</p>{recovery}</div>}
     {children}

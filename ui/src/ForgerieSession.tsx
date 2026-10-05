@@ -17,6 +17,8 @@ import type { HandoffDoor } from "./handoffDoor";
 import { SessionDoorsProvider } from "./ui/SessionDoor";
 import type { DraftStore } from "./draftStore";
 import { workingSend } from "./queue";
+import type { TreeOutcome } from "./sessionTree";
+import { SessionTreeNavigator, TreeOpener } from "./ui/SessionTreeNavigator";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSession }: {
@@ -43,6 +45,11 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
     if (result.session && result.session.id !== id) onSwitchSession(result.session, result.promptDraft);
     else if (result.promptDraft !== undefined) runtimeRef.current.thread.composer.setText(result.promptDraft);
   }, [id, onSwitchSession]);
+  // A fork opens as its own session. Continuing reloads this one and returns the entry's text to the message box.
+  const applyTree = useCallback((outcome: TreeOutcome) => {
+    if (outcome.type === "forked") onSwitchSession(outcome.session, outcome.promptDraft);
+    else if (outcome.type === "continued") runtimeRef.current?.thread.composer.setText(outcome.editorText);
+  }, [onSwitchSession]);
   const openDoor = useCallback((door: HandoffDoor) => onSwitchSession({ id: door.sessionId, cwd: door.cwd }), [onSwitchSession]);
   const send = useCallback(async (text: string, images?: PromptAttachment[], options?: { steer?: boolean }) => {
     applyResult(await store.send(text, images, options));
@@ -98,7 +105,9 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
-      recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}>
+      recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}
+      actions={<TreeOpener idle={state.connection.type === "ready" && !state.sending && !state.transcript.isRunning}
+        onOpen={() => { void store.openTree().catch(() => { /* The store exposes the error. */ }); }} />}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",
@@ -116,6 +125,10 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
           onClose: store.dismissCommand,
         } : undefined} />
       </SessionDoorsProvider>
+      {state.tree.type === "open" && <SessionTreeNavigator tree={state.tree.tree} operation={state.tree.operation}
+        onContinue={(targetId, summary) => { void store.continueTree(targetId, summary).then(applyTree); }}
+        onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
+        onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
     </SessionFrame>
     </DictationProvider>
   </AssistantRuntimeProvider>;
