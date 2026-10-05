@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Sending while working
+
+While the agent works, Queue (or Enter) sends a follow-up and Steer (or Ctrl or Cmd+Shift+Enter) reaches the current response. Pi's queue shows above the composer, and Stop returns it to the draft. See [behavior, verification, and limits](sending-while-working.md).
+
 ## Draft protection
 
 Unsent chat text and partial `ask_user` answers survive a session switch and a page reload. They are kept in this browser only, one record per session. See [draft behavior, storage, verification, and limits](drafts.md).

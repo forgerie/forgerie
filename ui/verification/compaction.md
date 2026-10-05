@@ -2,20 +2,20 @@
 
 Type `/compact` with optional instructions in the one composer. Command selection only inserts text. Confirm with Send or Enter.
 
-During an active run, the button reads "Queue compaction". Pi owns the queue and starts compaction after the run. Ordinary follow-up messages remain unavailable. During idle work, the button reads "Compact history". Attachments must be removed before running a slash command. Ask mode keeps its own command routing and Enter precedence.
+During an active run, the button reads "Queue compaction". Pi owns the queue and starts compaction after the run. Ordinary messages can wait behind it as follow-ups, but cannot steer. See [sending while working](sending-while-working.md). During idle work, the button reads "Compact history". Attachments must be removed before running a slash command. Ask mode keeps its own command routing and Enter precedence.
 
 ## Status and recovery
 
 | State | Behavior |
 | --- | --- |
 | Checking. | The command was accepted. The client reads authoritative status without repeating the command. |
-| Queued. | The notice shows "Compaction queued". Expand "Queued command" to read the original instructions. Another compaction submission stays disabled. |
+| Queued. | The compaction is a "Compaction" row in the queue above the composer, with its full instructions. No separate notice repeats it. The header reads "Compaction queued". Another compaction submission stays disabled. |
 | Running. | The notice shows "Compacting history…". Stop reads "Stop compaction". There is no estimated progress. |
 | Finished. | `command.output` supplies completion, cancellation, or failure. Completion details retain the full server receipt. Dismiss removes the notice. |
 | Outcome unavailable. | An observed operation disappeared without a receipt. The notice reports unavailable completion details instead of inventing success. |
 | Disconnected. | The notice and draft remain visible. Mutations stay disabled until the client joins authoritative status again. |
 
-"Clear entire queue" removes **all queued work**, including messages from another client. It does not stop the active run. The count includes every queued item. This is not selective compaction cancellation. Stop aborts active work and returns queued messages to the chat draft in delivery order. If a newer ask is open, restoration waits in the saved chat draft and does not change its answer.
+"Clear entire queue", in the queue's header, removes **all queued work**, including messages from another client. It does not stop the active run. The count includes every queued item. This is not selective compaction cancellation. Stop aborts active work and returns queued messages to the chat draft in delivery order. If a newer ask is open, restoration waits in the saved chat draft and does not change its answer.
 
 A rejected compaction restores its instructions only when the chat draft remains empty. A newer typed chat draft wins. An open or replacement ask keeps its answer and retains the recovered chat draft until it closes. Mutations never retry automatically. A lost acknowledgement can mean Pi accepted the command. Check live status and history before sending it again.
 
@@ -27,7 +27,7 @@ The client consumes validated `status.update` and `command.output` events. Statu
 
 Operational receipts stay outside transcript messages. They are not persisted. Join buffering retains receipts even below the transcript snapshot watermark. Newer live statuses win over older HTTP responses. Reconnect reads authoritative status without resending a mutation.
 
-The current API has no command ID. Receipt detection therefore depends on Pi's existing completion, cancellation, and failure prefixes. A future backend wording change needs a corresponding contract update. Automatic compaction can finish without a command receipt. Reload does not recover an earlier receipt. An unsent draft survives reload through [draft protection](drafts.md). This is not a general steering or follow-up queue editor.
+The current API has no command ID. Receipt detection therefore depends on Pi's existing completion, cancellation, and failure prefixes. A future backend wording change needs a corresponding contract update. Automatic compaction can finish without a command receipt. Reload does not recover an earlier receipt. An unsent draft survives reload through [draft protection](drafts.md).
 
 ## Verification
 
