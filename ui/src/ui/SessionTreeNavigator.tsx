@@ -123,21 +123,23 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose }: Se
     <div className="tree-sheet">
       <header className="tree-head">
         <h2 id={titleId}>Session tree</h2>
+        {rows.length > 0 && <span className="tree-count" title="Selected entry's position in this view">
+          {position < 0 ? "–" : position + 1} of {rows.length}</span>}
+        {/* Copy acts on the selection, so it sits with the readout, not on every row. */}
+        <button type="button" className="icon-button quiet-button tree-copy" aria-label="Copy entry text" title="Copy the selected entry's text"
+          disabled={!selected} onClick={() => { void copy(); }}><CopyIcon aria-hidden size={16} /></button>
         <button type="button" className="icon-button quiet-button" aria-label="Close session tree" title="Close"
           disabled={busy} onClick={onClose}><XIcon aria-hidden size={20} /></button>
       </header>
+      {/* Between the pinned header and actions. Normally only the tree scrolls; in a very short
+          window the tree keeps two rows and this whole region scrolls instead. */}
+      <div className="tree-body">
       <div className="tree-tools">
         <label className="tree-search">
           <SearchIcon aria-hidden size={16} />
           <input type="search" placeholder="Search history" aria-label="Search history entries" value={search}
             onChange={(event) => { setSearch(event.target.value); setFolded(new Set()); setCopied(undefined); }} />
         </label>
-        <div className="tree-readouts">
-          <button type="button" className="tree-copy" disabled={!selected} title="Copy the selected entry's text"
-            onClick={() => { void copy(); }}><CopyIcon aria-hidden size={14} />Copy</button>
-          {rows.length > 0 && <span className="tree-count" title="Selected entry's position in this view">
-            {position < 0 ? "–" : position + 1} of {rows.length}</span>}
-        </div>
         <div className="tree-lenses" role="group" aria-label="Show entries">
           {SESSION_TREE_FILTER_OPTIONS.map((option) => <button type="button" key={option.mode} title={option.description}
             aria-pressed={filter === option.mode} onClick={() => lens(option.mode)}>{option.label}</button>)}
@@ -161,6 +163,7 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose }: Se
           onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); continueHere(); } }} />
       </label>}
       {notice && <p className="tree-notice" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.message}</p>}
+      </div>
       <footer className="tree-actions">
         {summarizing && <button type="button" className="tree-stop" disabled={operation.aborting} onClick={onAbort}>
           <SquareIcon aria-hidden size={12} />{operation.aborting ? "Stopping…" : "Stop summary"}</button>}

@@ -312,25 +312,26 @@ button:disabled { cursor: default; opacity: 0.4; }
 .tree-sheet { --tree-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0;
   padding: max(0px, env(safe-area-inset-top) - var(--tree-room-block)) max(0px, env(safe-area-inset-right) - var(--tree-room-inline))
     max(0px, env(safe-area-inset-bottom) - var(--tree-room-block)) max(0px, env(safe-area-inset-left) - var(--tree-room-inline)); }
-.tree-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-block-size: var(--header-size); padding-inline: var(--tree-pad) var(--space-2); border-block-end: 1px solid var(--line); }
-.tree-head h2 { margin: 0; font-size: var(--text-size); font-weight: 500; }
+.tree-head { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--header-size); padding-inline: var(--tree-pad) var(--space-2); border-block-end: 1px solid var(--line); }
+.tree-head h2 { flex: none; margin: 0; font-size: var(--text-size); font-weight: 500; }
+.tree-head .tree-count { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
 .tree-head .icon-button { inline-size: var(--control-size); block-size: var(--control-size); }
 .tree-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--tree-pad); }
-.tree-search { flex: 1 1 12rem; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: 2.5rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: color-mix(in oklab, var(--muted) 30%, var(--background)); color: var(--muted-foreground); transition: border-color 150ms; }
+.tree-search { flex: 1 1 8rem; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: color-mix(in oklab, var(--muted) 30%, var(--background)); color: var(--muted-foreground); transition: border-color 150ms; }
 .tree-search:focus-within { border-color: var(--line-focus); }
 .tree-search input, .tree-focus input { flex: 1; min-inline-size: 0; border: 0; background: transparent; color: var(--foreground); font: inherit; font-size: 1rem; outline: none; }
 .tree-search input::placeholder, .tree-focus input::placeholder { color: var(--muted-foreground); }
-.tree-readouts { display: flex; align-items: center; gap: var(--space-2); }
 .tree-count { color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Lenses wrap rather than scroll, so every one stays in view. Drawn small, pressed large. */
 .tree-lenses { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.tree-lenses button, .tree-copy { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; }
-.tree-lenses button::before, .tree-copy::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
-.tree-lenses button:hover, .tree-copy:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.tree-lenses button { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem; padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; }
+.tree-lenses button::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.tree-lenses button:hover { background: var(--hover-surface); color: var(--foreground); }
 .tree-lenses button[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); }
 .tree-copied { flex: none; margin: 0; padding: 0 var(--tree-pad) var(--space-2); color: var(--muted-foreground); font-size: var(--label-text); }
-/* The one scroller. Rows are at least a touch target tall. */
-.tree-list, .tree-empty { flex: 1 1 auto; min-block-size: 0; border-block: 1px solid var(--line); }
+.tree-body { flex: 1; min-block-size: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+/* The one scroller while the window has height. It never drops below two rows. Rows are at least a touch target tall. */
+.tree-list, .tree-empty { flex: 1 0 0; min-block-size: calc(2 * var(--control-size) + var(--space-4)); border-block: 1px solid var(--line); }
 .tree-list { overflow-y: auto; overscroll-behavior: contain; }
 .tree-empty { margin: 0; padding: var(--space-6) var(--tree-pad); color: var(--muted-foreground); font-size: var(--small-text); text-align: center; }
 .tree-row { --lane: 0.875rem; display: grid; grid-template-columns: auto 0.75rem minmax(0, 1fr); align-items: center; column-gap: var(--space-2); min-block-size: var(--control-size); padding: var(--space-2) var(--tree-pad); cursor: pointer; outline: none; }
@@ -361,7 +362,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .tree-label { max-inline-size: 10rem; overflow: hidden; text-overflow: ellipsis; padding-inline: var(--space-1); border-radius: var(--radius-document); background: var(--muted); color: var(--foreground); }
 .tree-current { color: var(--live); font-weight: 500; }
 .tree-meta time { font-variant-numeric: tabular-nums; }
-.tree-focus { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.5rem; margin: var(--space-3) var(--tree-pad) 0; padding-inline: var(--space-3); border: 1px solid var(--line-focus); border-radius: var(--radius-control); color: var(--muted-foreground); }
+.tree-focus { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); margin: var(--space-3) var(--tree-pad) 0; padding-inline: var(--space-3); border: 1px solid var(--line-focus); border-radius: var(--radius-control); color: var(--muted-foreground); }
 .tree-notice { flex: none; max-block-size: 6rem; overflow-y: auto; margin: var(--space-3) var(--tree-pad) 0; color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
 .tree-notice[data-tone="error"] { color: var(--destructive); }
 .tree-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--tree-pad); }
