@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { DEFAULT_AUI_ALLOWED_HOSTS, speechProxyRequestHeaders } from "./src/speech/speechProxy";
+import { agentFilesApi, defaultAgentDirs } from "./src/agents/agentFilesApi";
 
 const allowedHosts = [...DEFAULT_AUI_ALLOWED_HOSTS, ...(process.env.FORGERIE_AUI_ALLOWED_HOSTS ?? "").split(",").map((host) => host.trim().toLowerCase()).filter(Boolean)];
 const certPath = process.env.FORGERIE_AUI_TLS_CERT;
@@ -10,7 +11,7 @@ if (!!certPath !== !!keyPath) throw new Error("Set both FORGERIE_AUI_TLS_CERT an
 const https = certPath && keyPath ? { cert: readFileSync(certPath), key: readFileSync(keyPath) } : undefined;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), agentFilesApi(defaultAgentDirs(import.meta.dirname))],
   server: {
     https,
     host: "::",

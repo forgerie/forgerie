@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { ForgerieSession } from "./ForgerieSession";
 import { usePicker } from "./usePicker";
 import type { Row } from "./picker/board";
@@ -9,10 +9,21 @@ import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession } from "./NewSession";
 import { createNewSessionApi, defaultDestinationCwd } from "./newSession";
+import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
+// Settings carry the prompt editor; the chat never pays for it.
+const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
 /** `?new=<folder>` keeps a new session's composer open across a reload. */
 const readNew = () => new URLSearchParams(window.location.search).get("new")?.trim() || undefined;
+/** `?settings=<section>&agent=<target>` keeps a settings page open across a reload. */
+const readSettings = (): SettingsPlace | undefined => {
+  const params = new URLSearchParams(window.location.search);
+  const section = params.get("settings");
+  if (section === null) return undefined;
+  return section === "agents" ? { section, agent: readTarget(params.get("agent") ?? undefined) } : { section: "root" };
+};
+const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 
 /** Composition root: owns the selected session (in the URL) and the sheet. */
@@ -21,12 +32,13 @@ export function App() {
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
   // A session that does not exist yet: the folder its composer starts in.
   const [composing, setComposing] = useState(readNew);
+  const [settings, setSettings] = useState(readSettings);
   // Bumped when a new composer opens, so moving its destination never remounts it.
   const [composeKey, setComposeKey] = useState(0);
   // Unsent drafts outlive a session switch and a reload, in this browser only.
   const [drafts] = useState(() => createDraftStore(browserStorage()));
   // With nothing selected there is nothing to cover, so the sheet starts open.
-  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined);
+  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
   // The URL is the source of truth for the selection, so read it there.
   const closeSession = useCallback(() => {
@@ -42,7 +54,7 @@ export function App() {
   }, [drafts, closeSession]);
   const picker = usePicker(selectedId, { onDeleted });
   useEffect(() => {
-    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); };
+    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setSettings(readSettings()); };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
@@ -51,8 +63,11 @@ export function App() {
     const fromComposer = readNew() !== undefined;
     setComposing(undefined);
     setCommandSelection({ session, draft, ...(error ? { error } : {}) });
-    if (session.id === selectedId && !fromComposer) return;
+    const inSettings = readSettings() !== undefined;
+    setSettings(undefined);
+    if (session.id === selectedId && !fromComposer && !inSettings) return;
     const url = new URL(window.location.href);
+    clearSettings(url);
     url.searchParams.delete("new");
     url.searchParams.set("session", session.id);
     // A started session replaces its composer: Back must not lead to an empty composer.
@@ -64,6 +79,12 @@ export function App() {
   const { find, recent } = picker;
   const startNew = useCallback(async () => {
     setOpen(false);
+    if (readSettings() !== undefined) {
+      const url = new URL(window.location.href);
+      clearSettings(url);
+      window.history.replaceState({}, "", url);
+      setSettings(undefined);
+    }
     if (readNew() !== undefined && !readSelected()) {
       document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
       return;
@@ -90,6 +111,19 @@ export function App() {
     if (outcome.type === "next") switchSession(outcome.session);
     else if (outcome.type === "allClear") { closeSession(); setOpen(true); }
   }, [archiveAndNext, switchSession, closeSession]);
+  // Settings take the thread's place; the session stays in the URL underneath.
+  const placeSettings = useCallback((place: SettingsPlace | undefined, replace = false) => {
+    const url = new URL(window.location.href);
+    clearSettings(url);
+    if (place) {
+      url.searchParams.set("settings", place.section);
+      if (place.section === "agents" && place.agent) url.searchParams.set("agent", targetParam(place.agent));
+    }
+    if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
+    setSettings(place);
+    if (place) setOpen(false);
+    else if (!readSelected() && readNew() === undefined) setOpen(true);
+  }, []);
   // A handoff door knows only the id and workspace. The catalog may also know the title.
   const known = !selectedId ? undefined : commandSelection?.session.id === selectedId
     ? { ...picker.find(selectedId), ...commandSelection.session } : picker.find(selectedId);
@@ -100,10 +134,13 @@ export function App() {
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
     picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
-        onClose: layout === "overlay" && (selectedId || composing !== undefined) ? () => setOpen(false) : undefined }} />}
+        onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
+        onClose: layout === "overlay" && (selectedId || composing !== undefined || settings) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
-    thread={composing !== undefined && !selectedId ? (composing
+    thread={settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
+      <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} /></Suspense>
+      : composing !== undefined && !selectedId ? (composing
       ? <NewSession key={composeKey} cwd={composing} api={newSessionApi} drafts={drafts}
         onDestination={(next) => { const url = new URL(window.location.href); url.searchParams.set("new", next); window.history.replaceState({}, "", url); }}
         onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} />

@@ -1,0 +1,123 @@
+/* Settings take the thread's place and its measures: the same header, the same
+   reading column, the same row and menu surfaces as the session list. An agent
+   reads as a document: its name is the title, its description the standfirst,
+   its settings a short property list, and its instructions the body. Every
+   reflow below follows the column's width; nothing keys off the viewport. */
+
+.settings-scroll { flex: 1; min-block-size: 0; overflow-y: auto; scrollbar-gutter: stable both-edges;
+  padding: var(--thread-top-space) var(--gutter) calc(4 * var(--space-8)); }
+.settings-column { container: settings / inline-size; max-inline-size: var(--thread-max-width); margin-inline: auto; }
+.settings-hint { margin: var(--space-3) 0; color: var(--muted-foreground); font-size: var(--small-text); }
+.settings-lede { margin: 0 0 var(--space-6); color: var(--muted-foreground); font-size: var(--small-text); line-height: var(--line-height); }
+
+/* Header controls. Back names where it goes; it yields its words before the title does. */
+.settings-back, .settings-primary, .agent-switch, .agent-chip button, .prompt-format button { position: relative; }
+.settings-back::before, .settings-primary::before, .agent-switch::before, .agent-chip button::before {
+  content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.settings-back { flex: 0 1 auto; display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: var(--icon-size); block-size: 2rem;
+  margin-inline-start: -0.375rem; padding-inline: 0.375rem var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; overflow: hidden; transition: color 150ms; }
+.settings-back:hover { color: var(--foreground); }
+.settings-back svg { flex: none; }
+.settings-back + .session-heading { border-inline-start: 1px solid var(--line); padding-inline-start: var(--space-2); }
+@container (max-width: 26rem) { .settings-back { font-size: 0; gap: 0; padding-inline-end: 0.375rem; } }
+.settings-primary { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); block-size: 2rem; padding-inline: var(--space-3); border: 0;
+  border-radius: var(--radius-control); background: var(--primary); color: var(--primary-foreground); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
+.settings-primary:not(:disabled):hover { background: color-mix(in oklab, var(--primary) 85%, var(--background)); }
+.settings-shell .session-header .picker-icon + .picker-icon, .settings-menu-anchor + .picker-icon { margin-inline-start: 0; }
+.settings-menu-anchor { position: relative; flex: none; display: flex; }
+.settings-menu-anchor .picker-menu { inset-block-start: calc(100% + var(--space-2)); inset-inline-end: 0; }
+.picker-menu button[data-tone="danger"] { color: var(--destructive); }
+.picker-menu button[data-tone="danger"]:hover, .picker-menu button[data-tone="danger"]:focus-visible { background: color-mix(in oklab, var(--destructive) 10%, transparent); }
+.settings-shell .connection-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+
+/* Lists: the session list's rows, with a second line for the description. */
+.settings-sections, .agent-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.agent-group + .agent-group { margin-block-start: var(--space-8); }
+.agent-group-label { margin: 0 0 var(--space-1); padding-inline: var(--space-3); color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--label-text); font-weight: 500; }
+.agent-group-where { margin: var(--space-2) 0 0; padding-inline: var(--space-3); color: color-mix(in oklab, var(--muted-foreground) 80%, transparent); font-size: var(--meta-text); overflow-wrap: anywhere; }
+.agent-group-where code { font-family: var(--code-font); }
+.agent-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) auto;
+  grid-template-areas: "name model chevron" "description description chevron" "flags flags chevron";
+  align-items: baseline; column-gap: var(--space-3); inline-size: 100%; padding: var(--space-3); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); text-align: start; transition: background-color 150ms; }
+.agent-row:hover, .agent-row:focus-visible { background: var(--hover-surface); }
+.agent-row-name { grid-area: name; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); font-weight: 500; overflow-wrap: anywhere; }
+.agent-row-name svg { flex: none; color: var(--muted-foreground); }
+.agent-row-model { grid-area: model; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
+.agent-row-description { grid-area: description; margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.agent-row-description em { font-style: normal; color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
+.agent-row-flags { grid-area: flags; display: flex; flex-wrap: wrap; gap: 0 var(--space-3); color: var(--muted-foreground); font-size: var(--meta-text); }
+.agent-row-flags:not(:empty) { margin-block-start: var(--space-1); }
+.agent-row-flags [data-on] { color: var(--foreground); }
+.agent-row-flags [data-on]::before { content: ""; display: inline-block; inline-size: 6px; block-size: 6px; margin-inline-end: var(--space-1); border-radius: 50%; background: var(--foreground); vertical-align: 0.1em; }
+.agent-row-flags [data-tone="draft"] { color: var(--live); }
+.agent-row[data-replaced] .agent-row-name, .agent-row[data-replaced] .agent-row-description { opacity: 0.6; }
+.agent-row-chevron { grid-area: chevron; align-self: center; color: var(--muted-foreground); }
+
+/* The agent as a document. */
+.agent-editor { display: flex; flex-direction: column; }
+.agent-banner { margin: 0 0 var(--space-5); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface);
+  color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+.agent-banner code { font-family: var(--code-font); font-size: var(--code-size); color: var(--foreground); }
+.agent-name, .agent-description { display: block; inline-size: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--foreground); outline: none; resize: none; }
+.agent-name { font-family: var(--display-font); font-size: clamp(1.375rem, 4.5cqi, 1.75rem); font-weight: 600; letter-spacing: -0.015em; line-height: 1.25; }
+.agent-description { margin-block-start: var(--space-2); field-sizing: content; min-block-size: 2lh; color: color-mix(in oklab, var(--foreground) 72%, transparent); font-size: var(--text-size); line-height: 1.5; }
+.agent-name::placeholder, .agent-description::placeholder { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
+.agent-name:focus-visible, .agent-description:focus-visible { box-shadow: 0 2px 0 var(--line-focus); }
+.agent-name[readonly], .agent-description[readonly] { cursor: default; }
+
+/* Properties: label beside value while the column has room, above it when it does not. */
+.agent-properties { margin-block: var(--space-6) 0; border-block: 1px solid var(--line); padding-block: var(--space-1); }
+.agent-field { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-4); padding-block: var(--space-2); }
+.agent-field + .agent-field { border-block-start: 1px solid color-mix(in oklab, var(--line) 60%, transparent); }
+.agent-field-label { flex: 0 0 8rem; min-block-size: 2rem; display: flex; align-items: center; color: var(--muted-foreground); font-size: var(--small-text); }
+.agent-field-value { flex: 1 1 14rem; min-inline-size: 0; display: flex; align-items: center; min-block-size: 2rem; }
+.agent-field-hint { flex: 1 1 100%; margin: var(--space-1) 0 0; color: color-mix(in oklab, var(--muted-foreground) 85%, transparent); font-size: var(--label-text); line-height: 1.45; }
+@container settings (min-width: 30rem) { .agent-field-hint { padding-inline-start: calc(8rem + var(--space-4)); } }
+.agent-model, .agent-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); inline-size: 100%; }
+.agent-field .model-trigger { flex: 0 1 auto; margin-inline-start: calc(-1 * var(--space-2)); color: var(--foreground); }
+.agent-field .model-trigger:disabled { opacity: 1; color: var(--foreground); }
+.agent-field .model-trigger:disabled svg { display: none; }
+.agent-chips .model-trigger { color: var(--muted-foreground); }
+.agent-chip ~ .model-trigger { margin-inline-start: 0; }
+.agent-text-button { padding: 0; border: 0; background: none; color: var(--muted-foreground); font-size: var(--small-text); text-decoration: underline; text-underline-offset: 2px; }
+.agent-text-button:hover { color: var(--foreground); }
+.agent-chip { display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; max-inline-size: 100%; block-size: 1.75rem; padding-inline: var(--space-2) var(--space-1);
+  border: 1px solid var(--line); border-radius: var(--radius-control); font-size: var(--small-text); }
+.agent-chip > span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-chip button { display: grid; place-items: center; flex: none; inline-size: 1.25rem; block-size: 1.25rem; padding: 0; border: 0; border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); }
+.agent-chip button:hover { background: var(--hover-surface); color: var(--foreground); }
+.agent-none { color: var(--muted-foreground); font-size: var(--small-text); }
+.agent-switch { flex: none; inline-size: 2.25rem; block-size: 1.25rem; padding: 2px; border: 0; border-radius: 999px; background: color-mix(in oklab, var(--foreground) 18%, transparent); transition: background-color 150ms; }
+.agent-switch > span { display: block; inline-size: calc(1.25rem - 4px); block-size: calc(1.25rem - 4px); border-radius: 50%; background: var(--background); box-shadow: 0 1px 2px var(--scrim-shadow); transition: transform 150ms; }
+.agent-switch[aria-checked="true"] { background: var(--primary); }
+.agent-switch[aria-checked="true"] > span { transform: translateX(1rem); }
+.agent-switch:disabled { opacity: 0.6; }
+.agent-other { flex: 1; margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--code-surface);
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-problems { margin: var(--space-3) 0 0; padding-inline-start: var(--space-5); color: var(--destructive); font-size: var(--small-text); }
+.agent-section { margin: var(--space-8) 0 var(--space-2); color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--label-text); font-weight: 500; }
+
+/* Instructions: the transcript's Markdown, editable. A rule at the start edge marks the caret's document. */
+.prompt-editor { position: relative; margin-inline-start: calc(-1 * var(--space-3) - 2px); padding-inline-start: var(--space-3); border-inline-start: 2px solid transparent; transition: border-color 150ms; }
+.prompt-editor:focus-within { border-inline-start-color: var(--line-focus); }
+.prompt-document { min-block-size: 12rem; padding-block: var(--space-1) var(--space-8); font-size: var(--text-size); outline: none; overflow-wrap: anywhere; caret-color: var(--foreground); }
+.prompt-document > :first-child { margin-block-start: 0; }
+.prompt-document p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: inline-start; block-size: 0; color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); pointer-events: none; }
+.prompt-document pre { margin: var(--space-3) 0; overflow-x: auto; padding: var(--space-3) 0.875rem; border: 1px solid var(--line); border-radius: var(--radius-document);
+  background: var(--code-surface); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.65; tab-size: 2; }
+.prompt-document pre code { white-space: pre; background: none; padding: 0; font-size: inherit; }
+.prompt-document ::selection { background: color-mix(in oklab, var(--live) 25%, transparent); }
+.prompt-editor[data-readonly] .prompt-document { min-block-size: 0; caret-color: transparent; }
+
+/* Formatting appears where the selection is, at window level so nothing clips it. */
+.prompt-format { z-index: 100; display: flex; gap: 2px; padding: var(--space-1); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover);
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); animation: menu-in 150ms ease-out; }
+.prompt-format button { display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; padding: 0; border: 0; border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); }
+.prompt-format button:hover { background: var(--hover-surface); color: var(--foreground); }
+.prompt-format button[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { .prompt-format, .agent-switch, .agent-switch > span { animation: none; transition: none; } }
+

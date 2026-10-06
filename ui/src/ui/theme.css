@@ -694,6 +694,10 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-new { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); margin: var(--space-2) var(--space-2) 0; padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; text-align: start; }
 .picker-new:hover, .picker-new:focus-visible { background: var(--hover-surface); }
 .picker-new svg { flex: none; color: var(--muted-foreground); }
+/* Settings: the session list's last row, always in reach under the list. */
+.picker-footer { flex: none; padding: var(--space-1) var(--space-2) var(--space-2); border-block-start: 1px solid var(--line); }
+.picker-footer .picker-new { margin: 0; inline-size: 100%; }
+.picker-footer .picker-new[aria-current="page"] { background: var(--active-surface); }
 /* The pinned cap's way out: the homepage's "Load more" row (h-8 13px muted). */
 .picker-more { display: flex; align-items: center; inline-size: 100%; min-block-size: 2rem; padding: 0 var(--space-2) 0 calc(var(--space-2) + 0.875rem + var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); text-align: start; transition: color 150ms; }
 .picker-more:hover { color: var(--foreground); }

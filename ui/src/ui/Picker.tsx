@@ -1,4 +1,4 @@
-import { AnvilIcon, ArchiveIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { AnvilIcon, ArchiveIcon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -30,6 +30,10 @@ export interface PickerActions {
   onDismissToast?: (() => void) | undefined;
   /** Opens the first-message composer of a new session. */
   onNew?: (() => void) | undefined;
+  /** Opens settings in the thread's place. */
+  onSettings?: (() => void) | undefined;
+  /** Settings is what the thread area shows now. */
+  settingsOpen?: boolean | undefined;
 }
 
 const PIN = <PinIcon className="picker-pin" aria-hidden />;
@@ -266,5 +270,9 @@ export function Picker({ view, prefs, onPrefs, actions }: {
         </div>)}
     </div>}
     {view.toast ? <PickerToast toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : null}
+    {actions.onSettings ? <div className="picker-footer">
+      <button className="picker-new" onClick={actions.onSettings} aria-current={actions.settingsOpen ? "page" : undefined}>
+        <SettingsIcon aria-hidden size={16} />Settings</button>
+    </div> : null}
   </section>;
 }

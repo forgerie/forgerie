@@ -21,6 +21,10 @@ export interface ModelBinding {
   onThinkingLevel: (level: string) => Promise<void>;
   /** How full the context window is. The composer draws it as a bar on its top edge. */
   context?: ContextUse | undefined;
+  /** False for a choice that has no thinking level of its own, such as a fallback model. */
+  thinking?: boolean | undefined;
+  /** The trigger's words when no model is set. */
+  emptyLabel?: string | undefined;
 }
 export interface PickerOpen { query: string }
 
@@ -60,7 +64,7 @@ export function ModelPicker({ binding, anchor, open, onOpenChange }: {
   // so its result and its error always land in the panel that sent it.
   const [change, setChange] = useState<Change>({ type: "idle" });
   const changing = change.type === "changing";
-  const label = modelLabel(binding.model);
+  const label = binding.model ? modelLabel(binding.model) : binding.emptyLabel ?? modelLabel(undefined);
   const level = binding.model ? binding.thinkingLevel : undefined;
   const close = useCallback((returnFocus: boolean) => {
     setChange((current) => current.type === "failed" ? { type: "idle" } : current);
@@ -188,7 +192,7 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
         })}</ul>
       </section>)}
     </div>
-    <div className="model-thinking" role="group" aria-labelledby={`${id}-thinking`}>
+    {binding.thinking !== false && <div className="model-thinking" role="group" aria-labelledby={`${id}-thinking`}>
       <span id={`${id}-thinking`} className="model-thinking-label">Thinking</span>
       {levels.type === "loading" && <span className="model-hint" role="status">Loading…</span>}
       {levels.type === "failed" && <span className="model-hint" role="alert">Levels unavailable: {levels.message}</span>}
@@ -197,6 +201,6 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
         {levelChoices.map((item) => <button key={item} type="button" aria-pressed={item === binding.thinkingLevel}
           aria-disabled={busy && item !== binding.thinkingLevel || undefined} onClick={() => void pickLevel(item)}>{thinkingLabel(item)}</button>)}
       </div>}
-    </div>
+    </div>}
   </div>;
 }
