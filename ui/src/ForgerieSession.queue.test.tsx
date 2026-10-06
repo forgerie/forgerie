@@ -87,7 +87,7 @@ it("queues and steers through Pi, shows Pi's queue, and Stop returns it to the d
     { cwd: "/work", text: "add tests after this", streamingBehavior: "followUp" },
     { cwd: "/work", text: "use the existing helper", streamingBehavior: "steer" },
   ]);
-  expect(rows()).toEqual(["Steeruse the existing helper", "Follow-upadd tests after this"]);
+  expect(rows()).toEqual(["Steer: use the existing helper", "Follow-up: add tests after this"]);
   expect(input().value).toBe("");
   await type("still typing");
   await act(async () => button("Stop generating")!.click());

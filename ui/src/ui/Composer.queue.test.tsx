@@ -105,7 +105,43 @@ describe("sending while the agent works", () => {
     expect(onNew).not.toHaveBeenCalled();
   });
 
-  it("leaves slash commands, ask answers, and offline sessions without queue controls", async () => {
+  it("queues whenever the session can queue, even before the thread shows a run", async () => {
+    // A compaction can wait behind a shell command while no agent run shows.
+    const onNew = vi.fn<(message: AppendMessage) => Promise<void>>().mockResolvedValue(undefined);
+    await render({ onNew, running: false, working: { queue: true, steer: false } }); await type("after compaction");
+    expect(button("Send message")).toBeUndefined();
+    expect(button("Queue message")).toBeDefined();
+    await press("Enter");
+    expect(sentText(onNew.mock.calls[0]?.[0])).toBe("after compaction");
+  });
+
+  it("keeps focus in the input after queueing, so the keyboard stays open", async () => {
+    await render(); await type("add tests");
+    input().focus();
+    await click(button("Queue message"));
+    expect(document.activeElement).toBe(input());
+    await type("use the helper");
+    await click(button("Steer"));
+    expect(document.activeElement).toBe(input());
+  });
+
+  it("stops on Escape only with an empty draft, so Escape never throws away typing", async () => {
+    const onCancel = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await render({ onCancel }); await type("half a thought");
+    await act(async () => { input().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })); });
+    expect(onCancel).not.toHaveBeenCalled();
+    await type("");
+    await act(async () => { input().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })); });
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("names the keyboard shortcuts for assistive technology", async () => {
+    await render(); await type("add tests");
+    expect(button("Queue message")?.getAttribute("aria-keyshortcuts")).toBe("Enter");
+    expect(button("Steer")?.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+Enter Meta+Shift+Enter");
+  });
+
+  it("leaves slash commands and ask answers without queue controls, and disables them offline", async () => {
     await render(); await type("/name release");
     expect(button("Queue message")).toBeUndefined();
     await render({ offline: true }); await type("plain text");
@@ -134,15 +170,20 @@ describe("the queue above the composer", () => {
     await render({ items, onClear, compaction: { type: "queued", text: "/compact keep the release plan" } });
     const region = document.querySelector("section.queue")!;
     expect(region.getAttribute("aria-label")).toBe("Queued messages");
-    expect(region.querySelector("[role=status]")?.textContent).toBe("3 queued");
+    expect(region.querySelector(".queue-head span")?.textContent).toBe("3 queued");
+    expect(document.querySelector(".queue-announcer")?.textContent).toBe("3 queued");
     expect([...region.querySelectorAll("li")].map((row) => [row.querySelector(".queue-kind")?.textContent, row.querySelector(".queue-text")?.textContent]))
       .toEqual([["Steer", "use the helper"], ["Follow-up", "add tests"], ["Compaction", "/compact keep the release plan"]]);
     // The queued compaction is one of these rows, so the compaction notice does not repeat it.
     expect(document.querySelector(".compaction-notice")).toBeNull();
+    // A separator keeps the kind and the text apart for screen readers.
+    expect(region.querySelector("li")!.textContent).toBe("Steer: use the helper");
+    expect(region.querySelector("ol")!.tabIndex).toBe(0);
     await type("unfinished thought");
     await click(button("Clear entire queue (3)"));
     expect(onClear).toHaveBeenCalledOnce();
     expect(input().value).toBe("unfinished thought");
+    expect(document.activeElement).toBe(input());
   });
 
   it("disables clearing offline and disappears when the queue is empty", async () => {
@@ -152,5 +193,10 @@ describe("the queue above the composer", () => {
     await click(button("Clear entire queue")); expect(onClear).not.toHaveBeenCalled();
     await render({ items: [] });
     expect(document.querySelector("section.queue")).toBeNull();
+    // The live region stays mounted, so the first queued item and an empty queue are announced.
+    expect(document.querySelector(".queue-announcer")?.getAttribute("role")).toBe("status");
+    expect(document.querySelector(".queue-announcer")?.textContent).toBe("Queue empty");
+    await render({ items: [{ kind: "followUp", text: "add tests" }] });
+    expect(document.querySelector(".queue-announcer")?.textContent).toBe("1 queued");
   });
 });

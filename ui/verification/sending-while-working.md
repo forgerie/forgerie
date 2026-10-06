@@ -9,7 +9,9 @@ While the agent works, the one composer can still send. Pi owns the queue. The c
 | Clear the queue. | "Clear entire queue" in the queue's header. | Removes every queued item, including items from other windows. The run continues. |
 | Stop. | The filled Stop button, which keeps Send's place. | Stops the run and returns every queued item to the draft in delivery order, ahead of the typed text. |
 
-Shift+Enter still adds a new line. The keys follow assistant-ui's composer.
+Shift+Enter still adds a new line. The keys follow assistant-ui's composer. Escape stops the run only when the draft is empty, so it never discards typing. Focus stays in the input after Queue, Steer, or Clear, so a touch keyboard stays open.
+
+The controls appear whenever Pi would queue the message, not only while the header reads "Running". A compaction can wait behind a shell command with no agent run, and the bar then offers Queue, because Pi will queue the message there. The bar also offers Queue and Steer as soon as the transcript sees a run start, before status catches up.
 
 ## When each control appears
 
@@ -67,8 +69,8 @@ Set `APP_URL` when the dev server is not on port 8510, and `FORGERIE_ROOT` when 
 
 | Check | Result (2026-10-05, after rebasing onto shell mode) |
 | --- | --- |
-| Automated checks. | Build, TypeScript, lint, and 467 unit tests passed. A new test covers a `!` draft during an agent run: it offers "Run command", not Queue or Steer. Another covers an ordinary prompt beside a running shell command: it goes out without a queue behavior. |
-| Browser fixtures. | `queue-acceptance.mjs` passed 48 scenario, theme, and size combinations. Flows: keyboard and buttons, attachments blocked, Stop restores, and Clear keeps the draft and the run. No API mutation and no page error. `shell-acceptance.mjs` (36) and `compaction-acceptance.mjs` (72) still pass. |
+| Automated checks. | Build, TypeScript, lint, and 493 unit tests passed (after the review fixes and the model picker). Review-fix tests cover one shared "working" rule, focus after Queue, Steer, and Clear, Escape only from an empty draft, keyboard-shortcut names, the always-mounted announcer, and the kind separator. A new test covers a `!` draft during an agent run: it offers "Run command", not Queue or Steer. Another covers an ordinary prompt beside a running shell command: it goes out without a queue behavior. |
+| Browser fixtures. | `queue-acceptance.mjs` passed 48 scenario, theme, and size combinations. Flows: keyboard and buttons, attachments blocked, Stop restores (the preview's own Stop handler; the real path is covered by `ForgerieSession.queue.test.tsx` and the real-session check), and Clear keeps the draft and the run. The queue list stays within `min(9rem, 22cqb)`. No API mutation and no page error. `shell-acceptance.mjs` (36) and `compaction-acceptance.mjs` (72) still pass. |
 | Visual review. | All 24 captures from `queue-shots.mjs` were read in contact sheets: the queue, a queued compaction, and a draft with attachments, at four Fold postures in both themes. Queue rows wrap, the list scrolls inside its budget, and the input, Steer, Queue, and Stop stay on screen. |
 | Real session. | `real-queue-acceptance.mjs` passed against the live backend at folded portrait. Enter queued a follow-up and Ctrl+Shift+Enter queued a steer while the agent ran `sleep 25`. Pi listed both. Pi delivered the steer before the follow-up, and the queue list emptied. Stop during a later run returned the queued message to the draft ahead of the typed text, and Pi never delivered it. |
 

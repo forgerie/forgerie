@@ -116,7 +116,7 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
         shell={{ availability: shellAvailabilityOf(state), onRun: send }}
         queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
-        working={workingSend(state.status, state.compaction)}
+        working={workingSend(state.status, state.compaction, state.transcript.isRunning)}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
           listModels: store.listModels, listThinkingLevels: store.listThinkingLevels, onModel: store.setModel, onThinkingLevel: store.setThinkingLevel }}
         commandResult={state.commandResult ? {

@@ -66,7 +66,7 @@ try {
     if (state.list) {
       assert.ok(state.list.left >= state.column.left - 1 && state.list.right <= state.column.right + 1, `${name}: queue outside the column`);
       // The list scrolls inside its budget instead of pushing the input away.
-      assert.ok(state.list.height <= Math.max(9 * 16, 0.22 * posture.height) + 1, `${name}: queue too tall ${state.list.height}`);
+      assert.ok(state.list.height <= Math.min(9 * 16, 0.22 * posture.height) + 1, `${name}: queue too tall ${state.list.height}`);
     }
     result.geometry.push({ scenario, posture: posture.name, scheme, rows: state.rows.length, buttons: state.buttons.map((button) => button.label) });
   }

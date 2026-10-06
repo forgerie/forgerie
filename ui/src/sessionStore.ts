@@ -342,7 +342,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
    */
   function deliveryOf(text: string, attachments: PromptAttachment[] | undefined, steer: boolean): "steer" | "followUp" | undefined {
     if (state.sending) throw new NotSentError("Wait for the current message to send.");
-    const working = workingSend(state.status, state.compaction);
+    const working = workingSend(state.status, state.compaction, state.transcript.isRunning);
     if (!state.transcript.isRunning && !working.queue) return undefined;
     if (!working.queue) throw new NotSentError("Wait for the current run to finish.");
     if (steer && !working.steer) throw new NotSentError("Steering works only while the agent responds. Queue the message instead.");

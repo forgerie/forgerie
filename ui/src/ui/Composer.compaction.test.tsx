@@ -81,7 +81,7 @@ describe("compaction in the one composer", () => {
     const state: CompactionState = { type: "queued", text: "/compact retain the release plan" };
     await render({ state, running: true, queueCount: 3, offline: true, onClear });
     expect(document.querySelector(".compaction-notice")).toBeNull();
-    expect([...document.querySelectorAll("section.queue .queue-item")].at(-1)?.textContent).toBe("Compaction/compact retain the release plan");
+    expect([...document.querySelectorAll("section.queue .queue-item")].at(-1)?.textContent).toBe("Compaction: /compact retain the release plan");
     expect(button("Clear entire queue (3)")?.disabled).toBe(true);
     await click(button("Clear entire queue (3)")); expect(onClear).not.toHaveBeenCalled();
     await render({ state, running: true, queueCount: 3, onClear }); await type("unfinished thought");

@@ -95,12 +95,16 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   // the current response. Pi owns that queue. Commands and shell commands keep
   // their own rules, and attachments must wait, because Stop can return only
   // queued text.
-  const workingDraft = running && working.queue && !control && !compactDraft && !shellMode && !preparing
+  // `working` is the one rule for "the session works", shared with the store,
+  // so the buttons always match what a send does.
+  const workingDraft = working.queue && !control && !compactDraft && !shellMode && !preparing
     && !isCommand(text) && (text.trim() !== "" || count > 0);
   const queueBlocked = disabled || dictating || tooMany || count > 0 || !canSend;
   function sendWhileWorking(steer: boolean) {
     if (!workingDraft || queueBlocked || (steer && !working.steer)) return;
     void aui.composer.send(steer ? { steer: true } : undefined);
+    // The buttons unmount with the draft. Keep focus, and the touch keyboard, in the input.
+    input.current?.focus({ preventScroll: true });
   }
   const anchor = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -155,7 +159,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         aria-describedby={control?.headingId}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || tooMany || compactDraft || modelQuery !== undefined || shellMode || running ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        submitMode={control || tooMany || compactDraft || modelQuery !== undefined || shellMode || running || working.queue ? "none" : "enter"}
+        // Escape stops the run only from an empty draft, so it never throws typing into the queue path.
+        cancelOnEscape={text.trim() === "" && count === 0} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
         <AddAttachment disabled={disabled || preparing || !!control?.sending || count >= MAX_ATTACHMENTS} />
@@ -171,15 +177,14 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
             Choose model
           </button> : shellMode ? <button type="button" className="primary compact-send" disabled={shellBlocked} onClick={() => void runShell()}>
             Run command
-          </button> : <AuiIf condition={(s) => !s.thread.isRunning}>
-            <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
-              <ArrowUpIcon aria-hidden size={16} />
-            </ComposerPrimitive.Send>
-          </AuiIf>}
+          </button> : !running && !workingDraft && <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
+            <ArrowUpIcon aria-hidden size={16} />
+          </ComposerPrimitive.Send>}
           {workingDraft && <>
             {working.steer && <button type="button" className="steer-send" disabled={queueBlocked} onClick={() => sendWhileWorking(true)}
+              aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
               title="Send now. The agent reads it after its current step. Ctrl or Cmd+Shift+Enter">Steer</button>}
-            <button type="button" className="icon-button queue-send" aria-label="Queue message" disabled={queueBlocked}
+            <button type="button" className="icon-button queue-send" aria-label="Queue message" disabled={queueBlocked} aria-keyshortcuts="Enter"
               onClick={() => sendWhileWorking(false)} title="Send when the current work finishes. Enter">
               <ArrowUpIcon aria-hidden size={16} />
             </button>

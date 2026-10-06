@@ -23,6 +23,11 @@ describe("sending while the session works", () => {
     }
   });
 
+  it("treats a run the transcript has seen start as a response before status catches up", () => {
+    expect(workingSend(idle, none, true)).toEqual({ queue: true, steer: true });
+    expect(workingSend({ ...idle, isCompacting: true }, none, true)).toEqual({ queue: true, steer: false });
+  });
+
   it("needs neither while only a shell command runs, because Pi starts the prompt at once", () => {
     expect(workingSend({ ...idle, isBashRunning: true }, none)).toEqual({ queue: false, steer: false });
   });
