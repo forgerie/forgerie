@@ -45,7 +45,7 @@ describe("agent choice", () => {
 describe("starting a session", () => {
   const cleanup: (() => Promise<void>)[] = [];
   afterEach(async () => { for (const dispose of cleanup.splice(0)) await dispose(); });
-  async function server(behavior: { start?: number | "drop"; prompt?: number | "drop" }) {
+  async function server(behavior: { start?: number | "drop"; prompt?: number | "drop"; startError?: string }) {
     const requests: { path: string; body: unknown }[] = [];
     const http = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
@@ -56,7 +56,7 @@ describe("starting a session", () => {
       const send = (code: number, data: unknown) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
       const outcome = path === "/api/sessions" ? behavior.start : behavior.prompt;
       if (outcome === "drop") { response.destroy(); return; }
-      if (outcome !== undefined) { send(outcome, { error: `refused with ${outcome}` }); return; }
+      if (outcome !== undefined) { send(outcome, { error: path === "/api/sessions" && behavior.startError ? behavior.startError : `refused with ${outcome}` }); return; }
       if (path === "/api/sessions") send(200, { id: "new-1", cwd: (body as { cwd: string }).cwd, path: "/x.jsonl" });
       else send(200, { accepted: true });
     });
@@ -75,19 +75,21 @@ describe("starting a session", () => {
     expect(result).toEqual({ type: "started", session: { id: "new-1", cwd: "/code/forgerie" } });
     expect(requests.map((request) => request.path)).toEqual(["/api/sessions", "/api/sessions/new-1/prompt"]);
     expect(requests[0]!.body).toMatchObject({ cwd: "/code/forgerie", modelSpec: "cliproxyapi/claude-opus-5-5", thinkingLevel: "high" });
-    expect(typeof (requests[0]!.body as { startupToken: unknown }).startupToken).toBe("string");
     expect(requests[1]!.body).toEqual({ cwd: "/code/forgerie", text: "Fix the build" });
   });
 
   it("leaves Pi's defaults alone when nothing was chosen", async () => {
     const { api, requests } = await server({});
     await api.start("/code/forgerie", "hi", {});
-    expect(Object.keys(requests[0]!.body as object).sort()).toEqual(["cwd", "startupToken"]);
+    expect(Object.keys(requests[0]!.body as object).sort()).toEqual(["cwd"]);
   });
 
-  it("says a refused start made no session, and a lost reply may have", async () => {
-    const refused = await (await server({ start: 400 })).api.start("/nowhere", "hi", {});
-    expect(refused).toEqual({ type: "failed", failure: { stage: "start", message: "refused with 400", maybeStarted: false } });
+  it("says a request the server rejected made no session; a start failure, a 400 from inside the start, or a lost reply may have", async () => {
+    const refused = await (await server({ start: 400, startError: 'Unknown model "x/y". Pass an exact "provider/model-id".' })).api.start("/code/forgerie", "hi", {});
+    expect(refused).toEqual({ type: "failed", failure: { stage: "start", message: 'Unknown model "x/y". Pass an exact "provider/model-id".', maybeStarted: false } });
+    // The real route answers 400 for a missing folder too, after it has written a session file.
+    const inside = await (await server({ start: 400, startError: "Stored session working directory does not exist: /nowhere" })).api.start("/nowhere", "hi", {});
+    expect(inside.type === "failed" && inside.failure.stage === "start" && inside.failure.maybeStarted).toBe(true);
     const lost = await server({ start: "drop" });
     const result = await lost.api.start("/code/forgerie", "hi", {});
     expect(result.type === "failed" && result.failure.stage === "start" && result.failure.maybeStarted).toBe(true);

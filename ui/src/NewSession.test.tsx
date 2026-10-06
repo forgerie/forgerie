@@ -19,7 +19,7 @@ const workspaces: Record<string, Workspace[]> = {
 type StartResult = Awaited<ReturnType<NewSessionApi["start"]>>;
 
 /** A configurable new-session API: real promises, scripted outcomes. */
-function scriptedApi(outcome: (cwd: string, text: string, choice: AgentChoice) => StartResult = (cwd) => ({ type: "started", session: { id: "s-new", cwd } })) {
+function scriptedApi(outcome: (cwd: string, text: string, choice: AgentChoice) => StartResult | Promise<StartResult> = (cwd) => ({ type: "started", session: { id: "s-new", cwd } })) {
   const starts: { cwd: string; text: string; choice: AgentChoice }[] = [];
   const modelReads: string[] = [];
   const api: NewSessionApi = {
@@ -132,6 +132,7 @@ describe("starting a new session", () => {
     await send();
     expect(document.querySelector(".notice")!.textContent).toMatch(/may have started anyway/);
     expect(script.starts).toHaveLength(1);
+    expect(textarea().value).toBe("hi");
   });
 
   it("opens the session it made when only the first message failed, with the message back in the draft", async () => {
@@ -152,6 +153,52 @@ describe("starting a new session", () => {
     expect(script.starts).toEqual([]);
     expect(textarea().value).toBe("!ls");
     expect(document.querySelector(".notice")!.textContent).toMatch(/Shell commands need a running session/);
+  });
+
+  it("does not open the session when the reader left during the start, and keeps a refused message in the saved draft", async () => {
+    let finish!: (result: StartResult) => void;
+    const script = scriptedApi(() => new Promise((resolve) => { finish = resolve; }));
+    const onStarted = vi.fn();
+    const drafts = createDraftStore(storage());
+    await render(script.api, onStarted, drafts);
+    await type("Fix the build");
+    await send();
+    expect(document.querySelector(".connection-status")!.textContent).toBe("Starting session…");
+    await act(async () => root.unmount());
+    await act(async () => { finish({ type: "failed", failure: { stage: "start", message: "Network error.", maybeStarted: true } }); });
+    expect(drafts.session("new-session").chat()).toBe("Fix the build");
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    const second = scriptedApi(() => new Promise((resolve) => { finish = resolve; }));
+    await render(second.api, onStarted, drafts);
+    await send();
+    await act(async () => root.unmount());
+    await act(async () => { finish({ type: "started", session: { id: "s-late", cwd: "/code/forgerie" } }); });
+    expect(onStarted).not.toHaveBeenCalled();
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+  });
+
+  it("holds Send until this folder's models are known, so the shown model is the one sent", async () => {
+    let release!: () => void;
+    const script = scriptedApi();
+    const models = script.api.models;
+    script.api.models = (cwd, signal) => new Promise((resolve) => { release = () => resolve(models(cwd, signal)); });
+    await render(script.api);
+    await type("hi");
+    await send();
+    expect(script.starts).toEqual([]);
+    await act(async () => { release(); });
+    await settle();
+    await send();
+    expect(script.starts[0]!.choice.model).toEqual(opus);
+  });
+
+  it("tells the URL where it starts after a move", async () => {
+    const onDestination = vi.fn();
+    await act(async () => root.render(<NewSession cwd="/code/forgerie" api={scriptedApi().api} onStarted={() => {}} onDestination={onDestination} />));
+    await settle();
+    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
+    await click(button("korri", document.querySelector(".destination-panel")!));
+    expect(onDestination).toHaveBeenCalledWith("/code/korri");
   });
 
   it("keeps the unsent first message across a reload", async () => {

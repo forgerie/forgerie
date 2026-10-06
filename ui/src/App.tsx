@@ -21,6 +21,8 @@ export function App() {
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
   // A session that does not exist yet: the folder its composer starts in.
   const [composing, setComposing] = useState(readNew);
+  // Bumped when a new composer opens, so moving its destination never remounts it.
+  const [composeKey, setComposeKey] = useState(0);
   // Unsent drafts outlive a session switch and a reload, in this browser only.
   const [drafts] = useState(() => createDraftStore(browserStorage()));
   // With nothing selected there is nothing to cover, so the sheet starts open.
@@ -46,23 +48,32 @@ export function App() {
   }, []);
   const switchSession = useCallback((session: Session, draft?: string, error?: string) => {
     setOpen(false);
+    const fromComposer = readNew() !== undefined;
     setComposing(undefined);
     setCommandSelection({ session, draft, ...(error ? { error } : {}) });
-    if (session.id === selectedId && readNew() === undefined) return;
+    if (session.id === selectedId && !fromComposer) return;
     const url = new URL(window.location.href);
     url.searchParams.delete("new");
     url.searchParams.set("session", session.id);
-    window.history.pushState({}, "", url);
+    // A started session replaces its composer: Back must not lead to an empty composer.
+    if (fromComposer) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSelectedId(session.id);
   }, [selectedId]);
   const select = useCallback((row: Row) => switchSession(row.session), [switchSession]);
   // New session: the composer starts where the reader is, and the URL remembers it.
   const { find, recent } = picker;
-  const startNew = useCallback(() => {
-    const open = readSelected();
-    const cwd = defaultDestinationCwd(open ? find(open) : undefined, recent, []);
+  const startNew = useCallback(async () => {
     setOpen(false);
-    if (!cwd) { setComposing(""); return; }
+    if (readNew() !== undefined && !readSelected()) {
+      document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+      return;
+    }
+    const open = readSelected();
+    // Before the session list loads, or with no sessions yet, Forgerie's projects decide.
+    const projects = await newSessionApi.projects().catch(() => []);
+    const cwd = defaultDestinationCwd(open ? find(open) : undefined, recent, projects);
+    setComposeKey((key) => key + 1);
+    if (!cwd) { setCommandSelection(undefined); setSelectedId(undefined); setComposing(""); return; }
     const url = new URL(window.location.href);
     url.searchParams.delete("session");
     url.searchParams.set("new", cwd);
@@ -88,14 +99,15 @@ export function App() {
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : undefined;
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
     picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
-      actions={{ ...picker.actions, onSelect: select, onNew: startNew,
+      actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onClose: layout === "overlay" && (selectedId || composing !== undefined) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
     thread={composing !== undefined && !selectedId ? (composing
-      ? <NewSession key={composing} cwd={composing} api={newSessionApi} drafts={drafts}
+      ? <NewSession key={composeKey} cwd={composing} api={newSessionApi} drafts={drafts}
+        onDestination={(next) => { const url = new URL(window.location.href); url.searchParams.set("new", next); window.history.replaceState({}, "", url); }}
         onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} />
-      : <SessionFrame name="New session" status="" error="Forgerie knows no project or session folder yet. Start the first session in the old client."><div className="thread-empty" /></SessionFrame>)
+      : <SessionFrame name="New session" status="" error="Forgerie knows no project yet. Add a project in the old client, then start a session here."><div className="thread-empty" /></SessionFrame>)
       : selectedId ? <ForgerieSession key={selectedId} id={selectedId}
       known={known}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}

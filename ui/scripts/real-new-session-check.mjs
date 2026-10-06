@@ -67,6 +67,15 @@ try {
   assert.equal(await evaluate(cdp, "new URLSearchParams(location.search).has('new')"), false);
   step("Send created the session and opened it", { id });
 
+  // The started session replaced its composer in history, so Back does not land on an empty composer.
+  const backTarget = await evaluate(cdp, "history.length");
+  await evaluate(cdp, "history.back()");
+  await sleep(800);
+  assert.notEqual(await evaluate(cdp, "document.querySelector('.session-title')?.textContent"), "New session", "Back led to the empty composer");
+  await evaluate(cdp, "history.forward()");
+  await until(`new URLSearchParams(location.search).get("session") === ${JSON.stringify(id)}`);
+  step("Back from the started session does not reopen the empty composer", { historyLength: backTarget });
+
   const status = await waitUntil("run ends", async () => { const s = await call(`/api/sessions/${id}/status?${new URLSearchParams({ cwd })}`); return s.isStreaming ? undefined : s; });
   assert.equal(status.thinkingLevel, "low");
   assert.ok(shownModel.startsWith(status.model?.name ?? status.model?.id ?? "?"), `bar showed ${shownModel}, Pi started ${status.model?.id}`);

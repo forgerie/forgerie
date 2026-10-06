@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import type { Session, SessionModel } from "./contracts";
 import { useThreadMessages } from "./useThreadMessages";
@@ -24,8 +24,10 @@ interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel |
  * session, sends the message, and opens it. Nothing is retried: a step that
  * may have worked is reported, never repeated.
  */
-export function NewSession({ cwd: initialCwd, api, drafts, onStarted }: {
+export function NewSession({ cwd: initialCwd, api, drafts, onStarted, onDestination }: {
   cwd: string; api: NewSessionApi; drafts?: DraftStore | undefined;
+  /** The author moved the destination. The URL follows, so a reload comes back here. */
+  onDestination?: ((cwd: string) => void) | undefined;
   /** The session exists. `draft` and `error` are set when its first message did not go out. */
   onStarted: (session: Session, unsent?: { draft: string; error: string }) => void;
 }) {
@@ -39,6 +41,17 @@ export function NewSession({ cwd: initialCwd, api, drafts, onStarted }: {
   const [saved] = useState(() => drafts?.session(NEW_SESSION_DRAFT));
   const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer, saved));
   const { cwd } = destination;
+  // A start can outlive this view (Back, another session, a reload). Its
+  // result must not pull the reader away from where they went.
+  const alive = useRef(true);
+  useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // A reload during a start could leave a session without its first message.
+  useEffect(() => {
+    if (phase.type !== "starting") return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [phase.type]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -49,6 +62,7 @@ export function NewSession({ cwd: initialCwd, api, drafts, onStarted }: {
   useEffect(() => {
     const controller = new AbortController();
     api.models(cwd, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
       setDefaults({ cwd, models: result.models, model: result.model, thinkingLevel: result.thinkingLevel });
       setChoice((current) => keepChoice(current, result.models));
     }, () => { if (!controller.signal.aborted) setDefaults({ cwd, models: [] }); });
@@ -63,7 +77,8 @@ export function NewSession({ cwd: initialCwd, api, drafts, onStarted }: {
     const restore = (error: string) => {
       setPhase({ type: "composing", error });
       const composer = runtimeRef.current?.thread.composer;
-      composer?.setText([text, composer.getState().text].filter(Boolean).join("\n"));
+      if (composer) composer.setText([text, composer.getState().text].filter(Boolean).join("\n"));
+      else saved?.saveChat([text, saved.chat()].filter(Boolean).join("\n"));
     };
     if (text === "") return;
     if (text.startsWith("!")) { restore("Shell commands need a running session. Send a first message, then run the command."); return; }
@@ -71,10 +86,10 @@ export function NewSession({ cwd: initialCwd, api, drafts, onStarted }: {
     // Start with exactly what the bar shows. Pi's own default for a create can
     // differ from the default its model list reports for the same folder.
     const result = await api.start(cwd, text, { model, thinkingLevel });
-    if (result.type === "started") { saved?.saveChat(""); onStarted(result.session); return; }
+    if (result.type === "started") { if (alive.current) onStarted(result.session); return; }
     const { failure } = result;
     if (failure.stage === "prompt") {
-      saved?.saveChat("");
+      if (!alive.current) return;
       onStarted(failure.session, { draft: text, error: `The session started, but its first message may not have reached Pi: ${failure.message} Check the transcript before you send it again.` });
       return;
     }
@@ -86,6 +101,7 @@ export function NewSession({ cwd: initialCwd, api, drafts, onStarted }: {
   const runtime = useExternalStoreRuntime({
     messages: useThreadMessages([], false), onNew, adapters: { dictation },
     isRunning: false, isDisabled: phase.type === "starting",
+    isSendDisabled: defaults?.cwd !== cwd,
   });
   useEffect(() => { runtimeRef.current = runtime; return () => { runtimeRef.current = null; }; }, [runtime]);
   useEffect(() => {
@@ -115,7 +131,7 @@ export function NewSession({ cwd: initialCwd, api, drafts, onStarted }: {
           cwd, label, disabled: phase.type === "starting",
           listProjects: (signal) => api.projects(signal),
           listWorkspaces: (projectId, signal) => api.workspaces(projectId, signal),
-          onChoose: (next, nextLabel) => setDestination({ cwd: next, label: nextLabel }),
+          onChoose: (next, nextLabel) => { setDestination({ cwd: next, label: nextLabel }); onDestination?.(next); },
         }} />} />
     </SessionFrame>
     </DictationProvider>

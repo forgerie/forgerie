@@ -67,8 +67,15 @@ export function keepChoice(choice: AgentChoice, models: readonly SessionModel[])
 export type StartFailure = { stage: "start"; message: string; maybeStarted: boolean }
   | { stage: "prompt"; session: Session; message: string };
 class Refusal extends Error { constructor(message: string, readonly status: number) { super(message); } }
-/** A 4xx other than 408 or 429 means the server read the request and refused it. */
-const refused = (error: unknown): error is Refusal => error instanceof Refusal && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+/**
+ * The create route answers 400 for request errors and for failures inside
+ * the start itself, so a 4xx alone does not prove no session exists. Only the
+ * route's own request checks do: a missing or malformed field, an unknown
+ * model, or an unknown thinking level.
+ */
+const VALIDATION = /(\bis required\b|\bmust be\b|^Unknown model\b|^Model not found\b|^Unknown thinking level\b|^Invalid thinking level\b)/iu;
+const refused = (error: unknown): error is Refusal => error instanceof Refusal && error.status >= 400 && error.status < 500
+  && error.status !== 408 && error.status !== 429 && VALIDATION.test(error.message);
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export type Fetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -96,7 +103,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
       let session: Session;
       try {
         const modelSpec = choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined;
-        session = await call("/api/sessions", sessionSchema, post({ cwd, startupToken: crypto.randomUUID(),
+        session = await call("/api/sessions", sessionSchema, post({ cwd,
           ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}) }));
       } catch (error) {
         return { type: "failed", failure: { stage: "start", message: messageOf(error), maybeStarted: !refused(error) } };

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, FolderIcon } from "lucide-react";
 import type { Project, Workspace } from "../newSession";
@@ -60,19 +60,29 @@ export function DestinationPicker({ binding }: { binding: DestinationBinding }) 
   </div>;
 }
 
+/** How a destination reads: the project, then the workspace when it is not the project's own folder. */
+function workspaceLabel(project: Project, workspace: Workspace): string {
+  return workspace.isMain || workspace.path === project.path ? project.name : `${project.name} · ${workspace.branch ?? workspace.label}`;
+}
+
 function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   id: string; binding: DestinationBinding; anchor: RefObject<HTMLDivElement | null>; trigger: RefObject<HTMLButtonElement | null>;
   onClose: (returnFocus: boolean) => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<Step>({ type: "projects" });
+  const cameFrom = useRef<string | undefined>(undefined);
   const [query, setQuery] = useState("");
   const projects = useRead(binding.listProjects, "projects");
   const project = step.type === "workspaces" ? step.project : undefined;
   const workspaces = useRead(project ? (signal) => binding.listWorkspaces(project.id, signal) : undefined, project?.id ?? "none");
   usePanelPlacement(panel, anchor, PANEL_CAP);
   // Focus moves in at once, so Escape always reaches the panel; no touch keyboard opens.
-  useLayoutEffect(() => { panel.current?.focus({ preventScroll: true }); }, [step]);
+  useLayoutEffect(() => {
+    const back = step.type === "projects" && cameFrom.current
+      ? panel.current?.querySelector<HTMLButtonElement>(`[data-project="${cameFrom.current}"]`) : undefined;
+    (back ?? panel.current)?.focus({ preventScroll: true });
+  }, [step]);
   useEffect(() => {
     const outside = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -81,13 +91,22 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
     document.addEventListener("pointerdown", outside, true);
     return () => document.removeEventListener("pointerdown", outside, true);
   }, [onClose, trigger]);
-  // A project with one checkout needs no second step.
+  // Focus leaving the panel by keyboard closes it, as a tap outside does.
+  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (next && !panel.current?.contains(next)) onClose(false);
+  };
+  // A project with one checkout needs no second step. Once per project.
+  const autoChosen = useRef<string | undefined>(undefined);
+  const latest = useRef({ binding, onClose });
+  latest.current = { binding, onClose };
   useEffect(() => {
-    if (!project || workspaces.type !== "ready" || workspaces.value.length !== 1) return;
+    if (!project || workspaces.type !== "ready" || workspaces.value.length !== 1 || autoChosen.current === project.id) return;
+    autoChosen.current = project.id;
     const only = workspaces.value[0]!;
-    binding.onChoose(only.path, project.name);
-    onClose(true);
-  }, [project, workspaces, binding, onClose]);
+    latest.current.binding.onChoose(only.path, workspaceLabel(project, only));
+    latest.current.onClose(true);
+  }, [project, workspaces]);
   const choose = (cwd: string, label: string) => { binding.onChoose(cwd, label); onClose(true); };
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
@@ -107,7 +126,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   const needle = query.trim().toLowerCase();
   const shownProjects = projects.type === "ready"
     ? projects.value.filter((item) => !needle || item.name.toLowerCase().includes(needle) || item.path.toLowerCase().includes(needle)) : [];
-  return <div ref={panel} id={id} className="model-panel destination-panel" role="dialog" tabIndex={-1}
+  return <div ref={panel} id={id} className="model-panel destination-panel" role="dialog" tabIndex={-1} onBlur={onBlur}
     aria-label={project ? `Workspaces of ${project.name}` : "Where the session starts"} onKeyDown={onKeyDown}>
     {step.type === "projects" ? <>
       <input type="search" className="model-search" placeholder="Search projects" aria-label="Search projects"
@@ -121,7 +140,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
         <ul>{shownProjects.map((item) => {
           const here = binding.cwd === item.path || binding.cwd.startsWith(`${item.path}/`);
           return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={here || undefined}
-            onClick={() => { setQuery(""); setStep({ type: "workspaces", project: item }); }}>
+            data-project={item.id} onClick={() => { cameFrom.current = item.id; setQuery(""); setStep({ type: "workspaces", project: item }); }}>
             <span className="model-row-name">{item.name}</span>
             <span className="model-row-meta"><span className="destination-path">{item.path}</span></span>
             {here && <CheckIcon aria-hidden size={16} className="model-row-check" />}
@@ -137,7 +156,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
         {workspaces.type === "failed" && <p className="model-hint" role="alert">Workspaces unavailable: {workspaces.message}</p>}
         <ul>{workspaces.type === "ready" && workspaces.value.map((item) => {
           const name = item.branch ?? item.label;
-          const label = item.isMain || item.path === step.project.path ? step.project.name : `${step.project.name} · ${name}`;
+          const label = workspaceLabel(step.project, item);
           return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={binding.cwd === item.path || undefined}
             onClick={() => choose(item.path, label)}>
             <span className="model-row-name">{name}{item.isMain && <span className="model-row-variant">main checkout</span>}</span>
