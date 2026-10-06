@@ -10,7 +10,7 @@ This deliberately differs from the guide's immediate-action example. Pi commands
 
 Discovery uses `GET /api/sessions/:id/commands?cwd=...`. Execution uses `POST /api/sessions/:id/commands/run` with `cwd` and the original text. Follow-up choices use `/commands/respond` with the exact request and option IDs. Mutations never retry automatically. Errors preserve the draft. Discovery failure shows Retry without breaking the live session. Reconnect and `/reload` refresh discovery.
 
-The same picker works in ask mode. Palette navigation has Enter precedence over answering the question. Non-prompt commands do not necessarily close an ask; Pi owns that decision. Command results show above the composer rather than creating unpersisted transcript messages. A fork or clone result selects its returned session and restores a returned draft. `/tree` is read-only in this MVP; use the current client for navigation.
+The same picker works in ask mode. Palette navigation has Enter precedence over answering the question. Non-prompt commands do not necessarily close an ask; Pi owns that decision. Command results show above the composer rather than creating unpersisted transcript messages. A fork or clone result selects its returned session and restores a returned draft. `/tree` opens the [session tree](session-tree.md) instead of a command result.
 
 ## Checks
 

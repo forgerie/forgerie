@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Session tree
+
+`/tree` and the header's tree button open the session tree in a modal. Pick an entry, then continue the session from it, with an optional summary of the branch it leaves, or fork a new session from it. The modal is a card while the window has room and meets each window edge as that room runs out. See [behavior, layout, verification, and limits](session-tree.md).
+
 ## Model and thinking level
 
 The input bar shows the session's model and thinking level. Press it, or send `/model`, to change either one for this session. See [behavior, verification, and limits](model-thinking.md).
