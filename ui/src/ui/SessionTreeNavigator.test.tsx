@@ -158,6 +158,67 @@ describe("session tree navigator", () => {
     expect(button("Stopping…").disabled).toBe(true);
   });
 
+  it("reopens a dialog the browser closes while an action runs, and closes the store's copy when idle", async () => {
+    const busy = binding({ operation: { type: "forking" } });
+    await render(busy);
+    const showModal = vi.spyOn(dialog(), "showModal");
+    await act(async () => { dialog().dispatchEvent(new Event("close")); });
+    expect(showModal).toHaveBeenCalledOnce();
+    expect(busy.onClose).not.toHaveBeenCalled();
+    const idle = binding();
+    await render(idle);
+    await act(async () => { dialog().dispatchEvent(new Event("close")); });
+    expect(idle.onClose).toHaveBeenCalledOnce();
+  });
+
+  it("closes from the backdrop only for a press that starts there, and never stops a summary", async () => {
+    const press = (down: Element) => act(async () => {
+      down.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      dialog().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const idle = binding();
+    await render(idle);
+    await press(document.querySelector('input[type="search"]')!);
+    expect(idle.onClose).not.toHaveBeenCalled();
+    await press(dialog());
+    expect(idle.onClose).toHaveBeenCalledOnce();
+    const summarizing = binding({ operation: { type: "continuing", summarizing: true, aborting: false } });
+    await render(summarizing);
+    await press(dialog());
+    expect(summarizing.onClose).not.toHaveBeenCalled();
+    expect(summarizing.onAbort).not.toHaveBeenCalled();
+  });
+
+  it("nests entries by fork, not by every linear step", async () => {
+    await render(binding());
+    await click(button("All"));
+    const level = (summary: string) => rows().find((row) => row.textContent?.includes(summary))!;
+    expect(["Plan the login fix", "Here is a plan", "Write the tests", "Tests written", "Try sessions instead"]
+      .map((summary) => level(summary).getAttribute("aria-level"))).toEqual(["1", "1", "2", "2", "2"]);
+    expect(rows().filter((row) => row.hasAttribute("aria-expanded")).map((row) => row.querySelector(".tree-summary")?.textContent))
+      .toEqual(["Here is a plan"]);
+    // Left on a linear entry steps back instead of folding the rest away.
+    await click(level("Tests written"));
+    await key("ArrowLeft");
+    expect(selected()).toBe("Write the tests");
+    expect(rows()).toHaveLength(5);
+  });
+
+  it("leaves modified keys to the browser", async () => {
+    await render(binding());
+    await act(async () => {
+      document.querySelector('[role="tree"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(selected()).toBe("Write the tests");
+  });
+
+  it("puts focus back on the selected entry when an action ends", async () => {
+    await render(binding({ operation: { type: "forking" } }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    await render(binding({ operation: { type: "idle", notice: { tone: "status", message: "Fork cancelled. No new session was created." } } }));
+    expect(document.activeElement?.querySelector(".tree-summary")?.textContent).toBe("Write the tests");
+  });
+
   it("shows the outcome of the last action", async () => {
     const notice = (operation: TreeOperation) => render(binding({ operation }));
     await notice({ type: "idle", notice: { tone: "error", message: "The session changed since /tree was opened." } });

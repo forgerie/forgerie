@@ -8,7 +8,7 @@ Type `/tree` and send it, or press the tree button in the session header. The se
 | Summarize, then Continue | Pi also writes a summary of the branch the session leaves. The optional focus text steers that summary. Summaries use the model and cost model usage. |
 | Fork | Pi starts a new session file from the history up to the entry. A user message forks from before itself and becomes the new session's draft. The client opens the new session. The original session does not change. |
 
-The tree opens on your own messages. Choose No tools, Conversation, Labeled, or All to see more. Search matches every word you type, in the label, the kind, and the summary. A lens or search change keeps the entry you picked: the selection moves to its nearest visible ancestor, and comes back when the entry is visible again. Arrow keys move and fold, Home and End jump, and Enter continues. The copy button in the header copies the selected entry's text.
+The tree opens on your own messages. Choose No tools, Conversation, Labeled, or All to see more. Search matches every word you type, in the label, the kind, and the summary. A lens or search change keeps the entry you picked: the selection moves to its nearest visible ancestor, and comes back when the entry is visible again. Up and Down move, Home and End jump, and Enter continues. Left and Right fold and unfold a fork. On a linear entry, Left steps to the entry before it. Keys with Ctrl, Alt, or Cmd go to the browser. Screen readers hear a level for each fork, not for each entry, so a long linear history stays at one level. The copy button in the header copies the selected entry's text.
 
 Rows that the move would take off the active path fade while you choose. The current entry shows "Current" in blue. A filled dot marks the active path. Rails and a caret appear only at real forks.
 
@@ -23,9 +23,12 @@ The header and the action row stay in place. Only the tree scrolls while the win
 The client uses the existing `/tree/navigate`, `/tree/fork`, and `/abort` endpoints. The backend and the Lit client do not change.
 
 - Each action sends `expectedLeafId`, the leaf the modal showed. If the session moved since then, Pi refuses the action, and the modal shows Pi's reason. Close the modal and run `/tree` again.
-- The client never retries an action. If the reply is lost, the modal says that the session may have changed.
+- The client never retries an action. A 4xx reply is Pi's refusal, and the modal shows Pi's reason. A lost reply or a 5xx reply can hide a move that happened, so the modal then says that the session may have changed. After any failure the client re-reads the history, because the server also reports some failures after the move as 400.
+- A tree action waits up to 5 minutes, the same limit as Forgerie's own proxy for these routes, because a summary uses the model. Other requests wait 20 seconds.
 - After a continue, the client reloads the history of the same session. The connection stays "Connected" during the reload.
-- While an action runs, every action and the close button are disabled. Escape stops a running summary. Escape does nothing during a plain continue or a fork.
+- While an action runs, every action and the close button are disabled. Escape stops a running summary. Escape does nothing during a plain continue or a fork. If the browser closes the dialog anyway, it reopens until the action ends.
+- A press on the backdrop closes an idle modal only if the press also started on the backdrop. It never stops a summary. Only Stop summary and Escape do that.
+- When an action ends without closing the modal, focus returns to the selected entry.
 - Pi refuses `/tree` while the session works, so the header button is disabled during a run.
 - Continue replaces any unsent text in the message box with the entry's text, or clears it. The old client does the same.
 - In the User lens the current entry is often an assistant reply, which the lens hides. The selection then starts on the last user message before it, and no row shows "Current". Choose All to see it.
@@ -49,7 +52,8 @@ SESSION_ID=<idle session with two user messages> \
 
 | Check | Result (2026-10-05) |
 | --- | --- |
-| Unit and component tests | Build, lint, and 490 tests pass. 49 tests are new: the model port (22), outcomes and presentation (7), the store (6), the modal (11), and the session view (3). |
+| Unit and component tests | Build, lint, and all tests pass. 56 tests are new: the model port (22), outcomes and presentation (7), the store (8), the modal (16), and the session view (3). |
+| Independent review | One blocker (a 20-second client timeout on summaries), two high, and five lower findings. The blocker, both high findings, and four of the five lower findings are fixed and tested. Not fixed: the fold caret is 28 px wide and reachable only by pointer (the arrow keys do the same job), and the selection bar sits on the left in right-to-left text. |
 | Fixture browser check | 60 combinations pass. State survives four posture changes. Keyboard flow passes. No API write and no browser error. |
 | Posture captures | 40 captures (five states, two schemes, four postures). I read the captures for every state at folded portrait and folded landscape, and spot-checked the unfolded postures. |
 | Real session | Session `01a0d563…` (35 history entries, 4 user messages). The fork held 10 entries and its draft was the second message. Continue in the fork returned the first message and emptied the transcript. The original still held 35 entries. The fork was archived. |

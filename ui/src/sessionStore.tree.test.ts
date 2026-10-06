@@ -23,7 +23,7 @@ function gate() {
 }
 async function until(predicate: () => boolean) { await expect.poll(predicate, { timeout: 2000 }).toBe(true); }
 
-async function treeServer() {
+async function treeServer(timing: { requestTimeoutMs?: number; treeActionTimeoutMs?: number } = {}) {
   const requests: { path: string; body: unknown }[] = [];
   const state = {
     historyReads: 0,
@@ -67,7 +67,7 @@ async function treeServer() {
     ws.close(); http.closeAllConnections();
     await new Promise<void>((resolve) => http.close(() => resolve()));
   });
-  const store = createSessionStore("test", transport, { retryDelayMs: 10 }, { id: "test", cwd: "/work tree" });
+  const store = createSessionStore("test", transport, { retryDelayMs: 10, ...timing }, { id: "test", cwd: "/work tree" });
   cleanup.push(store.dispose);
   await store.start();
   await until(() => store.getSnapshot().connection.type === "ready");
@@ -115,6 +115,33 @@ describe("session tree navigation", () => {
     expect(posts(requests, "/tree/navigate")).toHaveLength(1);
     expect(store.getSnapshot().tree).toMatchObject({ type: "open", operation: { type: "idle",
       notice: { tone: "error", message: "The session changed since /tree was opened." } } });
+  });
+
+  it("waits for a summary longer than an ordinary request may take", async () => {
+    const { store, state } = await treeServer({ requestTimeoutMs: 50, treeActionTimeoutMs: 2000 });
+    await store.openTree();
+    state.navigateGate = gate();
+    const pending = store.continueTree("u1", { mode: "default" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    state.navigateGate.resolve();
+    expect(await pending).toEqual({ type: "continued", editorText: "First question" });
+  });
+
+  it("re-reads the history after any failed action, and warns when the reply can hide a move", async () => {
+    const { store, state } = await treeServer();
+    await store.openTree();
+    state.navigateCode = 502;
+    let reads = state.historyReads;
+    expect(await store.continueTree("u1", { mode: "none" })).toEqual({ type: "unchanged" });
+    expect(store.getSnapshot().tree).toMatchObject({ operation: { notice: { tone: "error", message: expect.stringContaining("may have changed") } } });
+    await until(() => state.historyReads > reads);
+    await until(() => store.getSnapshot().connection.type === "ready");
+
+    state.navigateCode = 409;
+    reads = state.historyReads;
+    await store.continueTree("u1", { mode: "none" });
+    expect(store.getSnapshot().tree).toMatchObject({ operation: { notice: { message: "The session changed since /tree was opened." } } });
+    await until(() => state.historyReads > reads);
   });
 
   it("forks from an entry and hands back the new session with its draft", async () => {

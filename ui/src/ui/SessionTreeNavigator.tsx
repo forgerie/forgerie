@@ -53,6 +53,9 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose }: Se
   const [focusRow, setFocusRow] = useState(true);
   // Read during the first render, before showModal moves focus into the dialog.
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
+  // A backdrop press counts only when it also started there, so a drag out of the search field does not close.
+  const pressedBackdrop = useRef(false);
+  const wasBusy = useRef(false);
 
   const view = sessionTreeView(model, { foldedIds: folded, filter, search });
   const rows = view.rows;
@@ -74,6 +77,11 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose }: Se
   useEffect(() => () => { if (opener?.isConnected) opener.focus({ preventScroll: true }); }, [opener]);
   // Turning Summarize on reveals its optional focus; the caret goes there in the same motion.
   useEffect(() => { if (summarize) focusInput.current?.focus(); }, [summarize]);
+  // The pressed action button is disabled while it runs, so focus falls out of the tree. Put it back after.
+  useEffect(() => {
+    if (wasBusy.current && !busy) setFocusRow(true);
+    wasBusy.current = busy;
+  }, [busy]);
   useEffect(() => {
     if (!focusRow) return;
     setFocusRow(false);
@@ -93,9 +101,18 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose }: Se
     if (busy || selectedId === undefined || choice === undefined) return;
     onContinue(selectedId, choice);
   };
-  const dismiss = () => { if (!busy) onClose(); else if (summarizing) onAbort(); };
+  // Escape closes when idle, stops a running summary, and otherwise waits. A stray backdrop press never stops paid work.
+  const escape = () => { if (!busy) onClose(); else if (summarizing) onAbort(); };
   const onTreeKey = (event: KeyboardEvent) => {
-    if (event.key === "Escape") return; // The dialog's cancel event owns Escape.
+    // The dialog's cancel event owns Escape. Modified keys belong to the browser and assistive tech.
+    if (event.key === "Escape" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const row = rows.find((candidate) => candidate.node.id === selectedId);
+    // Only a fork folds. Left on a linear entry steps to the entry before it.
+    if (event.key === "ArrowLeft" && row && !foldable(row, folded.has(row.node.id))) {
+      event.preventDefault();
+      choose(view.visibleParentById.get(row.node.id) ?? row.node.id);
+      return;
+    }
     const next = transitionSessionTreeKey(model, { selectedId, foldedIds: folded, filter, search }, event.key);
     if (!next.handled) return;
     event.preventDefault();
@@ -117,9 +134,16 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose }: Se
 
   const now = Date.now();
   return <dialog ref={dialog} className="tree-dialog" aria-labelledby={titleId}
-    onCancel={(event) => { event.preventDefault(); dismiss(); }}
+    onCancel={(event) => { event.preventDefault(); escape(); }}
+    // A second Escape without a click between can close the dialog anyway. While an action runs,
+    // its result must reach the reader, so the dialog reopens; when idle, the store closes too.
+    onClose={() => { if (busy) dialog.current?.showModal(); else onClose(); }}
     // A press on the backdrop lands on the dialog itself; the sheet fills the rest.
-    onClick={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
+    onPointerDown={(event) => { pressedBackdrop.current = event.target === event.currentTarget; }}
+    onClick={(event) => {
+      if (pressedBackdrop.current && event.target === event.currentTarget && !busy) onClose();
+      pressedBackdrop.current = false;
+    }}>
     <div className="tree-sheet">
       <header className="tree-head">
         <h2 id={titleId}>Session tree</h2>
@@ -194,17 +218,21 @@ function forkDescription(node: SessionTreeNode): string {
     : "Start a new session from the history up to this entry. This session stays as it is.";
 }
 
+/** A caret marks a real fork. A folded entry keeps one too, so its hidden rows have a visible cause. */
+function foldable(row: SessionTreeRow, folded: boolean): boolean {
+  return row.childIds.length > 1 || folded && row.childIds.length > 0;
+}
+
 function TreeRow({ row, now, selected, leaving, movesHere, folded, branching, onSelect, onFold }: {
   row: SessionTreeRow; now: number; selected: boolean; leaving: boolean; movesHere: boolean; folded: boolean; branching: boolean;
   onSelect: () => void; onFold: (event: MouseEvent) => void;
 }) {
   const { node } = row;
-  const hasChildren = row.childIds.length > 0;
-  // A caret marks a real fork. A folded chain earns one too, so hidden rows have a visible cause.
-  const foldable = row.childIds.length > 1 || folded && hasChildren;
+  const canFold = foldable(row, folded);
   const lanes = sessionTreeVisualDepth(row.branchDepth);
-  return <div role="treeitem" className="tree-row" aria-level={row.depth + 1} aria-selected={selected}
-    aria-expanded={hasChildren ? !folded : undefined} aria-current={row.activeLeaf ? "true" : undefined}
+  // Nesting follows forks, as drawn. A linear history is one level, not hundreds.
+  return <div role="treeitem" className="tree-row" aria-level={row.branchDepth + 1} aria-selected={selected}
+    aria-expanded={canFold ? !folded : undefined} aria-current={row.activeLeaf ? "true" : undefined}
     tabIndex={selected ? 0 : -1} data-path={row.activePath || undefined} data-leaving={leaving || undefined}
     data-bookkeeping={isSessionTreeBookkeeping(node.kind) || undefined} onClick={onSelect}>
     {/* Always present: the row grid places by order, so a missing rail track would shift every column. */}
@@ -214,9 +242,9 @@ function TreeRow({ row, now, selected, leaving, movesHere, folded, branching, on
         data-elbow={own ? row.connector : undefined} />;
     })}</span>
     <span className="tree-marker" aria-hidden data-leaf={row.activeLeaf || undefined} />
-    {branching && <span className="tree-fold" aria-hidden title={foldable ? folded ? "Expand branch" : "Collapse branch" : undefined}
-      onClick={foldable ? onFold : undefined}>
-      {foldable && (folded ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />)}</span>}
+    {branching && <span className="tree-fold" aria-hidden title={canFold ? folded ? "Expand branch" : "Collapse branch" : undefined}
+      onClick={canFold ? onFold : undefined}>
+      {canFold && (folded ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />)}</span>}
     <span className="tree-entry">
       <span className="tree-summary" dir="auto">{node.summary}</span>
       <span className="tree-meta">

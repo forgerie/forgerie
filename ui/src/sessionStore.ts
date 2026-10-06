@@ -51,7 +51,13 @@ export const browserTransport: SessionTransport = {
     };
   },
 };
-interface RecoveryTiming { retryDelayMs?: number; maxRetryDelayMs?: number; openTimeoutMs?: number }
+interface RecoveryTiming {
+  retryDelayMs?: number; maxRetryDelayMs?: number; openTimeoutMs?: number;
+  /** Most requests. */
+  requestTimeoutMs?: number;
+  /** Tree actions. A summary uses the model, so Forgerie's own proxy waits 5 minutes for them. */
+  treeActionTimeoutMs?: number;
+}
 interface Join {
   controller: AbortController;
   socket?: WebSocket;
@@ -122,9 +128,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     retryTimer = setTimeout(() => { void connect(); }, retryDelay);
     retryDelay = Math.min(retryDelay * 1.6, timing.maxRetryDelayMs ?? 5000);
   }
-  async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, signal = lifetime.signal): Promise<T> {
+  async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, signal = lifetime.signal,
+    timeoutMs = timing.requestTimeoutMs ?? 20_000): Promise<T> {
     const response = await transport.request(path, {
-      ...init, signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+      ...init, signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     });
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => undefined);
@@ -410,7 +417,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       const result = await request(`${root}/${path}`, schema, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd: session.cwd, expectedLeafId: navigator.tree.activeLeafId, ...body }),
-      });
+      }, lifetime.signal, timing.treeActionTimeoutMs ?? 5 * 60_000);
       const { outcome, notice } = settle(result);
       if (outcome.type === "unchanged") {
         update({ ...state, tree: withTreeOperation(state.tree, { type: "idle", ...(notice ? { notice } : {}) }) });
@@ -420,9 +427,14 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (outcome.type === "continued") reload();
       return outcome;
     } catch (error) {
-      const message = error instanceof ReadFailure ? error.message
+      // A 4xx reply carries Pi's reason. Anything else, including a proxy's 5xx, can hide a move
+      // that happened, so say so. The server reports some failures after the move as 400 too, so
+      // every failure re-reads the history. That is a read, not a retry.
+      const refused = error instanceof ReadFailure && error.status < 500;
+      const message = refused ? error.message
         : `${messageOf(error)} The session may have changed. Close and reopen the tree to check before you try again.`;
       update({ ...state, tree: withTreeOperation(state.tree, { type: "idle", notice: { tone: "error", message } }) });
+      reload();
       return { type: "unchanged" };
     }
   }
