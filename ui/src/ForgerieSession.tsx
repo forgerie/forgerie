@@ -17,6 +17,8 @@ import type { HandoffDoor } from "./handoffDoor";
 import { SessionDoorsProvider } from "./ui/SessionDoor";
 import type { DraftStore } from "./draftStore";
 import { workingSend } from "./queue";
+import { phaseFor } from "./dialog";
+import type { DialogBinding } from "./ui/DialogLayer";
 import type { TreeOutcome } from "./sessionTree";
 import { SessionTreeNavigator, TreeOpener } from "./ui/SessionTreeNavigator";
 import { ArchiveNextButton } from "./ui/ArchiveNext";
@@ -93,13 +95,22 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
   const error = state.connection.type === "reconnecting" ? "Reconnecting automatically. Your draft stays here."
     : state.connection.type === "failed" ? state.connection.message
     : sendError ?? state.commandError ?? state.transcript.error;
+  const dialogs = state.status?.pendingDialogs ?? [];
   const status = state.connection.type === "loading" ? "Connecting"
     : state.connection.type === "reconnecting" ? "Reconnecting"
     : state.connection.type === "failed" ? "Disconnected"
+    : dialogs.length > 0 ? "Waiting for you"
     : state.sending ? "Sending" : state.compaction.type === "running" ? "Compacting"
     : state.compaction.type === "queued" ? "Compaction queued" : state.transcript.isRunning ? "Running"
     : isBashRunning(state) ? "Running shell command"
     : state.ask.type === "open" ? "Waiting for you" : "Connected";
+  const oldestDialog = dialogs[0];
+  const dialog: DialogBinding | undefined = oldestDialog && {
+    dialog: oldestDialog, count: dialogs.length, phase: phaseFor(state.dialogPhase, oldestDialog.dialogId),
+    offline: state.connection.type !== "ready",
+    onAnswer: (value) => void store.answerDialog(oldestDialog.dialogId, value),
+    onCancel: () => void store.cancelDialog(oldestDialog.dialogId),
+  };
   const ask: AskBinding | undefined = state.ask.type === "open" ? {
     ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
     onSubmit: (answers) => void store.submitAsk(answers), onDismiss: () => void store.dismissAsk(),
@@ -127,6 +138,7 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
         queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
         working={workingSend(state.status, state.compaction, state.transcript.isRunning)}
+        dialog={dialog}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
           listModels: store.listModels, listThinkingLevels: store.listThinkingLevels, onModel: store.setModel, onThinkingLevel: store.setThinkingLevel }}
         commandResult={state.commandResult ? {

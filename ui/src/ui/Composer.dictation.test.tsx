@@ -47,7 +47,7 @@ describe("SDK dictation controls in the one composer", () => {
     await render(); await type("existing draft"); await click("Voice input");
     expect(input().disabled).toBe(true);
     expect(button("Send message").disabled).toBe(true);
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("Listening…");
+    expect(document.querySelector('.dictation-status[role="status"]')?.textContent).toBe("Listening…");
     await click("Stop dictation");
     expect(input().value).toBe("existing draft spoken words");
     expect(input().disabled).toBe(false);
@@ -63,7 +63,7 @@ describe("SDK dictation controls in the one composer", () => {
     let resolve!: (result: { text: string }) => void;
     dependencies.transcribe = () => new Promise((yes) => { resolve = yes; });
     await render(); await type("chat draft"); await click("Voice input"); await click("Stop dictation");
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("Transcribing…");
+    expect(document.querySelector('.dictation-status[role="status"]')?.textContent).toBe("Transcribing…");
     await render(ask);
     expect(input().value).toBe(""); expect(input().disabled).toBe(false);
     await act(async () => resolve({ text: "stale text" }));

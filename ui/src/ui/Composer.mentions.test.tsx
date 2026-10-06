@@ -52,7 +52,7 @@ describe("assistant-ui mention composer", () => {
     await render({ mentions: source({ files: lookup }), onNew });
     await type("read @src");
     expect(suggestions()?.getAttribute("aria-label")).toBe("Files suggestions");
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("Searching…");
+    expect(document.querySelector('.mention-status[role="status"]')?.textContent).toBe("Searching…");
     await settle();
     expect(lookup).toHaveBeenCalledWith("src", "tracked", expect.any(AbortSignal));
     expect(options()).toHaveLength(2);

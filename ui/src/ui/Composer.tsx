@@ -3,7 +3,7 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
-import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, SquareIcon, TerminalIcon } from "lucide-react";
+import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, PuzzleIcon, SquareIcon, TerminalIcon } from "lucide-react";
 import { OTHER_TEXT_MAX_LENGTH } from "../askDraft";
 import { useDictation } from "../DictationProvider";
 import { ComposerDictation } from "./ComposerDictation";
@@ -19,6 +19,7 @@ import { isCommand } from "../commands";
 import type { WorkingSend } from "../queue";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
 import { modelCommandQuery } from "../modelChoice";
+import { DialogLayer, useDialogMode, type DialogBinding } from "./DialogLayer";
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
@@ -39,6 +40,8 @@ type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; c
   queued?: boolean;
   /** The session's model and thinking level. Without it, the bar shows no picker. */
   model?: ModelBinding | undefined;
+  /** The oldest open extension dialog. An open ask goes first. */
+  dialog?: DialogBinding | undefined;
   chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
@@ -47,7 +50,7 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
@@ -60,10 +63,16 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const { state } = useDictation();
   const control = useAskMode(ask, chatDraft);
-  const compactDraft = !!compaction && !control && count === 0 && !preparing && isCompactCommand(text);
+  const input = useRef<HTMLTextAreaElement>(null);
+  // An open ask goes first. A dialog waits behind it, and the bar says so.
+  const dialogControl = useDialogMode(control ? undefined : dialog, chatDraft, input);
+  const dialogInput = dialogControl?.isInput === true;
+  // An ask answer or a dialog answer is literal text: no command, shell, or queue routing.
+  const literal = !!control || dialogInput;
+  const compactDraft = !!compaction && !literal && count === 0 && !preparing && isCompactCommand(text);
   // Pi has no `/model` command for the web. The bar opens the picker instead,
   // with any text after the command as its search.
-  const modelQuery = model && !control && count === 0 && !preparing ? modelCommandQuery(text) : undefined;
+  const modelQuery = model && !literal && count === 0 && !preparing ? modelCommandQuery(text) : undefined;
   function chooseModel() {
     if (modelQuery === undefined || !model || model.disabled) return;
     aui.composer.setText("");
@@ -79,7 +88,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
     }
   }
   // Ask mode routes shell text itself, through its chat action.
-  const shellDraft = shell && !control ? shellDraftOf(text) : { type: "chat" as const };
+  const shellDraft = shell && !literal ? shellDraftOf(text) : { type: "chat" as const };
   const shellMode = shellDraft.type !== "chat";
   const shellReason = !shellMode || !shell ? undefined : count > 0 ? "Remove attachments to run a shell command."
     : shellDraft.type === "empty" ? "Type a command after !."
@@ -97,7 +106,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   // queued text.
   // `working` is the one rule for "the session works", shared with the store,
   // so the buttons always match what a send does.
-  const workingDraft = working.queue && !control && !compactDraft && !shellMode && !preparing
+  const workingDraft = working.queue && !literal && !compactDraft && !shellMode && !preparing
     && !isCommand(text) && (text.trim() !== "" || count > 0);
   const queueBlocked = disabled || dictating || tooMany || count > 0 || !canSend;
   function sendWhileWorking(steer: boolean) {
@@ -107,7 +116,6 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
     input.current?.focus({ preventScroll: true });
   }
   const anchor = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
   const snapshot = useRef<MentionInputSnapshot>(null);
   const rememberInput = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
   const triggers = unstable_useTriggerPopoverRootContext();
@@ -130,13 +138,20 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
       sendWhileWorking(steer);
       return;
     }
+    if (dialogControl?.isInput) { dialogControl.onKeyDown(event); return; }
     if (!tooMany) control?.onKeyDown(event);
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
   return <ComposerPrimitive.Root className="composer">
-    <ComposerPrimitive.AttachmentDropzone ref={anchor} className="composer-shell" data-mode={control ? "ask" : "chat"} data-shell={shellMode || undefined}
+    {/* Always mounted, so each new dialog is announced. The countdown stays silent. */}
+    <span className="sr-only" role="status">{dialogControl ? `An extension asks: ${dialogControl.dialog.title}` : ""}</span>
+    <ComposerPrimitive.AttachmentDropzone ref={anchor} className="composer-shell" data-mode={control ? "ask" : dialogControl ? "dialog" : "chat"} data-shell={shellMode || undefined}
       disabled={disabled || preparing || !!control?.sending}>
       {control && <AskQuestions control={control} />}
+      {dialogControl && <DialogLayer control={dialogControl} />}
+      {control && dialog && <p className="composer-hint" role="status">
+        <PuzzleIcon aria-hidden size={14} />An extension also asks something. It shows after these questions.
+      </p>}
       <ComposerAttachments />
       <AttachmentErrors />
       {tooMany && <p role="alert" className="attachment-notice">Send at most 16 attachments. Remove a file to continue.</p>}
@@ -155,22 +170,24 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
           ? "Shell command. Its output stays out of the agent's context." : "Shell command. The agent sees its output.")}
       </p>}
       <ComposerPrimitive.Input ref={input} aria-label="Message" rows={1} className="composer-input"
-        placeholder={control?.placeholder ?? "Send a message..."}
+        placeholder={control?.placeholder ?? (dialogInput ? dialogControl.placeholder : "Send a message...")}
         aria-describedby={control?.headingId}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || tooMany || compactDraft || modelQuery !== undefined || shellMode || running || working.queue ? "none" : "enter"}
+        submitMode={control || dialogInput || tooMany || compactDraft || modelQuery !== undefined || shellMode || running || working.queue ? "none" : "enter"}
         // Escape stops the run only from an empty draft, so it never throws typing into the queue path.
-        cancelOnEscape={text.trim() === "" && count === 0} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        cancelOnEscape={!dialogInput && text.trim() === "" && count === 0} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
-        <AddAttachment disabled={disabled || preparing || !!control?.sending || count >= MAX_ATTACHMENTS} />
+        <AddAttachment disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS} />
         {model && <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker} />}
         <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
         {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
           <SquareIcon aria-hidden size={12} fill="currentColor" />
         </ComposerPrimitive.Cancel> : control ? <AskActions control={{ ...control, blocked: control.blocked || tooMany }}
-          chatLabel={shellDraftOf(text).type === "shell" ? "Run command" : "Send message"} /> : <>
+          chatLabel={shellDraftOf(text).type === "shell" ? "Run command" : "Send message"} />
+        : dialogInput ? <button type="button" className="primary ask-primary" disabled={dialogControl.inputBlocked || tooMany || count > 0}
+          onClick={dialogControl.submitInput}>{dialogControl.sending ? "Sending…" : "Send answer"}<ArrowUpIcon aria-hidden size={16} /></button> : <>
           {compactDraft ? <button type="button" className="primary compact-send" disabled={compactBlocked} onClick={() => void sendCompaction()}>
             {compaction?.waits ?? running ? "Queue compaction" : "Compact history"}
           </button> : modelQuery !== undefined ? <button type="button" className="primary compact-send" disabled={model?.disabled} onClick={chooseModel}>

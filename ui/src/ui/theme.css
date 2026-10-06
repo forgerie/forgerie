@@ -112,8 +112,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* Drawn small, pressed large. Every control listed here is drawn at the
    homepage size and keeps a --control-size hit area through an invisible
    ::before centred on it. */
-.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .steer-send, .model-trigger, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
-.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .steer-send::before, .model-trigger::before, .picker-toast button::before, .session-door-open::before {
+.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .steer-send, .model-trigger, .dialog-no, .dialog-yes, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
+.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .steer-send::before, .model-trigger::before, .dialog-no::before, .dialog-yes::before, .picker-toast button::before, .session-door-open::before {
   content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -470,6 +470,20 @@ button:disabled { cursor: default; opacity: 0.4; }
 .ask-skip:not(:disabled):hover { color: var(--foreground); }
 .ask-primary { display: inline-flex; align-items: center; gap: 0.375rem; block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
 .ask-key { opacity: 0.6; }
+/* Extension dialogs share the ask layer: the same surface, question type, and
+   Skip. The head names the source, so an extension's question is never
+   mistaken for the agent's. Choices wrap into columns from the bar's width. */
+.composer-shell[data-mode="dialog"] { border-color: var(--line-focus); }
+.dialog-head { flex-wrap: wrap; column-gap: var(--space-3); padding-inline: var(--space-4) var(--space-2); }
+.dialog-source { flex: 1; display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.dialog-countdown, .dialog-head .ask-count { flex: none; margin-inline-start: 0; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.dialog-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(12rem, 100%), 1fr)); gap: var(--space-2); margin-block-start: var(--space-2); }
+.dialog-option { min-block-size: var(--control-size); padding: 0.5rem var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font-size: var(--text-size); line-height: 1.5; text-align: start; overflow-wrap: anywhere; }
+.dialog-option:not(:disabled):hover, .dialog-option:focus-visible { background: var(--hover-surface); border-color: var(--line-focus); }
+.dialog-confirm { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); padding: 0 var(--space-4) var(--space-3); }
+.dialog-no, .dialog-yes { block-size: 2rem; min-inline-size: 4rem; padding-inline: var(--space-4); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); font-weight: 500; }
+.dialog-no { background: transparent; color: var(--foreground); box-shadow: inset 0 0 0 1px var(--line-focus); }
+.dialog-no:not(:disabled):hover { background: var(--hover-surface); }
 .primary { background: var(--primary); color: var(--primary-foreground); transition: opacity 150ms; }
 .primary:not(:disabled):hover { opacity: 0.85; }
 /* Scroll to bottom from thread.tsx: size-8, bordered, -top-11, centred. */

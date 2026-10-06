@@ -4,6 +4,10 @@
 
 The archive button in the session header archives the open session with the usual undo offer and opens the next session blocked on you, errored, or unread. With nothing left, the session list opens. See [behavior, verification, and limits](archive-next.md).
 
+## Extension dialogs
+
+Confirm, select, and input dialogs from Pi extensions appear on top of the input bar, oldest first, after any open `ask_user` question. See [behavior, verification, and limits](extension-dialogs.md).
+
 ## Session tree
 
 `/tree` and the header's tree button open the session tree in a modal. Pick an entry, then continue the session from it, with an optional summary of the branch it leaves, or fork a new session from it. The modal is a card while the window has room and meets each window edge as that room runs out. See [behavior, layout, verification, and limits](session-tree.md).

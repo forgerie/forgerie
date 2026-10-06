@@ -10,7 +10,8 @@ import { SessionFrame } from "../src/ui/SessionFrame";
 import { ForgerieDictationAdapter } from "../src/speech/ForgerieDictationAdapter";
 import { DictationProvider } from "../src/DictationProvider";
 
-import type { PendingAsk, SessionModel } from "../src/contracts";
+import type { PendingAsk, PendingDialog, SessionModel } from "../src/contracts";
+import type { DialogPhase } from "../src/dialog";
 import type { CommandBinding } from "../src/ui/SlashCommands";
 import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
@@ -117,7 +118,7 @@ const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", qu
       ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
 ] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
-const scenarioAsk: Record<string, PendingAsk> = { "shell-ask": planAsk, ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
+const scenarioAsk: Record<string, PendingAsk> = { "dialog-ask": planAsk, "shell-ask": planAsk, ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
 const mentionFiles = ["src/main.ts", "src/file with spaces.ts", "src/ui/Composer.tsx", "vendor/", "dir with space/",
   ...Array.from({ length: 9 }, (_, i) => `src/very-long-folder-name-${i}/nested-folder/mention-source-${i}.test.ts`)];
 const previewMentions: MentionSource = {
@@ -210,6 +211,18 @@ const previewModels: SessionModel[] = [
   ...Array.from({ length: 12 }, (_, index): SessionModel => ({ provider: "openrouter", id: `model-${index + 1}`, name: `OpenRouter model ${index + 1}`, contextWindow: 131_072, reasoning: index % 3 !== 0 })),
 ];
 const previewLevels = (model: SessionModel | undefined) => model?.reasoning ? ["minimal", "low", "medium", "high", "xhigh", "max"] : ["off"];
+// Extension dialogs, as the daemon lists them: oldest first, local only.
+const inSeconds = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString();
+const previewConfirm: PendingDialog = { dialogId: "confirm", kind: "confirm", title: "Run the database migration on staging?",
+  message: "The guard extension stopped this bash call: it changes a shared database. Choose Yes to let it run, or No to block it. The agent sees your choice.",
+  askedAt: "2026-10-05T12:00:00Z", timeoutAt: inSeconds(272) };
+const previewSelect: PendingDialog = { dialogId: "select", kind: "select", title: "Which environment should the deploy extension target?",
+  options: ["staging", "production", "preview-branch-for-the-session-picker-redesign", "local", "canary (5% of traffic)", "nowhere"], askedAt: "2026-10-05T12:00:01Z" };
+const previewInput: PendingDialog = { dialogId: "input", kind: "input", title: "Name the release tag", placeholder: "v1.2.3", askedAt: "2026-10-05T12:00:02Z" };
+const dialogScenarios: Record<string, PendingDialog[]> = {
+  "dialog-confirm": [previewConfirm], "dialog-select": [previewSelect], "dialog-input": [previewInput],
+  "dialog-many": [previewConfirm, previewSelect, previewInput], "dialog-ask": [previewInput], "dialog-error": [previewSelect],
+};
 const modelStart: Record<string, { model: SessionModel; level: string }> = {
   "model-plain": { model: previewModels[8]!, level: "off" },
   "model-long": { model: previewModels[1]!, level: "xhigh" },
@@ -329,6 +342,18 @@ function Preview() {
   const shellRunning = messages.some((message) => message.parts[0]?.type === "shell" && message.parts[0].run.result.type === "running");
   const recovering = scenario === "compaction-reconnecting" || scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
   const [ask, setAsk] = useState<PendingAsk | undefined>(scenarioAsk[scenario]);
+  const [dialogs, setDialogs] = useState<PendingDialog[]>(dialogScenarios[scenario] ?? []);
+  const [dialogPhase, setDialogPhase] = useState<DialogPhase>({ type: "answering" });
+  // The daemon's side, locally: a close takes a moment, then status drops the dialog.
+  const closeDialog = (answer: boolean | string | undefined) => {
+    setDialogPhase({ type: "sending" });
+    setTimeout(() => {
+      if (scenario === "dialog-error" && answer !== undefined) { setDialogPhase({ type: "failed", message: `The extension refused "${String(answer)}". Pick another target.` }); return; }
+      document.documentElement.dataset["dialogAnswer"] = JSON.stringify(answer ?? null);
+      setDialogs((current) => current.slice(1));
+      setDialogPhase({ type: "answering" });
+    }, 150);
+  };
   // `ask-delayed` opens the ask after load, so a draft can be typed first.
   useEffect(() => {
     if (scenario !== "ask-delayed") return;
@@ -456,7 +481,8 @@ function Preview() {
       } : undefined} queue={compactionPreview || queuePreview ? { items: queue, disabled: recovering, onClear: () => {
         setQueue([]);
         if (compaction.type === "queued") setCompaction({ type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." });
-      } } : undefined} working={working} model={{ model: runtimeChoice.model, thinkingLevel: runtimeChoice.level, disabled: recovering || scenario === "disconnected",
+      } } : undefined} working={working} dialog={dialogs[0] && { dialog: dialogs[0], count: dialogs.length, phase: dialogPhase,
+        offline: recovering || scenario === "disconnected", onAnswer: closeDialog, onCancel: () => closeDialog(undefined) }} model={{ model: runtimeChoice.model, thinkingLevel: runtimeChoice.level, disabled: recovering || scenario === "disconnected",
         listModels: async () => previewModels,
         listThinkingLevels: async () => previewLevels(runtimeChoice.model),
         onModel: async (provider, id) => {

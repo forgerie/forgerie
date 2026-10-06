@@ -59,6 +59,23 @@ export const pendingAskSchema = z.object({
 export type PendingAsk = z.infer<typeof pendingAskSchema>;
 /** One reply. A question without an entry is reported to the model as unanswered. */
 export interface AskAnswer { id: string; values: string[]; otherText?: string }
+/**
+ * One open extension dialog (`ctx.ui.confirm`, `select`, or `input`). The
+ * daemon owns it and lists every open one in status, oldest first.
+ */
+export const pendingDialogSchema = z.object({
+  dialogId: z.string().min(1),
+  kind: z.enum(["confirm", "select", "input"]),
+  title: z.string(),
+  message: z.string().optional(),
+  options: z.array(z.string()).optional(),
+  placeholder: z.string().optional(),
+  askedAt: z.string(),
+  timeoutAt: z.string().optional(),
+});
+export type PendingDialog = z.infer<typeof pendingDialogSchema>;
+/** The longest text an `input` dialog accepts. */
+export const DIALOG_INPUT_MAX_LENGTH = 4_000;
 export const statusSchema = z.object({
   isStreaming: z.boolean(),
   isCompacting: z.boolean(),
@@ -66,6 +83,9 @@ export const statusSchema = z.object({
   pendingAsk: pendingAskSchema.optional(),
   model: sessionModelSchema.optional(),
   thinkingLevel: z.string().optional(),
+  // A dialog of a kind this client does not know stays out of the list, not the whole status.
+  pendingDialogs: z.preprocess((items) => Array.isArray(items) ? items.filter((item) => pendingDialogSchema.safeParse(item).success) : items,
+    z.array(pendingDialogSchema)).optional(),
   queuedMessages: z.array(z.object({ kind: z.enum(["steer", "followUp"]), text: z.string() })).default([]),
 });
 export type SessionStatus = z.infer<typeof statusSchema>;
@@ -75,6 +95,10 @@ export const abortResultSchema = z.object({
 });
 /** `stale` is an ordinary race: the ask already closed. The status is current in both cases. */
 export const askCloseResponseSchema = z.object({
+  result: z.enum(["closed", "stale"]), sessionStatus: statusSchema,
+});
+/** `stale` is an ordinary race: the dialog already closed. The status is current in both cases. */
+export const dialogCloseResponseSchema = z.object({
   result: z.enum(["closed", "stale"]), sessionStatus: statusSchema,
 });
 export const snapshotSchema = z.object({ seq: z.number(), partial: piMessageSchema.nullable() });

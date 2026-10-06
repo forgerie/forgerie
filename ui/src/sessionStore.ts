@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
+import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { carryUnsavedShellRows, fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 import { shellAvailability, shellDraftOf, type ShellAvailability } from "./shellDraft";
@@ -7,6 +7,7 @@ import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatal
 import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
 import { compactionFromOutput, compactionFromStatus, idleCompaction, isCompactCommand, type CompactionState } from "./compaction";
 import { isAlreadyQueued, workingSend } from "./queue";
+import { noDialogPhase, type StoredDialogPhase } from "./dialog";
 import { afterFork, afterNavigate, closedTree, openTree, treeForkResultSchema, treeNavigateResultSchema, withOperation as withTreeOperation, type SessionTreeSummaryChoice, type TreeNavigator, type TreeOutcome } from "./sessionTree";
 
 export type Connection = { type: "loading" } | { type: "ready" }
@@ -23,6 +24,8 @@ export interface SessionState {
   status?: SessionStatus;
   compaction: CompactionState;
   tree: TreeNavigator;
+  /** The browser's side of the oldest open extension dialog. The dialogs themselves live in status. */
+  dialogPhase: StoredDialogPhase;
 }
 export interface SessionTransport {
   request: (path: string, init: RequestInit) => Promise<Response>;
@@ -93,7 +96,7 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
  * it, the store finds the session's cwd in `/api/sessions/all` itself.
  */
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session) {
-  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree };
+  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
   let statusVersion = 0;
   const listeners = new Set<() => void>();
   const lifetime = new AbortController();
@@ -129,9 +132,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     retryDelay = Math.min(retryDelay * 1.6, timing.maxRetryDelayMs ?? 5000);
   }
   async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, signal = lifetime.signal,
-    timeoutMs = timing.requestTimeoutMs ?? 20_000): Promise<T> {
+    timeoutMs: number | null = timing.requestTimeoutMs ?? 20_000): Promise<T> {
     const response = await transport.request(path, {
-      ...init, signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+      ...init, signal: timeoutMs === null ? signal : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     });
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => undefined);
@@ -304,10 +307,12 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     const previousCompaction = state.compaction;
     update({ ...state, sending: true, commandError: undefined });
     try {
+      // No client timeout: Pi answers when the command ends, and an extension
+      // command can wait for the user to answer its dialogs.
       const result = await request(`${root}/${endpoint}`, commandResultSchema, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd: session.cwd, ...body }),
-      });
+      }, lifetime.signal, null);
       if (result.type === "unsupported") throw new Error(result.message);
       const compact = endpoint === "commands/run" && "text" in body && isCompactCommand(body.text);
       update({ ...state, ...(compact ? (state.compaction === previousCompaction && (previousCompaction.type === "idle" || previousCompaction.type === "finished")
@@ -456,6 +461,32 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
           notice: { tone: "error", message: `Could not stop the summary: ${messageOf(error)}` } }) });
     }
   }
+  /**
+   * Answer or cancel an extension dialog. The daemon answers with status, which
+   * drops the dialog; `stale` means another window or a timeout closed it
+   * first. Never retried: a lost acknowledgement can mean the extension
+   * already has the answer.
+   */
+  async function closeDialog(dialogId: string, action: "answer" | "cancel", value?: boolean | string) {
+    const session = state.session;
+    if (!session || state.connection.type !== "ready") return;
+    if (state.dialogPhase.dialogId !== undefined && state.dialogPhase.type === "sending") return;
+    const version = statusVersion;
+    update({ ...state, dialogPhase: { dialogId, type: "sending" } });
+    try {
+      const response = await request(`${root}/dialogs/${action}`, dialogCloseResponseSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: session.cwd, dialogId, ...(action === "answer" ? { value } : {}) }),
+      });
+      let next: SessionState = { ...state, dialogPhase: noDialogPhase };
+      if (version === statusVersion) { statusVersion++; next = withStatus(next, response.sessionStatus); }
+      update(next);
+    } catch (error) {
+      const message = error instanceof ReadFailure ? error.message
+        : `${messageOf(error)} The answer may have reached the extension. Check before you answer again.`;
+      update({ ...state, dialogPhase: { dialogId, type: "failed", message } });
+    }
+  }
   async function clearQueue() {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
@@ -530,6 +561,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     closeTree: () => { if (state.tree.type === "open" && state.tree.operation.type === "idle") update({ ...state, tree: closedTree }); },
     loadCommands,
     clearQueue,
+    answerDialog: (dialogId: string, value: boolean | string) => closeDialog(dialogId, "answer", value),
+    cancelDialog: (dialogId: string) => closeDialog(dialogId, "cancel"),
     listModels: async (signal?: AbortSignal) => (await readForPicker("models", modelsResponseSchema, signal)).models,
     listThinkingLevels: async (signal?: AbortSignal) => (await readForPicker("thinking-levels", thinkingLevelsResponseSchema, signal)).levels,
     setModel: (provider: string, modelId: string) => changeRuntime("model", { provider, modelId }),
