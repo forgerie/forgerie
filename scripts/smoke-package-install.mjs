@@ -60,6 +60,7 @@ try {
   const packageRoot = join(globalPrefix, "lib", "node_modules", "forgerie");
   await smokeInstalledTerminalService(packageRoot);
   await smokeInstalledManagedProcesses(packageRoot);
+  await smokeInstalledSubagents(packageRoot);
   console.log(`Installed-package PTY and managed-process smoke tests passed with npm ${NPM_VERSION}.`);
 } finally {
   await rm(root, { recursive: true, force: true });
@@ -96,6 +97,14 @@ async function smokeInstalledManagedProcesses(packageRoot) {
   }
   if (!channels.includes('COMMAND_WRITE: "processes:command:write"')) {
     throw new Error("Installed package does not contain Forgerie's managed-process stdin protocol patch");
+  }
+}
+
+async function smokeInstalledSubagents(packageRoot) {
+  const manifest = JSON.parse(await readFile(join(packageRoot, "node_modules", "pi-subagents", "package.json"), "utf8"));
+  const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).dependencies["pi-subagents"];
+  if (manifest.version !== expected) {
+    throw new Error(`Installed package bundles pi-subagents ${String(manifest.version)}, expected ${expected}`);
   }
 }
 

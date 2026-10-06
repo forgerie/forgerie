@@ -356,6 +356,16 @@ A completion notice wakes an idle parent or queues behind in-flight work. Each n
 
 `list_subsessions`, `check_subsession`, and `read_subsession` never yield or change control flow. They are for deliberate inspection or recovery, not completion polling. While a child works, agent-facing `check_subsession` and `read_subsession` withhold partial output and direct the parent to continue independent work or yield at the join point. Output becomes available when the child stops. Included output and transcripts follow a labeled marker and come last, after Forgerie guidance.
 
+### Delegated agents
+
+Forgerie bundles [`pi-subagents`](https://github.com/nicobailon/pi-subagents) and loads it into every hosted session, so the `subagent` tool works without a Pi package setting. Agent files, `subagents` settings, and `~/.pi/agent/extensions/subagent/config.json` are read from the Pi profile as usual. Each delegated run appears in the session's Agents panel.
+
+To route a kind of work to a model, write one agent file with a `description` that says when to use it, `advertise: true` so the parent sees it, and `model` (plus optional `fallbackModels`). See the upstream [agents](https://github.com/nicobailon/pi-subagents/blob/main/docs/agents.md) and [models](https://github.com/nicobailon/pi-subagents/blob/main/docs/models.md) docs. Agent file changes need `/reload` or a new session; a Forgerie upgrade that changes the bundled version needs a session daemon restart.
+
+If the Pi profile also loads a different `pi-subagents` copy, Forgerie ignores that copy in hosted sessions and reports a warning. To share one version with the terminal, point the profile's package entry at the bundled path that the warning names.
+
+### Model choice for spawned sessions
+
 Both `spawn_session` and `spawn_subsession` accept an optional `model` parameter, given as an exact `provider/model-id` such as `anthropic/claude-sonnet-4-5`. When set, the new session starts on that model instead of inheriting the dispatching session's model. The match is strict: an unknown or malformed value is rejected with an error. A `#provider/model-id` reference in the prompt (see [Prompt completions](#prompt-completions)) is how users ask for a specific model; agents forward that reference as this parameter. The new session also inherits the dispatching session's thinking level, clamped to its model's capabilities.
 
 In **Settings → Session daemon**, these keys are saved on the selected machine. Restart the session daemon on that machine after changing them.

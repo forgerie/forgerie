@@ -88,6 +88,7 @@ import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBrid
 import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
 import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from "./bundledForgerieSkills.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
+import { bundledSubagentsPackagePath, preferBundledSubagents } from "./bundledSubagents.js";
 
 import { type AuthChange } from "./authService.js";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
@@ -820,7 +821,12 @@ function createDefaultRuntimeFactory(
       agentDir,
       modelRuntime,
       resourceLoaderOptions: {
-        additionalExtensionPaths: [bundledManagedProcessesPackagePath(), bundledForgerieSkillsPackagePath()],
+        additionalExtensionPaths: [
+          bundledManagedProcessesPackagePath(),
+          bundledSubagentsPackagePath(),
+          bundledForgerieSkillsPackagePath(),
+        ],
+        extensionsOverride: preferBundledSubagents,
         skillsOverride: preferBundledForgerieSkills,
         extensionFactories: [
           createProcessBridgeExtension(processBridgeSlot),

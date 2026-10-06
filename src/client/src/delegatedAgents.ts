@@ -6,9 +6,9 @@
  * messages. It is deliberately *not* `parentSessionPath` — a session forked by
  * hand carries that too, and remains a first-class session of its own.
  *
- * `pi-subagents` is not a dependency of this app. It is a Pi extension that may
- * or may not be installed, and its payload arrives here as `unknown` on the
- * `details` of a tool execution. Every field is therefore optional and every
+ * Forgerie bundles `pi-subagents` for hosted sessions, but its payload arrives
+ * here as `unknown` on the `details` of a tool execution, and recorded sessions
+ * can hold runs from older versions. Every field is therefore optional and every
  * parse failure costs detail rather than throwing: a run whose details cannot be
  * read is still a run.
  */
@@ -241,7 +241,8 @@ function agentsFromResults(details: Record<string, unknown> | undefined): Delega
     if (name === undefined) continue;
     const failed = numberField(record, "exitCode") !== 0;
     const error = stringField(record, "error");
-    const output = stringField(record, "output");
+    // `finalOutput` is the field pi-subagents declares; `output` covers older recorded runs.
+    const output = stringField(record, "finalOutput") ?? stringField(record, "output");
     const detail = failed ? error ?? "failed" : summarise(output);
     const task = stringField(record, "task");
     const state: DelegatedAgentState = record?.["detached"] === true

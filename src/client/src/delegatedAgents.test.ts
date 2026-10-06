@@ -237,6 +237,26 @@ describe("deriveDelegatedRuns", () => {
     expect(runs[0]?.agents[0]?.state).toBe("detached");
   });
 
+  it("summarises a finished agent from the finalOutput field pi-subagents reports", () => {
+    const runs = deriveDelegatedRuns([
+      assistantLine({
+        type: "toolExecution",
+        toolCallId: "call-final",
+        toolName: "subagent",
+        summary: "subagent single",
+        status: "success",
+        args: { agent: "reviewer", task: "review" },
+        details: {
+          mode: "single",
+          runId: "2b7c0f11",
+          results: [{ agent: "reviewer", task: "review", exitCode: 0, finalOutput: "No blocking findings." }],
+        },
+      }),
+    ]);
+
+    expect(runs[0]?.agents[0]).toMatchObject({ state: "done", detail: "No blocking findings.", output: "No blocking findings." });
+  });
+
   it("ignores subagent management calls, which run no agents", () => {
     const managementPart: ToolExecutionPart = {
       type: "toolExecution",

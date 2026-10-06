@@ -81,6 +81,14 @@ tracks `main` without a NixOS rebuild.
   bundles its patched `pi-processes` dependency under `vendor/pi-processes` and
   loads it without machine-configuration support. Keep its divergence to the
   non-login spawn fix and additive stdin-write protocol.
+- Delegated agents are first-class: Forgerie bundles an exact, unpatched
+  `pi-subagents` npm version and loads it into every hosted session
+  (`src/server/sessions/bundledSubagents.ts`). A role lives in one agent file
+  (`description`, `advertise: true`, `model`); do not add routing rules to
+  instruction files. A different `pi-subagents` copy in the Pi profile is
+  dropped with a warning; point the profile at Forgerie's bundled path instead.
+  Upgrade by bumping the exact version, then run `npm run verify` and the
+  package smoke test.
 
 ## Acceptance device and visual testing
 
