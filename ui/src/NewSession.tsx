@@ -127,11 +127,13 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
     if (mode === "rapidfire") return;
     setPhase({ type: "starting", id: launch.id });
     const outcome = await launch.done;
+    // The window closed while it started (Back, the row, a reload): the start stays in the list,
+    // so the app's notice says how it went and "Put back" still has its files. A success needs nothing.
+    if (!alive.current) { if (outcome.type === "started") launches.take(launch.id); return; }
     launches.take(launch.id);
-    if (outcome.type === "started") { if (alive.current) onStarted(outcome.session); return; }
-    if (outcome.type === "unsent") { if (alive.current) onStarted(outcome.session, { draft: typed, error: outcome.error }); return; }
-    if (alive.current) refuse(outcome.error);
-    else saved?.saveChat([typed, saved.chat()].filter(Boolean).join("\n"));
+    if (outcome.type === "started") { onStarted(outcome.session); return; }
+    if (outcome.type === "unsent") { onStarted(outcome.session, { draft: typed, error: outcome.error }); return; }
+    refuse(outcome.error);
   }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, putBack, saved]);
 
   const starting = phase.type === "starting";

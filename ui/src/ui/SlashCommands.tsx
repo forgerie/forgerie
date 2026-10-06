@@ -48,7 +48,8 @@ export function SlashCommands({ binding, anchor }: { binding: CommandBinding; an
     id: command.name, description: command.description,
     // Pi selection is completion, not execution. Keep arguments editable and
     // require Send, especially for commands that mutate the session.
-    execute: () => anchor.current?.querySelector("textarea")?.focus(),
+    // The anchor may be the whole box or only part of it, so look from the composer root.
+    execute: () => (anchor.current?.closest(".composer") ?? anchor.current)?.querySelector("textarea")?.focus(),
   })) : [] });
 
   useLayoutEffect(() => {

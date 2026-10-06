@@ -72,7 +72,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
 }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const context = useRef<HTMLDivElement>(null);
-  const chips = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const snapshot = useRef<MentionInputSnapshot>(null);
   const triggers = unstable_useTriggerPopoverRootContext();
@@ -105,7 +105,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
       {/* "with" travels with its chip, so a wrap never leaves it alone at a line end. */}
       <span className="ns-with">with<ModelPicker binding={model} anchor={context} open={picker} onOpenChange={setPicker} /></span>
     </div>
-    <ComposerPrimitive.AttachmentDropzone className="ns-body" disabled={busy}>
+    <ComposerPrimitive.AttachmentDropzone ref={body} className="ns-body" disabled={busy}>
       <ComposerAttachments />
       <AttachmentErrors />
       <ComposerPrimitive.Input ref={input} aria-label="First message" rows={4} className="ns-input"
@@ -113,7 +113,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
         onKeyDown={onKeyDown} onChange={remember} onSelect={remember} />
     </ComposerPrimitive.AttachmentDropzone>
     {tray}
-    <div ref={chips} className="ns-chips" role="group" aria-label="What the first message carries">
+    <div className="ns-chips" role="group" aria-label="What the first message carries">
       <ComposerPrimitive.AddAttachment className="ns-chip" multiple disabled={busy} title={`Attach up to ${MAX_ATTACHMENTS} files`}>
         <PaperclipIcon aria-hidden size={14} />Attach</ComposerPrimitive.AddAttachment>
       <button type="button" className="ns-chip" aria-pressed={rapidfire} disabled={busy} onClick={onRapidfire}
@@ -129,7 +129,8 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
       <ComposerPrimitive.Send className="ns-start primary" aria-keyshortcuts="Control+Enter Meta+Enter"
         title={`${startLabel} (Ctrl+Enter)`}>{startLabel}</ComposerPrimitive.Send>
     </footer>
-    <SlashCommands binding={commands} anchor={chips} />
+    {/* Above the writing area, so the list never covers the line being typed. */}
+    <SlashCommands binding={commands} anchor={body} />
     {(["@", "!@", "#"] as const).map((char) => <MentionPopover key={`${mentions.key}:${char}`}
       source={mentions} char={char} input={input} snapshot={snapshot} enabled={!busy} />)}
   </ComposerPrimitive.Root>;

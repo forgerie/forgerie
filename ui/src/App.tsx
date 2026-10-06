@@ -189,13 +189,14 @@ export function App() {
   // The undo offer lives in the picker. While the sheet is closed, the thread shows it too.
   // A background start that failed after its window closed must still be seen. The window holds its draft.
   const orphan = composing === undefined ? launchList.find((launch) => launch.state.type === "failed" || launch.state.type === "unsent") : undefined;
-  const toast = picker.view.toast
-    ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} />
-    : orphan ? <div className="picker-toast" data-tone="error" role="alert">
+  const orphanNotice = orphan ? <div className="picker-toast" data-tone="error" role="alert">
       <span>“{orphan.title}” {orphan.state.type === "unsent" ? "started, but its first message may not have reached Pi." : "did not start."}</span>
       <button type="button" className="picker-toast-undo" onClick={() => { void startNew(); }}>Review</button>
       <button type="button" className="picker-toast-close" aria-label="Dismiss" onClick={() => launches.dismiss(orphan.id)}><XIcon aria-hidden /></button>
     </div> : undefined;
+  // One message line: the list shows it in place, the thread repeats it while the list is closed.
+  const toast = picker.view.toast
+    ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : orphanNotice;
   const dialog = composing === undefined ? null : composing
     ? <NewSession key={composeKey} cwd={composing} initialMode={composeMode} api={newSessionApi} launches={launches} deferred={deferred} drafts={drafts}
       onDestination={(next) => { const url = new URL(window.location.href); url.searchParams.set("new", next); window.history.replaceState(window.history.state, "", url); }}
@@ -215,7 +216,7 @@ export function App() {
     // message of its own: the picker is the instruction.
     : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
-    picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
+    picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs} message={orphanNotice}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onClose: layout === "overlay" && (selectedId || settings) ? () => setOpen(false) : undefined }} />}

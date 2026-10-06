@@ -1,6 +1,6 @@
 import { AnvilIcon, ArchiveIcon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
 import type { CatalogConnection } from "../picker/catalogStore";
 import { commandForKey, rowCommands, type RowCommandKind } from "../picker/commands";
@@ -151,8 +151,10 @@ export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo
  * in; selections, commands, and arrangement changes go out. Only open menus
  * live here.
  */
-export function Picker({ view, prefs, onPrefs, actions }: {
+export function Picker({ view, prefs, onPrefs, actions, message }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
+  /** The app's message line, when it is not the list's own: a background start that went wrong. */
+  message?: ReactNode;
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
@@ -272,7 +274,7 @@ export function Picker({ view, prefs, onPrefs, actions }: {
           </div>}
         </div>)}
     </div>}
-    {view.toast ? <PickerToast toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : null}
+    {view.toast ? <PickerToast toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : message}
     {actions.onSettings ? <div className="picker-footer">
       <button className="picker-new" onClick={actions.onSettings} aria-current={actions.settingsOpen ? "page" : undefined}>
         <SettingsIcon aria-hidden size={16} />Settings</button>

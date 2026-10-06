@@ -228,17 +228,18 @@ describe("starting a new session", () => {
     await act(async () => { finish({ type: "started", session: { id: "s", cwd: "/code/forgerie" } }); });
   });
 
-  it("does not open the session when the reader left during the start, and keeps a refused message in the saved draft", async () => {
+  it("does not pull back a reader who left during the start, and keeps a failed start listed with its draft", async () => {
     let finish!: (result: StartResult) => void;
     const script = scriptedApi(() => new Promise((resolve) => { finish = resolve; }));
     const onStarted = vi.fn();
-    const drafts = createDraftStore(storage());
-    await render(script.api, { onStarted, drafts });
+    const launches = await render(script.api, { onStarted });
     await type("Fix the build");
     await send();
     await act(async () => root.unmount());
     await act(async () => { finish({ type: "failed", failure: { stage: "start", message: "Network error.", maybeStarted: true } }); });
-    expect(drafts.session("new-session").chat()).toBe("Fix the build");
+    expect(onStarted).not.toHaveBeenCalled();
+    // The app's notice reads this list; "Put back" takes the draft, with its files, from it.
+    expect(launches.getSnapshot()).toMatchObject([{ state: { type: "failed" }, draft: { text: "Fix the build" } }]);
     root = createRoot(document.body.appendChild(document.createElement("div")));
   });
 
