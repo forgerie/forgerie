@@ -1,4 +1,5 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
+import type { ReactNode } from "react";
 import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import { Composer, type ShellBinding } from "./Composer";
@@ -18,7 +19,9 @@ import type { DialogBinding } from "./DialogLayer";
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, queue, working, model, dialog, chatDraft }: { ask?: AskBinding; dialog?: DialogBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; shell?: ShellBinding; queue?: QueueBinding; working?: WorkingSend; model?: ModelBinding; chatDraft?: ChatDraft }) {
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, queue, working, model, dialog, attachments, beforeComposer, chatDraft }: { ask?: AskBinding; dialog?: DialogBinding; attachments?: boolean;
+  /** A line above the input bar that belongs to this thread, such as a new session's destination. */
+  beforeComposer?: ReactNode; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; shell?: ShellBinding; queue?: QueueBinding; working?: WorkingSend; model?: ModelBinding; chatDraft?: ChatDraft }) {
   return <ImageViewerProvider><ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
@@ -41,8 +44,9 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
           {commandResult && <CommandResultPanel {...commandResult} />}
           {compaction && <CompactionNotice {...compaction} />}
           {queue && <QueuedMessages {...queue} />}
+          {beforeComposer}
           <Composer ask={ask} mentions={mentions} commands={commands} compaction={compaction} shell={shell} working={working}
-            queued={queue ? queue.items.length > 0 : false} model={model} dialog={dialog} chatDraft={chatDraft} />
+            queued={queue ? queue.items.length > 0 : false} model={model} dialog={dialog} attachments={attachments} chatDraft={chatDraft} />
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>

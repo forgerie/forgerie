@@ -25,8 +25,10 @@ import { ArchiveNextButton } from "./ui/ArchiveNext";
 import type { ArchiveAvailability } from "./picker/archiveNext";
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSession, archive }: {
+export function ForgerieSession({ id, known, initialDraft, initialError, drafts, onSwitchSession, archive }: {
   id: string; known?: Session | undefined; initialDraft?: string | undefined;
+  /** Shown once on open, such as a new session whose first message may not have gone out. */
+  initialError?: string | undefined;
   /** "Archive and next" from the catalog's view of this session. Absent: no button. */
   archive?: { availability: ArchiveAvailability; onArchive: () => void } | undefined;
   /** Where unsent drafts outlive this view. Without it, they last only while the view is mounted. */
@@ -44,7 +46,7 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
   const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
-  const [sendError, setSendError] = useState<string>();
+  const [sendError, setSendError] = useState<string | undefined>(initialError);
   useEffect(() => { void store.start(); return () => { attachments.dispose(); store.dispose(); }; }, [store, attachments]);
   const applyResult = useCallback((result: CommandResult | void) => {
     if (!runtimeRef.current || result?.type !== "done") return;

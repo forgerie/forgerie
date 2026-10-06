@@ -7,17 +7,24 @@ import { AppShell } from "./ui/AppShell";
 import { Picker, PickerToast } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
+import { NewSession } from "./NewSession";
+import { createNewSessionApi, defaultDestinationCwd } from "./newSession";
 
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
+/** `?new=<folder>` keeps a new session's composer open across a reload. */
+const readNew = () => new URLSearchParams(window.location.search).get("new")?.trim() || undefined;
+const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 
 /** Composition root: owns the selected session (in the URL) and the sheet. */
 export function App() {
   const [selectedId, setSelectedId] = useState(readSelected);
-  const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string }>();
+  const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
+  // A session that does not exist yet: the folder its composer starts in.
+  const [composing, setComposing] = useState(readNew);
   // Unsent drafts outlive a session switch and a reload, in this browser only.
   const [drafts] = useState(() => createDraftStore(browserStorage()));
   // With nothing selected there is nothing to cover, so the sheet starts open.
-  const [open, setOpen] = useState(() => readSelected() === undefined);
+  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
   // The URL is the source of truth for the selection, so read it there.
   const closeSession = useCallback(() => {
@@ -33,20 +40,37 @@ export function App() {
   }, [drafts, closeSession]);
   const picker = usePicker(selectedId, { onDeleted });
   useEffect(() => {
-    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); };
+    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  const switchSession = useCallback((session: Session, draft?: string) => {
+  const switchSession = useCallback((session: Session, draft?: string, error?: string) => {
     setOpen(false);
-    setCommandSelection({ session, draft });
-    if (session.id === selectedId) return;
+    setComposing(undefined);
+    setCommandSelection({ session, draft, ...(error ? { error } : {}) });
+    if (session.id === selectedId && readNew() === undefined) return;
     const url = new URL(window.location.href);
+    url.searchParams.delete("new");
     url.searchParams.set("session", session.id);
     window.history.pushState({}, "", url);
     setSelectedId(session.id);
   }, [selectedId]);
   const select = useCallback((row: Row) => switchSession(row.session), [switchSession]);
+  // New session: the composer starts where the reader is, and the URL remembers it.
+  const { find, recent } = picker;
+  const startNew = useCallback(() => {
+    const open = readSelected();
+    const cwd = defaultDestinationCwd(open ? find(open) : undefined, recent, []);
+    setOpen(false);
+    if (!cwd) { setComposing(""); return; }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("session");
+    url.searchParams.set("new", cwd);
+    window.history.pushState({}, "", url);
+    setCommandSelection(undefined);
+    setSelectedId(undefined);
+    setComposing(cwd);
+  }, [find, recent]);
   // Archive and next. With nothing left waiting, the list is the next thing to read.
   const { archiveAndNext } = picker;
   const archiveNext = useCallback(async (id: string) => {
@@ -64,12 +88,18 @@ export function App() {
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : undefined;
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
     picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
-      actions={{ ...picker.actions, onSelect: select, onClose: layout === "overlay" && selectedId ? () => setOpen(false) : undefined }} />}
+      actions={{ ...picker.actions, onSelect: select, onNew: startNew,
+        onClose: layout === "overlay" && (selectedId || composing !== undefined) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
-    thread={selectedId ? <ForgerieSession key={selectedId} id={selectedId}
+    thread={composing !== undefined && !selectedId ? (composing
+      ? <NewSession key={composing} cwd={composing} api={newSessionApi} drafts={drafts}
+        onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} />
+      : <SessionFrame name="New session" status="" error="Forgerie knows no project or session folder yet. Start the first session in the old client."><div className="thread-empty" /></SessionFrame>)
+      : selectedId ? <ForgerieSession key={selectedId} id={selectedId}
       known={known}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
+      initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
       drafts={drafts} onSwitchSession={switchSession}
       archive={{ availability: picker.archiveState(selectedId), onArchive: () => { void archiveNext(selectedId); } }} />
       // The picker covers this area whenever nothing is selected, so it holds no

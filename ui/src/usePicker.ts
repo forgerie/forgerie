@@ -41,6 +41,8 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     toast: actionState.toast,
     pending: actionState.pending,
   }), [state.connection, rows, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId, actionState]);
+  /** Where the newest unarchived session lives, for a new session's default folder. */
+  const recent = useMemo(() => state.sessions.filter((session) => !session.archived).map((session) => ({ cwd: session.cwd, modified: session.modified })), [state.sessions]);
   const find = useCallback((id: string) => {
     const session = state.sessions.find((candidate) => candidate.id === id);
     return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}) } : undefined;
@@ -69,7 +71,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     onUndo: () => void commands.undo(),
     onDismissToast: commands.dismiss,
   }), [store, commands]);
-  return { view, prefs, setPrefs, find, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext };
+  return { view, prefs, setPrefs, find, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext };
 }
 
 export type ArchiveOutcome =

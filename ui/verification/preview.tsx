@@ -15,6 +15,8 @@ import type { DialogPhase } from "../src/dialog";
 import type { CommandBinding } from "../src/ui/SlashCommands";
 import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
+import { NewSession } from "../src/NewSession";
+import type { NewSessionApi, Project, Workspace } from "../src/newSession";
 import { createAttachmentAdapter } from "../src/attachments";
 import { idleCompaction, isCompactCommand, type CompactionState } from "../src/compaction";
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
@@ -509,6 +511,41 @@ const previewCommands: CommandBinding = { catalog: { type: "ready", commands: [
   { name: "skill:testing", source: "skill", description: "Write regression tests" },
   ...Array.from({ length: 20 }, (_, index) => ({ name: `extension-${index + 1}`, source: "extension" as const, description: "An extension command with a description that wraps in a narrow pane." })),
 ] }, onRetry: () => {} };
+// New session: a local API with real promises and scripted outcomes. No network.
+const previewProjects: Project[] = [
+  { id: "p1", name: "forgerie", path: "/home/simon/code/sandbox/forgerie" },
+  { id: "p2", name: "korri", path: "/home/simon/code/sandbox/korri" },
+  { id: "p3", name: "amaze-insights-portal-source-with-a-long-name", path: "/home/simon/code/azure/AmazeInsights/amaze-insights-portal-source-with-a-long-name" },
+  ...Array.from({ length: 9 }, (_, index): Project => ({ id: `px${index}`, name: `project-${index + 1}`, path: `/home/simon/code/sandbox/project-${index + 1}` })),
+];
+const previewWorkspaces: Record<string, Workspace[]> = {
+  p1: [{ id: "w1", path: "/home/simon/code/sandbox/forgerie", label: "main", branch: "main", isMain: true },
+    { id: "w2", path: "/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp", label: "new-ui-mvp", branch: "new-ui-mvp", isMain: false },
+    { id: "w3", path: "/home/simon/code/sandbox/forgerie/.worktree/session-picker-redesign-with-a-long-branch", label: "redesign", branch: "feat/session-picker-redesign-with-a-long-branch", isMain: false }],
+};
+const previewNewApi: NewSessionApi = {
+  projects: async () => previewProjects,
+  workspaces: async (projectId) => previewWorkspaces[projectId] ?? [{ id: `${projectId}-main`, path: previewProjects.find((item) => item.id === projectId)!.path, label: "main", branch: "main", isMain: true }],
+  models: async () => ({ models: previewModels, model: previewModels[2], thinkingLevel: "high" }),
+  start: async (cwd, text) => {
+    await new Promise((resolve) => setTimeout(resolve, scenario === "new-session-slow" ? 60_000 : 300));
+    if (scenario === "new-session-error") return { type: "failed", failure: { stage: "start", message: `Folder not found: ${cwd}`, maybeStarted: false } };
+    document.documentElement.dataset["started"] = JSON.stringify({ cwd, text });
+    return { type: "started", session: { id: "preview-new", cwd } };
+  },
+};
+function NewSessionPreview() {
+  const [started, setStarted] = useState<string>();
+  useEffect(() => {
+    // Captures need the panel already open.
+    if (scenario !== "new-session-destination") return;
+    const timer = setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400);
+    return () => clearTimeout(timer);
+  }, []);
+  return started ? <SessionFrame name="Started" status="Connected"><p className="thread-empty">{started}</p></SessionFrame>
+    : <NewSession cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi}
+      onStarted={(session) => setStarted(`Opened ${session.id} in ${session.cwd}`)} />;
+}
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing preview root");
-createRoot(root).render(<Preview />);
+createRoot(root).render(scenario.startsWith("new-session") ? <NewSessionPreview /> : <Preview />);

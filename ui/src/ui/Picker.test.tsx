@@ -158,6 +158,24 @@ describe("picker", () => {
   });
 });
 
+describe("new session", () => {
+  it("starts a new session from the button at the top of the list, or with N", () => {
+    const onNew = vi.fn();
+    act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {}, onNew }} />));
+    const button = host.querySelector<HTMLButtonElement>(".picker-new")!;
+    expect(button.textContent).toBe("New session");
+    expect(button.getAttribute("aria-keyshortcuts")).toBe("N");
+    act(() => button.click());
+    press("n");
+    expect(onNew).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers it on an empty list too", () => {
+    act(() => root.render(<Picker view={view([])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {}, onNew: () => {} }} />));
+    expect(host.querySelector(".picker-new")).not.toBeNull();
+  });
+});
+
 describe("row commands", () => {
   function renderCommands(pickerView: PickerView) {
     const onCommand = vi.fn<(row: Row, kind: string) => void>();

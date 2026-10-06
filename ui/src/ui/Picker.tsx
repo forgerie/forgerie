@@ -1,4 +1,4 @@
-import { AnvilIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { AnvilIcon, ArchiveIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -28,6 +28,8 @@ export interface PickerActions {
   onCommand?: ((row: Row, kind: RowCommandKind) => void) | undefined;
   onUndo?: (() => void) | undefined;
   onDismissToast?: (() => void) | undefined;
+  /** Opens the first-message composer of a new session. */
+  onNew?: (() => void) | undefined;
 }
 
 const PIN = <PinIcon className="picker-pin" aria-hidden />;
@@ -183,7 +185,8 @@ export function Picker({ view, prefs, onPrefs, actions }: {
       const step = key === "j" || event.key === "ArrowDown" ? 1 : -1;
       const next = order[index === -1 ? (step > 0 ? 0 : order.length - 1) : Math.min(Math.max(index + step, 0), order.length - 1)];
       if (next && next.session.id !== view.selectedId) actions.onSelect(next);
-    } else if (key === "g") change({ ...prefs, grouping: prefs.grouping === "state" ? "project" : "state" });
+    } else if (key === "n" && actions.onNew) { event.preventDefault(); actions.onNew(); }
+    else if (key === "g") change({ ...prefs, grouping: prefs.grouping === "state" ? "project" : "state" });
     else if (key === "a") change({ ...prefs, showArchived: !prefs.showArchived });
     else if (selectedRow && actions.onCommand) {
       const command = commandForKey(selectedRow, key);
@@ -229,13 +232,16 @@ export function Picker({ view, prefs, onPrefs, actions }: {
           <CheckIcon aria-hidden />Show archived <small>{view.archivedCount} · A</small></button>
       </div> : null}
     </header>
+    {/* The homepage thread list opens with "New Thread"; here it starts a session. */}
+    {actions.onNew ? <button className="picker-new" onClick={actions.onNew} aria-keyshortcuts="N" title="New session (N)">
+      <SquarePenIcon aria-hidden size={16} />New session</button> : null}
     {connection.type === "reconnecting" ? <p className="picker-notice" role="status"><span aria-hidden="true">&gt;</span> Reconnecting…</p> : null}
     {connection.type === "failed" && !empty ? <p className="picker-notice" data-tone="error" role="alert">{connection.message}<button onClick={actions.onRetry}>Retry now</button></p> : null}
     {connection.type === "loading" && empty ? <div className="picker-list" role="status" aria-label="Loading sessions">
       {[38, 90, 70, 38, 90, 70].map((width, index) => <span key={index} className="picker-skeleton" style={{ inlineSize: `${String(width)}%` }} />)}
     </div> : connection.type === "failed" && empty ? <div className="picker-state" role="alert">
       <strong>Could not load sessions</strong><span>{connection.message}</span><button onClick={actions.onRetry}>Retry now</button>
-    </div> : empty ? <div className="picker-state"><strong>No sessions yet</strong><span>Start one and it appears here.</span></div>
+    </div> : empty ? <div className="picker-state"><strong>No sessions yet</strong><span>Start one with New session, and it appears here.</span></div>
     : <div className="picker-list" role="listbox" aria-label="Sessions" tabIndex={0} ref={listRef}
         aria-activedescendant={view.selectedId ? `picker-row-${view.selectedId}` : undefined}>
       {view.sections.every((section) => section.kind === "band" || section.kind === "archived" || section.kind === "project")

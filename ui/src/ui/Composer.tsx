@@ -42,6 +42,8 @@ type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; c
   model?: ModelBinding | undefined;
   /** The oldest open extension dialog. An open ask goes first. */
   dialog?: DialogBinding | undefined;
+  /** Files can be attached. Off where nothing can store them yet, such as a session that does not exist. */
+  attachments?: boolean;
   chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
@@ -50,7 +52,7 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, attachments = true, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
@@ -181,7 +183,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         cancelOnEscape={!dialogInput && text.trim() === "" && count === 0} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
-        <AddAttachment disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS} />
+        {attachments && <AddAttachment disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS} />}
         {model && <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker} />}
         <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
         {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">

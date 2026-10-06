@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import type { SessionModel } from "../contracts";
 import { modelGroups, modelKey, modelLabel, thinkingLabel } from "../modelChoice";
-import { mentionPlacement } from "../mentionSyntax";
+import { usePanelPlacement } from "./usePanelPlacement";
 
 /**
  * What the picker shows and changes. The binding owns where the choice lives:
@@ -95,35 +95,7 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
   const changingRef = useRef(false);
   changingRef.current = change.type === "changing";
 
-  useLayoutEffect(() => {
-    const element = panel.current;
-    const target = anchor.current;
-    if (!element || !target) return;
-    const viewport = window.visualViewport;
-    const position = () => {
-      const plan = mentionPlacement(target.getBoundingClientRect(), {
-        left: viewport?.offsetLeft ?? 0, top: viewport?.offsetTop ?? 0,
-        width: viewport?.width ?? window.innerWidth, height: viewport?.height ?? window.innerHeight,
-      }, PANEL_CAP);
-      // Measured window geometry, not theme decisions.
-      Object.assign(element.style, { left: `${plan.left}px`, top: `${plan.top}px`, width: `${plan.width}px`,
-        maxHeight: `${plan.maxHeight}px`, transform: plan.up ? "translateY(-100%)" : "none" });
-    };
-    position();
-    const observer = new ResizeObserver(position);
-    observer.observe(target);
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
-    viewport?.addEventListener("resize", position);
-    viewport?.addEventListener("scroll", position);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", position);
-      window.removeEventListener("scroll", position, true);
-      viewport?.removeEventListener("resize", position);
-      viewport?.removeEventListener("scroll", position);
-    };
-  }, [anchor]);
+  usePanelPlacement(panel, anchor, PANEL_CAP);
 
   // A tap outside closes the panel. The trigger toggles it itself.
   useEffect(() => {
