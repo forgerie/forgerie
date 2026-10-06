@@ -54,3 +54,20 @@ Set `APP_URL` when the dev server is not on port 8510, and `FORGERIE_ROOT` when 
 | Real session. | `real-model-check.mjs` passed against the live backend at folded portrait. The trigger named Pi's model and level. The picker listed all 44 models Pi offers and the current model's 5 levels. A level change and a model change reached Pi, the trigger followed, and a reload showed the saved choice. Pi's `settings.json` did not change. |
 
 Not verified: a physical Fold.
+
+## Review fixes (2026-10-05)
+
+An independent review found 8 should-fix items and 4 nits. All the should-fix items are fixed:
+
+- Focus moves into the picker as soon as it opens, so Escape closes it while the models load. Before, Escape could reach the input and stop the run. The current model takes focus once the list loads, unless you have already moved.
+- A full `/model` opens the picker on the first Enter, even while the slash list offers "model".
+- While a change runs, the picker stays open: a tap outside, the trigger, and Escape all wait for Pi. The result and any error land in the picker that sent it.
+- Busy rows and levels use `aria-disabled`, so a keyboard user keeps focus on the pressed control.
+- Only a 4xx answer (not 408 or 429) counts as a refusal. A 5xx or proxy error says the change may have applied. Dialog answers and `!` commands follow the same rule.
+- The model name truncates before the trigger wraps to its own row. Spacing in the bar yields first, and below 22rem the level moves into the picker, where it is always shown. Checked at 275 × 280.
+- The picker scrolls as a whole when the room is short, and a refusal shows under the search box, so neither the thinking row nor the error is cut off.
+- Model rows mark the current model with `aria-current`. Groups are named by their visible heading. The trigger's accessible name starts with its visible text.
+
+Also: a late read after a model change can no longer overwrite the newer one. Not changed: `/model` with attachments or during an ask still goes to the server, which answers "not implemented".
+
+The same pass fixed an extension-dialog head that overlapped at 275 px: the countdown now truncates first.

@@ -14,7 +14,7 @@ async function until(predicate: () => boolean) { await expect.poll(predicate, { 
 /** A Forgerie session API whose model and thinking level change like Pi's. */
 async function runtimeServer() {
   const requests: { method: string; path: string; body: unknown }[] = [];
-  const state = { status: initial, seq: 0, failNext: undefined as undefined | "error" | "drop" };
+  const state = { status: initial, seq: 0, failNext: undefined as undefined | "error" | "drop" | "gateway" };
   const ws = new WebSocketServer({ noServer: true });
   const http = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -26,6 +26,7 @@ async function runtimeServer() {
     const mutation = request.method === "POST";
     if (mutation && state.failNext === "drop") { state.failNext = undefined; response.destroy(); return; }
     if (mutation && state.failNext === "error") { state.failNext = undefined; send({ error: "Model not found: x/y" }, 400); return; }
+    if (mutation && state.failNext === "gateway") { state.failNext = undefined; send({ error: "Bad gateway" }, 502); return; }
     if (url.pathname.endsWith("/messages")) send({ messages: [], start: 0, total: 0 });
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: state.seq, partial: null });
     else if (url.pathname.endsWith("/status")) send(state.status);
@@ -101,6 +102,12 @@ describe("model and thinking level", () => {
     api.state.failNext = "error";
     await expect(api.store.setModel("openai-codex", "gpt-5.6-sol")).rejects.toThrow("Model not found: x/y");
     expect(api.store.getSnapshot().status?.model?.id).toBe("claude-opus-5-5");
+  });
+
+  it("does not call a gateway error a refusal, because the change may have applied", async () => {
+    const api = await runtimeServer();
+    api.state.failNext = "gateway";
+    await expect(api.store.setModel("openai-codex", "gpt-5.6-sol")).rejects.toThrow(/Bad gateway.*may have changed/);
   });
 
   it("never retries a change whose acknowledgement was lost, and says it may have applied", async () => {

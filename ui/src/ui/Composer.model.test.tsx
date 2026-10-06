@@ -13,7 +13,7 @@ const opus: SessionModel = { provider: "cliproxyapi", id: "claude-opus-5-5", nam
 const codex: SessionModel = { provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", contextWindow: 272_000, reasoning: false };
 const haiku: SessionModel = { provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5", contextWindow: 200_000, reasoning: true };
 
-interface Props { model?: Partial<ModelBinding>; onNew?: (message: AppendMessage) => Promise<void>; offline?: boolean }
+interface Props { model?: Partial<ModelBinding>; onNew?: (message: AppendMessage) => Promise<void>; offline?: boolean; onCancel?: () => Promise<void>; commands?: boolean }
 function binding(overrides: Partial<ModelBinding> = {}): ModelBinding {
   return {
     model: opus, thinkingLevel: "high", disabled: false,
@@ -22,9 +22,19 @@ function binding(overrides: Partial<ModelBinding> = {}): ModelBinding {
     onModel: async () => {}, onThinkingLevel: async () => {}, ...overrides,
   };
 }
-function Fixture({ model, onNew = async () => {}, offline = false }: Props) {
-  const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], false), onNew, isRunning: false, isDisabled: offline });
-  return <AssistantRuntimeProvider runtime={runtime}><Thread model={binding(model)} /></AssistantRuntimeProvider>;
+function Fixture({ model, onNew = async () => {}, offline = false, onCancel, commands = false }: Props) {
+  const running = onCancel !== undefined;
+  const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], running), onNew, ...(onCancel ? { onCancel } : {}), isRunning: running, isDisabled: offline });
+  // Pi lists `/model` as a builtin, so the slash list offers it.
+  return <AssistantRuntimeProvider runtime={runtime}><Thread model={binding(model)} commands={commands ? { catalog: { type: "ready",
+    commands: [{ name: "model", source: "builtin", description: "Select model" }, { name: "name", source: "builtin", description: "Set name" }] },
+    onRetry: () => {} } : undefined} /></AssistantRuntimeProvider>;
+}
+/** A promise the test settles by hand. */
+function deferred<T>() {
+  let resolve!: (value: T) => void; let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -59,7 +69,7 @@ describe("model and thinking level in the input bar", () => {
     await click(trigger());
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
     expect([...panel()!.querySelectorAll(".model-group-label")].map((node) => node.textContent)).toEqual(["Enabled models", "Anthropic", "Openai Codex"]);
-    expect(button("Claude Opus 5.5", panel()!)!.getAttribute("aria-pressed")).toBe("true");
+    expect(button("Claude Opus 5.5", panel()!)!.getAttribute("aria-current")).toBe("true");
     expect(document.activeElement).toBe(button("Claude Opus 5.5", panel()!));
     expect(button("GPT-5.6 Sol", panel()!)!.textContent).toContain("no thinking");
   });
@@ -80,7 +90,7 @@ describe("model and thinking level in the input bar", () => {
     await click(trigger());
     await click(button("Claude Haiku 4.5", panel()!));
     expect(panel()!.querySelector("[role=alert]")!.textContent).toBe("Model not found: anthropic/claude-haiku-4-5");
-    expect(button("Claude Opus 5.5", panel()!)!.getAttribute("aria-pressed")).toBe("true");
+    expect(button("Claude Opus 5.5", panel()!)!.getAttribute("aria-current")).toBe("true");
     expect(onModel).toHaveBeenCalledTimes(1);
   });
 
@@ -134,6 +144,65 @@ describe("model and thinking level in the input bar", () => {
     await render({ model: { model: undefined, thinkingLevel: undefined, disabled: true } });
     expect(trigger().textContent).toContain("No model");
     expect(trigger().disabled).toBe(true);
+  });
+
+  it("moves focus into the panel at once, so Escape closes it and never stops the run", async () => {
+    const onCancel = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const models = deferred<SessionModel[]>();
+    await render({ onCancel, model: { listModels: () => models.promise } });
+    await type("/model");
+    await press(input(), "Enter");
+    expect(panel()).not.toBeNull();
+    expect(document.activeElement).toBe(panel());
+    await press(document.activeElement as HTMLElement, "Escape");
+    expect(panel()).toBeNull();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("focuses the current model once the list loads, if focus has not moved", async () => {
+    const models = deferred<SessionModel[]>();
+    await render({ model: { listModels: () => models.promise } });
+    await click(trigger());
+    expect(document.activeElement).toBe(panel());
+    await act(async () => { models.resolve([opus, haiku]); });
+    await settle();
+    expect(document.activeElement).toBe(button("Claude Opus 5.5", panel()!));
+  });
+
+  it("opens the picker on the first Enter for a full /model, even while the slash list offers it", async () => {
+    await render({ commands: true });
+    await type("/model");
+    await press(input(), "Enter");
+    await settle();
+    expect(panel()).not.toBeNull();
+    expect(input().value).toBe("");
+  });
+
+  it("keeps the panel open while a change runs, so its result lands where it was sent", async () => {
+    const change = deferred<void>();
+    const onModel = vi.fn<ModelBinding["onModel"]>().mockReturnValue(change.promise);
+    await render({ model: { onModel } });
+    await click(trigger());
+    await click(button("Claude Haiku 4.5", panel()!));
+    // An outside tap, the trigger, and Escape all wait for Pi.
+    await act(async () => { document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+    await click(trigger());
+    await press(panel()!, "Escape");
+    expect(panel()).not.toBeNull();
+    // The pressed row keeps focus while it waits.
+    expect(button("Claude Haiku 4.5", panel()!)!.getAttribute("aria-busy")).toBe("true");
+    expect(button("GPT-5.6 Sol", panel()!)!.getAttribute("aria-disabled")).toBe("true");
+    expect(button("GPT-5.6 Sol", panel()!)!.disabled).toBe(false);
+    await click(button("GPT-5.6 Sol", panel()!));
+    expect(onModel).toHaveBeenCalledOnce();
+    await act(async () => { change.resolve(); });
+    await settle();
+    expect(panel()).toBeNull();
+  });
+
+  it("names the trigger by its visible text first", async () => {
+    await render();
+    expect(trigger().getAttribute("aria-label")).toBe("Claude Opus 5.5 High, change model and thinking level");
   });
 
   it("reports a failed model read inside the panel", async () => {

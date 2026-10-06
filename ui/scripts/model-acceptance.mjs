@@ -65,7 +65,10 @@ try {
     assert.equal(state.overflow, false, `${name}: overflow`);
     assert.equal(state.inputs, 1, `${name}: one input`);
     inside(state.trigger, "trigger");
-    assert.ok(state.name.width >= 24, `${name}: model name squeezed to ${state.name.width}`);
+    assert.ok(state.name.width >= 48, `${name}: model name squeezed to ${state.name.width}`);
+    // The model name truncates before the trigger wraps to a row of its own.
+    const send = state.actions.find((action) => action.label === "Send message");
+    if (send) assert.ok(Math.abs(send.top - state.trigger.top) < state.trigger.height, `${name}: trigger wrapped below Send`);
     for (const action of state.actions) inside(action, action.label);
     if (state.panel) {
       inside(state.panel, "panel");
@@ -82,7 +85,7 @@ try {
     await navigate(scenario, scenario.startsWith("model-"));
     for (const scheme of ["light", "dark"]) {
       await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
-      for (const posture of [...FOLD8_POSTURES, { name: "keyboard-budget", width: 475, height: 280 }, { name: "narrow-pane", width: 280, height: 500 }]) {
+      for (const posture of [...FOLD8_POSTURES, { name: "keyboard-budget", width: 475, height: 280 }, { name: "narrow-pane", width: 280, height: 500 }, { name: "tiny", width: 275, height: 280 }]) {
         await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
         await geometry(scenario, posture, scheme);
       }

@@ -122,6 +122,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
     rememberInput();
+    // `/model` typed in full opens the picker on the first Enter, even while the
+    // slash list offers it: completing it to "/model " would only ask for a second Enter.
+    if (modelQuery !== undefined && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); chooseModel(); return; }
     // Input's custom handler runs before SDK plugins. Trigger selection consumes
     // Enter before ask mode can advance or submit the current question.
     for (const trigger of triggers.getTriggers().values()) {
@@ -129,7 +132,6 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
     }
     if (shellMode && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void runShell(); return; }
     if (compactDraft && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendCompaction(); return; }
-    if (modelQuery !== undefined && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); chooseModel(); return; }
     // assistant-ui's keys: Enter queues, Ctrl or Cmd+Shift+Enter steers, Shift+Enter is a new line.
     if (workingDraft && event.key === "Enter") {
       const steer = event.shiftKey && (event.ctrlKey || event.metaKey);

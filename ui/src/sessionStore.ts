@@ -73,6 +73,13 @@ interface Join {
 class ReadFailure extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
+/**
+ * The server read the mutation and refused it, so it did not apply. A 5xx,
+ * a proxy error, a timeout, or a lost reply proves nothing: it may have applied.
+ */
+function refused(error: unknown): error is ReadFailure {
+  return error instanceof ReadFailure && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+}
 function permanent(error: unknown) {
   return error instanceof z.ZodError || error instanceof SyntaxError
     || error instanceof ReadFailure && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
@@ -341,7 +348,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd, text }),
       });
     } catch (error) {
-      const message = error instanceof ReadFailure ? error.message
+      const message = refused(error) ? error.message
         : `${messageOf(error)} The command may have started. Check the conversation before running it again.`;
       update({ ...state, commandError: message });
       throw new Error(message, { cause: error });
@@ -404,7 +411,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       });
       if (version === statusVersion) { statusVersion++; update(withStatus(state, status)); }
     } catch (error) {
-      if (error instanceof ReadFailure) throw error;
+      if (refused(error)) throw error;
       throw new Error(`${messageOf(error)} The ${endpoint === "model" ? "model" : "thinking level"} may have changed. Check it before you try again.`, { cause: error });
     }
   }
@@ -482,7 +489,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (version === statusVersion) { statusVersion++; next = withStatus(next, response.sessionStatus); }
       update(next);
     } catch (error) {
-      const message = error instanceof ReadFailure ? error.message
+      const message = refused(error) ? error.message
         : `${messageOf(error)} The answer may have reached the extension. Check before you answer again.`;
       update({ ...state, dialogPhase: { dialogId, type: "failed", message } });
     }

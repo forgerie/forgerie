@@ -95,7 +95,7 @@ export function DialogLayer({ control }: { control: DialogControl }) {
     aria-describedby={control.headingId} data-kind={dialog.kind}>
     <div className="ask-head dialog-head">
       <span className="dialog-source"><PuzzleIcon aria-hidden size={14} />Extension</span>
-      {control.countdown && <span className="dialog-countdown">{control.countdown}</span>}
+      {control.countdown && <span className="dialog-countdown" title={control.countdown}>{control.countdown}</span>}
       {control.count > 1 && <span className="ask-count" aria-label={`1 of ${control.count} open questions`}>1 of {control.count}</span>}
       <button type="button" className="ask-skip" disabled={control.blocked} onClick={control.skip}
         title="Close without answering. The extension sees a cancel.">Skip</button>

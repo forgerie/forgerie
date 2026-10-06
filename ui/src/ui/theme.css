@@ -176,7 +176,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer-input { display: block; color: var(--foreground); background: transparent; inline-size: 100%; max-block-size: min(12rem, 24cqb); field-sizing: content; resize: none; border: 0; border-radius: var(--radius-thread); padding: var(--space-3) var(--space-4) var(--space-2); font-size: 1rem; line-height: var(--space-6); outline: none; }
 .composer-input::placeholder { color: var(--muted-foreground); }
 .composer-input:focus-visible { outline: none; }
-.composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-4); padding: 0 var(--space-2) var(--space-2); }
+.composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: clamp(var(--space-2), 4cqi, var(--space-4)); padding: 0 var(--space-2) var(--space-2); }
 .compact-send { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); }
 /* While the agent works, Stop keeps Send's slot. Queue sits beside it, outlined
    so the filled Stop stays the one primary shape, and Steer is a quiet word. */
@@ -234,19 +234,24 @@ button:disabled { cursor: default; opacity: 0.4; }
 .shell-notes p { margin: 0; }
 /* Shell mode: the draft is set as code, so the bar reads as a command line. */
 .composer-shell[data-shell] .composer-input { font-family: var(--code-font); font-variant-ligatures: none; }
-.composer-dictation { display: flex; align-items: center; gap: var(--space-4); flex: 1; min-inline-size: 0; }
+.composer-dictation { display: flex; align-items: center; gap: var(--space-4); flex: 0 1 auto; min-inline-size: 0; margin-inline-end: auto; }
+/* The status text needs room only while dictation runs; otherwise the model name gets it. */
+.composer-dictation:has(.dictation-status) { flex: 1 1 0; }
 /* Model and thinking level, after assistant-ui's model selector element: a
    ghost trigger in the input bar that reads as the session's current choice.
    The model name is a readout, so it truncates first; the level and chevron
    keep their width. The full name stays in the panel. */
-.model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 1 auto; min-inline-size: 0; max-inline-size: 16rem; block-size: 2rem; padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; transition: color 150ms, background-color 150ms; }
+.model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1 1 0; min-inline-size: min(6rem, 100%); max-inline-size: max-content; block-size: 2rem; padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; transition: color 150ms, background-color 150ms; }
 .model-trigger:not(:disabled):hover, .model-trigger[aria-expanded="true"] { background: var(--hover-surface); color: var(--foreground); }
-.model-trigger-name { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-trigger-name { min-inline-size: 0; max-inline-size: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-trigger-level { flex: none; color: color-mix(in oklab, var(--muted-foreground) 75%, transparent); font-weight: 400; }
 .model-trigger svg { flex: none; }
+/* In a very narrow pane the level moves to the picker, where it is always shown,
+   so the model name keeps a readable width. Spacing has already yielded. */
+@container (max-width: 22rem) { .model-trigger-level { display: none; } }
 /* The panel: window level, the homepage menu surface. The list scrolls inside
    the room the anchor measured; search and thinking stay put around it. */
-.model-panel { position: fixed; z-index: 100; display: flex; flex-direction: column; min-block-size: 0; overflow: hidden;
+.model-panel { position: fixed; z-index: 100; display: flex; flex-direction: column; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
   border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); box-shadow: 0 var(--space-2) var(--space-6) var(--line); font-size: var(--small-text); }
 .model-search { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-block-end: 1px solid var(--line); background: transparent; color: var(--foreground); font: inherit; outline: none; }
 .model-search::placeholder { color: var(--muted-foreground); }
@@ -255,9 +260,9 @@ button:disabled { cursor: default; opacity: 0.4; }
 .model-group-label { margin: 0; padding: var(--space-2) var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
 .model-group ul { margin: 0; padding: 0; list-style: none; }
 .model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name check" "meta check"; align-items: center; column-gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; text-align: start; }
-.model-row:not(:disabled):hover, .model-row:focus-visible { background: var(--hover-surface); }
+.model-row:not([aria-disabled]):hover, .model-row:focus-visible { background: var(--hover-surface); }
 .model-row:focus-visible { outline-offset: -2px; }
-.model-row[aria-pressed="true"] { background: var(--active-surface); }
+.model-row[aria-current="true"] { background: var(--active-surface); }
 .model-row-name { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); color: var(--foreground); overflow-wrap: anywhere; }
 .model-row[data-plain] .model-row-name { color: color-mix(in oklab, var(--foreground) 70%, transparent); }
 .model-row-variant { color: var(--muted-foreground); font-size: var(--label-text); }
@@ -272,9 +277,10 @@ button:disabled { cursor: default; opacity: 0.4; }
 .model-thinking-label { flex: none; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
 .model-levels { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .model-levels button { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); }
-.model-levels button:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.model-levels button:not([aria-disabled]):hover { background: var(--hover-surface); color: var(--foreground); }
 .model-levels button[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); font-weight: 500; }
-.model-error { flex: none; margin: 0; padding: var(--space-2) var(--space-3); border-block-start: 1px solid var(--line); color: var(--destructive); overflow-wrap: anywhere; }
+.model-row[aria-disabled], .model-levels button[aria-disabled] { cursor: default; opacity: 0.4; }
+.model-error { flex: none; margin: 0; padding: var(--space-2) var(--space-3); border-block-end: 1px solid var(--line); color: var(--destructive); overflow-wrap: anywhere; }
 .dictation-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small-text); color: var(--muted-foreground); }
 /* Pi picker: same homepage menu tokens, window-level so the transcript cannot
    clip it. Its anchor measures the available height, including keyboard insets. */
@@ -474,9 +480,11 @@ button:disabled { cursor: default; opacity: 0.4; }
    Skip. The head names the source, so an extension's question is never
    mistaken for the agent's. Choices wrap into columns from the bar's width. */
 .composer-shell[data-mode="dialog"] { border-color: var(--line-focus); }
-.dialog-head { flex-wrap: wrap; column-gap: var(--space-3); padding-inline: var(--space-4) var(--space-2); }
-.dialog-source { flex: 1; display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
-.dialog-countdown, .dialog-head .ask-count { flex: none; margin-inline-start: 0; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.dialog-head { flex-wrap: nowrap; column-gap: var(--space-3); padding-inline: var(--space-4) var(--space-2); }
+.dialog-source { flex: 1 0 auto; display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.dialog-head .ask-count { flex: none; margin-inline-start: 0; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+/* The countdown is a readout: in a narrow head it truncates before the question loses a row. */
+.dialog-countdown { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
 .dialog-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(12rem, 100%), 1fr)); gap: var(--space-2); margin-block-start: var(--space-2); }
 .dialog-option { min-block-size: var(--control-size); padding: 0.5rem var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font-size: var(--text-size); line-height: 1.5; text-align: start; overflow-wrap: anywhere; }
 .dialog-option:not(:disabled):hover, .dialog-option:focus-visible { background: var(--hover-surface); border-color: var(--line-focus); }
