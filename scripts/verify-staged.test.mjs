@@ -11,9 +11,20 @@ import {
   createValidationSteps,
   parseNameStatusChanges,
   parseNullDelimitedPaths,
+  withoutGitHookEnvironment,
 } from "./verify-staged.mjs";
 
 describe("staged validation planning", () => {
+  it("keeps hook git variables away from validation steps so test repositories stay isolated", () => {
+    expect(withoutGitHookEnvironment({
+      GIT_DIR: "/repo/.git/worktrees/branch",
+      GIT_INDEX_FILE: "/repo/.git/worktrees/branch/index",
+      GIT_PREFIX: "",
+      PATH: "/bin",
+      npm_execpath: "/npm-cli.js",
+    })).toEqual({ PATH: "/bin", npm_execpath: "/npm-cli.js" });
+  });
+
   it("parses NUL-delimited Git paths without breaking spaces", () => {
     expect(parseNullDelimitedPaths(Buffer.from("src/one.ts\0src/path with spaces/two.ts\0"))).toEqual([
       "src/one.ts",

@@ -135,10 +135,24 @@ function scopedValidation(files, mode) {
   return files.length > 0 ? { mode, files } : { mode: "skip", files: [] };
 }
 
+/**
+ * Git exports GIT_DIR, GIT_INDEX_FILE, and similar variables to hooks. A test
+ * that runs `git init` or `git commit` in a temp directory would otherwise
+ * write to this repository: commits on the branch, `core.bare = true`, and a
+ * test identity in its config. Only this script's own git calls need them.
+ */
+export function withoutGitHookEnvironment(env) {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("GIT_")));
+}
+
 function runNpmStep(step, cwd) {
   console.log(`\n[pre-commit] ${step.label}`);
   const invocation = npmInvocation(step.npmArgs);
-  const result = spawnSync(invocation.command, invocation.args, { cwd, stdio: "inherit" });
+  const result = spawnSync(invocation.command, invocation.args, {
+    cwd,
+    env: withoutGitHookEnvironment(process.env),
+    stdio: "inherit",
+  });
   if (result.error !== undefined) throw result.error;
   return result.status ?? 1;
 }
