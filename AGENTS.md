@@ -71,8 +71,9 @@ tracks `main` without a NixOS rebuild.
 - Reuses the user's real pi profile at `~/.pi/agent` (credentials, sessions,
   packages, extensions) via the session daemon.
 - The daemon's `ask_user` custom tool shadows any extension-registered
-  `ask_user` (pi merges tools by name, SDK customTools last). This is relied
-  upon: the TUI keeps `pi-ask-user`, Forgerie uses the web-native form.
+  `ask_user` (pi merges tools by name, SDK customTools last). Forgerie bundles
+  its own `ask-user` decision-gate skill (`skills/ask-user`), written for this
+  tool's schema; it does not load the `pi-ask-user` package.
 - Provider registrations freeze at sessiond startup. Provider/extension
   changes need a sessiond restart, not `/reload`.
 - Managed background processes are first-class: `ad-process:notification`

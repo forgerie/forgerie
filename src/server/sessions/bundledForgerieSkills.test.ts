@@ -20,7 +20,7 @@ describe("bundled Forgerie skills", () => {
     expect(loader.getSkills().skills
       .filter((skill) => skill.filePath.startsWith(bundledForgerieSkillsPackagePath()))
       .map((skill) => skill.name)
-      .sort()).toEqual(["handoff", "relay"]);
+      .sort()).toEqual(["ask-user", "handoff", "relay"]);
   });
 
   it("prefers the bundled handoff over a shared-profile skill with the same name", async () => {

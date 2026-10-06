@@ -4,6 +4,7 @@
   "type": "module",
   "pi": {
     "skills": [
+      "./ask-user",
       "./handoff",
       "./relay"
     ]
