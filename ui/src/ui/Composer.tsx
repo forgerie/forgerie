@@ -1,5 +1,5 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
@@ -152,6 +152,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
       : control && dialog ? "An extension also asks something. It shows after these questions." : ""}</span>
     <ComposerPrimitive.AttachmentDropzone ref={anchor} className="composer-shell" data-mode={control ? "ask" : dialogControl ? "dialog" : "chat"} data-shell={shellMode || undefined}
       disabled={disabled || preparing || !!control?.sending}>
+      {model?.context?.type === "known" && <ContextBar percent={model.context.percent} high={model.context.high} />}
       {control && <AskQuestions control={control} />}
       {dialogControl && <DialogLayer control={dialogControl} />}
       {control && dialog && <p className="composer-hint">
@@ -286,4 +287,14 @@ function AskActions({ control, chatLabel }: { control: AskControl; chatLabel: st
         : sending("submit") ? "Sending…" : count > 1 ? "Send answers" : "Send answer"}
     </button>
   </>;
+}
+
+/**
+ * How full the context window is, drawn on the input's top edge between its
+ * rounded corners. The edge is a line the eye crosses every turn anyway.
+ */
+function ContextBar({ percent, high }: { percent: number; high: boolean }) {
+  return <div className="context-bar" role="progressbar" aria-label="Context used" aria-valuemin={0} aria-valuemax={100}
+    aria-valuenow={percent} title={`${percent}% of the context window used`} data-high={high || undefined}
+    style={{ "--context-used": `${percent}%` } as CSSProperties} />;
 }

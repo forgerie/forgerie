@@ -170,8 +170,13 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer { inline-size: 100%; position: relative; }
 /* Composer from composer.tsx: border-foreground/10, bg-muted/30,
    focus-within border-foreground/25, rounded-thread. */
-.composer-shell { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-thread); background: color-mix(in oklab, var(--muted) 30%, var(--background)); transition: border-color 150ms; }
+.composer-shell { position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-thread); background: color-mix(in oklab, var(--muted) 30%, var(--background)); transition: border-color 150ms; }
 .composer-shell:focus-within { border-color: var(--line-focus); }
+/* Context used: a 2px bar over the top border, between the rounded corners. The track is the border itself.
+   The last fifth of the window draws in the full text color. */
+.context-bar { position: absolute; z-index: 1; inset-block-start: -1px; inset-inline: var(--radius-thread); block-size: 2px; border-radius: 1px; pointer-events: none; }
+.context-bar::after { content: ""; display: block; inline-size: var(--context-used, 0%); block-size: 100%; border-radius: inherit; background: color-mix(in oklab, var(--live) 60%, transparent); transition: inline-size 300ms ease-out; }
+.context-bar[data-high]::after { background: var(--foreground); }
 .composer-shell[data-dragging] { outline: 2px solid var(--live); outline-offset: var(--space-1); }
 .composer-input { display: block; color: var(--foreground); background: transparent; inline-size: 100%; max-block-size: min(12rem, 24cqb); field-sizing: content; resize: none; border: 0; border-radius: var(--radius-thread); padding: var(--space-3) var(--space-4) var(--space-2); font-size: 1rem; line-height: var(--space-6); outline: none; }
 .composer-input::placeholder { color: var(--muted-foreground); }
@@ -246,9 +251,6 @@ button:disabled { cursor: default; opacity: 0.4; }
 .model-trigger-name { min-inline-size: 0; max-inline-size: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-trigger-level { flex: none; color: color-mix(in oklab, var(--muted-foreground) 75%, transparent); font-weight: 400; }
 .model-trigger svg { flex: none; }
-/* A readout, not a control: it never takes the trigger's width, and it stays at every width. */
-.context-use { flex: none; color: color-mix(in oklab, var(--muted-foreground) 75%, transparent); font-size: var(--small-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.context-use[data-high] { color: var(--foreground); font-weight: 500; }
 /* In a very narrow pane the level moves to the picker, where it is always shown,
    so the model name keeps a readable width. Spacing has already yielded. */
 @container (max-width: 22rem) { .model-trigger-level { display: none; } }

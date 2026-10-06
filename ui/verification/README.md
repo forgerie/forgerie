@@ -2,7 +2,7 @@
 
 ## Context use
 
-The input bar shows how much of the context window the session uses, as a whole percent beside the model. It turns stronger from 80% and hides until Pi has a reading. See [behavior, verification, and limits](context-use.md).
+A thin bar on the input bar's top edge shows how much of the context window the session uses. It turns stronger from 80% and hides until Pi has a reading. See [behavior, verification, and limits](context-use.md).
 
 ## Swipe to the session list
 

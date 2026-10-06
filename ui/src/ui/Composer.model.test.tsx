@@ -61,12 +61,16 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 describe("context use in the input bar", () => {
-  const readout = () => document.querySelector<HTMLElement>(".context-use");
-  it("shows the percent used beside the model, outside the model button", async () => {
+  const readout = () => document.querySelector<HTMLElement>(".context-bar");
+  it("draws the percent used as a bar on the input's top edge, with no number in the row", async () => {
     await render({ model: { context: { type: "known", percent: 62, high: false } } });
-    expect(readout()?.textContent).toBe("62% of context used");
+    expect(readout()?.parentElement?.classList.contains("composer-shell")).toBe(true);
+    expect(readout()?.getAttribute("role")).toBe("progressbar");
+    expect(readout()?.getAttribute("aria-valuenow")).toBe("62");
+    expect(readout()?.getAttribute("aria-label")).toBe("Context used");
+    expect(readout()?.style.getPropertyValue("--context-used")).toBe("62%");
     expect(readout()?.dataset.high).toBeUndefined();
-    expect(trigger().contains(readout())).toBe(false);
+    expect(document.querySelector(".composer-actions")?.textContent).not.toContain("%");
   });
   it("marks the last fifth of the window", async () => {
     await render({ model: { context: { type: "known", percent: 86, high: true } } });
