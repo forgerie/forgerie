@@ -762,3 +762,58 @@ summary.trace-line:hover { color: var(--foreground); }
   .ask, .app-scrim, .picker-menu, .picker-row-menu { animation: none; }
   .trace-text[data-live] { animation: none; background: none; color: var(--foreground); }
 }
+/* New session, after Paperclip's new-task dialog: a frameless window holding one
+   composer card, with the destination on a tab joined to the card's top edge.
+   The dialog is the page frame while open, so it sizes from the viewport; its
+   room shrinks with the window and the keyboard (resizes-content), never in steps. */
+.ns-dialog {
+  --ns-room: clamp(0.5rem, 4vmin, 2rem);
+  position: fixed; inset: 0; margin: auto; padding: 0; border: 0; background: transparent; color: var(--foreground);
+  inline-size: min(42rem, 100dvw - 2 * var(--ns-room)); max-inline-size: none;
+  block-size: fit-content; max-block-size: calc(100dvh - 2 * var(--ns-room)); overflow: visible;
+}
+.ns-dialog::backdrop { background: var(--scrim); }
+.ns-stack { display: flex; flex-direction: column; max-block-size: calc(100dvh - 2 * var(--ns-room)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+/* The tab: inset from the card's sides, rounded on top, open at the bottom where it meets the card. */
+.ns-context { flex: none; position: relative; z-index: 0; display: flex; align-items: center; gap: var(--space-1); min-block-size: 2.75rem;
+  margin-inline: 0.75rem; margin-block-end: -1px; padding-inline: var(--space-1); border: 1px solid var(--line); border-block-end: 0;
+  border-radius: 0.75rem 0.75rem 0 0; background: var(--popover); }
+.ns-context .destination { flex: 1; padding-inline: var(--space-1); }
+.ns-close { inline-size: var(--control-size); block-size: var(--control-size); }
+.ns-card { flex: none; position: relative; z-index: 1; display: flex; flex-direction: column; min-inline-size: 0; }
+.ns-card .composer-shell { border-color: var(--line); border-radius: var(--radius-thread); background: var(--popover);
+  box-shadow: 0 2px 8px -2px color-mix(in oklab, var(--foreground) 7%, transparent), 0 12px 32px -12px var(--scrim-shadow); }
+.ns-card .composer-shell:focus-within { border-color: var(--line-focus); }
+.ns-card .composer-input { min-block-size: 3rem; max-block-size: min(12rem, 28dvh); padding: clamp(0.75rem, 3vmin, 1.125rem) clamp(0.75rem, 3vmin, 1.125rem) var(--space-2); }
+.ns-card .composer-actions { padding: 0 clamp(var(--space-2), 2vmin, 0.875rem) clamp(var(--space-2), 2vmin, 0.875rem); }
+/* Send is the one filled control: round, in the text color, as in Paperclip. */
+.ns-card .composer-actions .primary.icon-button { inline-size: 2rem; block-size: 2rem; border-radius: 50%; background: var(--foreground); color: var(--background); }
+@media (prefers-color-scheme: dark) { .ns-card .composer-shell { border-color: transparent; background: var(--muted); } .ns-context { background: color-mix(in oklab, var(--muted) 70%, var(--popover)); } }
+/* The launch mode: a quiet chip that fills when it is on. */
+.ns-mode { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem; padding-inline: var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; }
+.ns-mode::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.ns-mode:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.ns-mode[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); }
+.ns-mode[aria-pressed="true"] svg { color: var(--live); }
+.ns-status, .ns-error { margin: var(--space-2) var(--space-4) 0; font-size: var(--small-text); overflow-wrap: anywhere; }
+.ns-status { color: var(--live); }
+.ns-error { color: var(--destructive); }
+/* Sessions started from here: one line each, the newest first. */
+.ns-tray { flex: none; margin: var(--space-3) 0.75rem 0; border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); }
+.ns-tray ul { margin: 0; padding: var(--space-1); list-style: none; max-block-size: min(12rem, 30dvh); overflow-y: auto; }
+.ns-launch { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-2); font-size: var(--small-text); }
+.ns-launch + .ns-launch { border-block-start: 1px solid color-mix(in oklab, var(--foreground) 5%, transparent); }
+.ns-launch-mark { flex: none; display: grid; place-items: center; color: var(--muted-foreground); }
+.ns-launch[data-state="starting"] .ns-launch-mark { color: var(--live); }
+.ns-launch[data-state="starting"] .ns-launch-mark svg { animation: ns-spin 1.2s linear infinite; }
+.ns-launch[data-state="failed"] .ns-launch-mark, .ns-launch[data-state="unsent"] .ns-launch-mark { color: var(--destructive); }
+@keyframes ns-spin { to { rotate: 1turn; } }
+.ns-launch-text { flex: 1; min-inline-size: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); }
+.ns-launch-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ns-launch-status { flex: 1 1 10rem; min-inline-size: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ns-launch[data-state="failed"] .ns-launch-status, .ns-launch[data-state="unsent"] .ns-launch-status { color: var(--destructive); }
+.ns-launch-actions { flex: none; display: flex; align-items: center; gap: var(--space-1); }
+.ns-launch-actions > button:not(.icon-button) { min-block-size: 2rem; padding-inline: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
+.ns-launch-actions > button:not(.icon-button):hover { border-color: var(--line-focus); }
+@media (prefers-reduced-motion: reduce) { .ns-launch[data-state="starting"] .ns-launch-mark svg { animation: none; } }

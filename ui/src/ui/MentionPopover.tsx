@@ -1,3 +1,4 @@
+import { usePortalTarget } from "./portalLayer";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ComponentProps, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, useAuiState, unstable_useTriggerPopoverScopeContext, type Unstable_TriggerItem } from "@assistant-ui/react";
@@ -42,6 +43,7 @@ export function MentionPopover({ source, char, enabled, input, snapshot }: {
   source: MentionSource; char: MentionTrigger; enabled: boolean; input: RefObject<HTMLTextAreaElement | null>;
   snapshot: RefObject<MentionInputSnapshot>;
 }) {
+  const layer = usePortalTarget();
   const { adapter, result, setQuery, query } = useSuggestions(source, char, enabled);
   const positionPopup = useCallback((panel: HTMLDivElement | null) => {
     const anchor = input.current;
@@ -85,7 +87,7 @@ export function MentionPopover({ source, char, enabled, input, snapshot }: {
     className="mention-popover" aria-label={`${label} suggestions`}>
     <MentionInsertion char={char} snapshot={snapshot} onCaret={setCaret} />
     <MentionResults label={label} result={result} input={input} snapshot={snapshot} onQuery={setQuery} />
-  </ComposerPrimitive.Unstable_TriggerPopover>, document.body);
+  </ComposerPrimitive.Unstable_TriggerPopover>, layer);
 }
 const inactiveMatcher = () => null;
 

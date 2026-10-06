@@ -1,7 +1,7 @@
 #!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
-// A new session through the real app and API. It starts in a scratch folder,
-// sends one short first message (normal model usage), and archives the
-// session afterwards.
+// New sessions through the real app and API. In a scratch folder it starts one
+// session from the dialog, then a second in Rapidfire from Ctrl+Enter. Each sends
+// one short first message (normal model usage). Both are archived afterwards.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -38,6 +38,7 @@ const port = await getFreePort();
 const chrome = launchChrome(process.env.CHROME_BIN || spawnSync("which", ["chromium"], { encoding: "utf8" }).stdout.trim(), port, profile);
 let cdp;
 let id;
+let rapidId;
 try {
   await waitForDebugger(port);
   cdp = await openPosturePage({ debugPort: port, posture: FOLD8_POSTURES.find((p) => p.name === "folded-portrait"), colorScheme: "dark" });
@@ -45,7 +46,7 @@ try {
   const until = (expression, timeoutMs = 60_000) => waitUntil(expression, () => evaluate(cdp, expression), timeoutMs);
   const url = new URL(app); url.searchParams.set("new", cwd);
   await cdp.send("Page.navigate", { url: url.href });
-  await until("document.querySelector('.session-title')?.textContent === 'New session' && !!document.querySelector('.model-trigger') && !document.querySelector('.model-trigger').textContent.startsWith('No model')");
+  await until("!!document.querySelector('dialog.ns-dialog[open]') && !!document.querySelector('.model-trigger') && !document.querySelector('.model-trigger').textContent.startsWith('No model')");
   const label = await evaluate(cdp, "document.querySelector('.destination-value').textContent");
   assert.equal(label, cwd.split("/").at(-1));
   step("the composer opened in the folder from the URL, with Pi's default model", { label, model: await evaluate(cdp, "document.querySelector('.model-trigger').textContent") });
@@ -59,7 +60,7 @@ try {
   await until("!document.querySelector('.model-panel') && document.querySelector('.model-trigger').textContent.includes('Low')");
 
   const shownModel = await evaluate(cdp, "document.querySelector('.model-trigger-name').textContent");
-  await evaluate(cdp, "document.querySelector('.composer textarea').focus()");
+  await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()");
   await cdp.send("Input.insertText", { text: "Automated UI test. Reply with the single word OK and do nothing else." });
   await pressCombo(cdp, "enter");
   await until("new URLSearchParams(location.search).has('session')", 90_000);
@@ -71,7 +72,7 @@ try {
   const backTarget = await evaluate(cdp, "history.length");
   await evaluate(cdp, "history.back()");
   await sleep(800);
-  assert.notEqual(await evaluate(cdp, "document.querySelector('.session-title')?.textContent"), "New session", "Back led to the empty composer");
+  assert.equal(await evaluate(cdp, "!!document.querySelector('dialog.ns-dialog')"), false, "Back reopened the dialog");
   await evaluate(cdp, "history.forward()");
   await until(`new URLSearchParams(location.search).get("session") === ${JSON.stringify(id)}`);
   step("Back from the started session does not reopen the empty composer", { historyLength: backTarget });
@@ -85,11 +86,32 @@ try {
   assert.equal(listed.cwd, cwd);
   step("Pi started it with the chosen level, the reply arrived, and the catalog lists it", { thinkingLevel: status.thinkingLevel, model: status.model?.id });
 
+  // Rapidfire: Ctrl+Enter opens the dialog where the reader is; Send starts in the background and keeps it open.
+  await evaluate(cdp, "document.activeElement?.blur()");
+  await pressCombo(cdp, "ctrl+enter");
+  await until("!!document.querySelector('dialog.ns-dialog[open]') && !document.querySelector('.ns-dialog .model-trigger').textContent.startsWith('No model')");
+  await evaluate(cdp, "[...document.querySelectorAll('.ns-mode')][0].click()");
+  await until("document.querySelector('.ns-mode').getAttribute('aria-pressed') === 'true'");
+  await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()");
+  await cdp.send("Input.insertText", { text: "Automated Rapidfire test. Reply with the single word OK." });
+  await pressCombo(cdp, "enter");
+  await until("document.querySelector('.ns-launch')?.dataset.state === 'starting'", 10_000);
+  const pendingRow = await evaluate(cdp, "!!document.querySelector('.ns-dialog') && document.querySelector('.ns-dialog .composer textarea').value === ''");
+  assert.equal(pendingRow, true, "the dialog stayed open with an empty bar");
+  await until("document.querySelector('.ns-launch')?.dataset.state === 'started'", 90_000);
+  assert.equal(await evaluate(cdp, "new URLSearchParams(location.search).get('session')"), id, "Rapidfire moved the reader");
+  rapidId = (await call("/api/sessions/all")).sessions.filter((session) => session.cwd === cwd && session.id !== id).map((session) => session.id)[0];
+  assert.ok(rapidId, "the Rapidfire session is in the catalog");
+  step("Rapidfire started a second session in the background and kept the dialog open", { rapidId });
+
   assert.deepEqual(result.errors, []);
   const output = resolve("verification/local");
   await mkdir(output, { recursive: true });
   await writeFile(join(output, "real-new-session-check.json"), JSON.stringify(result, null, 2));
 } finally {
+  // The Rapidfire reply may still be running; the server refuses to archive until it ends.
+  if (rapidId) await waitUntil("Rapidfire run ends", async () => !(await call(`/api/sessions/${rapidId}/status?${new URLSearchParams({ cwd })}`)).isStreaming).catch(() => {});
+  if (rapidId) await call(`/api/sessions/${rapidId}/archive`, { cwd }).catch((error) => console.error(`Archive failed: ${error.message}`));
   if (id) await call(`/api/sessions/${id}/archive`, { cwd }).catch((error) => console.error(`Archive failed: ${error.message}`));
   cdp?.close(); chrome.kill("SIGTERM"); await sleep(300);
   if (chrome.exitCode === null) chrome.kill("SIGKILL");

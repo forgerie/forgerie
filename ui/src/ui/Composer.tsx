@@ -1,5 +1,5 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
@@ -44,6 +44,10 @@ type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; c
   dialog?: DialogBinding | undefined;
   /** Files can be attached. Off where nothing can store them yet, such as a session that does not exist. */
   attachments?: boolean;
+  /** Controls that belong to this bar's owner, drawn after the attach button. */
+  extraActions?: ReactNode;
+  /** What an empty bar invites, and what Send does here. A new session starts rather than sends. */
+  placeholder?: string; sendLabel?: string;
   chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
@@ -52,7 +56,7 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, attachments = true, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, attachments = true, extraActions, placeholder = "Send a message...", sendLabel = "Send message", chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
@@ -176,7 +180,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
           ? "Shell command. Its output stays out of the agent's context." : "Shell command. The agent sees its output.")}
       </p>}
       <ComposerPrimitive.Input ref={input} aria-label={dialogInput ? "Answer" : "Message"} rows={1} className="composer-input"
-        placeholder={control?.placeholder ?? (dialogInput ? dialogControl.placeholder : "Send a message...")}
+        placeholder={control?.placeholder ?? (dialogInput ? dialogControl.placeholder : placeholder)}
         aria-describedby={control?.headingId ?? (dialogInput ? dialogControl.headingId : undefined)}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
@@ -186,6 +190,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
         {attachments && <AddAttachment disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS} />}
+        {extraActions}
         {model && <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker} />}
         <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
         {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
@@ -200,7 +205,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
             Choose model
           </button> : shellMode ? <button type="button" className="primary compact-send" disabled={shellBlocked} onClick={() => void runShell()}>
             Run command
-          </button> : !running && !workingDraft && <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
+          </button> : !running && !workingDraft && <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label={sendLabel} title={sendLabel}>
             <ArrowUpIcon aria-hidden size={16} />
           </ComposerPrimitive.Send>}
           {workingDraft && <>

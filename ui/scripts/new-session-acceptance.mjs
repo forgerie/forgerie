@@ -35,26 +35,29 @@ try {
     .then((found) => assert.equal(found, true, `no ${selector} "${text}"`));
   async function navigate(scenario, openDestination = false) {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
-    await until("document.querySelector('.model-trigger')?.textContent.includes('Claude Opus 5.5') && document.querySelector('.destination-value')?.textContent === 'forgerie · new-ui-mvp'");
+    if (scenario === "new-session-rapidfire") await sleep(800);
+    await until("document.querySelector('.ns-dialog .model-trigger')?.textContent.includes('Claude Opus 5.5') && document.querySelector('.destination-value')?.textContent === 'forgerie · new-ui-mvp'");
     if (openDestination) {
       await evaluate(cdp, "document.querySelector('.destination-trigger').click()");
       await until("!!document.querySelector('.destination-panel .destination-row')");
     }
   }
   async function type(text) {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
+    await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   }
-  const draft = () => evaluate(cdp, "document.querySelector('.composer textarea')?.value");
+  const draft = () => evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea')?.value");
   async function geometry(scenario, posture, scheme) {
     await sleep(150);
     const state = await evaluate(cdp, `(() => {
-      const box = element => element?.getBoundingClientRect().toJSON();
-      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.composer textarea').length,
-        input: box(document.querySelector('.composer textarea')), destination: box(document.querySelector('.destination-trigger')),
-        value: box(document.querySelector('.destination-value')), model: box(document.querySelector('.model-trigger')),
-        actions: [...document.querySelectorAll('.composer-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
-        panel: box(document.querySelector('.destination-panel')), firstRow: box(document.querySelector('.destination-row')) };
+      // A control in the dialog's scrolling stack counts once scrolled to, as a finger would.
+      const box = element => { element?.scrollIntoView?.({ block: "nearest" }); return element?.getBoundingClientRect().toJSON(); };
+      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.ns-dialog .composer textarea').length,
+        input: box(document.querySelector('.ns-dialog .composer textarea')), destination: box(document.querySelector('.destination-trigger')),
+        value: box(document.querySelector('.destination-value')), model: box(document.querySelector('.ns-dialog .model-trigger')),
+        actions: [...document.querySelectorAll('.ns-dialog .composer-actions button, .ns-close, .ns-launch-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
+        panel: box(document.querySelector('.destination-panel')), firstRow: box(document.querySelector('.destination-row')),
+        dialog: box(document.querySelector('.ns-stack')) };
     })()`);
     const name = `${scenario} ${posture.name} ${scheme}`;
     const inside = (rect, label) => assert.ok(rect && rect.left >= -0.5 && rect.right <= posture.width + 0.5 && rect.top >= -0.5 && rect.bottom <= posture.height + 0.5,
@@ -64,10 +67,11 @@ try {
     for (const [label, rect] of [["input", state.input], ["destination", state.destination], ["model", state.model]]) inside(rect, label);
     assert.ok(state.value.width >= 40, `${name}: destination squeezed to ${state.value.width}`);
     for (const action of state.actions) inside(action, action.label);
+    assert.ok(state.dialog && state.dialog.top >= -0.5 && state.dialog.bottom <= posture.height + 0.5, `${name}: dialog outside ${JSON.stringify(state.dialog)}`);
     if (state.panel) { inside(state.panel, "panel"); inside(state.firstRow, "first project"); }
     result.geometry.push({ scenario, posture: posture.name, scheme, panel: Boolean(state.panel) });
   }
-  for (const [scenario, open] of [["new-session", false], ["new-session", true]]) {
+  for (const [scenario, open] of [["new-session", false], ["new-session", true], ["new-session-rapidfire", false]]) {
     await navigate(scenario, open);
     for (const scheme of ["light", "dark"]) {
       await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
@@ -86,14 +90,14 @@ try {
   await until("document.querySelectorAll('.destination-panel .destination-row').length === 3");
   await click(".destination-row", "main checkout");
   await until("!document.querySelector('.destination-panel') && document.querySelector('.destination-value').textContent === 'forgerie'");
-  await evaluate(cdp, "document.querySelector('.model-trigger').click()");
+  await evaluate(cdp, "document.querySelector('.ns-dialog .model-trigger').click()");
   await until("!!document.querySelector('.model-panel .model-row')");
   await click(".model-row", "Claude Sonnet 5");
-  await until("!document.querySelector('.model-panel') && document.querySelector('.model-trigger').textContent.includes('Claude Sonnet 5')");
+  await until("!document.querySelector('.model-panel') && document.querySelector('.ns-dialog .model-trigger').textContent.includes('Claude Sonnet 5')");
   await type("Fix the build");
   await pressCombo(cdp, "enter");
-  await until("document.querySelector('.connection-status')?.textContent === 'Starting session…'");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').disabled || document.querySelector('.model-trigger').disabled"), true);
+  await until("document.querySelector('.ns-status')?.textContent === 'Starting session…'");
+  assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').disabled || document.querySelector('.ns-dialog .model-trigger').disabled"), true);
   await until("!!document.documentElement.dataset.started");
   assert.deepEqual(JSON.parse(await evaluate(cdp, "document.documentElement.dataset.started")), { cwd: "/home/simon/code/sandbox/forgerie", text: "Fix the build" });
   result.flows.startHere = true;
@@ -111,8 +115,8 @@ try {
   // A refused start keeps the message and says why.
   await navigate("new-session-error");
   await type("Fix the build"); await pressCombo(cdp, "enter");
-  await until("!!document.querySelector('.notice')");
-  assert.match(await evaluate(cdp, "document.querySelector('.notice').textContent"), /The session did not start: Folder not found/);
+  await until("!!document.querySelector('.ns-error')");
+  assert.match(await evaluate(cdp, "document.querySelector('.ns-error').textContent"), /The session did not start: Folder not found/);
   assert.equal(await draft(), "Fix the build");
   result.flows.refusal = true;
 

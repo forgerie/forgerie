@@ -1,3 +1,4 @@
+import { usePortalTarget } from "./portalLayer";
 import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, unstable_useSlashCommandAdapter, useAuiState } from "@assistant-ui/react";
@@ -21,6 +22,7 @@ export interface CommandBinding {
 /** System molecule: the stock assistant-ui picker, with plain Pi text and a window-level popup. */
 export function SlashCommands({ binding, anchor }: { binding: CommandBinding; anchor: RefObject<HTMLDivElement | null> }) {
   const text = useAuiState((s) => s.composer.text);
+  const layer = usePortalTarget();
   const disabled = useAuiState((s) => s.thread.isDisabled);
   const popover = useRef<HTMLDivElement>(null);
   const highlightObserver = useRef<MutationObserver | null>(null);
@@ -82,5 +84,5 @@ export function SlashCommands({ binding, anchor }: { binding: CommandBinding; an
         <span>{item.label}</span>{item.description && <small>{item.description}</small>}
       </ComposerPrimitive.Unstable_TriggerPopoverItem>)}
     </>}</ComposerPrimitive.Unstable_TriggerPopoverItems>
-  </ComposerPrimitive.Unstable_TriggerPopover>, document.body);
+  </ComposerPrimitive.Unstable_TriggerPopover>, layer);
 }

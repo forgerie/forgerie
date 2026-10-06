@@ -122,6 +122,20 @@ describe("live event cost", () => {
     stop();
     expect(calls).toBeLessThan(10);
   });
+
+  it("hands startup progress to whoever started the session, without touching the catalog", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    const before = store.getSnapshot();
+    const seen: unknown[] = [];
+    const stop = store.onStartup((event) => seen.push(event));
+    api.emit({ type: "session.startup", startupToken: "start-1", activity: { sessionId: "s1", phase: "active", label: "Refreshing provider models", at: "now" } });
+    await expect.poll(() => seen.length, { timeout: 2000 }).toBe(1);
+    expect(seen[0]).toMatchObject({ startupToken: "start-1", activity: { label: "Refreshing provider models" } });
+    expect(store.getSnapshot()).toBe(before);
+    stop();
+  });
 });
 
 describe("machine catalog", () => {

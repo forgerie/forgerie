@@ -1,20 +1,22 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ForgerieSession } from "./ForgerieSession";
-import { usePicker } from "./usePicker";
+import { usePicker, type StartingSession } from "./usePicker";
 import type { Row } from "./picker/board";
 import type { Session } from "./contracts";
 import { AppShell } from "./ui/AppShell";
 import { Picker, PickerToast } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
-import { NewSession } from "./NewSession";
+import { NewSession, type LaunchDraft, type LaunchMode } from "./NewSession";
 import { createNewSessionApi, defaultDestinationCwd } from "./newSession";
+import { createLaunchStore, type StartupListener } from "./launches";
+import { newSessionShortcut } from "./shortcuts";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 // Settings carry the prompt editor; the chat never pays for it.
 const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
-/** `?new=<folder>` keeps a new session's composer open across a reload. */
+/** `?new=<folder>` keeps the new-session dialog open across a reload, over whatever is open. */
 const readNew = () => new URLSearchParams(window.location.search).get("new")?.trim() || undefined;
 /** `?settings=<section>&agent=<target>` keeps a settings page open across a reload. */
 const readSettings = (): SettingsPlace | undefined => {
@@ -25,18 +27,31 @@ const readSettings = (): SettingsPlace | undefined => {
 };
 const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
+/** History entries this app pushed for the dialog, so closing it can step back instead of piling up entries. */
+const DIALOG_ENTRY = { newSession: true };
 
-/** Composition root: owns the selected session (in the URL) and the sheet. */
+/** Composition root: owns the selected session (in the URL), the sheet, and sessions being started. */
 export function App() {
   const [selectedId, setSelectedId] = useState(readSelected);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
-  // A session that does not exist yet: the folder its composer starts in.
+  // The new-session dialog: the folder it starts in, over the open session.
   const [composing, setComposing] = useState(readNew);
+  const [composeMode, setComposeMode] = useState<LaunchMode>("switch");
   const [settings, setSettings] = useState(readSettings);
-  // Bumped when a new composer opens, so moving its destination never remounts it.
+  // Bumped when the dialog opens, so moving its destination never remounts it.
   const [composeKey, setComposeKey] = useState(0);
   // Unsent drafts outlive a session switch and a reload, in this browser only.
   const [drafts] = useState(() => createDraftStore(browserStorage()));
+  // Starts outlive the dialog. Their progress arrives on the picker's event socket.
+  const [startup] = useState(() => {
+    const listeners = new Set<StartupListener>();
+    return { emit: ((event) => { for (const listener of listeners) listener(event); }) as StartupListener,
+      on: (listener: StartupListener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
+  });
+  const [launches] = useState(() => createLaunchStore<LaunchDraft>(newSessionApi, { onStartup: startup.on }));
+  const launchList = useSyncExternalStore(launches.subscribe, launches.getSnapshot);
+  const starting = useMemo<StartingSession[]>(() => launchList.filter((launch) => launch.state.type === "starting")
+    .map((launch) => ({ id: launch.id, cwd: launch.cwd, title: launch.title, startedAt: launch.startedAt })), [launchList]);
   // With nothing selected there is nothing to cover, so the sheet starts open.
   const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
@@ -52,11 +67,24 @@ export function App() {
     drafts.forget(id);
     if (readSelected() === id) closeSession();
   }, [drafts, closeSession]);
-  const picker = usePicker(selectedId, { onDeleted });
+  const picker = usePicker(selectedId, { onDeleted, starting });
+  const { onStartup } = picker;
+  useEffect(() => onStartup(startup.emit), [onStartup, startup]);
+  useEffect(() => () => launches.dispose(), [launches]);
   useEffect(() => {
     const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setSettings(readSettings()); };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  /** Close the dialog. Back would do the same when this app opened it. */
+  const closeComposer = useCallback(() => {
+    if (readNew() === undefined) { setComposing(undefined); return; }
+    const pushed = (window.history.state as typeof DIALOG_ENTRY | null)?.newSession === true;
+    if (pushed) { window.history.back(); return; }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("new");
+    window.history.replaceState({}, "", url);
+    setComposing(undefined);
   }, []);
   const switchSession = useCallback((session: Session, draft?: string, error?: string) => {
     setOpen(false);
@@ -70,39 +98,47 @@ export function App() {
     clearSettings(url);
     url.searchParams.delete("new");
     url.searchParams.set("session", session.id);
-    // A started session replaces its composer: Back must not lead to an empty composer.
+    // A started session replaces the dialog's entry: Back must not reopen an emptied dialog.
     if (fromComposer) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSelectedId(session.id);
   }, [selectedId]);
-  const select = useCallback((row: Row) => switchSession(row.session), [switchSession]);
-  // New session: the composer starts where the reader is, and the URL remembers it.
+  // New session: the dialog starts where the reader is, over whatever is open, and the URL remembers it.
   const { find, recent } = picker;
-  const startNew = useCallback(async () => {
+  const startNew = useCallback(async (mode: LaunchMode = "switch") => {
     setOpen(false);
-    if (readSettings() !== undefined) {
-      const url = new URL(window.location.href);
-      clearSettings(url);
-      window.history.replaceState({}, "", url);
-      setSettings(undefined);
-    }
-    if (readNew() !== undefined && !readSelected()) {
-      document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+    if (readNew() !== undefined) {
+      setComposeMode(mode);
+      document.querySelector<HTMLTextAreaElement>(".ns-dialog .composer textarea")?.focus();
       return;
     }
-    const open = readSelected();
+    const current = readSelected();
     // Before the session list loads, or with no sessions yet, Forgerie's projects decide.
     const projects = await newSessionApi.projects().catch(() => []);
-    const cwd = defaultDestinationCwd(open ? find(open) : undefined, recent, projects);
+    const cwd = defaultDestinationCwd(current ? find(current) : undefined, recent, projects);
     setComposeKey((key) => key + 1);
-    if (!cwd) { setCommandSelection(undefined); setSelectedId(undefined); setComposing(""); return; }
+    setComposeMode(mode);
+    if (!cwd) { setComposing(""); return; }
     const url = new URL(window.location.href);
-    url.searchParams.delete("session");
     url.searchParams.set("new", cwd);
-    window.history.pushState({}, "", url);
-    setCommandSelection(undefined);
-    setSelectedId(undefined);
+    window.history.pushState(DIALOG_ENTRY, "", url);
     setComposing(cwd);
   }, [find, recent]);
+  // Ctrl+Enter opens the dialog, Ctrl+Shift+Enter opens it in Rapidfire, as in the legacy client.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const mode = newSessionShortcut(event);
+      if (!mode || document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      void startNew(mode);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [startNew]);
+  // A row that is still starting has nothing to open yet; its dialog shows how it goes.
+  const select = useCallback((row: Row) => {
+    if (starting.some((item) => item.id === row.session.id)) { void startNew("rapidfire"); return; }
+    switchSession(row.session);
+  }, [starting, startNew, switchSession]);
   // Archive and next. With nothing left waiting, the list is the next thing to read.
   const { archiveAndNext } = picker;
   const archiveNext = useCallback(async (id: string) => {
@@ -122,7 +158,7 @@ export function App() {
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSettings(place);
     if (place) setOpen(false);
-    else if (!readSelected() && readNew() === undefined) setOpen(true);
+    else if (!readSelected()) setOpen(true);
   }, []);
   // A handoff door knows only the id and workspace. The catalog may also know the title.
   const known = !selectedId ? undefined : commandSelection?.session.id === selectedId
@@ -131,27 +167,30 @@ export function App() {
   // The undo offer lives in the picker. While the sheet is closed, the thread shows it too.
   const toast = picker.view.toast
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : undefined;
-  return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
-    picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
-      actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
-        onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
-        onClose: layout === "overlay" && (selectedId || composing !== undefined || settings) ? () => setOpen(false) : undefined }} />}
-    // `known` is read once, when the thread mounts for this id. A direct URL
-    // load before the catalog arrives passes nothing and the store looks it up.
-    thread={settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
-      <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} /></Suspense>
-      : composing !== undefined && !selectedId ? (composing
-      ? <NewSession key={composeKey} cwd={composing} api={newSessionApi} drafts={drafts}
-        onDestination={(next) => { const url = new URL(window.location.href); url.searchParams.set("new", next); window.history.replaceState({}, "", url); }}
-        onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} />
-      : <SessionFrame name="New session" status="" error="Forgerie knows no project yet. Add a project in the old client, then start a session here."><div className="thread-empty" /></SessionFrame>)
-      : selectedId ? <ForgerieSession key={selectedId} id={selectedId}
+  const dialog = composing === undefined ? null : composing
+    ? <NewSession key={composeKey} cwd={composing} initialMode={composeMode} api={newSessionApi} launches={launches} drafts={drafts}
+      onDestination={(next) => { const url = new URL(window.location.href); url.searchParams.set("new", next); window.history.replaceState(window.history.state, "", url); }}
+      onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
+    : null;
+  const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
+    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} /></Suspense>
+    : composing === "" && !selectedId
+      ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet. Add a project in the old client, then start a session here."><div className="thread-empty" /></SessionFrame>
+    : selectedId ? <ForgerieSession key={selectedId} id={selectedId}
       known={known}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
       drafts={drafts} onSwitchSession={switchSession}
       archive={{ availability: picker.archiveState(selectedId), onArchive: () => { void archiveNext(selectedId); } }} />
-      // The picker covers this area whenever nothing is selected, so it holds no
-      // message of its own: the picker is the instruction.
-      : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>} />;
+    // The picker covers this area whenever nothing is selected, so it holds no
+    // message of its own: the picker is the instruction.
+    : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
+  return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
+    picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs}
+      actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
+        onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
+        onClose: layout === "overlay" && (selectedId || settings) ? () => setOpen(false) : undefined }} />}
+    // `known` is read once, when the thread mounts for this id. A direct URL
+    // load before the catalog arrives passes nothing and the store looks it up.
+    thread={<>{thread}{dialog}</>} />;
 }

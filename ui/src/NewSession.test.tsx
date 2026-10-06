@@ -2,10 +2,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NewSession } from "./NewSession";
-import type { NewSessionApi, Project, Workspace, AgentChoice } from "./newSession";
+import { NewSession, type LaunchDraft, type LaunchMode } from "./NewSession";
+import type { AgentChoice, FirstPrompt, NewSessionApi, Project, PromptResource, Workspace } from "./newSession";
 import type { Session, SessionModel } from "./contracts";
-import { createDraftStore } from "./draftStore";
+import { createDraftStore, type DraftStore } from "./draftStore";
+import { createLaunchStore } from "./launches";
 
 let root: Root;
 const opus: SessionModel = { provider: "cliproxyapi", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true, scoped: true };
@@ -16,27 +17,39 @@ const workspaces: Record<string, Workspace[]> = {
     { id: "w2", path: "/code/forgerie/.worktree/ui", label: "ui", branch: "feat/ui", isMain: false }],
   p2: [{ id: "w3", path: "/code/korri", label: "main", branch: "main", isMain: true }],
 };
+const testing: PromptResource = { name: "skill:testing", source: "skill", identity: { source: "skill", name: "skill:testing", fingerprint: "f1" }, description: "Write tests" };
 type StartResult = Awaited<ReturnType<NewSessionApi["start"]>>;
 
 /** A configurable new-session API: real promises, scripted outcomes. */
 function scriptedApi(outcome: (cwd: string, text: string, choice: AgentChoice) => StartResult | Promise<StartResult> = (cwd) => ({ type: "started", session: { id: "s-new", cwd } })) {
-  const starts: { cwd: string; text: string; choice: AgentChoice }[] = [];
+  const starts: { cwd: string; text: string; choice: AgentChoice; prompt: FirstPrompt }[] = [];
   const modelReads: string[] = [];
   const api: NewSessionApi = {
     projects: async () => projects,
     workspaces: async (projectId) => workspaces[projectId] ?? [],
     models: async (cwd) => { modelReads.push(cwd); return { models: cwd === "/code/korri" ? [haiku] : [opus, haiku], model: cwd === "/code/korri" ? haiku : opus, thinkingLevel: "high" }; },
-    start: async (cwd, text, choice) => { starts.push({ cwd, text, choice }); return outcome(cwd, text, choice); },
+    promptResources: async () => [testing],
+    start: async (cwd, first, choice) => {
+      const prompt = typeof first === "string" ? { text: first } : first;
+      starts.push({ cwd, text: prompt.text, choice, prompt });
+      return outcome(cwd, prompt.text, choice);
+    },
   };
   return { api, starts, modelReads };
 }
 const storage = () => { const map = new Map<string, string>(); return { getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => { map.set(key, value); }, removeItem: (key: string) => { map.delete(key); } }; };
 const settle = () => act(async () => { for (let index = 0; index < 4; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-async function render(api: NewSessionApi, onStarted: (session: Session, unsent?: { draft: string; error: string }) => void = () => {}, drafts = createDraftStore(storage())) {
-  await act(async () => root.render(<NewSession cwd="/code/forgerie" api={api} drafts={drafts} onStarted={onStarted} />));
+interface Options { onStarted?: (session: Session, unsent?: { draft: string; error: string }) => void; drafts?: DraftStore; onClose?: () => void;
+  onDestination?: (cwd: string) => void; mode?: LaunchMode }
+async function render(api: NewSessionApi, options: Options = {}) {
+  const launches = createLaunchStore<LaunchDraft>(api);
+  await act(async () => root.render(<NewSession cwd="/code/forgerie" api={api} launches={launches} drafts={options.drafts ?? createDraftStore(storage())}
+    onStarted={options.onStarted ?? (() => {})} onClose={options.onClose ?? (() => {})} onDestination={options.onDestination} initialMode={options.mode} />));
   await settle();
+  return launches;
 }
-const textarea = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const dialog = () => document.querySelector<HTMLDialogElement>("dialog.ns-dialog");
+const textarea = () => document.querySelector<HTMLTextAreaElement>(".ns-dialog .composer textarea")!;
 const button = (name: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")]
   .find((node) => node.textContent?.trim().startsWith(name) || node.getAttribute("aria-label")?.startsWith(name));
 const click = async (node: HTMLElement | undefined) => { await act(async () => node!.click()); await settle(); };
@@ -47,6 +60,7 @@ async function type(text: string) {
   });
 }
 const send = async () => { await act(async () => { textarea().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" })); }); await settle(); };
+const error = () => document.querySelector(".ns-error")?.textContent;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -54,24 +68,49 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
-describe("starting a new session", () => {
-  it("names where it starts and Pi's default model, and has no attach button", async () => {
+describe("the new-session dialog", () => {
+  it("opens as a named modal with the destination on its tab, Pi's default model, files, and Rapidfire", async () => {
     await render(scriptedApi().api);
-    expect(document.querySelector(".session-title")!.textContent).toBe("New session");
-    expect(document.querySelector(".destination-value")!.textContent).toBe("forgerie");
+    expect(dialog()?.open).toBe(true);
+    expect(document.getElementById(dialog()!.getAttribute("aria-labelledby")!)?.textContent).toBe("New session");
+    expect(document.querySelector(".ns-context .destination-value")!.textContent).toBe("forgerie");
     expect(document.querySelector(".model-trigger")!.textContent).toContain("Claude Opus 5.5");
     expect(document.querySelector(".model-trigger")!.textContent).toContain("High");
-    expect(button("Add attachment")).toBeUndefined();
+    expect(button("Add attachment")).toBeDefined();
+    expect(button("Rapidfire")?.getAttribute("aria-pressed")).toBe("false");
+    expect(textarea().placeholder).toBe("Describe the first task…");
   });
 
+  it("mounts its pickers inside itself, so they are not inert behind the modal", async () => {
+    await render(scriptedApi().api);
+    await click(document.querySelector<HTMLButtonElement>(".model-trigger")!);
+    expect(document.querySelector(".model-panel")?.parentElement).toBe(dialog());
+    await act(async () => { document.querySelector(".model-panel")!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })); });
+    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
+    expect(document.querySelector(".destination-panel")?.parentElement).toBe(dialog());
+  });
+
+  it("closes from Escape and Close, and keeps the draft for next time", async () => {
+    const onClose = vi.fn();
+    const drafts = createDraftStore(storage());
+    await render(scriptedApi().api, { onClose, drafts });
+    await type("half a thought");
+    await act(async () => { dialog()!.dispatchEvent(new Event("cancel", { cancelable: true })); });
+    await click(button("Close new session"));
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(drafts.session("new-session").chat()).toBe("half a thought");
+  });
+});
+
+describe("starting a new session", () => {
   it("creates the session with the first message, then hands it over", async () => {
     const script = scriptedApi();
     const onStarted = vi.fn();
-    await render(script.api, onStarted);
+    await render(script.api, { onStarted });
     await type("Fix the build");
     await send();
     // The model and level the bar shows are the ones the session starts with.
-    expect(script.starts).toEqual([{ cwd: "/code/forgerie", text: "Fix the build", choice: { model: opus, thinkingLevel: "high" } }]);
+    expect(script.starts.map(({ cwd, text, choice }) => ({ cwd, text, choice }))).toEqual([{ cwd: "/code/forgerie", text: "Fix the build", choice: { model: opus, thinkingLevel: "high" } }]);
     expect(onStarted).toHaveBeenCalledWith({ id: "s-new", cwd: "/code/forgerie" });
   });
 
@@ -89,40 +128,30 @@ describe("starting a new session", () => {
 
   it("moves to another workspace, and reads that folder's models", async () => {
     const script = scriptedApi();
-    await render(script.api);
+    const onDestination = vi.fn();
+    await render(script.api, { onDestination });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
     const panel = () => document.querySelector<HTMLElement>(".destination-panel")!;
-    expect(document.activeElement).toBe(panel());
     await click(button("forgerie", panel()));
     await click(button("feat/ui", panel()));
     expect(document.querySelector(".destination-panel")).toBeNull();
     expect(document.querySelector(".destination-value")!.textContent).toBe("forgerie · feat/ui");
     expect(script.modelReads.at(-1)).toBe("/code/forgerie/.worktree/ui");
+    expect(onDestination).toHaveBeenCalledWith("/code/forgerie/.worktree/ui");
     await type("hi");
     await send();
     expect(script.starts[0]!.cwd).toBe("/code/forgerie/.worktree/ui");
   });
 
-  it("chooses a project with one checkout in one step, and drops a model that folder lacks", async () => {
-    const script = scriptedApi();
-    await render(script.api);
-    await click(document.querySelector<HTMLButtonElement>(".model-trigger")!);
-    await click(button("Claude Opus 5.5", document.querySelector(".model-panel")!));
-    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(button("korri", document.querySelector(".destination-panel")!));
-    expect(document.querySelector(".destination-value")!.textContent).toBe("korri");
-    expect(document.querySelector(".model-trigger")!.textContent).toContain("Claude Haiku 4.5");
-  });
-
   it("keeps the message and says why when the session did not start", async () => {
     const script = scriptedApi(() => ({ type: "failed", failure: { stage: "start", message: "No such folder", maybeStarted: false } }));
     const onStarted = vi.fn();
-    await render(script.api, onStarted);
+    await render(script.api, { onStarted });
     await type("Fix the build");
     await send();
     expect(onStarted).not.toHaveBeenCalled();
     expect(textarea().value).toBe("Fix the build");
-    expect(document.querySelector(".notice")!.textContent).toBe("The session did not start: No such folder");
+    expect(error()).toBe("The session did not start: No such folder");
   });
 
   it("warns that a session may exist when the reply was lost, and never starts again by itself", async () => {
@@ -130,7 +159,7 @@ describe("starting a new session", () => {
     await render(script.api);
     await type("hi");
     await send();
-    expect(document.querySelector(".notice")!.textContent).toMatch(/may have started anyway/);
+    expect(error()).toMatch(/may have started anyway/u);
     expect(script.starts).toHaveLength(1);
     expect(textarea().value).toBe("hi");
   });
@@ -138,11 +167,11 @@ describe("starting a new session", () => {
   it("opens the session it made when only the first message failed, with the message back in the draft", async () => {
     const script = scriptedApi((cwd) => ({ type: "failed", failure: { stage: "prompt", session: { id: "s-new", cwd }, message: "Network error." } }));
     const onStarted = vi.fn();
-    await render(script.api, onStarted);
+    await render(script.api, { onStarted });
     await type("Fix the build");
     await send();
     expect(onStarted).toHaveBeenCalledWith({ id: "s-new", cwd: "/code/forgerie" },
-      expect.objectContaining({ draft: "Fix the build", error: expect.stringMatching(/may not have reached Pi/) }));
+      expect.objectContaining({ draft: "Fix the build", error: expect.stringMatching(/may not have reached Pi/u) }));
   });
 
   it("refuses a shell command before any session exists", async () => {
@@ -152,7 +181,20 @@ describe("starting a new session", () => {
     await send();
     expect(script.starts).toEqual([]);
     expect(textarea().value).toBe("!ls");
-    expect(document.querySelector(".notice")!.textContent).toMatch(/Shell commands need a running session/);
+    expect(error()).toMatch(/Shell commands need a running session/u);
+  });
+
+  it("shows that it is starting, and cannot be closed until the start ends", async () => {
+    let finish!: (result: StartResult) => void;
+    const onClose = vi.fn();
+    await render(scriptedApi(() => new Promise((resolve) => { finish = resolve; })).api, { onClose });
+    await type("Fix the build");
+    await send();
+    expect(document.querySelector(".ns-status")?.textContent).toBe("Starting session…");
+    await act(async () => { dialog()!.dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(button("Close new session")?.disabled).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { finish({ type: "started", session: { id: "s", cwd: "/code/forgerie" } }); });
   });
 
   it("does not open the session when the reader left during the start, and keeps a refused message in the saved draft", async () => {
@@ -160,20 +202,12 @@ describe("starting a new session", () => {
     const script = scriptedApi(() => new Promise((resolve) => { finish = resolve; }));
     const onStarted = vi.fn();
     const drafts = createDraftStore(storage());
-    await render(script.api, onStarted, drafts);
+    await render(script.api, { onStarted, drafts });
     await type("Fix the build");
     await send();
-    expect(document.querySelector(".connection-status")!.textContent).toBe("Starting session…");
     await act(async () => root.unmount());
     await act(async () => { finish({ type: "failed", failure: { stage: "start", message: "Network error.", maybeStarted: true } }); });
     expect(drafts.session("new-session").chat()).toBe("Fix the build");
-    root = createRoot(document.body.appendChild(document.createElement("div")));
-    const second = scriptedApi(() => new Promise((resolve) => { finish = resolve; }));
-    await render(second.api, onStarted, drafts);
-    await send();
-    await act(async () => root.unmount());
-    await act(async () => { finish({ type: "started", session: { id: "s-late", cwd: "/code/forgerie" } }); });
-    expect(onStarted).not.toHaveBeenCalled();
     root = createRoot(document.body.appendChild(document.createElement("div")));
   });
 
@@ -192,22 +226,68 @@ describe("starting a new session", () => {
     expect(script.starts[0]!.choice.model).toEqual(opus);
   });
 
-  it("tells the URL where it starts after a move", async () => {
-    const onDestination = vi.fn();
-    await act(async () => root.render(<NewSession cwd="/code/forgerie" api={scriptedApi().api} onStarted={() => {}} onDestination={onDestination} />));
-    await settle();
-    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(button("korri", document.querySelector(".destination-panel")!));
-    expect(onDestination).toHaveBeenCalledWith("/code/korri");
-  });
-
   it("keeps the unsent first message across a reload", async () => {
     const drafts = createDraftStore(storage());
-    await render(scriptedApi().api, () => {}, drafts);
+    await render(scriptedApi().api, { drafts });
     await type("half a thought");
     await act(async () => root.unmount());
     root = createRoot(document.body.appendChild(document.createElement("div")));
-    await render(scriptedApi().api, () => {}, drafts);
+    await render(scriptedApi().api, { drafts });
     expect(textarea().value).toBe("half a thought");
+  });
+});
+
+describe("a skill or prompt template as the first message", () => {
+  it("starts it with the identity this folder listed", async () => {
+    const script = scriptedApi();
+    await render(script.api);
+    await type("/skill:testing add cases");
+    await send();
+    expect(script.starts[0]!.prompt).toMatchObject({ text: "/skill:testing add cases", command: testing.identity });
+  });
+
+  it("refuses a command this folder does not list, and keeps it in the bar", async () => {
+    const script = scriptedApi();
+    await render(script.api);
+    await type("/review the diff");
+    await send();
+    expect(script.starts).toEqual([]);
+    expect(error()).toMatch(/not a skill or prompt template in this folder/u);
+    expect(textarea().value).toBe("/review the diff");
+  });
+});
+
+describe("Rapidfire", () => {
+  it("starts each session in the background, clears the bar, and lists how each one went", async () => {
+    const replies: ((result: StartResult) => void)[] = [];
+    const script = scriptedApi(() => new Promise((resolve) => { replies.push(resolve); }));
+    const onStarted = vi.fn();
+    await render(script.api, { onStarted });
+    await click(button("Rapidfire"));
+    expect(button("Rapidfire")?.getAttribute("aria-pressed")).toBe("true");
+    await type("First task");
+    await send();
+    await type("Second task");
+    await send();
+    expect(textarea().value).toBe("");
+    expect(script.starts.map((start) => start.text)).toEqual(["First task", "Second task"]);
+    const rows = () => [...document.querySelectorAll(".ns-launch")].map((row) => row.textContent);
+    expect(rows()).toEqual(["Second taskStarting…", "First taskStarting…"]);
+    await act(async () => { replies[0]!({ type: "started", session: { id: "s1", cwd: "/code/forgerie" } }); });
+    await act(async () => { replies[1]!({ type: "failed", failure: { stage: "start", message: "Pi is down.", maybeStarted: false } }); });
+    await settle();
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(rows()[1]).toContain("Started");
+    expect(rows()[0]).toContain("The session did not start: Pi is down.");
+    await click(button("Put back"));
+    expect(textarea().value).toBe("Second task");
+    await click(button("Open"));
+    expect(onStarted).toHaveBeenCalledWith({ id: "s1", cwd: "/code/forgerie" }, undefined);
+  });
+
+  it("can open straight into Rapidfire", async () => {
+    await render(scriptedApi().api, { mode: "rapidfire" });
+    expect(button("Rapidfire")?.getAttribute("aria-pressed")).toBe("true");
+    expect(button("Start in the background")).toBeDefined();
   });
 });

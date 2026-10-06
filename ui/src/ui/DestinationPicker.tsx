@@ -1,3 +1,4 @@
+import { usePortalTarget } from "./portalLayer";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, FolderIcon } from "lucide-react";
@@ -43,6 +44,7 @@ function useRead<T>(read: ((signal: AbortSignal) => Promise<T>) | undefined, key
  */
 export function DestinationPicker({ binding }: { binding: DestinationBinding }) {
   const [open, setOpen] = useState(false);
+  const layer = usePortalTarget();
   const row = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
@@ -56,7 +58,7 @@ export function DestinationPicker({ binding }: { binding: DestinationBinding }) 
       <span className="destination-value" id={`${panelId}-value`}>{binding.label}</span>
       <ChevronDownIcon aria-hidden size={14} />
     </button>
-    {open && createPortal(<DestinationPanel id={panelId} binding={binding} anchor={row} trigger={trigger} onClose={close} />, document.body)}
+    {open && createPortal(<DestinationPanel id={panelId} binding={binding} anchor={row} trigger={trigger} onClose={close} />, layer)}
   </div>;
 }
 

@@ -15,7 +15,8 @@ import type { DialogPhase } from "../src/dialog";
 import type { CommandBinding } from "../src/ui/SlashCommands";
 import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
-import { NewSession } from "../src/NewSession";
+import { NewSession, type LaunchDraft } from "../src/NewSession";
+import { createLaunchStore } from "../src/launches";
 import type { NewSessionApi, Project, Workspace } from "../src/newSession";
 import { createAttachmentAdapter } from "../src/attachments";
 import { idleCompaction, isCompactCommand, type CompactionState } from "../src/compaction";
@@ -527,24 +528,42 @@ const previewNewApi: NewSessionApi = {
   projects: async () => previewProjects,
   workspaces: async (projectId) => previewWorkspaces[projectId] ?? [{ id: `${projectId}-main`, path: previewProjects.find((item) => item.id === projectId)!.path, label: "main", branch: "main", isMain: true }],
   models: async () => ({ models: previewModels, model: previewModels[2], thinkingLevel: "high" }),
-  start: async (cwd, text) => {
-    await new Promise((resolve) => setTimeout(resolve, scenario === "new-session-slow" ? 60_000 : 300));
-    if (scenario === "new-session-error") return { type: "failed", failure: { stage: "start", message: `Folder not found: ${cwd}`, maybeStarted: false } };
+  promptResources: async () => [
+    { name: "review", source: "prompt", identity: { source: "prompt", name: "review", fingerprint: "p1" }, description: "Review the current changes" },
+    { name: "skill:testing", source: "skill", identity: { source: "skill", name: "skill:testing", fingerprint: "s1" }, description: "Write regression tests" },
+  ],
+  start: async (cwd, first) => {
+    const text = typeof first === "string" ? first : first.text;
+    const slow = scenario === "new-session-slow" || scenario === "new-session-rapidfire" && text.startsWith("Second");
+    await new Promise((resolve) => setTimeout(resolve, slow ? 60_000 : 300));
+    if (scenario === "new-session-error" || scenario === "new-session-rapidfire" && text.startsWith("Third")) return { type: "failed", failure: { stage: "start", message: `Folder not found: ${cwd}`, maybeStarted: false } };
     document.documentElement.dataset["started"] = JSON.stringify({ cwd, text });
     return { type: "started", session: { id: "preview-new", cwd } };
   },
 };
+const previewLaunches = createLaunchStore<LaunchDraft>(previewNewApi);
+/** The dialog over a session, as it opens in the app. No network. */
 function NewSessionPreview() {
   const [started, setStarted] = useState<string>();
+  const [open, setOpen] = useState(true);
+  const runtime = useExternalStoreRuntime({ messages: useThreadMessages(initialMessages, false), onNew: async () => {} });
   useEffect(() => {
-    // Captures need the panel already open.
-    if (scenario !== "new-session-destination") return;
-    const timer = setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400);
-    return () => clearTimeout(timer);
+    // Captures need the panel already open, or the launches already listed.
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    if (scenario === "new-session-destination") timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400));
+    if (scenario === "new-session-rapidfire") {
+      for (const [index, text] of ["First: fix the login form", "Second: add the regression tests", "Third: update the changelog"].entries()) {
+        timers.push(setTimeout(() => previewLaunches.launch("/home/simon/code/sandbox/forgerie", { text }, {}, { text, attachments: [] }), 200 + index * 50));
+      }
+    }
+    return () => timers.forEach(clearTimeout);
   }, []);
-  return started ? <SessionFrame name="Started" status="Connected"><p className="thread-empty">{started}</p></SessionFrame>
-    : <NewSession cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi}
-      onStarted={(session) => setStarted(`Opened ${session.id} in ${session.cwd}`)} />;
+  return <AssistantRuntimeProvider runtime={runtime}>
+    <SessionFrame name={started ?? "Session client"} status="Connected"><Thread /></SessionFrame>
+    {open && <NewSession cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi} launches={previewLaunches}
+      initialMode={scenario === "new-session-rapidfire" ? "rapidfire" : "switch"}
+      onStarted={(session) => { setStarted(`Opened ${session.id} in ${session.cwd}`); setOpen(false); }} onClose={() => setOpen(false)} />}
+  </AssistantRuntimeProvider>;
 }
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing preview root");

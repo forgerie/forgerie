@@ -1,3 +1,4 @@
+import { usePortalTarget } from "./portalLayer";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeftIcon, ChevronRightIcon, XIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
@@ -13,6 +14,7 @@ const ViewerContext = createContext<OpenViewer | undefined>(undefined);
  * share navigation, zoom, and focus return.
  */
 export function ImageViewerProvider({ children }: { children: ReactNode }) {
+  const layer = usePortalTarget();
   const [view, setView] = useState<{ images: readonly ViewerImage[]; index: number }>();
   // The viewer can close by many paths, so the opener gets focus back here.
   const opener = useRef<HTMLElement>(undefined);
@@ -29,7 +31,7 @@ export function ImageViewerProvider({ children }: { children: ReactNode }) {
   return <ViewerContext.Provider value={open}>
     {children}
     {view && createPortal(<ImageViewer images={view.images} index={view.index}
-      onIndex={(index) => setView({ ...view, index })} onClose={() => setView(undefined)} />, document.body)}
+      onIndex={(index) => setView({ ...view, index })} onClose={() => setView(undefined)} />, layer)}
   </ViewerContext.Provider>;
 }
 

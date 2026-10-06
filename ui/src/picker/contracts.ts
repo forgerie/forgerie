@@ -51,6 +51,15 @@ const catalogEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("sessions.unread"), sessionId: z.string(), unread: z.object({}).passthrough().nullable() }),
 ]);
 export type CatalogEvent = z.infer<typeof catalogEventSchema>;
+/**
+ * What a session start is waiting on, labelled with the create request's
+ * `startupToken`. Phase "idle" ends the startup window.
+ */
+export const startupEventSchema = z.object({
+  type: z.literal("session.startup"), startupToken: z.string().optional(),
+  activity: z.object({ sessionId: z.string(), phase: z.enum(["active", "idle", "error"]), label: z.string(), detail: z.string().optional() }),
+});
+export type StartupEvent = z.infer<typeof startupEventSchema>;
 const consumed = new Set(["status.update", "activity.update", "session.created", "session.name", "session.pinned", "sessions.unread"]);
 /** Parse one machine event. Types the picker does not consume return undefined. */
 export function parseCatalogEvent(value: unknown): CatalogEvent | undefined {

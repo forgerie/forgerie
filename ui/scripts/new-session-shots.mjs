@@ -5,7 +5,7 @@ const repo = process.env.FORGERIE_ROOT ?? resolve("../..");
 const origin = process.env.APP_URL ?? "http://127.0.0.1:8510";
 const out = process.env.SHOT_DIR ?? "/tmp/aui-new-shots";
 const chromium = process.env.CHROME_BIN || spawnSync("which", ["chromium"], { encoding: "utf8" }).stdout.trim();
-for (const scenario of ["new-session", "new-session-destination"]) {
+for (const scenario of ["new-session", "new-session-destination", "new-session-rapidfire"]) {
   for (const scheme of ["light", "dark"]) {
     const result = spawnSync(process.execPath, [join(repo, "scripts/capture-postures.mjs"),
       "--url", `${origin}/verification/preview.html?scenario=${scenario}`,

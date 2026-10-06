@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, unreadSchema, type CatalogEvent, type WireStatus } from "./contracts";
+import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, startupEventSchema, unreadSchema, type CatalogEvent, type StartupEvent, type WireStatus } from "./contracts";
 import type { PickerActivity, PickerProject, PickerSession, PickerStatus } from "./board";
 import type { SessionTransport } from "../sessionStore";
 
@@ -107,6 +107,8 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   const machine = "/api/machines/local";
   let state: CatalogState = { connection: { type: "loading" }, sessions: [], statuses: {}, activities: {}, unread: new Set(), projects: [] };
   const listeners = new Set<() => void>();
+  /** Startup progress is not catalog state: it goes straight to whoever started the session. */
+  const startupListeners = new Set<(event: StartupEvent) => void>();
   const lifetime = new AbortController();
   const initialDelay = options.timing?.retryDelayMs ?? 500;
   let retryDelay = initialDelay;
@@ -164,7 +166,12 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         if (!live()) return;
         const text = typeof message.data === "string" ? message.data : new TextDecoder().decode(message.data as ArrayBuffer);
         let event: CatalogEvent | undefined;
-        try { event = parseCatalogEvent(JSON.parse(text)); }
+        try {
+          const value: unknown = JSON.parse(text);
+          const startup = startupEventSchema.safeParse(value);
+          if (startup.success) { for (const listener of startupListeners) listener(startup.data); return; }
+          event = parseCatalogEvent(value);
+        }
         catch (error) { console.warn("Picker ignored a malformed machine event.", error); return; }
         if (!event) return;
         if (current.buffer) current.buffer.push(event); else updateLive(applyCatalogEvent(state, event));
@@ -265,6 +272,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
     start: () => { unwatch = transport.watchRecovery?.(recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
     ...mutations,

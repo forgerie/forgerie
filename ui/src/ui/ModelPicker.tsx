@@ -1,3 +1,4 @@
+import { usePortalTarget } from "./portalLayer";
 import type { ContextUse } from "../contextUse";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -58,6 +59,7 @@ export function ModelPicker({ binding, anchor, open, onOpenChange }: {
   binding: ModelBinding; anchor: RefObject<HTMLElement | null>;
   open: PickerOpen | undefined; onOpenChange: (open: PickerOpen | undefined) => void;
 }) {
+  const layer = usePortalTarget();
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   // Held here, not in the panel: a change keeps the panel open until Pi answers,
@@ -81,7 +83,7 @@ export function ModelPicker({ binding, anchor, open, onOpenChange }: {
       <ChevronDownIcon aria-hidden size={14} />
     </button>
     {open && createPortal(<ModelPanel id={panelId} binding={binding} anchor={anchor} trigger={trigger}
-      initialQuery={open.query} onClose={close} change={change} setChange={setChange} />, document.body)}
+      initialQuery={open.query} onClose={close} change={change} setChange={setChange} />, layer)}
   </>;
 }
 

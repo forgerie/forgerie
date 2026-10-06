@@ -10,10 +10,15 @@ import { browserTransport } from "./sessionStore";
 import type { PickerActions, PickerView } from "./ui/Picker";
 
 const MINUTE = 60_000;
+const NONE: readonly StartingSession[] = [];
 const storage = () => { try { return window.localStorage; } catch { return undefined; } };
 
 /** Binding: the only hook that reads or writes the machine catalog. Views get a PickerView. */
-export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void } = {}) {
+/** A session this browser is starting, before Pi has saved it. */
+export interface StartingSession { id: string; cwd: string; title: string; startedAt: string }
+
+export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void; starting?: readonly StartingSession[] } = {}) {
+  const starting = options.starting ?? NONE;
   const [store] = useState(() => createCatalogStore(browserTransport));
   const onDeleted = useRef(options.onDeleted);
   useEffect(() => { onDeleted.current = options.onDeleted; }, [options.onDeleted]);
@@ -30,8 +35,12 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
   const setPrefs = useCallback((next: PickerPrefs) => { setPrefsState(next); writePrefs(storage(), next); }, []);
 
   const locate = useMemo(() => createLocationResolver(state.projects, []), [state.projects]);
-  const rows = useMemo(() => boardRows({ sessions: state.sessions, statuses: state.statuses, activities: state.activities, unread: state.unread, locate, now }),
-    [state.sessions, state.statuses, state.activities, state.unread, locate, now]);
+  // A start shows at once, as a working row named by its first line, until Pi's own row replaces it.
+  const rows = useMemo(() => boardRows({
+    sessions: [...state.sessions, ...starting.map((item) => ({ id: item.id, cwd: item.cwd, name: item.title, modified: item.startedAt }))],
+    statuses: state.statuses, unread: state.unread, locate, now,
+    activities: { ...state.activities, ...Object.fromEntries(starting.map((item) => [item.id, { phase: "active" as const, activeSince: item.startedAt }])) },
+  }), [state.sessions, state.statuses, state.activities, state.unread, starting, locate, now]);
   const view: PickerView = useMemo(() => ({
     connection: state.connection,
     sections: boardSections(rows, { grouping: prefs.grouping, showArchived: prefs.showArchived, allPinned: prefs.allPinned, selectedId, now }),
@@ -71,7 +80,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     onUndo: () => void commands.undo(),
     onDismissToast: commands.dismiss,
   }), [store, commands]);
-  return { view, prefs, setPrefs, find, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext };
+  return { view, prefs, setPrefs, find, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext, onStartup: store.onStartup };
 }
 
 export type ArchiveOutcome =
