@@ -1,3 +1,4 @@
+import type { ContextUse } from "../contextUse";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
@@ -18,6 +19,8 @@ export interface ModelBinding {
   listThinkingLevels: (signal: AbortSignal) => Promise<string[]>;
   onModel: (provider: string, id: string) => Promise<void>;
   onThinkingLevel: (level: string) => Promise<void>;
+  /** How full the context window is. Shown beside the model, because it belongs to that model's window. */
+  context?: ContextUse | undefined;
 }
 export interface PickerOpen { query: string }
 
@@ -73,6 +76,9 @@ export function ModelPicker({ binding, anchor, open, onOpenChange }: {
       {level && <span className="model-trigger-level">{thinkingLabel(level)}</span>}
       <ChevronDownIcon aria-hidden size={14} />
     </button>
+    {binding.context?.type === "known" && <span className="context-use" data-high={binding.context.high || undefined}
+      title={`${binding.context.percent}% of the context window used`}>
+      {binding.context.percent}%<span className="sr-only"> of context used</span></span>}
     {open && createPortal(<ModelPanel id={panelId} binding={binding} anchor={anchor} trigger={trigger}
       initialQuery={open.query} onClose={close} change={change} setChange={setChange} />, document.body)}
   </>;

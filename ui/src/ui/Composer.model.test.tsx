@@ -60,6 +60,24 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
+describe("context use in the input bar", () => {
+  const readout = () => document.querySelector<HTMLElement>(".context-use");
+  it("shows the percent used beside the model, outside the model button", async () => {
+    await render({ model: { context: { type: "known", percent: 62, high: false } } });
+    expect(readout()?.textContent).toBe("62% of context used");
+    expect(readout()?.dataset.high).toBeUndefined();
+    expect(trigger().contains(readout())).toBe(false);
+  });
+  it("marks the last fifth of the window", async () => {
+    await render({ model: { context: { type: "known", percent: 86, high: true } } });
+    expect(readout()?.dataset.high).toBe("true");
+  });
+  it("shows nothing until Pi has measured a reply", async () => {
+    await render({ model: { context: { type: "unknown" } } });
+    expect(readout()).toBeNull();
+  });
+});
+
 describe("model and thinking level in the input bar", () => {
   it("reads as the session's model and thinking level, and opens Pi's models in groups", async () => {
     await render();

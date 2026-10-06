@@ -89,6 +89,8 @@ export const statusSchema = z.object({
   pendingDialogs: z.preprocess((items) => Array.isArray(items) ? items.filter((item) => pendingDialogSchema.safeParse(item).success) : items,
     z.array(pendingDialogSchema)).optional(),
   queuedMessages: z.array(z.object({ kind: z.enum(["steer", "followUp"]), text: z.string() })).default([]),
+  // Only the percent is shown. A malformed reading drops out, not the whole status.
+  contextUsage: z.object({ percent: z.number().nullable() }).optional().catch(undefined),
 });
 export type SessionStatus = z.infer<typeof statusSchema>;
 export const abortResultSchema = z.object({

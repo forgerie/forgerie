@@ -246,6 +246,9 @@ button:disabled { cursor: default; opacity: 0.4; }
 .model-trigger-name { min-inline-size: 0; max-inline-size: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-trigger-level { flex: none; color: color-mix(in oklab, var(--muted-foreground) 75%, transparent); font-weight: 400; }
 .model-trigger svg { flex: none; }
+/* A readout, not a control: it never takes the trigger's width, and it stays at every width. */
+.context-use { flex: none; color: color-mix(in oklab, var(--muted-foreground) 75%, transparent); font-size: var(--small-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.context-use[data-high] { color: var(--foreground); font-weight: 500; }
 /* In a very narrow pane the level moves to the picker, where it is always shown,
    so the model name keeps a readable width. Spacing has already yielded. */
 @container (max-width: 22rem) { .model-trigger-level { display: none; } }

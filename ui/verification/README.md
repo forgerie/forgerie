@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Context use
+
+The input bar shows how much of the context window the session uses, as a whole percent beside the model. It turns stronger from 80% and hides until Pi has a reading. See [behavior, verification, and limits](context-use.md).
+
 ## Swipe to the session list
 
 Swipe right anywhere on the session to pull the session list in, and left to push it back. The list follows the finger, and a short swipe falls back. Scrolling, sideways-scrolling code, and text selection keep their own drags. See [behavior, verification, and limits](sheet-swipe.md).
