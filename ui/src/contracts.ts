@@ -65,7 +65,8 @@ export interface AskAnswer { id: string; values: string[]; otherText?: string }
  */
 export const pendingDialogSchema = z.object({
   dialogId: z.string().min(1),
-  kind: z.enum(["confirm", "select", "input"]),
+  // A kind this client cannot draw still shows, so the user can skip it.
+  kind: z.enum(["confirm", "select", "input", "unknown"]).catch("unknown"),
   title: z.string(),
   message: z.string().optional(),
   options: z.array(z.string()).optional(),
@@ -84,6 +85,7 @@ export const statusSchema = z.object({
   model: sessionModelSchema.optional(),
   thinkingLevel: z.string().optional(),
   // A dialog of a kind this client does not know stays out of the list, not the whole status.
+  // A malformed dialog stays out of the list, not the whole status.
   pendingDialogs: z.preprocess((items) => Array.isArray(items) ? items.filter((item) => pendingDialogSchema.safeParse(item).success) : items,
     z.array(pendingDialogSchema)).optional(),
   queuedMessages: z.array(z.object({ kind: z.enum(["steer", "followUp"]), text: z.string() })).default([]),

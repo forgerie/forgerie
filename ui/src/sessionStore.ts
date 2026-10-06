@@ -84,7 +84,12 @@ function permanent(error: unknown) {
   return error instanceof z.ZodError || error instanceof SyntaxError
     || error instanceof ReadFailure && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
 }
+const SLASH_WAIT_MS = 10 * 60_000;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+/** The client stopped waiting for a command; the command itself may still run. */
+class LostWait extends Error {
+  constructor() { super("Lost the live connection while waiting for the command. It may still be running in Pi. Check the transcript before you run it again."); }
+}
 /** A mutation refused before any request. Nothing reached the server, so the draft can simply come back. */
 export class NotSentError extends Error {}
 
@@ -119,11 +124,14 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     for (const listener of listeners) listener();
   };
   const current = (attempt: Join) => join === attempt && !lifetime.signal.aborted;
+  /** Slash commands waiting for Pi. They end with the live connection they were sent on. */
+  const slashWaits = new Set<AbortController>();
   function closeJoin() {
     const old = join;
     join = undefined; // Invalidate before close/abort can publish callbacks.
     old?.controller.abort();
     old?.socket?.close();
+    for (const wait of slashWaits) wait.abort(new LostWait());
   }
   function stop(error: unknown) {
     clearTimeout(retryTimer);
@@ -313,13 +321,19 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     if (state.sending) throw new Error("Wait for the current command to finish.");
     const previousCompaction = state.compaction;
     update({ ...state, sending: true, commandError: undefined });
+    const wait = new AbortController();
+    slashWaits.add(wait);
     try {
-      // No client timeout: Pi answers when the command ends, and an extension
-      // command can wait for the user to answer its dialogs.
+      // Pi answers when the command ends, and an extension command can wait for
+      // the user to answer its dialogs, so the usual 20-second timeout does not
+      // apply. The wait ends with the live connection instead, or after ten
+      // minutes, twice the daemon's default dialog timeout. Never retried.
       const result = await request(`${root}/${endpoint}`, commandResultSchema, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd: session.cwd, ...body }),
-      }, lifetime.signal, null);
+      }, AbortSignal.any([lifetime.signal, wait.signal]), SLASH_WAIT_MS).catch((error: unknown) => {
+        throw wait.signal.aborted && wait.signal.reason instanceof LostWait ? wait.signal.reason : error;
+      });
       if (result.type === "unsupported") throw new Error(result.message);
       const compact = endpoint === "commands/run" && "text" in body && isCompactCommand(body.text);
       update({ ...state, ...(compact ? (state.compaction === previousCompaction && (previousCompaction.type === "idle" || previousCompaction.type === "finished")
@@ -331,7 +345,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     } catch (error) {
       update({ ...state, commandError: messageOf(error) });
       throw error;
-    } finally { update({ ...state, sending: false }); }
+    } finally { slashWaits.delete(wait); update({ ...state, sending: false }); }
   }
   /** Never retried: a lost acknowledgement does not prove the command did not run. */
   async function runShell(text: string) {
@@ -477,7 +491,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   async function closeDialog(dialogId: string, action: "answer" | "cancel", value?: boolean | string) {
     const session = state.session;
     if (!session || state.connection.type !== "ready") return;
-    if (state.dialogPhase.dialogId !== undefined && state.dialogPhase.type === "sending") return;
+    // One answer per dialog at a time. The next dialog can be answered at once:
+    // the daemon shows it before it replies about the last one.
+    if (dialogsInFlight.has(dialogId)) return;
+    dialogsInFlight.add(dialogId);
     const version = statusVersion;
     update({ ...state, dialogPhase: { dialogId, type: "sending" } });
     try {
@@ -485,15 +502,16 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd: session.cwd, dialogId, ...(action === "answer" ? { value } : {}) }),
       });
-      let next: SessionState = { ...state, dialogPhase: noDialogPhase };
+      let next: SessionState = { ...state, dialogPhase: state.dialogPhase.dialogId === dialogId ? noDialogPhase : state.dialogPhase };
       if (version === statusVersion) { statusVersion++; next = withStatus(next, response.sessionStatus); }
       update(next);
     } catch (error) {
       const message = refused(error) ? error.message
         : `${messageOf(error)} The answer may have reached the extension. Check before you answer again.`;
       update({ ...state, dialogPhase: { dialogId, type: "failed", message } });
-    }
+    } finally { dialogsInFlight.delete(dialogId); }
   }
+  const dialogsInFlight = new Set<string>();
   async function clearQueue() {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");

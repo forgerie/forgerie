@@ -20,11 +20,11 @@ When the daemon set a deadline, the head shows it, for example "Closes in 4m 32s
 
 ## Contract and limits
 
-- Open dialogs come from `status.pendingDialogs`. The daemon publishes status right after every open and close, so the client does not use the `dialog.opened` and `dialog.closed` events. A reload shows the same open dialogs. A dialog of a kind this client does not know is left out, and the rest still show.
+- Open dialogs come from `status.pendingDialogs`. A dialog of a kind this client does not know still shows its title, with "This client cannot show this kind of question" and Skip. The daemon publishes status right after every open and close, so the client does not use the `dialog.opened` and `dialog.closed` events. A reload shows the same open dialogs.
 - Answers go to `POST /api/sessions/:id/dialogs/answer` with `{ cwd, dialogId, value }`. Skip goes to `POST /api/sessions/:id/dialogs/cancel`. Both return status. `stale` means another window or the deadline closed the dialog first. It is an ordinary race, not an error.
 - The daemon checks answers. A refused answer keeps the dialog open and shows the daemon's message. A lost acknowledgement is never retried. The message says the answer may have reached the extension.
-- Slash commands now wait for Pi with no client timeout. An extension command can wait for the user to answer its dialogs, and the old 20-second timeout reported a working command as failed.
-- An input dialog's typed answer is not saved across a reload or a session switch. The chat draft is.
+- Slash commands wait for Pi up to ten minutes, not 20 seconds. An extension command can wait for the user to answer its dialogs, and the old timeout reported a working command as failed. The wait also ends when the live connection drops; the message then says the command may still be running. Nothing is retried.
+- An input dialog's typed answer is not saved across a reload, a session switch, or an ask that takes the bar first. The chat draft is.
 - The settled outcome ("Answered: Yes") is not kept as a record. The old client showed it as a dismissable card.
 - The SDK cannot tell an extension that a dialog timed out rather than being skipped. See parking-lot item `01M1G357D22DV4R6TXX19CNH04` on `main`.
 
@@ -49,3 +49,19 @@ Set `APP_URL` when the dev server is not on port 8510, and `FORGERIE_ROOT` when 
 | Real session. | `real-dialog-check.mjs` passed against the live backend at folded portrait. `/dialog-probe` opened a real confirm in the input bar, and a reload showed it again. Yes answered it, Skip closed the select, and the input dialog took the input. The extension received `{ confirmed: true, target: null, name: "probe-1" }`, the chat draft came back, and the command did not fail after 25 seconds of waiting. |
 
 Not verified: a physical Fold.
+
+## Review fixes (2026-10-05)
+
+An independent review found no blockers, and 6 should-fix items and 5 nits. Fixed:
+
+- Dictation in flight is dropped when an input dialog takes the input or gives it back, so chat speech never becomes an answer and an answer's speech never lands in the chat draft.
+- A stuck slash command can no longer hold the bar on "Sending" forever: the wait ends with the live connection or after ten minutes.
+- A dialog of an unknown kind shows with Skip instead of disappearing.
+- In an input dialog, the field is named "Answer" and described by the dialog's question.
+- A tapped Yes, No, or choice no longer pulls the touch keyboard up. Focus returns to the input only if the reader was typing there.
+- The slash list stays out of an input dialog's answer.
+- The next dialog can be answered while the last answer is still on its way.
+- The persistent announcer also carries "An extension also asks something".
+- New tests cover dictation across an input dialog, the production draft hand-off between an ask and an input dialog, a dropped connection during a slash command, the next-dialog race, and each item above.
+
+Not changed: two dialogs in a row with the same title are announced once.

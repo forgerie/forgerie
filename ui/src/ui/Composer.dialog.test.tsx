@@ -17,13 +17,14 @@ const input: PendingDialog = { dialogId: "i", kind: "input", title: "Name the re
 const ask: AskBinding = { ask: { askId: "a", askedAt: "now", questions: [{ id: "q", question: "Which tests?", options: [] }] },
   phase: { type: "answering" }, offline: false, onChat: async () => {}, onDismiss: () => {}, onSubmit: () => {} };
 
-interface Props { dialog?: Partial<DialogBinding> | null; ask?: AskBinding; onNew?: (message: AppendMessage) => Promise<void>; chatDraft?: ChatDraft }
+interface Props { dialog?: Partial<DialogBinding> | null; ask?: AskBinding; onNew?: (message: AppendMessage) => Promise<void>; chatDraft?: ChatDraft; commands?: boolean }
 function binding(overrides: Partial<DialogBinding> = {}): DialogBinding {
   return { dialog: confirm, count: 1, phase: { type: "answering" }, offline: false, onAnswer: () => {}, onCancel: () => {}, ...overrides };
 }
-function Fixture({ dialog = {}, ask, onNew = async () => {}, chatDraft }: Props) {
+function Fixture({ dialog = {}, ask, onNew = async () => {}, chatDraft, commands = false }: Props) {
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], false), onNew, isRunning: false });
-  return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} dialog={dialog === null ? undefined : binding(dialog)} chatDraft={chatDraft} /></AssistantRuntimeProvider>;
+  return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} dialog={dialog === null ? undefined : binding(dialog)} chatDraft={chatDraft}
+    commands={commands ? { catalog: { type: "ready", commands: [{ name: "reload", source: "builtin", description: "Reload" }] }, onRetry: () => {} } : undefined} /></AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
 const layer = () => document.querySelector<HTMLElement>(".dialog-layer");
@@ -75,7 +76,6 @@ describe("extension dialogs in the one input bar", () => {
     await render({ dialog: { dialog: select, onAnswer } });
     await click(button("production", layer()!));
     expect(onAnswer).toHaveBeenCalledWith("production");
-    expect(document.activeElement).toBe(textarea());
   });
 
   it("takes the input for an input dialog, sends the text as typed, and parks the chat draft", async () => {
@@ -94,6 +94,44 @@ describe("extension dialogs in the one input bar", () => {
     expect(onNew).not.toHaveBeenCalled();
     await render({ dialog: null, onNew });
     expect(textarea().value).toBe("my unsent chat");
+  });
+
+  it("names the field as the answer and ties it to the question", async () => {
+    await render({ dialog: { dialog: input } });
+    expect(textarea().getAttribute("aria-label")).toBe("Answer");
+    const described = textarea().getAttribute("aria-describedby");
+    expect(described && document.getElementById(described)?.textContent).toBe("Name the release");
+  });
+
+  it("keeps the slash list out of an input dialog's answer", async () => {
+    await render({ dialog: { dialog: input }, commands: true });
+    await type("/re");
+    expect(document.querySelector(".command-popover")).toBeNull();
+  });
+
+  it("does not pull a touch keyboard up after a tapped choice, unless the reader was typing", async () => {
+    await render({ dialog: { dialog: select } });
+    (document.activeElement as HTMLElement | null)?.blur();
+    await click(button("production", layer()!));
+    expect(document.activeElement).not.toBe(textarea());
+    textarea().focus();
+    await act(async () => { button("staging", layer()!)!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+    await click(button("staging", layer()!));
+    expect(document.activeElement).toBe(textarea());
+  });
+
+  it("answers the next dialog at once, even while the last answer is on its way", async () => {
+    const onAnswer = vi.fn();
+    await render({ dialog: { dialog: select, onAnswer, phase: { type: "answering" } } });
+    expect(button("staging", layer()!)!.disabled).toBe(false);
+  });
+
+  it("shows a dialog this client cannot draw, so it can still be skipped", async () => {
+    const onCancel = vi.fn();
+    await render({ dialog: { dialog: { dialogId: "u", kind: "unknown", title: "Pick a colour", askedAt: "now" }, onCancel } });
+    expect(layer()!.textContent).toContain("This client cannot show this kind of question");
+    await click(button("Skip", layer()!));
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 
   it("refuses an input answer longer than the daemon accepts", async () => {
@@ -139,5 +177,6 @@ describe("extension dialogs in the one input bar", () => {
     expect(layer()).toBeNull();
     expect(document.querySelector(".ask h2")!.textContent).toBe("Which tests?");
     expect(document.querySelector(".composer-hint")!.textContent).toContain("An extension also asks something");
+    expect(document.querySelector(".composer > [role=status]")!.textContent).toContain("An extension also asks something");
   });
 });

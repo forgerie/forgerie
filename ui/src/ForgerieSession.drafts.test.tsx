@@ -140,6 +140,25 @@ describe("draft protection across session switches and reloads", () => {
     expect(input().value).toBe("chat thought");
   });
 
+  it("keeps the chat draft parked while an ask takes the bar from an input dialog and gives it back", async () => {
+    const dialog = { dialogId: "d1", kind: "input" as const, title: "Name the release", askedAt: "2026-10-01T00:00:00Z" };
+    const drafts = reload();
+    await open("a", drafts);
+    await type("chat thought");
+    await emit({ type: "status.update", status: { ...idle, pendingDialogs: [dialog] } });
+    await until(() => document.querySelector(".dialog-layer") !== null);
+    expect(input().value).toBe("");
+    await type("v1.2.3");
+    await emit({ type: "ask.opened", ask });
+    await until(() => question() === "Which database?");
+    await emit({ type: "ask.closed", askId: ask.askId, reason: "answered" });
+    await until(() => document.querySelector(".dialog-layer") !== null);
+    expect(input().value).toBe("");
+    await emit({ type: "status.update", status: idle });
+    await until(() => document.querySelector(".dialog-layer") === null);
+    expect(input().value).toBe("chat thought");
+  });
+
   it("starts a newly seen ask blank and never saves the chat draft as its answer", async () => {
     reload().session("a").saveChat("chat thought");
     status = { ...idle, pendingAsk: ask };

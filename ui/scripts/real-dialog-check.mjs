@@ -63,7 +63,7 @@ try {
     .catch(async (error) => { throw new Error(`${error.message}\nPage: ${await evaluate(cdp, pageState)}\nAPI: ${JSON.stringify((await status(id)).pendingDialogs ?? [])}`); });
   const title = () => evaluate(cdp, "document.querySelector('.dialog-layer .ask-question')?.textContent ?? null");
   const type = async (text) => {
-    await evaluate(cdp, "document.querySelector('[aria-label=\"Message\"]').focus()");
+    await evaluate(cdp, "document.querySelector('.composer textarea').focus()");
     await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   };
@@ -96,15 +96,15 @@ try {
   await type("unsent chat");
   await evaluate(cdp, "[...document.querySelectorAll('.dialog-head button')].find(b => b.textContent === 'Skip').click()");
   await until("document.querySelector('.dialog-layer .ask-question')?.textContent === 'Name the probe'");
-  assert.equal(await evaluate(cdp, "document.querySelector('[aria-label=\"Message\"]').value"), "");
-  assert.equal(await evaluate(cdp, "document.querySelector('[aria-label=\"Message\"]').placeholder"), "probe-name");
+  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "");
+  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').placeholder"), "probe-name");
   step("Yes answered the confirm, Skip closed the select, and the input dialog took the input");
 
   await type("probe-1"); await pressCombo(cdp, "enter");
   const answers = await waitUntil("probe result", probeResult, 20_000);
   assert.deepEqual(answers, { confirmed: true, target: null, name: "probe-1" });
   await until("!document.querySelector('.dialog-layer')");
-  assert.equal(await evaluate(cdp, "document.querySelector('[aria-label=\"Message\"]').value"), "unsent chat");
+  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "unsent chat");
   assert.deepEqual((await status(id)).pendingDialogs ?? [], []);
   step("the extension received every answer, and the chat draft came back", { answers });
 

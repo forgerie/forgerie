@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
-import { useAuiState } from "@assistant-ui/react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useAui, useAuiState } from "@assistant-ui/react";
+import { useDictation } from "../DictationProvider";
 import { PuzzleIcon } from "lucide-react";
 import type { PendingDialog } from "../contracts";
 import { dialogCountdown, dialogInputProblem, type DialogPhase } from "../dialog";
@@ -41,6 +42,14 @@ export function useDialogMode(binding: DialogBinding | undefined, chatDraft: Cha
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const headingId = useId();
   const inputId = binding?.dialog.kind === "input" ? binding.dialog.dialogId : undefined;
+  const aui = useAui();
+  const { cancel } = useDictation();
+  // Speech belongs to the input it started in. When a dialog takes the input
+  // or gives it back, capture and transcription in flight are dropped.
+  useLayoutEffect(() => {
+    cancel();
+    aui.composer.stopDictation();
+  }, [inputId, cancel, aui]);
   // Park the chat draft while an input dialog holds the input. A new dialog starts blank.
   useLayoutEffect(() => {
     if (inputId === undefined) return;
@@ -48,14 +57,17 @@ export function useDialogMode(binding: DialogBinding | undefined, chatDraft: Cha
     return () => chatDraft.setAsk(undefined);
   }, [inputId, chatDraft]);
   const now = useNow(binding?.dialog.timeoutAt !== undefined);
+  // A tapped choice must not pull a touch keyboard up. Focus returns to the
+  // input only when the reader was typing there when the press began.
+  const wasTyping = useRef(false);
   if (!binding) return undefined;
   const { dialog, phase, offline } = binding;
   const sending = phase.type === "sending";
   const isInput = dialog.kind === "input";
   const problem = isInput ? dialogInputProblem(text) : undefined;
   const blocked = sending || offline;
-  /** Answers unmount the buttons that sent them. Keep focus, and the touch keyboard, in the input. */
-  const keepFocus = () => input.current?.focus({ preventScroll: true });
+  const notePress = () => { wasTyping.current = document.activeElement === input.current; };
+  const keepFocus = () => { if (wasTyping.current || isInput) input.current?.focus({ preventScroll: true }); wasTyping.current = false; };
   function answer(value: boolean | string) {
     if (blocked) return;
     binding!.onAnswer(value);
@@ -81,7 +93,7 @@ export function useDialogMode(binding: DialogBinding | undefined, chatDraft: Cha
     error: problem ?? (phase.type === "failed" ? phase.message : undefined),
     inputBlocked: blocked || dictating || problem !== undefined,
     placeholder: dialog.placeholder || "Type your answer",
-    answer, submitInput, skip, onKeyDown,
+    answer, submitInput, skip, onKeyDown, notePress,
   };
 }
 
@@ -92,7 +104,7 @@ export function useDialogMode(binding: DialogBinding | undefined, chatDraft: Cha
 export function DialogLayer({ control }: { control: DialogControl }) {
   const { dialog } = control;
   return <section className="ask dialog-layer" aria-label="Question from an extension" aria-busy={control.sending}
-    aria-describedby={control.headingId} data-kind={dialog.kind}>
+    aria-describedby={control.headingId} data-kind={dialog.kind} onPointerDownCapture={control.notePress}>
     <div className="ask-head dialog-head">
       <span className="dialog-source"><PuzzleIcon aria-hidden size={14} />Extension</span>
       {control.countdown && <span className="dialog-countdown" title={control.countdown}>{control.countdown}</span>}
@@ -103,6 +115,7 @@ export function DialogLayer({ control }: { control: DialogControl }) {
     <div className="ask-body">
       <h2 className="ask-question" id={control.headingId}>{dialog.title}</h2>
       {dialog.message && <p className="ask-detail">{dialog.message}</p>}
+      {dialog.kind === "unknown" && <p className="ask-detail">This client cannot show this kind of question. Skip it, or answer it in the old client.</p>}
       {dialog.kind === "select" && <div className="dialog-options" role="group" aria-labelledby={control.headingId}>
         {(dialog.options ?? []).map((option) => <button key={option} type="button" className="dialog-option" disabled={control.blocked}
           onClick={() => control.answer(option)}>{option}</button>)}

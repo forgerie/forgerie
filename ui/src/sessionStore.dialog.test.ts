@@ -14,7 +14,7 @@ async function until(predicate: () => boolean) { await expect.poll(predicate, { 
 /** A Forgerie session API whose extension dialogs close like the daemon's. */
 async function dialogServer(initial: PendingDialog[]) {
   const requests: { path: string; body: unknown }[] = [];
-  const state = { dialogs: initial, seq: 0, failNext: undefined as undefined | "invalid" | "drop" | "stale" };
+  const state = { dialogs: initial, seq: 0, failNext: undefined as undefined | "invalid" | "drop" | "stale", commandHangs: false };
   const status = (): SessionStatus => ({ ...idle, ...(state.dialogs.length ? { pendingDialogs: state.dialogs } : {}) });
   const ws = new WebSocketServer({ noServer: true });
   const http = createServer(async (request, response) => {
@@ -29,7 +29,7 @@ async function dialogServer(initial: PendingDialog[]) {
     else if (url.pathname.endsWith("/status")) send(status());
     else if (url.pathname.endsWith("/commands")) send([]);
     // An extension command answers only when its handler ends, here after the user answers a dialog.
-    else if (url.pathname.endsWith("/commands/run")) setTimeout(() => send({ type: "done" }), 200);
+    else if (url.pathname.endsWith("/commands/run")) { if (!state.commandHangs) setTimeout(() => send({ type: "done" }), 200); }
     else if (url.pathname.includes("/dialogs/")) {
       const failure = state.failNext; state.failNext = undefined;
       if (failure === "drop") { response.destroy(); return; }
@@ -60,7 +60,7 @@ async function dialogServer(initial: PendingDialog[]) {
   };
   const mutations = () => requests.filter(({ path }) => path.includes("/dialogs/")).map(({ path, body }) => ({ path: path.replace("/api/sessions/test/", ""), body }));
   await store.start();
-  return { state, store, emit, status, mutations };
+  return { state, store, emit, status, mutations, sockets: () => [...ws.clients] };
 }
 const open = (store: Awaited<ReturnType<typeof dialogServer>>["store"]) => store.getSnapshot().status?.pendingDialogs?.map((item) => item.dialogId) ?? [];
 
@@ -73,10 +73,11 @@ describe("extension dialogs", () => {
     expect(open(api.store)).toEqual(["d1", "d2"]);
   });
 
-  it("skips a dialog of a kind this client does not know, and keeps the rest", async () => {
+  it("keeps a dialog of a kind this client does not know, so it can be skipped, and drops a malformed one", async () => {
     const api = await dialogServer([confirm]);
-    api.emit({ type: "status.update", status: { ...idle, pendingDialogs: [{ ...select, kind: "editor" } as unknown as PendingDialog, select] } });
-    await until(() => open(api.store).join() === "d2");
+    api.emit({ type: "status.update", status: { ...idle, pendingDialogs: [{ ...select, dialogId: "d3", kind: "editor" } as unknown as PendingDialog, { title: "no id" } as unknown as PendingDialog, select] } });
+    await until(() => open(api.store).join() === "d3,d2");
+    expect(api.store.getSnapshot().status?.pendingDialogs?.[0]?.kind).toBe("unknown");
   });
 
   it("answers and cancels through the daemon, and shows the status it returns", async () => {
@@ -125,6 +126,22 @@ describe("extension dialogs", () => {
     await api.store.answerDialog("d1", true);
     await expect(running).resolves.toEqual({ type: "done" });
     expect(api.store.getSnapshot().commandError).toBeUndefined();
+  });
+
+  it("answers another dialog while the first answer is on its way", async () => {
+    const api = await dialogServer([confirm, select]);
+    await Promise.all([api.store.answerDialog("d1", true), api.store.answerDialog("d2", "staging")]);
+    expect(api.mutations().map((item) => (item.body as { dialogId: string }).dialogId)).toEqual(["d1", "d2"]);
+  });
+
+  it("stops waiting for a command when the live connection drops, and says it may still run", async () => {
+    const api = await dialogServer([]);
+    api.state.commandHangs = true;
+    const running = api.store.send("/deploy");
+    await until(() => api.store.getSnapshot().sending);
+    for (const socket of api.sockets()) socket.terminate();
+    await expect(running).rejects.toThrow(/may still be running/);
+    expect(api.store.getSnapshot().sending).toBe(false);
   });
 
   it("ignores a second answer while one is on its way", async () => {

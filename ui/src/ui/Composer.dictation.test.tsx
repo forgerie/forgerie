@@ -5,7 +5,7 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime } from "@assistant-ui
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForgerieDictationAdapter, type DictationDependencies } from "../speech/ForgerieDictationAdapter";
 import { DictationProvider } from "../DictationProvider";
-import type { PendingAsk } from "../contracts";
+import type { PendingAsk, PendingDialog } from "../contracts";
 import { useThreadMessages } from "../useThreadMessages";
 import { Composer } from "./Composer";
 
@@ -15,15 +15,17 @@ let dependencies: DictationDependencies;
 const ask: PendingAsk = { askId: "ask", askedAt: "now", questions: [
   { id: "first", question: "Name?", options: [] }, { id: "second", question: "Port?", options: [] },
 ] };
-function Fixture({ pending, offline = false }: { pending?: PendingAsk; offline?: boolean }) {
+const nameDialog: PendingDialog = { dialogId: "d1", kind: "input", title: "Name the release", askedAt: "now" };
+function Fixture({ pending, offline = false, dialog }: { pending?: PendingAsk; offline?: boolean; dialog?: PendingDialog }) {
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], false), onNew: async () => {}, adapters: { dictation: adapter }, isDisabled: offline });
   return <AssistantRuntimeProvider runtime={runtime}><DictationProvider adapter={adapter}>
-    <Composer ask={pending && { ask: pending, phase: { type: "answering" }, offline, onSubmit: () => {}, onDismiss: () => {}, onChat: async () => {} }} />
+    <Composer ask={pending && { ask: pending, phase: { type: "answering" }, offline, onSubmit: () => {}, onDismiss: () => {}, onChat: async () => {} }}
+      dialog={dialog && { dialog, count: 1, phase: { type: "answering" }, offline, onAnswer: () => {}, onCancel: () => {} }} />
   </DictationProvider></AssistantRuntimeProvider>;
 }
 const button = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
 const input = () => document.querySelector("textarea")!;
-const render = (pending?: PendingAsk, offline = false) => act(async () => root.render(<Fixture pending={pending} offline={offline} />));
+const render = (pending?: PendingAsk, offline = false, dialog?: PendingDialog) => act(async () => root.render(<Fixture pending={pending} offline={offline} dialog={dialog} />));
 const click = (label: string) => act(async () => button(label).click());
 const type = (text: string) => act(async () => {
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
@@ -72,6 +74,16 @@ describe("SDK dictation controls in the one composer", () => {
     expect(input().disabled).toBe(false);
     await render(); expect(input().value).toBe("chat draft");
   });
+  it("cancels transcription when an input dialog takes the input, so chat speech never becomes the answer", async () => {
+    let resolve!: (result: { text: string }) => void;
+    dependencies.transcribe = () => new Promise((yes) => { resolve = yes; });
+    await render(); await type("chat draft"); await click("Voice input"); await click("Stop dictation");
+    await render(undefined, false, nameDialog);
+    expect(input().value).toBe("");
+    await act(async () => resolve({ text: "chat speech" }));
+    expect(input().value).toBe("");
+  });
+
   it("supports dictation in ask mode, keeps one input, and blocks advancement during capture", async () => {
     await render(ask); await click("Voice input");
     const next = [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent === "Next")!;

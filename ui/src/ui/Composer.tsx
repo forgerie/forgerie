@@ -148,12 +148,13 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
   return <ComposerPrimitive.Root className="composer">
     {/* Always mounted, so each new dialog is announced. The countdown stays silent. */}
-    <span className="sr-only" role="status">{dialogControl ? `An extension asks: ${dialogControl.dialog.title}` : ""}</span>
+    <span className="sr-only" role="status">{dialogControl ? `An extension asks: ${dialogControl.dialog.title}`
+      : control && dialog ? "An extension also asks something. It shows after these questions." : ""}</span>
     <ComposerPrimitive.AttachmentDropzone ref={anchor} className="composer-shell" data-mode={control ? "ask" : dialogControl ? "dialog" : "chat"} data-shell={shellMode || undefined}
       disabled={disabled || preparing || !!control?.sending}>
       {control && <AskQuestions control={control} />}
       {dialogControl && <DialogLayer control={dialogControl} />}
-      {control && dialog && <p className="composer-hint" role="status">
+      {control && dialog && <p className="composer-hint">
         <PuzzleIcon aria-hidden size={14} />An extension also asks something. It shows after these questions.
       </p>}
       <ComposerAttachments />
@@ -173,9 +174,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         <TerminalIcon aria-hidden size={14} />{shellReason ?? (shellDraft.excludeFromContext
           ? "Shell command. Its output stays out of the agent's context." : "Shell command. The agent sees its output.")}
       </p>}
-      <ComposerPrimitive.Input ref={input} aria-label="Message" rows={1} className="composer-input"
+      <ComposerPrimitive.Input ref={input} aria-label={dialogInput ? "Answer" : "Message"} rows={1} className="composer-input"
         placeholder={control?.placeholder ?? (dialogInput ? dialogControl.placeholder : "Send a message...")}
-        aria-describedby={control?.headingId}
+        aria-describedby={control?.headingId ?? (dialogInput ? dialogControl.headingId : undefined)}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
         submitMode={control || dialogInput || tooMany || compactDraft || modelQuery !== undefined || shellMode || running || working.queue ? "none" : "enter"}
@@ -219,7 +220,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         </>}
       </div>
     </ComposerPrimitive.AttachmentDropzone>
-    {commands && <SlashCommands binding={commands} anchor={anchor} />}
+    {commands && !dialogInput && <SlashCommands binding={commands} anchor={anchor} />}
     {mentions && (["@", "!@", "#"] as const).map((char) => <MentionPopover key={`${scopeKey}:${char}`}
       source={mentions} char={char} input={input} snapshot={snapshot} enabled={!disabled && !control?.sending && !shellMode} />)}
   </ComposerPrimitive.Root>;
