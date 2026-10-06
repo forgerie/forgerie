@@ -25,7 +25,9 @@
  * - `HOSTEXEC_*` stays: agents use `hostexec`.
  * - `PI_CODING_AGENT_DIR` stays so agent-spawned `pi` CLIs find the profile's
  *   auth and models; `PI_CODING_AGENT_SESSION_DIR` is daemon session-discovery
- *   wiring and is removed.
+ *   wiring and is removed. The daemon also writes `PI_CODING_AGENT_DIR` itself
+ *   (see `pinAgentDirEnv`), because the configured profile may not be the Pi
+ *   default.
  * - `NODE_ENV` and `PORT` are app-runtime configuration, removed like
  *   `PI_WEB_*`. Nothing in Forgerie reads `NODE_ENV` at runtime, but tools
  *   agents run (npm, Vite, Node itself) change behavior based on it.
@@ -52,6 +54,27 @@ export function isAgentVisibleEnvKey(key: string): boolean {
  * Delete every non-agent-visible key from `env` — the daemon's `process.env`
  * at startup — and return the removed key names, sorted, for logging.
  */
+/**
+ * Point every Pi profile lookup in and below the daemon at the active profile.
+ *
+ * `agent.dir` reaches the SDK only where Forgerie passes it explicitly. Code
+ * that resolves the profile on its own, through the SDK's `getAgentDir()`,
+ * reads `PI_CODING_AGENT_DIR` and falls back to `~/.pi/agent`. That code runs
+ * in the daemon (bundled `pi-subagents`, `pi-processes`) and in processes it
+ * spawns (`pi` from bash, terminals, subagent children). Without this, a
+ * Forgerie profile that is not `~/.pi/agent` would silently split: sessions use
+ * one profile while delegated agents, missions, and terminal `pi` use the
+ * other.
+ *
+ * Applies only to the Pi companion command, whose profile variable this is.
+ * Returns whether `env` was changed.
+ */
+export function pinAgentDirEnv(env: NodeJS.ProcessEnv, profile: { readonly dir: string; readonly usesPiProfileEnv: boolean }): boolean {
+  if (!profile.usesPiProfileEnv || env["PI_CODING_AGENT_DIR"] === profile.dir) return false;
+  env["PI_CODING_AGENT_DIR"] = profile.dir;
+  return true;
+}
+
 export function scrubNonAgentVisibleEnvKeys(env: NodeJS.ProcessEnv): string[] {
   const scrubbed = Object.keys(env).filter((key) => !isAgentVisibleEnvKey(key));
   for (const key of scrubbed) {

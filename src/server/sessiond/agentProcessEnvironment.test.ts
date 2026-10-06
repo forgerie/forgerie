@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAgentVisibleEnvKey, scrubNonAgentVisibleEnvKeys } from "./agentProcessEnvironment.js";
+import { isAgentVisibleEnvKey, pinAgentDirEnv, scrubNonAgentVisibleEnvKeys } from "./agentProcessEnvironment.js";
 
 describe("agent process environment visibility", () => {
   it("keeps the ordinary environment agent processes rely on", () => {
@@ -82,5 +82,43 @@ describe("agent process environment visibility", () => {
       PI_WEB_DOCKER_MODE: "runtime",
       HOSTEXEC_MODE: "nsenter",
     });
+  });
+});
+
+describe("agent profile directory pinning", () => {
+  it("points Pi's own profile lookup at the configured profile", () => {
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+
+    expect(pinAgentDirEnv(env, { dir: "/srv/forgerie/agent", usesPiProfileEnv: true })).toBe(true);
+    expect(env).toEqual({ PATH: "/usr/bin", PI_CODING_AGENT_DIR: "/srv/forgerie/agent" });
+  });
+
+  it("replaces an inherited profile that disagrees with the configured one", () => {
+    const env: NodeJS.ProcessEnv = { PI_CODING_AGENT_DIR: "/home/user/.pi/agent" };
+
+    expect(pinAgentDirEnv(env, { dir: "/srv/forgerie/agent", usesPiProfileEnv: true })).toBe(true);
+    expect(env["PI_CODING_AGENT_DIR"]).toBe("/srv/forgerie/agent");
+  });
+
+  it("reports no change when the environment already agrees", () => {
+    const env: NodeJS.ProcessEnv = { PI_CODING_AGENT_DIR: "/srv/forgerie/agent" };
+
+    expect(pinAgentDirEnv(env, { dir: "/srv/forgerie/agent", usesPiProfileEnv: true })).toBe(false);
+  });
+
+  it("leaves the environment alone for a command that does not use Pi's profile variable", () => {
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+
+    expect(pinAgentDirEnv(env, { dir: "/srv/other/agent", usesPiProfileEnv: false })).toBe(false);
+    expect(env).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("keeps the pinned profile visible to agent processes after scrubbing", () => {
+    const env: NodeJS.ProcessEnv = { PI_WEB_DATA_DIR: "/data/pi-web" };
+
+    pinAgentDirEnv(env, { dir: "/srv/forgerie/agent", usesPiProfileEnv: true });
+    scrubNonAgentVisibleEnvKeys(env);
+
+    expect(env).toEqual({ PI_CODING_AGENT_DIR: "/srv/forgerie/agent" });
   });
 });

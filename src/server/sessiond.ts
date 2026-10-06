@@ -35,7 +35,8 @@ import { agentSessionDirEnvKeys, effectivePiWebConfig, maxUploadBytes, offlineMo
 import { createActiveAgentProfileDescriptor } from "../sessiond/activeAgentProfile.js";
 import { applyAgentHttpIdleTimeout } from "./sessiond/agentHttpDispatcher.js";
 import { sessionServiceDependencies } from "./sessiond/sessionServiceDependencies.js";
-import { scrubNonAgentVisibleEnvKeys } from "./sessiond/agentProcessEnvironment.js";
+import { pinAgentDirEnv, scrubNonAgentVisibleEnvKeys } from "./sessiond/agentProcessEnvironment.js";
+import { usesPiCodingAgentStateCompatibility } from "../shared/activeAgentProfile.js";
 import { PromptResourceCatalogService } from "./resources/promptResourceCatalog.js";
 import { AgentDirPromptLibrary } from "./resources/promptLibrary.js";
 import { registerPromptLibraryRoutes } from "./resources/promptLibraryRoutes.js";
@@ -58,6 +59,9 @@ await app.register(fastifyWebsocket);
 // it explicitly below.
 const scrubbedEnvKeys = scrubNonAgentVisibleEnvKeys(process.env);
 app.log.info({ scrubbedEnvKeys }, "daemon-only environment keys hidden from agent processes");
+if (pinAgentDirEnv(process.env, { dir: activeAgentProfile.dir, usesPiProfileEnv: usesPiCodingAgentStateCompatibility(activeAgentProfile.command) })) {
+  app.log.info({ agentDir: activeAgentProfile.dir }, "PI_CODING_AGENT_DIR pinned to the active agent profile");
+}
 
 const runtime = await createSessionDaemonRuntime();
 registerSessionDaemonRoutes(runtime);
