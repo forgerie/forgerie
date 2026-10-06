@@ -45,4 +45,11 @@ describe("suggestion placement", () => {
     const plan = mentionPlacement({ left: 0, top: 110, bottom: 150, width: 600 }, { left: 20, top: 100, width: 300, height: 300 });
     expect(plan).toEqual({ left: 28, width: 284, top: 158, maxHeight: 234, up: false });
   });
+  it("widens past a narrow anchor to the minimum width, but not past the viewport", () => {
+    const chip = { left: 300, top: 100, bottom: 140, width: 120 };
+    expect(mentionPlacement(chip, { left: 0, top: 0, width: 1200, height: 800 }, 416, 448)).toMatchObject({ left: 300, width: 448 });
+    expect(mentionPlacement({ ...chip, width: 600 }, { left: 0, top: 0, width: 1200, height: 800 }, 416, 448).width).toBe(600);
+    expect(mentionPlacement(chip, { left: 0, top: 0, width: 475, height: 638 }, 416, 448)).toMatchObject({ left: 19, width: 448 });
+    expect(mentionPlacement(chip, { left: 0, top: 0, width: 400, height: 638 }, 416, 448)).toMatchObject({ left: 8, width: 384 });
+  });
 });

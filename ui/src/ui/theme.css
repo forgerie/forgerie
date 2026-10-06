@@ -298,7 +298,10 @@ button:disabled { cursor: default; opacity: 0.4; }
 .destination-trigger svg { flex: none; color: var(--muted-foreground); }
 .destination-value { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .destination-panel ul { margin: 0; padding: 0; list-style: none; }
-.destination-path { min-inline-size: 0; overflow-wrap: anywhere; font-family: var(--code-font); font-size: var(--meta-text); }
+/* One line; an overlong path loses its start (rtl box, ltr text), never wraps mid-word. */
+.destination-path { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left;
+  font-family: var(--code-font); font-size: var(--meta-text); }
+.destination-path > bdi { direction: ltr; }
 .destination-back { flex: none; display: flex; align-items: center; gap: var(--space-1); min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-block-end: 1px solid var(--line); background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; text-align: start; }
 .destination-back:hover, .destination-back:focus-visible { background: var(--hover-surface); }
 .dictation-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small-text); color: var(--muted-foreground); }

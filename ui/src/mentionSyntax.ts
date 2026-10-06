@@ -37,9 +37,10 @@ export function mentionFormatter(trigger: MentionTrigger): Unstable_DirectiveFor
 
 /** Pure window-level placement. The list scrolls; no posture changes its structure. */
 export function mentionPlacement(anchor: { left: number; top: number; bottom: number; width: number },
-  viewport: { left: number; top: number; width: number; height: number }, cap = 288) {
+  viewport: { left: number; top: number; width: number; height: number }, cap = 288, minWidth = 0) {
   const gap = 8;
-  const width = Math.min(anchor.width, Math.max(0, viewport.width - 2 * gap));
+  // As wide as the anchor, or minWidth when the anchor is narrower; never past the viewport.
+  const width = Math.min(Math.max(anchor.width, minWidth), Math.max(0, viewport.width - 2 * gap));
   const left = Math.max(viewport.left + gap, Math.min(anchor.left, viewport.left + viewport.width - width - gap));
   const above = Math.max(0, anchor.top - viewport.top - 2 * gap);
   const below = Math.max(0, viewport.top + viewport.height - anchor.bottom - 2 * gap);

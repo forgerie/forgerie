@@ -18,6 +18,8 @@ export interface DestinationBinding {
 type Load<T> = { type: "loading" } | { type: "ready"; value: T } | { type: "failed"; message: string };
 type Step = { type: "projects" } | { type: "workspaces"; project: Project };
 const PANEL_CAP = 416;
+/** Room for a typical path on one line, even when the anchor is only a short chip. */
+const PANEL_MIN_REM = 28;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 function useRead<T>(read: ((signal: AbortSignal) => Promise<T>) | undefined, key: string): Load<T> {
@@ -62,6 +64,14 @@ export function DestinationPicker({ binding }: { binding: DestinationBinding }) 
   </div>;
 }
 
+/**
+ * A folder path on one line. When it does not fit, the start gives way, so the
+ * folder names that tell rows apart stay visible. The title carries the whole path.
+ */
+function DestinationPath({ path }: { path: string }) {
+  return <span className="destination-path" title={path}><bdi dir="ltr">{path}</bdi></span>;
+}
+
 /** How a destination reads: the project, then the workspace when it is not the project's own folder. */
 function workspaceLabel(project: Project, workspace: Workspace): string {
   return workspace.isMain || workspace.path === project.path ? project.name : `${project.name} · ${workspace.branch ?? workspace.label}`;
@@ -78,7 +88,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   const projects = useRead(binding.listProjects, "projects");
   const project = step.type === "workspaces" ? step.project : undefined;
   const workspaces = useRead(project ? (signal) => binding.listWorkspaces(project.id, signal) : undefined, project?.id ?? "none");
-  usePanelPlacement(panel, anchor, PANEL_CAP);
+  usePanelPlacement(panel, anchor, PANEL_CAP, PANEL_MIN_REM);
   // Focus moves in at once, so Escape always reaches the panel; no touch keyboard opens.
   useLayoutEffect(() => {
     const back = step.type === "projects" && cameFrom.current
@@ -144,7 +154,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
           return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={here || undefined}
             data-project={item.id} onClick={() => { cameFrom.current = item.id; setQuery(""); setStep({ type: "workspaces", project: item }); }}>
             <span className="model-row-name">{item.name}</span>
-            <span className="model-row-meta"><span className="destination-path">{item.path}</span></span>
+            <span className="model-row-meta"><DestinationPath path={item.path} /></span>
             {here && <CheckIcon aria-hidden size={16} className="model-row-check" />}
           </button></li>;
         })}</ul>
@@ -162,7 +172,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
           return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={binding.cwd === item.path || undefined}
             onClick={() => choose(item.path, label)}>
             <span className="model-row-name">{name}{item.isMain && <span className="model-row-variant">main checkout</span>}</span>
-            <span className="model-row-meta"><span className="destination-path">{item.path}</span></span>
+            <span className="model-row-meta"><DestinationPath path={item.path} /></span>
             {binding.cwd === item.path && <CheckIcon aria-hidden size={16} className="model-row-check" />}
           </button></li>;
         })}</ul>
