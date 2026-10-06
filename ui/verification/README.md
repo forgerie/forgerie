@@ -10,7 +10,7 @@ Swipe right anywhere on the session to pull the session list in, and left to pus
 
 ## New session
 
-"New session" at the top of the list, or N, opens a first-message composer with "Start in" above the bar and the model picker in it. Send creates the session and opens it. See [behavior, verification, and limits](new-session.md).
+"New session" at the top of the list, N, or Ctrl+Enter opens a dialog after Paperclip's new-task dialog: the destination on a tab, the composer with files, skills, and the model picker. Send starts and opens the session; Rapidfire starts it in the background and keeps the dialog open. See [behavior, verification, and limits](new-session.md).
 
 ## Archive and next
 

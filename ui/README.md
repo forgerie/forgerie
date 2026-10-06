@@ -19,7 +19,7 @@ Type `/` at the start of the composer to discover Pi commands. Select a command,
 
 Type `/tree`, or press the tree button in the header, to move the session to an earlier entry or fork from it. See [session tree](verification/session-tree.md).
 
-Press "New session" at the top of the session list, or N, to start a session in any project workspace with the model you choose. See [new session](verification/new-session.md).
+Press "New session" at the top of the session list, N, or Ctrl+Enter to start a session in a dialog: any project workspace, the model you choose, files, and skills. Rapidfire starts several without leaving it. See [new session](verification/new-session.md).
 
 Press the archive button in the header to archive the session and open the next one waiting for you. See [archive and next](verification/archive-next.md).
 
