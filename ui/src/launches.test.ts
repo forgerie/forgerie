@@ -28,11 +28,14 @@ describe("launches", () => {
   it("labels each start, follows its progress, and records how it ended", async () => {
     const { store, calls, replies, emit } = harness();
     const { id, done } = store.launch("/w", { text: "Fix the build" }, {}, "draft");
-    expect(calls[0]![3]).toEqual({ startupToken: id });
-    expect(store.getSnapshot()).toEqual([{ id, cwd: "/w", title: "Fix the build", startedAt: "2026-10-05T12:00:00.000Z", state: { type: "starting" }, draft: "draft" }]);
+    expect(calls[0]![3]).toMatchObject({ startupToken: id });
+    // Once Pi creates it, the session id is known, so the list can show Pi's row instead of the placeholder.
+    calls[0]![3]!.onCreated!({ id: "s1", cwd: "/w" });
+    expect(store.getSnapshot()[0]!.state).toEqual({ type: "starting", sessionId: "s1" });
+    expect(store.getSnapshot()).toEqual([{ id, cwd: "/w", title: "Fix the build", startedAt: "2026-10-05T12:00:00.000Z", state: { type: "starting", sessionId: "s1" }, draft: "draft" }]);
     emit({ startupToken: id, activity: { phase: "active", label: "Refreshing provider models" } });
     emit({ startupToken: "someone-else", activity: { phase: "active", label: "Other" } });
-    expect(store.getSnapshot()[0]!.state).toEqual({ type: "starting", progress: "Refreshing provider models" });
+    expect(store.getSnapshot()[0]!.state).toEqual({ type: "starting", sessionId: "s1", progress: "Refreshing provider models" });
     replies[0]!.resolve({ type: "started", session: { id: "s1", cwd: "/w" } });
     expect(await done).toEqual({ type: "started", session: { id: "s1", cwd: "/w" } });
     expect(store.getSnapshot()[0]!.state).toEqual({ type: "started", session: { id: "s1", cwd: "/w" } });

@@ -49,9 +49,12 @@ const menuId = (id: string) => `picker-menu-${id}`;
 
 interface Press { x: number; y: number; at: number; timer: ReturnType<typeof setTimeout> }
 
-function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu, onCloseMenu }: {
+function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu: openMenu, onCloseMenu }: {
   row: Row; selected: boolean; pending: boolean; menuOpen: boolean; onSelect: (row: Row) => void; onMenu: (id: string) => void; onCloseMenu: () => void;
 }) {
+  // A row with no commands (a start still in flight) has no menu to open.
+  const hasCommands = rowCommands(row).length > 0;
+  const onMenu = (id: string) => { if (hasCommands) openMenu(id); };
   const { session, location } = row;
   const press = useRef<Press | undefined>(undefined);
   // A hold that opened the menu must not also open the session on release.
@@ -94,9 +97,9 @@ function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu, onClose
         {row.processes ? <span title={`${count(row.processes, "process", "processes")} running`} aria-label={`${count(row.processes, "process", "processes")} running`}>{TERMINAL}{row.processes}</span> : null}
       </span> : null}
     </span>
-    <button className="picker-row-more" aria-label="Session commands" aria-haspopup="menu" aria-expanded={menuOpen}
+    {hasCommands && <button className="picker-row-more" aria-label="Session commands" aria-haspopup="menu" aria-expanded={menuOpen}
       aria-controls={menuOpen ? menuId(session.id) : undefined} tabIndex={-1}
-      onClick={(event) => { event.stopPropagation(); if (menuOpen) onCloseMenu(); else onMenu(session.id); }}><EllipsisIcon aria-hidden /></button>
+      onClick={(event) => { event.stopPropagation(); if (menuOpen) onCloseMenu(); else onMenu(session.id); }}><EllipsisIcon aria-hidden /></button>}
   </div>;
 }
 

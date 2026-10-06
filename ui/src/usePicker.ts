@@ -15,7 +15,7 @@ const storage = () => { try { return window.localStorage; } catch { return undef
 
 /** Binding: the only hook that reads or writes the machine catalog. Views get a PickerView. */
 /** A session this browser is starting, before Pi has saved it. */
-export interface StartingSession { id: string; cwd: string; title: string; startedAt: string }
+export interface StartingSession { id: string; cwd: string; title: string; startedAt: string; sessionId?: string | undefined }
 
 export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void; starting?: readonly StartingSession[] } = {}) {
   const starting = options.starting ?? NONE;
@@ -36,11 +36,15 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
 
   const locate = useMemo(() => createLocationResolver(state.projects, []), [state.projects]);
   // A start shows at once, as a working row named by its first line, until Pi's own row replaces it.
-  const rows = useMemo(() => boardRows({
-    sessions: [...state.sessions, ...starting.map((item) => ({ id: item.id, cwd: item.cwd, name: item.title, modified: item.startedAt }))],
-    statuses: state.statuses, unread: state.unread, locate, now,
-    activities: { ...state.activities, ...Object.fromEntries(starting.map((item) => [item.id, { phase: "active" as const, activeSince: item.startedAt }])) },
-  }), [state.sessions, state.statuses, state.activities, state.unread, starting, locate, now]);
+  const rows = useMemo(() => {
+    // Once Pi lists the session, its own row stands in for the placeholder.
+    const pending = starting.filter((item) => !item.sessionId || !state.sessions.some((session) => session.id === item.sessionId));
+    return boardRows({
+      sessions: [...state.sessions, ...pending.map((item) => ({ id: item.id, cwd: item.cwd, name: item.title, modified: item.startedAt, starting: true }))],
+      statuses: state.statuses, unread: state.unread, locate, now,
+      activities: { ...state.activities, ...Object.fromEntries(pending.map((item) => [item.id, { phase: "active" as const, activeSince: item.startedAt }])) },
+    });
+  }, [state.sessions, state.statuses, state.activities, state.unread, starting, locate, now]);
   const view: PickerView = useMemo(() => ({
     connection: state.connection,
     sections: boardSections(rows, { grouping: prefs.grouping, showArchived: prefs.showArchived, allPinned: prefs.allPinned, selectedId, now }),

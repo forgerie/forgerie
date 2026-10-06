@@ -2,7 +2,17 @@
 
 A new session starts from a dialog over whatever is open. Open it with "New session" at the top of the session list, N while the list has focus, or Ctrl+Enter anywhere outside a text field. Ctrl+Shift+Enter opens it in Rapidfire. (Cmd on a Mac.) In a text field, Enter sends and Ctrl+Shift+Enter steers the running agent, so the shortcuts wait until focus leaves it.
 
-The look follows Paperclip's new-task dialog (`ui/src/components/NewIssueDialog.tsx` and `task-chat/TaskChatComposer.tsx` in paperclipai/paperclip). The dialog has no frame of its own. It holds one composer card, with the destination on a tab joined to the card's top edge. The bar under the text holds attach, Rapidfire, the model and thinking level, dictation, and a round Send in the text color. The theme stays this app's.
+The window follows Paperclip's new-task dialog as its own screenshots show it (`docs/pr-screenshots/pap-2837/newissue-*.png` in paperclipai/paperclip). It is a titled window in sections, divided by rules:
+
+1. A header: the Forgerie mark, "New session", and Close.
+2. A sentence of chips: "Start in [forgerie · new-ui-mvp] with [Claude Opus 5.5 High]".
+3. The writing area, which takes all the height left. Enter is a new line.
+4. A row of labelled chips: Attach, Rapidfire, and dictation.
+5. A footer: "Discard draft", and the one filled button, "Start session" (Ctrl or Cmd+Enter).
+
+The window keeps a margin while the screen has room and meets each edge as the room runs out, so on a folded phone it is a full-screen sheet with the same sections. In a short window, the header and footer stay put and the middle scrolls. The theme stays this app's.
+
+The first version (2026-10-05) was the chat composer on a tab, with no frame. The user rejected it: it did not carry the weight of Paperclip's window.
 
 ## What it does
 
@@ -15,8 +25,9 @@ The look follows Paperclip's new-task dialog (`ui/src/components/NewIssueDialog.
 | Model and thinking level | The picker shows Pi's default for the destination. Moving to another folder keeps a chosen model only where that folder offers it. The session starts with exactly what the picker shows. |
 | Send | The session starts and opens. While it starts, the card shows Pi's own startup progress ("Refreshing provider models", for example) or "Starting session…". Escape, the backdrop, and Close wait until the start ends. |
 | Rapidfire | The chip in the bar. Send starts the session in the background, empties the bar, and keeps the dialog open for the next one. A list under the card shows each start: its progress, "Started" with Open, or the failure with Put back, which returns the message and its files to the bar. Starts keep going after the dialog closes. |
-| Session list | A start shows at once as a Working row named by its first line, until Pi's own row replaces it. Selecting it reopens the dialog, where its progress shows. |
-| Close | Close on the tab, Escape, a press on the backdrop, or Back. The draft stays. |
+| Session list | A start shows at once as a Working row named by its first line, with no row menu. Once Pi has created the session and listed it, Pi's own row replaces it. Selecting it before then opens the session if it exists, or the window, where its progress shows. |
+| Background failures | A Rapidfire start that fails after the window closed shows a notice over the thread, with Review, which reopens the window and its "Put back". A reload while any start is in flight asks first. |
+| Close | Close in the header, Escape, a press on the backdrop, or Back. The draft stays. "Discard draft" clears the text, the files, and the saved copy. |
 
 ## Failures
 
@@ -29,6 +40,7 @@ Nothing is retried. Each failure says which step failed:
 | The session started, but its files or first message failed. | The session opens with the message back in its draft and "The session started, but its first message may not have reached Pi". In Rapidfire, its row says so and offers Open. |
 | A `!` shell command. | "Shell commands need a running session." Nothing is sent. |
 | A `/command` the folder does not list, or the list could not load. | The reason. Nothing is sent. Retry from the `/` list. |
+| A `/command` sent before the folder's list loaded. | "Still loading. Start again in a moment." Nothing is sent. |
 
 ## Contract and limits
 
@@ -55,7 +67,8 @@ nix shell nixpkgs#nodejs_22 -c npm run verify
 | Check | Result (2026-10-05) |
 | --- | --- |
 | Unit and component tests | Build, lint, and all tests pass. New or rewritten: the start with a token, images, saved files, and a skill identity; a file save failure after the session exists; the folder's skill catalog; startup tokens without a secure context; held files (28 in `newSession.test.ts`); the launch list (5); startup events on the catalog socket (1); and the dialog (18): opening, pickers mounted inside it, closing with the draft kept, every start outcome, the busy lock, a skill sent with its identity, an unlisted command refused, and Rapidfire with its list, Put back, and Open. |
-| Fixture browser check | 42 combinations pass: the dialog, the destination list open, and Rapidfire with three starts, at the four Fold postures, a 475 × 280 keyboard window, a 280 × 500 pane, and 275 × 280, in both themes. Every control sits inside the window once scrolled to. The draft and the open destination list survive fold, unfold, and rotation. No API request, no page error. |
+| Fixture browser check | 42 combinations pass: the dialog, the destination list open, and Rapidfire with three starts, at the four Fold postures, a 475 × 280 keyboard window, a 280 × 500 pane, and 275 × 280, in both themes. Every control sits inside the screen once scrolled to, and Start never leaves it. The draft and the open destination list survive fold, unfold, and rotation. No API request, no page error. |
 | Visual review | 24 captures (three states, four postures, two themes). Read: the dialog in light unfolded landscape and dark folded portrait, Rapidfire in light folded landscape and dark unfolded portrait, and the destination list in light folded portrait. |
 | Real sessions | Against the live backend at folded portrait: `?new=` opened the dialog in the scratch folder with Pi's default model; Low was chosen; Send created and opened the session; Back did not reopen the dialog; Pi started it at Low and the reply arrived. Then Ctrl+Enter opened the dialog over that session, Rapidfire started a second session in the background, the bar emptied, its row went from starting to Started, and the reader stayed on the first session. |
+| Independent review (first version) | Two blocking bugs and four smaller ones, all fixed and tested: closing the image viewer closed the whole window; "Put back" in a later window lost or swapped held files; a command sent while skills loaded was called unknown; placeholder rows duplicated Pi's row and offered a menu for a session that did not exist; a background failure was invisible once the window closed; and two quick opens, or a reload, broke Close's step back. |
 | Physical Fold | Not tested. |

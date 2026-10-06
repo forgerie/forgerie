@@ -12,6 +12,8 @@ export interface PickerSession {
   archived?: boolean | undefined;
   pinned?: boolean | undefined;
   agentSpawned?: boolean | undefined;
+  /** A start this browser made, before Pi has listed the session. It has no server identity yet. */
+  starting?: boolean | undefined;
 }
 export interface PickerStatus {
   isStreaming: boolean;

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime, type CompleteAttachment } from "@assistant-ui/react";
 import type { Session, SessionModel } from "./contracts";
 import { useThreadMessages } from "./useThreadMessages";
-import { Composer } from "./ui/Composer";
 import { ForgerieDictationAdapter } from "./speech/ForgerieDictationAdapter";
 import { DictationProvider } from "./DictationProvider";
 import { createChatDraft } from "./chatDraft";
@@ -10,12 +9,12 @@ import type { DraftStore } from "./draftStore";
 import { DestinationPicker } from "./ui/DestinationPicker";
 import type { ModelBinding } from "./ui/ModelPicker";
 import { ImageViewerProvider } from "./ui/ImageViewer";
-import { LaunchTray, NewSessionDialog, RapidfireToggle } from "./ui/NewSessionDialog";
+import { LaunchTray, NewSessionDialog, type StartPhase } from "./ui/NewSessionDialog";
 import { createAttachmentAdapter, promptOf, reusableAttachment } from "./attachments";
 import { createMentionSource } from "./mentionSource";
 import type { CommandCatalog } from "./commands";
 import type { Launch, LaunchStore } from "./launches";
-import { createDeferredFiles, destinationLabel, keepChoice, thinkingLevelsFor, type AgentChoice, type NewSessionApi, type Project, type PromptResource } from "./newSession";
+import { destinationLabel, keepChoice, thinkingLevelsFor, type AgentChoice, type DeferredFiles, type NewSessionApi, type Project, type PromptResource } from "./newSession";
 
 /** The draft store key of the first message, which has no session yet. */
 export const NEW_SESSION_DRAFT = "new-session";
@@ -33,8 +32,10 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * starts it in the background and clears the bar for the next one. Nothing is
  * retried: a step that may have worked is reported, never repeated.
  */
-export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launches, drafts, onStarted, onDestination, onClose }: {
+export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launches, deferred, drafts, onStarted, onDestination, onClose }: {
   cwd: string; initialMode?: LaunchMode; api: NewSessionApi; launches: LaunchStore<LaunchDraft>; drafts?: DraftStore | undefined;
+  /** Files held until their session exists. App-wide, so "Put back" in a later window still finds them. */
+  deferred: DeferredFiles;
   /** The author moved the destination. The URL follows, so a reload comes back here. */
   onDestination?: ((cwd: string) => void) | undefined;
   /** Open this session. `unsent` is set when its first message may not have gone out. */
@@ -50,7 +51,6 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
   const [phase, setPhase] = useState<Phase>({ type: "composing" });
   const [mode, setMode] = useState<LaunchMode>(initialMode);
   const [dictation] = useState(() => new ForgerieDictationAdapter());
-  const [deferred] = useState(() => createDeferredFiles());
   const [attachments] = useState(() => createAttachmentAdapter(deferred.save));
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   const [saved] = useState(() => drafts?.session(NEW_SESSION_DRAFT));
@@ -61,14 +61,6 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
   const alive = useRef(true);
   useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => () => attachments.dispose(), [attachments]);
-  // A reload during a start could leave a session without its first message.
-  const inFlight = phase.type === "starting" || started.some((launch) => launch.state.type === "starting");
-  useEffect(() => {
-    if (!inFlight) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [inFlight]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -118,8 +110,9 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
     if (text.startsWith("/")) {
       const name = /^\/(\S+)/u.exec(text)?.[1];
       const listed = resources?.cwd === cwd ? resources : undefined;
-      if (listed?.catalog.type === "failed") { refuse(`Skills and prompt templates could not be checked: ${listed.catalog.message} Retry from the / list.`); return; }
-      const match = listed?.commands.filter((item) => item.name === name) ?? [];
+      if (!listed || listed.catalog.type === "loading") { refuse("This folder's skills and prompt templates are still loading. Start again in a moment."); return; }
+      if (listed.catalog.type === "failed") { refuse(`Skills and prompt templates could not be checked: ${listed.catalog.message} Retry from the / list.`); return; }
+      const match = listed.commands.filter((item) => item.name === name);
       if (match.length !== 1) {
         refuse(match.length === 0 ? `/${name ?? ""} is not a skill or prompt template in this folder. Built-in commands need a running session.`
           : `/${name ?? ""} is ambiguous in this folder. Choose it again from the / list.`);
@@ -167,34 +160,34 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
     `/api/models?${new URLSearchParams({ cwd })}`), [cwd]);
   const label = destination.label ?? destinationLabel(cwd, projects);
   const progress = phase.type === "starting" ? started.find((item) => item.id === phase.id)?.state : undefined;
-  const status = progress?.type === "starting" ? progress.progress ?? "Starting session…" : undefined;
+  const view: StartPhase = phase.type === "starting"
+    ? { type: "starting", progress: (progress?.type === "starting" ? progress.progress : undefined) ?? "Starting session…" }
+    : phase.error ? { type: "failed", message: phase.error } : { type: "ready" };
   const open = (launch: Launch<LaunchDraft>) => {
     const { state } = launch;
     if (state.type !== "started" && state.type !== "unsent") return;
     launches.take(launch.id);
     onStarted(state.session, state.type === "unsent" ? { draft: launch.draft.text, error: state.error } : undefined);
   };
+  // Clears the bar and its files. The saved draft follows the bar, so it clears too.
+  const discard = () => { setPhase({ type: "composing" }); void runtimeRef.current?.thread.composer.reset(); };
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
-      <NewSessionDialog busy={starting} onClose={onClose}
-        context={<DestinationPicker binding={{
-          cwd, label, disabled: starting,
-          listProjects: (signal) => api.projects(signal),
-          listWorkspaces: (projectId, signal) => api.workspaces(projectId, signal),
-          onChoose: (next, nextLabel) => { setDestination({ cwd: next, label: nextLabel }); onDestination?.(next); },
-        }} />}
-        card={<ImageViewerProvider>
-          <Composer model={modelBinding} chatDraft={chatDraft} mentions={mentions}
-            commands={{ catalog: resources?.cwd === cwd ? resources.catalog : { type: "loading" }, onRetry: () => setResourceAttempt((n) => n + 1) }}
-            placeholder="Describe the first task…" sendLabel={mode === "rapidfire" ? "Start in the background" : "Start session"}
-            extraActions={<RapidfireToggle on={mode === "rapidfire"} disabled={starting} onToggle={() => setMode(mode === "rapidfire" ? "switch" : "rapidfire")} />} />
-          {status && <p className="ns-status" role="status">{status}</p>}
-          {phase.type === "composing" && phase.error && <p className="ns-error" role="alert">{phase.error}</p>}
-        </ImageViewerProvider>}
-        tray={<LaunchTray launches={started.filter((launch) => phase.type !== "starting" || launch.id !== phase.id)} onOpen={open}
-          onRestore={(launch) => { const taken = launches.take(launch.id); if (taken) void putBack(taken.draft); }}
-          onDismiss={(launch) => launches.dismiss(launch.id)} />} />
+      <ImageViewerProvider>
+        <NewSessionDialog phase={view} rapidfire={mode === "rapidfire"} onRapidfire={() => setMode(mode === "rapidfire" ? "switch" : "rapidfire")}
+          onDiscard={discard} onClose={onClose} model={modelBinding} mentions={mentions}
+          commands={{ catalog: resources?.cwd === cwd ? resources.catalog : { type: "loading" }, onRetry: () => setResourceAttempt((n) => n + 1) }}
+          destination={<DestinationPicker binding={{
+            cwd, label, disabled: starting,
+            listProjects: (signal) => api.projects(signal),
+            listWorkspaces: (projectId, signal) => api.workspaces(projectId, signal),
+            onChoose: (next, nextLabel) => { setDestination({ cwd: next, label: nextLabel }); onDestination?.(next); },
+          }} />}
+          tray={<LaunchTray launches={started.filter((launch) => phase.type !== "starting" || launch.id !== phase.id)} onOpen={open}
+            onRestore={(launch) => { const taken = launches.take(launch.id); if (taken) void putBack(taken.draft); }}
+            onDismiss={(launch) => launches.dismiss(launch.id)} />} />
+      </ImageViewerProvider>
     </DictationProvider>
   </AssistantRuntimeProvider>;
 }

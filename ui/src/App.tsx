@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ForgerieSession } from "./ForgerieSession";
 import { usePicker, type StartingSession } from "./usePicker";
 import type { Row } from "./picker/board";
@@ -8,7 +8,8 @@ import { Picker, PickerToast } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession, type LaunchDraft, type LaunchMode } from "./NewSession";
-import { createNewSessionApi, defaultDestinationCwd } from "./newSession";
+import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken } from "./newSession";
+import { XIcon } from "lucide-react";
 import { createLaunchStore, type StartupListener } from "./launches";
 import { newSessionShortcut } from "./shortcuts";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
@@ -27,8 +28,12 @@ const readSettings = (): SettingsPlace | undefined => {
 };
 const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
-/** History entries this app pushed for the dialog, so closing it can step back instead of piling up entries. */
-const DIALOG_ENTRY = { newSession: true };
+/**
+ * Marks the history entry this page load pushed for the dialog, so closing it
+ * steps back instead of piling up entries. Per load: after a reload the browser
+ * keeps the old mark, and stepping back to it would reload the page again.
+ */
+const DIALOG_ENTRY = { newSession: newStartupToken() };
 
 /** Composition root: owns the selected session (in the URL), the sheet, and sessions being started. */
 export function App() {
@@ -49,9 +54,20 @@ export function App() {
       on: (listener: StartupListener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
   });
   const [launches] = useState(() => createLaunchStore<LaunchDraft>(newSessionApi, { onStartup: startup.on }));
+  // Files wait here until their session exists, for every window, so "Put back" always finds them.
+  const [deferred] = useState(() => createDeferredFiles());
   const launchList = useSyncExternalStore(launches.subscribe, launches.getSnapshot);
   const starting = useMemo<StartingSession[]>(() => launchList.filter((launch) => launch.state.type === "starting")
-    .map((launch) => ({ id: launch.id, cwd: launch.cwd, title: launch.title, startedAt: launch.startedAt })), [launchList]);
+    .map((launch) => ({ id: launch.id, cwd: launch.cwd, title: launch.title, startedAt: launch.startedAt,
+      sessionId: launch.state.type === "starting" ? launch.state.sessionId : undefined })), [launchList]);
+  // A reload during any start could leave a session without its first message.
+  const inFlight = starting.length > 0;
+  useEffect(() => {
+    if (!inFlight) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [inFlight]);
   // With nothing selected there is nothing to cover, so the sheet starts open.
   const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
@@ -79,7 +95,7 @@ export function App() {
   /** Close the dialog. Back would do the same when this app opened it. */
   const closeComposer = useCallback(() => {
     if (readNew() === undefined) { setComposing(undefined); return; }
-    const pushed = (window.history.state as typeof DIALOG_ENTRY | null)?.newSession === true;
+    const pushed = (window.history.state as Partial<typeof DIALOG_ENTRY> | null)?.newSession === DIALOG_ENTRY.newSession;
     if (pushed) { window.history.back(); return; }
     const url = new URL(window.location.href);
     url.searchParams.delete("new");
@@ -104,16 +120,20 @@ export function App() {
   }, [selectedId]);
   // New session: the dialog starts where the reader is, over whatever is open, and the URL remembers it.
   const { find, recent } = picker;
+  // Two quick presses must open one window, not push two history entries.
+  const opening = useRef(false);
   const startNew = useCallback(async (mode: LaunchMode = "switch") => {
     setOpen(false);
+    if (opening.current) return;
     if (readNew() !== undefined) {
       setComposeMode(mode);
-      document.querySelector<HTMLTextAreaElement>(".ns-dialog .composer textarea")?.focus();
+      document.querySelector<HTMLTextAreaElement>(".ns-dialog textarea")?.focus();
       return;
     }
     const current = readSelected();
     // Before the session list loads, or with no sessions yet, Forgerie's projects decide.
-    const projects = await newSessionApi.projects().catch(() => []);
+    opening.current = true;
+    const projects = await newSessionApi.projects().catch(() => []).finally(() => { opening.current = false; });
     const cwd = defaultDestinationCwd(current ? find(current) : undefined, recent, projects);
     setComposeKey((key) => key + 1);
     setComposeMode(mode);
@@ -134,10 +154,12 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [startNew]);
-  // A row that is still starting has nothing to open yet; its dialog shows how it goes.
+  // A start still in flight: once Pi created the session it opens; before that, the window shows how it goes.
   const select = useCallback((row: Row) => {
-    if (starting.some((item) => item.id === row.session.id)) { void startNew("rapidfire"); return; }
-    switchSession(row.session);
+    const pending = starting.find((item) => item.id === row.session.id);
+    if (!pending) { switchSession(row.session); return; }
+    if (pending.sessionId) switchSession({ id: pending.sessionId, cwd: pending.cwd, name: pending.title });
+    else void startNew();
   }, [starting, startNew, switchSession]);
   // Archive and next. With nothing left waiting, the list is the next thing to read.
   const { archiveAndNext } = picker;
@@ -165,10 +187,17 @@ export function App() {
     ? { ...picker.find(selectedId), ...commandSelection.session } : picker.find(selectedId);
 
   // The undo offer lives in the picker. While the sheet is closed, the thread shows it too.
+  // A background start that failed after its window closed must still be seen. The window holds its draft.
+  const orphan = composing === undefined ? launchList.find((launch) => launch.state.type === "failed" || launch.state.type === "unsent") : undefined;
   const toast = picker.view.toast
-    ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : undefined;
+    ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} />
+    : orphan ? <div className="picker-toast" data-tone="error" role="alert">
+      <span>“{orphan.title}” {orphan.state.type === "unsent" ? "started, but its first message may not have reached Pi." : "did not start."}</span>
+      <button type="button" className="picker-toast-undo" onClick={() => { void startNew(); }}>Review</button>
+      <button type="button" className="picker-toast-close" aria-label="Dismiss" onClick={() => launches.dismiss(orphan.id)}><XIcon aria-hidden /></button>
+    </div> : undefined;
   const dialog = composing === undefined ? null : composing
-    ? <NewSession key={composeKey} cwd={composing} initialMode={composeMode} api={newSessionApi} launches={launches} drafts={drafts}
+    ? <NewSession key={composeKey} cwd={composing} initialMode={composeMode} api={newSessionApi} launches={launches} deferred={deferred} drafts={drafts}
       onDestination={(next) => { const url = new URL(window.location.href); url.searchParams.set("new", next); window.history.replaceState(window.history.state, "", url); }}
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;

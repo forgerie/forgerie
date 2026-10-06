@@ -55,9 +55,9 @@ try {
       return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.ns-dialog .composer textarea').length,
         input: box(document.querySelector('.ns-dialog .composer textarea')), destination: box(document.querySelector('.destination-trigger')),
         value: box(document.querySelector('.destination-value')), model: box(document.querySelector('.ns-dialog .model-trigger')),
-        actions: [...document.querySelectorAll('.ns-dialog .composer-actions button, .ns-close, .ns-launch-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
+        actions: [...document.querySelectorAll('.ns-dialog .ns-context button, .ns-chips button, .ns-foot button, .ns-close, .ns-launch-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
         panel: box(document.querySelector('.destination-panel')), firstRow: box(document.querySelector('.destination-row')),
-        dialog: box(document.querySelector('.ns-stack')) };
+        dialog: box(document.querySelector('.ns-window')) };
     })()`);
     const name = `${scenario} ${posture.name} ${scheme}`;
     const inside = (rect, label) => assert.ok(rect && rect.left >= -0.5 && rect.right <= posture.width + 0.5 && rect.top >= -0.5 && rect.bottom <= posture.height + 0.5,
@@ -95,7 +95,7 @@ try {
   await click(".model-row", "Claude Sonnet 5");
   await until("!document.querySelector('.model-panel') && document.querySelector('.ns-dialog .model-trigger').textContent.includes('Claude Sonnet 5')");
   await type("Fix the build");
-  await pressCombo(cdp, "enter");
+  await pressCombo(cdp, "ctrl+enter");
   await until("document.querySelector('.ns-status')?.textContent === 'Starting session…'");
   assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').disabled || document.querySelector('.ns-dialog .model-trigger').disabled"), true);
   await until("!!document.documentElement.dataset.started");
@@ -114,7 +114,7 @@ try {
 
   // A refused start keeps the message and says why.
   await navigate("new-session-error");
-  await type("Fix the build"); await pressCombo(cdp, "enter");
+  await type("Fix the build"); await pressCombo(cdp, "ctrl+enter");
   await until("!!document.querySelector('.ns-error')");
   assert.match(await evaluate(cdp, "document.querySelector('.ns-error').textContent"), /The session did not start: Folder not found/);
   assert.equal(await draft(), "Fix the build");

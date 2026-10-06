@@ -184,9 +184,21 @@ describe("files before the session exists", () => {
     const deferred = createDeferredFiles();
     const file = { kind: "file" as const, mimeType: "text/plain", data: "aGVsbG8=", name: "notes.txt" };
     const saved = await deferred.save(file);
-    expect(saved).toEqual({ path: "pending-upload/1/notes.txt", mimeType: "text/plain", size: 6 });
+    expect(saved).toMatchObject({ path: expect.stringMatching(/^pending-upload\/[0-9a-f]{24}\/notes.txt$/u), mimeType: "text/plain", size: 6 });
     expect(deferred.split(`Read this\n@${saved.path}`)).toEqual({ text: "Read this", files: [file] });
     // A typed mention that only looks like one stays text.
     expect(deferred.split("See @pending-upload/9/x.txt\n@src/app.ts")).toEqual({ text: "See @pending-upload/9/x.txt\n@src/app.ts", files: [] });
+  });
+});
+
+describe("held files across windows", () => {
+  it("gives every held file its own placeholder, even with the same name", async () => {
+    const deferred = createDeferredFiles();
+    const first = await deferred.save({ kind: "file", mimeType: "text/plain", data: "YQ==", name: "notes.txt" });
+    const second = await deferred.save({ kind: "file", mimeType: "text/plain", data: "Yg==", name: "notes.txt" });
+    expect(first.path).not.toBe(second.path);
+    expect(deferred.split(`@${first.path}`).files[0]?.data).toBe("YQ==");
+    // Still held after a send, so "Put back" and a second start find it.
+    expect(deferred.split(`@${first.path}`).files[0]?.data).toBe("YQ==");
   });
 });

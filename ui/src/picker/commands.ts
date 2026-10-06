@@ -24,6 +24,8 @@ export interface RowCommand {
  * Copy workspace path is on every row.
  */
 export function rowCommands(row: Row): RowCommand[] {
+  // A start still in flight has no server session to pin, archive, or copy.
+  if (row.session.starting === true) return [];
   const copy: RowCommand = { kind: "copyPath", label: "Copy workspace path" };
   if (row.state === "archived") {
     return [{ kind: "restore", label: "Restore" }, { kind: "delete", label: "Delete permanently", danger: true }, copy];

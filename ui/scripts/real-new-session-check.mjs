@@ -62,7 +62,7 @@ try {
   const shownModel = await evaluate(cdp, "document.querySelector('.model-trigger-name').textContent");
   await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()");
   await cdp.send("Input.insertText", { text: "Automated UI test. Reply with the single word OK and do nothing else." });
-  await pressCombo(cdp, "enter");
+  await pressCombo(cdp, "ctrl+enter");
   await until("new URLSearchParams(location.search).has('session')", 90_000);
   id = await evaluate(cdp, "new URLSearchParams(location.search).get('session')");
   assert.equal(await evaluate(cdp, "new URLSearchParams(location.search).has('new')"), false);
@@ -90,11 +90,11 @@ try {
   await evaluate(cdp, "document.activeElement?.blur()");
   await pressCombo(cdp, "ctrl+enter");
   await until("!!document.querySelector('dialog.ns-dialog[open]') && !document.querySelector('.ns-dialog .model-trigger').textContent.startsWith('No model')");
-  await evaluate(cdp, "[...document.querySelectorAll('.ns-mode')][0].click()");
-  await until("document.querySelector('.ns-mode').getAttribute('aria-pressed') === 'true'");
+  await evaluate(cdp, "document.querySelector('.ns-chips [aria-pressed]').click()");
+  await until("document.querySelector('.ns-chips [aria-pressed]').getAttribute('aria-pressed') === 'true'");
   await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()");
   await cdp.send("Input.insertText", { text: "Automated Rapidfire test. Reply with the single word OK." });
-  await pressCombo(cdp, "enter");
+  await pressCombo(cdp, "ctrl+enter");
   await until("document.querySelector('.ns-launch')?.dataset.state === 'starting'", 10_000);
   const pendingRow = await evaluate(cdp, "!!document.querySelector('.ns-dialog') && document.querySelector('.ns-dialog .composer textarea').value === ''");
   assert.equal(pendingRow, true, "the dialog stayed open with an empty bar");

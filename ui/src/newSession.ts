@@ -104,13 +104,16 @@ export function newStartupToken(): string {
  * adapter saves through `save`, which only holds the file and returns a
  * placeholder reference. `split` takes those references back out of the sent
  * text, so the start saves the files once the session exists.
+ *
+ * One per app, not per window: a failed start's files go back to the bar
+ * through "Put back", maybe in a later window, and must still be held. Each
+ * placeholder is random, so two windows never share one.
  */
 export function createDeferredFiles() {
   const held = new Map<string, PromptAttachment>();
-  let count = 0;
   return {
     async save(attachment: PromptAttachment) {
-      const path = `pending-upload/${String(++count)}/${attachment.name ?? "file"}`;
+      const path = `pending-upload/${newStartupToken().slice("start-".length)}/${attachment.name ?? "file"}`;
       held.set(path, attachment);
       return { path, mimeType: attachment.mimeType, size: Math.floor(attachment.data.length * 3 / 4) };
     },
@@ -171,7 +174,11 @@ export function createNewSessionApi(fetchFn: Fetch) {
      * step failed and whether a session may exist, so the caller never repeats
      * a step that may have worked.
      */
-    async start(cwd: string, first: string | FirstPrompt, choice: AgentChoice, options: { startupToken?: string } = {}): Promise<{ type: "started"; session: Session } | { type: "failed"; failure: StartFailure }> {
+    async start(cwd: string, first: string | FirstPrompt, choice: AgentChoice, options: {
+      startupToken?: string;
+      /** The session exists; its files and first message follow. */
+      onCreated?: (session: Session) => void;
+    } = {}): Promise<{ type: "started"; session: Session } | { type: "failed"; failure: StartFailure }> {
       const prompt: FirstPrompt = typeof first === "string" ? { text: first } : first;
       let session: Session;
       try {
@@ -181,6 +188,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
       } catch (error) {
         return { type: "failed", failure: { stage: "start", message: messageOf(error), maybeStarted: !refused(error) } };
       }
+      options.onCreated?.(session);
       const root = `/api/sessions/${encodeURIComponent(session.id)}`;
       try {
         let text = prompt.text;

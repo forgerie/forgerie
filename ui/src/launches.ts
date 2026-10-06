@@ -5,7 +5,8 @@ import type { Session } from "./contracts";
 import { newStartupToken, type AgentChoice, type FirstPrompt, type NewSessionApi, type StartFailure } from "./newSession";
 
 export type LaunchState =
-  | { type: "starting"; progress?: string | undefined }
+  /** `sessionId` once Pi has created the session; its files and first message still follow. */
+  | { type: "starting"; progress?: string | undefined; sessionId?: string | undefined }
   | { type: "started"; session: Session }
   /** The session exists, but its first message may not have reached Pi. */
   | { type: "unsent"; session: Session; error: string }
@@ -40,7 +41,7 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
     const launch = launches.find((item) => item.id === event.startupToken);
     if (launch?.state.type !== "starting") return;
     const progress = event.activity.phase === "active" ? event.activity.label : undefined;
-    if (progress !== launch.state.progress) patch(launch.id, { type: "starting", ...(progress ? { progress } : {}) });
+    if (progress !== launch.state.progress) patch(launch.id, { ...launch.state, progress });
   });
   return {
     getSnapshot: () => launches,
@@ -49,7 +50,11 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
     launch(cwd: string, prompt: FirstPrompt, choice: AgentChoice, draft: D): { id: string; done: Promise<LaunchOutcome> } {
       const id = newStartupToken();
       set([...launches, { id, cwd, title: launchTitle(prompt.text), startedAt: (options.now?.() ?? new Date()).toISOString(), state: { type: "starting" }, draft }]);
-      const done = api.start(cwd, prompt, choice, { startupToken: id }).then((result): LaunchOutcome => {
+      const created = (session: Session) => {
+        const launch = launches.find((item) => item.id === id);
+        if (launch?.state.type === "starting") patch(id, { ...launch.state, sessionId: session.id });
+      };
+      const done = api.start(cwd, prompt, choice, { startupToken: id, onCreated: created }).then((result): LaunchOutcome => {
         if (result.type === "started") return { type: "started", session: result.session };
         const { failure } = result;
         return failure.stage === "prompt" ? { type: "unsent", session: failure.session, error: failureText(failure) }

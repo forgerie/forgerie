@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NewSession, type LaunchDraft, type LaunchMode } from "./NewSession";
-import type { AgentChoice, FirstPrompt, NewSessionApi, Project, PromptResource, Workspace } from "./newSession";
+import { createDeferredFiles, type AgentChoice, type FirstPrompt, type NewSessionApi, type Project, type PromptResource, type Workspace } from "./newSession";
 import type { Session, SessionModel } from "./contracts";
 import { createDraftStore, type DraftStore } from "./draftStore";
 import { createLaunchStore } from "./launches";
@@ -43,7 +43,7 @@ interface Options { onStarted?: (session: Session, unsent?: { draft: string; err
   onDestination?: (cwd: string) => void; mode?: LaunchMode }
 async function render(api: NewSessionApi, options: Options = {}) {
   const launches = createLaunchStore<LaunchDraft>(api);
-  await act(async () => root.render(<NewSession cwd="/code/forgerie" api={api} launches={launches} drafts={options.drafts ?? createDraftStore(storage())}
+  await act(async () => root.render(<NewSession cwd="/code/forgerie" api={api} launches={launches} deferred={createDeferredFiles()} drafts={options.drafts ?? createDraftStore(storage())}
     onStarted={options.onStarted ?? (() => {})} onClose={options.onClose ?? (() => {})} onDestination={options.onDestination} initialMode={options.mode} />));
   await settle();
   return launches;
@@ -59,7 +59,7 @@ async function type(text: string) {
     textarea().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
-const send = async () => { await act(async () => { textarea().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" })); }); await settle(); };
+const send = async () => { await act(async () => { textarea().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", ctrlKey: true })); }); await settle(); };
 const error = () => document.querySelector(".ns-error")?.textContent;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -69,16 +69,47 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 describe("the new-session dialog", () => {
-  it("opens as a named modal with the destination on its tab, Pi's default model, files, and Rapidfire", async () => {
+  it("opens as a titled window: where and with what, a writing area, what it carries, and the decision", async () => {
     await render(scriptedApi().api);
     expect(dialog()?.open).toBe(true);
     expect(document.getElementById(dialog()!.getAttribute("aria-labelledby")!)?.textContent).toBe("New session");
     expect(document.querySelector(".ns-context .destination-value")!.textContent).toBe("forgerie");
-    expect(document.querySelector(".model-trigger")!.textContent).toContain("Claude Opus 5.5");
-    expect(document.querySelector(".model-trigger")!.textContent).toContain("High");
-    expect(button("Add attachment")).toBeDefined();
+    expect(document.querySelector(".ns-context .model-trigger")!.textContent).toContain("Claude Opus 5.5");
+    expect(document.querySelector(".ns-context .model-trigger")!.textContent).toContain("High");
+    expect(button("Attach", document.querySelector(".ns-chips")!)).toBeDefined();
     expect(button("Rapidfire")?.getAttribute("aria-pressed")).toBe("false");
-    expect(textarea().placeholder).toBe("Describe the first task…");
+    expect(button("Discard draft", document.querySelector(".ns-foot")!)).toBeDefined();
+    expect(button("Start session", document.querySelector(".ns-foot")!)).toBeDefined();
+    expect(textarea().placeholder).toBe("Describe what the agent should do first…");
+  });
+
+  it("keeps a plain Enter as a new line; only Ctrl or Cmd+Enter starts", async () => {
+    const script = scriptedApi();
+    await render(script.api);
+    await type("line one");
+    await act(async () => { textarea().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" })); });
+    await settle();
+    expect(script.starts).toEqual([]);
+  });
+
+  it("discards the draft and its saved copy", async () => {
+    const drafts = createDraftStore(storage());
+    await render(scriptedApi().api, { drafts });
+    await type("not this one");
+    await click(button("Discard draft"));
+    expect(textarea().value).toBe("");
+    expect(drafts.session("new-session").chat()).toBe("");
+  });
+
+  it("stays open when something nested inside it closes, such as the image viewer", async () => {
+    const onClose = vi.fn();
+    await render(scriptedApi().api, { onClose });
+    await act(async () => {
+      textarea().dispatchEvent(new Event("cancel", { bubbles: true, cancelable: true }));
+      textarea().dispatchEvent(new Event("close", { bubbles: true }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(dialog()?.open).toBe(true);
   });
 
   it("mounts its pickers inside itself, so they are not inert behind the modal", async () => {
@@ -246,6 +277,16 @@ describe("a skill or prompt template as the first message", () => {
     expect(script.starts[0]!.prompt).toMatchObject({ text: "/skill:testing add cases", command: testing.identity });
   });
 
+  it("asks to wait while the folder's list loads, instead of calling a real skill unknown", async () => {
+    const script = scriptedApi();
+    script.api.promptResources = () => new Promise(() => {});
+    await render(script.api);
+    await type("/skill:testing add cases");
+    await send();
+    expect(script.starts).toEqual([]);
+    expect(error()).toMatch(/still loading/u);
+  });
+
   it("refuses a command this folder does not list, and keeps it in the bar", async () => {
     const script = scriptedApi();
     await render(script.api);
@@ -288,6 +329,6 @@ describe("Rapidfire", () => {
   it("can open straight into Rapidfire", async () => {
     await render(scriptedApi().api, { mode: "rapidfire" });
     expect(button("Rapidfire")?.getAttribute("aria-pressed")).toBe("true");
-    expect(button("Start in the background")).toBeDefined();
+    expect(button("Start in background")).toBeDefined();
   });
 });

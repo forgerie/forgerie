@@ -762,46 +762,77 @@ summary.trace-line:hover { color: var(--foreground); }
   .ask, .app-scrim, .picker-menu, .picker-row-menu { animation: none; }
   .trace-text[data-live] { animation: none; background: none; color: var(--foreground); }
 }
-/* New session, after Paperclip's new-task dialog: a frameless window holding one
-   composer card, with the destination on a tab joined to the card's top edge.
-   The dialog is the page frame while open, so it sizes from the viewport; its
-   room shrinks with the window and the keyboard (resizes-content), never in steps. */
+/* New session, after Paperclip's new-task dialog: a titled window in sections.
+   The header names it; a sentence says where and with what it starts; the writing
+   area takes the room; a row of labelled chips holds what the message carries; the
+   footer holds the decision. A window while the screen has room around it; as that
+   room runs out, each axis gives up its own margin and the window meets that edge.
+   No width or height flips the layout. The dialog is the page frame while open, so
+   it sizes from the viewport, and the keyboard shrinks it (resizes-content). */
 .ns-dialog {
-  --ns-room: clamp(0.5rem, 4vmin, 2rem);
-  position: fixed; inset: 0; margin: auto; padding: 0; border: 0; background: transparent; color: var(--foreground);
-  inline-size: min(42rem, 100dvw - 2 * var(--ns-room)); max-inline-size: none;
-  block-size: fit-content; max-block-size: calc(100dvh - 2 * var(--ns-room)); overflow: visible;
+  --ns-width: 44rem; --ns-height: 42rem;
+  --ns-room-inline: clamp(0px, (100dvw - var(--ns-width)) / 2, 2rem);
+  --ns-room-block: clamp(0px, (100dvh - var(--ns-height)) / 2, 2.5rem);
+  --ns-pad: clamp(1rem, 4vmin, 1.5rem);
+  position: fixed; inset: 0; margin: auto; padding: 0; border: 0; background: transparent; color: var(--foreground); overflow: visible;
+  inline-size: min(var(--ns-width), 100dvw - 2 * var(--ns-room-inline)); max-inline-size: none;
+  block-size: min(var(--ns-height), 100dvh - 2 * var(--ns-room-block)); max-block-size: none;
 }
-.ns-dialog::backdrop { background: var(--scrim); }
-.ns-stack { display: flex; flex-direction: column; max-block-size: calc(100dvh - 2 * var(--ns-room)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-/* The tab: inset from the card's sides, rounded on top, open at the bottom where it meets the card. */
-.ns-context { flex: none; position: relative; z-index: 0; display: flex; align-items: center; gap: var(--space-1); min-block-size: 2.75rem;
-  margin-inline: 0.75rem; margin-block-end: -1px; padding-inline: var(--space-1); border: 1px solid var(--line); border-block-end: 0;
-  border-radius: 0.75rem 0.75rem 0 0; background: var(--popover); }
-.ns-context .destination { flex: 1; padding-inline: var(--space-1); }
+.ns-dialog::backdrop { background: color-mix(in oklab, black 62%, transparent); backdrop-filter: blur(2px); }
+.ns-dialog[open] { display: flex; }
+.ns-window { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; overflow: hidden;
+  border: 1px solid var(--line-focus); border-radius: min(0.875rem, var(--ns-room-inline), var(--ns-room-block));
+  background: var(--background); box-shadow: 0 1.5rem 4rem -1rem var(--scrim-shadow), 0 0 0 1px color-mix(in oklab, var(--foreground) 4%, transparent);
+  /* At an edge, the screen's own insets come back as padding. */
+  padding: max(0px, env(safe-area-inset-top) - var(--ns-room-block)) max(0px, env(safe-area-inset-right) - var(--ns-room-inline))
+    max(0px, env(safe-area-inset-bottom) - var(--ns-room-block)) max(0px, env(safe-area-inset-left) - var(--ns-room-inline)); }
+.ns-head, .ns-chips, .ns-foot { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+.ns-scroll { flex: 1 1 auto; min-block-size: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+.ns-head { min-block-size: 3.5rem; padding-inline: var(--ns-pad) var(--space-2); border-block-end: 1px solid var(--line); }
+.ns-crumb { flex: 1; min-inline-size: 0; display: flex; align-items: center; gap: var(--space-2); color: var(--muted-foreground); }
+.ns-badge { flex: none; display: grid; place-items: center; inline-size: 1.875rem; block-size: 1.875rem; border-radius: var(--radius-control); background: var(--primary); color: var(--primary-foreground); }
+.ns-crumb h2 { margin: 0; min-inline-size: 0; font-size: var(--text-size); font-weight: 400; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ns-close { inline-size: var(--control-size); block-size: var(--control-size); }
-.ns-card { flex: none; position: relative; z-index: 1; display: flex; flex-direction: column; min-inline-size: 0; }
-.ns-card .composer-shell { border-color: var(--line); border-radius: var(--radius-thread); background: var(--popover);
-  box-shadow: 0 2px 8px -2px color-mix(in oklab, var(--foreground) 7%, transparent), 0 12px 32px -12px var(--scrim-shadow); }
-.ns-card .composer-shell:focus-within { border-color: var(--line-focus); }
-.ns-card .composer-input { min-block-size: 3rem; max-block-size: min(12rem, 28dvh); padding: clamp(0.75rem, 3vmin, 1.125rem) clamp(0.75rem, 3vmin, 1.125rem) var(--space-2); }
-.ns-card .composer-actions { padding: 0 clamp(var(--space-2), 2vmin, 0.875rem) clamp(var(--space-2), 2vmin, 0.875rem); }
-/* Send is the one filled control: round, in the text color, as in Paperclip. */
-.ns-card .composer-actions .primary.icon-button { inline-size: 2rem; block-size: 2rem; border-radius: 50%; background: var(--foreground); color: var(--background); }
-@media (prefers-color-scheme: dark) { .ns-card .composer-shell { border-color: transparent; background: var(--muted); } .ns-context { background: color-mix(in oklab, var(--muted) 70%, var(--popover)); } }
-/* The launch mode: a quiet chip that fills when it is on. */
-.ns-mode { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem; padding-inline: var(--space-2);
-  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; }
-.ns-mode::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
-.ns-mode:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
-.ns-mode[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); }
-.ns-mode[aria-pressed="true"] svg { color: var(--live); }
-.ns-status, .ns-error { margin: var(--space-2) var(--space-4) 0; font-size: var(--small-text); overflow-wrap: anywhere; }
+/* The sentence: "Start in [where] with [model]". Chips carry the weight, the words stay quiet. */
+.ns-context { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-2); padding: var(--ns-pad) var(--ns-pad) var(--space-4); font-size: var(--text-size); color: var(--muted-foreground); }
+.ns-context .destination { display: inline-flex; flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; gap: var(--space-2); padding: 0; color: inherit; font-size: inherit; }
+.ns-context .destination > svg { display: none; }
+.ns-context .destination-lead { flex: none; }
+.ns-with { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; display: inline-flex; align-items: center; gap: var(--space-2); }
+.ns-context .destination-trigger, .ns-context .model-trigger { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; block-size: auto; min-block-size: 2.5rem;
+  gap: var(--space-2); padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control);
+  background: var(--tint-surface); color: var(--foreground); font-size: var(--text-size); font-weight: 500; }
+.ns-context .destination-trigger:not(:disabled):hover, .ns-context .model-trigger:not(:disabled):hover,
+.ns-context .destination-trigger[aria-expanded="true"], .ns-context .model-trigger[aria-expanded="true"] { border-color: var(--line-focus); background: var(--active-surface); }
+.ns-context .model-trigger-name { max-inline-size: none; }
+/* The writing area takes whatever height is left, behind a rule. */
+.ns-body { flex: 1 0 auto; min-block-size: 6rem; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--ns-pad) var(--space-2); border-block-start: 1px solid var(--line); }
+.ns-body[data-dragging] { outline: 2px solid var(--live); outline-offset: -4px; }
+.ns-body .composer-attachments:not(:empty) { flex: none; padding: 0; max-block-size: 30%; }
+.ns-input { flex: 1 1 auto; min-block-size: 3rem; block-size: 100% !important; inline-size: 100%; resize: none; overflow-y: auto; border: 0; padding: 0; background: transparent; color: var(--foreground);
+  font-size: 1.0625rem; line-height: 1.6; outline: none; }
+.ns-input::placeholder { color: var(--muted-foreground); }
+/* What the message carries: labelled chips, drawn small, pressed large. */
+.ns-chips { flex-wrap: wrap; padding: var(--space-3) var(--ns-pad); border-block-start: 1px solid var(--line); }
+.ns-chip { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: 2.25rem; padding-inline: var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; }
+.ns-chip::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.ns-chip:not(:disabled):hover { border-color: var(--line-focus); color: var(--foreground); }
+.ns-chip[aria-pressed="true"] { border-color: var(--line-focus); background: var(--active-surface); color: var(--foreground); }
+.ns-chip[aria-pressed="true"] svg { color: var(--live); }
+.ns-chips .composer-dictation { margin-inline-end: 0; }
+.ns-chips .composer-dictation .icon-button { inline-size: 2.25rem; block-size: 2.25rem; border: 1px solid var(--line); border-radius: var(--radius-control); }
+.ns-status, .ns-error { flex: none; margin: 0; padding: 0 var(--ns-pad) var(--space-3); font-size: var(--small-text); overflow-wrap: anywhere; }
 .ns-status { color: var(--live); }
 .ns-error { color: var(--destructive); }
-/* Sessions started from here: one line each, the newest first. */
-.ns-tray { flex: none; margin: var(--space-3) 0.75rem 0; border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); }
-.ns-tray ul { margin: 0; padding: var(--space-1); list-style: none; max-block-size: min(12rem, 30dvh); overflow-y: auto; }
+/* The decision. */
+.ns-foot { justify-content: space-between; padding: var(--space-3) var(--ns-pad); border-block-start: 1px solid var(--line); }
+.ns-discard { min-block-size: var(--control-size); padding-inline: var(--space-2); margin-inline-start: calc(-1 * var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--text-size); }
+.ns-discard:not(:disabled):hover { color: var(--foreground); background: var(--hover-surface); }
+.ns-start { min-block-size: var(--control-size); padding-inline: clamp(1rem, 4vmin, 1.75rem); border: 0; border-radius: var(--radius-control); font-size: var(--text-size); font-weight: 500; white-space: nowrap; }
+/* Sessions started from here: one line each, the newest first, inside the window. */
+.ns-tray { flex: none; margin: 0 var(--ns-pad) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); }
+.ns-tray ul { margin: 0; padding: var(--space-1); list-style: none; max-block-size: min(9rem, 22dvh); overflow-y: auto; }
 .ns-launch { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-2); font-size: var(--small-text); }
 .ns-launch + .ns-launch { border-block-start: 1px solid color-mix(in oklab, var(--foreground) 5%, transparent); }
 .ns-launch-mark { flex: none; display: grid; place-items: center; color: var(--muted-foreground); }

@@ -17,7 +17,7 @@ import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { NewSession, type LaunchDraft } from "../src/NewSession";
 import { createLaunchStore } from "../src/launches";
-import type { NewSessionApi, Project, Workspace } from "../src/newSession";
+import { createDeferredFiles, type NewSessionApi, type Project, type Workspace } from "../src/newSession";
 import { createAttachmentAdapter } from "../src/attachments";
 import { idleCompaction, isCompactCommand, type CompactionState } from "../src/compaction";
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
@@ -542,6 +542,7 @@ const previewNewApi: NewSessionApi = {
   },
 };
 const previewLaunches = createLaunchStore<LaunchDraft>(previewNewApi);
+const previewDeferred = createDeferredFiles();
 /** The dialog over a session, as it opens in the app. No network. */
 function NewSessionPreview() {
   const [started, setStarted] = useState<string>();
@@ -560,7 +561,7 @@ function NewSessionPreview() {
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name={started ?? "Session client"} status="Connected"><Thread /></SessionFrame>
-    {open && <NewSession cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi} launches={previewLaunches}
+    {open && <NewSession cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi} launches={previewLaunches} deferred={previewDeferred}
       initialMode={scenario === "new-session-rapidfire" ? "rapidfire" : "switch"}
       onStarted={(session) => { setStarted(`Opened ${session.id} in ${session.cwd}`); setOpen(false); }} onClose={() => setOpen(false)} />}
   </AssistantRuntimeProvider>;
