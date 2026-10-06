@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Swipe to the session list
+
+Swipe right anywhere on the session to pull the session list in, and left to push it back. The list follows the finger, and a short swipe falls back. Scrolling, sideways-scrolling code, and text selection keep their own drags. See [behavior, verification, and limits](sheet-swipe.md).
+
 ## Archive and next
 
 The archive button in the session header archives the open session with the usual undo offer and opens the next session blocked on you, errored, or unread. With nothing left, the session list opens. See [behavior, verification, and limits](archive-next.md).

@@ -21,6 +21,8 @@ Type `/tree`, or press the tree button in the header, to move the session to an 
 
 Press the archive button in the header to archive the session and open the next one waiting for you. See [archive and next](verification/archive-next.md).
 
+On a touch screen, swipe right to see the session list and left to put it away. See [swipe to the session list](verification/sheet-swipe.md).
+
 When an extension asks a confirm, select, or input question, it appears on top of the input bar. See [extension dialogs](verification/extension-dialogs.md).
 
 The input bar shows the session's model and thinking level. Press it, or send `/model`, to change either one. See [model and thinking level](verification/model-thinking.md).

@@ -1,6 +1,7 @@
 import { PanelLeftIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { SessionFrameLeading } from "./SessionFrame";
+import { useSheetDrag } from "./useSheetDrag";
 
 /**
  * Dock rule A (user, 2026-09-29): the picker slides over the thread in every
@@ -26,6 +27,7 @@ export function AppShell({ picker, thread, open, onOpenChange, attention, toast 
   attention?: "blocked" | "unread" | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const sheet = useRef<HTMLElement>(null);
   const [layout, setLayout] = useState<ShellLayout>("overlay");
   useLayoutEffect(() => {
     const element = ref.current;
@@ -37,13 +39,16 @@ export function AppShell({ picker, thread, open, onOpenChange, attention, toast 
     return () => observer.disconnect();
   }, []);
   const hidden = layout === "overlay" && !open;
+  // Swipe right anywhere to pull the sheet in, left to push it back. A docked list needs neither.
+  useSheetDrag(ref, sheet, { enabled: layout === "overlay", open, onOpenChange });
   const opener = layout === "overlay" ? <button className="app-opener" aria-label="Sessions" title="Sessions" aria-expanded={open}
     aria-controls="app-picker" data-attention={attention} onClick={() => onOpenChange(true)}>
     <PanelLeftIcon aria-hidden size={16} />
   </button> : null;
   return <div ref={ref} className="app-shell" data-layout={layout} data-sheet={hidden ? "closed" : "open"}>
-    <aside id="app-picker" className="app-picker" aria-hidden={hidden} inert={hidden}>{picker(layout)}</aside>
-    {layout === "overlay" && open ? <div className="app-scrim" aria-hidden="true" onClick={() => onOpenChange(false)} /> : null}
+    <aside ref={sheet} id="app-picker" className="app-picker" aria-hidden={hidden} inert={hidden}>{picker(layout)}</aside>
+    {/* Always present in overlay, so a drag can dim the thread as the sheet comes in. */}
+    {layout === "overlay" ? <div className="app-scrim" aria-hidden="true" onClick={() => onOpenChange(false)} /> : null}
     <div className="app-thread"><SessionFrameLeading.Provider value={opener}>{thread}</SessionFrameLeading.Provider>
       {hidden && toast ? <div className="app-toast">{toast}</div> : null}</div>
   </div>;
