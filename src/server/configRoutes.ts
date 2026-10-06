@@ -18,6 +18,7 @@ export const SELECTED_MACHINE_CONFIG_KEYS = [
   "spawnSessions",
   "subsessions",
   "askUser",
+  "codemode",
   "agent",
 ] as const satisfies readonly (keyof PiWebConfigValues)[];
 
@@ -135,6 +136,7 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
   const spawnSessions = value["spawnSessions"];
   const subsessions = value["subsessions"];
   const askUser = value["askUser"];
+  const codemode = value["codemode"];
   const agent = value["agent"];
   if (host !== undefined) {
     if (typeof host !== "string") throw new Error("Forgerie config host must be a string");
@@ -162,6 +164,10 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
     if (typeof askUser !== "boolean") throw new Error("Forgerie config askUser must be a boolean");
     config.askUser = askUser;
   }
+  if (codemode !== undefined) {
+    if (typeof codemode !== "boolean") throw new Error("Forgerie config codemode must be a boolean");
+    config.codemode = codemode;
+  }
   if (agent !== undefined) config.agent = parseAgentRequest(agent, agentPathHost);
   return config;
 }
@@ -175,6 +181,7 @@ function pickSelectedMachineConfig(config: PiWebConfigValues): PiWebConfig {
     ...(config.spawnSessions !== undefined ? { spawnSessions: config.spawnSessions } : {}),
     ...(config.subsessions !== undefined ? { subsessions: config.subsessions } : {}),
     ...(config.askUser !== undefined ? { askUser: config.askUser } : {}),
+    ...(config.codemode !== undefined ? { codemode: config.codemode } : {}),
     ...(config.agent !== undefined ? { agent: config.agent } : {}),
   };
 }
@@ -253,6 +260,7 @@ function parsePiWebConfigEnvOverridesResponse(value: unknown, source: string): P
     spawnSessions: requireResponseBoolean(record, "spawnSessions", source),
     subsessions: requireResponseBoolean(record, "subsessions", source),
     askUser: requireResponseBoolean(record, "askUser", source),
+    codemode: requireResponseBoolean(record, "codemode", source),
     agentCommand: requireResponseBoolean(record, "agentCommand", source),
     agentDir: requireResponseBoolean(record, "agentDir", source),
     ...optionalAgentDirSource(record, source),
@@ -294,6 +302,7 @@ function piWebConfigEnvOverrides(env: NodeJS.ProcessEnv, config: PiWebConfig = {
     spawnSessions: isEnvSet(env["PI_WEB_SPAWN_SESSIONS"]),
     subsessions: isEnvSet(env["PI_WEB_SUBSESSIONS"]),
     askUser: isEnvSet(env["PI_WEB_ASK_USER"]),
+    codemode: isEnvSet(env["PI_WEB_CODEMODE"]),
     agentCommand: isEnvSet(env["PI_WEB_AGENT_COMMAND"]),
     agentDir: hasAgentDirEnvOverride(env, command),
     ...(dirEnvSource === undefined ? {} : { agentDirSource: dirEnvSource }),

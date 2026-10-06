@@ -24,6 +24,7 @@ export class TurnRailLedger extends LitElement {
               <span class="verb">${row.verb}</span>
               <span class="target">${row.label}</span>
               ${row.editCount === undefined ? null : html`<span class="quantity">${String(row.editCount)} ${row.editCount === 1 ? "edit" : "edits"}</span>`}
+              ${row.callCount === undefined ? null : html`<span class="quantity">${String(row.callCount)} ${row.callCount === 1 ? "call" : "calls"}</span>`}
               ${row.added === 0 && row.removed === 0 ? null : html`
                 <span class="diff-stats"><b class="added">+${String(row.added)}</b><span>/</span><b class="removed">-${String(row.removed)}</b></span>
               `}

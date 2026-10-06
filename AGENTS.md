@@ -82,6 +82,14 @@ tracks `main` without a NixOS rebuild.
   bundles its patched `pi-processes` dependency under `vendor/pi-processes` and
   loads it without machine-configuration support. Keep its divergence to the
   non-login spawn fix and additive stdin-write protocol.
+- Codemode is on by default (`codemode` in Forgerie config). Forgerie loads
+  Pi's `builtin:codemode` extension and activates the tool with an in-memory
+  `defaultTools` override; it never writes that override to the shared Pi
+  profile, whose terminal Pi may predate `+name` entries. A script's calls
+  are not transcript entries: the server drops their `tool_execution_*`
+  events, and the card reads `details.calls`. Give a Forgerie tool
+  `exposure: "model-only"` (`MODEL_ONLY_EXPOSURE`) when it ends the run or
+  starts something the transcript must show.
 - Delegated agents are first-class: Forgerie bundles an exact, unpatched
   `pi-subagents` npm version and loads it into every hosted session
   (`src/server/sessions/bundledSubagents.ts`). A role lives in one agent file

@@ -92,6 +92,12 @@ export interface PiWebConfigValues {
    */
   askUser?: boolean;
   /**
+   * When true, hosted sessions start with Pi's `codemode` tool active: an
+   * agent can run one JavaScript script that calls the other tools. On by
+   * default; set to `false` to keep the tool inactive.
+   */
+  codemode?: boolean;
+  /**
    * How long an extension dialog may wait for an answer before the daemon
    * auto-cancels it, in milliseconds. Applies only when the extension set no
    * `timeout` of its own (the sooner of the two wins); `0` waits forever.
@@ -163,6 +169,7 @@ export interface PiWebConfigEnvOverrides {
   spawnSessions: boolean;
   subsessions: boolean;
   askUser: boolean;
+  codemode: boolean;
   agentCommand: boolean;
   agentDir: boolean;
   /** The configured directory environment source, even when Pi compatibility is inactive for the desired command. */

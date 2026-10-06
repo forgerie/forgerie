@@ -4,7 +4,7 @@ import type { ActiveAgentProfileDescriptor, PiWebConfigResponse, PiWebConfigValu
 import "./SettingsPanelFrame";
 import type { SettingsNotice } from "./SettingsPanelFrame";
 import { agentProfileConfigPatchFromDraft, agentProfileDraftFromConfig, agentProfileDraftMatchesConfig, emptyAgentProfileConfigDraft, type AgentProfileConfigDraft } from "./settingsConfigDraft";
-import { agentDirFieldOverridden, agentProfileActivationState, askUserConfigPatch, spawnSessionsConfigPatch, subsessionsConfigPatch } from "./settingsSessiondConfig";
+import { agentDirFieldOverridden, agentProfileActivationState, askUserConfigPatch, codemodeConfigPatch, spawnSessionsConfigPatch, subsessionsConfigPatch } from "./settingsSessiondConfig";
 
 @customElement("settings-sessiond-panel")
 export class SettingsSessiondPanel extends LitElement {
@@ -47,6 +47,9 @@ export class SettingsSessiondPanel extends LitElement {
     const effectiveSubsessions = config?.effectiveConfig.subsessions === true && effectiveSpawn;
     const askUserOverridden = config?.envOverrides.askUser === true;
     const effectiveAskUser = config?.effectiveConfig.askUser === true;
+    const codemodeOverridden = config?.envOverrides.codemode === true;
+    // On by default, like spawning: an unset key still shows the tool as on.
+    const effectiveCodemode = config?.effectiveConfig.codemode !== false;
     const agentCommandOverridden = config?.envOverrides.agentCommand === true;
     const draftCommand = agentCommandOverridden ? (config.effectiveConfig.agent?.command ?? this.agentDraft.command) : this.agentDraft.command;
     const agentDirLocked = agentDirFieldOverridden(config?.envOverrides, draftCommand);
@@ -156,6 +159,23 @@ export class SettingsSessiondPanel extends LitElement {
             </label>
             <small>Agents can ask a question and wait for the answer. On by default.</small>
           </div>
+          <div class="field">
+            <span class="field-heading">
+              <span>Allow agents to run scripts</span>
+              ${codemodeOverridden ? html`<span class="override-badge">environment override</span>` : null}
+            </span>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                aria-label="Enable Run Scripts"
+                .checked=${effectiveCodemode}
+                ?disabled=${this.loading || this.saving || codemodeOverridden}
+                @change=${(event: Event) => { void this.toggleCodemode(event); }}
+              >
+              <span>Enable the <code>codemode</code> tool</span>
+            </label>
+            <small>Agents can do several tool calls in one step with a short script, and see only what it prints. On by default.</small>
+          </div>
           <section class="effective-card" aria-label="Desired and active session daemon configuration summary">
             <h3>Summary</h3>
             <dl>
@@ -167,6 +187,7 @@ export class SettingsSessiondPanel extends LitElement {
               <div><dt>Spawn sessions</dt><dd>${effectiveSpawn ? "Enabled" : html`<span class="muted">Disabled</span>`}</dd></div>
               <div><dt>Subsessions</dt><dd>${effectiveSubsessions ? "Enabled" : html`<span class="muted">Disabled</span>`}</dd></div>
               <div><dt>Ask questions</dt><dd>${effectiveAskUser ? "Enabled" : html`<span class="muted">Disabled</span>`}</dd></div>
+              <div><dt>Run scripts</dt><dd>${effectiveCodemode ? "Enabled" : html`<span class="muted">Disabled</span>`}</dd></div>
             </dl>
           </section>
         `}
@@ -216,6 +237,11 @@ export class SettingsSessiondPanel extends LitElement {
   private async toggleAskUser(event: Event): Promise<void> {
     const enabled = event.target instanceof HTMLInputElement && event.target.checked;
     await this.onSave?.(askUserConfigPatch(enabled));
+  }
+
+  private async toggleCodemode(event: Event): Promise<void> {
+    const enabled = event.target instanceof HTMLInputElement && event.target.checked;
+    await this.onSave?.(codemodeConfigPatch(enabled));
   }
 
   static override styles = css`

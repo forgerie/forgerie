@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 
 export interface SpawnSessionResult {
   sessionId: string;
@@ -52,6 +53,7 @@ const SpawnSessionParams = Type.Object({
 export function createSpawnSessionToolDefinition(spawningCwd: string, deps: SpawnSessionToolDeps) {
   return defineTool<typeof SpawnSessionParams, SpawnSessionToolDetails>({
     name: "spawn_session",
+    exposure: MODEL_ONLY_EXPOSURE,
     label: "Spawn session",
     description: "Start a fully independent session; its transcript and results are unavailable here. Use only when the user or active workflow explicitly requests a separate session.",
     promptSnippet: "spawn_session: independent session; results unavailable here; explicit requests only",

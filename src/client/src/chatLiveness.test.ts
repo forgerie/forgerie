@@ -62,6 +62,21 @@ describe("latestToolStep", () => {
     expect(latestToolStep([line("assistant", [toolCall("bash", "echo one\n  echo two")])])).toBe("bash echo one echo two");
   });
 
+  it("names a running script by the call it is making now", () => {
+    const script = (status: "running" | "success", calls: unknown[]): ChatPart => ({
+      type: "toolExecution",
+      toolName: "codemode",
+      summary: "Check the build",
+      status,
+      details: { calls },
+    });
+    const running = [{ name: "read", args: "{\"path\":\"a.ts\"}", status: "ok" }, { name: "bash", args: "{\"command\":\"npm run build\"}", status: "running" }];
+    expect(latestToolStep([line("tool", [script("running", running)])])).toBe("bash npm run build");
+    // Between calls, and once it ends, the script's purpose names it.
+    expect(latestToolStep([line("tool", [script("running", [running[0]])])])).toBe("codemode Check the build");
+    expect(latestToolStep([line("tool", [script("success", running)])])).toBe("codemode Check the build");
+  });
+
   it("reports nothing when the transcript holds no tool calls", () => {
     expect(latestToolStep([line("user", [{ type: "text", text: "hello" }])])).toBeUndefined();
     expect(latestToolStep([])).toBeUndefined();

@@ -125,6 +125,34 @@ describe("chat message normalization", () => {
     expect(groupChatMessages(normalized).map((group) => group.kind)).toEqual(["group", "message"]);
   });
 
+  it("names a codemode call from history by its script's purpose, as the live stream does", () => {
+    const code = "// @options: {\"timeout_ms\": 1000}\n// Count the tests\nreturn 1;";
+    expect(normalizeMessage({ role: "assistant", content: [{ type: "toolCall", name: "codemode", arguments: { code } }] })).toEqual([
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "codemode", summary: "Count the tests", args: { code } }] },
+    ]);
+  });
+
+  it("merges a tool result with several text items into its one step after a reload", () => {
+    const content = [
+      { type: "text", text: "Script completed\nWall time 0.1 seconds\nOutput:\n" },
+      { type: "text", text: "hello.txt\n" },
+      { type: "text", text: "hello from a file\n" },
+    ];
+    const lines = normalizeMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "call_1", name: "codemode", arguments: { code: "// List files\nreturn 1;" } }] },
+      { role: "toolResult", toolCallId: "call_1", toolName: "codemode", content, details: { calls: [] } },
+    ]);
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.parts).toEqual([expect.objectContaining({
+      type: "toolExecution",
+      toolName: "codemode",
+      status: "success",
+      resultText: "Script completed\nWall time 0.1 seconds\nOutput:\n\nhello.txt\n\nhello from a file\n",
+      content,
+    })]);
+  });
+
   it("normalizes tool calls and tool results", () => {
     expect(normalizeMessage({ role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "npm test" } }] })).toEqual([
       { role: "assistant", parts: [{ type: "toolCall", toolName: "bash", summary: "npm test", args: { command: "npm test" } }] },

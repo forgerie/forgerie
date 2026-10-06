@@ -1618,6 +1618,7 @@ function parsePiWebConfigValues(value: unknown): PiWebConfigValues {
     ...optionalField("spawnSessions", optionalBoolean(record, "spawnSessions")),
     ...optionalField("subsessions", optionalBoolean(record, "subsessions")),
     ...optionalField("askUser", optionalBoolean(record, "askUser")),
+    ...optionalField("codemode", optionalBoolean(record, "codemode")),
   };
 }
 
@@ -1701,6 +1702,7 @@ function parsePiWebConfigEnvOverrides(value: unknown): PiWebConfigEnvOverrides {
     spawnSessions: requireBoolean(record, "spawnSessions"),
     subsessions: requireBoolean(record, "subsessions"),
     askUser: requireBoolean(record, "askUser"),
+    codemode: requireBoolean(record, "codemode"),
     agentCommand: requireBoolean(record, "agentCommand"),
     agentDir: requireBoolean(record, "agentDir"),
     ...optionalAgentDirSource(record),

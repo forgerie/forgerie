@@ -8,6 +8,7 @@ import {
   type AskUserQuestion,
   type AskUserQuestionOption,
 } from "../../shared/apiTypes.js";
+import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 import { renderSupersededAskText, type PendingAskOpenResult } from "./pendingAskStore.js";
 
 /** One `ask_user` call: the questions to post, for the session that called the tool. */
@@ -106,6 +107,7 @@ function postedText(result: PendingAskOpenResult): string {
 export function createAskUserToolDefinition(deps: AskUserToolDeps) {
   return defineTool<typeof AskUserParams, AskUserToolDetails>({
     name: "ask_user",
+    exposure: MODEL_ONLY_EXPOSURE,
     label: "Ask user",
     description: "Post a set of questions to the user as a browser form and end this run. Answers arrive later as a follow-up message; the user may leave any question unanswered.",
     promptSnippet: "ask_user: post a question set to the user; ends the run, answers return as a follow-up",

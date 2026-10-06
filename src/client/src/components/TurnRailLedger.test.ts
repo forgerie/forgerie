@@ -76,6 +76,24 @@ describe("TurnRailLedger", () => {
     expect(compactText(summaries[2] ?? null)).toContain("bash npm run verify failed");
   });
 
+  it("gives a script step its call count", async () => {
+    const ledger = new TurnRailLedger();
+    ledger.rows = [{
+      key: "codemode-1",
+      verb: "codemode",
+      label: "Check the build",
+      outcome: "done",
+      callCount: 3,
+      added: 0,
+      removed: 0,
+      execution: { type: "toolExecution", toolName: "codemode", summary: "Check the build", args: { code: "// Check the build" }, status: "success" },
+    }];
+    document.body.append(ledger);
+    await ledger.updateComplete;
+
+    expect(compactText(ledger.shadowRoot?.querySelector("summary") ?? null)).toBe("✓ done codemode Check the build 3 calls");
+  });
+
   it("opens the shipped tool detail without repeating its header", async () => {
     const ledger = await mount();
     const first = ledger.shadowRoot?.querySelector("details");

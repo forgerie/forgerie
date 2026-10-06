@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 
 export type HandoffSessionModel = NonNullable<ExtensionContext["model"]>;
 export type HandoffSessionThinkingLevel = NonNullable<ExtensionContext["thinkingLevel"]>;
@@ -46,6 +47,7 @@ const HandoffSessionParams = Type.Object({
 export function createHandoffSessionToolDefinition(spawningCwd: string, deps: HandoffSessionToolDeps) {
   return defineTool<typeof HandoffSessionParams, HandoffSessionResult>({
     name: "handoff_session",
+    exposure: MODEL_ONLY_EXPOSURE,
     label: "Hand off session",
     description: "Immediately create a continuation session and move context preparation there. Call only when the user explicitly asks to hand off or continue in a fresh session.",
     promptSnippet: "handoff_session: create the continuation immediately; call alone and last",

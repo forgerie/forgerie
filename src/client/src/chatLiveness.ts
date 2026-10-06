@@ -1,4 +1,5 @@
 import type { SessionActivity } from "./api";
+import { codemodeCurrentCall } from "./codemodeExecution";
 import type { ChatLine } from "./components/shared";
 
 /**
@@ -206,6 +207,10 @@ export function latestToolStep(messages: readonly ChatLine[]): string | undefine
       const part = parts[partIndex];
       if (part === undefined) continue;
       if (part.type !== "toolCall" && part.type !== "toolExecution") continue;
+      // A running script is named by the call it is making now, which says
+      // more than the script's purpose a reader already saw it start with.
+      const scriptCall = part.type === "toolExecution" ? codemodeCurrentCall(part) : undefined;
+      if (scriptCall !== undefined) return clampStep(scriptCall.target === "" ? scriptCall.name : `${scriptCall.name} ${scriptCall.target}`);
       const summary = part.summary.trim();
       const name = part.toolName.trim();
       if (summary !== "" && name !== "") return clampStep(`${name} ${summary}`);

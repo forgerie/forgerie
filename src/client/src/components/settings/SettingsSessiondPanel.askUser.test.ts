@@ -58,6 +58,7 @@ function configResponse(askUser: boolean, askUserOverride = false): PiWebConfigR
       spawnSessions: false,
       subsessions: false,
       askUser: askUserOverride,
+      codemode: false,
       agentCommand: false,
       agentDir: false,
       agentSessionDir: false,

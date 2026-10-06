@@ -15,6 +15,10 @@ export function askUserConfigPatch(enabled: boolean): PiWebConfigValues {
   return { askUser: enabled };
 }
 
+export function codemodeConfigPatch(enabled: boolean): PiWebConfigValues {
+  return { codemode: enabled };
+}
+
 export function agentProfileActivationState(
   config: PiWebConfigResponse | undefined,
   activeProfile: ActiveAgentProfileDescriptor | undefined,
@@ -44,6 +48,7 @@ export function mergeSelectedMachineSessiondConfig(base: PiWebConfigResponse, se
     spawnSessions: selectedMachine.envOverrides.spawnSessions,
     subsessions: selectedMachine.envOverrides.subsessions,
     askUser: selectedMachine.envOverrides.askUser,
+    codemode: selectedMachine.envOverrides.codemode,
     agentCommand: selectedMachine.envOverrides.agentCommand,
     agentDir: selectedMachine.envOverrides.agentDir,
     agentSessionDir: selectedMachine.envOverrides.agentSessionDir,

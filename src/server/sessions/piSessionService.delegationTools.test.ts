@@ -68,6 +68,27 @@ describe("delegation tool capability boundary", () => {
     ]);
   });
 
+  it("keeps run-ending and session-making tools out of codemode scripts", () => {
+    const { spawn, handoff, subsessions } = delegationDeps();
+    const askUser = { open: vi.fn() };
+    const exposures = Object.fromEntries(
+      createPiWebCustomToolDefinitions("/workspace", true, spawn, subsessions, askUser, handoff)
+        .map((definition) => [definition.name, definition.exposure ?? "direct"]),
+    );
+
+    expect(exposures).toEqual({
+      edit: "direct",
+      spawn_session: "model-only",
+      handoff_session: "model-only",
+      spawn_subsession: "model-only",
+      list_subsessions: "direct",
+      check_subsession: "direct",
+      read_subsession: "direct",
+      yield_to_subsessions: "model-only",
+      ask_user: "model-only",
+    });
+  });
+
   it("continues to honor global delegation feature flags for unrestricted sessions", () => {
     const { spawn } = delegationDeps();
 

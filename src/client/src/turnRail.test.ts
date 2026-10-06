@@ -47,6 +47,29 @@ describe("turnLedgerRows", () => {
     expect(rows[0]?.removed).toBe(0);
   });
 
+  it("labels a script step by its purpose and counts the calls it made", () => {
+    const rows = turnLedgerRows([work(exec("codemode", "success", { code: "// Check the build" }, {
+      summary: "Check the build",
+      details: { calls: [{ name: "bash", args: "{}", status: "ok" }, { name: "read", args: "{}", status: "ok" }] },
+    }))]);
+
+    expect(rows[0]).toMatchObject({ verb: "codemode", label: "Check the build", outcome: "done", callCount: 2 });
+    expect(rows[0]?.editCount).toBeUndefined();
+  });
+
+  it("takes a failed script's evidence from its script error, not Pi's run header", () => {
+    const rows = turnLedgerRows([work(exec("codemode", "error", { code: "await tools.bash({ command: 'exit 1' })" }, {
+      summary: "await tools.bash",
+      content: [
+        { type: "text", text: "Script failed\nWall time 0.1 seconds\nOutput:\n" },
+        { type: "text", text: "Script error:\nError: Command exited with code 1\n\nTool calls made before the failure (they are not undone): bash (error)" },
+      ],
+    }))]);
+
+    expect(rows[0]).toMatchObject({ outcome: "failed", evidence: "Error: Command exited with code 1" });
+    expect(rows[0]?.callCount).toBeUndefined();
+  });
+
   it("keeps failure evidence with the failed row", () => {
     const rows = turnLedgerRows([
       work(exec("bash", "error", { command: "npm run verify" }, { resultText: "vitest failed" })),

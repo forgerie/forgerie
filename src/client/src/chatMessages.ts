@@ -6,6 +6,7 @@ import {
   type ProcessNotificationKind,
   type ProcessNotificationStatus,
 } from "../../shared/apiTypes";
+import { CODEMODE_TOOL_NAME, codemodeScriptSummary } from "../../shared/codemodeScript";
 import { parseAskUserOutcome } from "./api/parsers";
 import { inheritChatLineTranscriptPosition, setChatLineTranscriptPosition } from "./chatLinePosition";
 import type { ChatLine, ChatPart, ToolExecutionPart, ToolPreview } from "./components/shared";
@@ -279,7 +280,7 @@ function normalizeContent(content: unknown, message: unknown): ChatPart[] {
   if (typeof content === "string") return content !== "" ? [{ type: "text", text: content }] : [];
   if (!Array.isArray(content)) return objectFallback(content);
 
-  return content.flatMap((part): ChatPart[] => {
+  const parts = content.flatMap((part): ChatPart[] => {
     const type = getString(part, "type");
     const text = getString(part, "text");
     if (type === "text") return text !== undefined && text !== "" ? [{ type: "text", text }] : [];
@@ -293,7 +294,7 @@ function normalizeContent(content: unknown, message: unknown): ChatPart[] {
       const toolCallId = getString(part, "id");
       const skillRead = toolName === "read" ? parseSkillReadPath(getString(args, "path")) : undefined;
       if (skillRead !== undefined) return [{ type: "skillRead", ...skillRead, ...(toolCallId === undefined ? {} : { toolCallId }) }];
-      return [{ type: "toolCall", ...(toolCallId === undefined ? {} : { toolCallId }), toolName, summary: summarizeArgs(args), ...(args === undefined ? {} : { args }) }];
+      return [{ type: "toolCall", ...(toolCallId === undefined ? {} : { toolCallId }), toolName, summary: summarizeToolCall(toolName, args), ...(args === undefined ? {} : { args }) }];
     }
     if (type === "image") {
       const data = getString(part, "data");
@@ -302,9 +303,23 @@ function normalizeContent(content: unknown, message: unknown): ChatPart[] {
       return [{ type: "text", text: "[image]" }];
     }
     return objectFallback(part);
-  }).map((part) => part.type === "text" && getString(message, "role") === "toolResult"
-    ? toolResultPartFromText(part.text, message)
-    : part);
+  });
+  return getString(message, "role") === "toolResult" ? toolResultParts(parts, message) : parts;
+}
+
+/**
+ * One result part for a tool result, whatever number of text items it holds.
+ *
+ * A tool result is one answer to one call, and only one part can merge into
+ * that call's step. A result with several text items, such as every codemode
+ * result, would otherwise leave the rest as stray rows after a reload. The
+ * text joins the way the live stream joins it.
+ */
+function toolResultParts(parts: ChatPart[], message: unknown): ChatPart[] {
+  const texts = parts.flatMap((part) => part.type === "text" ? [part.text] : []);
+  if (texts.length === 0) return parts;
+  const others = parts.filter((part) => part.type !== "text");
+  return [toolResultPartFromText(texts.join("\n"), message), ...others];
 }
 
 function askUserRecordPart(message: unknown): Extract<ChatPart, { type: "askUserRecord" }> | undefined {
@@ -484,6 +499,11 @@ function objectFallback(value: unknown): ChatPart[] {
   if (value == null) return [];
   if (typeof value === "object") return [{ type: "text", text: summarizeArgs(value) }];
   return [{ type: "text", text: stringifyPrimitive(value) }];
+}
+
+/** A codemode call is named by its script's purpose, not by its one `code` argument. */
+function summarizeToolCall(toolName: string, args: unknown): string {
+  return toolName === CODEMODE_TOOL_NAME ? codemodeScriptSummary(getString(args, "code") ?? "") : summarizeArgs(args);
 }
 
 export function summarizeArgs(args: unknown): string {

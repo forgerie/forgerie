@@ -84,6 +84,8 @@ import type {
   ManagedProcessWriteResult,
 } from "../../shared/apiTypes.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
+import { CODEMODE_TOOL_NAME, codemodeScriptSummary } from "../../shared/codemodeScript.js";
+import { codemodeDefaultTools, hostedCodemodeExtension, isNestedToolEvent } from "./codemode.js";
 import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
 import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
 import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from "./bundledForgerieSkills.js";
@@ -808,6 +810,7 @@ export function createPiWebCustomToolDefinitions(
 function createDefaultRuntimeFactory(
   modelRuntime: ModelRuntime,
   sessionManagers: Pick<PiSessionManagerGateway, "open">,
+  codemodeEnabled: boolean,
   spawn?: SpawnSessionFn,
   subsessions?: SubsessionToolDeps,
   askUser?: AskUserToolDeps,
@@ -831,9 +834,13 @@ function createDefaultRuntimeFactory(
         extensionFactories: [
           createProcessBridgeExtension(processBridgeSlot),
           createSessionTitleBridgeExtension(sessionTitleBridgeSlot),
+          hostedCodemodeExtension(),
         ],
       },
     });
+    // After the resource loader's reload, which re-reads settings and would
+    // drop an override applied any earlier.
+    baseServices.settingsManager.applyOverrides({ defaultTools: codemodeDefaultTools(codemodeEnabled) });
     const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
@@ -917,6 +924,11 @@ export interface PiSessionServiceDependencies {
    * questions reach the user of the asking session, not another session.
    */
   askUserEnabled?: boolean;
+  /**
+   * When true, hosted sessions start with Pi's `codemode` tool active, so an
+   * agent can run a script that calls the other tools. Off when omitted.
+   */
+  codemodeEnabled?: boolean;
   /** Daemon-lifetime open-ask state; defaults to an in-memory store in tests. */
   pendingAskStore?: PendingAskStore;
   /** Daemon-lifetime open-dialog state; defaults to an in-memory store in tests. */
@@ -1089,6 +1101,7 @@ export class PiSessionService implements SessionRouteService {
     this.createRuntime = deps.createRuntime ?? createDefaultRuntimeFactory(
       this.modelRuntime,
       this.sessionManager,
+      deps.codemodeEnabled === true,
       this.spawnTargets === undefined ? undefined : (input) => this.spawnSession(input),
       !subsessionsActive ? undefined : {
         spawn: (input) => this.spawnSubsession(input),
@@ -4771,6 +4784,9 @@ export class PiSessionService implements SessionRouteService {
     if (eventType === "tool_execution_update") { this.trackWorkingAgents(session, event); return; }
     if (eventType === "tool_execution_end") {
       const isError = getBoolean(event, "isError") === true;
+      // A script's call ending is progress of the script, not the end of a step:
+      // the step, and any delegated run beside it, is still going.
+      if (isNestedToolEvent(event)) return;
       this.publishActivity(session, isError ? "tool failed" : "tool complete", isError ? "error" : "idle", getString(event, "toolName"));
       // A finished run leaves nothing working, whatever its last progress said.
       if (this.workingAgentsBySession.delete(session.sessionId)) this.publishStatus(session);
@@ -5659,9 +5675,13 @@ function toClientEvent(event: unknown, thinkingLevel?: string): SessionUiEvent {
   if (eventType === "message_update" && getString(assistantMessageEvent, "type") === "thinking_delta") {
     return { type: "assistant.thinking.delta", text: getString(assistantMessageEvent, "delta") ?? "" };
   }
+  // A script's own calls reach the browser through the script's progress
+  // updates. As tool events they would draw cards that a reload cannot restore.
+  if (eventType?.startsWith("tool_execution_") === true && isNestedToolEvent(event)) return { type: "pi.event", eventType };
   if (eventType === "tool_execution_start") {
     const args = getProperty(event, "args");
-    return { type: "tool.start", toolName: getString(event, "toolName") ?? "", toolCallId: getString(event, "toolCallId") ?? "", summary: summarizeToolArgs(args), args };
+    const toolName = getString(event, "toolName") ?? "";
+    return { type: "tool.start", toolName, toolCallId: getString(event, "toolCallId") ?? "", summary: summarizeToolCall(toolName, args), args };
   }
   if (eventType === "tool_execution_update") {
     const partialResult = getProperty(event, "partialResult");
@@ -5679,6 +5699,10 @@ function toClientEvent(event: unknown, thinkingLevel?: string): SessionUiEvent {
     return { type: "message.end", message: annotateAssistantThinkingLevel(message, thinkingLevel) };
   }
   return { type: "pi.event", eventType: eventType ?? "unknown" };
+}
+
+function summarizeToolCall(toolName: string, args: unknown): string {
+  return toolName === CODEMODE_TOOL_NAME ? codemodeScriptSummary(getString(args, "code") ?? "") : summarizeToolArgs(args);
 }
 
 function summarizeToolArgs(args: unknown): string {

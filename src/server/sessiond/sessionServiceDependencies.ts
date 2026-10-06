@@ -30,6 +30,8 @@ export interface SessionServiceDependencyInput {
   subsessionsEnabled: boolean;
   /** Whether agents may post structured question sets to the browser. */
   askUserEnabled: boolean;
+  /** Whether hosted sessions start with Pi's `codemode` tool active. */
+  codemodeEnabled: boolean;
   /** Auto-cancel delay for extension dialogs whose extension set no timeout; `0` waits forever. */
   extensionDialogsTimeoutMs: number;
 }
@@ -59,6 +61,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     // so they stay off unless spawning is configured too.
     subsessionsEnabled: input.spawnTargets !== undefined && input.subsessionsEnabled,
     askUserEnabled: input.askUserEnabled,
+    codemodeEnabled: input.codemodeEnabled,
     extensionDialogsTimeoutMs: input.extensionDialogsTimeoutMs,
     notificationStore: input.notificationStore,
     unreadStore: input.unreadStore,

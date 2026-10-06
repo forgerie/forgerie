@@ -123,6 +123,7 @@ async function createSessionDaemonRuntime() {
     projectWorkspaces,
     subsessionsEnabled: config.subsessions,
     askUserEnabled: config.askUser,
+    codemodeEnabled: config.codemode,
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     notificationStore,
     unreadStore,

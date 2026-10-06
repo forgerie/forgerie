@@ -25,6 +25,7 @@ describe("agent process environment visibility", () => {
       "PI_WEB_SPAWN_SESSIONS",
       "PI_WEB_SUBSESSIONS",
       "PI_WEB_ASK_USER",
+      "PI_WEB_CODEMODE",
       "PI_WEB_OFFLINE",
       "PI_WEB_PROJECTS_FILE",
       "PI_WEB_MACHINES_FILE",

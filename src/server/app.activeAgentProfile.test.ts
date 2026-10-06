@@ -129,6 +129,7 @@ function emptyConfigService(): PiWebConfigService {
       spawnSessions: false,
       subsessions: false,
       askUser: false,
+      codemode: false,
       agentCommand: false,
       agentDir: false,
       agentSessionDir: false,

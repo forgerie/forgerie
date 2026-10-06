@@ -245,14 +245,14 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
                 <code>PI_WEB_ALLOWED_HOSTS</code>, <code>PI_WEB_MAX_UPLOAD_BYTES</code>, <code>PI_WEB_AGENT_COMMAND</code>,
                 <code>PI_WEB_AGENT_DIR</code>, <code>PI_WEB_AGENT_SESSION_DIR</code>, <code>PI_CODING_AGENT_DIR</code> /
                 <code>PI_CODING_AGENT_SESSION_DIR</code> for Pi compatibility, <code>PI_WEB_SPAWN_SESSIONS</code>,
-                <code>PI_WEB_SUBSESSIONS</code>, and <code>PI_WEB_ASK_USER</code>. Speech uses runtime-only web/API
+                <code>PI_WEB_SUBSESSIONS</code>, <code>PI_WEB_ASK_USER</code>, and <code>PI_WEB_CODEMODE</code>. Speech uses runtime-only web/API
                 environment variables described in <a href="#local-speech">Local speech dictation runtime</a>.
               </p>
               <ul>
                 <li><code>host</code> / <code>port</code>: restart the gateway web/API service or process.</li>
                 <li><code>FORGERIE_WHISPER_STT_WORKER</code> / <code>FORGERIE_SPEECH_ALLOWED_HOSTS</code>: restart the gateway web/API service or process. The speech worker is web-owned, not session-daemon-owned. <code>FORGERIE_SMART_TURN_WORKER</code> is ignored while automatic turn detection is disabled.</li>
                 <li><code>maxUploadBytes</code>: restart both the web/API process and the session daemon on that machine.</li>
-                <li><code>agent.command</code> / <code>agent.dir</code> / <code>spawnSessions</code> / <code>subsessions</code> / <code>askUser</code> / <code>extensionDialogsTimeoutMs</code>: restart the session daemon on that machine.</li>
+                <li><code>agent.command</code> / <code>agent.dir</code> / <code>spawnSessions</code> / <code>subsessions</code> / <code>askUser</code> / <code>codemode</code> / <code>extensionDialogsTimeoutMs</code>: restart the session daemon on that machine.</li>
                 <li><code>pathAccess</code>: applies on the next request; existing file views may need a browser refresh.</li>
                 <li><code>uploads.defaultFolder</code>: applies to newly opened Files upload dialogs and new direct drag/drop batches after config/workspace refresh.</li>
                 <li><code>plugins</code>: reload the browser tab after changing Forgerie plugin enablement.</li>
@@ -292,6 +292,7 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
   "spawnSessions": true,
   "subsessions": false,
   "askUser": true,
+  "codemode": true,
   "extensionDialogsTimeoutMs": 300000,
   "plugins": {
     "relays": { "enabled": true },
@@ -405,7 +406,7 @@ worktree_path="$1"
                 it, and whether project-local config overrides or merges with global config. Rows with JSON key
                 <code>—</code> are runtime-only environment variables, not config-file keys. <code>Global</code> means
                 machine-global. In Settings, selected-machine-safe global keys (<code>pathAccess</code>, <code>uploads</code>,
-                <code>maxUploadBytes</code>, <code>agent</code>, <code>spawnSessions</code>, <code>subsessions</code>, <code>askUser</code>, and <code>plugins</code>)
+                <code>maxUploadBytes</code>, <code>agent</code>, <code>spawnSessions</code>, <code>subsessions</code>, <code>askUser</code>, <code>codemode</code>, and <code>plugins</code>)
                 are edited for the selected machine; gateway host/port/allowed-hosts, keyboard shortcuts, and machine
                 registry/tokens stay local.
               </p>
@@ -507,6 +508,14 @@ worktree_path="$1"
                       <td>Agent can post question forms</td>
                       <td><code>askUser</code></td>
                       <td><code>PI_WEB_ASK_USER</code></td>
+                      <td>Global/session daemon</td>
+                      <td>Not supported locally</td>
+                      <td>Restart session daemon on that machine</td>
+                    </tr>
+                    <tr>
+                      <td>Agent can run tool scripts</td>
+                      <td><code>codemode</code></td>
+                      <td><code>PI_WEB_CODEMODE</code></td>
                       <td>Global/session daemon</td>
                       <td>Not supported locally</td>
                       <td>Restart session daemon on that machine</td>
@@ -1029,6 +1038,45 @@ worktree_path="$1"
                 upgrading Forgerie to a version that introduces this tool. For the systemd user service, run
                 <code>systemctl --user restart forgerie-sessiond</code>.
               </div>
+
+              <h3><code>codemode</code> and the <code>codemode</code> tool</h3>
+              <p>
+                <code>codemode</code> controls whether hosted sessions start with Pi's <code>codemode</code> tool active.
+                With it, an agent writes one JavaScript script that calls the other tools, for example several reads in
+                parallel, and only what the script prints goes back to the model. It defaults to <code>true</code>. Set it
+                to <code>false</code>, or set <code>PI_WEB_CODEMODE=false</code>, to keep the tool inactive. The environment
+                override accepts <code>0|1|true|false</code> and takes precedence over the config file. Pi's reference for
+                scripts is <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/codemode.md">Codemode</a>.
+              </p>
+              <p>
+                Use <strong>Settings → Session daemon → Allow agents to run scripts</strong> to change
+                <code>codemode</code> on the selected machine. An environment override makes the toggle read-only.
+              </p>
+              <p>
+                Forgerie applies this setting in hosted sessions only. It does not write <code>defaultTools</code> to the
+                shared Pi profile, because Pi before 0.99 reads <code>"+codemode"</code> as a tool name and starts terminal
+                sessions with no built-in tools. To remove the tool completely, add <code>-builtin:codemode</code> to the
+                <code>extensions</code> setting of the Pi profile.
+              </p>
+              <p>
+                A script reaches the tools the session already has, and each call goes through the same Pi tool hooks as a
+                direct call. Scripts cannot call <code>ask_user</code>, <code>handoff_session</code>, <code>spawn_session</code>,
+                <code>spawn_subsession</code>, <code>yield_to_subsessions</code>, or <code>subagent</code>. These tools end
+                the run or start a session or agent that the transcript must show, so only the model can call them.
+              </p>
+              <p>
+                The transcript shows a script as one step. Its detail shows the script, one row for each call the script
+                made with its status and time, and the script output. A call inside a script has no tool card of its own:
+                Pi keeps the name, arguments, status, and time of each call, but not its result. Images that the script
+                shows appear with the step. While a script runs, the live status line names the call that the script is
+                making.
+              </p>
+              <p>
+                Scripts can also run classifier models, such as TypeSafe's Jev, through <code>models.classify()</code>. A
+                classifier uses the credentials of its provider in the Pi profile, for example <code>TYPESAFE_API_KEY</code>
+                or a <code>typesafe</code> entry in <code>auth.json</code>. Restart the session daemon after you add a
+                provider credential.
+              </p>
             </section>
 
             <section id="extension-dialogs">

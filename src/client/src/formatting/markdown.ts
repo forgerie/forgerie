@@ -107,6 +107,15 @@ function canHighlightCode(code: string, raw: string): boolean {
   return code.length <= MAX_HIGHLIGHTED_CODE_CHARACTERS && hasClosingCodeFence(raw);
 }
 
+/**
+ * Highlighted HTML for one block of code shown outside markdown, such as a
+ * script a tool ran. Same highlighter, cache, and size limit as a fenced
+ * block; code past the limit is escaped instead of highlighted.
+ */
+export function highlightedCodeHtml(language: CodeFenceLanguageName, code: string): string {
+  return code.length > MAX_HIGHLIGHTED_CODE_CHARACTERS ? escapeHtml(code) : highlightedCode(language, code);
+}
+
 function highlightedCode(language: CodeFenceLanguageName, code: string): string {
   const cacheKey = `${language}\u0000${code}`;
   const cached = highlightedCodeCache.get(cacheKey);

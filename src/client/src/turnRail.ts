@@ -1,4 +1,5 @@
 import type { ChatGroup } from "./chatGroups";
+import { codemodeExecution, isCodemodeExecution } from "./codemodeExecution";
 import type { ToolExecutionPart } from "./components/shared";
 
 /** How far a step got. The wire's four statuses collapse to the three a reader acts on. */
@@ -25,6 +26,8 @@ export interface TurnStep {
 export interface TurnLedgerRow extends TurnStep {
   readonly key: string;
   readonly editCount?: number;
+  /** Calls a `codemode` script made: the one quantity a script step owns. */
+  readonly callCount?: number;
   readonly added: number;
   readonly removed: number;
   readonly execution: ToolExecutionPart;
@@ -126,10 +129,12 @@ export function turnLedgerRows(groups: readonly ChatGroup[]): TurnLedgerRow[] {
     const step = toTurnStep(execution);
     const diff = executionDiffStats(execution);
     const editCount = executionEditCount(execution);
+    const callCount = isCodemodeExecution(execution) ? codemodeExecution(execution).calls.length : undefined;
     return {
       ...step,
       key: execution.toolCallId ?? `${String(index)}:${execution.toolName}:${step.target ?? step.label}`,
       ...(editCount === undefined ? {} : { editCount }),
+      ...(callCount === undefined || callCount === 0 ? {} : { callCount }),
       added: diff.added,
       removed: diff.removed,
       execution,
@@ -156,7 +161,7 @@ export function turnStepTarget(execution: ToolExecutionPart): string | undefined
 function toTurnStep(execution: ToolExecutionPart): TurnStep {
   const target = turnStepTarget(execution);
   const outcome = stepOutcome(execution.status);
-  const evidence = outcome === "failed" ? failureEvidence(execution.resultText) : undefined;
+  const evidence = outcome === "failed" ? failureEvidence(failureText(execution)) : undefined;
   return {
     verb: execution.toolName,
     ...(target === undefined ? {} : { target }),
@@ -269,6 +274,16 @@ function basename(path: string): string {
   const name = trimmed.slice(trimmed.lastIndexOf("/") + 1);
   const suffix = path.endsWith("/") ? "/" : "";
   return name === "" ? path : `${name}${suffix}`;
+}
+
+/**
+ * The text that says why a step failed. A script's result opens with Pi's run
+ * header, so its reason is the script error that ends the result.
+ */
+function failureText(execution: ToolExecutionPart): string | undefined {
+  if (!isCodemodeExecution(execution)) return execution.resultText;
+  const view = codemodeExecution(execution);
+  return view.scriptError ?? view.output;
 }
 
 /**

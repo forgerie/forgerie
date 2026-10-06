@@ -55,7 +55,7 @@ describe("session daemon settings config helpers", () => {
     });
     const selectedMachine = configResponse(
       { spawnSessions: true, subsessions: true, agent: { command: "machine-agent", dir: "/srv/machine-agent" } },
-      { spawnSessions: true, subsessions: false, agentCommand: true, agentDir: false, agentDirSource: "pi-compatibility", agentSessionDir: true },
+      { spawnSessions: true, subsessions: false, codemode: true, agentCommand: true, agentDir: false, agentDirSource: "pi-compatibility", agentSessionDir: true },
       { spawnSessions: true, subsessions: true, agent: { command: "env-agent", dir: "/srv/machine-agent" } },
     );
 
@@ -88,6 +88,7 @@ describe("session daemon settings config helpers", () => {
         spawnSessions: true,
         subsessions: false,
         askUser: false,
+        codemode: true,
         agentCommand: true,
         agentDir: false,
         agentDirSource: "pi-compatibility",
@@ -124,6 +125,7 @@ function configResponse(
       spawnSessions: false,
       subsessions: false,
       askUser: false,
+      codemode: false,
       agentCommand: false,
       agentDir: false,
       agentSessionDir: false,

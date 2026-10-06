@@ -30,6 +30,7 @@ function daemonCollaborators(patch: Partial<SessionServiceDependencyInput> = {})
     catalogRefreshStatus: { isRefreshInFlight: () => false },
     subsessionsEnabled: false,
     askUserEnabled: true,
+    codemodeEnabled: true,
     extensionDialogsTimeoutMs: 300_000,
     ...patch,
   };

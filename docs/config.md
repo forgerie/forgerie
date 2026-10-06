@@ -69,14 +69,14 @@ defaults → global config file → environment overrides
 
 Supported project-local settings are then applied for that project's workspaces. For upload defaults, `<project>/.forgerie/config.json` overrides the global value.
 
-Environment overrides include `PI_WEB_HOST`, `PI_WEB_PORT` / `PORT`, `PI_WEB_ALLOWED_HOSTS`, `PI_WEB_MAX_UPLOAD_BYTES`, `PI_WEB_AGENT_COMMAND`, `PI_WEB_AGENT_DIR`, `PI_WEB_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` for Pi compatibility, `PI_WEB_SPAWN_SESSIONS`, `PI_WEB_SUBSESSIONS`, and `PI_WEB_ASK_USER`. Speech uses runtime-only web/API environment variables described in [Local speech dictation runtime](#local-speech-dictation-runtime).
+Environment overrides include `PI_WEB_HOST`, `PI_WEB_PORT` / `PORT`, `PI_WEB_ALLOWED_HOSTS`, `PI_WEB_MAX_UPLOAD_BYTES`, `PI_WEB_AGENT_COMMAND`, `PI_WEB_AGENT_DIR`, `PI_WEB_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` for Pi compatibility, `PI_WEB_SPAWN_SESSIONS`, `PI_WEB_SUBSESSIONS`, `PI_WEB_ASK_USER`, and `PI_WEB_CODEMODE`. Speech uses runtime-only web/API environment variables described in [Local speech dictation runtime](#local-speech-dictation-runtime).
 
 Process restarts depend on the key:
 
 - `host` / `port`: restart the gateway web/API service or process.
 - `FORGERIE_WHISPER_STT_WORKER` / `FORGERIE_SPEECH_ALLOWED_HOSTS`: restart the gateway web/API service or process. The speech worker is web-owned, not session-daemon-owned. `FORGERIE_SMART_TURN_WORKER` is ignored while automatic turn detection is disabled.
 - `maxUploadBytes`: restart both the web/API process and the session daemon on that machine.
-- `agent.command` / `agent.dir` / `spawnSessions` / `subsessions` / `askUser` / `extensionDialogsTimeoutMs`: restart the session daemon on that machine.
+- `agent.command` / `agent.dir` / `spawnSessions` / `subsessions` / `askUser` / `codemode` / `extensionDialogsTimeoutMs`: restart the session daemon on that machine.
 - `pathAccess`: applies on the next request; existing file views may need a browser refresh.
 - `uploads.defaultFolder`: applies to newly opened Files upload dialogs and new direct drag/drop batches after config/workspace refresh.
 - `plugins`: reload the browser tab after changing Forgerie plugin enablement.
@@ -103,6 +103,7 @@ Process restarts depend on the key:
   "spawnSessions": true,
   "subsessions": false,
   "askUser": true,
+  "codemode": true,
   "extensionDialogsTimeoutMs": 300000,
   "plugins": {
     "relays": { "enabled": true },
@@ -179,7 +180,7 @@ worktree_path="$1"
 
 ## Configuration matrix
 
-Rows with JSON key `—` are runtime-only environment variables, not config-file keys. `Global` means machine-global. In Settings, selected-machine-safe global keys (`pathAccess`, `uploads`, `maxUploadBytes`, `agent`, `spawnSessions`, `subsessions`, `askUser`, and `plugins`) are edited for the selected machine; gateway host/port/allowed-hosts, keyboard shortcuts, and machine registry/tokens stay local.
+Rows with JSON key `—` are runtime-only environment variables, not config-file keys. `Global` means machine-global. In Settings, selected-machine-safe global keys (`pathAccess`, `uploads`, `maxUploadBytes`, `agent`, `spawnSessions`, `subsessions`, `askUser`, `codemode`, and `plugins`) are edited for the selected machine; gateway host/port/allowed-hosts, keyboard shortcuts, and machine registry/tokens stay local.
 
 | Config | JSON key | Env var | Scope | Project-local behavior | Applies / restart |
 | --- | --- | --- | --- | --- | --- |
@@ -195,6 +196,7 @@ Rows with JSON key `—` are runtime-only environment variables, not config-file
 | Agent can spawn sessions | `spawnSessions` | `PI_WEB_SPAWN_SESSIONS` | Global/session daemon | Not supported locally | Restart session daemon on that machine |
 | Tracked subsessions (beta) | `subsessions` | `PI_WEB_SUBSESSIONS` | Global/session daemon | Not supported locally; also requires `spawnSessions` | Restart session daemon on that machine |
 | Agent can post question forms | `askUser` | `PI_WEB_ASK_USER` | Global/session daemon | Not supported locally | Restart session daemon on that machine |
+| Agent can run tool scripts | `codemode` | `PI_WEB_CODEMODE` | Global/session daemon | Not supported locally | Restart session daemon on that machine |
 | Extension dialog auto-cancel timeout | `extensionDialogsTimeoutMs` | — | Global/session daemon | Not supported locally | Restart session daemon on that machine |
 | Plugin enablement/settings | `plugins.<id>.enabled`, `plugins.<id>.settings` | — | Global | Not core local config; plugins may read their own project files | Reload browser tab |
 | Keyboard shortcuts | `shortcuts.<actionId>` | — | Global | Not supported locally | Applies after settings save/config refresh |
@@ -387,6 +389,20 @@ Forgerie confirms a partial submission before sending it and names the unanswere
 Sending an ordinary chat message while a form is open voids the form: the card closes as cancelled and the model is told its questions went unanswered as part of the turn the message itself starts.
 
 Restart the session daemon after changing `askUser` or after upgrading Forgerie to a version that introduces this tool. For the systemd user service, run `systemctl --user restart forgerie-sessiond`.
+
+#### `codemode` and the `codemode` tool
+
+`codemode` controls whether hosted sessions start with Pi's `codemode` tool active. With it, an agent writes one JavaScript script that calls the other tools, for example several reads in parallel, and only what the script prints goes back to the model. It defaults to `true`. Set it to `false`, or set `PI_WEB_CODEMODE=false`, to keep the tool inactive. The environment override accepts `0|1|true|false` and takes precedence over the config file. Pi's reference for scripts is [Codemode](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/codemode.md).
+
+Use **Settings → Session daemon → Allow agents to run scripts** to change `codemode` on the selected machine. An environment override makes the toggle read-only.
+
+Forgerie applies this setting in hosted sessions only. It does not write `defaultTools` to the shared Pi profile, because Pi before 0.99 reads `"+codemode"` as a tool name and starts terminal sessions with no built-in tools. To remove the tool completely, add `-builtin:codemode` to the `extensions` setting of the Pi profile.
+
+A script reaches the tools the session already has, and each call goes through the same Pi tool hooks as a direct call. Scripts cannot call `ask_user`, `handoff_session`, `spawn_session`, `spawn_subsession`, `yield_to_subsessions`, or `subagent`. These tools end the run or start a session or agent that the transcript must show, so only the model can call them.
+
+The transcript shows a script as one step. Its detail shows the script, one row for each call the script made with its status and time, and the script output. A call inside a script has no tool card of its own: Pi keeps the name, arguments, status, and time of each call, but not its result. Images that the script shows appear with the step. While a script runs, the live status line names the call that the script is making.
+
+Scripts can also run classifier models, such as TypeSafe's Jev, through `models.classify()`. A classifier uses the credentials of its provider in the Pi profile, for example `TYPESAFE_API_KEY` or a `typesafe` entry in `auth.json`. Restart the session daemon after you add a provider credential.
 
 ### Extension dialogs
 

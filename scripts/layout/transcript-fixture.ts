@@ -9,7 +9,7 @@
  * States are named here rather than assembled by the runner, so the runner
  * measures boxes and does not also own what a transcript looks like.
  */
-import { textMessage } from "../../src/client/src/chatMessages";
+import { normalizeMessages, textMessage } from "../../src/client/src/chatMessages";
 import { ChatView } from "../../src/client/src/components/ChatView";
 import { selectedChatFreshReadable, selectedChatTarget } from "../../src/client/src/selectedChatLoad";
 
@@ -69,6 +69,47 @@ const SIX_COLUMN_TABLE = [
   "| MT8195 | u-boot | partial | 2026-08-28 | yes | unassigned |",
 ].join("\n");
 
+const CODEMODE_SCRIPT = [
+  "// Find the failing tests and read the config they share",
+  "const [tests, config] = await Promise.all([",
+  "  tools.bash({ command: 'npx vitest run --reporter=json --outputFile=/tmp/vitest-report.json src/server/sessions' }),",
+  "  tools.read({ path: 'vitest.config.ts' }),",
+  "]);",
+  "const report = JSON.parse((await tools.read({ path: '/tmp/vitest-report.json' })));",
+  "const failed = report.testResults.filter((file) => file.status === 'failed').map((file) => file.name);",
+  "text(`${failed.length} failing files`);",
+  "text(failed.join('\\n'));",
+  "return config.split('\\n').slice(0, 4).join('\\n');",
+].join("\n");
+
+/** A settled script step as Pi 1.0.4 records it: the call, then its result with `details.calls`. */
+function codemodeTurn(outcome: "completed" | "failed") {
+  const calls = [
+    { id: "call_1/1", name: "bash", args: JSON.stringify({ command: "npx vitest run --reporter=json --outputFile=/tmp/vitest-report.json src/server/sessions" }), status: "ok", durationMs: 8_412 },
+    { id: "call_1/2", name: "read", args: JSON.stringify({ path: "vitest.config.ts" }), status: "ok", durationMs: 4 },
+    outcome === "completed"
+      ? { id: "call_1/3", name: "read", args: JSON.stringify({ path: "/tmp/vitest-report.json" }), status: "ok", durationMs: 11 }
+      : { id: "call_1/3", name: "read", args: JSON.stringify({ path: "/tmp/vitest-report.json" }), status: "error", durationMs: 2, error: "ENOENT: no such file or directory, access '/tmp/vitest-report.json'" },
+  ];
+  const content = outcome === "completed"
+    ? [
+      { type: "text", text: "Script completed\nWall time 8.6 seconds\nOutput:\n" },
+      { type: "text", text: "2 failing files" },
+      { type: "text", text: "src/server/sessions/piSessionService.promptQueue.test.ts\nsrc/server/sessions/sessionRoutes.test.ts" },
+      { type: "text", text: "import { defineConfig } from \"vitest/config\";\n\nexport default defineConfig({\n  test: {" },
+    ]
+    : [
+      { type: "text", text: "Script failed\nWall time 8.4 seconds\nOutput:\n" },
+      { type: "text", text: "Script error:\nError: ENOENT: no such file or directory, access '/tmp/vitest-report.json'\n\nTool calls made before the failure (they are not undone): bash (ok), read (ok), read (error)" },
+    ];
+  return normalizeMessages([
+    { role: "user", content: "which server tests fail, and what config do they share?", timestamp: 1 },
+    { role: "assistant", content: [{ type: "text", text: "I will run them and read the config in one script." }, { type: "toolCall", id: "call_1", name: "codemode", arguments: { code: CODEMODE_SCRIPT } }], timestamp: 2 },
+    { role: "toolResult", toolCallId: "call_1", toolName: "codemode", content, details: { calls }, isError: outcome === "failed", timestamp: 3 },
+    { role: "assistant", content: [{ type: "text", text: outcome === "completed" ? "Two files fail. Both use the shared `vitest.config.ts`." : "The test run did not write its report, so I will rerun it without the JSON reporter." }], timestamp: 4 },
+  ], 0);
+}
+
 const STATES: Record<string, (view: ChatView) => void> = {
   /** Fewer messages than the scroller can hold: the case that was stretching. */
   short: (view: ChatView) => {
@@ -114,6 +155,22 @@ const STATES: Record<string, (view: ChatView) => void> = {
     view.messageTotal = 2;
     view.hasMore = false;
   },
+  /** A script step, opened, so its script, calls, and output show. */
+  codemode: (view: ChatView) => {
+    view.messages = codemodeTurn("completed");
+    view.messageStart = 0;
+    view.messageEnd = 4;
+    view.messageTotal = 4;
+    view.hasMore = false;
+  },
+  /** A script that failed on its third call, opened, so the failure shows where it happened. */
+  "codemode-failed": (view: ChatView) => {
+    view.messages = codemodeTurn("failed");
+    view.messageStart = 0;
+    view.messageEnd = 4;
+    view.messageTotal = 4;
+    view.hasMore = false;
+  },
   /** No transcript at all: the empty screen has to centre itself. */
   empty: (view: ChatView) => {
     view.messages = [];
@@ -136,9 +193,21 @@ async function mount(state: string): Promise<void> {
   apply(view);
   document.body.append(view);
   await view.updateComplete;
+  if (state.startsWith("codemode")) await openFirstStep(view);
   // The transcript settles its scroll position on a later frame, so a measure
   // taken immediately after the update would read a position it does not keep.
   await new Promise((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(resolve); }); });
+}
+
+/** Open the turn's steps and the first step's detail, as a reader would with two taps. */
+async function openFirstStep(view: ChatView): Promise<void> {
+  const summary = view.shadowRoot?.querySelector("turn-rail-summary");
+  summary?.shadowRoot?.querySelector<HTMLButtonElement>("button")?.click();
+  await view.updateComplete;
+  const ledger = view.shadowRoot?.querySelector("turn-rail-ledger");
+  await ledger?.updateComplete;
+  const step = ledger?.shadowRoot?.querySelector("details");
+  if (step !== null && step !== undefined) step.open = true;
 }
 
 declare global {

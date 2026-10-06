@@ -1,5 +1,7 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { isCodemodeExecution } from "../codemodeExecution";
+import "./CodemodeExecutionView";
 import type { ToolExecutionPart } from "./shared";
 
 const MAX_COLLAPSED_DIFF_LINES = 180;
@@ -47,9 +49,11 @@ export class ToolExecutionView extends LitElement {
           </div>
         `}
 
-        ${previewMismatch ? html`<p class="notice">Applied diff differs from the preview.</p>` : null}
-        ${errorText === undefined || errorText === "" ? null : html`<pre class="error-text">${errorText}</pre>`}
-        ${visibleDiff === undefined ? this.renderTextBody(bodyText, target) : this.renderDiffBody(visibleDiff, actualDiff === undefined ? "Preview diff" : "Applied diff", target)}
+        ${isCodemodeExecution(execution) ? html`<codemode-execution-view .execution=${execution}></codemode-execution-view>` : html`
+          ${previewMismatch ? html`<p class="notice">Applied diff differs from the preview.</p>` : null}
+          ${errorText === undefined || errorText === "" ? null : html`<pre class="error-text">${errorText}</pre>`}
+          ${visibleDiff === undefined ? this.renderTextBody(bodyText, target) : this.renderDiffBody(visibleDiff, actualDiff === undefined ? "Preview diff" : "Applied diff", target)}
+        `}
       </section>
     `;
   }
