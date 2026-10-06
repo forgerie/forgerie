@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, parseEvent, snapshotSchema, statusSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
+import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { carryUnsavedShellRows, fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 import { shellAvailability, shellDraftOf, type ShellAvailability } from "./shellDraft";
@@ -362,6 +362,31 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       throw error;
     } finally { update({ ...state, sending: false }); }
   }
+  /** Reads for the model picker. They need a joined session but change nothing. */
+  async function readForPicker<T>(endpoint: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+    const session = state.session;
+    if (!session) throw new Error("The session is not connected.");
+    return request(readPath(endpoint, session), schema, {}, signal === undefined ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]));
+  }
+  /**
+   * Change the model or thinking level. Pi answers with its status, which the
+   * picker shows; nothing changes in the browser before that. Never retried:
+   * a lost acknowledgement does not prove the change did not apply.
+   */
+  async function changeRuntime(endpoint: "model" | "thinking-level", body: Record<string, string>) {
+    const session = state.session;
+    if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
+    const version = statusVersion;
+    try {
+      const status = await request(`${root}/${endpoint}`, statusSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd, ...body }),
+      });
+      if (version === statusVersion) { statusVersion++; update(withStatus(state, status)); }
+    } catch (error) {
+      if (error instanceof ReadFailure) throw error;
+      throw new Error(`${messageOf(error)} The ${endpoint === "model" ? "model" : "thinking level"} may have changed. Check it before you try again.`, { cause: error });
+    }
+  }
   async function clearQueue() {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
@@ -429,6 +454,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     dismissCommand: () => update({ ...state, commandResult: undefined }),
     loadCommands,
     clearQueue,
+    listModels: async (signal?: AbortSignal) => (await readForPicker("models", modelsResponseSchema, signal)).models,
+    listThinkingLevels: async (signal?: AbortSignal) => (await readForPicker("thinking-levels", thinkingLevelsResponseSchema, signal)).levels,
+    setModel: (provider: string, modelId: string) => changeRuntime("model", { provider, modelId }),
+    setThinkingLevel: (level: string) => changeRuntime("thinking-level", { level }),
     dismissCompaction: () => { if (state.compaction.type === "finished") update({ ...state, compaction: idleCompaction }); },
     saveAttachment: async (attachment: PromptAttachment, signal?: AbortSignal) => {
       const session = state.session;

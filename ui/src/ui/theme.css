@@ -108,8 +108,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* Drawn small, pressed large. Every control listed here is drawn at the
    homepage size and keeps a --control-size hit area through an invisible
    ::before centred on it. */
-.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .steer-send, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
-.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .steer-send::before, .picker-toast button::before, .session-door-open::before {
+.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .steer-send, .model-trigger, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
+.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .steer-send::before, .model-trigger::before, .picker-toast button::before, .session-door-open::before {
   content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -231,6 +231,46 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* Shell mode: the draft is set as code, so the bar reads as a command line. */
 .composer-shell[data-shell] .composer-input { font-family: var(--code-font); font-variant-ligatures: none; }
 .composer-dictation { display: flex; align-items: center; gap: var(--space-4); flex: 1; min-inline-size: 0; }
+/* Model and thinking level, after assistant-ui's model selector element: a
+   ghost trigger in the input bar that reads as the session's current choice.
+   The model name is a readout, so it truncates first; the level and chevron
+   keep their width. The full name stays in the panel. */
+.model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 1 auto; min-inline-size: 0; max-inline-size: 16rem; block-size: 2rem; padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; transition: color 150ms, background-color 150ms; }
+.model-trigger:not(:disabled):hover, .model-trigger[aria-expanded="true"] { background: var(--hover-surface); color: var(--foreground); }
+.model-trigger-name { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-trigger-level { flex: none; color: color-mix(in oklab, var(--muted-foreground) 75%, transparent); font-weight: 400; }
+.model-trigger svg { flex: none; }
+/* The panel: window level, the homepage menu surface. The list scrolls inside
+   the room the anchor measured; search and thinking stay put around it. */
+.model-panel { position: fixed; z-index: 100; display: flex; flex-direction: column; min-block-size: 0; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); box-shadow: 0 var(--space-2) var(--space-6) var(--line); font-size: var(--small-text); }
+.model-search { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-block-end: 1px solid var(--line); background: transparent; color: var(--foreground); font: inherit; outline: none; }
+.model-search::placeholder { color: var(--muted-foreground); }
+.model-list { flex: 1 1 auto; min-block-size: var(--control-size); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); }
+.model-group + .model-group { margin-block-start: var(--space-1); padding-block-start: var(--space-1); border-block-start: 1px solid var(--line); }
+.model-group-label { margin: 0; padding: var(--space-2) var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.model-group ul { margin: 0; padding: 0; list-style: none; }
+.model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name check" "meta check"; align-items: center; column-gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; text-align: start; }
+.model-row:not(:disabled):hover, .model-row:focus-visible { background: var(--hover-surface); }
+.model-row:focus-visible { outline-offset: -2px; }
+.model-row[aria-pressed="true"] { background: var(--active-surface); }
+.model-row-name { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); color: var(--foreground); overflow-wrap: anywhere; }
+.model-row[data-plain] .model-row-name { color: color-mix(in oklab, var(--foreground) 70%, transparent); }
+.model-row-variant { color: var(--muted-foreground); font-size: var(--label-text); }
+.model-row-meta { grid-area: meta; display: flex; flex-wrap: wrap; column-gap: var(--space-3); color: var(--muted-foreground); font-size: var(--label-text); }
+.model-row-meta:empty { display: none; }
+.model-row-check { grid-area: check; }
+.model-hint { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted-foreground); }
+/* Thinking: Pi's levels for this model, as one wrapping row of segments next
+   to the trigger, so they stay in reach when the list scrolls. */
+.model-thinking { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3); border-block-start: 1px solid var(--line); }
+.model-thinking .model-hint { padding: var(--space-2) 0; }
+.model-thinking-label { flex: none; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.model-levels { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.model-levels button { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); }
+.model-levels button:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.model-levels button[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); font-weight: 500; }
+.model-error { flex: none; margin: 0; padding: var(--space-2) var(--space-3); border-block-start: 1px solid var(--line); color: var(--destructive); overflow-wrap: anywhere; }
 .dictation-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small-text); color: var(--muted-foreground); }
 /* Pi picker: same homepage menu tokens, window-level so the transcript cannot
    clip it. Its anchor measures the available height, including keyboard insets. */

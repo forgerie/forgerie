@@ -17,6 +17,8 @@ import { createChatDraft, type ChatDraft } from "../chatDraft";
 import { shellDraftOf, type ShellAvailability } from "../shellDraft";
 import { isCommand } from "../commands";
 import type { WorkingSend } from "../queue";
+import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
+import { modelCommandQuery } from "../modelChoice";
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
@@ -35,6 +37,8 @@ type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; c
   working?: WorkingSend | undefined;
   /** Pi holds queued work that Stop would return to the draft. */
   queued?: boolean;
+  /** The session's model and thinking level. Without it, the bar shows no picker. */
+  model?: ModelBinding | undefined;
   chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
@@ -43,7 +47,8 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+  const [picker, setPicker] = useState<PickerOpen>();
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
   const canSend = useAuiState((s) => s.composer.canSend);
@@ -56,6 +61,14 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const { state } = useDictation();
   const control = useAskMode(ask, chatDraft);
   const compactDraft = !!compaction && !control && count === 0 && !preparing && isCompactCommand(text);
+  // Pi has no `/model` command for the web. The bar opens the picker instead,
+  // with any text after the command as its search.
+  const modelQuery = model && !control && count === 0 && !preparing ? modelCommandQuery(text) : undefined;
+  function chooseModel() {
+    if (modelQuery === undefined || !model || model.disabled) return;
+    aui.composer.setText("");
+    setPicker({ query: modelQuery });
+  }
   const compactBlocked = disabled || dictating || compaction?.disabled || compaction?.state.type === "checking" || compaction?.state.type === "queued" || compaction?.state.type === "running";
   async function sendCompaction() {
     if (!compactDraft || compactBlocked || !compaction) return;
@@ -104,6 +117,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
     }
     if (shellMode && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void runShell(); return; }
     if (compactDraft && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendCompaction(); return; }
+    if (modelQuery !== undefined && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); chooseModel(); return; }
     // assistant-ui's keys: Enter queues, Ctrl or Cmd+Shift+Enter steers, Shift+Enter is a new line.
     if (workingDraft && event.key === "Enter") {
       const steer = event.shiftKey && (event.ctrlKey || event.metaKey);
@@ -141,10 +155,11 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         aria-describedby={control?.headingId}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || tooMany || compactDraft || shellMode || running ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        submitMode={control || tooMany || compactDraft || modelQuery !== undefined || shellMode || running ? "none" : "enter"} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
         <AddAttachment disabled={disabled || preparing || !!control?.sending || count >= MAX_ATTACHMENTS} />
+        {model && <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker} />}
         <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
         {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
           <SquareIcon aria-hidden size={12} fill="currentColor" />
@@ -152,6 +167,8 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
           chatLabel={shellDraftOf(text).type === "shell" ? "Run command" : "Send message"} /> : <>
           {compactDraft ? <button type="button" className="primary compact-send" disabled={compactBlocked} onClick={() => void sendCompaction()}>
             {compaction?.waits ?? running ? "Queue compaction" : "Compact history"}
+          </button> : modelQuery !== undefined ? <button type="button" className="primary compact-send" disabled={model?.disabled} onClick={chooseModel}>
+            Choose model
           </button> : shellMode ? <button type="button" className="primary compact-send" disabled={shellBlocked} onClick={() => void runShell()}>
             Run command
           </button> : <AuiIf condition={(s) => !s.thread.isRunning}>

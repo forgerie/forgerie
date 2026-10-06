@@ -10,7 +10,7 @@ import { SessionFrame } from "../src/ui/SessionFrame";
 import { ForgerieDictationAdapter } from "../src/speech/ForgerieDictationAdapter";
 import { DictationProvider } from "../src/DictationProvider";
 
-import type { PendingAsk } from "../src/contracts";
+import type { PendingAsk, SessionModel } from "../src/contracts";
 import type { CommandBinding } from "../src/ui/SlashCommands";
 import type { MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
@@ -196,6 +196,24 @@ const handoffMessages: TranscriptMessage[] = [
     { type: "text", text: "The handoff failed because that model is not available. No session was created." },
   ] },
 ];
+// Model and thinking level: a catalog shaped like a real Pi profile, local only.
+const previewModels: SessionModel[] = [
+  { provider: "cliproxyapi", id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash", contextWindow: 1_048_576, reasoning: true, scoped: true },
+  { provider: "cliproxyapi", id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash (OpenRouter)", contextWindow: 1_048_576, reasoning: true, scoped: true },
+  { provider: "cliproxyapi", id: "claude-opus-5-5", name: "Claude Opus 5.5", contextWindow: 1_000_000, reasoning: true, scoped: true },
+  { provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", contextWindow: 272_000, reasoning: true, scoped: true },
+  { provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5 (latest)", contextWindow: 200_000, reasoning: true },
+  { provider: "anthropic", id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", contextWindow: 200_000, reasoning: true },
+  { provider: "anthropic", id: "claude-sonnet-5", name: "Claude Sonnet 5", contextWindow: 1_000_000, reasoning: true },
+  { provider: "openai-codex", id: "gpt-5.6-luna", name: "GPT-5.6 Luna", contextWindow: 272_000, reasoning: true },
+  { provider: "openrouter", id: "qwen-4-coder-480b-a35b-instruct-long-context-preview", name: "Qwen 4 Coder 480B A35B Instruct Long Context Preview", contextWindow: 262_144, reasoning: false },
+  ...Array.from({ length: 12 }, (_, index): SessionModel => ({ provider: "openrouter", id: `model-${index + 1}`, name: `OpenRouter model ${index + 1}`, contextWindow: 131_072, reasoning: index % 3 !== 0 })),
+];
+const previewLevels = (model: SessionModel | undefined) => model?.reasoning ? ["minimal", "low", "medium", "high", "xhigh", "max"] : ["off"];
+const modelStart: Record<string, { model: SessionModel; level: string }> = {
+  "model-plain": { model: previewModels[8]!, level: "off" },
+  "model-long": { model: previewModels[1]!, level: "xhigh" },
+};
 /** The preview cannot navigate, so it records which session a door opened. */
 const openPreviewDoor = (door: HandoffDoor) => { document.documentElement.dataset["openedSession"] = door.sessionId; };
 const compactionPreview = scenario.startsWith("compaction");
@@ -381,6 +399,13 @@ function Preview() {
     const bytes = Uint8Array.from(atob(pixel), (char) => char.charCodeAt(0));
     void runtime.thread.composer.addAttachment(new File([bytes], "layout.png", { type: "image/png" }));
   }, [runtime]);
+  const [runtimeChoice, setRuntimeChoice] = useState(() => modelStart[scenario] ?? { model: previewModels[2]!, level: "high" });
+  useEffect(() => {
+    // Captures need the panel already open; `/model` scenarios type the command instead.
+    if (scenario !== "model-open" && scenario !== "model-plain" && scenario !== "model-long") return;
+    const timer = setTimeout(() => document.querySelector<HTMLButtonElement>(".model-trigger")?.click(), 150);
+    return () => clearTimeout(timer);
+  }, []);
   const compactionWaits = compaction.type === "queued" || compaction.type === "running";
   const working = queuePreview || compactionPreview ? { queue: running, steer: running && !compactionWaits } : undefined;
   useEffect(() => {
@@ -431,7 +456,17 @@ function Preview() {
       } : undefined} queue={compactionPreview || queuePreview ? { items: queue, disabled: recovering, onClear: () => {
         setQueue([]);
         if (compaction.type === "queued") setCompaction({ type: "finished", outcome: "cancelled", message: "Queued compaction cancelled." });
-      } } : undefined} working={working} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+      } } : undefined} working={working} model={{ model: runtimeChoice.model, thinkingLevel: runtimeChoice.level, disabled: recovering || scenario === "disconnected",
+        listModels: async () => previewModels,
+        listThinkingLevels: async () => previewLevels(runtimeChoice.model),
+        onModel: async (provider, id) => {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          if (scenario === "model-error") throw new Error(`Model not found: ${provider}/${id}`);
+          const model = previewModels.find((item) => item.provider === provider && item.id === id)!;
+          setRuntimeChoice((current) => ({ model, level: model.reasoning ? (current.level === "off" ? "medium" : current.level) : "off" }));
+        },
+        onThinkingLevel: async (level) => { setRuntimeChoice((current) => ({ ...current, level })); },
+      }} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
       </SessionDoorsProvider>

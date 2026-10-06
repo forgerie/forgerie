@@ -1,5 +1,9 @@
 # Verification and limits
 
+## Model and thinking level
+
+The input bar shows the session's model and thinking level. Press it, or send `/model`, to change either one for this session. See [behavior, verification, and limits](model-thinking.md).
+
 ## Sending while working
 
 While the agent works, Queue (or Enter) sends a follow-up and Steer (or Ctrl or Cmd+Shift+Enter) reaches the current response. Pi's queue shows above the composer, and Stop returns it to the draft. See [behavior, verification, and limits](sending-while-working.md).

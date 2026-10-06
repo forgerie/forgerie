@@ -1,6 +1,19 @@
 import { z } from "zod";
 
 // Only the consumed fields are specified. Pi's other parts remain server-owned.
+/** One model Pi offers a session. Only `provider` and `id` are required to pick it. */
+export const sessionModelSchema = z.object({
+  provider: z.string().optional(),
+  id: z.string().optional(),
+  name: z.string().optional(),
+  contextWindow: z.number().optional(),
+  reasoning: z.unknown().optional(),
+  /** Set on the models Pi's `enabledModels` setting holds. */
+  scoped: z.boolean().optional(),
+});
+export type SessionModel = z.infer<typeof sessionModelSchema>;
+export const modelsResponseSchema = z.object({ models: z.array(sessionModelSchema) });
+export const thinkingLevelsResponseSchema = z.object({ levels: z.array(z.string()) });
 export const piMessageSchema = z.object({
   role: z.string(),
   content: z.union([z.string(), z.array(z.unknown())]).optional(),
@@ -51,6 +64,8 @@ export const statusSchema = z.object({
   isCompacting: z.boolean(),
   isBashRunning: z.boolean(),
   pendingAsk: pendingAskSchema.optional(),
+  model: sessionModelSchema.optional(),
+  thinkingLevel: z.string().optional(),
   queuedMessages: z.array(z.object({ kind: z.enum(["steer", "followUp"]), text: z.string() })).default([]),
 });
 export type SessionStatus = z.infer<typeof statusSchema>;

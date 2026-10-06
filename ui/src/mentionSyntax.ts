@@ -37,13 +37,13 @@ export function mentionFormatter(trigger: MentionTrigger): Unstable_DirectiveFor
 
 /** Pure window-level placement. The list scrolls; no posture changes its structure. */
 export function mentionPlacement(anchor: { left: number; top: number; bottom: number; width: number },
-  viewport: { left: number; top: number; width: number; height: number }) {
+  viewport: { left: number; top: number; width: number; height: number }, cap = 288) {
   const gap = 8;
   const width = Math.min(anchor.width, Math.max(0, viewport.width - 2 * gap));
   const left = Math.max(viewport.left + gap, Math.min(anchor.left, viewport.left + viewport.width - width - gap));
   const above = Math.max(0, anchor.top - viewport.top - 2 * gap);
   const below = Math.max(0, viewport.top + viewport.height - anchor.bottom - 2 * gap);
   const up = above >= below;
-  const maxHeight = Math.min(288, up ? above : below);
+  const maxHeight = Math.min(cap, up ? above : below);
   return { left, width, maxHeight, top: up ? anchor.top - gap : anchor.bottom + gap, up };
 }

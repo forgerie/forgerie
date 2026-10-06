@@ -17,6 +17,8 @@ The app resolves the session's `cwd` through `/api/sessions/all`, loads its hist
 
 Type `/` at the start of the composer to discover Pi commands. Select a command, add arguments, then Send. See [slash commands](verification/slash-commands.md) for behavior, endpoint checks, and the read-only `/tree` limit.
 
+The input bar shows the session's model and thinking level. Press it, or send `/model`, to change either one. See [model and thinking level](verification/model-thinking.md).
+
 When the agent hands off to a new session or spawns one, the reply shows an "Open session" button beside that call. See [handoff navigation](verification/handoff-navigation.md).
 
 Type `!command` to run a shell command in the session's folder, or `!!command` to keep its output out of the agent's context. See [shell commands](verification/shell.md) for behavior and limits, including that a running command cannot be stopped from this client yet.
