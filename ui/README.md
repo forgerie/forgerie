@@ -19,6 +19,8 @@ Type `/` at the start of the composer to discover Pi commands. Select a command,
 
 Type `/tree`, or press the tree button in the header, to move the session to an earlier entry or fork from it. See [session tree](verification/session-tree.md).
 
+Press the archive button in the header to archive the session and open the next one waiting for you. See [archive and next](verification/archive-next.md).
+
 The input bar shows the session's model and thinking level. Press it, or send `/model`, to change either one. See [model and thinking level](verification/model-thinking.md).
 
 When the agent hands off to a new session or spawns one, the reply shows an "Open session" button beside that call. See [handoff navigation](verification/handoff-navigation.md).

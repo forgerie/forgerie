@@ -60,8 +60,17 @@ export function createRowActions(deps: {
     finally { setPending(target.id, false); }
   }
 
+  /** Archive with the undo offer. True once the server confirms; false after a refusal or a duplicate. */
+  async function archive(target: Target): Promise<boolean> {
+    // A second archive replaces the first offer; the first archive stands.
+    const done = await guarded(target, () => deps.writes.setArchived({ id: target.id, cwd: target.cwd }, true));
+    if (done) show({ type: "undo", target });
+    return done;
+  }
+
   return {
     getSnapshot: () => state,
+    archive,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     async run(kind: RowCommandKind, target: Target): Promise<void> {
       const ref = { id: target.id, cwd: target.cwd };
@@ -70,8 +79,7 @@ export function createRowActions(deps: {
           await guarded(target, () => deps.writes.setPinned(ref, kind === "pin"));
           return;
         case "archive":
-          // A second archive replaces the first offer; the first archive stands.
-          if (await guarded(target, () => deps.writes.setArchived(ref, true))) show({ type: "undo", target });
+          await archive(target);
           return;
         case "restore":
           if (await guarded(target, () => deps.writes.setArchived(ref, false))) show({ type: "info", text: `Restored ${titleOf(target)}` });

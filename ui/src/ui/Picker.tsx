@@ -128,7 +128,8 @@ function RowMenu({ row, confirming, onConfirm, onRun, onClose }: {
   </div>;
 }
 
-function ToastLine({ toast, onUndo, onDismiss }: { toast: Toast; onUndo?: (() => void) | undefined; onDismiss?: (() => void) | undefined }) {
+/** The picker's message line. The shell also shows it over the thread while the sheet is closed. */
+export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo?: (() => void) | undefined; onDismiss?: (() => void) | undefined }) {
   return <div className="picker-toast" data-tone={toast.type === "error" ? "error" : undefined} role={toast.type === "error" ? "alert" : "status"}>
     <span>{toast.type === "undo" ? <>Archived <em>{toast.target.name ?? "Untitled session"}</em></> : toast.text}</span>
     {toast.type === "undo" && onUndo ? <button className="picker-toast-undo" onClick={onUndo}>Undo</button> : null}
@@ -258,6 +259,6 @@ export function Picker({ view, prefs, onPrefs, actions }: {
           </div>}
         </div>)}
     </div>}
-    {view.toast ? <ToastLine toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : null}
+    {view.toast ? <PickerToast toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : null}
   </section>;
 }

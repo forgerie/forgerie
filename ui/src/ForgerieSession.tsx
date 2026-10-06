@@ -19,10 +19,14 @@ import type { DraftStore } from "./draftStore";
 import { workingSend } from "./queue";
 import type { TreeOutcome } from "./sessionTree";
 import { SessionTreeNavigator, TreeOpener } from "./ui/SessionTreeNavigator";
+import { ArchiveNextButton } from "./ui/ArchiveNext";
+import type { ArchiveAvailability } from "./picker/archiveNext";
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSession }: {
+export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSession, archive }: {
   id: string; known?: Session | undefined; initialDraft?: string | undefined;
+  /** "Archive and next" from the catalog's view of this session. Absent: no button. */
+  archive?: { availability: ArchiveAvailability; onArchive: () => void } | undefined;
   /** Where unsent drafts outlive this view. Without it, they last only while the view is mounted. */
   drafts?: DraftStore | undefined;
   onSwitchSession: (session: Session, draft?: string) => void;
@@ -106,8 +110,14 @@ export function ForgerieSession({ id, known, initialDraft, drafts, onSwitchSessi
     <DictationProvider adapter={dictation}>
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}
-      actions={<TreeOpener idle={state.connection.type === "ready" && !state.sending && !state.transcript.isRunning}
-        onOpen={() => { void store.openTree().catch(() => { /* The store exposes the error. */ }); }} />}>
+      actions={<>
+        <TreeOpener idle={state.connection.type === "ready" && !state.sending && !state.transcript.isRunning}
+          onOpen={() => { void store.openTree().catch(() => { /* The store exposes the error. */ }); }} />
+        {archive && <ArchiveNextButton onArchive={archive.onArchive}
+          // The catalog's status can lag the live one; the server refuses an archive during any run.
+          availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
+            ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}
+      </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",

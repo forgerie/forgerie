@@ -576,7 +576,10 @@ summary.trace-line:hover { color: var(--foreground); }
    the homepage's shadcn Sheet: 18rem, page background, black/50 scrim. ---- */
 .app-shell { --picker-width: clamp(15rem, 22%, 18rem); position: relative; block-size: 100%; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
 .app-shell[data-layout="docked"] { grid-template-columns: var(--picker-width) minmax(0, 1fr); }
-.app-thread { min-inline-size: 0; min-block-size: 0; block-size: 100%; }
+.app-thread { position: relative; min-inline-size: 0; min-block-size: 0; block-size: 100%; }
+/* The undo offer over a closed sheet: under the header, across the reading column, never over the composer. */
+.app-toast { position: absolute; z-index: 20; inset-block-start: var(--header-size); inset-inline: 0; display: flex; justify-content: center; padding-inline: var(--gutter); pointer-events: none; }
+.app-toast > .picker-toast { pointer-events: auto; inline-size: min(100%, var(--thread-max-width)); margin-inline: 0; }
 .app-picker { min-inline-size: 0; min-block-size: 0; block-size: 100%; background: var(--background); }
 .app-shell[data-layout="docked"] .app-picker { background: var(--tint-surface); border-inline-end: 1px solid var(--line); }
 .app-shell[data-layout="overlay"] .app-picker { position: absolute; z-index: 3; inset-block: 0; inset-inline-start: 0; inline-size: min(18rem, calc(100% - 3rem)); border-inline-end: 1px solid var(--line); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transition: transform 300ms ease-in-out, visibility 300ms; }

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { attention, createLocationResolver, rows as boardRows, sections as boardSections, type Row } from "./picker/board";
+import { archiveAvailability, nextWaiting, type ArchiveAvailability } from "./picker/archiveNext";
 import { createCatalogStore } from "./picker/catalogStore";
 import type { RowCommandKind } from "./picker/commands";
 import { readPrefs, writePrefs, type PickerPrefs } from "./picker/prefs";
@@ -44,11 +45,36 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     const session = state.sessions.find((candidate) => candidate.id === id);
     return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}) } : undefined;
   }, [state.sessions]);
+  const latestRows = useRef(rows);
+  // Layout, not passive: a click right after a render must read that render's rows.
+  useLayoutEffect(() => { latestRows.current = rows; }, [rows]);
+  /** Whether the open session can be archived now. A write in flight on it counts as busy. */
+  const archiveState = useCallback((id: string): ArchiveAvailability => actionState.pending.has(id)
+    ? { type: "blocked", reason: "Archiving" } : archiveAvailability(rows.find((row) => row.session.id === id)), [rows, actionState.pending]);
+  /**
+   * Archive one session with the usual undo offer, then name the next session that wants
+   * the reader. Nothing moves when the server refuses; its reason shows in the message line.
+   */
+  const archiveAndNext = useCallback(async (id: string): Promise<ArchiveOutcome> => {
+    const row = latestRows.current.find((candidate) => candidate.session.id === id);
+    if (!row || archiveAvailability(row).type !== "ready") return { type: "refused" };
+    if (!await commands.archive({ id, cwd: row.session.cwd, name: row.session.name })) return { type: "refused" };
+    const next = nextWaiting(latestRows.current, id);
+    return next ? { type: "next", session: { id: next.session.id, cwd: next.session.cwd, ...(next.session.name ? { name: next.session.name } : {}) } }
+      : { type: "allClear" };
+  }, [commands]);
   const rowActions: Omit<PickerActions, "onSelect" | "onClose"> = useMemo(() => ({
     onRetry: store.retry,
     onCommand: (row: Row, kind: RowCommandKind) => void commands.run(kind, { id: row.session.id, cwd: row.session.cwd, name: row.session.name }),
     onUndo: () => void commands.undo(),
     onDismissToast: commands.dismiss,
   }), [store, commands]);
-  return { view, prefs, setPrefs, find, attention: attention(rows), actions: rowActions };
+  return { view, prefs, setPrefs, find, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext };
 }
+
+export type ArchiveOutcome =
+  | { type: "next"; session: { id: string; cwd: string; name?: string } }
+  /** Nothing else waits. */
+  | { type: "allClear" }
+  /** The server refused, or the session cannot be archived now. Nothing changed. */
+  | { type: "refused" };

@@ -24,6 +24,13 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("row actions", () => {
+  it("reports whether an archive went through, for callers that move on after it", async () => {
+    expect(await actions().store.archive(target)).toBe(true);
+    const refused = actions({ failWith: new MutationError("Stop current session activity before archiving", 400) });
+    expect(await refused.store.archive(target)).toBe(false);
+    expect(refused.store.getSnapshot().toast).toEqual({ type: "error", text: "Stop current session activity before archiving" });
+  });
+
   it("offers undo for five seconds after an archive", async () => {
     const { store, calls } = actions();
     await store.run("archive", target);
