@@ -54,6 +54,8 @@
 .agent-row-flags [data-on] { color: var(--foreground); }
 .agent-row-flags [data-on]::before { content: ""; display: inline-block; inline-size: 6px; block-size: 6px; margin-inline-end: var(--space-1); border-radius: 50%; background: var(--foreground); vertical-align: 0.1em; }
 .agent-row-flags [data-tone="draft"] { color: var(--live); }
+.agent-row-flags [data-tone="error"], .agent-chip[data-tone="error"] { color: var(--destructive); }
+.agent-chip[data-tone="error"] { border-color: color-mix(in oklab, var(--destructive) 40%, transparent); padding-inline-end: var(--space-2); }
 .agent-row[data-replaced] .agent-row-name, .agent-row[data-replaced] .agent-row-description { opacity: 0.6; }
 .agent-row-chevron { grid-area: chevron; align-self: center; color: var(--muted-foreground); }
 

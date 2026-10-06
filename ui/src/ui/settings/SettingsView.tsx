@@ -43,6 +43,7 @@ function AgentRow({ agent, replaced, onOpen }: { agent: AgentSummary; replaced: 
       <span className="agent-row-flags">
         {replaced ? <span>Replaced by yours</span> : agent.advertise ? <span data-on>Offered to sessions</span> : null}
         {agent.disabled ? <span>Turned off</span> : null}
+        {agent.broken ? <span data-tone="error">{agent.broken}</span> : null}
         {unsaved ? <span data-tone="draft">Unsaved changes</span> : null}
       </span>
       <ChevronRightIcon aria-hidden size={16} className="agent-row-chevron" />

@@ -83,7 +83,9 @@ async function list(dirs: AgentDirs) {
     const fields = summary(text);
     const file = relative(dir, path).slice(0, -".md".length).split(sep).join("/");
     return { scope, file, name: fields.name || file, description: fields.description ?? "", model: fields.model, thinking: fields.thinking,
-      advertise: fields.advertise === "true", disabled: fields.disabled === "true", mtimeMs: info.mtimeMs };
+      advertise: fields.advertise === "true", disabled: fields.disabled === "true", mtimeMs: info.mtimeMs,
+      // pi-subagents refuses the whole file when it lists fallbacks.
+      ...(fields.fallbackModels !== undefined ? { broken: "Lists fallbacks, so sessions cannot use it" } : {}) };
   })) : [];
   const [user, builtin] = await Promise.all([read("user", dirs.user), read("builtin", dirs.builtin)]);
   const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);

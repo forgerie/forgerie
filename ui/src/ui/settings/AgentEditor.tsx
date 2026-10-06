@@ -73,9 +73,7 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
   const [save, setSave] = useState<Save>({ type: "idle" });
   const [menu, setMenu] = useState<"closed" | "open" | "confirm">("closed");
   const [modelOpen, setModelOpen] = useState<PickerOpen>();
-  const [fallbackOpen, setFallbackOpen] = useState<PickerOpen>();
   const modelAnchor = useRef<HTMLDivElement>(null);
-  const fallbackAnchor = useRef<HTMLDivElement>(null);
   const { models, list: listModels } = useModels(home);
 
   const open = useCallback(async (signal?: AbortSignal, ignoreDraft = false) => {
@@ -135,6 +133,7 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
   const problems = [
     !name.trim() ? "Give the agent a name." : undefined,
     advertise && !fields.description?.trim() ? "Sessions choose an offered agent by its description. Describe the work it is for." : undefined,
+    fields.fallbackModels !== undefined ? "Remove the fallbacks, or sessions cannot use this agent." : undefined,
   ].filter((item): item is string => item !== undefined);
 
   async function onSave() {
@@ -193,15 +192,8 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
       update("thinking", level);
     },
   };
+  // pi-subagents 0.76 removed fallbacks: a file that still has them does not load at all.
   const fallbacks = parseList(fields.fallbackModels);
-  const fallbackBinding: ModelBinding = {
-    disabled: readOnly, thinking: false, emptyLabel: "Add a fallback", listModels, listThinkingLevels: async () => [],
-    onModel: async (provider, id) => {
-      const next = `${provider}/${id}`;
-      if (!fallbacks.includes(next)) update("fallbackModels", [...fallbacks, next].join(", "));
-    },
-    onThinkingLevel: async () => { /* Fallbacks follow the agent's thinking level. */ },
-  };
   // A field's block lines belong to it, so they leave with it above.
   const otherLines = useMemo(() => {
     const keep: string[] = [];
@@ -255,19 +247,12 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
             {fields.model && !readOnly ? <button type="button" className="agent-text-button" onClick={() => { update("model", undefined); }}>Use the session's model</button> : null}
           </div>
         </Field>
-        <Field label="Fallbacks" hint={fallbacks.length > 0 ? "Tried in order when the model is out of quota or unavailable." : undefined}>
-          <div ref={fallbackAnchor} className="agent-chips">
-            {fallbacks.map((item, index) => <span key={item} className="agent-chip">
-              <span>{modelLabel(resolveModel(item, models))}</span>
-              {readOnly ? null : <button type="button" aria-label={`Remove ${item}`} onClick={() => {
-                const next = fallbacks.filter((_, at) => at !== index);
-                update("fallbackModels", next.length > 0 ? next.join(", ") : undefined);
-              }}><XIcon aria-hidden size={12} /></button>}
-            </span>)}
-            {readOnly ? (fallbacks.length === 0 ? <span className="agent-none">None</span> : null)
-              : <ModelPicker binding={fallbackBinding} anchor={fallbackAnchor} open={fallbackOpen} onOpenChange={setFallbackOpen} />}
+        {fields.fallbackModels !== undefined ? <Field label="Fallbacks" hint={<>Sessions cannot use this agent while the file lists fallbacks. pi-subagents dropped them: each run uses one model.</>}>
+          <div className="agent-chips">
+            {fallbacks.map((item) => <span key={item} className="agent-chip" data-tone="error"><span>{modelLabel(resolveModel(item, models))}</span></span>)}
+            {readOnly ? null : <button type="button" className="agent-text-button" onClick={() => update("fallbackModels", undefined)}>Remove fallbacks</button>}
           </div>
-        </Field>
+        </Field> : null}
         <Field label="Offer to sessions" id="agent-advertise" hint={advertise
           ? "Every new session sees this agent's name and description, and hands it matching work without being told."
           : "Sessions use this agent only when someone names it."}>
@@ -278,7 +263,7 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
           <pre className="agent-other">{otherLines.join("\n")}</pre>
         </Field> : null}
       </div>
-      {problems.length > 0 && !readOnly && dirty ? <ul className="agent-problems" role="status">{problems.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+      {problems.length > 0 && !readOnly && (dirty || fields.fallbackModels !== undefined) ? <ul className="agent-problems" role="status">{problems.map((item) => <li key={item}>{item}</li>)}</ul> : null}
 
       <h2 className="agent-section">Instructions</h2>
       <PromptEditor key={revision} initial={file.body} readOnly={readOnly} label="Instructions" onChange={onBody} />

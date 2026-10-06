@@ -9,6 +9,7 @@ const agentSummarySchema = z.object({
   thinking: z.string().optional(),
   advertise: z.boolean(),
   disabled: z.boolean(),
+  broken: z.string().optional(),
   mtimeMs: z.number(),
 });
 export type AgentSummary = z.infer<typeof agentSummarySchema>;
