@@ -16,6 +16,12 @@ import { BacklogClaimStore } from "./backlog/backlogClaimStore.js";
 import { BacklogService } from "./backlog/backlogService.js";
 import { registerBacklogRoutes } from "./backlog/backlogRoutes.js";
 import { withBacklogClaimRelease } from "./backlog/backlogArchive.js";
+import { markdownBacklogProvider } from "./backlog/markdownBacklog.js";
+import { createGitHubBacklogProvider } from "./backlog/githubBacklog.js";
+import { GitHubAuth } from "./github/githubAuth.js";
+import { GitHubAuthStore } from "./github/githubAuthStore.js";
+import { GitHubIssueClient } from "./github/githubIssues.js";
+import { registerGitHubRoutes } from "./github/githubRoutes.js";
 import { defaultSessionNameIndexFilePath } from "./sessions/sessionNameIndex.js";
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
 import { registerProcessRoutes } from "./sessions/processRoutes.js";
@@ -100,6 +106,10 @@ async function createSessionDaemonRuntime() {
   const backlogClaims = new BacklogClaimStore(join(piWebDataDir(daemonEnvironment), "backlog-claims.json"));
   await backlogClaims.initialize();
   await backlogClaims.releaseSessions((await archiveStore.list()).map((record) => record.sessionId));
+  const githubStore = new GitHubAuthStore(join(piWebDataDir(daemonEnvironment), "github-auth.json"));
+  await githubStore.initialize();
+  const github = new GitHubAuth({ store: githubStore, fetch: (input, init) => fetch(input, init), log: app.log });
+  const githubIssues = new GitHubIssueClient({ auth: github, fetch: (input, init) => fetch(input, init), appSlug: () => githubStore.read().app?.slug });
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
   const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
   const workspaceActivity = new WorkspaceActivityService(eventHub);
@@ -177,12 +187,14 @@ async function createSessionDaemonRuntime() {
     activeAgentProfile,
   });
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
-  const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id) });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog };
+  const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
+    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })] });
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
+  registerGitHubRoutes(app, github);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
   registerSessionWorktreeRoutes(app, userSessions);

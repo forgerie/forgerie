@@ -58,8 +58,12 @@ function parseProjectPiWebConfig(value: Record<string, unknown>, path: string): 
 }
 
 function parseBacklogConfig(value: unknown, path: string): BacklogConfig {
-  if (!Check(BacklogConfigSchema, value) || isAbsolute(value.dir) || value.dir.split("/").includes("..") || /[\\\\\0]/.test(value.dir) || value.dir.trim() === "") {
+  const dir: unknown = isRecord(value) ? value["dir"] : undefined;
+  if (dir !== undefined && (typeof dir !== "string" || isAbsolute(dir) || dir.split("/").includes("..") || /[\\\\\0]/.test(dir) || dir.trim() === "")) {
     throw new Error(`backlog.dir must be a non-empty relative path inside the project: ${path}`);
+  }
+  if (!Check(BacklogConfigSchema, value)) {
+    throw new Error(`backlog must be an object with optional dir, providers ("markdown", "github"), and github { repo: "owner/name", authors: "trusted" | "all" }: ${path}`);
   }
   return value;
 }

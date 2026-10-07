@@ -2,7 +2,19 @@ import { Type, type Static } from "typebox";
 import { UserSessionStartSchema } from "./sessionWorktree.js";
 
 const text = Type.String({ minLength: 1, maxLength: 4096 });
-export const BacklogConfigSchema = Type.Object({ dir: text }, { additionalProperties: false });
+/** Which issue authors a GitHub backlog lists. `trusted` means the repo's owner, members, and collaborators. */
+export const BacklogGitHubAuthorsSchema = Type.Union([Type.Literal("trusted"), Type.Literal("all")]);
+export const BacklogGitHubConfigSchema = Type.Object({
+  /** `owner/name`. Overrides the repo read from the project's `origin` remote. */
+  repo: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$" })),
+  authors: Type.Optional(BacklogGitHubAuthorsSchema),
+}, { additionalProperties: false });
+export const BacklogConfigSchema = Type.Object({
+  dir: Type.Optional(text),
+  /** Providers this project lists. Omitted means markdown only. */
+  providers: Type.Optional(Type.Array(Type.Union([Type.Literal("markdown"), Type.Literal("github")]), { minItems: 1, maxItems: 2, uniqueItems: true })),
+  github: Type.Optional(BacklogGitHubConfigSchema),
+}, { additionalProperties: false });
 export type BacklogConfig = Static<typeof BacklogConfigSchema>;
 
 export const BacklogMetadataSchema = Type.Object({
@@ -37,7 +49,11 @@ export type BacklogClaim = Static<typeof BacklogClaimSchema>;
 export const BacklogItemSchema = Type.Object({
   ...BacklogMetadataSchema.properties,
   provider: BacklogProviderIdSchema,
-  projectId: text, projectName: text, repo: text, path: text,
+  projectId: text, projectName: text, repo: text,
+  /** Where the item lives inside its provider: a repo-relative file for markdown, `owner/name#42` for GitHub. */
+  path: text,
+  /** A web page for the item, when the provider has one. */
+  url: Type.Optional(Type.String({ pattern: "^https://", maxLength: 4096 })),
   status: text, labels: Type.Array(text), blocked_by: Type.Array(text),
   open: Type.Boolean(),
   readiness: Type.Union([Type.Literal("ready"), Type.Literal("blocked"), Type.Literal("claimed"), Type.Literal("closed")]),
@@ -48,7 +64,16 @@ export type BacklogItem = Static<typeof BacklogItemSchema>;
 
 export const BacklogWarningSchema = Type.Object({
   projectId: text, path: text,
-  kind: Type.Union([Type.Literal("ignored-directory"), Type.Literal("invalid-item"), Type.Literal("project-error"), Type.Literal("scan-limit")]),
+  kind: Type.Union([
+    Type.Literal("ignored-directory"), Type.Literal("invalid-item"), Type.Literal("project-error"), Type.Literal("scan-limit"),
+    /** The provider needs a login before it can list items. The fix is to connect, not to edit files. */
+    Type.Literal("provider-auth"),
+    /** The provider could not list items: no access, no remote, rate limited, or offline. The message names the fix. */
+    Type.Literal("provider-unavailable"),
+    /** Some items were left out on purpose, such as issues from untrusted authors. */
+    Type.Literal("items-hidden"),
+  ]),
+  provider: Type.Optional(BacklogProviderIdSchema),
   message: Type.String(),
 });
 export type BacklogWarning = Static<typeof BacklogWarningSchema>;

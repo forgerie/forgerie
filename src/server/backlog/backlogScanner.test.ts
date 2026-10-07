@@ -85,6 +85,7 @@ describe("project backlog scanner", () => {
   });
   it("keeps the same id from two providers as two items and overlays a claim only on its own provider", async () => {
     const project = await fixture();
+    await file(join(project.path, ".forgerie/config.json"), JSON.stringify({ backlog: { providers: ["markdown", "github"] } }));
     await file(join(project.path, ".forgerie/backlog/b.md"), item("b"));
     const other = "github";
     const second: BacklogProvider = {
@@ -96,13 +97,24 @@ describe("project backlog scanner", () => {
     const result = await scanProjectBacklog(project, [claim], [markdownBacklogProvider, second]);
     expect(result.entries.map(({ item: entry }) => [entry.provider, entry.id, entry.readiness])).toEqual([["markdown", "b", "claimed"], [other, "b", "ready"]]);
   });
+  it("runs only the providers a project turns on, markdown when it names none", async () => {
+    const project = await fixture();
+    await file(join(project.path, ".forgerie/backlog/a.md"), item("a"));
+    let remote = 0;
+    const github: BacklogProvider = { id: "github", prompt: () => "", scan: () => { remote++; return Promise.resolve({ entries: [], warnings: [] }); } };
+    expect((await scanProjectBacklog(project, [], [markdownBacklogProvider, github])).entries).toHaveLength(1);
+    expect(remote).toBe(0);
+    await file(join(project.path, ".forgerie/config.json"), JSON.stringify({ backlog: { providers: ["github"] } }));
+    expect((await scanProjectBacklog(project, [], [markdownBacklogProvider, github])).entries).toEqual([]);
+    expect(remote).toBe(1);
+  });
   it("reports a failing provider without hiding another provider's items", async () => {
     const project = await fixture();
     await file(join(project.path, ".forgerie/backlog/a.md"), item("a"));
     const failing: BacklogProvider = { id: "markdown", prompt: () => "", scan: () => Promise.reject(new Error("Remote unavailable")) };
     const result = await scanProjectBacklog(project, [], [failing, markdownBacklogProvider]);
     expect(result.entries.map(({ item: entry }) => entry.id)).toEqual(["a"]);
-    expect(result.warnings).toMatchObject([{ kind: "project-error", message: "Remote unavailable" }]);
+    expect(result.warnings).toMatchObject([{ kind: "project-error", provider: "markdown", message: "Remote unavailable" }]);
   });
   it("returns an empty result for a missing default directory", async () => {
     expect(await scanProjectBacklog(await fixture(), [])).toEqual({ entries: [], warnings: [] });

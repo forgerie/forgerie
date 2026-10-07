@@ -49,6 +49,7 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   app.all(`${prefix}/prompts`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/backlog`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/backlog/*`, (request, reply) => proxy(request, reply));
+  app.all(`${prefix}/github/*`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/sessions`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/sessions/*`, (request, reply) => proxy(request, reply));
 }

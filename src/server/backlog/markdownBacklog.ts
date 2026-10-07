@@ -3,10 +3,9 @@ import { constants } from "node:fs";
 import { open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
-import type { BacklogWarning, Project } from "../../shared/apiTypes.js";
+import type { BacklogConfig, BacklogWarning, Project } from "../../shared/apiTypes.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { isGitRepository } from "../workspaces/gitWorktreeDiscovery.js";
-import { loadProjectPiWebConfig } from "../workspaces/projectPiWebConfig.js";
 import { backlogErrorMessage, isMissingFile } from "./backlogError.js";
 import { isOpenBacklogStatus, parseBacklogItem } from "./backlogItem.js";
 import type { BacklogProvider, BacklogProviderScan, ScannedBacklogItem } from "./backlogProvider.js";
@@ -23,13 +22,11 @@ export const markdownBacklogProvider: BacklogProvider = {
   prompt: ({ item, body }) => `This is backlog item ${item.id}.\n\n${body}`,
 };
 
-async function scanMarkdownBacklog(project: Project, repo: string): Promise<BacklogProviderScan> {
+async function scanMarkdownBacklog(project: Project, repo: string, config: BacklogConfig | undefined): Promise<BacklogProviderScan> {
   const warnings: BacklogWarning[] = [];
   const entries: ScannedBacklogItem[] = [];
-  const warn = (kind: BacklogWarning["kind"], path: string, message: string) => { warnings.push({ projectId: project.id, kind, path, message }); };
-  await assertContainedFile(repo, join(repo, ".forgerie/config.json"));
-  const loaded = await loadProjectPiWebConfig(repo);
-  const directory = join(repo, loaded.config.backlog?.dir ?? DEFAULT_BACKLOG_DIRECTORY);
+  const warn = (kind: BacklogWarning["kind"], path: string, message: string) => { warnings.push({ projectId: project.id, provider: "markdown", kind, path, message }); };
+  const directory = join(repo, config?.dir ?? DEFAULT_BACKLOG_DIRECTORY);
   await assertContainedFile(repo, directory);
   if (await isGitRepository(repo) && await ignoredByGit(repo, directory)) {
     warn("ignored-directory", directory, "Backlog directory is git-ignored; items are still served. For a .forgerie/ ignore, replace it with .forgerie/* and !.forgerie/backlog/. For an override, remove or narrow the matching ignore rule.");
@@ -79,7 +76,7 @@ async function scanMarkdownBacklog(project: Project, repo: string): Promise<Back
   return { entries: unique, warnings };
 }
 
-async function assertContainedFile(root: string, path: string): Promise<void> {
+export async function assertContainedFile(root: string, path: string): Promise<void> {
   try {
     const resolved = await realpath(path);
     const rel = relative(root, resolved);

@@ -158,7 +158,7 @@ The scanner reads markdown files recursively. Frontmatter requires string `id` a
 
 Missing status means `To Do`. `done`, `completed`, `closed`, `cancelled`, and `canceled` are closed, without case sensitivity. An open item is blocked when a `blocked_by` ID names another open item in the same project. Missing or closed dependency IDs do not block. A claim overrides the displayed readiness, even when the file's status says closed. The file's status remains unchanged.
 
-Every item carries a `provider`, which names where it comes from. Today the only provider is `markdown`, the directory scanner described above. Do not confuse it with the frontmatter `source` field, which records who captured a markdown item. Forgerie identifies an item by its canonical project, provider, and `id`, so the same `id` from two providers is two items with separate claims. Item routes accept `?provider=`. Omit it to select `markdown`. A provider that is not enabled on this host returns `404`, and a malformed name returns `400`. Release accepts any provider name, so a claim stays recoverable after its provider is disabled.
+Every item carries a `provider`, which names where it comes from: `markdown`, the directory scanner described above, or `github`, described in [GitHub issues](#github-issues). Do not confuse it with the frontmatter `source` field, which records who captured a markdown item. Forgerie identifies an item by its canonical project, provider, and `id`, so the same `id` from two providers is two items with separate claims. Item routes accept `?provider=`. Omit it to select `markdown`. A provider that is not enabled on this host returns `404`, and a malformed name returns `400`. Release accepts any provider name, so a claim stays recoverable after its provider is disabled.
 
 | Endpoint | Behavior |
 | --- | --- |
@@ -172,6 +172,44 @@ Launch returns `{ session: { id, cwd }, claim, initialPrompt, reused }`. The com
 Claims live in `backlog-claims.json` in Forgerie's data directory, normally `~/.local/share/forgerie/`, or `$PI_WEB_DATA_DIR`. The daemon owns the store. A claim records the item and its provider, project, request, session, workspace, branch when available, and claim time. Claims written before `provider` existed load as `markdown` claims. Launch reserves the item before creating the session; a rejected creation releases the reservation. Archive and archived-session deletion release ownership, including bulk cleanup. Restore does not reclaim an item. No operation rewrites, moves, or mirrors a claim into the item file.
 
 If the daemon restarts during creation, the reservation becomes `interrupted` and still blocks another launch. Inspect the worktree setup and any session first. Then release the exact `claimId` before retrying. Claims have no lease or expiry. File-only readers cannot see claims, and separate Forgerie hosts do not share claim ownership.
+
+### GitHub issues
+
+A project lists the open issues of its GitHub repo when its `.forgerie/config.json` turns the `github` provider on:
+
+```json
+{
+  "backlog": {
+    "providers": ["markdown", "github"],
+    "github": { "repo": "korri-os/korri", "authors": "trusted" }
+  }
+}
+```
+
+`providers` lists the providers the project uses. Omitted, it is `["markdown"]`. `github.repo` is optional: without it, Forgerie reads the repo from the checkout's `origin` remote when that remote is on github.com. Forgerie reads only `origin`, never `upstream` or another remote. `github.authors` is `trusted` by default, which lists issues opened by the repo's owner, members, and collaborators. Set it to `all` to list issues from anyone. Each item's `id` is the issue number, its `path` is `owner/name#number`, and its `url` is the issue page. Pull requests are left out.
+
+GitHub issue text is untrusted. On a public repo, anyone can open an issue, and a launched session receives the issue as its first prompt. Forgerie therefore hides outside contributors' issues by default and reports how many it hid with an `items-hidden` warning. The first prompt also quotes the title and body between markers and tells the agent to treat them as a description of a problem, not as instructions. These measures reduce the risk; they do not remove it. Read an issue before you launch it.
+
+Forgerie only reads from GitHub. It never comments, assigns, labels, or closes an issue. A claim stays in Forgerie's store, the same as for markdown items.
+
+Forgerie reuses a repo's issue list for one minute, then asks again with the list's ETag; GitHub does not count an unchanged answer against the rate limit. It sends one GitHub request at a time and reads at most 500 open issues and pull requests per repo. When GitHub is unreachable or rate limited, the list keeps the last good result and a `provider-unavailable` warning says how old it is. A login problem produces a `provider-auth` warning; other failures, such as no access to the repo or no GitHub remote, produce `provider-unavailable` warnings that name the fix.
+
+#### GitHub login
+
+Forgerie logs in to GitHub through a GitHub App that you register once. The app needs only read access to issues. Forgerie uses the app's public client ID and the device flow: Forgerie shows a code, and you approve it at github.com/login/device from any device. Forgerie never holds the app's client secret or private key.
+
+Register the app with `scripts/github-app-wizard.sh`. It opens GitHub's registration page with a name, homepage, public visibility, no webhook, and `Issues: Read-only` filled in. GitHub has no registration parameter for Device Flow, so you tick "Enable Device Flow" yourself; the wizard tells you where. The app must be public to install it on an organization that does not own it. A public app with no secret, key, or webhook gives nobody else access to your data. Install the app on each account or organization whose repos you want listed. The wizard then sends the client ID to Forgerie.
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /api/github/auth` | Return the login state: `not-configured`, `disconnected` with an optional `reason`, `pending` with `userCode` and `verificationUri`, or `connected` with `login`. |
+| `PUT /api/github/app` | Set the app with `{ clientId, slug? }`. The slug comes from `https://github.com/apps/<slug>` and makes access warnings include an install link. A different client ID ends the current login. |
+| `POST /api/github/auth/login` | Start a device-flow login and return the `pending` state at once. Forgerie polls GitHub in the background. |
+| `DELETE /api/github/auth` | Forget the login. GitHub still lists the authorization until you revoke it at github.com/settings/apps/authorizations. |
+
+These routes also exist under `/api/machines/local` and the federated machine prefix. Each machine's daemon scans its own projects, so each machine holds its own login.
+
+The login lives in `github-auth.json` in Forgerie's data directory with owner-only permissions (`0600`). No response from Forgerie contains a token. GitHub user tokens expire after 8 hours, and Forgerie renews them with the refresh token, which expires after 6 months. Each renewal issues a new refresh token, so a daemon that runs at least once every 6 months stays logged in. If the refresh token expires, GitHub refuses a renewal, or GitHub rejects the token, Forgerie forgets the login and the backlog shows a `provider-auth` warning. A network failure during renewal keeps the login.
 
 ## Worktree pre-remove hook
 

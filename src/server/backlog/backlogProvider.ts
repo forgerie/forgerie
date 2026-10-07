@@ -1,4 +1,4 @@
-import type { BacklogItem, BacklogProviderId, BacklogWarning, Project } from "../../shared/apiTypes.js";
+import type { BacklogConfig, BacklogItem, BacklogProviderId, BacklogWarning, Project } from "../../shared/apiTypes.js";
 
 export interface ScannedBacklogItem { item: BacklogItem; body: string }
 export interface BacklogProviderScan { entries: ScannedBacklogItem[]; warnings: BacklogWarning[] }
@@ -9,8 +9,11 @@ export interface BacklogProviderScan { entries: ScannedBacklogItem[]; warnings: 
  */
 export interface BacklogProvider {
   readonly id: BacklogProviderId;
-  /** `repo` is the canonical checkout root. A thrown error becomes one project-error warning. */
-  scan(project: Project, repo: string): Promise<BacklogProviderScan>;
+  /**
+   * `repo` is the canonical checkout root; `config` is the project's `backlog` settings, already validated.
+   * A thrown error becomes one project-error warning.
+   */
+  scan(project: Project, repo: string, config: BacklogConfig | undefined): Promise<BacklogProviderScan>;
   /** The first prompt for a session dedicated to this item. */
   prompt(entry: ScannedBacklogItem): string;
 }
