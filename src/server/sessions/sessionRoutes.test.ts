@@ -780,6 +780,14 @@ describe("session routes", () => {
       expect(promptResponse.statusCode).toBe(200);
       expect(routeService.calls.at(-1)).toEqual({ lookup: { id: "session-1", cwd: resolve("/repo") }, text: "look", attachments });
 
+      const annotated = await routeApp.inject({ method: "POST", url: "/sessions/session-1/prompt", payload: {
+        cwd: "/repo", text: "look", attachments,
+        diffAnnotations: [{ path: "src/retry.ts", staged: false, comment: "Keep retries.", lines: [{ kind: "add", newLineNumber: 8, text: "retry();" }] }],
+      } });
+      expect(annotated.statusCode).toBe(200);
+      const expectedText: unknown = expect.stringContaining("Keep retries.");
+      expect(routeService.calls.at(-1)).toEqual({ lookup: { id: "session-1", cwd: resolve("/repo") }, text: expectedText, attachments });
+
       const saveResponse = await routeApp.inject({ method: "POST", url: "/sessions/session-1/attachments", payload: { cwd: "/repo", attachments, folder: "uploads" } });
       expect(saveResponse.statusCode).toBe(200);
       expect(saveResponse.json()).toEqual({ attachments: [{ path: "uploads/shot.png", mimeType: "image/png", size: 3 }] });

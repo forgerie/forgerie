@@ -28,6 +28,16 @@ describe("machine-scoped session proxy routes", () => {
     expect(daemon.requests).toEqual([{ method: "GET", path: "/sessions?cwd=/repo", body: undefined }]);
   });
 
+  it("forwards structured diff annotations unchanged to the session daemon", async () => {
+    const payload = {
+      cwd: "/repo", text: "Fix", streamingBehavior: "followUp",
+      diffAnnotations: [{ path: "src/retry.ts", staged: false, comment: "Keep retries.", lines: [{ kind: "add", newLineNumber: 8, text: "retry();" }] }],
+    };
+    const response = await app.inject({ method: "POST", url: "/api/machines/local/sessions/session-1/prompt", payload });
+    expect(response.statusCode).toBe(200);
+    expect(daemon.requests).toEqual([{ method: "POST", path: "/sessions/session-1/prompt", body: payload }]);
+  });
+
   it("forwards queue-clear mutations and their status through the session daemon", async () => {
     const status = { sessionId: "session-1", pendingMessageCount: 0, queuedMessages: [] };
     daemon.respondWith({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(status) });

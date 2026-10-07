@@ -7,6 +7,7 @@ import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { normalizeSessionCleanupRequest } from "./sessionCleanup.js";
 import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
+import { composeDiffAnnotationPrompt } from "./promptDiffAnnotations.js";
 
 interface SessionQuery {
   cwd?: string;
@@ -23,6 +24,10 @@ interface PromptRequestBody {
   text?: unknown;
   streamingBehavior?: unknown;
   attachments?: unknown;
+}
+
+interface AnnotatedPromptRequestBody extends PromptRequestBody {
+  diffAnnotations?: unknown;
 }
 
 interface PromptResourceCommandRequestBody extends PromptRequestBody {
@@ -309,10 +314,11 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
-  app.post<{ Params: { sessionId: string }; Body: PromptRequestBody | undefined }>(`${prefix}/sessions/:sessionId/prompt`, async (request, reply) => {
+  app.post<{ Params: { sessionId: string }; Body: AnnotatedPromptRequestBody | undefined }>(`${prefix}/sessions/:sessionId/prompt`, async (request, reply) => {
     try {
       const body = optionalRecord(request.body);
-      await sessions.prompt(sessionRefFromBody(request.params.sessionId, body), body["text"], body["streamingBehavior"], body["attachments"]);
+      const text = composeDiffAnnotationPrompt(body["text"], body["diffAnnotations"]);
+      await sessions.prompt(sessionRefFromBody(request.params.sessionId, body), text, body["streamingBehavior"], body["attachments"]);
       return { accepted: true };
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
