@@ -3,11 +3,19 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import { BacklogClaimSchema, type BacklogClaim } from "../../shared/backlog.js";
+import { BacklogClaimSchema, type BacklogClaim, type BacklogProviderId } from "../../shared/backlog.js";
 import { BacklogError, isMissingFile } from "./backlogError.js";
 
 const FileSchema = Type.Object({ version: Type.Literal(1), claims: Type.Array(BacklogClaimSchema) }, { additionalProperties: false });
 type Reservation = Extract<BacklogClaim, { kind: "launching" }>;
+/** An item's identity across providers. The same id from two providers is two items. */
+export interface BacklogItemKey { repo: string; provider: BacklogProviderId; itemId: string }
+const sameItem = (claim: BacklogClaim, key: BacklogItemKey) => claim.repo === key.repo && claim.provider === key.provider && claim.itemId === key.itemId;
+/** Claims written before providers existed carry no provider; every one of them was markdown. */
+const withProvider = (value: unknown): unknown => {
+  if (typeof value !== "object" || value === null || !("claims" in value) || !Array.isArray(value.claims)) return value;
+  return { ...value, claims: value.claims.map((claim: unknown) => typeof claim === "object" && claim !== null && !("provider" in claim) ? { ...claim, provider: "markdown" } : claim) };
+};
 
 /** Single daemon owner; serialize mutations and publish only after atomic disk replacement. */
 export class BacklogClaimStore {
@@ -18,10 +26,10 @@ export class BacklogClaimStore {
   async initialize(): Promise<void> {
     if (this.path === undefined) return;
     let value: unknown;
-    try { value = JSON.parse(await readFile(this.path, "utf8")); }
+    try { value = withProvider(JSON.parse(await readFile(this.path, "utf8"))); }
     catch (error) { if (isMissingFile(error)) return; throw error; }
     if (!Check(FileSchema, value)) throw new Error("Invalid backlog claim file");
-    const identities = value.claims.map((claim) => JSON.stringify([claim.repo, claim.itemId]));
+    const identities = value.claims.map((claim) => JSON.stringify([claim.repo, claim.provider, claim.itemId]));
     if (new Set(identities).size !== identities.length || new Set(value.claims.map((claim) => claim.claimId)).size !== identities.length) throw new Error("Duplicate backlog claims");
     this.claims = value.claims;
     // A killed launch is not still running. Retain ownership until explicit guarded recovery.
@@ -30,12 +38,12 @@ export class BacklogClaimStore {
     }
   }
   list(): Promise<BacklogClaim[]> { return Promise.resolve(structuredClone(this.claims)); }
-  get(repo: string, itemId: string): Promise<BacklogClaim | undefined> {
-    return Promise.resolve(structuredClone(this.claims.find((claim) => claim.repo === repo && claim.itemId === itemId)));
+  get(key: BacklogItemKey): Promise<BacklogClaim | undefined> {
+    return Promise.resolve(structuredClone(this.claims.find((claim) => sameItem(claim, key))));
   }
   reserve(input: Omit<Reservation, "kind" | "claimId" | "claimedAt">): Promise<Reservation> {
     return this.exclusive(async () => {
-      const existing = await this.get(input.repo, input.itemId);
+      const existing = await this.get(input);
       if (existing !== undefined) throw new BacklogError("conflict", "Backlog item already has a claim", existing);
       const claim: Reservation = { ...input, kind: "launching", claimId: randomUUID(), claimedAt: new Date().toISOString() };
       await this.persist([...this.claims, claim]);
@@ -51,9 +59,9 @@ export class BacklogClaimStore {
       return structuredClone(claim);
     });
   }
-  release(repo: string, itemId: string, claimId: string, allowLaunching = false): Promise<void> {
+  release(key: BacklogItemKey, claimId: string, allowLaunching = false): Promise<void> {
     return this.exclusive(async () => {
-      const current = await this.get(repo, itemId);
+      const current = await this.get(key);
       if (current === undefined) return;
       if (current.claimId !== claimId) throw new BacklogError("conflict", "Claim changed; refresh before releasing", current);
       if (current.kind === "launching" && !allowLaunching) throw new BacklogError("conflict", "Wait for the launch to finish", current);

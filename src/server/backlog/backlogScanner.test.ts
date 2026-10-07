@@ -6,7 +6,9 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BacklogClaim, Project } from "../../shared/apiTypes.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
+import type { BacklogProvider } from "./backlogProvider.js";
 import { canonicalBacklogRoot, scanProjectBacklog } from "./backlogScanner.js";
+import { markdownBacklogProvider } from "./markdownBacklog.js";
 
 const execute = promisify(execFile);
 const directories: string[] = [];
@@ -32,7 +34,7 @@ describe("project backlog scanner", () => {
     await file(join(project.path, "work/items/active/b.md"), item("b"));
     await file(join(project.path, "work/items/done.md"), item("done", "status: Done\n"));
     await file(join(project.path, ".forgerie/backlog/not-selected.md"), item("ignored"));
-    const claim: BacklogClaim = { kind: "claimed", projectId: "p1", itemId: "b", claimId: "claim", requestId: "request", fingerprint: "hash", repo: project.path, sessionId: "session", cwd: project.path, claimedAt: "2026-09-01" };
+    const claim: BacklogClaim = { kind: "claimed", projectId: "p1", provider: "markdown", itemId: "b", claimId: "claim", requestId: "request", fingerprint: "hash", repo: project.path, sessionId: "session", cwd: project.path, claimedAt: "2026-09-01" };
     const before = await git(project.path, "status", "--porcelain", "--untracked-files=all");
     const result = await scanProjectBacklog(project, [claim]);
     expect(result.warnings).toEqual([]);
@@ -80,6 +82,27 @@ describe("project backlog scanner", () => {
     await file(join(project.path, ".forgerie/config.json"), JSON.stringify({ backlog: { dir: "../outside" } }));
     expect((await scanProjectBacklog(project, [])).warnings[0]?.kind).toBe("project-error");
     expect(await readFile(external, "utf8")).toBe(item("external"));
+  });
+  it("keeps the same id from two providers as two items and overlays a claim only on its own provider", async () => {
+    const project = await fixture();
+    await file(join(project.path, ".forgerie/backlog/b.md"), item("b"));
+    const other = "github";
+    const second: BacklogProvider = {
+      id: other, prompt: () => "",
+      scan: (scanned, repo) => Promise.resolve({ warnings: [], entries: [{ body: "", item: { id: "b", title: "Remote b", provider: other, projectId: scanned.id,
+        projectName: scanned.name, repo, path: "#b", status: "open", labels: [], blocked_by: [], open: true, readiness: "ready", blockingIds: [] } }] }),
+    };
+    const claim: BacklogClaim = { kind: "claimed", projectId: "p1", provider: "markdown", itemId: "b", claimId: "claim", requestId: "request", fingerprint: "hash", repo: project.path, sessionId: "session", cwd: project.path, claimedAt: "2026-09-01" };
+    const result = await scanProjectBacklog(project, [claim], [markdownBacklogProvider, second]);
+    expect(result.entries.map(({ item: entry }) => [entry.provider, entry.id, entry.readiness])).toEqual([["markdown", "b", "claimed"], [other, "b", "ready"]]);
+  });
+  it("reports a failing provider without hiding another provider's items", async () => {
+    const project = await fixture();
+    await file(join(project.path, ".forgerie/backlog/a.md"), item("a"));
+    const failing: BacklogProvider = { id: "markdown", prompt: () => "", scan: () => Promise.reject(new Error("Remote unavailable")) };
+    const result = await scanProjectBacklog(project, [], [failing, markdownBacklogProvider]);
+    expect(result.entries.map(({ item: entry }) => entry.id)).toEqual(["a"]);
+    expect(result.warnings).toMatchObject([{ kind: "project-error", message: "Remote unavailable" }]);
   });
   it("returns an empty result for a missing default directory", async () => {
     expect(await scanProjectBacklog(await fixture(), [])).toEqual({ entries: [], warnings: [] });

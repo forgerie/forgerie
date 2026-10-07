@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import type { BacklogDetailResponse, BacklogLaunchRequest, BacklogLaunchResponse, BacklogListResponse, BacklogReleaseRequest, BacklogReleaseResponse } from "../../shared/apiTypes.js";
+import type { BacklogDetailResponse, BacklogLaunchRequest, BacklogLaunchResponse, BacklogListResponse, BacklogProviderId, BacklogReleaseRequest, BacklogReleaseResponse } from "../../shared/apiTypes.js";
 import type { ProjectService } from "../projects/projectService.js";
 import type { UserSessionWorktrees } from "../workspaces/sessionWorktreeRoutes.js";
 import type { SessionRouteService } from "../sessions/sessionService.js";
 import type { BacklogClaimStore } from "./backlogClaimStore.js";
 import { BacklogError } from "./backlogError.js";
-import { canonicalBacklogRoot, scanProjectBacklog } from "./backlogScanner.js";
+import type { BacklogProvider } from "./backlogProvider.js";
+import { canonicalBacklogRoot, defaultBacklogProviders, scanProjectBacklog } from "./backlogScanner.js";
 
 interface BacklogDependencies {
   projects: Pick<ProjectService, "list" | "requireProject">;
@@ -14,28 +15,35 @@ interface BacklogDependencies {
   userSessions: Pick<UserSessionWorktrees, "start">;
   sessions: Pick<SessionRouteService, "stop">;
   isArchived: (sessionId: string) => Promise<boolean>;
+  providers?: readonly BacklogProvider[];
 }
 
+/** Requests that name no provider address markdown items, as every request did before providers existed. */
+const DEFAULT_PROVIDER: BacklogProviderId = "markdown";
+
 export class BacklogService {
-  private readonly pending = new Map<string, { projectId: string; itemId: string; fingerprint: string; promise: Promise<BacklogLaunchResponse> }>();
-  constructor(private readonly deps: BacklogDependencies) {}
+  private readonly pending = new Map<string, { projectId: string; provider: BacklogProviderId; itemId: string; fingerprint: string; promise: Promise<BacklogLaunchResponse> }>();
+  private readonly providers: readonly BacklogProvider[];
+  constructor(private readonly deps: BacklogDependencies) { this.providers = deps.providers ?? defaultBacklogProviders; }
 
   async list(): Promise<BacklogListResponse> {
     const claims = await this.deps.claims.list();
-    const scans = await Promise.all((await this.deps.projects.list()).map((project) => scanProjectBacklog(project, claims)));
+    const scans = await Promise.all((await this.deps.projects.list()).map((project) => scanProjectBacklog(project, claims, this.providers)));
     return { items: scans.flatMap((scan) => scan.entries.map((entry) => entry.item)), warnings: scans.flatMap((scan) => scan.warnings), generatedAt: new Date().toISOString() };
   }
-  async detail(projectId: string, itemId: string): Promise<BacklogDetailResponse> {
+  async detail(projectId: string, itemId: string, provider: BacklogProviderId = DEFAULT_PROVIDER): Promise<BacklogDetailResponse> {
+    const selected = this.providers.find((candidate) => candidate.id === provider);
+    if (selected === undefined) throw new BacklogError("not-found", `Backlog provider ${provider} is not enabled`);
     const project = await this.requireProject(projectId);
-    const scan = await scanProjectBacklog(project, await this.deps.claims.list());
+    const scan = await scanProjectBacklog(project, await this.deps.claims.list(), [selected]);
     const failure = scan.warnings.find((warning) => warning.kind === "project-error" || warning.kind === "scan-limit");
     if (failure !== undefined) throw new BacklogError("unavailable", failure.message);
     const entry = scan.entries.find(({ item }) => item.id === itemId);
     if (entry === undefined) throw new BacklogError("not-found", "Backlog item not found or invalid");
-    return { ...entry, initialPrompt: `This is backlog item ${entry.item.id}.\n\n${entry.body}` };
+    return { ...entry, initialPrompt: selected.prompt(entry) };
   }
-  launch(projectId: string, itemId: string, input: BacklogLaunchRequest): Promise<BacklogLaunchResponse> {
-    const key = JSON.stringify([projectId, itemId, input.requestId]);
+  launch(projectId: string, itemId: string, input: BacklogLaunchRequest, provider: BacklogProviderId = DEFAULT_PROVIDER): Promise<BacklogLaunchResponse> {
+    const key = JSON.stringify([projectId, provider, itemId, input.requestId]);
     const fingerprint = createHash("sha256").update(JSON.stringify([
       input.start.cwd, input.start.modelSpec ?? null, input.start.thinkingLevel ?? null,
       input.start.destination?.kind ?? null, input.start.setupId ?? null,
@@ -45,18 +53,18 @@ export class BacklogService {
       if (pending.fingerprint !== fingerprint) return Promise.reject(new BacklogError("conflict", "requestId was reused with different session choices"));
       return pending.promise;
     }
-    const promise = this.launchOnce(projectId, itemId, input, fingerprint);
-    this.pending.set(key, { projectId, itemId, fingerprint, promise });
+    const promise = this.launchOnce(projectId, provider, itemId, input, fingerprint);
+    this.pending.set(key, { projectId, provider, itemId, fingerprint, promise });
     void promise.finally(() => { if (this.pending.get(key)?.promise === promise) this.pending.delete(key); }).catch(() => undefined);
     return promise;
   }
-  async release(projectId: string, itemId: string, input: BacklogReleaseRequest): Promise<BacklogReleaseResponse> {
+  async release(projectId: string, itemId: string, input: BacklogReleaseRequest, provider: BacklogProviderId = DEFAULT_PROVIDER): Promise<BacklogReleaseResponse> {
     const project = await this.requireProject(projectId);
-    if ([...this.pending.values()].some((pending) => pending.itemId === itemId)) {
+    if ([...this.pending.values()].some((pending) => pending.provider === provider && pending.itemId === itemId)) {
       throw new BacklogError("conflict", "Wait for the launch to finish");
     }
     // Recovery still works after an agent closes or removes the item file, or claim binding failed.
-    await this.deps.claims.release(await canonicalBacklogRoot(project.path), itemId, input.claimId, true);
+    await this.deps.claims.release({ repo: await canonicalBacklogRoot(project.path), provider, itemId }, input.claimId, true);
     return { released: true };
   }
   private async requireProject(projectId: string) {
@@ -66,10 +74,11 @@ export class BacklogService {
       throw error;
     }
   }
-  private async launchOnce(projectId: string, itemId: string, input: BacklogLaunchRequest, fingerprint: string): Promise<BacklogLaunchResponse> {
-    const detail = await this.detail(projectId, itemId);
+  private async launchOnce(projectId: string, provider: BacklogProviderId, itemId: string, input: BacklogLaunchRequest, fingerprint: string): Promise<BacklogLaunchResponse> {
+    const detail = await this.detail(projectId, itemId, provider);
     const { item, initialPrompt } = detail;
-    const existing = await this.deps.claims.get(item.repo, itemId);
+    const key = { repo: item.repo, provider, itemId };
+    const existing = await this.deps.claims.get(key);
     if (existing !== undefined) {
       if (existing.kind === "claimed" && existing.projectId === projectId && existing.requestId === input.requestId && existing.fingerprint === fingerprint) {
         if (await this.deps.isArchived(existing.sessionId)) {
@@ -83,13 +92,13 @@ export class BacklogService {
     if (item.readiness !== "ready") throw new BacklogError("conflict", "Only open, unblocked backlog items can launch");
     const cwd = await realpath(input.start.cwd);
     if (await canonicalBacklogRoot(cwd) !== item.repo) throw new BacklogError("invalid-request", "Session destination must belong to the backlog item's project");
-    const reservation = await this.deps.claims.reserve({ projectId, itemId, repo: item.repo, cwd, requestId: input.requestId, fingerprint });
+    const reservation = await this.deps.claims.reserve({ ...key, projectId, cwd, requestId: input.requestId, fingerprint });
     let session;
     try {
       // A server-owned token cannot collide with an unrelated composer launch.
       session = await this.deps.userSessions.start({ ...input.start, cwd, startupToken: `backlog-${reservation.claimId}` });
     } catch (error) {
-      await this.deps.claims.release(item.repo, itemId, reservation.claimId, true);
+      await this.deps.claims.release(key, reservation.claimId, true);
       throw error;
     }
     let claim;

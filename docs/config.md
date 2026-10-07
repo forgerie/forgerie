@@ -158,6 +158,8 @@ The scanner reads markdown files recursively. Frontmatter requires string `id` a
 
 Missing status means `To Do`. `done`, `completed`, `closed`, `cancelled`, and `canceled` are closed, without case sensitivity. An open item is blocked when a `blocked_by` ID names another open item in the same project. Missing or closed dependency IDs do not block. A claim overrides the displayed readiness, even when the file's status says closed. The file's status remains unchanged.
 
+Every item carries a `provider`, which names where it comes from. Today the only provider is `markdown`, the directory scanner described above. Do not confuse it with the frontmatter `source` field, which records who captured a markdown item. Forgerie identifies an item by its canonical project, provider, and `id`, so the same `id` from two providers is two items with separate claims. Item routes accept `?provider=`. Omit it to select `markdown`. A provider that is not enabled on this host returns `404`, and a malformed name returns `400`. Release accepts any provider name, so a claim stays recoverable after its provider is disabled.
+
 | Endpoint | Behavior |
 | --- | --- |
 | `GET /api/backlog` | Return `{ items, warnings, generatedAt }` across registered projects. |
@@ -167,7 +169,7 @@ Missing status means `To Do`. `done`, `completed`, `closed`, `cancelled`, and `c
 
 Launch returns `{ session: { id, cwd }, claim, initialPrompt, reused }`. The composer sends its confirmed prompt through the existing session prompt endpoint. Launch alone does not run the agent. Use one stable `requestId` for retries of a confirmed launch. Repeating the same request returns the existing owner. Different choices or another claimant return `409`. Closed or blocked items cannot launch. The destination must belong to the same canonical project. These routes also exist under `/api/machines/local` and the federated machine prefix.
 
-Claims live in `backlog-claims.json` in Forgerie's data directory, normally `~/.local/share/forgerie/`, or `$PI_WEB_DATA_DIR`. The daemon owns the store. A claim records the item, project, request, session, workspace, branch when available, and claim time. Launch reserves the item before creating the session; a rejected creation releases the reservation. Archive and archived-session deletion release ownership, including bulk cleanup. Restore does not reclaim an item. No operation rewrites, moves, or mirrors a claim into the item file.
+Claims live in `backlog-claims.json` in Forgerie's data directory, normally `~/.local/share/forgerie/`, or `$PI_WEB_DATA_DIR`. The daemon owns the store. A claim records the item and its provider, project, request, session, workspace, branch when available, and claim time. Claims written before `provider` existed load as `markdown` claims. Launch reserves the item before creating the session; a rejected creation releases the reservation. Archive and archived-session deletion release ownership, including bulk cleanup. Restore does not reclaim an item. No operation rewrites, moves, or mirrors a claim into the item file.
 
 If the daemon restarts during creation, the reservation becomes `interrupted` and still blocks another launch. Inspect the worktree setup and any session first. Then release the exact `claimId` before retrying. Claims have no lease or expiry. File-only readers cannot see claims, and separate Forgerie hosts do not share claim ownership.
 

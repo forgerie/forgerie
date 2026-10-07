@@ -37,8 +37,22 @@ describe("backlog HTTP contract", () => {
     const listing = await f.app.inject({ method: "GET", url: "/backlog" });
     expect(listing.statusCode).toBe(200); expect(listing.json<BacklogListResponse>().items).toHaveLength(1);
     const detail = await f.app.inject({ method: "GET", url: f.base });
-    expect(detail.json()).toMatchObject({ body: f.body, initialPrompt: `This is backlog item item.\n\n${f.body}`, item: { readiness: "ready" } });
+    expect(detail.json()).toMatchObject({ body: f.body, initialPrompt: `This is backlog item item.\n\n${f.body}`, item: { provider: "markdown", readiness: "ready" } });
     expect(await f.claims.list()).toEqual([]);
+  });
+  it("addresses markdown items when the provider is omitted or named, and refuses other providers", async () => {
+    const f = await fixture();
+    expect((await f.app.inject({ method: "GET", url: `${f.base}?provider=markdown` })).json()).toMatchObject({ item: { id: "item", provider: "markdown" } });
+    const disabled = await f.app.inject({ method: "GET", url: `${f.base}?provider=github` });
+    expect(disabled.statusCode).toBe(404); expect(disabled.json<BacklogErrorResponse>().error).toContain("not enabled");
+    expect((await f.app.inject({ method: "POST", url: `${f.base}/launch?provider=github`, payload: f.request })).statusCode).toBe(404);
+    const malformed = await f.app.inject({ method: "GET", url: `${f.base}?provider=Not%20A%20Name` });
+    expect(malformed.statusCode).toBe(400); expect(malformed.json<BacklogErrorResponse>().kind).toBe("invalid-request");
+    // A claim must stay releasable after its provider is disabled.
+    expect((await f.app.inject({ method: "POST", url: `${f.base}/release?provider=github`, payload: { claimId: "none" } })).statusCode).toBe(200);
+    expect(f.started()).toBe(0);
+    const launch = await f.app.inject({ method: "POST", url: `${f.base}/launch?provider=markdown`, payload: f.request });
+    expect(launch.json<BacklogLaunchResponse>().claim).toMatchObject({ provider: "markdown", itemId: "item" });
   });
   it("claims on confirmed launch, reuses the same request, and rejects a competing owner", async () => {
     const f = await fixture(); const before = await readFile(f.itemPath, "utf8");
@@ -85,7 +99,7 @@ describe("backlog HTTP contract", () => {
     expect(release.statusCode).toBe(409);
     complete(f.session); expect((await launch).statusCode).toBe(200);
     await f.claims.releaseSessions(["session"]);
-    const interrupted = await f.claims.reserve({ projectId: f.project.id, itemId: "item", repo: f.projectRoot, cwd: f.projectRoot, requestId: "killed", fingerprint: "hash" });
+    const interrupted = await f.claims.reserve({ projectId: f.project.id, provider: "markdown", itemId: "item", repo: f.projectRoot, cwd: f.projectRoot, requestId: "killed", fingerprint: "hash" });
     const reloaded = new BacklogClaimStore(join(f.root, "claims.json")); await reloaded.initialize();
     expect((await reloaded.list())[0]?.kind).toBe("interrupted");
     const backlog = new BacklogService({ projects: { list: () => Promise.resolve([f.project]), requireProject: () => Promise.resolve(f.project) }, claims: reloaded, userSessions: { start: () => Promise.resolve(f.session) }, sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false) });

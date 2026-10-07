@@ -14,9 +14,18 @@ export const BacklogMetadataSchema = Type.Object({
 });
 export type BacklogMetadata = Static<typeof BacklogMetadataSchema>;
 
+/**
+ * Where an item comes from, such as `markdown`. An item is identified by (repo, provider, id), never by id alone.
+ * Which providers exist is a fact of the host, not of this contract. Not the frontmatter `source` field,
+ * which records who captured a markdown item.
+ */
+export const BacklogProviderIdSchema = Type.String({ pattern: "^[a-z][a-z0-9-]{0,63}$" });
+export type BacklogProviderId = Static<typeof BacklogProviderIdSchema>;
+export const BacklogItemQuerySchema = Type.Object({ provider: Type.Optional(BacklogProviderIdSchema) });
+
 const claimIdentity = {
   claimId: text, requestId: text, fingerprint: text,
-  projectId: text, itemId: text, repo: text, cwd: text, claimedAt: text,
+  projectId: text, provider: BacklogProviderIdSchema, itemId: text, repo: text, cwd: text, claimedAt: text,
 };
 export const BacklogClaimSchema = Type.Union([
   Type.Object({ ...claimIdentity, kind: Type.Literal("launching") }, { additionalProperties: false }),
@@ -27,6 +36,7 @@ export type BacklogClaim = Static<typeof BacklogClaimSchema>;
 
 export const BacklogItemSchema = Type.Object({
   ...BacklogMetadataSchema.properties,
+  provider: BacklogProviderIdSchema,
   projectId: text, projectName: text, repo: text, path: text,
   status: text, labels: Type.Array(text), blocked_by: Type.Array(text),
   open: Type.Boolean(),

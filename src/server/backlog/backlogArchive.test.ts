@@ -15,7 +15,7 @@ async function fixture() {
   const wrapped = withBacklogClaimRelease(archive, claims);
   const add = async (id: string): Promise<ArchiveSessionInput> => {
     const path = join(root, `${id}.jsonl`); await writeFile(path, `${id}\n`);
-    const reservation = await claims.reserve({ projectId: "project", itemId: id, requestId: id, fingerprint: id, cwd: root, repo: root });
+    const reservation = await claims.reserve({ projectId: "project", provider: "markdown", itemId: id, requestId: id, fingerprint: id, cwd: root, repo: root });
     await claims.bind(reservation.claimId, id, root);
     return { sessionId: id, path, cwd: root, created: "2026-09-01", modified: "2026-09-01", messageCount: 1, firstMessage: "Work" };
   };
