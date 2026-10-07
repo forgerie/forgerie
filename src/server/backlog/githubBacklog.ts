@@ -39,13 +39,23 @@ export function createGitHubBacklogProvider(deps: GitHubBacklogDependencies): Ba
         id: String(issue.number), title: issue.title.trim() === "" ? `#${String(issue.number)}` : issue.title,
         provider: "github", projectId: project.id, projectName: project.name, repo,
         path: `${slug}#${String(issue.number)}`, url: issue.html_url,
-        status: "Open", labels: issue.labels, created: issue.created_at, blocked_by: [],
+        status: "Open", ...priorityOf(issue.labels), created: issue.created_at, blocked_by: [],
         open: true, readiness: "ready", blockingIds: [],
       } }));
       return { entries, warnings };
     },
     prompt: githubIssuePrompt,
   };
+}
+
+/**
+ * GitHub has no priority field, so the label convention `priority: <word>` carries it. That label becomes
+ * the item's priority and leaves the label list, so the list does not say it twice. With several, the first wins.
+ */
+export function priorityOf(labels: readonly string[]): { labels: string[]; priority?: string } {
+  const match = labels.map((label) => /^priority:\s*(\S.*)$/iu.exec(label.trim())).find((found) => found !== null);
+  const rest = labels.filter((label) => !/^priority:/iu.test(label.trim()));
+  return match?.[1] === undefined ? { labels: rest } : { labels: rest, priority: match[1].trim().toLowerCase() };
 }
 
 /**

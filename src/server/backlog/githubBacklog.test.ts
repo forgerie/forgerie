@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BacklogConfig, Project } from "../../shared/apiTypes.js";
 import type { GitHubIssue, IssuesResult } from "../github/githubIssues.js";
-import { createGitHubBacklogProvider, githubIssuePrompt } from "./githubBacklog.js";
+import { createGitHubBacklogProvider, githubIssuePrompt, priorityOf } from "./githubBacklog.js";
 
 const project: Project = { id: "p1", name: "korri", path: "/code/korri", createdAt: "2026-09-01" };
 function issue(number: number, extra: Partial<GitHubIssue> = {}): GitHubIssue {
@@ -45,6 +45,16 @@ describe("GitHub backlog provider", () => {
     const stale = await provider({ ok: true, truncated: true, issues: [issue(1)], staleSince: "2026-10-07T12:00:00.000Z", staleReason: "GitHub is unreachable." }).scan();
     expect(stale.entries).toHaveLength(1);
     expect(stale.warnings.map((warning) => warning.kind)).toEqual(["scan-limit", "provider-unavailable"]);
+  });
+});
+
+describe("GitHub priority labels", () => {
+  it("turns a priority label into the item's priority and drops it from the labels", async () => {
+    expect(priorityOf(["bug", "priority: High", "device: rg353m"])).toEqual({ labels: ["bug", "device: rg353m"], priority: "high" });
+    expect(priorityOf(["bug"])).toEqual({ labels: ["bug"] });
+    expect(priorityOf(["priority: low", "priority: high"])).toEqual({ labels: [], priority: "low" });
+    const scan = await provider({ ok: true, truncated: false, issues: [issue(7, { labels: ["priority: medium", "area: korrid"] })] }).scan();
+    expect(scan.entries[0]?.item).toMatchObject({ priority: "medium", labels: ["area: korrid"] });
   });
 });
 
