@@ -1,11 +1,13 @@
 import Fastify from "fastify";
 import { execFile } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { BacklogDetailResponse, BacklogLaunchResponse, BacklogListResponse, SessionInfo } from "../../shared/apiTypes.js";
+import type { GitHubSetupStart } from "../../shared/github.js";
 import { BacklogClaimStore } from "../backlog/backlogClaimStore.js";
 import { registerBacklogRoutes } from "../backlog/backlogRoutes.js";
 import { BacklogService } from "../backlog/backlogService.js";
@@ -14,13 +16,14 @@ import { markdownBacklogProvider } from "../backlog/markdownBacklog.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { ProjectService } from "../projects/projectService.js";
 import { ProjectStore } from "../storage/projectStore.js";
-import { FakeGitHub, issue, json } from "./fakeGitHub.testSupport.js";
-import { GitHubAuth } from "./githubAuth.js";
-import { GitHubAuthStore } from "./githubAuthStore.js";
+import { FakeGitHub, issue, json, stateOf } from "./fakeGitHub.testSupport.js";
+import { GitHubApp } from "./githubApp.js";
+import { GitHubAppStore } from "./githubAppStore.js";
 import { GitHubIssueClient } from "./githubIssues.js";
 import { registerGitHubRoutes } from "./githubRoutes.js";
 
 const execute = promisify(execFile);
+const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs1", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
@@ -34,61 +37,70 @@ async function fixture() {
   const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
   const project = await projects.add({ path: repo });
   const github = new FakeGitHub();
-  const store = new GitHubAuthStore(join(root, "github-auth.json")); await store.initialize();
-  const auth = new GitHubAuth({ store, fetch: github.fetch, wait: () => Promise.resolve() });
-  const issues = new GitHubIssueClient({ auth, fetch: github.fetch });
+  const store = new GitHubAppStore(join(root, "github-app.json")); await store.initialize();
+  const app = new GitHubApp({ store, fetch: github.fetch, machineName: "zao" });
+  const issues = new GitHubIssueClient({ app, fetch: github.fetch });
   const claims = new BacklogClaimStore(join(root, "claims.json")); await claims.initialize();
   const session: SessionInfo = { id: "session", cwd: repo, path: join(root, "session.jsonl"), created: "2026-10-07", modified: "2026-10-07", messageCount: 0, firstMessage: "" };
   const backlog = new BacklogService({ projects, claims, userSessions: { start: () => Promise.resolve(session) }, sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues })] });
-  const app = Fastify(); registerGitHubRoutes(app, auth); registerBacklogRoutes(app, backlog); cleanups.push(() => app.close());
-  return { repo, project, github, app, claims };
+  const server = Fastify(); registerGitHubRoutes(server, app); registerBacklogRoutes(server, backlog); cleanups.push(() => server.close());
+  return { repo, project, github, server };
 }
 
-describe("GitHub login and issue routes", () => {
-  it("logs in through the routes, never returns a token, and then lists the repo's issues beside markdown items", async () => {
+describe("GitHub App routes", () => {
+  it("sets up the app, asks for the install, then lists the repo's issues beside markdown items and launches one", async () => {
     const f = await fixture();
-    expect((await f.app.inject({ method: "GET", url: "/github/auth" })).json()).toEqual({ state: "not-configured" });
-    expect((await f.app.inject({ method: "PUT", url: "/github/app", payload: { clientId: "bad id" } })).statusCode).toBe(400);
-    expect((await f.app.inject({ method: "PUT", url: "/github/app", payload: { clientId: "Iv23liForgerie01", slug: "forgerie-zao" } })).json()).toMatchObject({ state: "disconnected" });
-
-    const before = (await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
+    expect((await f.server.inject({ method: "GET", url: "/github/app" })).json()).toEqual({ state: "not-configured" });
+    const before = (await f.server.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
     expect(before.items.map((item) => [item.provider, item.id])).toEqual([["markdown", "7"]]);
     expect(before.warnings).toMatchObject([{ provider: "github", kind: "provider-auth", path: "korri-os/korri" }]);
 
-    f.github.on("POST https://github.com/login/device/code", json({ device_code: "dev", user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }))
-      .on("POST https://github.com/login/oauth/access_token", json({ access_token: "ghu_secret", expires_in: 28_800, refresh_token: "ghr_secret", refresh_token_expires_in: 15_897_600 }))
-      .on("GET https://api.github.com/user", json({ login: "simonwjackson" }))
-      .always("GET https://api.github.com/repos/korri-os/korri/issues", json([issue(7, { title: "Remote seven" })]));
-    const login = await f.app.inject({ method: "POST", url: "/github/auth/login" });
-    expect(login.json()).toMatchObject({ state: "pending", userCode: "ABCD-EFGH" });
-    await vi.waitFor(async () => { expect((await f.app.inject({ method: "GET", url: "/github/auth" })).json()).toMatchObject({ state: "connected", login: "simonwjackson" }); });
+    const start = (await f.server.inject({ method: "POST", url: "/github/app/setup", payload: { origin: "https://forgerie.tail.ts.net" } })).json<GitHubSetupStart>();
+    const state = stateOf(start.action);
+    f.github.on("POST https://api.github.com/app-manifests/code-1/conversions", json({ id: 42, slug: "forgerie-zao", client_id: "Iv23liForgerie01",
+      html_url: "https://github.com/apps/forgerie-zao", owner: { login: "simonwjackson" }, pem: privateKey, client_secret: "x", webhook_secret: "y" }, { status: 201 }));
+    const created = await f.server.inject({ method: "POST", url: "/github/app/created", payload: { code: "code-1", state } });
+    expect(created.json()).toMatchObject({ state: "configured", installUrl: "https://github.com/apps/forgerie-zao/installations/new" });
+    expect(created.body).not.toContain("PRIVATE KEY");
 
-    const listing = await f.app.inject({ method: "GET", url: "/backlog" });
-    expect(listing.body).not.toMatch(/ghu_|ghr_/u);
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/installation", json({ message: "Not Found" }, { status: 404 }));
+    const notInstalled = (await f.server.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
+    expect(notInstalled.warnings).toMatchObject([{ provider: "github", kind: "provider-install", path: "korri-os/korri" }]);
+  });
+
+  it("lists and launches an issue once the app is installed, and no reply carries a key or token", async () => {
+    const f = await fixture();
+    const start = (await f.server.inject({ method: "POST", url: "/github/app/setup", payload: { origin: "https://forgerie.tail.ts.net" } })).json<GitHubSetupStart>();
+    f.github.on("POST https://api.github.com/app-manifests/code-1/conversions", json({ id: 42, slug: "forgerie-zao", client_id: "Iv23liForgerie01",
+      html_url: "https://github.com/apps/forgerie-zao", owner: { login: "simonwjackson" }, pem: privateKey }, { status: 201 }))
+      .always("GET https://api.github.com/repos/korri-os/korri/installation", json({ id: 77 }))
+      .always("POST https://api.github.com/app/installations/77/access_tokens", json({ token: "ghs_secret", expires_at: "2099-01-01T00:00:00Z" }, { status: 201 }))
+      .always("GET https://api.github.com/repos/korri-os/korri/issues", json([issue(7, { title: "Remote seven" })]));
+    await f.server.inject({ method: "POST", url: "/github/app/created", payload: { code: "code-1", state: stateOf(start.action) } });
+
+    const listing = await f.server.inject({ method: "GET", url: "/backlog" });
+    expect(listing.body).not.toMatch(/ghs_|PRIVATE KEY/u);
     const after = listing.json<BacklogListResponse>();
     expect(after.warnings).toEqual([]);
     expect(after.items.map((item) => [item.provider, item.id, item.title])).toEqual([["markdown", "7", "Local seven"], ["github", "7", "Remote seven"]]);
+    const list = f.github.requests.find((request) => request.url.includes("/issues?"));
+    expect(list?.headers["authorization"]).toBe("Bearer ghs_secret");
 
-    const detail = (await f.app.inject({ method: "GET", url: `/backlog/${f.project.id}/items/7?provider=github` })).json<BacklogDetailResponse>();
+    const detail = (await f.server.inject({ method: "GET", url: `/backlog/${f.project.id}/items/7?provider=github` })).json<BacklogDetailResponse>();
     expect(detail.initialPrompt).toContain("<github-issue-7>");
-    expect(detail.item.url).toBe("https://github.com/korri-os/korri/issues/7");
-
-    const launch = await f.app.inject({ method: "POST", url: `/backlog/${f.project.id}/items/7/launch?provider=github`, payload: { requestId: "r1", start: { cwd: f.repo } } });
-    expect(launch.statusCode).toBe(200);
+    const launch = await f.server.inject({ method: "POST", url: `/backlog/${f.project.id}/items/7/launch?provider=github`, payload: { requestId: "r1", start: { cwd: f.repo } } });
     expect(launch.json<BacklogLaunchResponse>().claim).toMatchObject({ provider: "github", itemId: "7" });
-    const claimed = (await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
-    expect(claimed.items.map((item) => [item.provider, item.readiness])).toEqual([["markdown", "ready"], ["github", "claimed"]]);
 
-    expect((await f.app.inject({ method: "DELETE", url: "/github/auth" })).json()).toMatchObject({ state: "disconnected" });
+    expect((await f.server.inject({ method: "DELETE", url: "/github/app" })).json()).toEqual({ state: "not-configured" });
   });
 
-  it("answers a login GitHub refuses with the fix", async () => {
+  it("refuses a setup reply it cannot trust, with the fix", async () => {
     const f = await fixture();
-    await f.app.inject({ method: "PUT", url: "/github/app", payload: { clientId: "Iv23liForgerie01" } });
-    f.github.on("POST https://github.com/login/device/code", json({ error: "device_flow_disabled" }));
-    const response = await f.app.inject({ method: "POST", url: "/github/auth/login" });
-    expect(response.statusCode).toBe(400);
-    expect(response.json<{ error: string }>().error).toContain("Enable Device Flow");
+    expect((await f.server.inject({ method: "POST", url: "/github/app/setup", payload: {} })).statusCode).toBe(400);
+    expect((await f.server.inject({ method: "POST", url: "/github/app/created", payload: { code: "c", state: "evil" } })).statusCode).toBe(400);
+    const stranger = await f.server.inject({ method: "POST", url: "/github/app/created", payload: { code: "c", state: "forgerie-00000000000000000000000000000000" } });
+    expect(stranger.statusCode).toBe(400);
+    expect(stranger.json<{ error: string }>().error).toContain("Start the setup again");
   });
 });

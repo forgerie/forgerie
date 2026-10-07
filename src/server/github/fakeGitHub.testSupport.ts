@@ -42,4 +42,16 @@ export function issue(number: number, extra: Record<string, unknown> = {}): Reco
   };
 }
 
+/** The `state` Forgerie put in a setup form's action, which GitHub sends back. */
+export function stateOf(action: string): string {
+  const state = new URL(action).searchParams.get("state");
+  if (state === null) throw new Error(`No state in ${action}`);
+  return state;
+}
+/** A value the test needs to exist, failing with a message instead of a later TypeError. */
+export function defined<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`Expected ${what}`);
+  return value;
+}
+
 function routeOf(request: FakeRequest): string { return `${request.method} ${request.url.split("?")[0] ?? request.url}`; }

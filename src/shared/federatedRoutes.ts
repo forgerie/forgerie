@@ -25,11 +25,11 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "GET", path: "/backlog/:projectId/items/:itemId" },
   { method: "POST", path: "/backlog/:projectId/items/:itemId/launch", timeoutMs: BACKLOG_LAUNCH_PROXY_TIMEOUT_MS },
   { method: "POST", path: "/backlog/:projectId/items/:itemId/release" },
-  // Each machine's daemon scans its own projects, so each machine holds its own GitHub login.
-  { method: "GET", path: "/github/auth" },
-  { method: "PUT", path: "/github/app" },
-  { method: "POST", path: "/github/auth/login" },
-  { method: "DELETE", path: "/github/auth" },
+  // Each machine's daemon scans its own projects, so each machine holds its own GitHub App.
+  { method: "GET", path: "/github/app" },
+  { method: "POST", path: "/github/app/setup" },
+  { method: "POST", path: "/github/app/created" },
+  { method: "DELETE", path: "/github/app" },
   { method: "GET", path: "/projects" },
   { method: "POST", path: "/projects" },
   { method: "DELETE", path: "/projects/:projectId" },

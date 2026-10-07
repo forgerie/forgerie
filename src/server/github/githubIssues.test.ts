@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { FakeGitHub, issue, json } from "./fakeGitHub.testSupport.js";
+import type { TokenResult } from "./githubApp.js";
 import { GitHubIssueClient } from "./githubIssues.js";
 
 const LIST = "GET https://api.github.com/repos/korri-os/korri/issues";
-function fixture(options: { token?: string | undefined; slug?: string } = {}) {
+function fixture(options: { granted?: TokenResult } = {}) {
   const github = new FakeGitHub();
   let clock = Date.parse("2026-10-07T12:00:00Z");
-  const rejected: string[] = [];
-  const token = "token" in options ? options.token : "ghu_token";
+  const dropped: string[] = [];
+  const granted: TokenResult = options.granted ?? { ok: true, token: "ghs_token" };
   const client = new GitHubIssueClient({
-    fetch: github.fetch, now: () => clock, appSlug: () => options.slug,
-    auth: { accessToken: () => Promise.resolve(token), loginName: () => "simonwjackson", rejectToken: (value) => { rejected.push(value); return Promise.resolve(); } },
+    fetch: github.fetch, now: () => clock,
+    app: { tokenFor: () => Promise.resolve(granted), dropToken: (repo) => { dropped.push(repo); }, installUrl: () => "https://github.com/apps/forgerie-zao/installations/new" },
   });
-  return { github, client, rejected, advance: (ms: number) => { clock += ms; } };
+  return { github, client, dropped, advance: (ms: number) => { clock += ms; } };
 }
 
 describe("GitHub issue client", () => {
@@ -25,7 +26,7 @@ describe("GitHub issue client", () => {
     expect(result).toMatchObject({ ok: true, truncated: false });
     expect(result.ok && result.issues.map((value) => [value.number, value.labels])).toEqual([[3, ["bug"]], [1, ["plain"]]]);
     expect(f.github.requests[0]?.url).toBe("https://api.github.com/repos/korri-os/korri/issues?state=open&per_page=100");
-    expect(f.github.requests[0]?.headers).toMatchObject({ authorization: "Bearer ghu_token", "x-github-api-version": "2026-03-10" });
+    expect(f.github.requests[0]?.headers).toMatchObject({ authorization: "Bearer ghs_token", "x-github-api-version": "2026-03-10" });
   });
 
   it("reuses a list for a minute, then revalidates with its ETag and reuses it on 304", async () => {
@@ -49,19 +50,25 @@ describe("GitHub issue client", () => {
     expect(f.github.maxInFlight).toBe(1);
   });
 
-  it("asks for a login when there is no token, and drops a token GitHub rejects", async () => {
-    expect(await fixture({ token: undefined }).client.openIssues("korri-os/korri")).toEqual({ ok: false, kind: "auth", message: "Connect GitHub to list issues for korri-os/korri." });
-    const f = fixture();
-    f.github.on(LIST, json({ message: "Bad credentials" }, { status: 401 }));
-    expect(await f.client.openIssues("korri-os/korri")).toMatchObject({ ok: false, kind: "auth" });
-    expect(f.rejected).toEqual(["ghu_token"]);
+  it("passes on why the app may not read the repo, without asking GitHub for issues", async () => {
+    const missing: TokenResult = { ok: false, kind: "install", message: "Forgerie's GitHub App is not installed on korri-os/korri." };
+    const f = fixture({ granted: missing });
+    expect(await f.client.openIssues("korri-os/korri")).toEqual(missing);
+    expect(f.github.requests).toHaveLength(0);
   });
 
-  it("names the install link when Forgerie cannot read the repo", async () => {
-    const f = fixture({ slug: "forgerie-zao" });
+  it("drops a refused token so the next read mints a new one", async () => {
+    const f = fixture();
+    f.github.on(LIST, json({ message: "Bad credentials" }, { status: 401 }));
+    expect(await f.client.openIssues("korri-os/korri")).toMatchObject({ ok: false, kind: "unavailable" });
+    expect(f.dropped).toEqual(["korri-os/korri"]);
+  });
+
+  it("names the install page when the app is installed but left this repo out", async () => {
+    const f = fixture();
     f.github.on(LIST, json({ message: "Not Found" }, { status: 404 }));
     const result = await f.client.openIssues("korri-os/korri");
-    expect(result).toMatchObject({ ok: false, kind: "unavailable" });
+    expect(result).toMatchObject({ ok: false, kind: "install" });
     expect(!result.ok && result.message).toContain("https://github.com/apps/forgerie-zao/installations/new");
   });
 

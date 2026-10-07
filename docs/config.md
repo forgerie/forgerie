@@ -192,24 +192,26 @@ GitHub issue text is untrusted. On a public repo, anyone can open an issue, and 
 
 Forgerie only reads from GitHub. It never comments, assigns, labels, or closes an issue. A claim stays in Forgerie's store, the same as for markdown items.
 
-Forgerie reuses a repo's issue list for one minute, then asks again with the list's ETag; GitHub does not count an unchanged answer against the rate limit. It sends one GitHub request at a time and reads at most 500 open issues and pull requests per repo. When GitHub is unreachable or rate limited, the list keeps the last good result and a `provider-unavailable` warning says how old it is. A login problem produces a `provider-auth` warning; other failures, such as no access to the repo or no GitHub remote, produce `provider-unavailable` warnings that name the fix.
+Forgerie reuses a repo's issue list for one minute, then asks again with the list's ETag; GitHub does not count an unchanged answer against the rate limit. It sends one GitHub request at a time and reads at most 500 open issues and pull requests per repo. When GitHub is unreachable or rate limited, the list keeps the last good result and a `provider-unavailable` warning says how old it is. Each failure is a warning that names its fix: `provider-auth` when GitHub is not set up on this machine or no longer accepts its app, `provider-install` when the app may not read the project's repo, and `provider-unavailable` for anything else, such as no GitHub remote.
 
-#### GitHub login
+#### GitHub setup
 
-Forgerie logs in to GitHub through a GitHub App that you register once. The app needs only read access to issues. Forgerie uses the app's public client ID and the device flow: Forgerie shows a code, and you approve it at github.com/login/device from any device. Forgerie never holds the app's client secret or private key.
+Forgerie reads GitHub as its own GitHub App, not as a person. Nobody logs in, and nothing expires while the app exists.
 
-Register the app with `scripts/github-app-wizard.sh`. It opens GitHub's registration page with a name, homepage, public visibility, no webhook, and `Issues: Read-only` filled in. GitHub has no registration parameter for Device Flow, so you tick "Enable Device Flow" yourself; the wizard tells you where. The app must be public to install it on an organization that does not own it. A public app with no secret, key, or webhook gives nobody else access to your data. Install the app on each account or organization whose repos you want listed. The wizard then sends the client ID to Forgerie.
+Set it up from the backlog: press **Set up GitHub**, then **Create GitHub App** on the page GitHub opens. GitHub creates the app from Forgerie's manifest (public, no webhook, `Issues: Read-only`) and returns you to Forgerie, which keeps the app's ID and private key. GitHub must be able to send your browser back to the page you started from, so start from the address you normally use. Then press **Install on GitHub** and choose the accounts and repos the app may read. Installing on an organization you do not own sends a request to its owners. The app must be public to install it on an organization that does not own it; with no webhook and no user login, being public gives nobody else access to anything.
+
+Forgerie signs a 10-minute token with the private key, trades it for a 1-hour installation token for each repo, and renews that token 5 minutes before it expires. A repo where the app is not installed produces a `provider-install` warning with the install link; Forgerie checks again after a minute.
 
 | Endpoint | Behavior |
 | --- | --- |
-| `GET /api/github/auth` | Return the login state: `not-configured`, `disconnected` with an optional `reason`, `pending` with `userCode` and `verificationUri`, or `connected` with `login`. |
-| `PUT /api/github/app` | Set the app with `{ clientId, slug? }`. The slug comes from `https://github.com/apps/<slug>` and makes access warnings include an install link. A different client ID ends the current login. |
-| `POST /api/github/auth/login` | Start a device-flow login and return the `pending` state at once. Forgerie polls GitHub in the background. |
-| `DELETE /api/github/auth` | Forget the login. GitHub still lists the authorization until you revoke it at github.com/settings/apps/authorizations. |
+| `GET /api/github/app` | Return `not-configured`, or `configured` with the app's `slug`, `owner`, `url`, and `installUrl`. |
+| `POST /api/github/app/setup` | Start setup with `{ origin }`, the page's own origin. Return `{ action, manifest }`: the browser posts `manifest` to `action`. The setup expires after one hour. |
+| `POST /api/github/app/created` | Finish setup with the `{ code, state }` GitHub added to the return address. A `state` this machine did not issue, or one older than an hour, returns `400`. |
+| `DELETE /api/github/app` | Forget the app on this machine. It stays on GitHub until its owner deletes it there. |
 
-These routes also exist under `/api/machines/local` and the federated machine prefix. Each machine's daemon scans its own projects, so each machine holds its own login.
+These routes also exist under `/api/machines/local` and the federated machine prefix. Each machine's daemon scans its own projects, so each machine creates its own app.
 
-The login lives in `github-auth.json` in Forgerie's data directory with owner-only permissions (`0600`). No response from Forgerie contains a token. GitHub user tokens expire after 8 hours, and Forgerie renews them with the refresh token, which expires after 6 months. Each renewal issues a new refresh token, so a daemon that runs at least once every 6 months stays logged in. If the refresh token expires, GitHub refuses a renewal, or GitHub rejects the token, Forgerie forgets the login and the backlog shows a `provider-auth` warning. A network failure during renewal keeps the login.
+The app lives in `github-app.json` in Forgerie's data directory with owner-only permissions (`0600`). It holds the private key, which can read issues on every repo where the app is installed until you delete the key on GitHub. Forgerie drops the client secret and webhook secret GitHub sends at setup, and no response contains the key or a token. If GitHub stops accepting the app because it was deleted or its key revoked, the backlog shows a `provider-auth` warning: remove the app in the backlog and set GitHub up again.
 
 ## Worktree pre-remove hook
 

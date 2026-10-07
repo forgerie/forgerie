@@ -1,24 +1,42 @@
 import { Type, type Static } from "typebox";
 
-/** The GitHub App Forgerie logs in through. The client ID is public; Forgerie never holds the app's secret or key. */
-export const GitHubAppSchema = Type.Object({
-  clientId: Type.String({ pattern: "^[A-Za-z0-9._-]{8,64}$" }),
-  /** From the app's public link, `https://github.com/apps/<slug>`. Used only to build the install link. */
-  slug: Type.Optional(Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,99}$" })),
-}, { additionalProperties: false });
-export type GitHubApp = Static<typeof GitHubAppSchema>;
-
-const text = Type.String({ minLength: 1, maxLength: 4096 });
-/** What the browser may know about the GitHub login. Tokens never leave the session daemon. */
-export const GitHubAuthStatusSchema = Type.Union([
+/**
+ * Forgerie reads GitHub as its own GitHub App, not as a person. The app is created once from the
+ * backlog (GitHub's manifest flow) and installed on the repos it may read. Nothing here is secret:
+ * the app's private key stays in the session daemon.
+ */
+export const GitHubAppStatusSchema = Type.Union([
   Type.Object({ state: Type.Literal("not-configured") }, { additionalProperties: false }),
-  Type.Object({ state: Type.Literal("disconnected"), app: GitHubAppSchema, reason: Type.Optional(text) }, { additionalProperties: false }),
   Type.Object({
-    state: Type.Literal("pending"), app: GitHubAppSchema,
-    userCode: text, verificationUri: Type.String({ pattern: "^https://" }), expiresAt: text,
+    state: Type.Literal("configured"),
+    app: Type.Object({
+      slug: Type.String({ minLength: 1 }),
+      /** The account that owns the app registration. */
+      owner: Type.String({ minLength: 1 }),
+      /** The app's public page. */
+      url: Type.String({ pattern: "^https://" }),
+    }, { additionalProperties: false }),
+    /** Where a person chooses the accounts and repos the app may read. */
+    installUrl: Type.String({ pattern: "^https://" }),
   }, { additionalProperties: false }),
-  Type.Object({ state: Type.Literal("connected"), app: GitHubAppSchema, login: text, loginExpiresAt: Type.Optional(text) }, { additionalProperties: false }),
 ]);
-export type GitHubAuthStatus = Static<typeof GitHubAuthStatusSchema>;
+export type GitHubAppStatus = Static<typeof GitHubAppStatusSchema>;
 
-export const GitHubAuthErrorSchema = Type.Object({ error: Type.String() }, { additionalProperties: false });
+/** The browser's own origin. GitHub sends the person back here after each step. */
+export const GitHubSetupRequestSchema = Type.Object({ origin: Type.String({ pattern: "^https?://", maxLength: 2048 }) }, { additionalProperties: false });
+
+/** A form the browser posts to GitHub: `manifest` goes in a field of that name. */
+export const GitHubSetupStartSchema = Type.Object({
+  action: Type.String({ pattern: "^https://github\\.com/settings/apps/new\\?state=" }),
+  manifest: Type.String({ minLength: 2 }),
+}, { additionalProperties: false });
+export type GitHubSetupStart = Static<typeof GitHubSetupStartSchema>;
+
+/** What GitHub adds to the return address after the person creates the app. */
+export const GitHubCreatedRequestSchema = Type.Object({
+  code: Type.String({ pattern: "^[A-Za-z0-9._-]{1,200}$" }),
+  state: Type.String({ pattern: "^forgerie-[a-f0-9]{32}$" }),
+}, { additionalProperties: false });
+export type GitHubCreatedRequest = Static<typeof GitHubCreatedRequestSchema>;
+
+export const GitHubErrorSchema = Type.Object({ error: Type.String() }, { additionalProperties: false });

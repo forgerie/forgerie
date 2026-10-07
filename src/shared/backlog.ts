@@ -66,8 +66,10 @@ export const BacklogWarningSchema = Type.Object({
   projectId: text, path: text,
   kind: Type.Union([
     Type.Literal("ignored-directory"), Type.Literal("invalid-item"), Type.Literal("project-error"), Type.Literal("scan-limit"),
-    /** The provider needs a login before it can list items. The fix is to connect, not to edit files. */
+    /** The provider is not set up on this machine, or its setup stopped working. The fix is in the backlog, not in files. */
     Type.Literal("provider-auth"),
+    /** The provider is set up but may not read this project's repo. The fix is to install it there. */
+    Type.Literal("provider-install"),
     /** The provider could not list items: no access, no remote, rate limited, or offline. The message names the fix. */
     Type.Literal("provider-unavailable"),
     /** Some items were left out on purpose, such as issues from untrusted authors. */
