@@ -36,6 +36,16 @@ describe("project Forgerie config", () => {
     });
   });
 
+  it("loads the project backlog override without changing other settings", async () => {
+    await writeProjectConfig({ version: 1, backlog: { dir: "work/items/" }, uploads: { defaultFolder: "uploads" } });
+    expect((await loadProjectPiWebConfig(projectPath)).config).toEqual({ version: 1, backlog: { dir: "work/items/" }, uploads: { defaultFolder: "uploads" } });
+  });
+
+  it.each(["", " ", "/outside", "../outside", "work/../../outside", "work\\\\items", "work\u0000items"])("rejects unsafe backlog directory %s", async (dir) => {
+    await writeProjectConfig({ backlog: { dir } });
+    await expect(loadProjectPiWebConfig(projectPath)).rejects.toThrow("backlog.dir");
+  });
+
   it("rejects unsupported project config versions", async () => {
     await writeProjectConfig({ version: 2 });
 

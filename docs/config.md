@@ -129,6 +129,9 @@ Project-local config lives at `<project>/.forgerie/config.json`. Use it for sett
   },
   "uploads": {
     "defaultFolder": "manual/uploads"
+  },
+  "backlog": {
+    "dir": "work/items/"
   }
 }
 ```
@@ -138,6 +141,35 @@ Project-local `pathAccess.allowedPaths` entries are merged after the global list
 Project-local `uploads.defaultFolder` overrides the global upload destination for workspaces in that project. Forgerie servers always include this workspace-effective value on the workspace responses used locally and through machine federation.
 
 Forgerie also honors one optional project hook; see [Worktree pre-remove hook](#worktree-pre-remove-hook).
+
+## Project backlog and launch API
+
+The session daemon scans one backlog directory per registered project. The default is `.forgerie/backlog/`. Set `backlog.dir` in `.forgerie/config.json` to use another directory, such as `work/items/`. The path must be relative and stay inside the project. For Git projects, both config and items come from the canonical checkout identified by Git's common directory, including requests from linked worktrees. Config changes apply on the next backlog request.
+
+Item content belongs in Git. If Git ignores the directory, the response includes an `ignored-directory` warning and still serves its items. Replace a wholesale `.forgerie/` ignore with:
+
+```gitignore
+.forgerie/*
+!.forgerie/config.json
+!.forgerie/backlog/
+```
+
+The scanner reads markdown files recursively. Frontmatter requires string `id` and `title`. Optional fields are `status`, `priority`, `labels`, `created`, `source`, and `blocked_by`. `labels` and `blocked_by` are string arrays. Unknown keys, including `claimed_by`, do not affect claims. The body retains its original whitespace and line endings. Invalid items and all copies of duplicate IDs produce warnings instead of launchable items. The scanner does not follow symbolic links. Limits are 256 KiB per item, 10,000 directory entries, and 16 directory levels.
+
+Missing status means `To Do`. `done`, `completed`, `closed`, `cancelled`, and `canceled` are closed, without case sensitivity. An open item is blocked when a `blocked_by` ID names another open item in the same project. Missing or closed dependency IDs do not block. A claim overrides the displayed readiness, even when the file's status says closed. The file's status remains unchanged.
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /api/backlog` | Return `{ items, warnings, generatedAt }` across registered projects. |
+| `GET /api/backlog/:projectId/items/:itemId` | Return `{ item, body, initialPrompt }` for the new-session composer. This does not claim the item. |
+| `POST /api/backlog/:projectId/items/:itemId/launch` | Confirm creation with `{ requestId, start }`. `start` uses the normal new-session choices, including `cwd`, `destination`, `modelSpec`, `thinkingLevel`, and `setupId`. |
+| `POST /api/backlog/:projectId/items/:itemId/release` | Release with `{ claimId }`. A stale claim ID returns `409`. Release does not stop the session. |
+
+Launch returns `{ session: { id, cwd }, claim, initialPrompt, reused }`. The composer sends its confirmed prompt through the existing session prompt endpoint. Launch alone does not run the agent. Use one stable `requestId` for retries of a confirmed launch. Repeating the same request returns the existing owner. Different choices or another claimant return `409`. Closed or blocked items cannot launch. The destination must belong to the same canonical project. These routes also exist under `/api/machines/local` and the federated machine prefix.
+
+Claims live in `backlog-claims.json` in Forgerie's data directory, normally `~/.local/share/forgerie/`, or `$PI_WEB_DATA_DIR`. The daemon owns the store. A claim records the item, project, request, session, workspace, branch when available, and claim time. Launch reserves the item before creating the session; a rejected creation releases the reservation. Archive and archived-session deletion release ownership, including bulk cleanup. Restore does not reclaim an item. No operation rewrites, moves, or mirrors a claim into the item file.
+
+If the daemon restarts during creation, the reservation becomes `interrupted` and still blocks another launch. Inspect the worktree setup and any session first. Then release the exact `claimId` before retrying. Claims have no lease or expiry. File-only readers cannot see claims, and separate Forgerie hosts do not share claim ownership.
 
 ## Worktree pre-remove hook
 

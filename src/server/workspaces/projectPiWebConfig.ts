@@ -1,12 +1,15 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
+import { Check } from "typebox/value";
+import { BacklogConfigSchema } from "../../shared/backlog.js";
 import { effectiveUploadsConfig, parsePathAccessConfig, parseUploadsConfig, type PiWebConfig } from "../../config.js";
-import type { PiWebPathAccessConfig, PiWebUploadsConfig } from "../../shared/apiTypes.js";
+import type { BacklogConfig, PiWebPathAccessConfig, PiWebUploadsConfig } from "../../shared/apiTypes.js";
 
 export const PROJECT_PI_WEB_CONFIG_PATH = ".forgerie/config.json";
 
 export interface ProjectPiWebConfig {
   version?: 1;
+  backlog?: BacklogConfig;
   pathAccess?: PiWebPathAccessConfig;
   uploads?: PiWebUploadsConfig;
 }
@@ -50,7 +53,15 @@ function parseProjectPiWebConfig(value: Record<string, unknown>, path: string): 
     ...(version !== undefined ? { version: parseProjectConfigVersion(version, path) } : {}),
     ...(value["pathAccess"] !== undefined ? { pathAccess: parsePathAccessConfig(value["pathAccess"], path) } : {}),
     ...(value["uploads"] !== undefined ? { uploads: parseUploadsConfig(value["uploads"], path) } : {}),
+    ...(value["backlog"] !== undefined ? { backlog: parseBacklogConfig(value["backlog"], path) } : {}),
   };
+}
+
+function parseBacklogConfig(value: unknown, path: string): BacklogConfig {
+  if (!Check(BacklogConfigSchema, value) || isAbsolute(value.dir) || value.dir.split("/").includes("..") || /[\\\\\0]/.test(value.dir) || value.dir.trim() === "") {
+    throw new Error(`backlog.dir must be a non-empty relative path inside the project: ${path}`);
+  }
+  return value;
 }
 
 function parseProjectConfigVersion(value: unknown, path: string): 1 {

@@ -28,6 +28,20 @@ describe("machine-scoped session proxy routes", () => {
     expect(daemon.requests).toEqual([{ method: "GET", path: "/sessions?cwd=/repo", body: undefined }]);
   });
 
+  it("forwards backlog lists and guarded launches to the single daemon owner", async () => {
+    const payload = { requestId: "request", start: { cwd: "/repo", destination: { kind: "fresh-worktree" } } };
+    const listing = await app.inject({ method: "GET", url: "/api/machines/local/backlog" });
+    daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "conflict", error: "Already claimed" }) });
+    const launch = await app.inject({ method: "POST", url: "/api/machines/local/backlog/project/items/item/launch", payload });
+    expect(listing.statusCode).toBe(200);
+    expect(launch.statusCode).toBe(409);
+    expect(launch.json()).toEqual({ kind: "conflict", error: "Already claimed" });
+    expect(daemon.requests).toEqual([
+      { method: "GET", path: "/backlog", body: undefined },
+      { method: "POST", path: "/backlog/project/items/item/launch", body: payload },
+    ]);
+  });
+
   it("forwards structured diff annotations unchanged to the session daemon", async () => {
     const payload = {
       cwd: "/repo", text: "Fix", streamingBehavior: "followUp",

@@ -1,5 +1,8 @@
 import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktree.js";
 
+/** Public wire types; their runtime schemas live in backlog.ts. */
+export type { BacklogConfig, BacklogMetadata, BacklogClaim, BacklogItem, BacklogWarning, BacklogListResponse, BacklogDetailResponse, BacklogLaunchRequest, BacklogLaunchResponse, BacklogReleaseRequest, BacklogReleaseResponse, BacklogErrorResponse } from "./backlog.js";
+
 export type MachineKind = "local" | "remote";
 export type MachineStatus = "unknown" | "online" | "offline" | "error";
 

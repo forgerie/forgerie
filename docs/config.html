@@ -310,12 +310,12 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
             <section id="project-config">
               <h2>Project-local config</h2>
               <p>
-                Project-local config lives at <code>&lt;project&gt;/.pi-web/config.json</code>. Use it for settings that should
+                Project-local config lives at <code>&lt;project&gt;/.forgerie/config.json</code>. Use it for settings that should
                 follow a repository.
               </p>
               <div class="code-card">
                 <div class="copy-row">
-                  <strong>.pi-web/config.json</strong>
+                  <strong>.forgerie/config.json</strong>
                   <button class="copy-button" data-copy="#project-config-example">Copy</button>
                 </div>
                 <pre id="project-config-example"><code>{
@@ -325,6 +325,9 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
   },
   "uploads": {
     "defaultFolder": "manual/uploads"
+  },
+  "backlog": {
+    "dir": "work/items/"
   }
 }</code></pre>
               </div>
@@ -336,6 +339,21 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
                 Project-local <code>uploads.defaultFolder</code> overrides the global upload destination for workspaces in
                 that project. Forgerie servers always include this workspace-effective value on local and federated
                 workspace responses.
+              </p>
+              <p>
+                Project-local <code>backlog.dir</code> selects one backlog directory. The default is
+                <code>.forgerie/backlog/</code>. Both config and items come from the canonical Git checkout,
+                even for linked worktrees. The path must stay inside the project. Changes apply on the next backlog request.
+                Forgerie warns when Git ignores the directory but still serves its items.
+              </p>
+              <p>
+                <code>GET /api/backlog</code> aggregates registered projects. Item details prefill the composer without
+                claiming. Confirmed launch creates a session and a claim in Forgerie's data store, never in the item file.
+                Archive or deletion releases the claim. The composer sends the first prompt through the existing session
+                prompt endpoint. Interrupted launches require inspection and release of the exact claim before retrying.
+                Claims have no lease or expiry; separate hosts do not share ownership.
+                See the <a href="config.md#project-backlog-and-launch-api">backlog configuration and API contract</a>
+                for request types, readiness, limits, and recovery.
               </p>
               <p>Forgerie also honors one optional project hook; see <a href="#worktree-pre-remove-hook">Worktree pre-remove hook</a>.</p>
             </section>

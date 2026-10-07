@@ -12,6 +12,10 @@ import { registerAuthRoutes } from "./sessions/authRoutes.js";
 import { ModelCatalogRefresher } from "./sessions/modelCatalogRefresher.js";
 import { PiSessionService } from "./sessions/piSessionService.js";
 import { createPiSessionManagerGateway } from "./sessions/piSessionManagerGateway.js";
+import { BacklogClaimStore } from "./backlog/backlogClaimStore.js";
+import { BacklogService } from "./backlog/backlogService.js";
+import { registerBacklogRoutes } from "./backlog/backlogRoutes.js";
+import { withBacklogClaimRelease } from "./backlog/backlogArchive.js";
 import { defaultSessionNameIndexFilePath } from "./sessions/sessionNameIndex.js";
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
 import { registerProcessRoutes } from "./sessions/processRoutes.js";
@@ -93,6 +97,9 @@ async function createSessionDaemonRuntime() {
   await unreadStore.load();
   const archiveStore = new SessionArchiveStore(defaultSessionArchiveFilePath(daemonEnvironment));
   await initializeSessionArchive(archiveStore.initialize(), app.log);
+  const backlogClaims = new BacklogClaimStore(join(piWebDataDir(daemonEnvironment), "backlog-claims.json"));
+  await backlogClaims.initialize();
+  await backlogClaims.releaseSessions((await archiveStore.list()).map((record) => record.sessionId));
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
   const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
   const workspaceActivity = new WorkspaceActivityService(eventHub);
@@ -136,7 +143,7 @@ async function createSessionDaemonRuntime() {
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: auth.runtime,
     agentDir: activeAgentProfile.dir,
-    archiveStore,
+    archiveStore: withBacklogClaimRelease(archiveStore, backlogClaims),
     pinStore,
     tabsStore,
     workspaceActivity,
@@ -170,10 +177,12 @@ async function createSessionDaemonRuntime() {
     activeAgentProfile,
   });
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions };
+  const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id) });
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog }: SessionDaemonRuntime): void {
+  registerBacklogRoutes(app, backlog);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
   registerSessionWorktreeRoutes(app, userSessions);

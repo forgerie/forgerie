@@ -4,6 +4,7 @@ export const PI_PACKAGE_MUTATION_PROXY_TIMEOUT_MS = 5 * 60_000;
 export const PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS = 15_000;
 export const SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS = 5 * 60_000;
 export const SESSION_TREE_FORK_PROXY_TIMEOUT_MS = 5 * 60_000;
+const BACKLOG_LAUNCH_PROXY_TIMEOUT_MS = 5 * 60_000;
 
 export interface FederatedHttpRouteSpec {
   method: FederatedHttpMethod;
@@ -20,6 +21,10 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "POST", path: "/pi-packages/install", timeoutMs: PI_PACKAGE_MUTATION_PROXY_TIMEOUT_MS },
   { method: "POST", path: "/pi-packages/remove", timeoutMs: PI_PACKAGE_MUTATION_PROXY_TIMEOUT_MS },
   { method: "POST", path: "/pi-packages/update", timeoutMs: PI_PACKAGE_MUTATION_PROXY_TIMEOUT_MS },
+  { method: "GET", path: "/backlog" },
+  { method: "GET", path: "/backlog/:projectId/items/:itemId" },
+  { method: "POST", path: "/backlog/:projectId/items/:itemId/launch", timeoutMs: BACKLOG_LAUNCH_PROXY_TIMEOUT_MS },
+  { method: "POST", path: "/backlog/:projectId/items/:itemId/release" },
   { method: "GET", path: "/projects" },
   { method: "POST", path: "/projects" },
   { method: "DELETE", path: "/projects/:projectId" },
