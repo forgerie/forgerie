@@ -116,6 +116,15 @@ describe("project backlog scanner", () => {
     expect(result.entries.map(({ item: entry }) => entry.id)).toEqual(["a"]);
     expect(result.warnings).toMatchObject([{ kind: "project-error", provider: "markdown", message: "Remote unavailable" }]);
   });
+  it("reports a bad backlog section as this project's error and lists nothing from it", async () => {
+    const project = await fixture();
+    await file(join(project.path, ".forgerie/config.json"), JSON.stringify({ backlog: { dir: "../work/items" } }));
+    await file(join(project.path, ".forgerie/backlog/a.md"), item("a"));
+    const result = await scanProjectBacklog(project, []);
+    expect(result.entries).toEqual([]);
+    expect(result.warnings).toMatchObject([{ kind: "project-error", path: project.path }]);
+    expect(result.warnings[0]?.message).toContain("not from .forgerie/");
+  });
   it("returns an empty result for a missing default directory", async () => {
     expect(await scanProjectBacklog(await fixture(), [])).toEqual({ entries: [], warnings: [] });
   });

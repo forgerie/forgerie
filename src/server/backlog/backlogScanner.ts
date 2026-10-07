@@ -41,7 +41,10 @@ export async function scanProjectBacklog(project: Project, claims: readonly Back
     repo = await canonicalBacklogRoot(project.path);
     // The config decides which paths and services the scan touches, so it must not be a link out of the repo.
     await assertContainedFile(repo, join(repo, ".forgerie/config.json"));
-    config = (await loadProjectPiWebConfig(repo)).config.backlog;
+    const loaded = await loadProjectPiWebConfig(repo);
+    // A bad backlog section lists nothing rather than guessing a default folder or provider set.
+    if (loaded.backlogError !== undefined) throw new Error(loaded.backlogError);
+    config = loaded.config.backlog;
   } catch (error) { failed(error); return { entries, warnings }; }
   const enabled = new Set(config?.providers ?? DEFAULT_PROJECT_PROVIDERS);
   for (const provider of providers) {

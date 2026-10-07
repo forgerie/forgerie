@@ -18,6 +18,11 @@ export interface LoadedProjectPiWebConfig {
   path: string;
   exists: boolean;
   config: ProjectPiWebConfig;
+  /**
+   * Why the `backlog` section was left out. Only the backlog reports it: a backlog mistake
+   * must not stop the project's workspaces from opening.
+   */
+  backlogError?: string;
 }
 
 export async function loadProjectPiWebConfig(projectPath: string): Promise<LoadedProjectPiWebConfig> {
@@ -25,7 +30,11 @@ export async function loadProjectPiWebConfig(projectPath: string): Promise<Loade
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
     if (!isRecord(parsed)) throw new Error(`Forgerie project config must be a JSON object: ${path}`);
-    return { path, exists: true, config: parseProjectPiWebConfig(parsed, path) };
+    const { backlog, ...rest } = parsed;
+    const config = parseProjectPiWebConfig(rest, path);
+    if (backlog === undefined) return { path, exists: true, config };
+    try { return { path, exists: true, config: { ...config, backlog: parseBacklogConfig(backlog, path) } }; }
+    catch (error) { return { path, exists: true, config, backlogError: error instanceof Error ? error.message : String(error) }; }
   } catch (error) {
     if (isNodeErrorWithCode(error, "ENOENT")) return { path, exists: false, config: {} };
     throw error;
@@ -53,14 +62,14 @@ function parseProjectPiWebConfig(value: Record<string, unknown>, path: string): 
     ...(version !== undefined ? { version: parseProjectConfigVersion(version, path) } : {}),
     ...(value["pathAccess"] !== undefined ? { pathAccess: parsePathAccessConfig(value["pathAccess"], path) } : {}),
     ...(value["uploads"] !== undefined ? { uploads: parseUploadsConfig(value["uploads"], path) } : {}),
-    ...(value["backlog"] !== undefined ? { backlog: parseBacklogConfig(value["backlog"], path) } : {}),
   };
 }
 
 function parseBacklogConfig(value: unknown, path: string): BacklogConfig {
   const dir: unknown = isRecord(value) ? value["dir"] : undefined;
   if (dir !== undefined && (typeof dir !== "string" || isAbsolute(dir) || dir.split("/").includes("..") || /[\\\\\0]/.test(dir) || dir.trim() === "")) {
-    throw new Error(`backlog.dir must be a non-empty relative path inside the project: ${path}`);
+    // Someone once wrote ../work/items, reading the path as relative to .forgerie/. Say where it starts.
+    throw new Error(`backlog.dir must be a non-empty path inside the project, written from the project root (work/items), not from .forgerie/: ${path}`);
   }
   if (!Check(BacklogConfigSchema, value)) {
     throw new Error(`backlog must be an object with optional dir, providers ("markdown", "github"), and github { repo: "owner/name", authors: "trusted" | "all" }: ${path}`);

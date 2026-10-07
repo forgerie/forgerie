@@ -43,7 +43,19 @@ describe("project Forgerie config", () => {
 
   it.each(["", " ", "/outside", "../outside", "work/../../outside", "work\\\\items", "work\u0000items"])("rejects unsafe backlog directory %s", async (dir) => {
     await writeProjectConfig({ backlog: { dir } });
-    await expect(loadProjectPiWebConfig(projectPath)).rejects.toThrow("backlog.dir");
+    const loaded = await loadProjectPiWebConfig(projectPath);
+    expect(loaded.config.backlog).toBeUndefined();
+    expect(loaded.backlogError).toContain("backlog.dir");
+  });
+
+  it("keeps uploads and path access when only the backlog section is wrong, so the workspace still opens", async () => {
+    await writeProjectConfig({ backlog: { providers: ["markdown", "github"], dir: "../work/items" }, uploads: { defaultFolder: "uploads" } });
+    const loaded = await loadProjectPiWebConfig(projectPath);
+    expect(loaded.config).toEqual({ uploads: { defaultFolder: "uploads" } });
+    expect(loaded.backlogError).toContain("from the project root (work/items), not from .forgerie/");
+    await expect(loadEffectiveProjectUploadsConfig(projectPath, {})).resolves.toMatchObject({ defaultFolder: "uploads" });
+    await writeProjectConfig({ backlog: { providers: ["jira"] } });
+    expect((await loadProjectPiWebConfig(projectPath)).backlogError).toContain("backlog must be an object");
   });
 
   it("rejects unsupported project config versions", async () => {
