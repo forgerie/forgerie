@@ -4,6 +4,8 @@ describe("speech proxy origin guard", () => {
   it("translates only matching browser origin and host for speech", () => {
     expect(speechProxyHeaders("/api/speech/transcribe", "localhost:8510", "http://localhost:8510", "same-origin"))
       .toEqual({ host: "127.0.0.1:8504", origin: "http://127.0.0.1:8504" });
+    expect(speechProxyHeaders("/api/speech/transcribe", "zao:8510", "http://zao:8510", "same-origin"))
+      .toEqual({ host: "127.0.0.1:8504", origin: "http://127.0.0.1:8504" });
   });
   it("handles the HTTPS HTTP/2 authority header instead of Host", () => {
     expect(speechProxyRequestHeaders("/api/speech/transcribe", {

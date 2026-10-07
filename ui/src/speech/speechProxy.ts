@@ -1,4 +1,4 @@
-export const DEFAULT_AUI_ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+export const DEFAULT_AUI_ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "zao"];
 
 export function speechProxyRequestHeaders(path: string | undefined, incoming: Record<string, string | string[] | undefined>, allowedHosts: readonly string[] = DEFAULT_AUI_ALLOWED_HOSTS): { host: string; origin: string } | undefined {
   const host = incoming.host;
