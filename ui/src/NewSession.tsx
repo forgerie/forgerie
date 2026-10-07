@@ -20,6 +20,9 @@ import { freshLabel } from "./worktrees/worktreeModel";
 import { WorktreeSetupCard } from "./ui/WorktreeSetupCard";
 import { WorktreeDialog } from "./ui/WorktreeActions";
 import { XIcon } from "lucide-react";
+import type { BacklogApi, BacklogClaim, BacklogDetail } from "./backlog/backlogApi";
+import { sameItem, type ItemRef, type SessionLook } from "./backlog/backlogModel";
+import { BacklogCarry, type CarryState } from "./ui/backlog/BacklogCarry";
 
 /** The draft store key of the first message, which has no session yet. */
 export const NEW_SESSION_DRAFT = "new-session";
@@ -30,6 +33,29 @@ export type LaunchMode = "switch" | "rapidfire";
 export type Placement = "fresh" | "existing";
 type Options = { cwd: string; value?: WorktreeOptions | undefined };
 type Phase = { type: "composing"; error?: string } | { type: "starting"; id: string };
+type ItemLoad = { ref: ItemRef; detail?: BacklogDetail | undefined; error?: string | undefined };
+/** A send with no typed words: the backlog item is the whole message. */
+const EMPTY_MESSAGE = { role: "user", content: [], attachments: [] } as unknown as AppendMessage;
+
+/** What the window says about the item riding with the first message. */
+function carryState(load: ItemLoad | undefined, item: ItemRef, taken: BacklogClaim | undefined, look: ((id: string) => SessionLook | undefined) | undefined,
+  open: (claim: BacklogClaim) => void): CarryState {
+  if (!load || !sameItem(load.ref, item)) return { type: "loading" };
+  if (load.error !== undefined || !load.detail) return { type: "unavailable", reason: `This item could not be read: ${load.error ?? "no reply"}` };
+  const { item: read } = load.detail;
+  const claim = taken ?? read.claim;
+  if (claim) {
+    const session = claim.kind === "claimed" ? look?.(claim.sessionId) : undefined;
+    return { type: "taken", title: read.title, name: session?.name, when: session?.time,
+      ...(claim.kind === "claimed" ? { onOpen: () => open(claim) } : {}) };
+  }
+  if (read.readiness === "closed" || !read.open) return { type: "unavailable", title: read.title, reason: "This item is done." };
+  if (read.readiness !== "ready") {
+    const n = read.blockingIds.length;
+    return { type: "unavailable", title: read.title, reason: n > 0 ? `Waiting on ${String(n)} other ${n === 1 ? "item" : "items"}. Finish ${n === 1 ? "it" : "those"} first, or start without this one.` : "This item cannot start a session now." };
+  }
+  return { type: "ready", title: read.title };
+}
 interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel | undefined; thinkingLevel?: string | undefined }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -40,8 +66,17 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * starts it in the background and clears the bar for the next one. Nothing is
  * retried: a step that may have worked is reported, never repeated.
  */
-export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "switch", api, worktrees, launches, deferred, drafts, onStarted, onDestination, onClose }: {
+export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "switch", api, worktrees, launches, deferred, drafts, onStarted, onDestination, onClose,
+  item: initialItem, backlog, lookSession, onItemRemoved }: {
   cwd: string; initialMode?: LaunchMode; api: NewSessionApi; launches: LaunchStore<LaunchDraft>; drafts?: DraftStore | undefined;
+  /** A backlog item the session takes. Its file leads the first message, and starting claims it. */
+  item?: ItemRef | undefined;
+  /** Reads the item. Absent: the item cannot be shown, so it does not ride. */
+  backlog?: Pick<BacklogApi, "detail"> | undefined;
+  /** The session list's view of a session, to name the one that holds the item. */
+  lookSession?: ((sessionId: string) => SessionLook | undefined) | undefined;
+  /** The author took the item off this session. The URL follows. */
+  onItemRemoved?: (() => void) | undefined;
   /** The author's last explicit choice. Absent: a fresh worktree in a Git project. */
   initialPlacement?: Placement | undefined;
   /** Worktree options and failed setups. Absent: every start uses the folder itself, as before worktrees. */
@@ -74,6 +109,24 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   const [saved] = useState(() => drafts?.session(NEW_SESSION_DRAFT));
   const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer, saved));
   const started = useSyncExternalStore(launches.subscribe, launches.getSnapshot);
+  const [item, setItem] = useState(backlog ? initialItem : undefined);
+  const [itemLoad, setItemLoad] = useState<ItemLoad>();
+  // The claim that beat this start. The item stays, so the author can see who holds it.
+  const [taken, setTaken] = useState<BacklogClaim>();
+  useEffect(() => {
+    if (!item || !backlog) return;
+    const controller = new AbortController();
+    backlog.detail(item.projectId, item.itemId, controller.signal).then((detail) => { if (!controller.signal.aborted) setItemLoad({ ref: item, detail }); },
+      (error: unknown) => { if (!controller.signal.aborted) setItemLoad({ ref: item, error: messageOf(error) }); });
+    return () => controller.abort();
+  }, [item, backlog]);
+  const removeItem = useCallback(() => { setItem(undefined); setTaken(undefined); onItemRemoved?.(); }, [onItemRemoved]);
+  const carry = item ? carryState(itemLoad, item, taken, lookSession, (claim) => {
+    if (claim.kind === "claimed") onStarted({ id: claim.sessionId, cwd: claim.cwd });
+  }) : undefined;
+  const itemTitle = carry && carry.type !== "loading" ? carry.title : undefined;
+  // Nothing starts while the item cannot go with it: the author removes it, or waits for it to load.
+  const itemBlocks = carry !== undefined && carry.type !== "ready";
   // Is the folder in a Git project? Until the server says, the start leaves the choice to it, which is the same default.
   useEffect(() => {
     if (!worktrees) return;
@@ -145,7 +198,8 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     let prompt: ReturnType<typeof promptOf>;
     try { prompt = promptOf(message); } catch (error) { refuse(messageOf(error)); return; }
     const { text, files } = deferred.split(prompt.text);
-    if (text === "" && !prompt.attachments?.length && files.length === 0) return;
+    if (itemBlocks) { void putBack(draft); return; }
+    if (text === "" && !prompt.attachments?.length && files.length === 0 && !item) return;
     if (text.startsWith("!")) { refuse("Shell commands need a running session. Send a first message, then run the command."); return; }
     let command: PromptResource["identity"] | undefined;
     if (text.startsWith("/")) {
@@ -167,11 +221,13 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     // A retry sends this message into the worktree whose setup failed, instead of making another.
     const retrying = retry.current;
     retry.current = undefined;
-    const placement = retrying ? { destination: { kind: "fresh-worktree" as const }, setupId: retrying.id, worktree: retrying }
+    const site = retrying ? { destination: { kind: "fresh-worktree" as const }, setupId: retrying.id, worktree: retrying }
       : where ? { destination: { kind: fresh ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
-    if (retrying) { setInspected(undefined); setFailedSetups((current) => current && { ...current, records: current.records.filter((item) => item.id !== retrying.id) }); }
+    const placement = item ? { ...site, item, ...(itemTitle ? { title: itemTitle } : {}) } : site;
+    if (retrying) { setInspected(undefined); setFailedSetups((current) => current && { ...current, records: current.records.filter((record) => record.id !== retrying.id) }); }
     const launch = launches.launch(retrying?.repo ?? cwd, { text, images: prompt.attachments, files, command }, { model, thinkingLevel }, draft, placement);
-    if (mode === "rapidfire") return;
+    // One item goes to one session. In Rapidfire the bar clears for the next start, so the item leaves with this one.
+    if (mode === "rapidfire") { if (item) removeItem(); return; }
     setPhase({ type: "starting", id: launch.id });
     const outcome = await launch.done;
     const failedSetup = launch.worktree();
@@ -181,6 +237,8 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     launches.take(launch.id);
     if (outcome.type === "started") { onStarted(outcome.session); return; }
     if (outcome.type === "unsent") { onStarted(outcome.session, { draft: typed, error: outcome.error }); return; }
+    // Another session took the item first. Its card says so and offers the way on; the words go back.
+    if (outcome.taken) { setTaken(outcome.taken); setPhase({ type: "composing" }); void putBack(draft); return; }
     // A failed setup keeps its card, with its log and what to do next, instead of a line of text.
     if (failedSetup?.setup.phase === "failed") {
       setFailedSetups((current) => ({ repo: failedSetup.repo, records: [failedSetup, ...(current?.repo === failedSetup.repo ? current.records.filter((item) => item.id !== failedSetup.id) : [])] }));
@@ -190,12 +248,12 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
       return;
     }
     refuse(outcome.error);
-  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, putBack, saved, where, fresh]);
+  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, putBack, saved, where, fresh, item, itemTitle, itemBlocks, removeItem]);
 
   const starting = phase.type === "starting";
   const runtime = useExternalStoreRuntime({
     messages: useThreadMessages([], false), onNew, adapters: { dictation, attachments },
-    isRunning: false, isDisabled: starting, isSendDisabled: defaults?.cwd !== cwd,
+    isRunning: false, isDisabled: starting, isSendDisabled: defaults?.cwd !== cwd || itemBlocks,
   });
   useEffect(() => { runtimeRef.current = runtime; return () => { runtimeRef.current = null; }; }, [runtime]);
   useEffect(() => {
@@ -246,7 +304,14 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
       <ImageViewerProvider>
-        <NewSessionDialog phase={view} rapidfire={mode === "rapidfire"} onRapidfire={() => setMode(mode === "rapidfire" ? "switch" : "rapidfire")}
+        <NewSessionDialog carry={carry ? {
+            card: <BacklogCarry state={carry} onRemove={removeItem} />,
+            note: carry.type === "ready" ? <p className="bl-note">Starting gives this item to the new session until you archive it.</p> : undefined,
+            placeholder: "Add anything the item does not say, or start with the item as written…",
+            onSendEmpty: defaults?.cwd === cwd ? () => { void onNew(EMPTY_MESSAGE); } : undefined,
+            blocked: itemBlocks,
+          } : undefined}
+          phase={view} rapidfire={mode === "rapidfire"} onRapidfire={() => setMode(mode === "rapidfire" ? "switch" : "rapidfire")}
           onDiscard={discard} onClose={onClose} model={modelBinding} mentions={mentions}
           commands={{ catalog: resources?.cwd === cwd ? resources.catalog : { type: "loading" }, onRetry: () => setResourceAttempt((n) => n + 1) }}
           setup={setupCard}

@@ -14,8 +14,13 @@ import { XIcon } from "lucide-react";
 import { createLaunchStore, type StartupListener, type WorktreeListener } from "./launches";
 import { newSessionShortcut } from "./shortcuts";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
+import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
+import { heldSessions, itemParam, listOf, openCount, readBacklogPlace, readItemParam, type BacklogPlace, type ItemRef } from "./backlog/backlogModel";
+import { useBacklogList } from "./backlog/useBacklogList";
 // Settings carry the prompt editor; the chat never pays for it.
 const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
+// The backlog renders item files as documents; the chat never pays for it either.
+const BacklogView = lazy(() => import("./ui/backlog/BacklogView").then((module) => ({ default: module.BacklogView })));
 
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
 /** `?new=<folder>` keeps the new-session dialog open across a reload, over whatever is open. */
@@ -29,9 +34,15 @@ const readSettings = (): SettingsPlace | undefined => {
   if (section === null) return undefined;
   return section === "agents" ? { section, agent: readTarget(params.get("agent") ?? undefined) } : { section: "root" };
 };
-const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); };
+/** `?backlog` keeps the backlog open across a reload; `?backlog=<projectId>/<itemId>` keeps one item open. */
+const readBacklog = () => readBacklogPlace(new URLSearchParams(window.location.search));
+/** `&item=<projectId>/<itemId>` keeps a backlog item riding with the new-session dialog across a reload. */
+const readItem = () => readItemParam(new URLSearchParams(window.location.search).get("item"));
+/** Settings and the backlog both take the thread's place, so opening one closes the other. */
+const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("backlog"); };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
+const backlogApi = createBacklogApi((path, init) => fetch(path, init));
 /**
  * Marks the history entry this page load pushed for the dialog, so closing it
  * steps back instead of piling up entries. Per load: after a reload the browser
@@ -47,6 +58,11 @@ export function App() {
   const [composing, setComposing] = useState(readNew);
   const [composeMode, setComposeMode] = useState<LaunchMode>("switch");
   const [settings, setSettings] = useState(readSettings);
+  const [backlog, setBacklog] = useState(readBacklog);
+  // The backlog item riding with the new-session dialog.
+  const [composeItem, setComposeItem] = useState(readItem);
+  const backlogList = useBacklogList(backlogApi);
+  const backlogItems = listOf(backlogList.load)?.items;
   // Bumped when the dialog opens, so moving its destination never remounts it.
   const [composeKey, setComposeKey] = useState(0);
   // Unsent drafts outlive a session switch and a reload, in this browser only.
@@ -80,7 +96,7 @@ export function App() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [inFlight]);
   // With nothing selected there is nothing to cover, so the sheet starts open.
-  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined);
+  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined && readBacklog() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
   // The URL is the source of truth for the selection, so read it there.
   const closeSession = useCallback(() => {
@@ -100,7 +116,7 @@ export function App() {
   useEffect(() => onWorktree(worktreeEvents.emit), [onWorktree, worktreeEvents]);
   useEffect(() => () => launches.dispose(), [launches]);
   useEffect(() => {
-    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setSettings(readSettings()); };
+    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setComposeItem(readItem()); setSettings(readSettings()); setBacklog(readBacklog()); };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
@@ -111,20 +127,32 @@ export function App() {
     if (pushed) { window.history.back(); return; }
     const url = new URL(window.location.href);
     url.searchParams.delete("new");
+    url.searchParams.delete("item");
     window.history.replaceState({}, "", url);
     setComposing(undefined);
+    setComposeItem(undefined);
+  }, []);
+  /** The author took the item off the new session. The dialog stays. */
+  const dropComposeItem = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("item");
+    window.history.replaceState(window.history.state, "", url);
+    setComposeItem(undefined);
   }, []);
   const switchSession = useCallback((session: Session, draft?: string, error?: string) => {
     setOpen(false);
     const fromComposer = readNew() !== undefined;
     setComposing(undefined);
+    setComposeItem(undefined);
     setCommandSelection({ session, draft, ...(error ? { error } : {}) });
-    const inSettings = readSettings() !== undefined;
+    const inSettings = readSettings() !== undefined || readBacklog() !== undefined;
     setSettings(undefined);
+    setBacklog(undefined);
     if (session.id === selectedId && !fromComposer && !inSettings) return;
     const url = new URL(window.location.href);
     clearSettings(url);
     url.searchParams.delete("new");
+    url.searchParams.delete("item");
     url.searchParams.set("session", session.id);
     // A started session replaces the dialog's entry: Back must not reopen an emptied dialog.
     if (fromComposer) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
@@ -134,9 +162,24 @@ export function App() {
   const { find, recent } = picker;
   // Two quick presses must open one window, not push two history entries.
   const opening = useRef(false);
-  const startNew = useCallback(async (mode: LaunchMode = "switch") => {
+  const startNew = useCallback(async (mode: LaunchMode = "switch", item?: BacklogItem) => {
     setOpen(false);
     if (opening.current) return;
+    // A backlog item starts in its own project. Over an open dialog, it replaces that dialog's destination and item.
+    if (item) {
+      const ref: ItemRef = { projectId: item.projectId, itemId: item.id };
+      const url = new URL(window.location.href);
+      const reopen = readNew() !== undefined;
+      url.searchParams.set("new", item.repo);
+      url.searchParams.delete("place");
+      url.searchParams.set("item", itemParam(ref));
+      if (reopen) window.history.replaceState(window.history.state, "", url); else window.history.pushState(DIALOG_ENTRY, "", url);
+      setComposeKey((key) => key + 1);
+      setComposeMode(mode);
+      setComposeItem(ref);
+      setComposing(item.repo);
+      return;
+    }
     if (readNew() !== undefined) {
       setComposeMode(mode);
       document.querySelector<HTMLTextAreaElement>(".ns-dialog textarea")?.focus();
@@ -191,9 +234,34 @@ export function App() {
     }
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSettings(place);
+    setBacklog(undefined);
     if (place) setOpen(false);
     else if (!readSelected()) setOpen(true);
   }, []);
+  // The backlog takes the thread's place the same way; the session stays in the URL underneath.
+  const { refresh: refreshBacklog } = backlogList;
+  const placeBacklog = useCallback((place: BacklogPlace | undefined, replace = false) => {
+    const url = new URL(window.location.href);
+    clearSettings(url);
+    if (place) url.searchParams.set("backlog", place.item ? itemParam(place.item) : "");
+    if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
+    // Opening the list reads the folders again: an agent may have written an item since.
+    if (place && !place.item) refreshBacklog();
+    setBacklog(place);
+    setSettings(undefined);
+    if (place) setOpen(false);
+    else if (!readSelected()) setOpen(true);
+  }, [refreshBacklog]);
+  // A start, a failed start, or an archive can claim or free an item. Read the list again when one settles.
+  const settled = launchList.filter((launch) => launch.state.type !== "starting").length;
+  const archived = picker.view.archivedCount;
+  const firstSettle = useRef(true);
+  useEffect(() => {
+    if (firstSettle.current) { firstSettle.current = false; return; }
+    refreshBacklog();
+  }, [settled, archived, refreshBacklog]);
+  const held = useMemo(() => backlogItems ? heldSessions(backlogItems) : undefined, [backlogItems]);
+  const pickerView = useMemo(() => held ? { ...picker.view, held } : picker.view, [picker.view, held]);
   // A handoff door knows only the id and workspace. The catalog may also know the title.
   const known = !selectedId ? undefined : commandSelection?.session.id === selectedId
     ? { ...picker.find(selectedId), ...commandSelection.session } : picker.find(selectedId);
@@ -211,6 +279,7 @@ export function App() {
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : orphanNotice;
   const dialog = composing === undefined ? null : composing
     ? <NewSession key={composeKey} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
+      item={composeItem} backlog={backlogApi} lookSession={picker.look} onItemRemoved={dropComposeItem}
       launches={launches} deferred={deferred} drafts={drafts}
       onDestination={(next, place) => {
         const url = new URL(window.location.href);
@@ -222,6 +291,11 @@ export function App() {
     : null;
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
     <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} /></Suspense>
+    : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
+      <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
+        onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
+        onLaunch: (item) => { void startNew("switch", item); },
+        onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }) }} /></Suspense>
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet. Add a project in the old client, then start a session here."><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId}
@@ -235,10 +309,12 @@ export function App() {
     // message of its own: the picker is the instruction.
     : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
-    picker={(layout) => <Picker view={picker.view} prefs={picker.prefs} onPrefs={picker.setPrefs} message={orphanNotice}
+    picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs} message={orphanNotice}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
-        onClose: layout === "overlay" && (selectedId || settings) ? () => setOpen(false) : undefined }} />}
+        onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,
+        backlogCount: backlogItems ? openCount(backlogItems) : undefined,
+        onClose: layout === "overlay" && (selectedId || settings || backlog) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
     thread={<>{thread}{dialog}</>} />;

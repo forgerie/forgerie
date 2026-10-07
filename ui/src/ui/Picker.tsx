@@ -1,4 +1,4 @@
-import { AnvilIcon, ArchiveIcon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { AnvilIcon, ArchiveIcon, ListTodoIcon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -21,6 +21,8 @@ export interface PickerView {
   toast?: Toast | undefined;
   /** Rows with a write in flight. */
   pending?: ReadonlySet<string> | undefined;
+  /** Sessions that hold a backlog item. */
+  held?: ReadonlySet<string> | undefined;
 }
 export interface PickerActions {
   onSelect: (row: Row) => void;
@@ -35,6 +37,11 @@ export interface PickerActions {
   onSettings?: (() => void) | undefined;
   /** Settings is what the thread area shows now. */
   settingsOpen?: boolean | undefined;
+  /** Opens the backlog in the thread's place. */
+  onBacklog?: (() => void) | undefined;
+  backlogOpen?: boolean | undefined;
+  /** Open items across every project. Absent until the backlog is read. */
+  backlogCount?: number | undefined;
 }
 
 const PIN = <PinIcon className="picker-pin" aria-hidden />;
@@ -50,8 +57,8 @@ const menuId = (id: string) => `picker-menu-${id}`;
 
 interface Press { x: number; y: number; at: number; timer: ReturnType<typeof setTimeout> }
 
-function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu: openMenu, onCloseMenu }: {
-  row: Row; selected: boolean; pending: boolean; menuOpen: boolean; onSelect: (row: Row) => void; onMenu: (id: string) => void; onCloseMenu: () => void;
+function PickerRow({ row, selected, pending, held, menuOpen, onSelect, onMenu: openMenu, onCloseMenu }: {
+  row: Row; selected: boolean; pending: boolean; held: boolean; menuOpen: boolean; onSelect: (row: Row) => void; onMenu: (id: string) => void; onCloseMenu: () => void;
 }) {
   // A row with no commands (a start still in flight) has no menu to open.
   const hasCommands = rowCommands(row).length > 0;
@@ -94,6 +101,7 @@ function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu: openMen
     <span className="picker-sub">
       <span className="picker-where" title={session.cwd}>{location.project}{location.branch ? <> · <span className="picker-branch">{location.branch}</span></> : null}</span>
       {session.worktree ? <WorktreeRowMark info={session.worktree} /> : null}
+      {held ? <span className="picker-from-backlog" title="Holds a backlog item" aria-label="Holds a backlog item"><ListTodoIcon aria-hidden /></span> : null}
       {row.agents || row.processes ? <span className="picker-work">
         {row.agents ? <span title={`${count(row.agents, "agent", "agents")} working`} aria-label={`${count(row.agents, "agent", "agents")} working`}>{AGENTS}{row.agents}</span> : null}
         {row.processes ? <span title={`${count(row.processes, "process", "processes")} running`} aria-label={`${count(row.processes, "process", "processes")} running`}>{TERMINAL}{row.processes}</span> : null}
@@ -265,6 +273,7 @@ export function Picker({ view, prefs, onPrefs, actions, message }: {
           {collapsed.has(section.key) ? null : <div className="picker-group-rows" role="group" aria-label={section.label}>
             {section.rows.map((row) => <div key={row.session.id} role="none">
               <PickerRow row={row} selected={row.session.id === view.selectedId} pending={view.pending?.has(row.session.id) === true}
+                held={view.held?.has(row.session.id) === true}
                 menuOpen={rowWithMenu?.session.id === row.session.id} onSelect={actions.onSelect} onMenu={openRowMenu} onCloseMenu={closeRowMenu} />
               {rowMenu && rowWithMenu?.session.id === row.session.id ? <RowMenu row={row} confirming={rowMenu.confirming}
                 onConfirm={() => setRowMenu({ ...rowMenu, confirming: true })} onRun={(kind) => run(row, kind)} onClose={closeRowMenu} /> : null}
@@ -277,9 +286,13 @@ export function Picker({ view, prefs, onPrefs, actions, message }: {
         </div>)}
     </div>}
     {view.toast ? <PickerToast toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : message}
-    {actions.onSettings ? <div className="picker-footer">
-      <button className="picker-new" onClick={actions.onSettings} aria-current={actions.settingsOpen ? "page" : undefined}>
-        <SettingsIcon aria-hidden size={16} />Settings</button>
+    {actions.onSettings || actions.onBacklog ? <div className="picker-footer">
+      {actions.onBacklog ? <button className="picker-new" onClick={actions.onBacklog} aria-current={actions.backlogOpen ? "page" : undefined}
+        title={actions.backlogCount === undefined ? "Backlog" : `Backlog: ${String(actions.backlogCount)} open ${actions.backlogCount === 1 ? "item" : "items"}`}>
+        <ListTodoIcon aria-hidden size={16} />Backlog{actions.backlogCount === undefined ? null
+          : <span className="picker-footer-count" aria-hidden="true">{actions.backlogCount}</span>}</button> : null}
+      {actions.onSettings ? <button className="picker-new" onClick={actions.onSettings} aria-current={actions.settingsOpen ? "page" : undefined}>
+        <SettingsIcon aria-hidden size={16} />Settings</button> : null}
     </div> : null}
   </section>;
 }

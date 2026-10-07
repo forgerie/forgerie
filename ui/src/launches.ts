@@ -5,6 +5,8 @@ import type { Session } from "./contracts";
 import { newStartupToken, type AgentChoice, type FirstPrompt, type NewSessionApi, type StartFailure } from "./newSession";
 import type { NewSessionDestination, WorktreeRecord } from "./worktrees/worktreeApi";
 import { POST_CREATE_HOOK } from "./worktrees/worktreeModel";
+import type { BacklogClaim } from "./backlog/backlogApi";
+import type { ItemRef } from "./backlog/backlogModel";
 
 export type LaunchState =
   /** `sessionId` once Pi has created the session; its files and first message still follow. */
@@ -12,7 +14,8 @@ export type LaunchState =
   | { type: "started"; session: Session }
   /** The session exists, but its first message may not have reached Pi. */
   | { type: "unsent"; session: Session; error: string }
-  | { type: "failed"; error: string; maybeStarted: boolean };
+  /** `taken`: the backlog item went to another session first. Nothing started. */
+  | { type: "failed"; error: string; maybeStarted: boolean; taken?: BacklogClaim | undefined };
 /** `D` is the draft that comes back to the composer on a failure. */
 export interface Launch<D> {
   id: string; cwd: string; title: string; startedAt: string; state: LaunchState; draft: D;
@@ -25,7 +28,11 @@ export type LaunchOutcome = Exclude<LaunchState, { type: "starting" }>;
 export type StartupListener = (event: { startupToken?: string | undefined; activity: { phase: string; label: string; detail?: string | undefined } }) => void;
 export type WorktreeListener = (record: WorktreeRecord) => void;
 /** Where a start goes beyond its folder: a fresh worktree, or the folder itself, and a failed setup to retry. */
-export interface Placement { destination?: NewSessionDestination | undefined; setupId?: string | undefined }
+export interface Placement { destination?: NewSessionDestination | undefined; setupId?: string | undefined;
+  /** The backlog item the session takes. */
+  item?: ItemRef | undefined;
+  /** The stand-in name until Pi names the session. Absent: the first line. */
+  title?: string | undefined }
 
 /** The first line, as a stand-in name until Pi names the session. */
 export function launchTitle(text: string): string {
@@ -34,6 +41,7 @@ export function launchTitle(text: string): string {
 }
 
 export function failureText(failure: StartFailure): string {
+  if (failure.stage === "start" && failure.taken) return "Another session took this item first, so this session did not start.";
   if (failure.stage === "prompt") return `The session started, but its first message may not have reached Pi: ${failure.message} Check the transcript before you send it again.`;
   return failure.maybeStarted
     ? `${failure.message} The session may have started anyway. Check the session list before you try again.`
@@ -99,7 +107,7 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
     } {
       const id = newStartupToken();
       const fresh = placement.destination?.kind === "fresh-worktree";
-      set([...launches, { id, cwd, title: launchTitle(prompt.text), startedAt: (options.now?.() ?? new Date()).toISOString(),
+      set([...launches, { id, cwd, title: placement.title ?? launchTitle(prompt.text), startedAt: (options.now?.() ?? new Date()).toISOString(),
         state: { type: "starting", ...(fresh ? { progress: placement.setupId ? "Retrying worktree setup…" : "Creating worktree…" } : {}) }, draft,
         ...(placement.worktree ? { worktree: placement.worktree } : {}) }]);
       const created = (session: Session) => {
@@ -107,7 +115,8 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
         if (launch?.state.type === "starting") patch(id, { ...launch.state, sessionId: session.id });
       };
       const done = api.start(cwd, prompt, choice, { startupToken: id, onCreated: created,
-        ...(placement.destination ? { destination: placement.destination } : {}), ...(placement.setupId ? { setupId: placement.setupId } : {}) })
+        ...(placement.destination ? { destination: placement.destination } : {}), ...(placement.setupId ? { setupId: placement.setupId } : {}),
+        ...(placement.item ? { item: placement.item } : {}) })
         .then(async (result): Promise<LaunchOutcome> => {
           if (result.type === "started") return { type: "started", session: result.session };
           const { failure } = result;
@@ -118,7 +127,7 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
             change(id, { worktree: setup, hookSeen: launches.find((item) => item.id === id)?.hookSeen === true || setup.setup.log !== "" });
             return { type: "failed", error: setupFailureText(setup), maybeStarted: false };
           }
-          return { type: "failed", error: failureText(failure), maybeStarted: failure.maybeStarted };
+          return { type: "failed", error: failureText(failure), maybeStarted: failure.maybeStarted, ...(failure.taken ? { taken: failure.taken } : {}) };
         }).then((outcome) => { if (launches.some((item) => item.id === id)) patch(id, outcome); return outcome; });
       return { id, done, worktree: () => launches.find((item) => item.id === id)?.worktree };
     },

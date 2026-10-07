@@ -3,6 +3,8 @@ import { errorSchema, sessionModelSchema, sessionSchema, type Session, type Sess
 import type { PromptAttachment } from "./attachments";
 import { workspaceOf } from "./workspaceOf";
 import type { NewSessionDestination } from "./worktrees/worktreeApi";
+import { BacklogRefusal, createBacklogApi, type BacklogClaim } from "./backlog/backlogApi";
+import { firstMessage, type ItemRef } from "./backlog/backlogModel";
 
 /** One project Forgerie knows, and one checkout of it. */
 export const projectSchema = z.object({ id: z.string().min(1), name: z.string(), path: z.string().min(1) });
@@ -131,7 +133,8 @@ export function createDeferredFiles() {
 }
 export type DeferredFiles = ReturnType<typeof createDeferredFiles>;
 
-export type StartFailure = { stage: "start"; message: string; maybeStarted: boolean }
+/** `taken`: a backlog item another session already holds. Nothing started. */
+export type StartFailure = { stage: "start"; message: string; maybeStarted: boolean; taken?: BacklogClaim | undefined }
   | { stage: "prompt"; session: Session; message: string };
 class Refusal extends Error { constructor(message: string, readonly status: number) { super(message); } }
 /**
@@ -157,6 +160,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
     return schema.parse(await response.json());
   }
   const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const backlog = createBacklogApi(fetchFn);
   return {
     projects: (signal?: AbortSignal) => call("/api/projects", z.array(projectSchema), signal ? { signal } : {}),
     workspaces: (projectId: string, signal?: AbortSignal) => call(`/api/projects/${encodeURIComponent(projectId)}/workspaces`, z.array(workspaceSchema), signal ? { signal } : {}),
@@ -183,21 +187,38 @@ export function createNewSessionApi(fetchFn: Fetch) {
       destination?: NewSessionDestination | undefined;
       /** Retry this failed worktree setup instead of creating another worktree. */
       setupId?: string | undefined;
+      /**
+       * A backlog item the session takes. The server claims it and creates the
+       * session in one step, and the item's file leads the first message.
+       */
+      item?: ItemRef | undefined;
     } = {}): Promise<{ type: "started"; session: Session } | { type: "failed"; failure: StartFailure }> {
       const prompt: FirstPrompt = typeof first === "string" ? { text: first } : first;
       let session: Session;
+      let text = prompt.text;
+      const modelSpec = choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined;
+      const start = { cwd, ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}),
+        ...(options.destination ? { destination: options.destination } : {}), ...(options.setupId ? { setupId: options.setupId } : {}) };
       try {
-        const modelSpec = choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined;
-        session = await call("/api/sessions", sessionSchema, post({ cwd, ...(options.startupToken ? { startupToken: options.startupToken } : {}),
-          ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}),
-          ...(options.destination ? { destination: options.destination } : {}), ...(options.setupId ? { setupId: options.setupId } : {}) }));
+        if (options.item) {
+          // The server names its own startup token for a claimed start, so this one only identifies the request.
+          const launched = await backlog.launch(options.item.projectId, options.item.itemId, options.startupToken ?? newStartupToken(), start);
+          session = launched.session;
+          text = firstMessage(launched.initialPrompt, prompt.text, prompt.command !== undefined);
+        } else {
+          session = await call("/api/sessions", sessionSchema, post({ ...start, ...(options.startupToken ? { startupToken: options.startupToken } : {}) }));
+        }
       } catch (error) {
+        if (error instanceof BacklogRefusal) {
+          // The launch route releases its claim when the start fails, and answers 4xx only before it starts anything.
+          return { type: "failed", failure: { stage: "start", message: error.message, maybeStarted: error.kind === "unavailable",
+            ...(error.kind === "conflict" && error.claim ? { taken: error.claim } : {}) } };
+        }
         return { type: "failed", failure: { stage: "start", message: messageOf(error), maybeStarted: !refused(error) } };
       }
       options.onCreated?.(session);
       const root = `/api/sessions/${encodeURIComponent(session.id)}`;
       try {
-        let text = prompt.text;
         if (prompt.files?.length) {
           const saved = await call(`${root}/attachments`, z.object({ attachments: z.array(z.object({ path: z.string().min(1) })).length(prompt.files.length) }),
             post({ cwd: session.cwd, attachments: prompt.files }));

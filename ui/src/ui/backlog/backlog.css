@@ -1,0 +1,138 @@
+/* The backlog. It takes the thread's place, as Settings does, and reuses the
+   session list's rows, groups, and marks, so one concept keeps one picture.
+   Everything adapts to the reading column's width (container "backlog");
+   nothing keys off the viewport. Thresholds are guesses until measured in the
+   real container. */
+
+.bl-column { container: backlog / inline-size; display: flex; flex-direction: column; }
+
+/* Filter and total. The total is a readout: it sits beside the filter while the
+   column has room, and drops under it when the filter would fall below 14rem. */
+.bl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin-block-end: var(--space-2); }
+.bl-filter { flex: 1 1 14rem; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--tint-surface); color: var(--muted-foreground); }
+.bl-filter:focus-within { border-color: var(--line-focus); }
+.bl-filter input { flex: 1; min-inline-size: 0; border: 0; padding: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--small-text); outline: none; }
+.bl-filter input::placeholder { color: var(--muted-foreground); }
+.bl-total { flex: none; color: var(--muted-foreground); font-size: var(--small-text); }
+
+/* Groups: the picker's group header. Rows: the picker's row, with the title
+   allowed two lines because here the title is the content. */
+.bl-group { margin-block-start: var(--space-2); }
+.bl-rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.bl-row { display: grid; grid-template-columns: 0.875rem minmax(0, 1fr) auto; column-gap: var(--space-2); row-gap: 2px; align-items: start; inline-size: 100%;
+  min-block-size: var(--control-size); padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground); text-align: start;
+  transition: background-color 150ms; }
+.bl-row:hover { background: var(--hover-surface); }
+.bl-row .picker-mark { block-size: 1.375rem; }
+.bl-title { min-inline-size: 0; font-size: var(--small-text); line-height: 1.375rem; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bl-row .picker-time { line-height: 1.375rem; }
+.bl-meta { grid-column: 2 / span 2; display: flex; align-items: baseline; gap: var(--space-3); min-inline-size: 0; font-size: var(--label-text); line-height: 1rem;
+  color: color-mix(in oklab, var(--muted-foreground) 80%, transparent); }
+/* Priority is a word, not a colour: High carries weight, Low steps back. */
+.bl-priority { flex: none; color: var(--muted-foreground); }
+.bl-priority[data-priority="high"] { color: var(--foreground); font-weight: 500; }
+.bl-priority[data-priority="low"] { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
+/* Labels are a readout: they truncate before anything else on the line. */
+.bl-labels { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.bl-held { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bl-held em { font-style: normal; color: var(--foreground); }
+.bl-project { margin-inline-end: var(--space-3); color: var(--muted-foreground); }
+
+/* A held item's mark is the session's own mark from the list: a live ring
+   while it works, a square while it waits for you. */
+.bl-mark { display: block !important; inline-size: 6px; block-size: 6px; border-radius: 50%; }
+.bl-mark[data-state="working"] { border: 1.5px solid var(--live); animation: picker-pulse 1.6s ease-in-out infinite; }
+.bl-mark[data-state="blocked"] { border-radius: 1px; background: var(--foreground); }
+.bl-mark[data-state="open"] { background: var(--muted-foreground); }
+
+/* Ignored-by-git warning: inside the group it is about, above its rows. */
+.bl-warning { display: flex; gap: var(--space-3); margin: var(--space-1) 0 var(--space-2); padding: var(--space-3); border: 1px solid var(--line);
+  border-radius: var(--radius-surface); background: var(--tint-surface); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+.bl-warning > svg { flex: none; margin-block-start: 0.15rem; color: var(--foreground); }
+.bl-warning-text { flex: 1; min-inline-size: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.bl-warning p { margin: 0; overflow-wrap: anywhere; }
+.bl-warning code, .bl-empty code { font-family: var(--code-font); font-size: var(--code-size); color: var(--foreground); }
+.bl-warning pre { align-self: stretch; margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--code-surface); overflow-x: auto; }
+.bl-text-button { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem; padding-inline: var(--space-2);
+  margin-inline-start: calc(-1 * var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; }
+.bl-text-button:hover { background: var(--hover-surface); }
+
+/* Empty: says where Forgerie looks. */
+.bl-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); max-inline-size: 30rem; margin: clamp(2rem, 18cqb, 8rem) auto 0;
+  text-align: center; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.55; }
+.bl-empty strong { color: var(--foreground); font-weight: 500; font-size: var(--text-size); }
+.bl-empty p { margin: 0; }
+
+/* An item as a document: the agent editor's title, property list, and body. */
+.bl-item-title { margin-block-start: var(--space-1); }
+.bl-claim { display: grid; grid-template-columns: 0.875rem minmax(0, 1fr); column-gap: var(--space-2); margin-block-end: var(--space-5); padding: var(--space-3);
+  border: 1px solid color-mix(in oklab, var(--live) 35%, var(--line)); border-radius: var(--radius-surface); background: color-mix(in oklab, var(--live) 6%, var(--background)); }
+.bl-claim .picker-mark { block-size: 1.375rem; }
+.bl-claim-text p { margin: 0; font-size: var(--small-text); line-height: 1.375rem; }
+.bl-claim-text strong { font-weight: 600; }
+.bl-claim-where { color: var(--muted-foreground); line-height: 1.45 !important; overflow-wrap: anywhere; }
+.bl-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); min-inline-size: 0; padding-block: var(--space-1); }
+.bl-chip { display: inline-flex; align-items: center; block-size: 1.5rem; padding-inline: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-document);
+  font-size: var(--label-text); color: var(--muted-foreground); }
+.bl-file { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: start;
+  font-family: var(--code-font); font-size: var(--meta-text); color: var(--muted-foreground); }
+.bl-body { margin-block-start: var(--space-4); font-size: var(--text-size); }
+.bl-body code { font-family: var(--code-font); font-size: var(--code-size); }
+
+/* The item riding with the first message: the one emphatic surface here.
+   It sits at the top of the writing area, where attachments go. */
+.bl-carry { flex: none; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3);
+  border: 1px solid var(--line-focus); border-radius: var(--radius-surface); background: var(--tint-surface); }
+.bl-carry > svg { flex: none; color: var(--foreground); }
+.bl-carry-text { flex: 1; min-inline-size: 0; display: flex; flex-direction: column; gap: 2px; }
+.bl-carry-title { font-size: var(--small-text); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bl-carry-where { color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.35; }
+.bl-carry-where em { font-style: normal; color: var(--foreground); }
+.bl-carry[data-refused] { border-color: color-mix(in oklab, var(--destructive) 45%, transparent); }
+.bl-carry[data-refused] .bl-carry-where { color: var(--destructive); }
+.bl-carry .icon-button { inline-size: var(--control-size); block-size: var(--control-size); }
+.bl-note { flex: none; margin: 0; padding: 0 var(--ns-pad) var(--space-3); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; }
+.bl-refusal { flex: none; display: flex; flex-direction: column; gap: var(--space-2); color: var(--destructive); font-size: var(--small-text); }
+.bl-refusal p { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
+.bl-refusal-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.bl-refusal-actions button { min-block-size: 2.25rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font-size: var(--small-text); }
+.bl-refusal-actions button:hover { border-color: var(--line-focus); }
+
+
+/* States the list adds to the mockup. "Blocked" and "Done" are words beside the priority, like it. */
+.bl-filter input::-webkit-search-cancel-button { cursor: pointer; }
+.bl-state { flex: none; color: var(--foreground); }
+.bl-row[data-done] .bl-title { color: var(--muted-foreground); }
+.bl-mark[data-state="starting"] { border: 1.5px dashed var(--muted-foreground); }
+.bl-mark[data-state="interrupted"], .bl-mark[data-state="missing"] { border-radius: 1px; background: var(--destructive); }
+.bl-claim[data-state="interrupted"], .bl-claim[data-state="missing"] { border-color: color-mix(in oklab, var(--destructive) 40%, var(--line));
+  background: color-mix(in oklab, var(--destructive) 5%, var(--background)); }
+
+/* Files that are not items, and projects that could not be read: folded under the list. */
+.bl-problems { margin-block-start: var(--space-5); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; }
+.bl-problems summary { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-2); border-radius: var(--radius-control);
+  cursor: pointer; list-style: none; }
+.bl-problems summary::-webkit-details-marker { display: none; }
+.bl-problems summary:hover { background: var(--hover-surface); color: var(--foreground); }
+.bl-problems summary svg { flex: none; }
+.bl-problems-lede { margin: var(--space-2) var(--space-2) var(--space-3); }
+.bl-problems code { font-family: var(--code-font); font-size: var(--code-size); color: var(--foreground); }
+.bl-problems ul { margin: 0; padding: 0 var(--space-2); list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.bl-problems li { display: flex; flex-direction: column; gap: 2px; min-inline-size: 0; }
+.bl-problem-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: start; font-family: var(--code-font); font-size: var(--meta-text); color: var(--foreground); }
+.bl-problem-why { overflow-wrap: anywhere; }
+
+/* An item's blockers: each one opens. */
+.bl-blockers { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-inline-size: 0; padding-block: var(--space-1); }
+.bl-link { position: relative; max-inline-size: 100%; padding: 0; border: 0; background: transparent; color: var(--foreground); font-size: var(--small-text); line-height: 1.6;
+  text-align: start; text-decoration: underline; text-decoration-color: var(--line-focus); text-underline-offset: 0.2em; overflow-wrap: anywhere; }
+.bl-link:hover { text-decoration-color: currentColor; }
+/* A 48px hit area around a one-line link, without moving it. */
+.bl-link::before { content: ""; position: absolute; inset: -0.5rem -0.25rem; }
+.bl-body .markdown-content > :first-child { margin-block-start: 0; }
+
+@media (prefers-reduced-motion: reduce) { .bl-mark { animation: none; } }

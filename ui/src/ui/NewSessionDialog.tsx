@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ComposerPrimitive, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
+import { ComposerPrimitive, unstable_useTriggerPopoverRootContext, useAuiState } from "@assistant-ui/react";
 import { AnvilIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, PaperclipIcon, XIcon, ZapIcon } from "lucide-react";
 import { setupFailureText, type Launch } from "../launches";
 import type { WorktreeRecord } from "../worktrees/worktreeApi";
@@ -23,9 +23,23 @@ export type StartPhase = { type: "ready" } | { type: "starting"; progress: strin
  * the decision. It is the portal layer for its pickers, so they stay usable
  * while everything behind it is inert.
  */
-export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, tray, setup, onRapidfire, onDiscard, onClose }: {
+/** What rides with the first message besides its text: a backlog item. */
+export interface Carry {
+  /** The card at the top of the writing area, and anything said about it. */
+  card: ReactNode;
+  /** A line under the chips about what starting does with it. */
+  note?: ReactNode;
+  placeholder?: string | undefined;
+  /** Start may go with no typed words: the item is the message. */
+  onSendEmpty?: (() => void) | undefined;
+  /** Nothing may start while this holds, for example while another session holds the item. */
+  blocked?: boolean | undefined;
+}
+
+export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, tray, setup, carry, onRapidfire, onDiscard, onClose }: {
   /** The destination chip and its picker. */
   destination: ReactNode;
+  carry?: Carry | undefined;
   /** A worktree being set up, or one whose setup failed. It takes the progress line's place. */
   setup?: ReactNode;
   model: ModelBinding;
@@ -63,14 +77,14 @@ export function NewSessionDialog({ destination, model, mentions, commands, rapid
     <PortalLayerProvider value={dialog}>
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <Window titleId={titleId} destination={destination} model={model} mentions={mentions} commands={commands}
-          rapidfire={rapidfire} phase={phase} tray={tray} setup={setup} onRapidfire={onRapidfire} onDiscard={onDiscard} onClose={close} />
+          rapidfire={rapidfire} phase={phase} tray={tray} setup={setup} carry={carry} onRapidfire={onRapidfire} onDiscard={onDiscard} onClose={close} />
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </PortalLayerProvider>
   </dialog>, document.body);
 }
 
-function Window({ titleId, destination, model, mentions, commands, rapidfire, phase, tray, setup, onRapidfire, onDiscard, onClose }: {
-  titleId: string; destination: ReactNode; setup?: ReactNode; model: ModelBinding; mentions: MentionSource; commands: CommandBinding;
+function Window({ titleId, destination, model, mentions, commands, rapidfire, phase, tray, setup, carry, onRapidfire, onDiscard, onClose }: {
+  titleId: string; destination: ReactNode; setup?: ReactNode; carry?: Carry | undefined; model: ModelBinding; mentions: MentionSource; commands: CommandBinding;
   rapidfire: boolean; phase: StartPhase; tray?: ReactNode; onRapidfire: () => void; onDiscard: () => void; onClose: () => void;
 }) {
   const [picker, setPicker] = useState<PickerOpen>();
@@ -80,9 +94,13 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
   const snapshot = useRef<MentionInputSnapshot>(null);
   const triggers = unstable_useTriggerPopoverRootContext();
   const busy = phase.type === "starting";
+  const empty = useAuiState((state) => state.composer.isEmpty);
+  // The composer sends nothing empty. With an item riding along, empty is a whole message.
+  const sendEmpty = empty && !busy && !carry?.blocked ? carry?.onSendEmpty : undefined;
   const remember = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
+    if (sendEmpty && event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); sendEmpty(); return; }
     remember();
     // An open suggestion list takes Enter and Escape first.
     for (const trigger of triggers.getTriggers().values()) {
@@ -109,10 +127,11 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
       <span className="ns-with">with<ModelPicker binding={model} anchor={context} open={picker} onOpenChange={setPicker} /></span>
     </div>
     <ComposerPrimitive.AttachmentDropzone ref={body} className="ns-body" disabled={busy}>
+      {carry?.card}
       <ComposerAttachments />
       <AttachmentErrors />
       <ComposerPrimitive.Input ref={input} aria-label="First message" rows={4} className="ns-input"
-        placeholder="Describe what the agent should do first…" submitMode="ctrlEnter" cancelOnEscape={false}
+        placeholder={carry?.placeholder ?? "Describe what the agent should do first…"} submitMode="ctrlEnter" cancelOnEscape={false}
         onKeyDown={onKeyDown} onChange={remember} onSelect={remember} />
     </ComposerPrimitive.AttachmentDropzone>
     {tray}
@@ -124,14 +143,18 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
         <ZapIcon aria-hidden size={14} />Rapidfire</button>
       <ComposerDictation disabled={busy} />
     </div>
+    {carry?.note}
     {setup ? <div className="ns-setup">{setup}</div>
       : phase.type === "starting" && <p className="ns-status" role="status">{phase.progress}</p>}
     {phase.type === "failed" && <p className="ns-error" role="alert">{phase.message}</p>}
     </div>
     <footer className="ns-foot">
       <button type="button" className="ns-discard" disabled={busy} onClick={onDiscard}>Discard draft</button>
-      <ComposerPrimitive.Send className="ns-start primary" aria-keyshortcuts="Control+Enter Meta+Enter"
-        title={`${startLabel} (Ctrl+Enter)`}>{startLabel}</ComposerPrimitive.Send>
+      {sendEmpty ? <button type="button" className="ns-start primary" aria-keyshortcuts="Control+Enter Meta+Enter"
+        title={`${startLabel} (Ctrl+Enter)`} onClick={sendEmpty}>{startLabel}</button>
+        : carry?.blocked ? <button type="button" className="ns-start primary" disabled>{startLabel}</button>
+        : <ComposerPrimitive.Send className="ns-start primary" aria-keyshortcuts="Control+Enter Meta+Enter"
+          title={`${startLabel} (Ctrl+Enter)`}>{startLabel}</ComposerPrimitive.Send>}
     </footer>
     {/* Above the writing area, so the list never covers the line being typed. */}
     <SlashCommands binding={commands} anchor={body} />

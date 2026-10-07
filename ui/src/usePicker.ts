@@ -100,7 +100,12 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     onUndo: () => void commands.undo(),
     onDismissToast: commands.dismiss,
   }), [store, commands]);
-  return { view, prefs, setPrefs, find, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext,
+  /** What the list says about one session: its state, name, and shorthand time. The backlog speaks of its sessions in these words. */
+  const look = useCallback((id: string) => {
+    const row = rows.find((candidate) => candidate.session.id === id);
+    return row ? { state: row.state, time: row.time, ...(row.session.name ? { name: row.session.name } : {}) } : undefined;
+  }, [rows]);
+  return { view, prefs, setPrefs, find, look, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext,
     onStartup: store.onStartup, onWorktree: store.onWorktree };
 }
 
