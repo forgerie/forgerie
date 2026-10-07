@@ -11,8 +11,11 @@ export interface SessionWrites {
 }
 export interface Target extends SessionRef { name?: string | undefined }
 export type Toast =
-  | { type: "undo"; target: Target }
+  /** `note` says what the archive left behind, such as a worktree the server kept and why. */
+  | { type: "undo"; target: Target; note?: string | undefined }
   | { type: "info"; text: string }
+  /** Information that stays until dismissed. */
+  | { type: "note"; text: string }
   | { type: "error"; text: string };
 export interface RowActionsState {
   toast?: Toast | undefined;
@@ -37,14 +40,16 @@ export function createRowActions(deps: {
 }) {
   const timers: Timers = deps.timers ?? { set: (run, ms) => setTimeout(run, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
   let state: RowActionsState = { pending: new Set() };
+  /** The latest note per session, for an archive reply that arrives after it. */
+  const notes = new Map<string, string>();
   let toastTimer: unknown;
   const listeners = new Set<() => void>();
   const update = (next: RowActionsState) => { state = next; for (const listener of listeners) listener(); };
   const show = (toast: Toast | undefined) => {
     timers.clear(toastTimer);
     toastTimer = undefined;
-    // Errors stay until dismissed or replaced: a refusal read after it vanished is no help.
-    if (toast && toast.type !== "error") toastTimer = timers.set(() => update({ ...state, toast: undefined }), toast.type === "undo" ? UNDO_MS : INFO_MS);
+    // Errors and notes stay until dismissed or replaced: a reason read after it vanished is no help.
+    if (toast && toast.type !== "error" && toast.type !== "note" && !(toast.type === "undo" && toast.note)) toastTimer = timers.set(() => update({ ...state, toast: undefined }), toast.type === "undo" ? UNDO_MS : INFO_MS);
     update({ ...state, toast });
   };
   const setPending = (id: string, on: boolean) => {
@@ -64,7 +69,9 @@ export function createRowActions(deps: {
   async function archive(target: Target): Promise<boolean> {
     // A second archive replaces the first offer; the first archive stands.
     const done = await guarded(target, () => deps.writes.setArchived({ id: target.id, cwd: target.cwd }, true));
-    if (done) show({ type: "undo", target });
+    // The note can arrive before the archive's own reply.
+    const note = notes.get(target.id);
+    if (done) show({ type: "undo", target, ...(note ? { note } : {}) });
     return done;
   }
 
@@ -106,6 +113,17 @@ export function createRowActions(deps: {
       catch (error) {
         show({ type: "error", text: error instanceof MutationError && error.status === 404 ? "Session was already deleted" : messageOf(error) });
       }
+    },
+    /**
+     * Say what an archive left behind. It joins that archive's undo offer, which
+     * then stays until dismissed; after the offer is gone it stands alone.
+     */
+    annotate(sessionId: string, note: string) {
+      notes.set(sessionId, note);
+      const toast = state.toast;
+      // An archive still in flight shows the note with its undo offer.
+      if (state.pending.has(sessionId)) return;
+      show(toast?.type === "undo" && toast.target.id === sessionId ? { ...toast, note } : { type: "note", text: note });
     },
     dismiss: () => show(undefined),
     dispose: () => { timers.clear(toastTimer); listeners.clear(); },

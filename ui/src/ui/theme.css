@@ -950,3 +950,125 @@ summary.trace-line:hover { color: var(--foreground); }
   .note-chip-text { max-inline-size: 10rem; }
 }
 @media (prefers-reduced-motion: reduce) { .change-chevron { transition: none; } }
+
+/* ---- Session worktrees. Git facts (branch, sha, counts, logs) are set in the
+   code face wherever they appear, so they read as Git, not prose. Readouts give
+   way before any control: the branch chip takes only the room the bar's
+   buttons leave, and the session menu repeats what it cuts. ---- */
+/* Basis 0, so it never wraps the bar's controls onto a new line. The model picker
+   grows a thousand times faster, so it reaches its own width first; the chip
+   takes what is left, up to its own width, and ellipsizes the branch below that. */
+.composer-actions:has(> .worktree-chip) .model-trigger { flex-grow: 1000; }
+.worktree-chip { flex: 1 1 0; min-inline-size: 1.75rem; max-inline-size: max-content; display: inline-flex; align-items: center; gap: var(--space-1); margin-inline-end: auto; padding-inline: var(--space-2); overflow: hidden;
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; white-space: nowrap; }
+.worktree-chip > svg { flex: none; }
+.worktree-chip-branch { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
+.worktree-marks { flex: none; display: inline-flex; gap: var(--space-2); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.worktree-marks [data-mark="ahead"] { color: var(--live); }
+.worktree-marks [data-mark="dirty"] { color: var(--muted-foreground); }
+.worktree-marks [data-mark="error"] { color: var(--destructive); }
+.picker-sub .worktree-marks, .worktree-row-state { flex: none; }
+.worktree-row-state { display: inline-flex; align-items: center; gap: 3px; font-family: var(--code-font); font-size: var(--meta-text); color: var(--muted-foreground); }
+.worktree-row-state svg { inline-size: 0.75rem; block-size: 0.75rem; }
+.worktree-row-state[data-state="landed"] svg { color: var(--live); }
+
+/* The session menu: under the header's ⋯, at the trailing edge, above the thread. */
+.session-menu-root { position: relative; flex: none; display: grid; }
+.session-menu { position: absolute; z-index: 6; inset-block-start: calc(100% + var(--space-2)); inset-inline-end: calc(-1 * var(--space-1));
+  inline-size: max-content; min-inline-size: 15rem; max-inline-size: min(22rem, calc(100cqi - 2 * var(--space-4)));
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transform-origin: top right; }
+.session-menu button { white-space: nowrap; }
+.session-menu button small { font-family: var(--body-font); }
+.session-menu button[data-tone="danger"] { color: var(--destructive); }
+.session-menu button[data-tone="danger"]:disabled { color: var(--muted-foreground); }
+.session-menu-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1); color: var(--muted-foreground); }
+.session-menu-branch { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-family: var(--code-font); font-size: var(--label-text); }
+.session-menu-sentence { grid-column: 2; font-size: var(--label-text); overflow-wrap: anywhere; }
+.session-menu-sentence:empty { display: none; }
+
+/* Setup: a checklist with the hook's own output under it. */
+.wt-setup { display: flex; flex-direction: column; gap: var(--space-2); margin-block-end: var(--message-gap); padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); font-size: var(--small-text); }
+.wt-setup[data-phase="failed"] { border-color: color-mix(in oklab, var(--destructive) 40%, transparent); }
+.wt-setup-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--space-3); }
+.wt-setup-title { font-weight: 500; }
+.wt-setup[data-phase="failed"] .wt-setup-title { color: var(--destructive); }
+.wt-branch { display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; max-inline-size: 100%; overflow: hidden; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); white-space: nowrap; text-overflow: ellipsis; }
+.wt-branch svg { flex: none; }
+.wt-steps { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.wt-steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--muted-foreground); }
+.wt-steps li > svg { flex: none; }
+.wt-steps li[data-state="running"] { color: var(--foreground); }
+.wt-steps li[data-state="running"] > svg { color: var(--live); animation: ns-spin 1.2s linear infinite; }
+.wt-steps li[data-state="done"] > svg { color: var(--live); }
+.wt-steps li[data-state="failed"] { color: var(--destructive); }
+.wt-exit { margin-inline-start: auto; padding-inline: var(--space-1); border-radius: var(--radius-document); background: color-mix(in oklab, var(--destructive) 10%, transparent); font-family: var(--code-font); font-size: var(--meta-text); }
+.wt-log-tail, .wt-log pre { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--code-surface); color: var(--muted-foreground);
+  font-family: var(--code-font); font-size: var(--meta-text); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Overflow at the start is clipped, so the newest line stays at the bottom edge. */
+.wt-log-tail { display: flex; flex-direction: column; justify-content: flex-end; max-block-size: calc(6lh + 2 * var(--space-2)); overflow: hidden; }
+.wt-log pre { max-block-size: min(16rem, 40dvh); overflow: auto; }
+.wt-log summary { cursor: pointer; color: var(--muted-foreground); font-size: var(--label-text); margin-block-end: var(--space-1); }
+.wt-setup-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.wt-setup-actions .wt-dismiss { order: -1; margin-inline-end: auto; }
+.ns-setup { flex: none; padding: 0 var(--ns-pad) var(--space-3); }
+.ns-setup .wt-setup { margin: 0; }
+
+/* Buttons shared by the setup card, the receipt, and the Land/Discard window. */
+.wt-primary, .wt-secondary { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-4);
+  border-radius: var(--radius-control); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
+.wt-primary { border: 0; }
+/* primary-foreground flips with the theme: near-white on the deep light-mode red, near-black on the bright dark-mode red. */
+.wt-primary[data-tone="danger"] { background: var(--destructive); color: var(--primary-foreground); }
+.wt-secondary { border: 1px solid var(--line); background: transparent; color: var(--foreground); }
+.wt-secondary:not(:disabled):hover { border-color: var(--line-focus); }
+
+/* Read-only: where the input bar was. It says what happened and offers a new session, never a box to type into. */
+.wt-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border: 1px dashed var(--line-focus); border-radius: var(--radius-thread); color: var(--muted-foreground); font-size: var(--small-text); }
+.wt-receipt-mark { flex: none; display: grid; }
+.wt-receipt[data-state="landed"] .wt-receipt-mark { color: var(--live); }
+.wt-receipt-text { flex: 1 1 14rem; min-inline-size: 0; margin: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.wt-receipt-text strong { color: var(--foreground); font-weight: 500; }
+.wt-receipt .wt-secondary { margin-inline-start: auto; }
+
+/* Land and Discard: a small window. A card while there is room; at a narrow or short edge it meets the screen. */
+.wt-dialog {
+  --wt-width: 30rem;
+  --wt-room: clamp(0px, (100dvw - var(--wt-width)) / 2, 1.5rem);
+  position: fixed; inset: 0; margin: auto; padding: 0; border: 0; background: transparent; color: var(--foreground); overflow: visible;
+  inline-size: min(var(--wt-width), 100dvw - 2 * var(--wt-room)); max-inline-size: none; block-size: fit-content; max-block-size: 100dvh;
+}
+.wt-dialog[open] { display: flex; }
+.wt-dialog::backdrop { background: var(--scrim); }
+.wt-card { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; max-block-size: 100dvh; overflow: hidden;
+  border: 1px solid var(--line); border-radius: min(var(--radius-thread), var(--wt-room)); background: var(--background); box-shadow: 0 var(--space-4) var(--space-8) var(--scrim-shadow); }
+.wt-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: var(--space-4) var(--space-5) var(--space-2); }
+.wt-head h2 { flex: 1 1 auto; margin: 0; font-size: var(--text-size); font-weight: 500; }
+.wt-mark { flex: none; display: grid; place-items: center; inline-size: 1.75rem; block-size: 1.75rem; border-radius: var(--radius-control); background: var(--muted); color: var(--muted-foreground); }
+.wt-head .wt-branch { flex-basis: 100%; padding-inline-start: calc(1.75rem + var(--space-2)); }
+.wt-body { flex: 1 1 auto; min-block-size: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-2) var(--space-5) var(--space-3); font-size: var(--small-text); line-height: 1.55; }
+.wt-body p { margin: 0; }
+.wt-lead { color: var(--foreground); }
+.wt-lead[data-tone="danger"] { color: var(--destructive); font-weight: 500; }
+.wt-note, .wt-status { color: var(--muted-foreground); }
+.wt-status { display: flex; align-items: center; gap: var(--space-2); }
+.wt-status svg { animation: ns-spin 1.2s linear infinite; }
+.wt-warning { padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: color-mix(in oklab, var(--destructive) 8%, transparent); color: var(--foreground); }
+.wt-error { margin: 0; color: var(--destructive); font-size: var(--small-text); overflow-wrap: anywhere; }
+.wt-card > .wt-error { padding: 0 var(--space-5) var(--space-2); }
+.wt-list { display: grid; margin: 0; padding: var(--space-1) 0; list-style: none; border-block: 1px solid var(--line); }
+.wt-list + .wt-list { border-block-start: 0; margin-block-start: calc(-1 * var(--space-3)); }
+.wt-list li { display: flex; align-items: baseline; gap: var(--space-3); min-inline-size: 0; padding-block: 0.3rem; }
+.wt-list code, .wt-path { font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; }
+.wt-list code { flex: none; color: var(--muted-foreground); }
+.wt-list li > span:not(.wt-path) { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-path { min-inline-size: 0; overflow-wrap: anywhere; }
+.wt-outcome { display: flex; flex-direction: column; gap: var(--space-3); }
+.wt-outcome-title { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--foreground); font-size: var(--text-size); font-weight: 500; }
+.wt-outcome-title svg { flex: none; margin-block-start: 0.15em; }
+.wt-outcome[data-tone="done"] .wt-outcome-title svg { color: var(--live); }
+.wt-outcome[data-tone="conflict"] .wt-outcome-title svg, .wt-outcome[data-tone="blocked"] .wt-outcome-title svg, .wt-outcome[data-tone="stale"] .wt-outcome-title svg { color: var(--destructive); }
+.wt-foot { flex: none; display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--space-5) var(--space-4); border-block-start: 1px solid var(--line); }
+.wt-foot > button { flex: 1 0 auto; }
+@media (prefers-reduced-motion: reduce) { .wt-steps li[data-state="running"] > svg, .wt-status svg { animation: none; } }
+.destination-fresh .model-row-name { display: inline-flex; align-items: center; gap: var(--space-2); }
+.destination-fresh .model-row-name svg { flex: none; color: var(--live); }

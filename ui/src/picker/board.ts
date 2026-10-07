@@ -3,6 +3,7 @@
 // and inboxLocation.ts (main, a348db81) so both clients agree on what a
 // session "is". Review rules on top: rows carry no chat text and no status
 // words; time is always shorthand.
+import type { WorktreeInfo } from "../worktrees/worktreeApi";
 
 export interface PickerSession {
   id: string;
@@ -14,6 +15,8 @@ export interface PickerSession {
   agentSpawned?: boolean | undefined;
   /** A start this browser made, before Pi has listed the session. It has no server identity yet. */
   starting?: boolean | undefined;
+  /** The session-owned worktree it runs in, or ran in before Land or Discard removed it. */
+  worktree?: WorktreeInfo | undefined;
 }
 export interface PickerStatus {
   isStreaming: boolean;
@@ -171,9 +174,11 @@ export function rows(input: BoardInput): Row[] {
     const working = state === "working";
     const since = working ? activity?.activeSince ?? session.modified : session.modified;
     const busy = status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true;
+    const location = input.locate(session.cwd);
     return {
       session, state, group, working, busy,
-      location: input.locate(session.cwd),
+      // A session worktree's folder is a generated name; its branch is what a person reads.
+      location: session.worktree ? { ...location, branch: session.worktree.branch } : location,
       time: shortAge(since, input.now),
       agents: status?.workingAgents ?? 0,
       processes: status?.runningProcesses ?? 0,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { worktreeInfoSchema } from "../worktrees/worktreeApi";
 
 // Only the fields the picker consumes. Everything else stays server-owned.
 export const pickerSessionSchema = z.object({
@@ -9,6 +10,8 @@ export const pickerSessionSchema = z.object({
   archived: z.boolean().optional(),
   pinned: z.boolean().optional(),
   agentSpawned: z.boolean().optional(),
+  // A malformed worktree drops out, not the whole listing.
+  worktree: worktreeInfoSchema.optional().catch(undefined),
 });
 const blockers = {
   pendingAsk: z.object({ askId: z.string() }).optional(),

@@ -176,7 +176,12 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (attempt === catalogAttempt) update({ ...state, commands: { type: "failed", message: messageOf(error) } });
     }
   }
-  function withStatus(next: SessionState, status: SessionStatus): SessionState {
+  function withStatus(next: SessionState, incoming: SessionStatus): SessionState {
+    // Live status events leave out the worktree and the read-only mark; only the status read carries them.
+    const previous = next.status;
+    const status: SessionStatus = { ...incoming,
+      ...(incoming.worktree === undefined && previous?.worktree ? { worktree: previous.worktree } : {}),
+      ...(incoming.readOnly === undefined && previous?.readOnly !== undefined ? { readOnly: previous.readOnly } : {}) };
     // A shell command is not an agent run: Stop cannot end it and prompts may start beside it.
     return { ...next, status, compaction: compactionFromStatus(next.compaction, status),
       transcript: { ...next.transcript, isRunning: status.isStreaming || status.isCompacting } };

@@ -23,6 +23,8 @@ Press "New session" at the top of the session list, N, or Ctrl+Enter to start a 
 
 Press the changes button in the header to read the session's git diff. Select lines, write a note, and the note goes to the agent with your next message. See [notes on changes](verification/diff-notes.md).
 
+A new session in a Git project starts in a fresh worktree from the default branch. Land or discard it from the ⋯ menu in the header. See [session worktrees](verification/session-worktrees.md).
+
 Press the archive button in the header to archive the session and open the next one waiting for you. See [archive and next](verification/archive-next.md).
 
 On a touch screen, swipe right to see the session list and left to put it away. See [swipe to the session list](verification/sheet-swipe.md).

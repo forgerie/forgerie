@@ -2,6 +2,7 @@ import { z } from "zod";
 import { errorSchema, sessionModelSchema, sessionSchema, type Session, type SessionModel } from "./contracts";
 import type { PromptAttachment } from "./attachments";
 import { workspaceOf } from "./workspaceOf";
+import type { NewSessionDestination } from "./worktrees/worktreeApi";
 
 /** One project Forgerie knows, and one checkout of it. */
 export const projectSchema = z.object({ id: z.string().min(1), name: z.string(), path: z.string().min(1) });
@@ -178,13 +179,18 @@ export function createNewSessionApi(fetchFn: Fetch) {
       startupToken?: string;
       /** The session exists; its files and first message follow. */
       onCreated?: (session: Session) => void;
+      /** A fresh worktree or the folder itself. Absent: the server's default for the folder. */
+      destination?: NewSessionDestination | undefined;
+      /** Retry this failed worktree setup instead of creating another worktree. */
+      setupId?: string | undefined;
     } = {}): Promise<{ type: "started"; session: Session } | { type: "failed"; failure: StartFailure }> {
       const prompt: FirstPrompt = typeof first === "string" ? { text: first } : first;
       let session: Session;
       try {
         const modelSpec = choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined;
         session = await call("/api/sessions", sessionSchema, post({ cwd, ...(options.startupToken ? { startupToken: options.startupToken } : {}),
-          ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}) }));
+          ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}),
+          ...(options.destination ? { destination: options.destination } : {}), ...(options.setupId ? { setupId: options.setupId } : {}) }));
       } catch (error) {
         return { type: "failed", failure: { stage: "start", message: messageOf(error), maybeStarted: !refused(error) } };
       }

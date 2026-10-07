@@ -14,5 +14,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src", "verification/preview.tsx", "verification/dictation-live.tsx", "vite.config.ts"]
+  "include": ["src", "verification/preview.tsx", "verification/worktree-preview.tsx", "verification/dictation-live.tsx", "vite.config.ts"]
 }

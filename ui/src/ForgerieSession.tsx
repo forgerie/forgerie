@@ -29,10 +29,22 @@ import { annotationsOf, carriesNotes } from "./changes/diffNotes";
 import { createChangesSource } from "./changes/changesSource";
 import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
 import type { NotesBinding } from "./ui/NoteTray";
+import type { WorktreeApi, WorktreeInfo } from "./worktrees/worktreeApi";
+import { useSessionWorktree } from "./worktrees/useSessionWorktree";
+import { visibleSetup } from "./worktrees/worktreeModel";
+import { WorktreeChip } from "./ui/WorktreeChip";
+import { SessionMenu, WorktreeDialog, type WorktreeCommand } from "./ui/WorktreeActions";
+import { WorktreeReceipt, WorktreeSetupCard } from "./ui/WorktreeSetupCard";
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, initialDraft, initialError, drafts, onSwitchSession, archive }: {
+export function ForgerieSession({ id, known, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, worktrees, onNewSession }: {
   id: string; known?: Session | undefined; initialDraft?: string | undefined;
+  /** The catalog's live view of this session's worktree: state, setup, and branch as events report them. */
+  worktree?: WorktreeInfo | undefined;
+  /** Worktree reads and Land/Discard. Absent: the session shows no worktree controls. */
+  worktrees?: WorktreeApi | undefined;
+  /** Start a new session, offered once this one can no longer continue. */
+  onNewSession?: (() => void) | undefined;
   /** Shown once on open, such as a new session whose first message may not have gone out. */
   initialError?: string | undefined;
   /** "Archive and next" from the catalog's view of this session. Absent: no button. */
@@ -104,6 +116,12 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
       chatDraft.restore(restored.map((message) => message.text).join("\n\n"));
     } catch { /* The store exposes the command error. */ }
   }, [store, chatDraft]);
+  const busy = state.transcript.isRunning || isBashRunning(state) || state.status?.isCompacting === true;
+  const { info: worktree, refresh: refreshWorktree } = useSessionWorktree(worktrees, { catalog: catalogWorktree, status: state.status?.worktree }, busy);
+  // Landed or discarded: the transcript is saved, the folder is gone, Pi does not run here again.
+  const readOnly = state.status?.readOnly === true || (worktree !== undefined && worktree.state.kind !== "active");
+  const [worktreeCommand, setWorktreeCommand] = useState<WorktreeCommand>();
+  const setup = worktree?.owned ? visibleSetup(worktree.setup, state.transcript.messages.length > 0 || state.transcript.isRunning) : undefined;
   const messages = useThreadMessages(state.transcript.messages, state.transcript.isRunning);
   const runtime = useExternalStoreRuntime({
     messages, onNew, onCancel, adapters: { dictation, attachments },
@@ -128,7 +146,8 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
     : state.connection.type === "failed" ? state.connection.message
     : sendError ?? state.commandError ?? state.transcript.error;
   const dialogs = state.status?.pendingDialogs ?? [];
-  const status = state.connection.type === "loading" ? "Connecting"
+  const status = readOnly ? (worktree?.state.kind === "landed" ? "Landed" : worktree?.state.kind === "discarded" ? "Discarded" : "Read-only")
+    : state.connection.type === "loading" ? "Connecting"
     : state.connection.type === "reconnecting" ? "Reconnecting"
     : state.connection.type === "failed" ? "Disconnected"
     : dialogs.length > 0 ? "Waiting for you"
@@ -154,16 +173,22 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}
       actions={<>
-        {changes && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
+        {/* A landed or discarded worktree has no folder left to diff. */}
+        {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
         <TreeOpener idle={state.connection.type === "ready" && !state.sending && !state.transcript.isRunning}
           onOpen={() => { void store.openTree().catch(() => { /* The store exposes the error. */ }); }} />
         {archive && <ArchiveNextButton onArchive={archive.onArchive}
           // The catalog's status can lag the live one; the server refuses an archive during any run.
           availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
             ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}
+        {worktree && worktrees && worktree.state.kind === "active" && <SessionMenu info={worktree} busy={busy} onCommand={setWorktreeCommand} />}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
-      <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
+      <Thread ask={ask} mentions={mentions} chatDraft={chatDraft}
+        head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
+        inputContext={worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : undefined}
+        readOnly={readOnly ? <WorktreeReceipt state={worktree?.state} defaultBranch={worktree?.defaultBranch}
+          branch={worktree?.branch} onNew={onNewSession} /> : undefined} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",
           waits: state.transcript.isRunning || isBashRunning(state),
           onSend: send, onDismiss: store.dismissCompaction }}
@@ -187,6 +212,8 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
       {review && changes && <ChangesReview source={changes} notes={notes} focusNoteId={review.focusNoteId}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
+      {worktreeCommand && worktree && worktrees && <WorktreeDialog command={worktreeCommand} info={worktree} api={worktrees}
+        onAsk={readOnly ? undefined : (prompt) => send(prompt)} onDone={() => { void refreshWorktree(); }} onClose={() => setWorktreeCommand(undefined)} />}
     </SessionFrame>
     </DictationProvider>
   </AssistantRuntimeProvider>;

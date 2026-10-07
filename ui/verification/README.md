@@ -16,6 +16,10 @@ Swipe right anywhere on the session to pull the session list in, and left to pus
 
 The changes button in the session header opens the session's git diff. Select lines, write a note, and the note waits as a chip in the message box until the next message carries it to the agent. See [behavior, layout, verification, and limits](diff-notes.md).
 
+## Session worktrees
+
+A new session in a Git project starts in a fresh worktree by default. The input bar shows its branch with commits ahead and uncommitted files; the session menu lands or discards it; a landed or discarded conversation stays readable. See [behavior, verification, and limits](session-worktrees.md).
+
 ## Archive and next
 
 The archive button in the session header archives the open session with the usual undo offer and opens the next session blocked on you, errored, or unread. With nothing left, the session list opens. See [behavior, verification, and limits](archive-next.md).

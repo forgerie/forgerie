@@ -1,8 +1,9 @@
 import { usePortalTarget } from "./portalLayer";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, FolderIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, FolderIcon, GitBranchPlusIcon } from "lucide-react";
 import type { Project, Workspace } from "../newSession";
+import type { WorktreeOptions } from "../worktrees/worktreeApi";
 import { usePanelPlacement } from "./usePanelPlacement";
 
 /** Where a new session starts, and the folders it could start in instead. */
@@ -12,7 +13,12 @@ export interface DestinationBinding {
   disabled: boolean;
   listProjects: (signal: AbortSignal) => Promise<Project[]>;
   listWorkspaces: (projectId: string, signal: AbortSignal) => Promise<Workspace[]>;
-  onChoose: (cwd: string, label: string) => void;
+  /** A fresh worktree, or the folder itself. Absent: this client does not offer worktrees. */
+  placement?: "fresh" | "existing" | undefined;
+  /** Whether a project is a Git repository, and its default branch. */
+  worktreeOptions?: ((path: string, signal: AbortSignal) => Promise<WorktreeOptions>) | undefined;
+  /** `placement` is set when the choice offered one: "fresh" for a new worktree, "existing" for a listed folder. */
+  onChoose: (cwd: string, label: string, placement?: "fresh" | "existing") => void;
 }
 
 type Load<T> = { type: "loading" } | { type: "ready"; value: T } | { type: "failed"; message: string };
@@ -88,6 +94,12 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   const projects = useRead(binding.listProjects, "projects");
   const project = step.type === "workspaces" ? step.project : undefined;
   const workspaces = useRead(project ? (signal) => binding.listWorkspaces(project.id, signal) : undefined, project?.id ?? "none");
+  const offer = binding.worktreeOptions;
+  const repo = useRead(project && offer ? (signal) => offer(project.path, signal) : undefined, project ? `options:${project.id}` : "none");
+  // Without worktree support the choice is the folder alone, as before.
+  const git = offer && repo.type === "ready" && repo.value.kind === "git" ? repo.value : undefined;
+  const optionsSettled = !offer || repo.type !== "loading";
+  const placed = offer ? "existing" as const : undefined;
   usePanelPlacement(panel, anchor, PANEL_CAP, PANEL_MIN_REM);
   // Focus moves in at once, so Escape always reaches the panel; no touch keyboard opens.
   useLayoutEffect(() => {
@@ -113,13 +125,15 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   const latest = useRef({ binding, onClose });
   latest.current = { binding, onClose };
   useEffect(() => {
-    if (!project || workspaces.type !== "ready" || workspaces.value.length !== 1 || autoChosen.current === project.id) return;
+    // A Git project also offers a fresh worktree, so its one checkout is still a choice.
+    if (!project || workspaces.type !== "ready" || workspaces.value.length !== 1 || autoChosen.current === project.id || !optionsSettled || git) return;
     autoChosen.current = project.id;
     const only = workspaces.value[0]!;
-    latest.current.binding.onChoose(only.path, workspaceLabel(project, only));
+    latest.current.binding.onChoose(only.path, workspaceLabel(project, only), placed);
     latest.current.onClose(true);
-  }, [project, workspaces]);
-  const choose = (cwd: string, label: string) => { binding.onChoose(cwd, label); onClose(true); };
+  }, [project, workspaces, optionsSettled, git, placed]);
+  const choose = (cwd: string, label: string, placement: "fresh" | "existing" | undefined = placed) => { binding.onChoose(cwd, label, placement); onClose(true); };
+  const freshHere = binding.placement === "fresh" && project !== undefined && (binding.cwd === project.path || binding.cwd.startsWith(`${project.path}/`));
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault(); event.stopPropagation();
@@ -164,16 +178,23 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
         <ChevronLeftIcon aria-hidden size={16} />{step.project.name}
       </button>
       <div className="model-list">
+        {git && <ul><li><button type="button" className="model-row destination-row destination-fresh" aria-current={freshHere || undefined}
+          onClick={() => choose(step.project.path, `${step.project.name} · new worktree from ${git.defaultBranch}`, "fresh")}>
+          <span className="model-row-name"><GitBranchPlusIcon aria-hidden size={16} />New worktree<span className="model-row-variant">from {git.defaultBranch}</span></span>
+          <span className="model-row-meta">Its own branch and folder. Land or discard it when the work is done.</span>
+          {freshHere && <CheckIcon aria-hidden size={16} className="model-row-check" />}
+        </button></li></ul>}
         {workspaces.type === "loading" && <p className="model-hint" role="status">Loading workspaces…</p>}
         {workspaces.type === "failed" && <p className="model-hint" role="alert">Workspaces unavailable: {workspaces.message}</p>}
         <ul>{workspaces.type === "ready" && workspaces.value.map((item) => {
           const name = item.branch ?? item.label;
           const label = workspaceLabel(step.project, item);
-          return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={binding.cwd === item.path || undefined}
+          const current = binding.cwd === item.path && binding.placement !== "fresh";
+          return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={current || undefined}
             onClick={() => choose(item.path, label)}>
             <span className="model-row-name">{name}{item.isMain && <span className="model-row-variant">main checkout</span>}</span>
             <span className="model-row-meta"><DestinationPath path={item.path} /></span>
-            {binding.cwd === item.path && <CheckIcon aria-hidden size={16} className="model-row-check" />}
+            {current && <CheckIcon aria-hidden size={16} className="model-row-check" />}
           </button></li>;
         })}</ul>
       </div>

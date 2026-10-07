@@ -8,6 +8,7 @@ import { createRowActions } from "./picker/rowActions";
 import { writeClipboardText } from "./clipboard";
 import { browserTransport } from "./sessionStore";
 import type { PickerActions, PickerView } from "./ui/Picker";
+import { archiveNote } from "./worktrees/worktreeModel";
 
 const MINUTE = 60_000;
 const NONE: readonly StartingSession[] = [];
@@ -58,8 +59,23 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
   const recent = useMemo(() => state.sessions.filter((session) => !session.archived).map((session) => ({ cwd: session.cwd, modified: session.modified })), [state.sessions]);
   const find = useCallback((id: string) => {
     const session = state.sessions.find((candidate) => candidate.id === id);
-    return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}) } : undefined;
+    return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}), ...(session.worktree ? { worktree: session.worktree } : {}) } : undefined;
   }, [state.sessions]);
+  // An archive can keep its worktree. Its reason arrives as a worktree event and joins the archive's message.
+  const archiveNotes = useRef<Map<string, string> | undefined>(undefined);
+  useEffect(() => {
+    if (state.connection.type !== "ready") return;
+    const first = archiveNotes.current === undefined;
+    const notes = archiveNotes.current ?? new Map<string, string>();
+    for (const session of state.sessions) {
+      const note = session.worktree && session.archived ? archiveNote(session.worktree) : undefined;
+      if (!note || notes.get(session.id) === note) continue;
+      notes.set(session.id, note);
+      // What was already true when the list loaded is not news.
+      if (!first) commands.annotate(session.id, note);
+    }
+    archiveNotes.current = notes;
+  }, [state.connection.type, state.sessions, commands]);
   const latestRows = useRef(rows);
   // Layout, not passive: a click right after a render must read that render's rows.
   useLayoutEffect(() => { latestRows.current = rows; }, [rows]);
@@ -84,7 +100,8 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     onUndo: () => void commands.undo(),
     onDismissToast: commands.dismiss,
   }), [store, commands]);
-  return { view, prefs, setPrefs, find, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext, onStartup: store.onStartup };
+  return { view, prefs, setPrefs, find, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext,
+    onStartup: store.onStartup, onWorktree: store.onWorktree };
 }
 
 export type ArchiveOutcome =

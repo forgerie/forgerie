@@ -2,6 +2,7 @@ import { z } from "zod";
 import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, startupEventSchema, unreadSchema, type CatalogEvent, type StartupEvent, type WireStatus } from "./contracts";
 import type { PickerActivity, PickerProject, PickerSession, PickerStatus } from "./board";
 import type { SessionTransport } from "../sessionStore";
+import { mergeRecord, parseWorktreeEvent, type WorktreeRecord } from "../worktrees/worktreeApi";
 
 /** How far the picker's copy of the machine catalog can be trusted. */
 export type CatalogConnection =
@@ -31,7 +32,9 @@ const toStatus = (status: WireStatus): PickerStatus => ({
  */
 export type LocalChange =
   | { type: "local.archived"; sessionId: string; archived: boolean }
-  | { type: "local.deleted"; sessionId: string };
+  | { type: "local.deleted"; sessionId: string }
+  /** A session worktree changed: setup, Land, Discard, archive cleanup, or a branch rename. */
+  | { type: "session.worktree"; worktree: WorktreeRecord };
 
 /** Apply one live event or confirmed local change. Pure so replay after a snapshot uses the same rules. */
 export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | LocalChange): CatalogState {
@@ -57,6 +60,17 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | Loc
       const next = toActivity(event.activity);
       return sameFields(state.activities[event.activity.sessionId], next) ? state
         : { ...state, activities: { ...state.activities, [event.activity.sessionId]: next } };
+    }
+    case "session.worktree": {
+      const record = event.worktree;
+      const owner = record.sessionId ?? record.ownerSession?.id;
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.worktree?.id !== record.id && session.id !== owner) return session;
+        changed = true;
+        return { ...session, worktree: { ...mergeRecord(session.worktree, record), owned: session.worktree?.owned ?? session.id === owner } };
+      });
+      return changed ? { ...state, sessions } : state;
     }
     case "session.created":
       return state.sessions.some((session) => session.id === event.session.id) ? state
@@ -109,6 +123,8 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   const listeners = new Set<() => void>();
   /** Startup progress is not catalog state: it goes straight to whoever started the session. */
   const startupListeners = new Set<(event: StartupEvent) => void>();
+  /** Worktree changes also go to whoever started a session, before the catalog lists it. */
+  const worktreeListeners = new Set<(record: WorktreeRecord) => void>();
   const lifetime = new AbortController();
   const initialDelay = options.timing?.retryDelayMs ?? 500;
   let retryDelay = initialDelay;
@@ -170,6 +186,13 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
           const value: unknown = JSON.parse(text);
           const startup = startupEventSchema.safeParse(value);
           if (startup.success) { for (const listener of startupListeners) listener(startup.data); return; }
+          const worktree = parseWorktreeEvent(value);
+          if (worktree) {
+            for (const listener of worktreeListeners) listener(worktree);
+            const change: LocalChange = { type: "session.worktree", worktree };
+            if (current.buffer) current.buffer.push(change); else updateLive(applyCatalogEvent(state, change));
+            return;
+          }
           event = parseCatalogEvent(value);
         }
         catch (error) { console.warn("Picker ignored a malformed machine event.", error); return; }
@@ -273,6 +296,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
+    onWorktree: (listener: (record: WorktreeRecord) => void) => { worktreeListeners.add(listener); return () => { worktreeListeners.delete(listener); }; },
     start: () => { unwatch = transport.watchRecovery?.(recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
     ...mutations,

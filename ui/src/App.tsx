@@ -7,10 +7,11 @@ import { AppShell } from "./ui/AppShell";
 import { Picker, PickerToast } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
-import { NewSession, type LaunchDraft, type LaunchMode } from "./NewSession";
+import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
+import { createWorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
 import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken } from "./newSession";
 import { XIcon } from "lucide-react";
-import { createLaunchStore, type StartupListener } from "./launches";
+import { createLaunchStore, type StartupListener, type WorktreeListener } from "./launches";
 import { newSessionShortcut } from "./shortcuts";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 // Settings carry the prompt editor; the chat never pays for it.
@@ -19,6 +20,8 @@ const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((modul
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
 /** `?new=<folder>` keeps the new-session dialog open across a reload, over whatever is open. */
 const readNew = () => new URLSearchParams(window.location.search).get("new")?.trim() || undefined;
+/** `&place=existing` keeps an explicit "this folder, not a new worktree" across a reload. Absent: the default. */
+const readPlace = (): Placement | undefined => { const place = new URLSearchParams(window.location.search).get("place"); return place === "existing" || place === "fresh" ? place : undefined; };
 /** `?settings=<section>&agent=<target>` keeps a settings page open across a reload. */
 const readSettings = (): SettingsPlace | undefined => {
   const params = new URLSearchParams(window.location.search);
@@ -28,6 +31,7 @@ const readSettings = (): SettingsPlace | undefined => {
 };
 const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
+const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 /**
  * Marks the history entry this page load pushed for the dialog, so closing it
  * steps back instead of piling up entries. Per load: after a reload the browser
@@ -53,7 +57,14 @@ export function App() {
     return { emit: ((event) => { for (const listener of listeners) listener(event); }) as StartupListener,
       on: (listener: StartupListener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
   });
-  const [launches] = useState(() => createLaunchStore<LaunchDraft>(newSessionApi, { onStartup: startup.on }));
+  // Worktree setup progress arrives on the same socket, labelled with the same startup token.
+  const [worktreeEvents] = useState(() => {
+    const listeners = new Set<WorktreeListener>();
+    return { emit: (record: WorktreeRecord) => { for (const listener of listeners) listener(record); },
+      on: (listener: WorktreeListener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
+  });
+  const [launches] = useState(() => createLaunchStore<LaunchDraft>(newSessionApi, { onStartup: startup.on, onWorktree: worktreeEvents.on,
+    findWorktree: async (token, cwd) => (await worktreeApi.list(cwd)).find((record) => record.startupToken === token) }));
   // Files wait here until their session exists, for every window, so "Put back" always finds them.
   const [deferred] = useState(() => createDeferredFiles());
   const launchList = useSyncExternalStore(launches.subscribe, launches.getSnapshot);
@@ -84,8 +95,9 @@ export function App() {
     if (readSelected() === id) closeSession();
   }, [drafts, closeSession]);
   const picker = usePicker(selectedId, { onDeleted, starting });
-  const { onStartup } = picker;
+  const { onStartup, onWorktree } = picker;
   useEffect(() => onStartup(startup.emit), [onStartup, startup]);
+  useEffect(() => onWorktree(worktreeEvents.emit), [onWorktree, worktreeEvents]);
   useEffect(() => () => launches.dispose(), [launches]);
   useEffect(() => {
     const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setSettings(readSettings()); };
@@ -198,8 +210,14 @@ export function App() {
   const toast = picker.view.toast
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : orphanNotice;
   const dialog = composing === undefined ? null : composing
-    ? <NewSession key={composeKey} cwd={composing} initialMode={composeMode} api={newSessionApi} launches={launches} deferred={deferred} drafts={drafts}
-      onDestination={(next) => { const url = new URL(window.location.href); url.searchParams.set("new", next); window.history.replaceState(window.history.state, "", url); }}
+    ? <NewSession key={composeKey} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
+      launches={launches} deferred={deferred} drafts={drafts}
+      onDestination={(next, place) => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("new", next);
+        if (place === "existing") url.searchParams.set("place", place); else url.searchParams.delete("place");
+        window.history.replaceState(window.history.state, "", url);
+      }}
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
@@ -211,6 +229,7 @@ export function App() {
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
       drafts={drafts} onSwitchSession={switchSession}
+      worktree={picker.find(selectedId)?.worktree} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
       archive={{ availability: picker.archiveState(selectedId), onArchive: () => { void archiveNext(selectedId); } }} />
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.

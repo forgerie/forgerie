@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { worktreeInfoSchema } from "./worktrees/worktreeApi";
 
 // Only the consumed fields are specified. Pi's other parts remain server-owned.
 /** One model Pi offers a session. Only `provider` and `id` are required to pick it. */
@@ -91,6 +92,9 @@ export const statusSchema = z.object({
   queuedMessages: z.array(z.object({ kind: z.enum(["steer", "followUp"]), text: z.string() })).default([]),
   // Only the percent is shown. A malformed reading drops out, not the whole status.
   contextUsage: z.object({ percent: z.number().nullable() }).optional().catch(undefined),
+  /** A session whose worktree was landed or discarded. Its transcript is saved; Pi does not run. */
+  readOnly: z.boolean().optional().catch(undefined),
+  worktree: worktreeInfoSchema.optional().catch(undefined),
 });
 export type SessionStatus = z.infer<typeof statusSchema>;
 export const abortResultSchema = z.object({

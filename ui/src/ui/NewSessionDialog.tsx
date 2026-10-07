@@ -2,7 +2,8 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type Reac
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import { AnvilIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, PaperclipIcon, XIcon, ZapIcon } from "lucide-react";
-import type { Launch } from "../launches";
+import { setupFailureText, type Launch } from "../launches";
+import type { WorktreeRecord } from "../worktrees/worktreeApi";
 import type { MentionSource } from "../mentionSource";
 import { MAX_ATTACHMENTS } from "../attachments";
 import { PortalLayerProvider } from "./portalLayer";
@@ -22,9 +23,11 @@ export type StartPhase = { type: "ready" } | { type: "starting"; progress: strin
  * the decision. It is the portal layer for its pickers, so they stay usable
  * while everything behind it is inert.
  */
-export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, tray, onRapidfire, onDiscard, onClose }: {
+export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, tray, setup, onRapidfire, onDiscard, onClose }: {
   /** The destination chip and its picker. */
   destination: ReactNode;
+  /** A worktree being set up, or one whose setup failed. It takes the progress line's place. */
+  setup?: ReactNode;
   model: ModelBinding;
   mentions: MentionSource;
   commands: CommandBinding;
@@ -60,14 +63,14 @@ export function NewSessionDialog({ destination, model, mentions, commands, rapid
     <PortalLayerProvider value={dialog}>
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <Window titleId={titleId} destination={destination} model={model} mentions={mentions} commands={commands}
-          rapidfire={rapidfire} phase={phase} tray={tray} onRapidfire={onRapidfire} onDiscard={onDiscard} onClose={close} />
+          rapidfire={rapidfire} phase={phase} tray={tray} setup={setup} onRapidfire={onRapidfire} onDiscard={onDiscard} onClose={close} />
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </PortalLayerProvider>
   </dialog>, document.body);
 }
 
-function Window({ titleId, destination, model, mentions, commands, rapidfire, phase, tray, onRapidfire, onDiscard, onClose }: {
-  titleId: string; destination: ReactNode; model: ModelBinding; mentions: MentionSource; commands: CommandBinding;
+function Window({ titleId, destination, model, mentions, commands, rapidfire, phase, tray, setup, onRapidfire, onDiscard, onClose }: {
+  titleId: string; destination: ReactNode; setup?: ReactNode; model: ModelBinding; mentions: MentionSource; commands: CommandBinding;
   rapidfire: boolean; phase: StartPhase; tray?: ReactNode; onRapidfire: () => void; onDiscard: () => void; onClose: () => void;
 }) {
   const [picker, setPicker] = useState<PickerOpen>();
@@ -121,7 +124,8 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
         <ZapIcon aria-hidden size={14} />Rapidfire</button>
       <ComposerDictation disabled={busy} />
     </div>
-    {phase.type === "starting" && <p className="ns-status" role="status">{phase.progress}</p>}
+    {setup ? <div className="ns-setup">{setup}</div>
+      : phase.type === "starting" && <p className="ns-status" role="status">{phase.progress}</p>}
     {phase.type === "failed" && <p className="ns-error" role="alert">{phase.message}</p>}
     </div>
     <footer className="ns-foot">
@@ -137,15 +141,28 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
 }
 
 /** The sessions started from this window, newest first. Each one says how it went and what you can do next. */
-export function LaunchTray<D>({ launches, onOpen, onRestore, onDismiss }: {
+export function LaunchTray<D>({ launches, failedSetups = [], onOpen, onRestore, onInspect, onInspectSetup, onDismiss }: {
   launches: readonly Launch<D>[];
+  /** Failed worktree setups the server still holds, from this browser or an earlier one. */
+  failedSetups?: readonly WorktreeRecord[] | undefined;
   onOpen: (launch: Launch<D>) => void;
   onRestore: (launch: Launch<D>) => void;
+  /** Show a failed start's worktree setup: its steps, log, and what to do next. */
+  onInspect?: ((launch: Launch<D>) => void) | undefined;
+  onInspectSetup?: ((record: WorktreeRecord) => void) | undefined;
   onDismiss: (launch: Launch<D>) => void;
 }) {
-  if (launches.length === 0) return null;
+  if (launches.length === 0 && failedSetups.length === 0) return null;
   return <section className="ns-tray" aria-label="Sessions started here">
-    <ul>{[...launches].reverse().map((launch) => {
+    <ul>{failedSetups.map((record) => <li key={record.id} className="ns-launch" data-state="failed">
+      <span className="ns-launch-mark" aria-hidden><CircleAlertIcon size={14} /></span>
+      <span className="ns-launch-text">
+        <span className="ns-launch-title">{record.branch}</span>
+        <span className="ns-launch-status">{setupFailureText(record)}</span>
+      </span>
+      {onInspectSetup && <span className="ns-launch-actions"><button type="button" onClick={() => onInspectSetup(record)}>View setup</button></span>}
+    </li>)}{[...launches].reverse().map((launch) => {
+      const failedSetup = launch.state.type === "failed" && launch.worktree?.setup.phase === "failed" && onInspect;
       const { state } = launch;
       return <li key={launch.id} className="ns-launch" data-state={state.type}>
         <span className="ns-launch-mark" aria-hidden>
@@ -158,7 +175,8 @@ export function LaunchTray<D>({ launches, onOpen, onRestore, onDismiss }: {
         </span>
         <span className="ns-launch-actions">
           {(state.type === "started" || state.type === "unsent") && <button type="button" onClick={() => onOpen(launch)}>Open</button>}
-          {state.type === "failed" && <button type="button" onClick={() => onRestore(launch)}>Put back</button>}
+          {failedSetup ? <button type="button" onClick={() => onInspect(launch)}>View setup</button>
+            : state.type === "failed" && <button type="button" onClick={() => onRestore(launch)}>Put back</button>}
           {state.type !== "starting" && <button type="button" className="icon-button quiet-button" aria-label={`Dismiss ${launch.title}`}
             onClick={() => onDismiss(launch)}><XIcon aria-hidden size={14} /></button>}
         </span>

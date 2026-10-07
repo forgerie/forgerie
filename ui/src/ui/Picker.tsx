@@ -7,6 +7,7 @@ import { commandForKey, rowCommands, type RowCommandKind } from "../picker/comma
 import type { PickerPrefs } from "../picker/prefs";
 import { readRowPress, ROW_PRESS } from "../picker/press";
 import type { Toast } from "../picker/rowActions";
+import { WorktreeRowMark } from "./WorktreeChip";
 
 /** What the picker draws. Built by the binding; the view does no I/O. */
 export interface PickerView {
@@ -92,6 +93,7 @@ function PickerRow({ row, selected, pending, menuOpen, onSelect, onMenu: openMen
     <span className="picker-time" data-live={row.working || undefined}>{row.time}</span>
     <span className="picker-sub">
       <span className="picker-where" title={session.cwd}>{location.project}{location.branch ? <> · <span className="picker-branch">{location.branch}</span></> : null}</span>
+      {session.worktree ? <WorktreeRowMark info={session.worktree} /> : null}
       {row.agents || row.processes ? <span className="picker-work">
         {row.agents ? <span title={`${count(row.agents, "agent", "agents")} working`} aria-label={`${count(row.agents, "agent", "agents")} working`}>{AGENTS}{row.agents}</span> : null}
         {row.processes ? <span title={`${count(row.processes, "process", "processes")} running`} aria-label={`${count(row.processes, "process", "processes")} running`}>{TERMINAL}{row.processes}</span> : null}
@@ -140,7 +142,7 @@ function RowMenu({ row, confirming, onConfirm, onRun, onClose }: {
 /** The picker's message line. The shell also shows it over the thread while the sheet is closed. */
 export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo?: (() => void) | undefined; onDismiss?: (() => void) | undefined }) {
   return <div className="picker-toast" data-tone={toast.type === "error" ? "error" : undefined} role={toast.type === "error" ? "alert" : "status"}>
-    <span>{toast.type === "undo" ? <>Archived <em>{toast.target.name ?? "Untitled session"}</em></> : toast.text}</span>
+    <span>{toast.type === "undo" ? <>Archived <em>{toast.target.name ?? "Untitled session"}</em>{toast.note ? <>. {toast.note}</> : null}</> : toast.text}</span>
     {toast.type === "undo" && onUndo ? <button className="picker-toast-undo" onClick={onUndo}>Undo</button> : null}
     {onDismiss ? <button className="picker-toast-close" aria-label="Dismiss" onClick={onDismiss}><XIcon aria-hidden /></button> : null}
   </div>;

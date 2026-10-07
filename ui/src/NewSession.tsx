@@ -15,12 +15,20 @@ import { createMentionSource } from "./mentionSource";
 import type { CommandCatalog } from "./commands";
 import type { Launch, LaunchStore } from "./launches";
 import { destinationLabel, keepChoice, thinkingLevelsFor, type AgentChoice, type DeferredFiles, type NewSessionApi, type Project, type PromptResource } from "./newSession";
+import { mergeRecord, type WorktreeApi, type WorktreeOptions, type WorktreeRecord } from "./worktrees/worktreeApi";
+import { freshLabel } from "./worktrees/worktreeModel";
+import { WorktreeSetupCard } from "./ui/WorktreeSetupCard";
+import { WorktreeDialog } from "./ui/WorktreeActions";
+import { XIcon } from "lucide-react";
 
 /** The draft store key of the first message, which has no session yet. */
 export const NEW_SESSION_DRAFT = "new-session";
 /** What comes back to the composer when a start fails. */
 export interface LaunchDraft { text: string; attachments: readonly CompleteAttachment[] }
 export type LaunchMode = "switch" | "rapidfire";
+/** A fresh worktree, or the chosen folder itself. Only a Git project offers the choice. */
+export type Placement = "fresh" | "existing";
+type Options = { cwd: string; value?: WorktreeOptions | undefined };
 type Phase = { type: "composing"; error?: string } | { type: "starting"; id: string };
 interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel | undefined; thinkingLevel?: string | undefined }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -32,17 +40,27 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * starts it in the background and clears the bar for the next one. Nothing is
  * retried: a step that may have worked is reported, never repeated.
  */
-export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launches, deferred, drafts, onStarted, onDestination, onClose }: {
+export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "switch", api, worktrees, launches, deferred, drafts, onStarted, onDestination, onClose }: {
   cwd: string; initialMode?: LaunchMode; api: NewSessionApi; launches: LaunchStore<LaunchDraft>; drafts?: DraftStore | undefined;
+  /** The author's last explicit choice. Absent: a fresh worktree in a Git project. */
+  initialPlacement?: Placement | undefined;
+  /** Worktree options and failed setups. Absent: every start uses the folder itself, as before worktrees. */
+  worktrees?: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard"> | undefined;
   /** Files held until their session exists. App-wide, so "Put back" in a later window still finds them. */
   deferred: DeferredFiles;
   /** The author moved the destination. The URL follows, so a reload comes back here. */
-  onDestination?: ((cwd: string) => void) | undefined;
+  onDestination?: ((cwd: string, placement?: Placement) => void) | undefined;
   /** Open this session. `unsent` is set when its first message may not have gone out. */
   onStarted: (session: Session, unsent?: { draft: string; error: string }) => void;
   onClose: () => void;
 }) {
-  const [destination, setDestination] = useState<{ cwd: string; label?: string }>({ cwd: initialCwd });
+  const [destination, setDestination] = useState<{ cwd: string; label?: string; placement?: Placement | undefined }>({ cwd: initialCwd, placement: initialPlacement });
+  const [options, setOptions] = useState<Options>();
+  // Failed setups in this repository, newest first. A reload finds them through the server's inventory.
+  const [failedSetups, setFailedSetups] = useState<{ repo: string; records: WorktreeRecord[] }>();
+  const [inspected, setInspected] = useState<string>();
+  const [discarding, setDiscarding] = useState<WorktreeRecord>();
+  const retry = useRef<WorktreeRecord | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [choice, setChoice] = useState<AgentChoice>({});
   const [defaults, setDefaults] = useState<Defaults>();
@@ -56,7 +74,30 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
   const [saved] = useState(() => drafts?.session(NEW_SESSION_DRAFT));
   const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer, saved));
   const started = useSyncExternalStore(launches.subscribe, launches.getSnapshot);
-  const { cwd } = destination;
+  // Is the folder in a Git project? Until the server says, the start leaves the choice to it, which is the same default.
+  useEffect(() => {
+    if (!worktrees) return;
+    const controller = new AbortController();
+    worktrees.options(destination.cwd, controller.signal).then((value) => { if (!controller.signal.aborted) setOptions({ cwd: destination.cwd, value }); },
+      () => { if (!controller.signal.aborted) setOptions({ cwd: destination.cwd }); });
+    return () => controller.abort();
+  }, [worktrees, destination.cwd]);
+  const where = options?.cwd === destination.cwd ? options.value : undefined;
+  const git = where?.kind === "git" ? where : undefined;
+  const fresh = git !== undefined && destination.placement !== "existing";
+  // A fresh worktree starts from the default branch, so the main checkout stands in for it: models, skills, and files.
+  const cwd = fresh ? git.repo : destination.cwd;
+  const repo = git?.repo;
+  useEffect(() => {
+    if (!worktrees || !repo) return;
+    const controller = new AbortController();
+    worktrees.list(repo, controller.signal).then((records) => {
+      if (controller.signal.aborted) return;
+      setFailedSetups({ repo, records: records.filter((record) => record.setup.phase === "failed" && !record.sessionId && record.state.kind === "active")
+        .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")) });
+    }, () => { /* The inventory is a convenience; a start still works without it. */ });
+    return () => controller.abort();
+  }, [worktrees, repo]);
   // A switch-mode start can outlive this dialog (Back, a reload). Its result must not pull the reader away.
   const alive = useRef(true);
   useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -123,18 +164,33 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
     setPhase((current) => current.type === "composing" ? { type: "composing" } : current);
     // Start with exactly what the bar shows. Pi's own default for a create can
     // differ from the default its model list reports for the same folder.
-    const launch = launches.launch(cwd, { text, images: prompt.attachments, files, command }, { model, thinkingLevel }, draft);
+    // A retry sends this message into the worktree whose setup failed, instead of making another.
+    const retrying = retry.current;
+    retry.current = undefined;
+    const placement = retrying ? { destination: { kind: "fresh-worktree" as const }, setupId: retrying.id, worktree: retrying }
+      : where ? { destination: { kind: fresh ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
+    if (retrying) { setInspected(undefined); setFailedSetups((current) => current && { ...current, records: current.records.filter((item) => item.id !== retrying.id) }); }
+    const launch = launches.launch(retrying?.repo ?? cwd, { text, images: prompt.attachments, files, command }, { model, thinkingLevel }, draft, placement);
     if (mode === "rapidfire") return;
     setPhase({ type: "starting", id: launch.id });
     const outcome = await launch.done;
+    const failedSetup = launch.worktree();
     // The window closed while it started (Back, the row, a reload): the start stays in the list,
     // so the app's notice says how it went and "Put back" still has its files. A success needs nothing.
     if (!alive.current) { if (outcome.type === "started") launches.take(launch.id); return; }
     launches.take(launch.id);
     if (outcome.type === "started") { onStarted(outcome.session); return; }
     if (outcome.type === "unsent") { onStarted(outcome.session, { draft: typed, error: outcome.error }); return; }
+    // A failed setup keeps its card, with its log and what to do next, instead of a line of text.
+    if (failedSetup?.setup.phase === "failed") {
+      setFailedSetups((current) => ({ repo: failedSetup.repo, records: [failedSetup, ...(current?.repo === failedSetup.repo ? current.records.filter((item) => item.id !== failedSetup.id) : [])] }));
+      setInspected(failedSetup.id);
+      setPhase({ type: "composing" });
+      void putBack(draft);
+      return;
+    }
     refuse(outcome.error);
-  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, putBack, saved]);
+  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, putBack, saved, where, fresh]);
 
   const starting = phase.type === "starting";
   const runtime = useExternalStoreRuntime({
@@ -160,11 +216,24 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
   }), [model, thinkingLevel, starting, known, api, cwd]);
   const mentions = useMemo(() => createMentionSource({ id: NEW_SESSION_DRAFT, cwd }, (path, init) => fetch(path, init),
     `/api/models?${new URLSearchParams({ cwd })}`), [cwd]);
-  const label = destination.label ?? destinationLabel(cwd, projects);
-  const progress = phase.type === "starting" ? started.find((item) => item.id === phase.id)?.state : undefined;
+  const label = fresh ? freshLabel(destinationLabel(git.repo, projects), git) : destination.label ?? destinationLabel(cwd, projects);
+  const current = phase.type === "starting" ? started.find((item) => item.id === phase.id) : undefined;
+  const progress = current?.state;
   const view: StartPhase = phase.type === "starting"
     ? { type: "starting", progress: (progress?.type === "starting" ? progress.progress : undefined) ?? "Starting session…" }
     : phase.error ? { type: "failed", message: phase.error } : { type: "ready" };
+  // What the card shows: the setup of the start in progress, or a failed setup the reader is looking at.
+  const failedList = failedSetups && failedSetups.repo === repo ? failedSetups.records : [];
+  const shown = phase.type === "starting" ? current?.worktree && { record: current.worktree, hookSeen: current.hookSeen === true }
+    : inspected ? (() => { const record = failedList.find((item) => item.id === inspected); return record && { record, hookSeen: record.setup.log !== "" }; })() : undefined;
+  const setupCard = shown ? <WorktreeSetupCard setup={shown.record.setup} hookSeen={shown.hookSeen} branch={shown.record.branch}
+    actions={shown.record.setup.phase === "failed" && phase.type !== "starting" ? <>
+      <button type="button" className="wt-secondary" onClick={() => setDiscarding(shown.record)}>Discard worktree…</button>
+      <button type="button" className="primary wt-primary" onClick={() => { retry.current = shown.record; void runtimeRef.current?.thread.composer.send(); }}
+        title="Run the setup again in the same worktree, then start the session with the message above">Retry setup</button>
+      <button type="button" className="icon-button quiet-button wt-dismiss" aria-label="Hide this setup" onClick={() => setInspected(undefined)}>
+        <XIcon aria-hidden size={16} /></button>
+    </> : undefined} /> : undefined;
   const open = (launch: Launch<LaunchDraft>) => {
     const { state } = launch;
     if (state.type !== "started" && state.type !== "unsent") return;
@@ -180,15 +249,38 @@ export function NewSession({ cwd: initialCwd, initialMode = "switch", api, launc
         <NewSessionDialog phase={view} rapidfire={mode === "rapidfire"} onRapidfire={() => setMode(mode === "rapidfire" ? "switch" : "rapidfire")}
           onDiscard={discard} onClose={onClose} model={modelBinding} mentions={mentions}
           commands={{ catalog: resources?.cwd === cwd ? resources.catalog : { type: "loading" }, onRetry: () => setResourceAttempt((n) => n + 1) }}
+          setup={setupCard}
           destination={<DestinationPicker binding={{
-            cwd, label, disabled: starting,
+            cwd: destination.cwd, label, disabled: starting, placement: worktrees ? (fresh ? "fresh" : "existing") : undefined,
             listProjects: (signal) => api.projects(signal),
             listWorkspaces: (projectId, signal) => api.workspaces(projectId, signal),
-            onChoose: (next, nextLabel) => { setDestination({ cwd: next, label: nextLabel }); onDestination?.(next); },
+            ...(worktrees ? { worktreeOptions: (path: string, signal: AbortSignal) => worktrees.options(path, signal) } : {}),
+            onChoose: (next, nextLabel, placement) => {
+              setDestination({ cwd: next, ...(placement === "fresh" ? {} : { label: nextLabel }), placement });
+              setInspected(undefined);
+              if (placement) onDestination?.(next, placement); else onDestination?.(next);
+            },
           }} />}
           tray={<LaunchTray launches={started.filter((launch) => phase.type !== "starting" || launch.id !== phase.id)} onOpen={open}
             onRestore={(launch) => { const taken = launches.take(launch.id); if (taken) void putBack(taken.draft); }}
+            onInspect={(launch) => {
+              const record = launch.worktree;
+              if (!record) return;
+              const taken = launches.take(launch.id);
+              setFailedSetups((list) => ({ repo: record.repo, records: [record, ...(list?.repo === record.repo ? list.records.filter((item) => item.id !== record.id) : [])] }));
+              setInspected(record.id);
+              if (taken) void putBack(taken.draft);
+            }}
+            failedSetups={failedList.filter((record) => record.id !== inspected && !started.some((launch) => launch.worktree?.id === record.id))}
+            onInspectSetup={(record) => setInspected(record.id)}
             onDismiss={(launch) => launches.dismiss(launch.id)} />} />
+        {discarding && worktrees && <WorktreeDialog command="discard" info={mergeRecord(undefined, discarding)} api={worktrees}
+          onDone={(result) => {
+            if (result.kind !== "discarded") return;
+            setFailedSetups((list) => list && { ...list, records: list.records.filter((item) => item.id !== discarding.id) });
+            setInspected(undefined);
+          }}
+          onClose={() => setDiscarding(undefined)} />}
       </ImageViewerProvider>
     </DictationProvider>
   </AssistantRuntimeProvider>;
