@@ -440,19 +440,24 @@ export class PromptEditor extends LitElement {
           ${this.renderTreeAction()}
           ${this.renderArchiveAction()}
           ${this.renderCompactStatus()}
-          ${this.capabilities.newSession === undefined ? nothing : html`
-            <button
-              class="icon-button new-session-button"
-              data-action="new-session"
-              title=${NEW_SESSION_LABEL}
-              aria-label=${NEW_SESSION_LABEL}
-              @click=${() => { this.closeSteer(false); this.capabilities.newSession?.onNewSession(); }}
-            >${renderNewSessionIcon()}</button>
-          `}
-          ${this.renderRapidfireAction()}
-          ${this.renderDismissAction()}
-          ${this.primaryActionVisible ? this.renderPrimaryAction(rail) : nothing}
-          ${this.renderQueueAction(rail)}
+          <!-- The commit end of the rail moves as one group. When the row
+               cannot also give a destination room to be read, this group
+               takes the next line rather than the destination losing its words. -->
+          <span class="rail-end">
+            ${this.capabilities.newSession === undefined ? nothing : html`
+              <button
+                class="icon-button new-session-button"
+                data-action="new-session"
+                title=${NEW_SESSION_LABEL}
+                aria-label=${NEW_SESSION_LABEL}
+                @click=${() => { this.closeSteer(false); this.capabilities.newSession?.onNewSession(); }}
+              >${renderNewSessionIcon()}</button>
+            `}
+            ${this.renderRapidfireAction()}
+            ${this.renderDismissAction()}
+            ${this.primaryActionVisible ? this.renderPrimaryAction(rail) : nothing}
+            ${this.renderQueueAction(rail)}
+          </span>
         </div>
       </footer>
     `;
@@ -1005,8 +1010,9 @@ export class PromptEditor extends LitElement {
     const context = this.capabilities.context ?? [];
     const model = this.capabilities.model;
     if (context.length === 0 && model === undefined) return null;
+    const pointable = context.some((chip) => chip.action !== undefined);
     return html`
-      <div class=${`compact-status${this.chromeSummoned ? " summoned" : ""}`} aria-label="Composer status">
+      <div class=${`compact-status${this.chromeSummoned ? " summoned" : ""}${pointable ? " pointable" : ""}`} aria-label="Composer status">
         ${context.map((chip) => this.renderContextChip(chip))}
         ${model === undefined ? nothing : this.renderModelCapsule(model)}
       </div>
@@ -1077,18 +1083,27 @@ export class PromptEditor extends LitElement {
 
   private renderContextChip(chip: ComposerContextChip) {
     const action = chip.action;
+    if (action === undefined) {
+      return html`
+        <span class="composer-context-chip session-identity summoned-secondary" title=${chip.title ?? chip.label}>
+          ${chip.kind === "branch" ? renderBranchIcon() : nothing}<span class="context-chip-name">${chip.label}</span>
+        </span>
+      `;
+    }
+    // A chip that can be repointed is one control: the words are what a reader
+    // taps, and they never leave the rail, because a destination you cannot
+    // read is a choice you cannot check before sending.
+    const accessibleName = action.label === chip.label ? action.label : `${action.label}: ${chip.label}`;
     return html`
-      <span class=${`composer-context-chip session-identity summoned-secondary${action === undefined ? "" : " actionable"}`} title=${chip.title ?? chip.label}>
-        ${chip.kind === "branch" ? renderBranchIcon() : nothing}<span class="context-chip-name">${chip.label}</span>
-        ${action === undefined ? nothing : html`<button
-          class="composer-context-chip-action"
-          data-action="change-destination"
-          ?disabled=${this.disabled || action.disabled === true || this.dictationBlocksComposer()}
-          title=${action.label}
-          aria-label=${action.label}
-          @click=${() => { if (!this.dictationBlocksComposer()) action.onActivate(); }}
-        >${renderChangeIcon()}</button>`}
-      </span>
+      <button
+        type="button"
+        class="composer-context-chip actionable"
+        data-action="change-destination"
+        ?disabled=${this.disabled || action.disabled === true || this.dictationBlocksComposer()}
+        title=${chip.title ?? chip.label}
+        aria-label=${accessibleName}
+        @click=${() => { if (!this.dictationBlocksComposer()) action.onActivate(); }}
+      >${chip.kind === "branch" ? renderBranchIcon() : nothing}<span class="context-chip-name">${chip.label}</span>${renderChangeIcon()}</button>
     `;
   }
 

@@ -748,6 +748,21 @@ describe("new-session-composer editing and submission", () => {
 });
 
 describe("new-session-composer destination choice", () => {
+  it("says a destination is needed in words that open the chooser", async () => {
+    const catalog = new InMemoryNewSessionDestinationCatalog({ machines: [machine("remote")] });
+    const composer = await mountComposer({ catalog });
+
+    // The required state must read as a choice, not as an unlabelled pencil:
+    // on a folded phone the words are the only sign a destination is missing.
+    expect(destinationChip(composer).textContent.trim()).toBe("Choose destination");
+    expect(destinationAction(composer).getAttribute("aria-label")).toBe("Choose destination");
+
+    destinationAction(composer).click();
+    await settleCatalog(composer);
+
+    expect(root(composer).querySelector("[data-machine-id='remote']")).not.toBeNull();
+  });
+
   it("does not let Rapidfire activate while the destination chooser is open", async () => {
     const destination = completeNewSessionDestination(machine("local"), project("forge"), workspace("main", "forge"));
     const catalog = new InMemoryNewSessionDestinationCatalog({ machines: [machine("remote")] });

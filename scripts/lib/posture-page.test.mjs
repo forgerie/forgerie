@@ -14,7 +14,7 @@ function cdpWithButton(found) {
     send: (method, params) => {
       if (method !== "Runtime.evaluate") return Promise.resolve({});
       evaluated.push(params.expression);
-      return Promise.resolve({ result: { result: { value: params.expression.includes("__forgerieDeepFind") ? found : undefined } } });
+      return Promise.resolve({ result: { value: params.expression.includes("__forgerieDeepFind((element)") ? found : undefined } });
     },
   };
 }
@@ -44,6 +44,21 @@ describe("drivePage click titles", () => {
 
     expect(cdp.evaluated.some((expression) => expression.includes('"Show sessions"'))).toBe(true);
     expect(cdp.evaluated.some((expression) => expression.includes('"?Show sessions"'))).toBe(false);
+  });
+
+  it("matches a text step by the words a button shows", async () => {
+    const cdp = cdpWithButton(true);
+
+    await drivePage(cdp, { url: "about:blank", settle: 0, clickTitles: [{ text: "demo" }], label: "folded-portrait" });
+
+    expect(cdp.evaluated.some((expression) => expression.includes('textContent') && expression.includes('"demo"'))).toBe(true);
+  });
+
+  it("names a missing text step by its words", async () => {
+    const cdp = cdpWithButton(false);
+
+    await expect(drivePage(cdp, { url: "about:blank", settle: 0, clickTitles: [{ text: "demo" }], label: "folded-portrait" }))
+      .rejects.toThrow(/No button reading "demo" in folded-portrait/);
   });
 });
 

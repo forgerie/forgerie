@@ -351,7 +351,7 @@ export class NewSessionComposer extends LitElement {
     const destination = state.kind === "choosing" ? undefined : state.destination;
     const chosen = destination?.kind === "complete" ? destination : undefined;
     const label = chosen === undefined
-      ? "Destination required"
+      ? "Choose destination"
       : [
         chosen.project.name,
         ...(chosen.workspace.isMain ? [] : [chosen.workspace.label]),
@@ -368,7 +368,7 @@ export class NewSessionComposer extends LitElement {
         label,
         title: label,
         action: {
-          label: chosen === undefined ? "Choose" : "Change",
+          label: chosen === undefined ? "Choose destination" : "Change destination",
           disabled: state.kind === "submitting" || (this.launchMode === "rapidfire" && chosen !== undefined),
           onActivate: () => { this.openDestinationChoice(); },
         },

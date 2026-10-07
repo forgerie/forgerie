@@ -40,13 +40,15 @@ describe("PromptEditor summoned chrome", () => {
 
     const action = required(editor.shadowRoot?.querySelector<HTMLButtonElement>("[data-action='new-session']"), "New session action");
     const send = required(editor.shadowRoot?.querySelector<HTMLButtonElement>(".send-button"), "Send action");
-    const actions = required(editor.shadowRoot?.querySelector<HTMLElement>(".actions"), "prompt actions");
+    // New session belongs to the commit group, which moves as one unit when
+    // the rail wraps, so it never strands away from Send.
+    const commitGroup = required(editor.shadowRoot?.querySelector<HTMLElement>(".actions > .rail-end"), "commit group");
 
     expect(action.title).toBe(NEW_SESSION_LABEL);
     expect(action.getAttribute("aria-label")).toBe(NEW_SESSION_LABEL);
     expect(action.textContent.trim()).toBe("");
     expect(action.querySelector("svg.new-session-icon")?.getAttribute("aria-hidden")).toBe("true");
-    expect(action.parentElement).toBe(actions);
+    expect(action.parentElement).toBe(commitGroup);
     expect(action.nextElementSibling?.classList.contains("primary-action")).toBe(true);
     expect(action.nextElementSibling?.contains(send)).toBe(true);
 

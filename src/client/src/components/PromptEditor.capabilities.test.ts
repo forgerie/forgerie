@@ -142,16 +142,34 @@ describe("PromptEditor capabilities", () => {
       context: [{ id: "destination", label: "forge · main", action: { label: "Change destination", onActivate } }],
     });
 
-    const chip = query(editor, ".composer-context-chip");
-    expect(chip?.textContent).toContain("forge · main");
-    expect(chip?.classList.contains("actionable")).toBe(true);
+    // The words and the mark are one control, so the destination is read and
+    // repointed from the same place at every width.
     const action = button(editor, "[data-action='change-destination']");
-    expect(action.textContent.trim()).toBe("");
+    expect(action.classList.contains("composer-context-chip")).toBe(true);
+    expect(action.classList.contains("actionable")).toBe(true);
+    expect(action.textContent.trim()).toBe("forge · main");
     expect(action.querySelector(".prompt-context-action-icon")).not.toBeNull();
-    expect(action.getAttribute("aria-label")).toBe("Change destination");
+    expect(action.getAttribute("aria-label")).toBe("Change destination: forge · main");
+    expect(query(editor, ".compact-status")?.classList.contains("pointable")).toBe(true);
     action.click();
 
     expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("names a chip once when its words already say what it does", async () => {
+    const editor = await mount({
+      context: [{ id: "destination", label: "Choose destination", action: { label: "Choose destination", onActivate: vi.fn() } }],
+    });
+
+    expect(button(editor, "[data-action='change-destination']").getAttribute("aria-label")).toBe("Choose destination");
+  });
+
+  it("keeps a session's identity chip a readout, not a control", async () => {
+    const editor = await mount({ context: [{ id: "branch", kind: "branch", label: "feature" }] });
+
+    expect(query(editor, ".composer-context-chip")?.tagName).toBe("SPAN");
+    expect(query(editor, "[data-action='change-destination']")).toBeNull();
+    expect(query(editor, ".compact-status")?.classList.contains("pointable")).toBe(false);
   });
 });
 

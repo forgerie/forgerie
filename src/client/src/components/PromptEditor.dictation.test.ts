@@ -633,7 +633,7 @@ describe("PromptEditor local dictation", () => {
     dictation.captureReady();
     await settle(editor);
 
-    const changeDestination = button(editor, ".composer-context-chip-action");
+    const changeDestination = button(editor, "[data-action='change-destination']");
     expect(changeDestination.disabled).toBe(true);
     changeDestination.click();
     expect(onChangeDestination).not.toHaveBeenCalled();

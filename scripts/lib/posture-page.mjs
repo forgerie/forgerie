@@ -95,20 +95,28 @@ export async function drivePage(cdp, options) {
   // run can reach the same surface across all four postures, which is the one
   // thing the sweep is for. An unprefixed title stays required, so a genuine
   // missing control is still a failure.
-  for (const clickTitle of clickTitles) {
-    const optional = clickTitle.startsWith("?");
-    const title = optional ? clickTitle.slice(1) : clickTitle;
+  //
+  // A step given as `{ text }` matches a button by the words it shows rather
+  // than its title: list rows (a project, a workspace) carry no title, and a
+  // path through a chooser has to name the row it picks.
+  for (const step of clickTitles) {
+    const byText = typeof step === "object";
+    const raw = byText ? step.text : step;
+    const optional = raw.startsWith("?");
+    const wanted = optional ? raw.slice(1) : raw;
     await evaluate(cdp, DEEP_QUERY);
+    const test = byText
+      ? `element.tagName === "BUTTON" && (element.textContent ?? "").trim().startsWith(${JSON.stringify(wanted)})`
+      : `element.tagName === "BUTTON" && element.getAttribute("title") === ${JSON.stringify(wanted)}`;
     const clicked = await evaluate(cdp, `
       (() => {
-        const target = window.__forgerieDeepFind((element) =>
-          element.tagName === "BUTTON" && element.getAttribute("title") === ${JSON.stringify(title)});
+        const target = window.__forgerieDeepFind((element) => ${test});
         if (!target) return false;
         target.click();
         return true;
       })()
     `);
-    if (clicked !== true && !optional) throw new Error(`No button titled ${JSON.stringify(title)} in ${label}`);
+    if (clicked !== true && !optional) throw new Error(`No button ${byText ? "reading" : "titled"} ${JSON.stringify(wanted)} in ${label}`);
     if (clicked === true) await sleep(settle);
   }
 }

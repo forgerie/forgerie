@@ -1237,7 +1237,11 @@ export const promptEditorStyles = css`
      clipping the island to make it fit would trap the choice popovers. */
   context-usage-meter { position: absolute; top: 0; inset-inline: var(--composer-island-radius); }
   footer.shell-mode { border-color: var(--pi-success); background: var(--pi-success-bg); }
-  .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
+  /* One row while it fits. Wrapping only ever moves the commit group
+     (.rail-end) to its own line, kept at the trailing edge where the thumb
+     already is; nothing on the rail is dropped to make the row fit. */
+  .actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; white-space: nowrap; }
+  .rail-end { flex: 0 0 auto; display: inline-flex; align-items: center; gap: inherit; }
   :host([surface="embedded"]) footer {
     inline-size: 100%;
     margin-inline: 0;
@@ -1260,25 +1264,34 @@ export const promptEditorStyles = css`
    * appears only when the island's own width can carry it.
    */
   .composer-context-chip { display: none; align-items: center; gap: 4px; }
-  /* An actionable chip keeps its control at every width. Its readout yields
-     until the rail has room, because information must give way before a control. */
-  .composer-context-chip.actionable { display: inline-flex; flex: 0 0 auto; overflow: visible; }
-  .composer-context-chip.actionable .context-chip-name { display: none; }
-  /* A chip states where the composer points; its action is a quiet icon, not
-     a second text label competing with the row's real controls. The mark draws
-     at 28px, while the pseudo-element restores the rail's 36px hit target. */
-  .composer-context-chip-action { position: relative; flex: 0 0 auto; width: 28px; height: 28px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--pi-radius-control); background: transparent; color: var(--pi-accent); cursor: pointer; }
-  .composer-context-chip-action::after { content: ""; position: absolute; inset: -4px; }
-  .composer-context-chip-action:hover:not(:disabled), .composer-context-chip-action:focus-visible { background: var(--pi-surface-hover); color: var(--pi-text); }
-  .composer-context-chip-action:disabled { color: var(--pi-muted); cursor: default; }
-  .prompt-context-action-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  /*
+   * A chip that can be repointed states a choice the next Send acts on, so it
+   * is read at every width: it is one quiet control, its words and the pencil
+   * together, and the words shorten with an ellipsis before they ever go.
+   *
+   * The status group asks for room enough to read a destination
+   * (--composer-destination-room). When the row cannot give that beside the
+   * commit group, the commit group takes the next line instead: height is
+   * the plentiful axis wherever a composer is this narrow.
+   */
+  .compact-status.pointable { flex: 1 1 var(--composer-destination-room, 16rem); }
+  .composer-context-chip.actionable {
+    position: relative; display: inline-flex; flex: 0 1 auto; min-width: 0; height: 36px; gap: 5px;
+    padding: 0 6px; border: 0; border-radius: var(--pi-radius-control); background: transparent;
+    color: var(--pi-text-secondary); font: inherit; cursor: pointer;
+  }
+  .composer-context-chip.actionable .prompt-context-action-icon { color: var(--pi-accent); }
+  .composer-context-chip.actionable:hover:not(:disabled), .composer-context-chip.actionable:focus-visible { background: var(--pi-surface-hover); color: var(--pi-text); }
+  .composer-context-chip.actionable:disabled { opacity: 1; color: var(--pi-muted); cursor: default; }
+  .composer-context-chip.actionable:disabled .prompt-context-action-icon { color: var(--pi-muted); }
+  .composer-context-chip.actionable .context-chip-name { max-width: none; }
+  .prompt-context-action-icon { flex: 0 0 auto; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .context-chip-name { min-width: 0; max-width: min(26cqi, 168px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prompt-branch-icon { flex: 0 0 auto; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   .session-identity { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--pi-text-secondary); }
   @container (min-width: 560px) {
     .session-identity { display: inline; }
     .composer-context-chip { display: inline-flex; }
-    .composer-context-chip.actionable .context-chip-name { display: inline; }
   }
   /*
    * The rail carries one filled control: the primary action. Everything else
@@ -1381,12 +1394,12 @@ export const promptEditorStyles = css`
   @container (max-width: 640px) {
     footer { gap: 8px; --composer-island-pad: 8px; }
     .actions { gap: 6px; }
-    .compact-status { flex: 1 1 220px; gap: 4px; }
+    .compact-status { gap: 4px; }
     .select-model { max-width: min(62cqi, 320px); }
     button { padding: 6px 8px; }
   }
   @container (max-width: 430px) {
-    .compact-status { flex-basis: 170px; font-size: var(--pi-text-xs); }
+    .compact-status { font-size: var(--pi-text-xs); }
     .select-model { max-width: 56cqi; }
     button { padding: 5px 7px; }
   }

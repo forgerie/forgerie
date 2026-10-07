@@ -5,6 +5,10 @@
 //   node scripts/capture-postures.mjs --url http://127.0.0.1:8504/ --out /tmp/shots --label slice2
 //   node scripts/capture-postures.mjs --url ... --click-title Sessions --label overlay
 //   node scripts/capture-postures.mjs --url ... --press ctrl+k --click-title "New Prompt"
+//   node scripts/capture-postures.mjs --url ... --click-title "New session" --click-title Choose --click-text Local
+//
+// --click-title and --click-text steps run in the order given. --click-text
+// matches a button by the words it starts with, for rows that carry no title.
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -64,6 +68,7 @@ function parseArgs(argv) {
     else if (arg === "--out") parsed.out = argv[++i];
     else if (arg === "--label") parsed.label = argv[++i];
     else if (arg === "--click-title") parsed.clickTitles.push(argv[++i]);
+    else if (arg === "--click-text") parsed.clickTitles.push({ text: argv[++i] });
     else if (arg === "--press") parsed.presses.push(argv[++i]);
     else if (arg === "--input-mode") parsed.inputMode = argv[++i];
     else if (arg === "--color-scheme") parsed.colorScheme = requireColorScheme(argv[++i]);
