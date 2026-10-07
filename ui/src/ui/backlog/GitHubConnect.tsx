@@ -26,7 +26,7 @@ export function GitHubConnect({ load, warnings, busy, error, onSetUp, onRefresh 
       {load.type === "failed" ? <p>Forgerie could not say whether GitHub is set up: {load.message}</p>
         : !state ? <p>{busy ? "Finishing the GitHub setup…" : "Checking GitHub…"}</p>
         : state.state === "not-configured" ? <>
-          <p>Set up GitHub to list the issues of {list(reposOf(warnings)) || "your projects"}. Forgerie creates its own GitHub App, which can only read issues. GitHub asks you to confirm.</p>
+          <p>Set up GitHub to list the issues of {list(reposOf(warnings)) || "your projects"}. Forgerie creates its own GitHub App. Agents use it to work on issues and pull requests. GitHub asks you to confirm.</p>
           <span className="bl-github-actions"><button type="button" className="bl-github-connect" disabled={busy} onClick={onSetUp}>
             {busy ? "Opening GitHub…" : "Set up GitHub"}</button></span>
         </>
