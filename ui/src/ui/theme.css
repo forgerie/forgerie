@@ -687,15 +687,21 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-state strong { color: var(--foreground); font-weight: 500; }
 .picker-state button { margin: 0; justify-self: center; }
 .picker-clear { margin: var(--space-3) 0 0; padding-inline: var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); }
-/* Section label: text-xs font-medium muted, mt-5 mb-1 px-2. The button is a
-   44px touch target, so the label sits at its bottom edge. */
-.picker-group-header { display: flex; align-items: flex-end; gap: var(--space-1); inline-size: 100%; min-block-size: var(--control-size); padding: 0 var(--space-2) var(--space-1); border: 0; border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; line-height: 1rem; text-align: start; transition: color 150ms; }
+/* Section label: text-xs muted, mt-5 mb-1 px-2. The button is a 44px touch
+   target, so the label sits at its bottom edge.
+   Three tiers must never share a look: heading, title, and the row's second
+   line. The homepage rows are one line, so its muted 12px label could not be
+   mistaken for anything; here the second line is also small and muted, and
+   "Pinned 11" read as one more project name. The heading takes weight and a
+   rule that runs to the edge, so it reads as the start of a group. */
+.picker-group-header { display: flex; align-items: flex-end; gap: var(--space-1); inline-size: 100%; min-block-size: var(--control-size); padding: 0 var(--space-2) var(--space-1); border: 0; border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 600; line-height: 1rem; text-align: start; transition: color 150ms; }
+.picker-group-header::after { content: ""; flex: 1 1 0; min-inline-size: var(--space-4); block-size: 1px; margin: 0 0 calc(0.5rem - 0.5px) var(--space-1); background: var(--line); }
 .picker-group:first-child > .picker-group-header { min-block-size: 2rem; }
 .picker-group-header:hover { color: var(--foreground); }
 .picker-chevron { flex: none; inline-size: 0.75rem; block-size: 1rem; transition: transform 150ms; }
 .picker-group-header[aria-expanded="false"] .picker-chevron { transform: rotate(-90deg); }
 .picker-group[data-kind="blocked"] .picker-group-label { color: var(--foreground); }
-.picker-count { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); font-variant-numeric: tabular-nums; }
+.picker-count { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); font-weight: 400; font-variant-numeric: tabular-nums; }
 .picker-group-rows { display: flex; flex-direction: column; gap: 2px; }
 /* "New session": the homepage thread list's "New Thread" row (ghost, h-9,
    13px, icon first), on the list's own inset so it lines up with the rows. */
@@ -706,16 +712,21 @@ summary.trace-line:hover { color: var(--foreground); }
    They share one row, so the list loses no height to the second entry. */
 .picker-footer { flex: none; display: flex; gap: var(--space-1); padding: var(--space-1) var(--space-2) var(--space-2); border-block-start: 1px solid var(--line); }
 .picker-footer .picker-new { flex: 1 1 0; min-inline-size: 0; margin: 0; inline-size: auto; }
-/* The open-item count is a readout: it truncates before the entry's name does. */
-.picker-footer-count { margin-inline-start: auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
-  font-family: var(--code-font); font-size: var(--meta-text); font-weight: 400; }
+/* The open-item count is a readout: it truncates before the entry's name does.
+   It sits against its own name in a chip. Pushed to the button's far edge it
+   landed beside Settings and read as Settings' number. */
+.picker-footer-count { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 0.375rem; border-radius: 999px; background: var(--muted); color: var(--muted-foreground);
+  font-family: var(--code-font); font-size: var(--meta-text); font-weight: 400; line-height: 1.125rem; }
 /* A session that holds a backlog item carries the item's mark. */
 .picker-from-backlog { flex: none; display: inline-flex; align-items: center; color: var(--muted-foreground); }
 .picker-from-backlog svg { inline-size: 0.75rem; block-size: 0.75rem; }
 .picker-footer .picker-new[aria-current="page"] { background: var(--active-surface); }
-/* The pinned cap's way out: the homepage's "Load more" row (h-8 13px muted). */
-.picker-more { display: flex; align-items: center; inline-size: 100%; min-block-size: 2rem; padding: 0 var(--space-2) 0 calc(var(--space-2) + 0.875rem + var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); text-align: start; transition: color 150ms; }
-.picker-more:hover { color: var(--foreground); }
+/* The pinned cap's way out: the homepage's "Load more" row (h-8 muted). Smaller
+   and heavier than a title, with a trailing chevron, so it reads as a control.
+   At title size it read as one more session. */
+.picker-more { display: flex; align-items: center; gap: var(--space-1); inline-size: 100%; min-block-size: 2rem; padding: 0 var(--space-2) 0 calc(var(--space-2) + 0.875rem + var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; text-align: start; transition: color 150ms, background-color 150ms; }
+.picker-more svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
+.picker-more:hover { color: var(--foreground); background: var(--hover-surface); }
 /* Rows: thread-list-item.tsx. rounded-control, hover /[0.04], active /[0.06],
    13px muted title that turns foreground when active. A second 12px line
    carries the project and live work, so rows are 44px, not h-8. */
@@ -731,16 +742,23 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-row[data-state="working"] .picker-mark i { display: block; border: 1.5px solid var(--live); animation: picker-pulse 1.6s ease-in-out infinite; }
 .picker-row[data-state="unread"] .picker-mark i { display: block; background: var(--foreground); }
 @keyframes picker-pulse { 50% { opacity: 0.35; } }
-.picker-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.25rem; transition: color 150ms; }
+/* The homepage keeps titles muted until active, which works for one-line rows.
+   With a muted second line under each, a muted title left every row two grey
+   lines of nearly one size. The title is what a row is found by, so it stays
+   near foreground at rest. Rows that want the reader keep the step above it:
+   full foreground and a heavier weight, beside their mark. */
+.picker-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: color-mix(in oklab, var(--foreground) 82%, transparent); font-size: var(--small-text); line-height: 1.25rem; transition: color 150ms; }
 .picker-row:hover .picker-title, .picker-row[aria-selected="true"] .picker-title,
 .picker-row[data-state="blocked"] .picker-title, .picker-row[data-state="unread"] .picker-title, .picker-row[data-state="errored"] .picker-title { color: var(--foreground); }
-.picker-row[data-state="blocked"] .picker-title, .picker-row[data-state="unread"] .picker-title { font-weight: 500; }
-.picker-row[data-state="archived"] .picker-title, .picker-untitled { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
+.picker-row[data-state="blocked"] .picker-title, .picker-row[data-state="unread"] .picker-title { font-weight: 600; }
+.picker-row[data-state="archived"] .picker-title, .picker-untitled { color: var(--muted-foreground); }
 .picker-pin { display: inline-block; inline-size: 0.75rem; block-size: 0.75rem; margin-inline-end: 0.25rem; vertical-align: -1px; color: var(--muted-foreground); }
 /* Meta: the homepage's 11px mono tabular (branch picker, message timing). */
 .picker-time { font-family: var(--code-font); font-size: var(--meta-text); line-height: 1.25rem; color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .picker-time[data-live] { color: var(--live); }
-.picker-sub { grid-column: 2 / span 2; display: flex; align-items: center; column-gap: var(--space-3); min-inline-size: 0; line-height: 1rem; font-size: var(--label-text); color: color-mix(in oklab, var(--muted-foreground) 80%, transparent); }
+/* The second line is a size and a weight below the heading, so the two never
+   pass for each other. It keeps the full muted colour, for contrast. */
+.picker-sub { grid-column: 2 / span 2; display: flex; align-items: center; column-gap: var(--space-3); min-inline-size: 0; line-height: 1rem; font-size: var(--meta-text); color: var(--muted-foreground); }
 .picker-where { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-branch { color: var(--muted-foreground); }
 .picker-work { flex: none; display: inline-flex; gap: var(--space-2); margin-inline-start: auto; color: var(--live); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }

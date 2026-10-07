@@ -137,7 +137,7 @@ describe("picker", () => {
     expect(pinned()?.querySelector(".picker-count")?.textContent).toBe("12");
     expect(pinned()?.querySelectorAll(".picker-row")).toHaveLength(3);
     const more = () => pinned()?.querySelector<HTMLButtonElement>(".picker-more");
-    expect(more()?.textContent?.trim()).toBe("Show all 12");
+    expect(more()?.textContent?.trim()).toBe("Show 9 more");
     act(() => more()?.click());
     expect(pinned()?.querySelectorAll(".picker-row")).toHaveLength(12);
     expect(more()?.textContent?.trim()).toBe("Show fewer");
@@ -145,7 +145,14 @@ describe("picker", () => {
     expect(pinned()?.querySelectorAll(".picker-row")).toHaveLength(3);
   });
 
-  it("shows no Show all control when there are three pins or fewer", () => {
+  it("leaves the pin glyph to the Pinned heading, and draws it where no heading says so", () => {
+    render(view([S("a", { pinned: true })]));
+    expect(host.querySelector('[data-kind="pinned"] [data-session="a"] .picker-pin')).toBeNull();
+    render(view([S("a", { pinned: true })], { grouping: "project" }));
+    expect(host.querySelector('[data-session="a"] .picker-pin')).not.toBeNull();
+  });
+
+  it("shows no Show more control when there are three pins or fewer", () => {
     act(() => root.render(<LiveHarness sessions={[S("a", { pinned: true }), S("b", { pinned: true })]} />));
     expect(host.querySelector(".picker-more")).toBeNull();
   });

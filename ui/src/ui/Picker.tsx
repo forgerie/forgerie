@@ -1,4 +1,4 @@
-import { AnvilIcon, ArchiveIcon, ListTodoIcon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { AnvilIcon, ArchiveIcon, ListTodoIcon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -57,8 +57,10 @@ const menuId = (id: string) => `picker-menu-${id}`;
 
 interface Press { x: number; y: number; at: number; timer: ReturnType<typeof setTimeout> }
 
-function PickerRow({ row, selected, pending, held, menuOpen, onSelect, onMenu: openMenu, onCloseMenu }: {
-  row: Row; selected: boolean; pending: boolean; held: boolean; menuOpen: boolean; onSelect: (row: Row) => void; onMenu: (id: string) => void; onCloseMenu: () => void;
+function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, onMenu: openMenu, onCloseMenu }: {
+  row: Row; selected: boolean; pending: boolean; held: boolean;
+  /** False under the Pinned heading, which already says it for every row. */
+  showPin: boolean; menuOpen: boolean; onSelect: (row: Row) => void; onMenu: (id: string) => void; onCloseMenu: () => void;
 }) {
   // A row with no commands (a start still in flight) has no menu to open.
   const hasCommands = rowCommands(row).length > 0;
@@ -95,7 +97,7 @@ function PickerRow({ row, selected, pending, held, menuOpen, onSelect, onMenu: o
     onClick={() => { if (swallowClick.current) { swallowClick.current = false; return; } onSelect(row); }}
     onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={cancel} onPointerCancel={cancel} onContextMenu={onContextMenu}>
     <span className="picker-mark" aria-hidden="true"><i /></span>
-    <span className="picker-title">{session.pinned ? <>{PIN} </> : null}
+    <span className="picker-title">{session.pinned && showPin ? <>{PIN} </> : null}
       {session.name ? session.name : <span className="picker-untitled">Untitled session</span>}</span>
     <span className="picker-time" data-live={row.working || undefined}>{row.time}</span>
     <span className="picker-sub">
@@ -273,15 +275,17 @@ export function Picker({ view, prefs, onPrefs, actions, message }: {
           {collapsed.has(section.key) ? null : <div className="picker-group-rows" role="group" aria-label={section.label}>
             {section.rows.map((row) => <div key={row.session.id} role="none">
               <PickerRow row={row} selected={row.session.id === view.selectedId} pending={view.pending?.has(row.session.id) === true}
-                held={view.held?.has(row.session.id) === true}
+                held={view.held?.has(row.session.id) === true} showPin={section.kind !== "pinned"}
                 menuOpen={rowWithMenu?.session.id === row.session.id} onSelect={actions.onSelect} onMenu={openRowMenu} onCloseMenu={closeRowMenu} />
               {rowMenu && rowWithMenu?.session.id === row.session.id ? <RowMenu row={row} confirming={rowMenu.confirming}
                 onConfirm={() => setRowMenu({ ...rowMenu, confirming: true })} onRun={(kind) => run(row, kind)} onClose={closeRowMenu} /> : null}
             </div>)}
+            {/* A control, not a row: it says what it adds. The chevron trails the words;
+                leading, it stood where a heading's does and read as a closed group. */}
             {section.hidden ? <button className="picker-more" onClick={() => change({ ...prefs, allPinned: true })}>
-              Show all {section.rows.length + section.hidden}</button>
+              Show {section.hidden} more<ChevronDownIcon aria-hidden /></button>
               : section.kind === "pinned" && prefs.allPinned ? <button className="picker-more" onClick={() => change({ ...prefs, allPinned: false })}>
-                Show fewer</button> : null}
+                Show fewer<ChevronUpIcon aria-hidden /></button> : null}
           </div>}
         </div>)}
     </div>}

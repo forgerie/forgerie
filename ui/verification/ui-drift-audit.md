@@ -42,7 +42,7 @@ homepage. The drift comes from four choices made after that:
 | Spacing | Trace lines | At least 32 px each, centred. | `my-1`, baseline aligned: about 24 px each. | 28 px. Disclosures stay touch targets, so they do not shrink to 24 px. |
 | Spacing | Picker list | 4 px row inset, rows about 60 px. | `p-3` panel, `px-2` rows, 32 px rows, `gap-0.5`. | 12 px panel inset, 8 px row padding, 44 px two-line rows, 2 px gap. |
 | Colours | Ask step rail | Current step in the live blue. | Blue marks only live work (trace marker). | Current step foreground, answered muted, pending foreground at 10 %. |
-| Colours | Picker rows | Selected row `--muted`; titles always foreground. | Active row foreground at 6 %, hover 4 %. Titles muted until active or hovered. | Match. Unread and waiting rows keep foreground titles, because they need attention. |
+| Colours | Picker rows | Selected row `--muted`; titles always foreground. | Active row foreground at 6 %, hover 4 %. Titles muted until active or hovered. | Superseded 2026-10-07: titles at foreground 82 % at rest. See "Picker tiers" below. |
 | Colours | Live blue | `#2563eb` light, `#60a5fa` dark. | `text-blue-500` in both themes. | Use blue-500. |
 | Radius | Menus | 8 px panel, 6 px items, 25 % border, custom shadow. | `rounded-surface` 10 px panel, 6 px items, 10 % border, popover background. | Match. |
 | Density | All icon buttons | 44 × 44 px drawn. | 24 to 32 px drawn. | Draw at homepage size. Keep a 44 px hit area with an invisible `::before`. |
@@ -60,6 +60,18 @@ homepage. The drift comes from four choices made after that:
 - **Two-line picker rows.** Homepage rows show a title only. Forgerie rows
   also carry the project, the age, and live work counts (agreed in picker
   slice 1), so they are 44 px instead of 32 px.
+- **Picker tiers (2026-10-07).** The user could not tell the picker's items
+  apart. A second muted line under a muted title, and a muted 12 px group
+  label, gave three items one look: "Pinned 11" read as a project name and
+  "Show all 11" read as a session. The picker now keeps three distinct tiers.
+  Group labels are 12 px semibold with a rule to the edge. Titles are 13 px at
+  foreground 82 % at rest. The second line is 11 px muted. Unread and waiting
+  titles step up to full foreground and semibold. The pinned cap reads
+  "Show 8 more" in 12 px with a trailing chevron. Rows under the Pinned label
+  no longer draw a pin. The Backlog count sits in a chip beside its name,
+  because at the button's far edge it read as Settings' number. Captures:
+  `scripts/picker-shots.mjs` (read-only), all four postures, docked, both
+  schemes.
 - **Stacked menu items stay 44 px.**
 - **No Tailwind.** The homepage classes are translated into `theme.css`
   values. Tests and acceptance scripts find elements by semantic class names
