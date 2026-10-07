@@ -8,6 +8,7 @@ import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
 import { compactionFromOutput, compactionFromStatus, idleCompaction, isCompactCommand, type CompactionState } from "./compaction";
 import { isAlreadyQueued, workingSend } from "./queue";
 import { noDialogPhase, type StoredDialogPhase } from "./dialog";
+import type { PromptDiffAnnotation } from "./changes/diffNotes";
 import { afterFork, afterNavigate, closedTree, openTree, treeForkResultSchema, treeNavigateResultSchema, withOperation as withTreeOperation, type SessionTreeSummaryChoice, type TreeNavigator, type TreeOutcome } from "./sessionTree";
 
 export type Connection = { type: "loading" } | { type: "ready" }
@@ -373,7 +374,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
    * as before. While the session works, a prompt becomes a follow-up, or a
    * steer when asked. Every refusal here happens before any request.
    */
-  function deliveryOf(text: string, attachments: PromptAttachment[] | undefined, steer: boolean): "steer" | "followUp" | undefined {
+  function deliveryOf(text: string, attachments: PromptAttachment[] | undefined, steer: boolean, annotated: boolean): "steer" | "followUp" | undefined {
     if (state.sending) throw new NotSentError("Wait for the current message to send.");
     const working = workingSend(state.status, state.compaction, state.transcript.isRunning);
     if (!state.transcript.isRunning && !working.queue) return undefined;
@@ -381,13 +382,16 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     if (steer && !working.steer) throw new NotSentError("Steering works only while the agent responds. Queue the message instead.");
     // Stop returns only the text of queued work, so a queued image could be lost.
     if (attachments?.length) throw new NotSentError("Queued messages are text only. Remove the attachments, or send them after the run.");
-    if (isAlreadyQueued(state.status, text)) throw new NotSentError("This message is already queued.");
+    // The server folds notes into the queued text, so a noted message never equals a queued one.
+    // Notes need no such rule as attachments: Stop returns their text with the message.
+    if (!annotated && isAlreadyQueued(state.status, text)) throw new NotSentError("This message is already queued.");
     return steer ? "steer" : "followUp";
   }
-  async function command(endpoint: "prompt" | "abort", text?: string, attachments?: PromptAttachment[], steer = false) {
+  async function command(endpoint: "prompt" | "abort", text?: string, attachments?: PromptAttachment[], steer = false,
+    diffAnnotations?: PromptDiffAnnotation[]) {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new NotSentError("The session is not connected.");
-    const streamingBehavior = endpoint === "prompt" ? deliveryOf(text ?? "", attachments, steer) : undefined;
+    const streamingBehavior = endpoint === "prompt" ? deliveryOf(text ?? "", attachments, steer, !!diffAnnotations?.length) : undefined;
     update({ ...state, sending: true, commandError: undefined });
     try {
       // Never automatically retry a mutation: the server may have accepted it
@@ -395,7 +399,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       const result = await request<z.infer<typeof acceptedSchema> | z.infer<typeof abortResultSchema>>(`${root}/${endpoint}`, endpoint === "prompt" ? acceptedSchema : abortResultSchema, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd: session.cwd, ...(text === undefined ? {} : { text }), ...(attachments?.length ? { attachments } : {}),
-          ...(streamingBehavior ? { streamingBehavior } : {}) }),
+          ...(streamingBehavior ? { streamingBehavior } : {}), ...(diffAnnotations?.length ? { diffAnnotations } : {}) }),
       });
       if (endpoint === "abort") void refreshStatus();
       return "restoredMessages" in result ? result.restoredMessages : [];
@@ -562,7 +566,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start,
-    send: async (text: string, attachments?: PromptAttachment[], options: { steer?: boolean } = {}) => {
+    /**
+     * `diffAnnotations` go only with a chat message. A slash or `!` command
+     * ignores them; see `carriesNotes`. With notes, the text may be empty.
+     */
+    send: async (text: string, attachments?: PromptAttachment[], options: { steer?: boolean; diffAnnotations?: PromptDiffAnnotation[] | undefined } = {}) => {
       const shell = shellDraftOf(text);
       if (shell.type !== "chat") {
         if (attachments?.length) throw new Error("Remove attachments before running a shell command.");
@@ -573,7 +581,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         if (attachments?.length) throw new Error("Remove attachments before running a slash command.");
         return runSlash("commands/run", { text });
       }
-      await command("prompt", text, attachments, options.steer === true);
+      await command("prompt", text, attachments, options.steer === true, options.diffAnnotations);
     },
     respondToCommand: (requestId: string, value: string) => runSlash("commands/respond", { requestId, value }),
     dismissCommand: () => update({ ...state, commandResult: undefined }),

@@ -64,6 +64,9 @@
   --live: oklch(0.623 0.214 259.815);
   --scrim: oklch(0 0 0 / 0.32);
   --scrim-shadow: oklch(0 0 0 / 0.16);
+  /* Diff rows: drawn as faint washes, so the live blue of a note stays the loudest mark on a line. */
+  --diff-add: oklch(0.6 0.15 150);
+  --diff-remove: oklch(0.6 0.2 25);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -83,6 +86,8 @@
     --code-title: #a3c3e6;
     --scrim: oklch(0 0 0 / 0.55);
     --scrim-shadow: oklch(0 0 0 / 0.4);
+    --diff-add: oklch(0.72 0.16 150);
+    --diff-remove: oklch(0.7 0.19 25);
   }
 }
 * { box-sizing: border-box; scrollbar-width: thin; }
@@ -851,3 +856,90 @@ summary.trace-line:hover { color: var(--foreground); }
 .ns-launch-actions > button:not(.icon-button) { min-block-size: 2rem; padding-inline: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
 .ns-launch-actions > button:not(.icon-button):hover { border-color: var(--line-focus); }
 @media (prefers-reduced-motion: reduce) { .ns-launch[data-state="starting"] .ns-launch-mark svg { animation: none; } }
+
+/* Changes review: the session's git diff as one column of files at every size.
+   Selected lines and the notes written on them share one blue spine down the
+   left edge, so a note always reads as attached to its code. */
+.changes-dialog { --tree-width: 52rem; --tree-height: 54rem; }
+.changes-opener .changes-badge { position: absolute; inset-block-start: -0.1875rem; inset-inline-end: -0.375rem; min-inline-size: 1rem; block-size: 1rem;
+  padding-inline: 0.25rem; border-radius: 0.5rem; background: var(--live); color: var(--primary-foreground); font-size: var(--meta-text); font-weight: 600;
+  line-height: 1rem; font-variant-numeric: tabular-nums; text-align: center; pointer-events: none; }
+.changes-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; }
+.changes-message, .change-message { margin: 0; padding: var(--space-4) var(--tree-pad); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
+.changes-message p, .change-message p { margin: 0 0 var(--space-2); }
+.changes-message button, .change-message button, .diff-more { min-block-size: 2.25rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
+.changes-message button:hover, .change-message button:hover, .diff-more:hover { border-color: var(--line-focus); }
+.change-file + .change-file { border-block-start: 1px solid var(--line); }
+.change-file-head { position: sticky; inset-block-start: 0; z-index: 1; margin: 0; background: var(--background); font-size: var(--small-text); font-weight: 400; }
+.change-file-head button { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2) var(--tree-pad); border: 0; background: transparent; text-align: start; }
+.change-file-head button:disabled { opacity: 1; }
+.change-file-head button:not(:disabled):hover { background: var(--hover-surface); }
+.change-file-head button[aria-expanded="true"] { border-block-end: 1px solid var(--line); }
+.change-chevron { flex: none; color: var(--muted-foreground); transition: rotate 150ms; }
+.change-file-head [aria-expanded="true"] .change-chevron { rotate: 90deg; }
+.change-file-head button:disabled .change-chevron { visibility: hidden; }
+/* The name never truncates before its folder does. */
+.change-path { flex: 1 1 12rem; min-inline-size: 0; display: flex; white-space: nowrap; }
+.change-folder { flex: 0 1 auto; min-inline-size: 1.5rem; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
+.change-name { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.change-facts { flex: none; display: flex; gap: var(--space-2); margin-inline-start: auto; padding-inline-start: calc(16px + var(--space-2)); color: var(--muted-foreground); font-size: var(--label-text); white-space: nowrap; }
+.change-noted { color: var(--live); font-weight: 500; }
+
+.diff { --diff-num: 3.5ch; font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6; font-variant-ligatures: none; tab-size: 4; padding-block-end: var(--space-2); }
+.diff-row { display: grid; grid-template-columns: auto 1.75ch minmax(0, 1fr); min-block-size: 1.5rem; cursor: pointer; }
+.diff-row[data-kind="hunk"], .diff-row[data-kind="marker"] { display: block; padding: var(--space-1) var(--tree-pad); color: var(--muted-foreground); background: var(--tint-surface); cursor: default; overflow-wrap: anywhere; }
+.diff-row[data-kind="marker"] { background: transparent; font-style: italic; }
+.diff-row[data-kind="add"] { background: color-mix(in oklab, var(--diff-add) 14%, transparent); }
+.diff-row[data-kind="remove"] { background: color-mix(in oklab, var(--diff-remove) 12%, transparent); }
+.diff-row[data-selected] { background: color-mix(in oklab, var(--live) 18%, transparent); }
+.diff-gutter { display: grid; grid-template-columns: repeat(2, var(--diff-num)); gap: var(--space-2); align-content: start; padding: 0 var(--space-2) 0 var(--tree-pad);
+  border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--muted-foreground) 80%, transparent); font: inherit; text-align: end;
+  font-variant-numeric: tabular-nums; user-select: none; box-shadow: inset 3px 0 transparent; }
+.diff-gutter:focus-visible { outline-offset: -2px; }
+.diff-row:hover .diff-gutter { color: var(--foreground); }
+.diff-row[data-noted] .diff-gutter { box-shadow: inset 3px 0 color-mix(in oklab, var(--live) 50%, transparent); }
+.diff-row[data-selected] .diff-gutter { box-shadow: inset 3px 0 var(--live); color: var(--foreground); }
+.diff-sign { color: var(--muted-foreground); text-align: center; user-select: none; }
+.diff-text { min-inline-size: 0; padding-inline-end: var(--tree-pad); white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-more { display: block; margin: var(--space-3) var(--tree-pad); }
+.diff-moved { border-block-end: 1px solid var(--line); }
+
+.diff-note { margin: 0 var(--tree-pad) var(--space-3) 0; padding: var(--space-2) var(--space-3) var(--space-3) calc(var(--tree-pad) + var(--space-1));
+  border: 1px solid var(--line); border-inline-start: 3px solid var(--live); border-start-end-radius: 0; border-end-end-radius: var(--radius-surface);
+  background: var(--background); font-family: var(--body-font); font-size: var(--small-text); line-height: 1.5; }
+.diff-note-head { display: flex; align-items: center; gap: var(--space-1); }
+.diff-note-range { flex: 1; min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); }
+.diff-note-head .icon-button { inline-size: 2rem; block-size: 2rem; }
+.diff-note-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-editor { display: flex; flex-direction: column; gap: var(--space-2); padding-block-start: var(--space-3); }
+.note-editor textarea { inline-size: 100%; min-block-size: 4.5rem; max-block-size: 14rem; field-sizing: content; resize: none; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-control); background: color-mix(in oklab, var(--muted) 30%, var(--background)); color: var(--foreground);
+  font-size: 1rem; line-height: 1.5; outline: none; transition: border-color 150ms; }
+.note-editor textarea:focus-visible { border-color: var(--line-focus); }
+.note-editor textarea::placeholder { color: var(--muted-foreground); }
+.note-error, .note-hint { margin: 0; font-size: var(--label-text); }
+.note-error { color: var(--destructive); }
+.note-hint { color: var(--muted-foreground); }
+.note-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.note-actions button { min-block-size: 2.5rem; padding-inline: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
+.note-actions .note-submit { border-color: var(--primary); background: var(--primary); }
+.note-actions .note-cancel:hover { border-color: var(--line-focus); }
+
+.changes-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--tree-pad);
+  border-block-start: 1px solid var(--line); }
+.changes-foot p { flex: 1 1 12rem; margin: 0; color: var(--muted-foreground); font-size: var(--small-text); }
+.changes-write { min-block-size: var(--control-size); padding-inline: var(--space-4); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); font-weight: 500; }
+
+/* The input bar's notes. A chip names the file and lines; the tray takes a bounded share of the window and scrolls past it. */
+.note-tray { display: flex; flex-wrap: wrap; gap: var(--space-2); min-inline-size: 0; margin: 0; padding: var(--space-3) var(--space-4) 0; list-style: none;
+  max-block-size: max(5.5rem, 22cqb); overflow-y: auto; }
+.note-chip { display: flex; align-items: center; max-inline-size: 100%; min-inline-size: 0;
+  border: 1px solid color-mix(in oklab, var(--live) 35%, var(--line)); border-radius: var(--radius-control); background: color-mix(in oklab, var(--live) 6%, var(--background)); }
+.note-chip-open { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: 2.5rem; padding-inline: var(--space-3) var(--space-1);
+  border: 0; border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); text-align: start; }
+.note-chip-open svg { flex: none; color: var(--live); }
+.note-chip-where { flex: none; font-family: var(--code-font); font-size: var(--label-text); }
+.note-chip-text { min-inline-size: 0; max-inline-size: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.note-chip-remove { display: grid; place-items: center; flex: none; inline-size: 2.5rem; block-size: 2.5rem; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.note-chip-open:hover, .note-chip-remove:hover { background: var(--hover-surface); color: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { .change-chevron { transition: none; } }

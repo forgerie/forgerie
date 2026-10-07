@@ -20,6 +20,7 @@ import type { WorkingSend } from "../queue";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
 import { modelCommandQuery } from "../modelChoice";
 import { DialogLayer, useDialogMode, type DialogBinding } from "./DialogLayer";
+import { NoteTray, type NotesBinding } from "./NoteTray";
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
@@ -44,6 +45,8 @@ type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; c
   dialog?: DialogBinding | undefined;
   /** Files can be attached. Off where nothing can store them yet, such as a session that does not exist. */
   attachments?: boolean;
+  /** Notes on diff lines that go with the next chat message. */
+  notes?: NotesBinding | undefined;
   chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
@@ -52,7 +55,7 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, attachments = true, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, attachments = true, notes, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
@@ -96,6 +99,16 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
     : shellDraft.type === "empty" ? "Type a command after !."
     : shell.availability.type === "blocked" ? shell.availability.reason : undefined;
   const shellBlocked = disabled || preparing || dictating || shellReason !== undefined;
+  // Notes go with a chat message, or alone when the draft is empty. Commands leave them waiting.
+  const noteCount = notes?.notes.length ?? 0;
+  const notesAlone = noteCount > 0 && !literal && !preparing && count === 0 && text.trim() === "";
+  const notesWait = noteCount > 0 && !literal && (shellMode || compactDraft || modelQuery !== undefined || isCommand(text));
+  const [sendingNotes, setSendingNotes] = useState(false);
+  async function sendNotesAlone(steer: boolean) {
+    if (!notes || !notesAlone || disabled || dictating || sendingNotes) return;
+    setSendingNotes(true);
+    try { await notes.onSendAlone(steer); } catch { /* The binding shows the error; the notes stay. */ } finally { setSendingNotes(false); }
+  }
   async function runShell() {
     if (shellDraft.type !== "shell" || shellBlocked || !shell) return;
     aui.composer.setText("");
@@ -109,11 +122,12 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   // `working` is the one rule for "the session works", shared with the store,
   // so the buttons always match what a send does.
   const workingDraft = working.queue && !literal && !compactDraft && !shellMode && !preparing
-    && !isCommand(text) && (text.trim() !== "" || count > 0);
-  const queueBlocked = disabled || dictating || tooMany || count > 0 || !canSend;
+    && !isCommand(text) && (text.trim() !== "" || count > 0 || notesAlone);
+  const queueBlocked = disabled || dictating || tooMany || count > 0 || (notesAlone ? sendingNotes : !canSend);
   function sendWhileWorking(steer: boolean) {
     if (!workingDraft || queueBlocked || (steer && !working.steer)) return;
-    void aui.composer.send(steer ? { steer: true } : undefined);
+    if (notesAlone) void sendNotesAlone(steer);
+    else void aui.composer.send(steer ? { steer: true } : undefined);
     // The buttons unmount with the draft. Keep focus, and the touch keyboard, in the input.
     input.current?.focus({ preventScroll: true });
   }
@@ -142,6 +156,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
       sendWhileWorking(steer);
       return;
     }
+    if (notesAlone && !running && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendNotesAlone(false); return; }
     if (dialogControl?.isInput) { dialogControl.onKeyDown(event); return; }
     if (!tooMany) control?.onKeyDown(event);
   }
@@ -159,6 +174,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         <PuzzleIcon aria-hidden size={14} />An extension also asks something. It shows after these questions.
       </p>}
       <ComposerAttachments />
+      {notes && noteCount > 0 && <NoteTray binding={notes} disabled={sendingNotes} />}
       <AttachmentErrors />
       {tooMany && <p role="alert" className="attachment-notice">Send at most 16 attachments. Remove a file to continue.</p>}
       {control?.route === "chat" && <p className="ask-route" role="status">
@@ -168,6 +184,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
       </p>}
       {workingDraft && count > 0 && <p className="ask-route" role="status">
         <InfoIcon aria-hidden size={14} />Queued messages are text only. Remove the attachments to queue this message.
+      </p>}
+      {notesWait && <p className="composer-hint" role="status">
+        <InfoIcon aria-hidden size={14} />Commands do not carry notes. Your notes wait for your next message.
       </p>}
       {control?.error && <p className="ask-error" role="alert">{control.error}</p>}
       {state.type === "failed" && <p className="ask-error" role="alert">{state.message}</p>}
@@ -180,7 +199,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         aria-describedby={control?.headingId ?? (dialogInput ? dialogControl.headingId : undefined)}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || dialogInput || tooMany || compactDraft || modelQuery !== undefined || shellMode || running || working.queue ? "none" : "enter"}
+        submitMode={control || dialogInput || tooMany || compactDraft || modelQuery !== undefined || shellMode || running || working.queue || notesAlone ? "none" : "enter"}
         // Escape stops the run only from an empty draft, so it never throws typing into the queue path.
         cancelOnEscape={!dialogInput && text.trim() === "" && count === 0} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
@@ -200,7 +219,10 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
             Choose model
           </button> : shellMode ? <button type="button" className="primary compact-send" disabled={shellBlocked} onClick={() => void runShell()}>
             Run command
-          </button> : !running && !workingDraft && <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
+          </button> : running || workingDraft ? null : notesAlone ? <button type="button" className="primary icon-button" aria-label="Send notes"
+            title="Send the notes without a message" disabled={disabled || dictating || sendingNotes} onClick={() => void sendNotesAlone(false)}>
+            <ArrowUpIcon aria-hidden size={16} />
+          </button> : <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
             <ArrowUpIcon aria-hidden size={16} />
           </ComposerPrimitive.Send>}
           {workingDraft && <>

@@ -1,7 +1,7 @@
 import { contextUse } from "./contextUse";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
-import { browserTransport, createSessionStore, isBashRunning, shellAvailabilityOf } from "./sessionStore";
+import { browserTransport, createSessionStore, isBashRunning, NotSentError, shellAvailabilityOf } from "./sessionStore";
 import type { Session } from "./contracts";
 import { useThreadMessages } from "./useThreadMessages";
 import { Thread } from "./ui/Thread";
@@ -24,6 +24,11 @@ import type { TreeOutcome } from "./sessionTree";
 import { SessionTreeNavigator, TreeOpener } from "./ui/SessionTreeNavigator";
 import { ArchiveNextButton } from "./ui/ArchiveNext";
 import type { ArchiveAvailability } from "./picker/archiveNext";
+import { createNoteTray } from "./changes/noteTray";
+import { annotationsOf, carriesNotes } from "./changes/diffNotes";
+import { createChangesSource } from "./changes/changesSource";
+import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
+import type { NotesBinding } from "./ui/NoteTray";
 
 // Binding: the only React component that reads the Forgerie transport/store.
 export function ForgerieSession({ id, known, initialDraft, initialError, drafts, onSwitchSession, archive }: {
@@ -63,12 +68,36 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
   const send = useCallback(async (text: string, images?: PromptAttachment[], options?: { steer?: boolean }) => {
     applyResult(await store.send(text, images, options));
   }, [store, applyResult]);
+  // Notes on diff lines wait here, saved with the drafts, until a chat message carries them.
+  const [tray] = useState(() => createNoteTray(saved));
+  const notes = useSyncExternalStore(tray.subscribe, tray.notes);
+  const [review, setReview] = useState<{ focusNoteId?: string }>();
+  const changes = useMemo(() => cwd ? createChangesSource(cwd, browserTransport.request) : undefined, [cwd]);
+  /** Send a chat message with every waiting note. Only the notes it carried leave the tray, and only once Pi accepted it. */
+  const sendWithNotes = useCallback(async (text: string, images: PromptAttachment[] | undefined, steer: boolean) => {
+    const carried = carriesNotes(text) ? tray.notes() : [];
+    applyResult(await store.send(text, images, { steer, diffAnnotations: annotationsOf(carried) }));
+    tray.drop(carried.map((note) => note.id));
+  }, [store, tray, applyResult]);
   const onNew = useCallback(async (message: AppendMessage) => {
     setSendError(undefined);
     // assistant-ui marks a steer on the message itself (composer.send({ steer: true })).
-    await sendMessage(message, (text, images) => send(text, images, { steer: message.steer === true }),
+    await sendMessage(message, (text, images) => sendWithNotes(text, images, message.steer === true),
       () => runtimeRef.current?.thread.composer, setSendError);
-  }, [send]);
+  }, [sendWithNotes]);
+  const notesBinding: NotesBinding = {
+    notes, onRemove: tray.remove, onOpen: (noteId) => setReview({ focusNoteId: noteId }),
+    onSendAlone: async (steer) => {
+      setSendError(undefined);
+      try { await sendWithNotes("", undefined, steer); }
+      catch (error) {
+        // Notes never leave the tray on failure, so there is nothing to restore.
+        setSendError(error instanceof NotSentError ? error.message
+          : `${error instanceof Error ? error.message : String(error)} Check the transcript before sending again.`);
+        throw error;
+      }
+    },
+  };
   const onCancel = useCallback(async () => {
     try {
       const restored = await store.cancel();
@@ -125,6 +154,7 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
     <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}
       actions={<>
+        {changes && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
         <TreeOpener idle={state.connection.type === "ready" && !state.sending && !state.transcript.isRunning}
           onOpen={() => { void store.openTree().catch(() => { /* The store exposes the error. */ }); }} />
         {archive && <ArchiveNextButton onArchive={archive.onArchive}
@@ -141,7 +171,7 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
         queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
         working={workingSend(state.status, state.compaction, state.transcript.isRunning)}
-        dialog={dialog}
+        dialog={dialog} notes={notesBinding}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
           listModels: store.listModels, listThinkingLevels: store.listThinkingLevels, onModel: store.setModel, onThinkingLevel: store.setThinkingLevel,
           context: contextUse(state.status) }}
@@ -155,6 +185,8 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
         onContinue={(targetId, summary) => { void store.continueTree(targetId, summary).then(applyTree); }}
         onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
+      {review && changes && <ChangesReview source={changes} notes={notes} focusNoteId={review.focusNoteId}
+        onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
     </SessionFrame>
     </DictationProvider>
   </AssistantRuntimeProvider>;
