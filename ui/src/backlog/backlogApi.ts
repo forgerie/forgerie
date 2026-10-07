@@ -1,5 +1,5 @@
-// The one file that knows the backlog wire contract (src/shared/backlog.ts on
-// Forgerie's main branch, landed in f397a376). Everything else in this client
+// The one file that knows the backlog wire contract (src/shared/backlog.ts and
+// src/shared/github.ts on Forgerie's main branch). Everything else in this client
 // reads the types below, so a contract change lands here. Only the fields this
 // client reads are specified; an unknown readiness or claim kind degrades, it
 // never drops the whole list.
@@ -7,8 +7,10 @@ import { z } from "zod";
 import type { Fetch } from "../newSession";
 
 const text = z.string().min(1);
+/** Where an item comes from. A server older than providers sends none, and all its items are markdown. */
+const provider = z.string().min(1).catch("markdown");
 
-const claimIdentity = { claimId: text, projectId: text, itemId: text, repo: text, cwd: text, claimedAt: text };
+const claimIdentity = { claimId: text, projectId: text, provider, itemId: text, repo: text, cwd: text, claimedAt: text };
 export const backlogClaimSchema = z.discriminatedUnion("kind", [
   z.object({ ...claimIdentity, kind: z.literal("launching") }),
   z.object({ ...claimIdentity, kind: z.literal("interrupted") }),
@@ -17,7 +19,11 @@ export const backlogClaimSchema = z.discriminatedUnion("kind", [
 export type BacklogClaim = z.infer<typeof backlogClaimSchema>;
 
 export const backlogItemSchema = z.object({
-  id: text, title: text, projectId: text, projectName: text, repo: text, path: text,
+  id: text, title: text, provider, projectId: text, projectName: text, repo: text,
+  /** A repo-relative file for markdown; `owner/name#42` for a GitHub issue. */
+  path: text,
+  /** The item's own web page, when its provider has one. Only https. */
+  url: z.string().regex(/^https:\/\//u).optional().catch(undefined),
   status: z.string().catch(""),
   priority: z.string().optional().catch(undefined),
   labels: z.array(z.string()).catch([]),
@@ -32,7 +38,8 @@ export type BacklogItem = z.infer<typeof backlogItemSchema>;
 
 export const backlogWarningSchema = z.object({
   projectId: text, path: z.string(),
-  kind: z.enum(["ignored-directory", "invalid-item", "project-error", "scan-limit"]).or(z.string()),
+  kind: z.enum(["ignored-directory", "invalid-item", "project-error", "scan-limit", "provider-auth", "provider-unavailable", "items-hidden"]).or(z.string()),
+  provider: z.string().optional().catch(undefined),
   message: z.string(),
 });
 export type BacklogWarning = z.infer<typeof backlogWarningSchema>;
@@ -81,7 +88,13 @@ export class BacklogRefusal extends Error {
   }
 }
 
-const itemPath = (projectId: string, itemId: string) => `/api/backlog/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemId)}`;
+/** One item. The same id from two providers is two items, so a reference always says which provider; absent means markdown. */
+export interface BacklogRef { projectId: string; itemId: string; provider?: string | undefined }
+export const MARKDOWN = "markdown";
+export const providerOf = (ref: Pick<BacklogRef, "provider">) => ref.provider ?? MARKDOWN;
+/** Markdown items keep the bare path, so this client still works against a server older than providers. */
+const itemPath = (ref: BacklogRef) => `/api/backlog/${encodeURIComponent(ref.projectId)}/items/${encodeURIComponent(ref.itemId)}`;
+const providerQuery = (ref: BacklogRef) => providerOf(ref) === MARKDOWN ? "" : `?provider=${encodeURIComponent(providerOf(ref))}`;
 
 /** The reads and writes of the backlog. Nothing here retries. */
 export function createBacklogApi(fetchFn: Fetch) {
@@ -98,16 +111,16 @@ export function createBacklogApi(fetchFn: Fetch) {
     ...(signal ? { signal } : {}) });
   return {
     list: (signal?: AbortSignal) => call("/api/backlog", backlogListSchema, signal ? { signal } : {}),
-    detail: (projectId: string, itemId: string, signal?: AbortSignal) => call(itemPath(projectId, itemId), backlogDetailSchema, signal ? { signal } : {}),
+    detail: (ref: BacklogRef, signal?: AbortSignal) => call(`${itemPath(ref)}${providerQuery(ref)}`, backlogDetailSchema, signal ? { signal } : {}),
     /**
      * Claim the item and start its session in one step. The same `requestId`
      * with the same choices returns the same session, so a lost reply is safe
      * to ask again; this client still never retries on its own.
      */
-    launch: (projectId: string, itemId: string, requestId: string, start: BacklogStart) =>
-      call(`${itemPath(projectId, itemId)}/launch`, backlogLaunchSchema, post({ requestId, start })),
-    release: (projectId: string, itemId: string, claimId: string) =>
-      call(`${itemPath(projectId, itemId)}/release`, z.object({ released: z.literal(true) }), post({ claimId })),
+    launch: (ref: BacklogRef, requestId: string, start: BacklogStart) =>
+      call(`${itemPath(ref)}/launch${providerQuery(ref)}`, backlogLaunchSchema, post({ requestId, start })),
+    release: (ref: BacklogRef, claimId: string) =>
+      call(`${itemPath(ref)}/release${providerQuery(ref)}`, z.object({ released: z.literal(true) }), post({ claimId })),
   };
 }
 export type BacklogApi = ReturnType<typeof createBacklogApi>;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createNewSessionApi } from "../newSession";
 import { createLaunchStore } from "../launches";
 import { createBacklogApi } from "./backlogApi";
+import { createGitHubApi } from "./githubApi";
 
 type Call = { path: string; body?: unknown };
 function server(reply: (call: Call) => { status?: number; body: unknown }) {
@@ -71,8 +72,32 @@ describe("the backlog client", () => {
     const list = await createBacklogApi(fetchFn).list();
     expect(list.items.map((item) => [item.id, item.readiness])).toEqual([["01A", "ready"], ["02B", "blocked"]]);
   });
+  it("names the provider for every route of a GitHub issue, and none for a file, so older servers still answer", async () => {
+    const { calls, fetchFn } = server(({ path }) => path.includes("/launch")
+      ? { body: { session: { id: "s1", cwd: "/code/korri" }, claim: { ...claim, provider: "github", itemId: "7", sessionId: "s1" }, initialPrompt: "This is GitHub issue korri-os/korri#7.", reused: false } }
+      : { body: { accepted: true } });
+    const api = createNewSessionApi(fetchFn);
+    await api.start("/code/korri", { text: "" }, {}, { startupToken: "start-7", item: { projectId: "p1", itemId: "7", provider: "github" } });
+    expect(calls[0]!.path).toBe("/api/backlog/p1/items/7/launch?provider=github");
+    const paths = server(() => ({ body: { released: true } }));
+    await createBacklogApi(paths.fetchFn).release({ projectId: "p1", itemId: "7", provider: "github" }, "c1");
+    await createBacklogApi(paths.fetchFn).release({ projectId: "p1", itemId: "01A", provider: "markdown" }, "c2");
+    expect(paths.calls.map((call) => call.path)).toEqual(["/api/backlog/p1/items/7/release?provider=github", "/api/backlog/p1/items/01A/release"]);
+  });
+  it("reads an item from a server older than providers as markdown", async () => {
+    const { fetchFn } = server(() => ({ body: { items: [{ id: "01A", title: "Fix", projectId: "p1", projectName: "forgerie", repo: "/r", path: "a.md", status: "To Do",
+      labels: [], open: true, readiness: "ready", blockingIds: [], claim: { ...claim, provider: undefined } }], warnings: [], generatedAt: "now" } }));
+    const list = await createBacklogApi(fetchFn).list();
+    expect(list.items[0]).toMatchObject({ provider: "markdown", claim: { provider: "markdown" } });
+  });
+  it("reads a server without GitHub login as not set up, and never shows a token", async () => {
+    const missing = async () => new Response("{}", { status: 404 });
+    expect(await createGitHubApi(missing).status()).toEqual({ state: "not-configured" });
+    const refused = async () => new Response(JSON.stringify({ error: "Device flow is off for this GitHub App." }), { status: 400 });
+    await expect(createGitHubApi(refused).login()).rejects.toThrow("Device flow is off");
+  });
   it("carries the server's refusal and the claim that holds the item", async () => {
     const { fetchFn } = server(() => ({ status: 409, body: { kind: "conflict", error: "Backlog item is already claimed", claim } }));
-    await expect(createBacklogApi(fetchFn).launch("p1", "01A", "r", { cwd: "/r" })).rejects.toMatchObject({ kind: "conflict", status: 409, claim: { sessionId: "s-held" } });
+    await expect(createBacklogApi(fetchFn).launch({ projectId: "p1", itemId: "01A" }, "r", { cwd: "/r" })).rejects.toMatchObject({ kind: "conflict", status: 409, claim: { sessionId: "s-held" } });
   });
 });

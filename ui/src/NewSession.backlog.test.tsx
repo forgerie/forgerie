@@ -13,9 +13,9 @@ let root: Root;
 const opus: SessionModel = { provider: "p", id: "opus", name: "Opus", reasoning: true };
 type StartArgs = Parameters<NewSessionApi["start"]>;
 type StartResult = Awaited<ReturnType<NewSessionApi["start"]>>;
-const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ id: "01A", title: "Fix the nested transcript", projectId: "p1", projectName: "forgerie",
+const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ id: "01A", title: "Fix the nested transcript", provider: "markdown", projectId: "p1", projectName: "forgerie",
   repo: "/code/forgerie", path: "work/items/a.md", status: "To Do", labels: [], open: true, readiness: "ready", blockingIds: [], ...extra });
-const held: BacklogClaim = { kind: "claimed", claimId: "c1", projectId: "p1", itemId: "01A", repo: "/code/forgerie", cwd: "/code/forgerie/.worktree/s-9",
+const held: BacklogClaim = { kind: "claimed", claimId: "c1", projectId: "p1", provider: "markdown", itemId: "01A", repo: "/code/forgerie", cwd: "/code/forgerie/.worktree/s-9",
   claimedAt: "2026-10-07T10:00:00Z", sessionId: "s-held" };
 
 function harness(options: { detail?: Partial<BacklogItem>; outcome?: (args: StartArgs) => StartResult } = {}) {

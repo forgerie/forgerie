@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { BacklogClaim, BacklogItem, BacklogWarning } from "./backlogApi";
-import { ageText, ageWords, bodyUnderTitle, firstMessage, groupBacklog, heldSessions, holderOf, ignoredFix, matches, openCount, otherWarnings, priorityWord,
-  readBacklogPlace, readItemParam, itemParam, relativePath } from "./backlogModel";
+import { ageText, ageWords, authWarnings, bodyUnderTitle, findItem, firstMessage, groupBacklog, heldSessions, holderOf, ignoredFix, issueNumber, matches, openCount, otherWarnings, priorityWord,
+  readBacklogPlace, readItemParam, itemParam, refOf, relativePath, sameItem } from "./backlogModel";
 
 const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({
-  id: "01A", title: "Fix the scanner", projectId: "p1", projectName: "forgerie", repo: "/code/forgerie", path: "work/items/a.md",
+  id: "01A", title: "Fix the scanner", provider: "markdown", projectId: "p1", projectName: "forgerie", repo: "/code/forgerie", path: "work/items/a.md",
   status: "To Do", priority: "medium", labels: [], created: "2026-09-01", open: true, readiness: "ready", blockingIds: [], ...extra,
 });
-const claimed = (sessionId: string, claimedAt = "2026-10-06T10:00:00Z"): BacklogClaim => ({ kind: "claimed", claimId: `c-${sessionId}`, projectId: "p1",
+const claimed = (sessionId: string, claimedAt = "2026-10-06T10:00:00Z"): BacklogClaim => ({ kind: "claimed", claimId: `c-${sessionId}`, projectId: "p1", provider: "markdown",
   itemId: "x", repo: "/code/forgerie", cwd: "/code/forgerie", claimedAt, sessionId });
 const ignored = (projectId: string, path: string): BacklogWarning => ({ projectId, path, kind: "ignored-directory", message: "ignored" });
 const NOW = Date.parse("2026-10-07T12:00:00Z");
@@ -15,13 +15,30 @@ const NOW = Date.parse("2026-10-07T12:00:00Z");
 describe("the backlog place in the URL", () => {
   it("reads the list, one item, and nothing", () => {
     expect(readBacklogPlace(new URLSearchParams("backlog"))).toEqual({});
-    expect(readBacklogPlace(new URLSearchParams("backlog=p1/01A"))).toEqual({ item: { projectId: "p1", itemId: "01A" } });
+    expect(readBacklogPlace(new URLSearchParams("backlog=p1/01A"))).toEqual({ item: { projectId: "p1", itemId: "01A", provider: "markdown" } });
     expect(readBacklogPlace(new URLSearchParams("session=s1"))).toBeUndefined();
   });
   it("round-trips an item, and refuses a half", () => {
-    expect(readItemParam(itemParam({ projectId: "p1", itemId: "task-013" }))).toEqual({ projectId: "p1", itemId: "task-013" });
+    expect(readItemParam(itemParam({ projectId: "p1", itemId: "task-013" }))).toEqual({ projectId: "p1", itemId: "task-013", provider: "markdown" });
     expect(readItemParam("p1/")).toBeUndefined();
     expect(readItemParam("/01A")).toBeUndefined();
+    expect(readItemParam("github~/7")).toBeUndefined();
+  });
+  it("names another provider's item, and keeps a markdown link as it was", () => {
+    expect(itemParam({ projectId: "p1", itemId: "7", provider: "github" })).toBe("github~p1/7");
+    expect(itemParam({ projectId: "p1", itemId: "01A", provider: "markdown" })).toBe("p1/01A");
+    expect(readItemParam("github~p1/7")).toEqual({ projectId: "p1", itemId: "7", provider: "github" });
+    // A markdown id may hold anything after the first slash, including a tilde.
+    expect(readItemParam("p1/odd~id/x")).toEqual({ projectId: "p1", itemId: "odd~id/x", provider: "markdown" });
+  });
+  it("tells the same id from two providers apart", () => {
+    const issue = item({ id: "7", provider: "github" });
+    const file = item({ id: "7" });
+    expect(sameItem(refOf(issue), refOf(file))).toBe(false);
+    expect(sameItem({ projectId: "p1", itemId: "7" }, refOf(file))).toBe(true);
+    expect(findItem([file, issue], { projectId: "p1", itemId: "7", provider: "github" })).toBe(issue);
+    expect(issueNumber(issue)).toBe("#7");
+    expect(issueNumber(file)).toBeUndefined();
   });
 });
 
@@ -95,6 +112,24 @@ describe("grouping", () => {
   });
   it("lists the sessions that hold items", () => {
     expect([...heldSessions([item({ claim: claimed("s1") }), item({ claim: { ...claimed("s2"), kind: "launching" } as BacklogClaim })])]).toEqual(["s1"]);
+  });
+});
+
+describe("GitHub notes", () => {
+  const note = (projectId: string, kind: string): BacklogWarning => ({ projectId, provider: "github", path: "korri-os/korri", kind, message: kind });
+  it("puts a project's GitHub notes in its group, the login above the list, and the rest under it", () => {
+    const warnings = [note("p1", "items-hidden"), note("p1", "provider-auth"), note("p2", "provider-unavailable"),
+      { projectId: "p1", path: "work/items/x.md", kind: "invalid-item", message: "bad" }];
+    const groups = groupBacklog([item({ id: "7", provider: "github" })], warnings);
+    expect(groups[0]!.notes).toEqual([warnings[0]]);
+    expect(authWarnings(warnings)).toEqual([warnings[1]]);
+    expect(otherWarnings(groups, warnings)).toEqual([warnings[2], warnings[3]]);
+  });
+  it("finds an issue by its number or by the word github", () => {
+    const issue = item({ id: "7", provider: "github", title: "Crash on boot" });
+    expect(matches(issue, "#7")).toBe(true);
+    expect(matches(issue, "github")).toBe(true);
+    expect(matches(item(), "github")).toBe(false);
   });
 });
 

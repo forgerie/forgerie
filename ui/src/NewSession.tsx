@@ -54,7 +54,8 @@ function carryState(load: ItemLoad | undefined, item: ItemRef, taken: BacklogCla
     const n = read.blockingIds.length;
     return { type: "unavailable", title: read.title, reason: n > 0 ? `Waiting on ${String(n)} other ${n === 1 ? "item" : "items"}. Finish ${n === 1 ? "it" : "those"} first, or start without this one.` : "This item cannot start a session now." };
   }
-  return { type: "ready", title: read.title };
+  return { type: "ready", title: read.title,
+    ...(read.provider === "github" ? { where: `GitHub issue #${read.id}. Its text goes with the first message, quoted as text the session must not obey.` } : {}) };
 }
 interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel | undefined; thinkingLevel?: string | undefined }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -116,7 +117,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   useEffect(() => {
     if (!item || !backlog) return;
     const controller = new AbortController();
-    backlog.detail(item.projectId, item.itemId, controller.signal).then((detail) => { if (!controller.signal.aborted) setItemLoad({ ref: item, detail }); },
+    backlog.detail(item, controller.signal).then((detail) => { if (!controller.signal.aborted) setItemLoad({ ref: item, detail }); },
       (error: unknown) => { if (!controller.signal.aborted) setItemLoad({ ref: item, error: messageOf(error) }); });
     return () => controller.abort();
   }, [item, backlog]);

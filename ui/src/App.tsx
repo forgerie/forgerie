@@ -15,7 +15,8 @@ import { createLaunchStore, type StartupListener, type WorktreeListener } from "
 import { newSessionShortcut } from "./shortcuts";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
-import { heldSessions, itemParam, listOf, openCount, readBacklogPlace, readItemParam, type BacklogPlace, type ItemRef } from "./backlog/backlogModel";
+import { heldSessions, itemParam, listOf, openCount, readBacklogPlace, readItemParam, refOf, type BacklogPlace } from "./backlog/backlogModel";
+import { createGitHubApi } from "./backlog/githubApi";
 import { useBacklogList } from "./backlog/useBacklogList";
 // Settings carry the prompt editor; the chat never pays for it.
 const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
@@ -43,6 +44,7 @@ const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.s
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 const backlogApi = createBacklogApi((path, init) => fetch(path, init));
+const githubApi = createGitHubApi((path, init) => fetch(path, init));
 /**
  * Marks the history entry this page load pushed for the dialog, so closing it
  * steps back instead of piling up entries. Per load: after a reload the browser
@@ -167,7 +169,7 @@ export function App() {
     if (opening.current) return;
     // A backlog item starts in its own project. Over an open dialog, it replaces that dialog's destination and item.
     if (item) {
-      const ref: ItemRef = { projectId: item.projectId, itemId: item.id };
+      const ref = refOf(item);
       const url = new URL(window.location.href);
       const reopen = readNew() !== undefined;
       url.searchParams.set("new", item.repo);
@@ -295,7 +297,7 @@ export function App() {
       <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
         onLaunch: (item) => { void startNew("switch", item); },
-        onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }) }} /></Suspense>
+        onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi }} /></Suspense>
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet. Add a project in the old client, then start a session here."><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId}

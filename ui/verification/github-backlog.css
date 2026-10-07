@@ -1,0 +1,8 @@
+/* Only the contact sheet's frame. The screens use the app's own styles. */
+.mock-sheet-page, .mock-sheet-page body { block-size: auto; }
+.mock-sheet-page #root { block-size: auto; }
+.mock-sheet { display: grid; gap: 2rem; padding: 2rem; justify-content: center; }
+.mock-frame { margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.mock-frame figcaption { display: flex; flex-direction: column; gap: 0.25rem; min-block-size: 3.5rem; max-inline-size: 30rem; font-size: var(--small-text); color: var(--muted-foreground); }
+.mock-frame figcaption strong { color: var(--foreground); font-size: 0.9375rem; font-weight: 600; }
+.mock-device { display: block; border: 1px solid var(--line-focus); border-radius: 1.25rem; background: var(--background); }

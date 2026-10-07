@@ -5,7 +5,8 @@ import "./backlog.css";
 /** What the window knows about the item riding with the first message. */
 export type CarryState =
   | { type: "loading" }
-  | { type: "ready"; title: string }
+  /** `where` replaces the default line, for an item that is not a file. */
+  | { type: "ready"; title: string; where?: string | undefined }
   /** The item cannot start a session now: it is done, blocked, or could not be read. */
   | { type: "unavailable"; title?: string | undefined; reason: string }
   /** Another session holds it. `name` and `when` come from the session list when it knows that session. */
@@ -20,6 +21,7 @@ export function BacklogCarry({ state, onRemove }: { state: CarryState; onRemove:
   const title = state.type === "loading" ? "Reading the backlog item…" : state.title ?? "Backlog item";
   const where = state.type === "taken" ? <>Taken by <em>{state.name ?? "another session"}</em>{state.when ? <> {state.when} ago</> : null}</>
     : state.type === "unavailable" ? state.reason
+    : state.type === "ready" && state.where ? state.where
     : "Backlog item. The whole file goes with the first message.";
   const refused = state.type === "taken" || state.type === "unavailable";
   return <>

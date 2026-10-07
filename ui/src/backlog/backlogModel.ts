@@ -1,23 +1,31 @@
 // What the backlog shows, decided once. Pure: the views and the launch read
 // these functions and do no arithmetic of their own.
-import type { BacklogClaim, BacklogItem, BacklogList, BacklogWarning } from "./backlogApi";
+import { MARKDOWN, providerOf, type BacklogClaim, type BacklogItem, type BacklogList, type BacklogRef, type BacklogWarning } from "./backlogApi";
 
 /** The list as the app last read it. A failed read keeps the last list it had. */
 export type BacklogLoad = { type: "loading" } | { type: "failed"; message: string; last?: BacklogList | undefined } | { type: "ready"; value: BacklogList };
 export const listOf = (load: BacklogLoad): BacklogList | undefined => load.type === "ready" ? load.value : load.type === "failed" ? load.last : undefined;
 
-/** One item, as the URL names it: `?backlog=<projectId>/<itemId>`. */
-export interface ItemRef { projectId: string; itemId: string }
+/**
+ * One item, as the URL names it: `?backlog=<projectId>/<itemId>` for a markdown item,
+ * `?backlog=github~<projectId>/<itemId>` for another provider's. Project ids are UUIDs, so `~` cannot
+ * be part of one, and every link written before providers still reads as the markdown item it named.
+ */
+export type ItemRef = BacklogRef;
 /** Where the backlog is open: the list, or one item. */
 export interface BacklogPlace { item?: ItemRef | undefined }
 
-export const itemParam = (ref: ItemRef) => `${ref.projectId}/${ref.itemId}`;
+export const refOf = (item: Pick<BacklogItem, "projectId" | "id" | "provider">): ItemRef => ({ projectId: item.projectId, itemId: item.id, provider: item.provider });
+export const itemParam = (ref: ItemRef) => `${providerOf(ref) === MARKDOWN ? "" : `${providerOf(ref)}~`}${ref.projectId}/${ref.itemId}`;
 export function readItemParam(value: string | null | undefined): ItemRef | undefined {
   if (!value) return undefined;
   const slash = value.indexOf("/");
-  const projectId = value.slice(0, slash);
+  const head = value.slice(0, Math.max(slash, 0));
   const itemId = value.slice(slash + 1);
-  return slash > 0 && itemId ? { projectId, itemId } : undefined;
+  const tilde = head.indexOf("~");
+  const provider = tilde > 0 ? head.slice(0, tilde) : MARKDOWN;
+  const projectId = tilde > 0 ? head.slice(tilde + 1) : head;
+  return slash > 0 && projectId && itemId ? { projectId, itemId, provider } : undefined;
 }
 /** `?backlog` alone is the list; `?backlog=<projectId>/<itemId>` is one item. Absent: the backlog is not open. */
 export function readBacklogPlace(params: URLSearchParams): BacklogPlace | undefined {
@@ -25,7 +33,13 @@ export function readBacklogPlace(params: URLSearchParams): BacklogPlace | undefi
   const item = readItemParam(params.get("backlog"));
   return item ? { item } : {};
 }
-export const sameItem = (a: ItemRef | undefined, b: ItemRef | undefined) => a !== undefined && b !== undefined && a.projectId === b.projectId && a.itemId === b.itemId;
+export const sameItem = (a: ItemRef | undefined, b: ItemRef | undefined) => a !== undefined && b !== undefined
+  && a.projectId === b.projectId && a.itemId === b.itemId && providerOf(a) === providerOf(b);
+/** The list's item for a reference. */
+export const findItem = (items: readonly BacklogItem[] | undefined, ref: ItemRef) => items?.find((item) => sameItem(refOf(item), ref));
+/** A GitHub issue reads as its number; a file's id is too long and too private to show. */
+export const isGitHub = (item: Pick<BacklogItem, "provider">) => item.provider === "github";
+export const issueNumber = (item: Pick<BacklogItem, "provider" | "id">) => isGitHub(item) ? `#${item.id}` : undefined;
 
 const DAY = 86_400_000;
 /** Whole days since `created`, or undefined when the file gives no readable date. */
@@ -76,7 +90,7 @@ export const HOLDER_WORDS: Record<HolderState, string> = {
 export function matches(item: BacklogItem, filter: string): boolean {
   const words = filter.trim().toLowerCase().split(/\s+/u).filter(Boolean);
   if (words.length === 0) return true;
-  const hay = [item.title, item.id, item.projectName, ...item.labels].join("\n").toLowerCase();
+  const hay = [item.title, item.id, issueNumber(item) ?? "", item.provider, item.projectName, ...item.labels].join("\n").toLowerCase();
   return words.every((word) => hay.includes(word));
 }
 
@@ -89,7 +103,14 @@ export interface BacklogGroup {
   projectId?: string | undefined;
   /** The project's backlog folder is ignored by Git (brief A2). */
   ignored?: BacklogWarning | undefined;
+  /** What a provider says about this project's list: issues it hid, a cut-short list, a list that is not current. */
+  notes?: BacklogWarning[] | undefined;
 }
+/** Provider notes that belong beside a project's items. A login problem is not one: it has its own place, above the list. */
+const isGroupNote = (warning: BacklogWarning) => warning.provider !== undefined && warning.provider !== MARKDOWN
+  && (warning.kind === "items-hidden" || warning.kind === "provider-unavailable" || warning.kind === "scan-limit");
+/** GitHub needs a login before it can list a project's issues. */
+export const authWarnings = (warnings: readonly BacklogWarning[]) => warnings.filter((warning) => warning.kind === "provider-auth");
 /**
  * Held items first, from every project, because they have a session to go to.
  * Then one group per project, by name. In a group: priority, then newest.
@@ -103,8 +124,10 @@ export function groupBacklog(items: readonly BacklogItem[], warnings: readonly B
   const projects = new Map<string, BacklogItem[]>();
   for (const item of shown) if (item.claim === undefined) projects.set(item.projectId, [...projects.get(item.projectId) ?? [], item]);
   const ignored = new Map(warnings.filter((warning) => warning.kind === "ignored-directory").map((warning) => [warning.projectId, warning]));
+  const notes = (projectId: string) => warnings.filter((warning) => warning.projectId === projectId && isGroupNote(warning));
   const groups: BacklogGroup[] = [...projects].map(([projectId, list]) => ({ key: `project:${projectId}`, label: list[0]!.projectName, kind: "project" as const,
-    projectId, items: list.sort(order), ...(ignored.has(projectId) ? { ignored: ignored.get(projectId) } : {}) }))
+    projectId, items: list.sort(order), ...(ignored.has(projectId) ? { ignored: ignored.get(projectId) } : {}),
+    ...(notes(projectId).length ? { notes: notes(projectId) } : {}) }))
     .sort((a, b) => a.label.localeCompare(b.label));
   return held.length ? [{ key: "held", label: "In a session", kind: "held", items: held }, ...groups] : groups;
 }
@@ -123,8 +146,8 @@ export function heldSessions(items: readonly BacklogItem[]): ReadonlySet<string>
  * with no items. Ignored folders of shown projects sit in their group instead.
  */
 export function otherWarnings(groups: readonly BacklogGroup[], warnings: readonly BacklogWarning[]): BacklogWarning[] {
-  const placed = new Set(groups.flatMap((group) => group.ignored ? [group.ignored] : []));
-  return warnings.filter((warning) => !placed.has(warning) && warning.kind !== "ignored-directory");
+  const placed = new Set(groups.flatMap((group) => [...group.ignored ? [group.ignored] : [], ...group.notes ?? []]));
+  return warnings.filter((warning) => !placed.has(warning) && warning.kind !== "ignored-directory" && warning.kind !== "provider-auth");
 }
 
 /**
@@ -158,7 +181,7 @@ export function bodyUnderTitle(body: string, title: string): string {
   return match && match[1]!.trim() === title.trim() ? body.slice(match[0].length).replace(/^\s*\n/u, "") : body;
 }
 
-/** A project-relative path, for a person: the file under its repository. */
+/** A project-relative path, for a person: the file under its repository. A GitHub issue's path is already `owner/name#42`. */
 export function relativePath(item: Pick<BacklogItem, "path" | "repo">): string {
   return item.path.startsWith(`${item.repo}/`) ? item.path.slice(item.repo.length + 1) : item.path;
 }

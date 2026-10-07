@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, CopyIcon, EllipsisIcon, ListTodoIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon, UnlinkIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, InfoIcon, ListTodoIcon, LogOutIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon, UnlinkIcon, XIcon } from "lucide-react";
 import type { BacklogApi, BacklogClaim, BacklogDetail, BacklogItem, BacklogWarning } from "../../backlog/backlogApi";
-import { ageText, ageWords, bodyUnderTitle, groupBacklog, HOLDER_WORDS, holderOf, ignoredFix, listOf, openCount, otherWarnings, priorityWord, projectCount, relativePath,
-  type BacklogGroup, type BacklogLoad, type BacklogPlace, type Holder, type ItemRef, type SessionLook } from "../../backlog/backlogModel";
+import { ageText, ageWords, authWarnings, bodyUnderTitle, findItem, groupBacklog, HOLDER_WORDS, holderOf, ignoredFix, isGitHub, issueNumber, itemParam, listOf, openCount, otherWarnings,
+  priorityWord, projectCount, refOf, relativePath, type BacklogGroup, type BacklogLoad, type BacklogPlace, type Holder, type ItemRef, type SessionLook } from "../../backlog/backlogModel";
+import type { GitHubApi } from "../../backlog/githubApi";
+import { useGitHubAuth } from "../../backlog/useGitHubAuth";
 import { writeClipboardText } from "../../clipboard";
 import { SettingsFrame } from "../settings/SettingsFrame";
+import { GitHubConnect } from "./GitHubConnect";
 import "../settings/settings.css";
 import "./backlog.css";
 
@@ -25,6 +28,8 @@ export interface BacklogBinding {
   onLaunch: (item: BacklogItem) => void;
   /** Open the session that holds an item. */
   onOpenSession: (claim: Extract<BacklogClaim, { kind: "claimed" }>) => void;
+  /** This machine's GitHub login. Without it, the list still says when GitHub needs one. */
+  github?: Pick<GitHubApi, "status" | "login" | "disconnect"> | undefined;
   onClose?: (() => void) | undefined;
 }
 
@@ -34,7 +39,7 @@ export interface BacklogBinding {
  * on: start a session, or open the one that holds it.
  */
 export function BacklogView({ place, binding }: { place: BacklogPlace; binding: BacklogBinding }) {
-  return place.item ? <ItemPage key={`${place.item.projectId}/${place.item.itemId}`} item={place.item} binding={binding} />
+  return place.item ? <ItemPage key={itemParam(place.item)} item={place.item} binding={binding} />
     : <ListPage binding={binding} />;
 }
 
@@ -76,6 +81,7 @@ function ItemRow({ item, holder, showProject, now, onOpen }: { item: BacklogItem
     <span className="bl-meta">
       {holder ? <span className="bl-held">{showProject ? <span className="bl-project">{item.projectName}</span> : null}{holderLine(holder)}</span>
         : <>{item.readiness === "closed" ? <span className="bl-state">Done</span> : item.readiness === "blocked" ? <span className="bl-state">Blocked</span> : null}
+          {issueNumber(item) ? <span className="bl-issue" title="GitHub issue">{issueNumber(item)}</span> : null}
           {priority ? <span className="bl-priority" data-priority={item.priority?.toLowerCase()}>{priority}</span> : null}
           {item.labels.length ? <span className="bl-labels">{item.labels.join("  ")}</span> : null}</>}
     </span>
@@ -115,7 +121,8 @@ function Group({ group, collapsed, all, look, now, onToggle, onAll, onOpen }: {
     </button>
     {collapsed ? null : <>
       {group.ignored ? <IgnoredWarning warning={group.ignored} project={group.label} /> : null}
-      <ul className="bl-rows">{rows.map((item) => <ItemRow key={`${item.projectId}/${item.id}`} item={item} now={now} showProject={group.kind === "held"}
+      {group.notes?.map((note) => <p key={`${note.kind}:${note.path}`} className="bl-note-line"><InfoIcon aria-hidden size={14} />{note.message}</p>)}
+      <ul className="bl-rows">{rows.map((item) => <ItemRow key={itemParam(refOf(item))} item={item} now={now} showProject={group.kind === "held"}
         holder={item.claim ? holderOf(item.claim, look) : undefined} onOpen={() => onOpen(item)} />)}</ul>
       {limited ? <button type="button" className="picker-more" onClick={onAll}>Show all {group.items.length}</button> : null}
     </>}
@@ -126,12 +133,14 @@ function Group({ group, collapsed, all, look, now, onToggle, onAll, onOpen }: {
 function Problems({ warnings, projectName }: { warnings: readonly BacklogWarning[]; projectName: (id: string) => string | undefined }) {
   if (warnings.length === 0) return null;
   const files = warnings.filter((warning) => warning.kind === "invalid-item").length;
-  const projects = warnings.length - files;
+  const github = warnings.filter((warning) => warning.provider === "github").length;
+  const projects = warnings.length - files - github;
   const parts = [files ? `${String(files)} ${files === 1 ? "file is" : "files are"} not readable as items` : "",
-    projects ? `${String(projects)} ${projects === 1 ? "project" : "projects"} could not be read` : ""].filter(Boolean);
+    projects ? `${String(projects)} ${projects === 1 ? "project" : "projects"} could not be read` : "",
+    github ? `GitHub has ${String(github)} ${github === 1 ? "note" : "notes"}` : ""].filter(Boolean);
   return <details className="bl-problems">
     <summary><TriangleAlertIcon aria-hidden size={14} />{parts.join(", and ")}</summary>
-    <p className="bl-problems-lede">An item needs <code>id</code> and <code>title</code> in its front matter. Other files in the folder are skipped.</p>
+    {files ? <p className="bl-problems-lede">An item needs <code>id</code> and <code>title</code> in its front matter. Other files in the folder are skipped.</p> : null}
     <ul>{warnings.map((warning) => <li key={`${warning.kind}:${warning.path}`}>
       <span className="bl-problem-where" title={warning.path}><bdi dir="ltr">{projectName(warning.projectId) ? `${projectName(warning.projectId)!}: ` : ""}{warning.path}</bdi></span>
       <span className="bl-problem-why">{warning.message}</span>
@@ -152,6 +161,7 @@ function Empty({ onClose }: { onClose?: (() => void) | undefined }) {
 
 function ListPage({ binding }: { binding: BacklogBinding }) {
   const { load, onRefresh, onPlace, look, onClose } = binding;
+  const github = useGitHubAuth(binding.github, onRefresh);
   const [filter, setFilter] = useState("");
   const [showDone, setShowDone] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -162,7 +172,10 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
   const groups = useMemo(() => list ? groupBacklog(list.items, list.warnings, { filter, showDone }) : [], [list, filter, showDone]);
   const problems = useMemo(() => list ? otherWarnings(groupBacklog(list.items, list.warnings, { showDone: true }), list.warnings) : [], [list]);
   const toggle = (set: ReadonlySet<string>, key: string) => { const next = new Set(set); if (next.has(key)) next.delete(key); else next.add(key); return next; };
-  if (load.type === "ready" && list && list.items.length === 0 && problems.length === 0) return <Empty onClose={onClose} />;
+  const needsLogin = list ? authWarnings(list.warnings) : [];
+  const pending = github.load.type === "ready" && github.load.value.state === "pending";
+  const loggedIn = github.load.type === "ready" && github.load.value.state === "connected" ? github.load.value.login : undefined;
+  if (load.type === "ready" && list && list.items.length === 0 && problems.length === 0 && needsLogin.length === 0 && !pending) return <Empty onClose={onClose} />;
   const names = new Map(list?.items.map((item) => [item.projectId, item.projectName]));
   const open = list ? openCount(list.items) : 0;
   const more = <div className="settings-menu-anchor" ref={menu.anchor}>
@@ -171,7 +184,9 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
     {menu.open ? <div className="picker-menu" role="menu" aria-label="Backlog commands">
       <button role="menuitemcheckbox" aria-checked={showDone} onClick={() => { menu.setOpen(false); setShowDone(!showDone); }}><CheckIcon aria-hidden />Show done items</button>
       <div className="picker-menu-separator" role="separator" />
-      <button role="menuitem" onClick={() => { menu.setOpen(false); onRefresh(); }}><RefreshCwIcon aria-hidden />Read the folders again</button>
+      <button role="menuitem" onClick={() => { menu.setOpen(false); onRefresh(); }}><RefreshCwIcon aria-hidden />Read the backlog again</button>
+      {loggedIn ? <button role="menuitem" disabled={github.busy} onClick={() => { menu.setOpen(false); github.disconnect(); onRefresh(); }}>
+        <LogOutIcon aria-hidden />Log out of GitHub ({loggedIn})</button> : null}
     </div> : null}
   </div>;
   return <SettingsFrame title="Backlog" actions={<>{more}<CloseButton onClose={onClose} /></>}
@@ -182,14 +197,17 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
       <div className="bl-toolbar">
         <label className="bl-filter"><SearchIcon aria-hidden size={14} /><span className="sr-only">Filter items</span>
           <input type="search" placeholder="Filter by title or label" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
-        {list ? <span className="bl-total">{open} {open === 1 ? "item" : "items"} in {projectCount(list.items)} {projectCount(list.items) === 1 ? "project" : "projects"}</span> : null}
+        {list?.items.length ? <span className="bl-total">{open} {open === 1 ? "item" : "items"} in {projectCount(list.items)} {projectCount(list.items) === 1 ? "project" : "projects"}</span> : null}
       </div>
+      {needsLogin.length || pending ? <GitHubConnect load={github.load} warnings={needsLogin} busy={github.busy} error={github.error}
+        onConnect={github.connect} onCancel={github.disconnect} /> : null}
       {!list ? <p className="settings-hint" role="status">Reading every project's backlog…</p>
-        : groups.length === 0 ? <p className="settings-hint">{filter.trim() ? <>No items match “{filter.trim()}”.</> : "Every item is done."}</p>
+        : groups.length === 0 ? list.items.length === 0 ? null
+          : <p className="settings-hint">{filter.trim() ? <>No items match “{filter.trim()}”.</> : "Every item is done."}</p>
         : groups.map((group) => <Group key={group.key} group={group} look={look} now={now}
           collapsed={collapsed.has(group.key)} all={expanded.has(group.key) || filter.trim() !== ""}
           onToggle={() => setCollapsed(toggle(collapsed, group.key))} onAll={() => setExpanded(toggle(expanded, group.key))}
-          onOpen={(item) => onPlace({ item: { projectId: item.projectId, itemId: item.id } })} />)}
+          onOpen={(item) => onPlace({ item: refOf(item) })} />)}
       <Problems warnings={problems} projectName={(id) => names.get(id)} />
     </div>
   </SettingsFrame>;
@@ -215,18 +233,23 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
   const [release, setRelease] = useState<"idle" | "confirm" | "running" | { error: string }>("idle");
   const menu = useMenu();
   // The list may be newer than this page's read (a claim, a release), so it wins where it has the item.
-  const listed = listOf(load)?.items.find((candidate) => candidate.projectId === ref.projectId && candidate.id === ref.itemId);
+  const listed = findItem(listOf(load)?.items, ref);
   const listedClaim = listed?.claim?.claimId;
+  const github = ref.provider === "github";
   useEffect(() => {
     const controller = new AbortController();
-    api.detail(ref.projectId, ref.itemId, controller.signal).then((value) => { if (!controller.signal.aborted) setDetail({ type: "ready", value }); },
+    api.detail(ref, controller.signal).then((value) => { if (!controller.signal.aborted) setDetail({ type: "ready", value }); },
       (error: unknown) => { if (!controller.signal.aborted) setDetail({ type: "failed", message: messageOf(error), missing: (error as { kind?: string }).kind === "not-found" }); });
     return () => controller.abort();
-  }, [api, ref.projectId, ref.itemId, attempt, listedClaim]);
+    // `ref` is rebuilt from the URL on every render; its parts are what identify the item.
+  }, [api, ref.projectId, ref.itemId, ref.provider, attempt, listedClaim]);
   const back = <button type="button" className="settings-back" onClick={() => onPlace({})}><ChevronLeftIcon aria-hidden size={16} />Backlog</button>;
   if (detail.type !== "ready") {
     return <SettingsFrame back={back} title={listed?.title ?? "Backlog item"} actions={<CloseButton onClose={onClose} />}
-      error={detail.type === "failed" ? detail.missing ? "This item is no longer in the backlog. Its file was moved, renamed, or lost its front matter." : `Could not read this item: ${detail.message}` : undefined}
+      error={detail.type === "failed" ? detail.missing
+        ? github ? "This issue is no longer listed. It was closed, its author is outside the repo, or the project no longer lists GitHub issues."
+          : "This item is no longer in the backlog. Its file was moved, renamed, or lost its front matter."
+        : `Could not read this item: ${detail.message}` : undefined}
       recovery={detail.type === "failed" && !detail.missing ? <button onClick={() => setAttempt((n) => n + 1)}>Retry</button> : undefined}>
       {detail.type === "loading" ? <p className="settings-hint" role="status">Reading the item…</p> : null}
     </SettingsFrame>;
@@ -236,11 +259,11 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
   const holder = claim ? holderOf(claim, look) : undefined;
   const now = Date.now();
   const priority = priorityWord(item.priority);
-  const blockers = item.blockingIds.map((id) => listOf(load)?.items.find((candidate) => candidate.projectId === item.projectId && candidate.id === id) ?? { id, title: id });
+  const blockers = item.blockingIds.map((id) => findItem(listOf(load)?.items, { projectId: item.projectId, itemId: id, provider: item.provider }) ?? { id, title: id });
   const doRelease = async () => {
     if (!claim) return;
     setRelease("running");
-    try { await api.release(item.projectId, item.id, claim.claimId); setRelease("idle"); onRefresh(); setAttempt((n) => n + 1); }
+    try { await api.release(refOf(item), claim.claimId); setRelease("idle"); onRefresh(); setAttempt((n) => n + 1); }
     catch (error) { setRelease({ error: messageOf(error) }); }
   };
   // One filled button: the way on from here.
@@ -253,12 +276,14 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
     : <button type="button" className="settings-primary" disabled={item.readiness !== "ready"} title={item.readiness === "blocked" ? "Waiting on other items" : undefined}
       onClick={() => onLaunch(item)}>Start session</button>;
   const file = relativePath(item);
+  const issue = isGitHub(item);
+  const where = issue ? item.url ?? file : file;
   const commands = <div className="settings-menu-anchor" ref={menu.anchor}>
     <button type="button" className="picker-icon" aria-label="Item commands" aria-haspopup="menu" aria-expanded={menu.open}
       onClick={() => { menu.setOpen(!menu.open); if (release === "confirm") setRelease("idle"); }}><EllipsisIcon aria-hidden size={16} /></button>
     {menu.open ? <div className="picker-menu" role="menu" aria-label="Item commands">
-      <button role="menuitem" onClick={() => { menu.setOpen(false); void writeClipboardText(file); }}><CopyIcon aria-hidden />Copy file path</button>
-      <button role="menuitem" onClick={() => { menu.setOpen(false); onRefresh(); setAttempt((n) => n + 1); }}><RefreshCwIcon aria-hidden />Read the file again</button>
+      <button role="menuitem" onClick={() => { menu.setOpen(false); void writeClipboardText(where); }}><CopyIcon aria-hidden />{issue ? "Copy issue link" : "Copy file path"}</button>
+      <button role="menuitem" onClick={() => { menu.setOpen(false); onRefresh(); setAttempt((n) => n + 1); }}><RefreshCwIcon aria-hidden />{issue ? "Read the issue again" : "Read the file again"}</button>
       {claim ? <button role="menuitem" data-tone="danger" disabled={release === "running"}
         onClick={() => { if (release === "confirm") { menu.setOpen(false); void doRelease(); } else setRelease("confirm"); }}>
         <UnlinkIcon aria-hidden />{release === "confirm" ? "Release? The session keeps running" : "Release item"}</button> : null}
@@ -281,13 +306,18 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
         {item.labels.length ? <Property label="Labels"><span className="bl-chips">{item.labels.map((label) => <span key={label} className="bl-chip">{label}</span>)}</span></Property> : null}
         {blockers.length ? <Property label="Waiting on" hint="A session can start once these items are done.">
           <span className="bl-blockers">{blockers.map((blocker) => <button key={blocker.id} type="button" className="bl-link"
-            onClick={() => onPlace({ item: { projectId: item.projectId, itemId: blocker.id } })}>{blocker.title}</button>)}</span></Property> : null}
-        {ageWords(item.created, now) ? <Property label="Added">{ageWords(item.created, now)}</Property> : null}
-        <Property label="File"><span className="bl-file" title={file}><bdi dir="ltr">{file}</bdi></span>
+            onClick={() => onPlace({ item: { projectId: item.projectId, itemId: blocker.id, provider: item.provider } })}>{blocker.title}</button>)}</span></Property> : null}
+        {ageWords(item.created, now) ? <Property label={issue ? "Opened" : "Added"}>{ageWords(item.created, now)}</Property> : null}
+        {issue ? <Property label="Issue">{item.url
+          ? <a className="bl-issue-link" href={item.url} target="_blank" rel="noopener noreferrer"><bdi dir="ltr">{file}</bdi><ExternalLinkIcon aria-hidden size={14} /></a>
+          : <span className="bl-file"><bdi dir="ltr">{file}</bdi></span>}</Property>
+          : <Property label="File"><span className="bl-file" title={file}><bdi dir="ltr">{file}</bdi></span>
           <button type="button" className="icon-button quiet-button" aria-label="Copy file path" title="Copy file path" onClick={() => void writeClipboardText(file)}>
-            <CopyIcon aria-hidden size={14} /></button></Property>
-        {item.status ? <Property label="Status in file" hint={claim ? "Forgerie shows the session that holds the item, not this field." : undefined}>{item.status}</Property> : null}
+            <CopyIcon aria-hidden size={14} /></button></Property>}
+        {item.status ? <Property label={issue ? "Status on GitHub" : "Status in file"} hint={claim ? "Forgerie shows the session that holds the item, not this field." : undefined}>{item.status}</Property> : null}
       </div>
+      {issue ? <p className="bl-note-line bl-untrusted"><InfoIcon aria-hidden size={14} />
+        Someone on GitHub wrote this issue. Read it before you start a session: the session gets it as quoted text and is told not to follow instructions in it.</p> : null}
       <div className="markdown bl-body">
         <Streamdown className="markdown-content" mode="static" controls={false} skipHtml linkSafety={{ enabled: false }} components={markdownComponents}>
           {bodyUnderTitle(detail.value.body, item.title)}</Streamdown>

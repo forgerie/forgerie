@@ -202,7 +202,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
       try {
         if (options.item) {
           // The server names its own startup token for a claimed start, so this one only identifies the request.
-          const launched = await backlog.launch(options.item.projectId, options.item.itemId, options.startupToken ?? newStartupToken(), start);
+          const launched = await backlog.launch(options.item, options.startupToken ?? newStartupToken(), start);
           session = launched.session;
           text = firstMessage(launched.initialPrompt, prompt.text, prompt.command !== undefined);
         } else {
