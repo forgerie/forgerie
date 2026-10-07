@@ -81,6 +81,7 @@ const specialHookPath = join(specialMainWorkspace.path, WORKTREE_PRE_REMOVE_HOOK
 interface AppOptions {
   project?: Project;
   workspaces?: WorkspaceListing[];
+  owned?: boolean;
 }
 
 beforeEach(() => {
@@ -215,6 +216,15 @@ describe("workspace deletion routes", () => {
     expect(daemonRequests).toEqual([{ method: "DELETE", path: `/terminals?cwd=${encodeURIComponent(targetWorkspace.path)}` }]);
   });
 
+  it("refuses session-owned worktrees before touching terminals or running hooks", async () => {
+    await restartApp({ owned: true });
+    const response = await app.inject({ method: "DELETE", url: "/api/projects/p1/workspaces/feature" });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "This worktree belongs to a session. Use that session's Land or Discard action." });
+    expect(daemonRequests).toEqual([]);
+    expect(hookProbePaths).toEqual([]);
+  });
+
   it("rejects main workspace deletion before touching terminals", async () => {
     const response = await app.inject({ method: "DELETE", url: "/api/projects/p1/workspaces/main" });
 
@@ -239,6 +249,7 @@ function registerApp(options: AppOptions = {}): void {
     fakeDaemon(),
     "/api",
     fakePreRemoveHookProbe(),
+    { owns: () => Promise.resolve(options.owned ?? false) },
   );
 }
 

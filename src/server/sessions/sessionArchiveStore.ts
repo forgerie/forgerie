@@ -108,14 +108,14 @@ export class SessionArchiveStore {
     });
   }
 
-  async restore(sessionId: string): Promise<void> {
+  async restore(sessionId: string, restoredPath?: string): Promise<void> {
     await this.exclusive(async () => {
       const data = cloneArchiveFile(await this.snapshot());
       const record = data.sessions.find((session) => session.sessionId === sessionId);
       if (record === undefined) return;
 
       if (record.archivePath !== undefined && record.originalPath !== undefined) {
-        await restoreSessionFile(record.archivePath, record.originalPath);
+        await restoreSessionFile(record.archivePath, restoredPath ?? record.originalPath);
       }
 
       const sessions = data.sessions.filter((session) => session.sessionId !== sessionId);

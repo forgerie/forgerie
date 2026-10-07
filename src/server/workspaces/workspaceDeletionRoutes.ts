@@ -1,4 +1,3 @@
-import { access, constants } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { TerminalCommandRun } from "../../shared/apiTypes.js";
@@ -7,45 +6,37 @@ import { workspaceDeletionMetadata } from "../../shared/workspaceDeletion.js";
 import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
 import type { ProjectService } from "../projects/projectService.js";
 import type { SessionProxyDaemon } from "../sessiond/sessionProxyRoutes.js";
-import { isNodeErrorWithCode } from "./pathSafety.js";
+import { isExecutableWorktreeHook, WORKTREE_PRE_REMOVE_HOOK_PATH } from "./worktreeHooks.js";
 import type { WorkspaceService } from "./workspaceService.js";
+import type { WorktreeOwnershipProbe } from "./worktreeOwnership.js";
 
 /** Relative path, from a workspace root, of the optional repo-provided hook that runs before `git worktree remove`. */
-export const WORKTREE_PRE_REMOVE_HOOK_RELATIVE_PATH = ".forgerie/hooks/worktree-pre-remove";
+export const WORKTREE_PRE_REMOVE_HOOK_RELATIVE_PATH = WORKTREE_PRE_REMOVE_HOOK_PATH;
 
 /** Executability probe for the pre-remove hook; injectable so deletion stays testable without a real filesystem. */
 export interface WorktreePreRemoveHookProbe {
   isExecutable(path: string): Promise<boolean>;
 }
 
-const realWorktreePreRemoveHookProbe: WorktreePreRemoveHookProbe = {
-  async isExecutable(path) {
-    try {
-      await access(path, constants.X_OK);
-      return true;
-    } catch (error) {
-      if (isNodeErrorWithCode(error, "ENOENT") || isNodeErrorWithCode(error, "ENOTDIR") || isNodeErrorWithCode(error, "EACCES") || isNodeErrorWithCode(error, "EPERM")) return false;
-      throw error;
-    }
-  },
-};
+const realWorktreePreRemoveHookProbe: WorktreePreRemoveHookProbe = { isExecutable: isExecutableWorktreeHook };
 
-export function registerWorkspaceDeletionRoutes(app: FastifyInstance, projects: ProjectService, workspaces: WorkspaceService, daemon: SessionProxyDaemon = new SessionDaemonClient(), prefix = "/api", preRemoveHook: WorktreePreRemoveHookProbe = realWorktreePreRemoveHookProbe): void {
+export function registerWorkspaceDeletionRoutes(app: FastifyInstance, projects: ProjectService, workspaces: WorkspaceService, daemon: SessionProxyDaemon = new SessionDaemonClient(), prefix = "/api", preRemoveHook: WorktreePreRemoveHookProbe = realWorktreePreRemoveHookProbe, ownership?: WorktreeOwnershipProbe): void {
   app.delete<{ Params: { projectId: string; workspaceId: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId`, async (request, reply) => {
     try {
-      return await deleteWorkspace(projects, workspaces, daemon, preRemoveHook, request.params.projectId, request.params.workspaceId);
+      return await deleteWorkspace(projects, workspaces, daemon, preRemoveHook, request.params.projectId, request.params.workspaceId, ownership);
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });
 }
 
-async function deleteWorkspace(projects: ProjectService, workspaces: WorkspaceService, daemon: SessionProxyDaemon, preRemoveHook: WorktreePreRemoveHookProbe, projectId: string, workspaceId: string): Promise<TerminalCommandRun> {
+async function deleteWorkspace(projects: ProjectService, workspaces: WorkspaceService, daemon: SessionProxyDaemon, preRemoveHook: WorktreePreRemoveHookProbe, projectId: string, workspaceId: string, ownership?: WorktreeOwnershipProbe): Promise<TerminalCommandRun> {
   const project = await projects.requireProject(projectId);
   const projectWorkspaces = await workspaces.list(project);
   const targetWorkspace = projectWorkspaces.find((workspace) => workspace.id === workspaceId);
   if (targetWorkspace === undefined) throw new Error("Workspace not found");
   if (!canDeleteWorkspace(targetWorkspace)) throw new Error("Only secondary Git worktrees can be deleted");
+  if (await ownership?.owns(targetWorkspace.path) === true) throw new Error("This worktree belongs to a session. Use that session's Land or Discard action.");
 
   const commandWorkspace = projectWorkspaces.find((workspace) => workspace.isMain) ?? projectWorkspaces.find((workspace) => workspace.id !== targetWorkspace.id);
   if (commandWorkspace === undefined) throw new Error("Project main workspace not found");

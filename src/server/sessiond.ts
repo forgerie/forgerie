@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { mkdir, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import { WorkspaceActivityService } from "./activity/workspaceActivityService.js";
@@ -26,12 +26,15 @@ import { RegisteredProjectWorkspaceCwds } from "./workspaces/projectWorkspaceCwd
 import { ProjectService } from "./projects/projectService.js";
 import { ProjectStore, projectStorePath } from "./storage/projectStore.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
+import { SessionWorktreeStore } from "./workspaces/sessionWorktreeStore.js";
+import { SessionWorktrees } from "./workspaces/sessionWorktrees.js";
+import { UserSessionWorktrees, registerSessionWorktreeRoutes } from "./workspaces/sessionWorktreeRoutes.js";
 import { sessiondSocketPath } from "../sessiond/config.js";
 import { TerminalService } from "./terminals/terminalService.js";
 import { registerTerminalRoutes } from "./terminals/terminalRoutes.js";
 import { getPiWebRuntimeComponent } from "./piWebStatus.js";
 import { SESSIOND_RUNTIME_CAPABILITIES } from "../shared/capabilities.js";
-import { agentSessionDirEnvKeys, effectivePiWebConfig, maxUploadBytes, offlineModeEnabled } from "../config.js";
+import { agentSessionDirEnvKeys, effectivePiWebConfig, maxUploadBytes, offlineModeEnabled, piWebDataDir } from "../config.js";
 import { createActiveAgentProfileDescriptor } from "../sessiond/activeAgentProfile.js";
 import { applyAgentHttpIdleTimeout } from "./sessiond/agentHttpDispatcher.js";
 import { sessionServiceDependencies } from "./sessiond/sessionServiceDependencies.js";
@@ -115,7 +118,22 @@ async function createSessionDaemonRuntime() {
   const projectWorkspaceDeps = { projects: new ProjectService(new ProjectStore(projectStorePath(daemonEnvironment))), workspaces: new WorkspaceService() };
   const projectWorkspaces = new RegisteredProjectWorkspaceCwds(projectWorkspaceDeps);
   const spawnTargets = config.spawnSessions ? new ProjectScopedSpawnTargetResolver(projectWorkspaceDeps) : undefined;
-  const sessions = new PiSessionService(eventHub, sessionServiceDependencies({
+  const worktreeStore = new SessionWorktreeStore(join(piWebDataDir(daemonEnvironment), "session-worktrees.json"));
+  await worktreeStore.initialize();
+  const sessionWorktrees: SessionWorktrees = new SessionWorktrees(worktreeStore, {
+    publish(record) {
+      const event = { type: "session.worktree", worktree: record } as const;
+      eventHub.publishGlobal(event);
+      for (const id of new Set([...(record.sessionId === undefined ? [] : [record.sessionId]), ...record.transcripts.map((item) => item.id)])) eventHub.publish(id, event);
+    },
+    async beforeRemoval(record) {
+      const affected = await sessions.prepareWorktreeRemoval(record.path);
+      for (const cwd of new Set([record.path, ...affected.map((session) => session.cwd)])) terminals.closeForCwd(cwd);
+      return affected;
+    },
+  });
+  await sessionWorktrees.initialize();
+  const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: auth.runtime,
     agentDir: activeAgentProfile.dir,
     archiveStore,
@@ -125,6 +143,7 @@ async function createSessionDaemonRuntime() {
     logger: app.log,
     ...(spawnTargets === undefined ? {} : { spawnTargets }),
     projectWorkspaces,
+    sessionWorktrees,
     subsessionsEnabled: config.subsessions,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
@@ -150,13 +169,15 @@ async function createSessionDaemonRuntime() {
     ...getPiWebRuntimeComponent("sessiond", SESSIOND_RUNTIME_CAPABILITIES),
     activeAgentProfile,
   });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary };
+  const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions }: SessionDaemonRuntime): void {
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
-  registerSessionRoutes(app, sessions, eventHub);
+  registerSessionWorktreeRoutes(app, userSessions);
+  registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
   registerTerminalRoutes(app, terminals);
   registerPromptResourceRoutes(app, promptResources);

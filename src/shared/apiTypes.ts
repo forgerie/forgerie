@@ -1,3 +1,5 @@
+import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktree.js";
+
 export type MachineKind = "local" | "remote";
 export type MachineStatus = "unknown" | "online" | "offline" | "error";
 
@@ -349,6 +351,8 @@ export interface SessionNotificationSummaryEvent {
 }
 
 export interface SessionInfo extends SessionRef {
+  /** Present for a session-owned worktree or a saved session in a completed worktree. */
+  worktree?: SessionWorktreeInfo;
   path: string;
   /** True when the server has verified a backing session file exists; false when known transient. */
   persisted?: boolean;
@@ -971,6 +975,9 @@ export interface SessionAskCatalogSnapshot {
 
 export interface SessionStatus {
   sessionId: string;
+  /** Completed worktrees return an inert status without starting Pi in a removed cwd. */
+  readOnly?: boolean;
+  worktree?: SessionWorktreeInfo;
   /** True when the server has verified a backing session file exists; false when known transient. */
   persisted?: boolean;
   model?: SessionModel;
@@ -1481,6 +1488,7 @@ type SessionUiEventBody =
   | { type: "session.pinned"; sessionId: string; cwd: string; pinned: boolean }
   | { type: "session.tabs"; sessionId: string; cwd: string; tabs: string[] }
   | { type: "session.created"; session: SessionInfo }
+  | WorktreeSessionEvent
   | { type: "pi.event"; eventType: string }
   | { type: "processes.update"; snapshot: ManagedProcessesSnapshot }
   | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
@@ -1489,7 +1497,8 @@ export type GlobalSessionEvent =
   | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" }>
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
-  | SessionStartupProgressEvent;
+  | SessionStartupProgressEvent
+  | WorktreeSessionEvent;
 export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | WorkspaceActivityUiEvent;
 
 /**

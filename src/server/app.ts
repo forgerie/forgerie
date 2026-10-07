@@ -17,6 +17,7 @@ import { registerPromptResourceCatalogProxyRoutes } from "./resources/promptReso
 import { registerGitRoutes } from "./gitRoutes.js";
 import { registerTerminalProxyRoutes } from "./terminalProxyRoutes.js";
 import { registerWorkspaceDeletionRoutes } from "./workspaces/workspaceDeletionRoutes.js";
+import { sessionWorktreeOwnershipProbe } from "./workspaces/worktreeOwnership.js";
 import { createUnavailableSpeechService, registerSpeechRoutes } from "./speech/speechRoutes.js";
 import type { SpeechService } from "./speech/speechService.js";
 import type { SpeechRuntimePolicy } from "../shared/speechPolicy.js";
@@ -218,8 +219,9 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   registerGitRoutes(app, projects, workspaces, "/api/machines/local");
   registerTerminalProxyRoutes(app, projects, workspaces, sessionDaemon);
   registerTerminalProxyRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local");
-  registerWorkspaceDeletionRoutes(app, projects, workspaces, sessionDaemon);
-  registerWorkspaceDeletionRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local");
+  const worktreeOwnership = sessionWorktreeOwnershipProbe(sessionDaemon);
+  registerWorkspaceDeletionRoutes(app, projects, workspaces, sessionDaemon, "/api", undefined, worktreeOwnership);
+  registerWorkspaceDeletionRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local", undefined, worktreeOwnership);
 
   registerMachineProxyRoutes(app, machines);
 

@@ -45,6 +45,8 @@ import { SessionTabsStore, type SessionTabsRecord } from "./sessionTabsStore.js"
 import { findArchiveCandidateByIdOrPrefix, planSessionArchiveTree, type SessionArchiveTreeCandidate } from "./sessionArchiveTree.js";
 import type { ActiveSession } from "./sessionRuntimeStore.js";
 import { deterministicSessionName, fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
+import type { SessionWorktrees, WorktreeSessionFile } from "../workspaces/sessionWorktrees.js";
+import { pathInside, worktreeRecordForSession } from "../workspaces/sessionWorktreeStore.js";
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
@@ -888,6 +890,7 @@ function createPiWebEditToolDefinition(cwd: string) {
 export interface PiSessionServiceDependencies {
   agentDir: string;
   sessionManager: PiSessionManagerGateway;
+  sessionWorktrees?: SessionWorktrees;
   archiveStore?: SessionArchiveRepository;
   /** Pinned-session catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
   pinStore?: SessionPinRepository;
@@ -1045,6 +1048,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly tabsStore: SessionTabsRepository;
   private readonly agentDir: string;
   private readonly sessionManager: PiSessionManagerGateway;
+  private readonly sessionWorktrees: SessionWorktrees | undefined;
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
   private readonly createAgentRuntime: CreateAgentRuntime;
   private readonly modelRuntime: ModelRuntime;
@@ -1078,6 +1082,7 @@ export class PiSessionService implements SessionRouteService {
     this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
     this.agentDir = deps.agentDir;
     this.sessionManager = deps.sessionManager;
+    this.sessionWorktrees = deps.sessionWorktrees;
     this.modelRuntime = deps.modelRuntime;
     this.spawnTargets = deps.spawnTargets;
     this.projectWorkspaces = deps.projectWorkspaces;
@@ -1271,6 +1276,7 @@ export class PiSessionService implements SessionRouteService {
     const deletedSessionIds = new Set(await this.archiveStoreDeleteArchivedMany(readyDeleteRecords.map((record) => record.sessionId)));
     deleteRecords.push(...readyDeleteRecords.filter((record) => deletedSessionIds.has(record.sessionId)));
     await this.forgetUnreadSessions(deleteRecords);
+    await this.sessionWorktrees?.store.forgetTranscripts(deleteRecords.map((record) => record.sessionId));
 
     return summarizeSessionCleanupExecution({
       archiveInputs,
@@ -1370,7 +1376,9 @@ export class PiSessionService implements SessionRouteService {
       this.delegatingSessionFiles(),
     );
 
+    const ownedSessions = await this.withSessionWorktrees(sessions);
     const cwds = new Set([
+      ...ownedSessions.map((session) => session.cwd),
       ...listedSessions.map((session) => session.cwd),
       ...archivedRecords.map((record) => record.cwd),
     ]);
@@ -1380,8 +1388,8 @@ export class PiSessionService implements SessionRouteService {
           .filter((record) => cwdPathsEqual(record.cwd, cwd))
           .map((record) => [record.sessionId, record]),
       );
-      const listedSessionIds = unarchivedSessions
-        .filter((session) => cwdPathsEqual(session.cwd, cwd))
+      const listedSessionIds = ownedSessions
+        .filter((session) => !archivedById.has(session.id) && cwdPathsEqual(session.cwd, cwd))
         .map((session) => session.id);
       const reconcilableSessionIds = this.reconcilableSessionIds(cwd, listedSessionIds, archivedForCwd);
       this.workspaceActivity?.reconcileSessionActivity(cwd, reconcilableSessionIds);
@@ -1396,7 +1404,7 @@ export class PiSessionService implements SessionRouteService {
       const activity = this.activities.get(sessionId);
       return activity === undefined ? [] : [{ sessionId, ...activity }];
     });
-    return { sessions, statuses, activities };
+    return { sessions: withSessionTabs(withPinnedFlags(ownedSessions, pinnedSessionIdSet(pinnedRecords)), tabsBySessionId(tabsRecords)), statuses, activities };
   }
 
   async list(cwd: string): Promise<ClientSession[]> {
@@ -1411,7 +1419,9 @@ export class PiSessionService implements SessionRouteService {
       sessions.filter((session) => !archivedById.has(session.id)).map(clientSessionFromListEntry),
       pinnedSessionIdSet(pinnedRecords),
     );
-    const reconcilableSessionIds = this.reconcilableSessionIds(cwd, unarchivedSessions.map((session) => session.id), archivedById);
+    const savedSessions = await this.withSessionWorktrees([], cwd);
+    const listedIds = [...unarchivedSessions, ...savedSessions.filter((session) => !archivedById.has(session.id))].map((session) => session.id);
+    const reconcilableSessionIds = this.reconcilableSessionIds(cwd, listedIds, archivedById);
     this.workspaceActivity?.reconcileSessionActivity(cwd, reconcilableSessionIds);
     await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
     await this.pinStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds);
@@ -1421,7 +1431,59 @@ export class PiSessionService implements SessionRouteService {
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, sessionsById.get(record.sessionId)))
       .filter(isDefined);
-    return await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd);
+    const ownedSessions = await this.withSessionWorktrees(await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd), cwd);
+    return withSessionTabs(withPinnedFlags(ownedSessions, pinnedSessionIdSet(pinnedRecords)), tabsBySessionId(tabsRecords));
+  }
+
+  /** Close only idle sessions. The worktree service has already persisted its input gate. */
+  async prepareWorktreeRemoval(cwd: string): Promise<(ClientSession & WorktreeSessionFile)[]> {
+    await Promise.all(this.pendingSessionOpenPromises());
+    if ([...this.startupSessions.values()].some((session) => pathInside(cwd, session.sessionManager.getCwd()))) {
+      throw new Error("Wait for session startup to finish before removing its worktree");
+    }
+    const active = [...this.active.values()].filter((item) => pathInside(cwd, item.runtime.cwd));
+    for (const item of active) {
+      const counts = this.liveWorkCounts(item.runtime.session);
+      if (this.hasActiveWork(item.runtime.session) || (counts.runningProcesses ?? 0) > 0 || (counts.workingAgents ?? 0) > 0) {
+        throw new Error("Stop agents and managed processes in this worktree before Land or Discard");
+      }
+      if (!sessionFileExists(item.runtime.session.sessionFile)) throw new Error("Send the first message before removing an owned session worktree");
+    }
+    const sessions = await this.worktreeSessionInventory(cwd);
+    for (const item of active) await this.closeActive(item.runtime.session.sessionId);
+    return sessions;
+  }
+
+  private async worktreeSessionInventory(cwd: string): Promise<(ClientSession & WorktreeSessionFile)[]> {
+    const [catalog, snapshot] = await Promise.all([this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(), this.machineListing()]);
+    // Include delegated children hidden by inbox policy. Cleanup must consider every session, not only visible rows.
+    const inventory = new Map(catalog.map((entry) => [entry.id, clientSessionFromListEntry(entry)]));
+    for (const session of snapshot.sessions) inventory.set(session.id, session);
+    const archives = new Map((await this.archiveStore.list()).map((record) => [record.sessionId, record]));
+    return [...inventory.values()].filter((session) => pathInside(cwd, session.cwd)).map((session) => {
+      const archive = archives.get(session.id);
+      return archive?.archivePath === undefined ? session : { ...session, transcriptSourcePath: archive.archivePath };
+    });
+  }
+
+  private async withSessionWorktrees(sessions: readonly ClientSession[], cwd?: string): Promise<ClientSession[]> {
+    const worktrees = this.sessionWorktrees;
+    if (worktrees === undefined) return [...sessions];
+    const records = await worktrees.store.list();
+    const all = [...sessions];
+    const known = new Set(all.map((session) => session.id));
+    for (const record of records) {
+      if (record.state.kind === "active") continue;
+      for (const transcript of record.transcripts) {
+        if (known.has(transcript.id) || (cwd !== undefined && !cwdPathsEqual(cwd, transcript.cwd)) || !sessionFileExists(transcript.transcriptPath)) continue;
+        all.push({ ...transcript.session, persisted: true });
+        known.add(transcript.id);
+      }
+    }
+    return Promise.all(all.map(async (session) => {
+      const record = worktreeRecordForSession(records, session);
+      return record === undefined ? session : { ...session, worktree: await worktrees.info(record, session.id) };
+    }));
   }
 
   /**
@@ -1530,6 +1592,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async startSession(cwd: string, options: InternalStartSessionOptions): Promise<ClientSession> {
+    if (this.sessionWorktrees !== undefined) {
+      const blocking = (await this.sessionWorktrees.store.list()).find((record) => pathInside(record.path, cwd) && (record.operation !== undefined || record.state.kind !== "active"));
+      if (blocking !== undefined) throw new Error("This workspace is closed or a worktree lifecycle action is running");
+    }
     const active = await this.create(
       this.sessionManager.create(cwd, options.parentSession === undefined ? undefined : { parentSession: options.parentSession }),
       cwd,
@@ -2564,7 +2630,22 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async status(ref: PiSessionRef): Promise<ClientSessionStatus> {
-    return this.statusFromSession(await this.sessionForStatusOrDialogClose(ref));
+    const worktrees = this.sessionWorktrees;
+    const readonly = await worktrees?.store.readOnly(ref);
+    if (readonly !== undefined && worktrees !== undefined) {
+      const messages = historyMessages(await this.historySessionManager(ref));
+      const worktree = await this.sessionWorktrees?.store.forSession(ref);
+      return {
+        sessionId: readonly.session.id, readOnly: true, persisted: true,
+        ...(worktree === undefined ? {} : { worktree: await worktrees.info(worktree, readonly.session.id) }),
+        isStreaming: false, isCompacting: false, isBashRunning: false, pendingMessageCount: 0,
+        queuedMessages: [], messageCount: messages.length,
+        ...savedTranscriptUsage(messages),
+      };
+    }
+    const status = this.statusFromSession(await this.sessionForStatusOrDialogClose(ref));
+    const worktree = await this.sessionWorktrees?.store.forSession(ref);
+    return worktree === undefined || worktrees === undefined ? status : { ...status, worktree: await worktrees.info(worktree, status.sessionId) };
   }
 
   async processes(ref: PiSessionRef): Promise<ManagedProcessesSnapshot> {
@@ -2596,6 +2677,8 @@ export class PiSessionService implements SessionRouteService {
    * signatures; it is `null` when no assistant message is mid-stream.
    */
   async streamSnapshot(ref: PiSessionRef): Promise<SessionStreamSnapshot> {
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    if (readonly !== undefined) return { seq: this.events.currentSeq(readonly.session.id), partial: null };
     const session = await this.getOrOpen(ref);
     // Single consistent tick: capture the watermark and the partial together so
     // the seq matches the partial the client seeds against.
@@ -3104,6 +3187,17 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async archive(ref: PiSessionRef): Promise<void> {
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    if (readonly !== undefined) {
+      if (await this.isPinned(readonly.session.id)) throw new Error("Unpin session before archiving");
+      if (await this.getArchived(ref) !== undefined) return;
+      await this.archiveStore.archive({
+        sessionId: readonly.session.id, ...readonly.session,
+        path: sessionFileExists(readonly.session.path) ? readonly.session.path : readonly.transcriptPath,
+      });
+      await this.forgetUnreadSessions([{ sessionId: readonly.session.id, cwd: readonly.session.cwd }]);
+      return;
+    }
     const session = await this.getOrOpen(ref);
     if (await this.isPinned(session.sessionId)) throw new Error("Unpin session before archiving");
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before archiving");
@@ -3214,6 +3308,11 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async archiveTree(ref: PiSessionRef): Promise<ClientArchiveSessionsResponse> {
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    if (readonly !== undefined) {
+      await this.archive(ref);
+      return { archived: true, sessionIds: [readonly.session.id], archivedCount: 1 };
+    }
     const session = await this.getOrOpen(ref);
     const catalog = await this.workspaceArchiveCandidates(session.sessionManager.getCwd());
     const root = findArchiveCandidateByIdOrPrefix(catalog, session.sessionId) ?? archiveCandidateFromActiveSession(session, false);
@@ -3260,7 +3359,9 @@ export class PiSessionService implements SessionRouteService {
     const archived = await this.getArchived(ref);
     if (archived === undefined) throw new Error("Session not found");
     await this.closeActive(archived.sessionId, { kind: "clear", reason: "restore" });
-    await this.archiveStore.restore(archived.sessionId);
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    if (readonly === undefined) await this.archiveStore.restore(archived.sessionId);
+    else await this.archiveStore.restore(archived.sessionId, readonly.transcriptPath);
     await this.forgetUnreadSessions([archived]);
   }
 
@@ -3309,6 +3410,8 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async resolvePinTarget(ref: PiSessionRef): Promise<PinSessionInput | undefined> {
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    if (readonly !== undefined) return { sessionId: readonly.session.id, cwd: readonly.session.cwd };
     const active = this.activeForRef(ref);
     if (active !== undefined) {
       return { sessionId: active.runtime.session.sessionId, cwd: active.runtime.session.sessionManager.getCwd() };
@@ -3361,6 +3464,7 @@ export class PiSessionService implements SessionRouteService {
     }
     const deletedIdSet = new Set(deletedSessionIds);
     await this.forgetUnreadSessions(readyRecords.filter((record) => deletedIdSet.has(record.sessionId)));
+    await this.sessionWorktrees?.store.forgetTranscripts([...deletedIdSet]);
 
     return {
       deleted: true,
@@ -3666,7 +3770,17 @@ export class PiSessionService implements SessionRouteService {
 
   private async listSessionsByCwd(cwds: readonly string[]): Promise<Map<string, PiSessionListEntry[]>> {
     const uniqueCwds = uniqueStrings(cwds);
-    const entries = await Promise.all(uniqueCwds.map(async (cwd) => [cwd, await this.sessionManager.list(cwd)] as const));
+    const entries = await Promise.all(uniqueCwds.map(async (cwd) => {
+      const listed = await this.sessionManager.list(cwd);
+      const known = new Set(listed.map((session) => session.id));
+      for (const saved of await this.withSessionWorktrees([], cwd)) {
+        if (known.has(saved.id)) continue;
+        const readonly = await this.sessionWorktrees?.store.readOnly(saved);
+        if (readonly === undefined) continue;
+        listed.push({ ...saved, path: readonly.transcriptPath, created: new Date(saved.created), modified: new Date(saved.modified), allMessagesText: "" });
+      }
+      return [cwd, listed] as const;
+    }));
     return new Map(entries);
   }
 
@@ -3846,6 +3960,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async assertWritable(ref: PiSessionRef): Promise<void> {
+    await this.sessionWorktrees?.store.assertWritable(ref);
     if (await this.getArchived(ref) !== undefined) throw new Error("Archived sessions are read-only. Restore the session to continue.");
   }
 
@@ -3859,6 +3974,8 @@ export class PiSessionService implements SessionRouteService {
 
     const archived = await this.getArchived(ref);
     if (archived?.archivePath !== undefined) return this.sessionManager.open(archived.archivePath);
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    if (readonly !== undefined) return this.sessionManager.open(readonly.transcriptPath);
 
     const match = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
     if (!match) throw new Error("Session not found");
@@ -3866,6 +3983,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async getActive(ref: PiSessionRef, options: Pick<CreateSessionRuntimeOptions, "notificationGeneration"> = {}): Promise<ActiveSession<PiSessionRuntime>> {
+    await this.sessionWorktrees?.store.assertWritable(ref);
     const active = this.activeForRef(ref);
     if (active !== undefined) return active;
 
@@ -4244,6 +4362,15 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async forgetUnreadSessions(identities: readonly { sessionId: string; cwd: string }[]): Promise<void> {
+    if (this.sessionWorktrees !== undefined) {
+      for (const identity of identities) {
+        if (!await this.archiveStore.isArchived(identity.sessionId)) continue;
+        const record = await this.sessionWorktrees.store.forSession({ id: identity.sessionId, cwd: identity.cwd });
+        if (record?.sessionId !== identity.sessionId || record.state.kind !== "active") continue;
+        const sessions = await this.worktreeSessionInventory(record.path);
+        await this.sessionWorktrees.archiveCleanup(record.id, sessions);
+      }
+    }
     const mutations: SessionUnreadMutation[] = [];
     for (const identity of identities) {
       mutations.push(...this.unreadStore.forgetSession(
@@ -4636,6 +4763,11 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishSessionName(session: PiAgentSession): void {
+    if (session.sessionName !== undefined) {
+      void this.sessionWorktrees?.renameFromTitle(session.sessionId, session.sessionName).catch((error: unknown) => {
+        this.logger.info({ sessionId: session.sessionId, error: errorMessage(error) }, "worktree branch rename failed");
+      });
+    }
     const event = session.sessionName === undefined
       ? { type: "session.name", sessionId: session.sessionId } as const
       : { type: "session.name", sessionId: session.sessionId, name: session.sessionName } as const;
@@ -4956,6 +5088,20 @@ export class PiSessionService implements SessionRouteService {
   private hasQueuedMessageText(session: PiAgentSession, text: string): boolean {
     return this.queuedMessages(session).some((message) => message.text === text);
   }
+}
+
+function savedTranscriptUsage(messages: readonly unknown[]): Pick<ClientSessionStatus, "tokens" | "cost"> {
+  const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+  let cost = 0;
+  const numeric = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
+  for (const message of messages) {
+    if (getProperty(message, "role") !== "assistant") continue;
+    const usage = getProperty(message, "usage");
+    for (const key of ["input", "output", "cacheRead", "cacheWrite"] as const) tokens[key] += numeric(getProperty(usage, key));
+    tokens.total += numeric(getProperty(usage, "totalTokens"));
+    cost += numeric(getProperty(getProperty(usage, "cost"), "total"));
+  }
+  return { tokens, cost };
 }
 
 function previewResponseFromPlan(plan: SessionCleanupPlan): ClientSessionCleanupPreviewResponse {
