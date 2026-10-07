@@ -39,8 +39,8 @@ export function entriesOf(files: z.infer<typeof statusSchema>["files"]): ChangeE
         staged, state, diffable: !file.path.endsWith("/") });
     }
   }
-  // Paths read top to bottom like a file tree. One file's staged side comes before its unstaged side, as git applies them.
-  return entries.sort((a, b) => a.path.localeCompare(b.path) || Number(b.staged) - Number(a.staged));
+  // Readable files first. Paths read top to bottom like a file tree. One file's staged side comes before its unstaged side, as git applies them.
+  return entries.sort((a, b) => Number(b.diffable) - Number(a.diffable) || a.path.localeCompare(b.path) || Number(b.staged) - Number(a.staged));
 }
 
 export type ChangesRequest = (path: string, init: RequestInit) => Promise<Response>;

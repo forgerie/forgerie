@@ -176,7 +176,8 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   });
 
   const entries = changes.type === "ready" ? changes.value.entries : [];
-  const count = changes.type === "ready" ? `${entries.length} ${entries.length === 1 ? "file" : "files"}${changes.value.branch ? ` on ${changes.value.branch}` : ""}` : "";
+  const branch = changes.type === "ready" && changes.value.branch ? `on ${changes.value.branch}` : "";
+  const count = entries.length === 0 ? branch : `${entries.length} ${entries.length === 1 ? "file" : "files"} ${branch}`.trim();
   return <dialog ref={dialog} className="tree-dialog changes-dialog" aria-labelledby={titleId}
     onPointerDown={(event: PointerEvent) => { pointer.current = event.pointerType; pressedBackdrop.current = event.target === dialog.current; }}
     onClick={(event) => { if (event.target === dialog.current && pressedBackdrop.current && !draft) onClose(); pressedBackdrop.current = false; }}>
@@ -243,16 +244,16 @@ function ChangeFile({ entry, view, notes, selection, draft, onToggle, onRetry, o
     <h3 className="change-file-head">
       <button type="button" id={headId} aria-expanded={entry.diffable ? open : undefined} disabled={!entry.diffable} onClick={onToggle}>
         <ChevronRightIcon aria-hidden size={16} className="change-chevron" />
-        <span className="change-path" title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}>
+        <span className="change-path" title={!entry.diffable ? `${entry.path}: git lists this folder as a whole, such as another repository, so it has no diff here.`
+          : entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}>
           {folder && <span className="change-folder">{folder}</span>}<span className="change-name">{name}</span>
         </span>
         <span className="change-facts">
           {notes.length > 0 && <span className="change-noted">{notes.length === 1 ? "1 note" : `${notes.length} notes`}</span>}
-          <span>{STATE_LABEL[entry.state]}{entry.staged ? ", staged" : ""}</span>
+          <span>{entry.diffable ? `${STATE_LABEL[entry.state]}${entry.staged ? ", staged" : ""}` : "Untracked folder, no diff"}</span>
         </span>
       </button>
     </h3>
-    {!entry.diffable && <p className="change-message">A folder git does not list file by file, such as another repository. Open it in a terminal to review it.</p>}
     {open && <FileBody diff={view.diff} notes={notes} selection={selection} draft={draft} onRetry={onRetry} onTap={onTap}
       onDraft={onDraft} onAdd={onAdd} onCancel={onCancel} onEdit={onEdit} onSave={onSave} onRemove={onRemove} />}
   </section>;

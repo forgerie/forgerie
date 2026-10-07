@@ -942,4 +942,11 @@ summary.trace-line:hover { color: var(--foreground); }
 .note-chip-text { min-inline-size: 0; max-inline-size: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .note-chip-remove { display: grid; place-items: center; flex: none; inline-size: 2.5rem; block-size: 2.5rem; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
 .note-chip-open:hover, .note-chip-remove:hover { background: var(--hover-surface); color: var(--foreground); }
+/* A short session has width to spare and no height: the chips line up in one row that scrolls sideways.
+   The sheet swipe leaves sideways scrollers their own drags. */
+@container (max-height: 28rem) {
+  .note-tray { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding-block-end: var(--space-1); }
+  .note-chip { flex: none; }
+  .note-chip-text { max-inline-size: 10rem; }
+}
 @media (prefers-reduced-motion: reduce) { .change-chevron { transition: none; } }

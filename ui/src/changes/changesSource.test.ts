@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createChangesSource, entriesOf } from "./changesSource";
 
 describe("change entries", () => {
-  it("splits a file changed in both the index and the working tree, and keeps untracked folders unreadable", () => {
+  it("splits a file changed in both the index and the working tree, and puts untracked folders, which have no diff, last", () => {
     expect(entriesOf([
       { path: "src/b.ts", index: "modified", workingTree: "modified" },
       { path: "src/a.ts", index: "unmodified", workingTree: "deleted" },
@@ -10,11 +10,11 @@ describe("change entries", () => {
       { path: "nested/", index: "untracked", workingTree: "untracked" },
       { path: "skip.log", index: "ignored", workingTree: "ignored" },
     ])).toEqual([
-      { key: "unstaged:nested/", path: "nested/", staged: false, state: "untracked", diffable: false },
       { key: "unstaged:new.md", path: "new.md", staged: false, state: "untracked", diffable: true },
       { key: "unstaged:src/a.ts", path: "src/a.ts", staged: false, state: "deleted", diffable: true },
       { key: "staged:src/b.ts", path: "src/b.ts", staged: true, state: "modified", diffable: true },
       { key: "unstaged:src/b.ts", path: "src/b.ts", staged: false, state: "modified", diffable: true },
+      { key: "unstaged:nested/", path: "nested/", staged: false, state: "untracked", diffable: false },
     ]);
   });
 });

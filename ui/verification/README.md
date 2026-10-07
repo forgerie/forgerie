@@ -12,6 +12,10 @@ Swipe right anywhere on the session to pull the session list in, and left to pus
 
 "New session" at the top of the list, N, or Ctrl+Enter opens a titled window after Paperclip's new-task dialog: "Start in [where] with [model]", a large writing area, Attach and Rapidfire chips, and a Start session button. Send starts and opens the session; Rapidfire starts it in the background and keeps the dialog open. See [behavior, verification, and limits](new-session.md).
 
+## Notes on changes
+
+The changes button in the session header opens the session's git diff. Select lines, write a note, and the note waits as a chip in the message box until the next message carries it to the agent. See [behavior, layout, verification, and limits](diff-notes.md).
+
 ## Archive and next
 
 The archive button in the session header archives the open session with the usual undo offer and opens the next session blocked on you, errored, or unread. With nothing left, the session list opens. See [behavior, verification, and limits](archive-next.md).

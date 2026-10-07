@@ -21,6 +21,8 @@ Type `/tree`, or press the tree button in the header, to move the session to an 
 
 Press "New session" at the top of the session list, N, or Ctrl+Enter to start a session in a dialog: any project workspace, the model you choose, files, and skills. Rapidfire starts several without leaving it. See [new session](verification/new-session.md).
 
+Press the changes button in the header to read the session's git diff. Select lines, write a note, and the note goes to the agent with your next message. See [notes on changes](verification/diff-notes.md).
+
 Press the archive button in the header to archive the session and open the next one waiting for you. See [archive and next](verification/archive-next.md).
 
 On a touch screen, swipe right to see the session list and left to put it away. See [swipe to the session list](verification/sheet-swipe.md).
