@@ -272,7 +272,10 @@ export class GitHubAgent {
         catch (error) { throw new GitHubToolError(`GitHub is unreachable: ${error instanceof Error ? error.message : String(error)}`); }
       };
       let response = await attempt();
-      if (response.status === 401) { app.dropToken(slug); token = undefined; response = await attempt(); }
+      // A token keeps the permissions it was minted with for its whole hour. After the person grants the app
+      // more, a refusal from the old token says nothing about the app, so one fresh token gets one more try.
+      const stalePermissions = response.status === 403 && /not accessible by integration/iu.test(await response.clone().text().catch(() => ""));
+      if (response.status === 401 || stalePermissions) { app.dropToken(slug); token = undefined; response = await attempt(); }
       if (options.missingOk === true && response.status === 404) return response;
       if (!response.ok) throw await this.refusal(response, slug, permission);
       return response;

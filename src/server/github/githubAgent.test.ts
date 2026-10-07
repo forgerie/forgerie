@@ -124,9 +124,18 @@ describe("GitHub agent: writing", () => {
     expect(f.bodyOf(`POST ${REPO}/pulls`)).toMatchObject({ head: "fix/portal", base: "main", draft: false });
   });
 
+  it("retries once with a fresh token after a permission refusal, since a token keeps the permissions it was minted with", async () => {
+    const f = fixture();
+    f.github.on(`POST ${REPO}/issues/5/comments`, json({ message: "Resource not accessible by integration" }, { status: 403 }), json({ html_url: "https://github.com/korri-os/korri/issues/5#c" }, { status: 201 }));
+    expect((await f.agent.write("/repo", "s1", { action: "comment", number: 5, body: "Hi" })).text).toBe("Commented on #5.");
+    expect(f.dropped).toEqual(["korri-os/korri"]);
+    expect(f.github.requests.map((request) => request.headers["authorization"])).toEqual(["Bearer ghs_1", "Bearer ghs_2"]);
+  });
+
   it("says which permission the app lacks, where to grant it, and not to retry", async () => {
     const f = fixture();
-    f.github.on(`POST ${REPO}/issues/5/comments`, json({ message: "Resource not accessible by integration" }, { status: 403 }));
+    const refused = json({ message: "Resource not accessible by integration" }, { status: 403 });
+    f.github.on(`POST ${REPO}/issues/5/comments`, refused, refused.clone());
     await expect(f.agent.write("/repo", "s1", { action: "comment", number: 5, body: "Hi" })).rejects.toThrow(
       'Forgerie\'s GitHub App may not do this on korri-os/korri: it needs "Issues: write". Grant it at https://github.com/settings/apps/forgerie-zao/permissions, then accept the new permissions on the app\'s installation. Tell the user; do not retry.');
   });
