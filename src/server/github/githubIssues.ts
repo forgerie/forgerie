@@ -19,7 +19,21 @@ const IssueSchema = Type.Object({
   pull_request: Type.Optional(Type.Unknown()),
 });
 const PageSchema = Type.Array(Type.Unknown());
-export type GitHubIssue = Omit<Static<typeof IssueSchema>, "pull_request" | "labels"> & { labels: string[] };
+export type GitHubIssue = Omit<Static<typeof IssueSchema>, "pull_request" | "labels"> & {
+  labels: string[];
+  /** The author can already change the repo: owner, member, or anyone with write access. */
+  trusted: boolean;
+};
+
+/** GitHub's own words for people the repo already trusts. */
+const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+/** Write access or more: these authors could change the code directly, so their issue text is no new risk. */
+const TRUSTED_PERMISSIONS = new Set(["admin", "maintain", "write"]);
+/** How long an author's permission on a repo is believed. */
+const PERMISSION_MS = 60 * 60_000;
+/** At most this many authors are checked per read, so a busy public repo cannot spend the rate limit. */
+const MAX_PERMISSION_CHECKS = 20;
+const PermissionSchema = Type.Object({ permission: Type.String() });
 
 export type IssuesResult =
   | { ok: true; issues: GitHubIssue[]; truncated: boolean; staleSince?: string; staleReason?: string }
@@ -41,6 +55,7 @@ export interface GitHubIssueClientDependencies {
  */
 export class GitHubIssueClient {
   private readonly cache = new Map<string, Listing>();
+  private readonly permissions = new Map<string, { trusted: boolean; checkedAt: number }>();
   private queue: Promise<unknown> = Promise.resolve();
   private blockedUntil = 0;
   private readonly now: () => number;
@@ -87,8 +102,37 @@ export class GitHubIssueClient {
       return stale(cached, `GitHub is unreachable: ${error instanceof Error ? error.message : String(error)}`);
     }
     const listing: Listing = { pages, truncated, fetchedAt: this.now() };
+    await this.checkAuthors(slug, listing, token);
     this.cache.set(key, listing);
     return listed(listing);
+  }
+
+  /**
+   * GitHub hides private organization membership from an app, so a member's issue can arrive marked
+   * `CONTRIBUTOR`. For those authors, ask GitHub what the author may do in the repo. A failed check
+   * leaves the issue untrusted: hiding a trusted issue is recoverable, showing an untrusted one is not.
+   */
+  private async checkAuthors(slug: string, listing: Listing, token: string): Promise<void> {
+    const issues = listing.pages.flatMap((page) => page.issues);
+    const unknown = [...new Set(issues.filter((issue) => !issue.trusted && issue.author_association === "CONTRIBUTOR" && issue.user !== null)
+      .map((issue) => issue.user?.login ?? ""))].filter(Boolean);
+    let checks = 0;
+    for (const login of unknown) {
+      const key = `${slug.toLowerCase()}\n${login.toLowerCase()}`;
+      const known = this.permissions.get(key);
+      if (known !== undefined && this.now() - known.checkedAt < PERMISSION_MS) continue;
+      if (++checks > MAX_PERMISSION_CHECKS) break;
+      try {
+        const response = await this.deps.fetch(`${GITHUB_API}/repos/${slug}/collaborators/${encodeURIComponent(login)}/permission`, { headers: apiHeaders(token) });
+        const body: unknown = await response.json().catch(() => undefined);
+        const trusted = response.ok && Check(PermissionSchema, body) && TRUSTED_PERMISSIONS.has(body.permission);
+        if (response.ok || response.status === 404) this.permissions.set(key, { trusted, checkedAt: this.now() });
+      } catch { /* Unreachable: the issue stays untrusted until the next read. */ }
+    }
+    for (const issue of issues) {
+      if (issue.trusted || issue.user === null) continue;
+      issue.trusted = this.permissions.get(`${slug.toLowerCase()}\n${issue.user.login.toLowerCase()}`)?.trusted === true;
+    }
   }
 
   private refused(response: Response, slug: string, cached: Listing | undefined): IssuesResult {
@@ -128,6 +172,7 @@ function toIssue(value: Static<typeof IssueSchema>): GitHubIssue {
     number: value.number, title: value.title, body: value.body, html_url: value.html_url, created_at: value.created_at,
     author_association: value.author_association, user: value.user,
     labels: value.labels.map((label) => typeof label === "string" ? label : label.name),
+    trusted: TRUSTED_ASSOCIATIONS.has(value.author_association),
   };
 }
 /** GitHub says to follow its `Link` header rather than build page URLs. */

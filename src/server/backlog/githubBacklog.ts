@@ -3,9 +3,6 @@ import type { GitHubIssueClient } from "../github/githubIssues.js";
 import { originGitHubRepo } from "../github/githubRemote.js";
 import type { BacklogProvider, BacklogProviderScan, ScannedBacklogItem } from "./backlogProvider.js";
 
-/** GitHub's own words for people the repo already trusts. Everyone else is an outside contributor. */
-const TRUSTED_AUTHORS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-
 export interface GitHubBacklogDependencies {
   issues: Pick<GitHubIssueClient, "openIssues">;
   /** Injected so tests need no git remote. */
@@ -29,7 +26,7 @@ export function createGitHubBacklogProvider(deps: GitHubBacklogDependencies): Ba
       const warnings: BacklogWarning[] = [];
       const note = (kind: BacklogWarning["kind"], message: string) => { warnings.push({ projectId: project.id, provider: "github", kind, path: slug, message }); };
       const everyone = config?.github?.authors === "all";
-      const shown = everyone ? result.issues : result.issues.filter((issue) => TRUSTED_AUTHORS.has(issue.author_association));
+      const shown = everyone ? result.issues : result.issues.filter((issue) => issue.trusted);
       const hidden = result.issues.length - shown.length;
       if (hidden > 0) note("items-hidden", `${String(hidden)} ${hidden === 1 ? "issue" : "issues"} from outside contributors ${hidden === 1 ? "is" : "are"} hidden, because their text goes to an agent. Set backlog.github.authors to "all" to list them.`);
       // GitHub lists pull requests with issues and has no filter for them, so the cap counts both.

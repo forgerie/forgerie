@@ -6,7 +6,7 @@ import { createGitHubBacklogProvider, githubIssuePrompt, priorityOf } from "./gi
 const project: Project = { id: "p1", name: "korri", path: "/code/korri", createdAt: "2026-09-01" };
 function issue(number: number, extra: Partial<GitHubIssue> = {}): GitHubIssue {
   return { number, title: `Issue ${String(number)}`, body: `Body ${String(number)}`, html_url: `https://github.com/korri-os/korri/issues/${String(number)}`,
-    created_at: "2026-10-01T12:00:00Z", author_association: "OWNER", user: { login: "simonwjackson" }, labels: ["bug"], ...extra };
+    created_at: "2026-10-01T12:00:00Z", author_association: "OWNER", user: { login: "simonwjackson" }, labels: ["bug"], trusted: true, ...extra };
 }
 /** `origin` null means the checkout has no GitHub origin remote. */
 function provider(result: IssuesResult, origin: string | null = "korri-os/korri") {
@@ -17,7 +17,7 @@ function provider(result: IssuesResult, origin: string | null = "korri-os/korri"
 
 describe("GitHub backlog provider", () => {
   it("lists trusted authors' open issues as launchable items and says how many it hid", async () => {
-    const p = provider({ ok: true, truncated: false, issues: [issue(7), issue(8, { author_association: "CONTRIBUTOR" }), issue(9, { author_association: "MEMBER", body: null, title: " " })] });
+    const p = provider({ ok: true, truncated: false, issues: [issue(7), issue(8, { author_association: "CONTRIBUTOR", trusted: false }), issue(9, { author_association: "MEMBER", body: null, title: " " })] });
     const scan = await p.scan();
     expect(p.asked).toEqual(["korri-os/korri"]);
     expect(scan.entries[0]?.item).toEqual({ id: "7", title: "Issue 7", provider: "github", projectId: "p1", projectName: "korri", repo: "/code/korri", path: "korri-os/korri#7",
@@ -29,7 +29,7 @@ describe("GitHub backlog provider", () => {
   });
 
   it("lists everyone when the project asks, and prefers the configured repo over origin", async () => {
-    const p = provider({ ok: true, truncated: false, issues: [issue(8, { author_association: "NONE" })] });
+    const p = provider({ ok: true, truncated: false, issues: [issue(8, { author_association: "NONE", trusted: false })] });
     const scan = await p.scan({ github: { repo: "korri-os/other", authors: "all" } });
     expect(p.asked).toEqual(["korri-os/other"]);
     expect(scan.entries).toHaveLength(1);

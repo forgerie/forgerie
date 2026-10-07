@@ -105,6 +105,31 @@ describe("GitHub issue client", () => {
     expect(f.github.count(LIST)).toBe(5);
   });
 
+  it("trusts a CONTRIBUTOR who has write access, because GitHub hides private org membership from an app", async () => {
+    const f = fixture();
+    f.github.on(LIST, json([issue(1, { author_association: "CONTRIBUTOR", user: { login: "simonwjackson" } }),
+      issue(2, { author_association: "CONTRIBUTOR", user: { login: "stranger" } }), issue(3, { author_association: "CONTRIBUTOR", user: { login: "simonwjackson" } }),
+      issue(4, { author_association: "MEMBER", user: { login: "teammate" } }), issue(5, { author_association: "NONE", user: { login: "drive-by" } })]));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/simonwjackson/permission", json({ permission: "admin" }));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/stranger/permission", json({ permission: "read" }));
+    const result = await f.client.openIssues("korri-os/korri");
+    expect(result.ok && result.issues.map((value) => [value.number, value.trusted])).toEqual([[1, true], [2, false], [3, true], [4, true], [5, false]]);
+    // One lookup per contributor, none for MEMBER or NONE, and the answer is reused for an hour.
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(2);
+    f.advance(61_000);
+    f.github.on(LIST, new Response(null, { status: 304 }));
+    await f.client.openIssues("korri-os/korri");
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(2);
+  });
+
+  it("leaves a contributor untrusted when GitHub cannot say", async () => {
+    const f = fixture();
+    f.github.on(LIST, json([issue(1, { author_association: "CONTRIBUTOR", user: { login: "someone" } })]));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/someone/permission", () => { throw new TypeError("fetch failed"); });
+    const result = await f.client.openIssues("korri-os/korri");
+    expect(result.ok && result.issues[0]?.trusted).toBe(false);
+  });
+
   it("does not follow a next link off GitHub's API", async () => {
     const f = fixture();
     f.github.on(LIST, json([issue(1)], { headers: { link: '<https://evil.example/steal>; rel="next"' } }));
