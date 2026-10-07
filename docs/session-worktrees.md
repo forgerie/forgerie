@@ -112,7 +112,7 @@ After deployment, run:
 ./scripts/verify-session-worktrees.py --out /tmp/session-worktrees-live.json
 ```
 
-The script creates a disposable Git repository, exercises real Pi shell transcripts without model inference, then checks Land, confirmed Discard, archive cleanup, removed-checkout reads, and rejected prompts. It deletes only its completed test conversations. It keeps the disposable main repository and writes the results to the requested file. An interrupted or failed case can leave its test checkout for inspection.
+The script creates a disposable Git repository, sends one short model prompt per test conversation to make Pi persist its transcript, runs a shell command, then checks Land, confirmed Discard, archive cleanup, removed-checkout reads, and rejected prompts. It sends three short prompts with the profile's default model. Automatic title generation can add model requests. Shell-only Pi sessions remain transient. It deletes only its completed test conversations. It keeps the disposable main repository and writes the results to the requested file. An interrupted or failed case can leave its test checkout for inspection.
 
 ## Frontend acceptance
 

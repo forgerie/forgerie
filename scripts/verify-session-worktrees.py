@@ -1,6 +1,6 @@
 #!/usr/bin/env nix
 #! nix shell nixpkgs#python3 nixpkgs#git --command python3
-"""Verify the running worktree API using disposable repositories and shell-only Pi history."""
+"""Verify the running worktree API using disposable repositories and persisted Pi history."""
 import argparse
 import json
 import pathlib
@@ -23,6 +23,7 @@ repo.mkdir()
 created = []
 results = []
 cleanup_errors = []
+deleted_ids = set()
 
 
 def api(method, path, body=None, allow_error=False):
@@ -58,6 +59,16 @@ def make_session():
     assert session['worktree']['owned'] and session['worktree']['setup']['phase'] == 'done', session
     worktree = pathlib.Path(session['cwd'])
     assert worktree.joinpath('setup-proof').read_text().strip() == str(worktree)
+    # Pi persists a session only after a user or assistant message, not a shell entry.
+    api('POST', ref_path(session, '/prompt'), {'cwd': session['cwd'], 'text': 'Live acceptance check. Reply exactly OK. Do not use tools.'})
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        status = read(session, '/status')
+        if status.get('persisted') and not status['isStreaming'] and not status['isCompacting'] and status.get('pendingMessageCount', 0) == 0:
+            break
+        time.sleep(0.2)
+    else:
+        raise RuntimeError('Conversation did not become persisted and idle')
     api('POST', ref_path(session, '/shell'), {'cwd': session['cwd'], 'text': "!printf 'worktree live acceptance\\n'"})
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
@@ -142,6 +153,12 @@ finally:
         if deletion[0] >= 400 or session['id'] not in deletion[1].get('deletedSessionIds', []):
             cleanup_errors.append(deletion)
             print('Conversation cleanup needs attention:', deletion)
+        else:
+            deleted_ids.add(session['id'])
+    listed_ids = {session['id'] for session in api('GET', '/sessions/all')[1]['sessions']}
+    resurrected = sorted(deleted_ids & listed_ids)
+    if resurrected:
+        cleanup_errors.append({'error': 'Deleted conversations reappeared', 'sessionIds': resurrected})
     evidence = {'baseUrl': base, 'repo': str(repo), 'cases': results, 'sessionIds': [session['id'] for session in created], 'cleanupErrors': cleanup_errors}
     output = pathlib.Path(args.out)
     output.parent.mkdir(parents=True, exist_ok=True)
