@@ -101,6 +101,7 @@ import { countOutOfListingChildren, locateOutOfListingParents, type SessionHeade
 import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
+import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
 import { PendingAskStore, renderAskUserAnswersText, type PendingAskCloseResult, type PendingAskOpenResult } from "./pendingAskStore.js";
 import { PendingExtensionDialogStore, type ExtensionDialogCancelReason } from "./pendingExtensionDialogStore.js";
 import { ExtensionDialogWaiters, effectiveExtensionDialogTimeoutMs, extensionDialogCancelValue } from "./extensionDialogWaiters.js";
@@ -797,6 +798,7 @@ export function createPiWebCustomToolDefinitions(
   subsessions?: SubsessionToolDeps,
   askUser?: AskUserToolDeps,
   handoff?: HandoffSessionFn,
+  github?: GitHubToolDeps,
 ) {
   return [
     createPiWebEditToolDefinition(cwd),
@@ -806,6 +808,8 @@ export function createPiWebCustomToolDefinitions(
     // Asking the user is not delegation: the questions land in the session the
     // user is already watching, so tracked children may ask too.
     ...(askUser === undefined ? [] : [createAskUserToolDefinition(askUser)]),
+    // Not delegation either: the tools act on the session's own repo, as Forgerie's GitHub App.
+    ...(github === undefined ? [] : createGitHubToolDefinitions(cwd, github)),
   ];
 }
 
@@ -817,6 +821,7 @@ function createDefaultRuntimeFactory(
   subsessions?: SubsessionToolDeps,
   askUser?: AskUserToolDeps,
   handoff?: HandoffSessionFn,
+  github?: GitHubToolDeps,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -846,7 +851,7 @@ function createDefaultRuntimeFactory(
     const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
-    const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser, handoff);
+    const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser, handoff, github);
     const result = await createAgentSessionFromServices({
       services,
       sessionManager,
@@ -927,6 +932,11 @@ export interface PiSessionServiceDependencies {
    * questions reach the user of the asking session, not another session.
    */
   askUserEnabled?: boolean;
+  /**
+   * When provided, every session gets `github_read` and `github_write` for its
+   * project's GitHub repo, acting as Forgerie's GitHub App.
+   */
+  github?: GitHubToolDeps;
   /**
    * When true, hosted sessions start with Pi's `codemode` tool active, so an
    * agent can run a script that calls the other tools. Off when omitted.
@@ -1116,6 +1126,7 @@ export class PiSessionService implements SessionRouteService {
       },
       deps.askUserEnabled === true ? { open: (input) => this.openAsk(input) } : undefined,
       this.spawnTargets === undefined ? undefined : (input) => this.handoffSession(input),
+      deps.github,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;

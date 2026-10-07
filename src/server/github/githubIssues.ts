@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 import { apiHeaders, GITHUB_API, type Fetch, type GitHubApp } from "./githubApp.js";
+import { GitHubAuthorTrust } from "./githubTrust.js";
 
 /** Matches GitHub's polling advice: reuse a list for a minute, then ask again with its ETag. */
 const FRESH_MS = 60_000;
@@ -25,15 +26,6 @@ export type GitHubIssue = Omit<Static<typeof IssueSchema>, "pull_request" | "lab
   trusted: boolean;
 };
 
-/** GitHub's own words for people the repo already trusts. */
-const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-/** Write access or more: these authors could change the code directly, so their issue text is no new risk. */
-const TRUSTED_PERMISSIONS = new Set(["admin", "maintain", "write"]);
-/** How long an author's permission on a repo is believed. */
-const PERMISSION_MS = 60 * 60_000;
-/** At most this many authors are checked per read, so a busy public repo cannot spend the rate limit. */
-const MAX_PERMISSION_CHECKS = 20;
-const PermissionSchema = Type.Object({ permission: Type.String() });
 
 export type IssuesResult =
   | { ok: true; issues: GitHubIssue[]; truncated: boolean; staleSince?: string; staleReason?: string }
@@ -46,6 +38,8 @@ export interface GitHubIssueClientDependencies {
   app: Pick<GitHubApp, "tokenFor" | "dropToken" | "installUrl">;
   fetch: Fetch;
   now?: () => number;
+  /** Shared with the agent tools, so both ask GitHub about an author once an hour. */
+  trust?: GitHubAuthorTrust;
 }
 
 /**
@@ -55,11 +49,14 @@ export interface GitHubIssueClientDependencies {
  */
 export class GitHubIssueClient {
   private readonly cache = new Map<string, Listing>();
-  private readonly permissions = new Map<string, { trusted: boolean; checkedAt: number }>();
+  private readonly trust: GitHubAuthorTrust;
   private queue: Promise<unknown> = Promise.resolve();
   private blockedUntil = 0;
   private readonly now: () => number;
-  constructor(private readonly deps: GitHubIssueClientDependencies) { this.now = deps.now ?? Date.now; }
+  constructor(private readonly deps: GitHubIssueClientDependencies) {
+    this.now = deps.now ?? Date.now;
+    this.trust = deps.trust ?? new GitHubAuthorTrust({ fetch: deps.fetch, now: this.now });
+  }
 
   openIssues(slug: string): Promise<IssuesResult> {
     const run = this.queue.then(() => this.read(slug), () => this.read(slug));
@@ -107,32 +104,12 @@ export class GitHubIssueClient {
     return listed(listing);
   }
 
-  /**
-   * GitHub hides private organization membership from an app, so a member's issue can arrive marked
-   * `CONTRIBUTOR`. For those authors, ask GitHub what the author may do in the repo. A failed check
-   * leaves the issue untrusted: hiding a trusted issue is recoverable, showing an untrusted one is not.
-   */
+  /** Marks each issue trusted or not, so the backlog can hide outside contributions. */
   private async checkAuthors(slug: string, listing: Listing, token: string): Promise<void> {
     const issues = listing.pages.flatMap((page) => page.issues);
-    const unknown = [...new Set(issues.filter((issue) => !issue.trusted && issue.author_association === "CONTRIBUTOR" && issue.user !== null)
-      .map((issue) => issue.user?.login ?? ""))].filter(Boolean);
-    let checks = 0;
-    for (const login of unknown) {
-      const key = `${slug.toLowerCase()}\n${login.toLowerCase()}`;
-      const known = this.permissions.get(key);
-      if (known !== undefined && this.now() - known.checkedAt < PERMISSION_MS) continue;
-      if (++checks > MAX_PERMISSION_CHECKS) break;
-      try {
-        const response = await this.deps.fetch(`${GITHUB_API}/repos/${slug}/collaborators/${encodeURIComponent(login)}/permission`, { headers: apiHeaders(token) });
-        const body: unknown = await response.json().catch(() => undefined);
-        const trusted = response.ok && Check(PermissionSchema, body) && TRUSTED_PERMISSIONS.has(body.permission);
-        if (response.ok || response.status === 404) this.permissions.set(key, { trusted, checkedAt: this.now() });
-      } catch { /* Unreachable: the issue stays untrusted until the next read. */ }
-    }
-    for (const issue of issues) {
-      if (issue.trusted || issue.user === null) continue;
-      issue.trusted = this.permissions.get(`${slug.toLowerCase()}\n${issue.user.login.toLowerCase()}`)?.trusted === true;
-    }
+    const authorOf = (issue: GitHubIssue) => ({ login: issue.user?.login, association: issue.author_association });
+    const trusted = await this.trust.judge(slug, token, issues.map(authorOf));
+    for (const issue of issues) issue.trusted = trusted(authorOf(issue));
   }
 
   private refused(response: Response, slug: string, cached: Listing | undefined): IssuesResult {
@@ -172,7 +149,7 @@ function toIssue(value: Static<typeof IssueSchema>): GitHubIssue {
     number: value.number, title: value.title, body: value.body, html_url: value.html_url, created_at: value.created_at,
     author_association: value.author_association, user: value.user,
     labels: value.labels.map((label) => typeof label === "string" ? label : label.name),
-    trusted: TRUSTED_ASSOCIATIONS.has(value.author_association),
+    trusted: false,
   };
 }
 /** GitHub says to follow its `Link` header rather than build page URLs. */

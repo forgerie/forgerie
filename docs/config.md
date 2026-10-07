@@ -198,7 +198,7 @@ Forgerie reuses a repo's issue list for one minute, then asks again with the lis
 
 Forgerie reads GitHub as its own GitHub App, not as a person. Nobody logs in, and nothing expires while the app exists.
 
-Set it up from the backlog: press **Set up GitHub**, then **Create GitHub App** on the page GitHub opens. GitHub creates the app from Forgerie's manifest (public, no webhook, `Issues: Read-only`) and returns you to Forgerie, which keeps the app's ID and private key. GitHub must be able to send your browser back to the page you started from, so start from the address you normally use. Then press **Install on GitHub** and choose the accounts and repos the app may read. Installing on an organization you do not own sends a request to its owners. The app must be public to install it on an organization that does not own it; with no webhook and no user login, being public gives nobody else access to anything.
+Set it up from the backlog: press **Set up GitHub**, then **Create GitHub App** on the page GitHub opens. GitHub creates the app from Forgerie's manifest (public, no webhook; `Issues`, `Pull requests`, and `Contents` read and write; `Checks` and `Commit statuses` read-only) and returns you to Forgerie, which keeps the app's ID and private key. GitHub must be able to send your browser back to the page you started from, so start from the address you normally use. Then press **Install on GitHub** and choose the accounts and repos the app may read. Installing on an organization you do not own sends a request to its owners. The app must be public to install it on an organization that does not own it; with no webhook and no user login, being public gives nobody else access to anything.
 
 Forgerie signs a 10-minute token with the private key, trades it for a 1-hour installation token for each repo, and renews that token 5 minutes before it expires. A repo where the app is not installed produces a `provider-install` warning with the install link; Forgerie checks again after a minute.
 
@@ -211,7 +211,7 @@ Forgerie signs a 10-minute token with the private key, trades it for a 1-hour in
 
 These routes also exist under `/api/machines/local` and the federated machine prefix. Each machine's daemon scans its own projects, so each machine creates its own app.
 
-The app lives in `github-app.json` in Forgerie's data directory with owner-only permissions (`0600`). It holds the private key, which can read issues on every repo where the app is installed until you delete the key on GitHub. Forgerie drops the client secret and webhook secret GitHub sends at setup, and no response contains the key or a token. If GitHub stops accepting the app because it was deleted or its key revoked, the backlog shows a `provider-auth` warning: remove the app in the backlog and set GitHub up again.
+The app lives in `github-app.json` in Forgerie's data directory with owner-only permissions (`0600`). It holds the private key, which can do everything the app's permissions allow on every repo where the app is installed, including merging pull requests, until you delete the key on GitHub. Forgerie drops the client secret and webhook secret GitHub sends at setup, and no response contains the key or a token. If GitHub stops accepting the app because it was deleted or its key revoked, the backlog shows a `provider-auth` warning: remove the app in the backlog and set GitHub up again.
 
 ## Worktree pre-remove hook
 
@@ -463,6 +463,21 @@ Forgerie confirms a partial submission before sending it and names the unanswere
 Sending an ordinary chat message while a form is open voids the form: the card closes as cancelled and the model is told its questions went unanswered as part of the turn the message itself starts.
 
 Restart the session daemon after changing `askUser` or after upgrading Forgerie to a version that introduces this tool. For the systemd user service, run `systemctl --user restart forgerie-sessiond`.
+
+#### `github_read` and `github_write`
+
+Every hosted session gets two tools for its project's GitHub repo. They act as the machine's [GitHub App](#github-setup), so GitHub shows each write as made by the app's bot account. They work on one repo only: `backlog.github.repo` from the canonical checkout's `.forgerie/config.json`, or the checkout's github.com `origin` remote. Terminal Pi sessions do not get them.
+
+| Tool | Actions |
+| --- | --- |
+| `github_read` | `issues` lists issues, with `state`, `labels`, `query` (GitHub search), and `limit` up to 50. `issue` reads one issue with its comments. `labels` lists the repo's labels. `prs` lists pull requests. `pr` reads one pull request with its CI checks, reviews, and comments. |
+| `github_write` | `create_issue`, `comment`, `edit` (title or body), `close` (with `reason` and an optional closing comment), `reopen`, `label` (`add` and `remove`), `create_pr` (from a branch already pushed), and `merge_pr`. |
+
+The tools apply the backlog's author rule to everything they return. Titles, bodies, and comments by outside contributors are replaced with a note naming the author, unless `backlog.github.authors` is `all`. `github_write` uses only labels that already exist on the repo and refuses others before writing anything. Each body it writes ends with a hidden `<!-- forgerie-session: ID -->` marker that names the session.
+
+`merge_pr` merges by rebase unless `method` is `squash` or `merge`. It refuses a draft, a closed pull request, a branch that conflicts, and a commit where any check run or commit status failed or still runs. It also refuses when no CI ran on the head commit. The merge request names the head commit it checked, so GitHub refuses the merge if someone pushed after the check. Branch protection on GitHub still applies on top of these rules.
+
+Scripts may call `github_read`. Only the model can call `github_write`, so each write shows in the transcript as its own card. When the app lacks a permission, the tool names the permission and the app's settings page. An app created before these tools has `Issues: Read-only`: open the app's **Permissions & events** page on GitHub, set the permissions listed in [GitHub setup](#github-setup), save, and accept the new permissions on each installation.
 
 #### `codemode` and the `codemode` tool
 

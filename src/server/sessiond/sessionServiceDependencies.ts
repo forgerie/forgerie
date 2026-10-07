@@ -33,6 +33,8 @@ export interface SessionServiceDependencyInput {
   askUserEnabled: boolean;
   /** Whether hosted sessions start with Pi's `codemode` tool active. */
   codemodeEnabled: boolean;
+  /** GitHub work on each session's own repo, as Forgerie's GitHub App. */
+  github: NonNullable<PiSessionServiceDependencies["github"]>;
   /** Auto-cancel delay for extension dialogs whose extension set no timeout; `0` waits forever. */
   extensionDialogsTimeoutMs: number;
 }
@@ -64,6 +66,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     subsessionsEnabled: input.spawnTargets !== undefined && input.subsessionsEnabled,
     askUserEnabled: input.askUserEnabled,
     codemodeEnabled: input.codemodeEnabled,
+    github: input.github,
     extensionDialogsTimeoutMs: input.extensionDialogsTimeoutMs,
     notificationStore: input.notificationStore,
     unreadStore: input.unreadStore,

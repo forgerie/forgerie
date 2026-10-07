@@ -31,6 +31,7 @@ function daemonCollaborators(patch: Partial<SessionServiceDependencyInput> = {})
     subsessionsEnabled: false,
     askUserEnabled: true,
     codemodeEnabled: true,
+    github: { read: () => Promise.reject(new Error("unused")), write: () => Promise.reject(new Error("unused")) },
     extensionDialogsTimeoutMs: 300_000,
     ...patch,
   };

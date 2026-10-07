@@ -68,13 +68,14 @@ export class GitHubApp {
     const name = `Forgerie (${this.deps.machineName ?? hostname()})`.slice(0, 34);
     const manifest = {
       name, url: base.startsWith("https://") ? base : GITHUB_WEB,
-      description: "Lists issues in Forgerie's backlog. Read-only.",
+      description: "Lists issues in Forgerie's backlog, and lets Forgerie's agents work on issues and pull requests.",
       // The app must be public to install it on an organization that does not own it.
       // With no webhook and no user login, being public gives nobody else access to anything.
       public: true,
       redirect_url: `${base}/`,
       setup_url: `${base}/?backlog`, setup_on_update: true,
-      default_permissions: { issues: "read" }, default_events: [],
+      // Agents comment, close, and label issues, open pull requests, read CI, and merge when CI passes.
+      default_permissions: { issues: "write", pull_requests: "write", contents: "write", checks: "read", statuses: "read" }, default_events: [],
     };
     return { action: `${GITHUB_WEB}/settings/apps/new?state=${state}`, manifest: JSON.stringify(manifest) };
   }

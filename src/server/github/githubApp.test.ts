@@ -39,9 +39,9 @@ describe("GitHub App setup", () => {
     const start = f.app.startSetup("https://forgerie.tail.ts.net/some/path?backlog");
     expect(start.action).toMatch(/^https:\/\/github\.com\/settings\/apps\/new\?state=forgerie-[a-f0-9]{32}$/u);
     expect(JSON.parse(start.manifest)).toEqual({
-      name: "Forgerie (zao)", url: "https://forgerie.tail.ts.net", description: "Lists issues in Forgerie's backlog. Read-only.", public: true,
+      name: "Forgerie (zao)", url: "https://forgerie.tail.ts.net", description: "Lists issues in Forgerie's backlog, and lets Forgerie's agents work on issues and pull requests.", public: true,
       redirect_url: "https://forgerie.tail.ts.net/", setup_url: "https://forgerie.tail.ts.net/?backlog", setup_on_update: true,
-      default_permissions: { issues: "read" }, default_events: [],
+      default_permissions: { issues: "write", pull_requests: "write", contents: "write", checks: "read", statuses: "read" }, default_events: [],
     });
     // A plain-http origin still returns there; only the homepage falls back to github.com.
     expect(JSON.parse(f.app.startSetup("http://zao:8510").manifest)).toMatchObject({ url: "https://github.com", redirect_url: "http://zao:8510/" });

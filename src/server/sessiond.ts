@@ -21,6 +21,8 @@ import { createGitHubBacklogProvider } from "./backlog/githubBacklog.js";
 import { GitHubApp } from "./github/githubApp.js";
 import { GitHubAppStore } from "./github/githubAppStore.js";
 import { GitHubIssueClient } from "./github/githubIssues.js";
+import { GitHubAgent } from "./github/githubAgent.js";
+import { GitHubAuthorTrust } from "./github/githubTrust.js";
 import { registerGitHubRoutes } from "./github/githubRoutes.js";
 import { defaultSessionNameIndexFilePath } from "./sessions/sessionNameIndex.js";
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
@@ -109,7 +111,9 @@ async function createSessionDaemonRuntime() {
   const githubStore = new GitHubAppStore(join(piWebDataDir(daemonEnvironment), "github-app.json"));
   await githubStore.initialize();
   const github = new GitHubApp({ store: githubStore, fetch: (input, init) => fetch(input, init) });
-  const githubIssues = new GitHubIssueClient({ app: github, fetch: (input, init) => fetch(input, init) });
+  const githubTrust = new GitHubAuthorTrust({ fetch: (input, init) => fetch(input, init) });
+  const githubIssues = new GitHubIssueClient({ app: github, fetch: (input, init) => fetch(input, init), trust: githubTrust });
+  const githubAgent = new GitHubAgent({ app: github, fetch: (input, init) => fetch(input, init), trust: githubTrust });
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
   const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
   const workspaceActivity = new WorkspaceActivityService(eventHub);
@@ -164,6 +168,7 @@ async function createSessionDaemonRuntime() {
     subsessionsEnabled: config.subsessions,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
+    github: githubAgent,
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     notificationStore,
     unreadStore,

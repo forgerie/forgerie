@@ -353,7 +353,7 @@ nix profile install .#forgerie-whisper-stt-worker</code></pre>
                 prompt endpoint. Interrupted launches require inspection and release of the exact claim before retrying.
                 Claims have no lease or expiry; separate hosts do not share ownership.
                 Projects that set <code>backlog.providers</code> to include <code>github</code> also list their repo's open issues,
-                read-only, as a GitHub App that each machine sets up once from the backlog.
+                as a GitHub App that each machine sets up once from the backlog.
                 See the <a href="config.md#project-backlog-and-launch-api">backlog configuration and API contract</a>
                 for request types, readiness, limits, recovery, and <a href="config.md#github-issues">GitHub issues</a>.
               </p>
@@ -1058,6 +1058,16 @@ worktree_path="$1"
                 upgrading Forgerie to a version that introduces this tool. For the systemd user service, run
                 <code>systemctl --user restart forgerie-sessiond</code>.
               </div>
+
+              <h3><code>github_read</code> and <code>github_write</code></h3>
+              <p>
+                Every hosted session gets two tools for its project's GitHub repo, acting as the machine's GitHub App.
+                <code>github_read</code> lists and reads issues, labels, and pull requests with their CI checks.
+                <code>github_write</code> creates, comments on, edits, closes, reopens, and labels issues, opens pull
+                requests, and merges a pull request only when every check on its head commit passed. Text by outside
+                contributors stays hidden unless <code>backlog.github.authors</code> is <code>all</code>, and writes use
+                only labels that already exist. See <a href="config.md#github_read-and-github_write">the tool reference</a>.
+              </p>
 
               <h3><code>codemode</code> and the <code>codemode</code> tool</h3>
               <p>

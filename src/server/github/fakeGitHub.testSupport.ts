@@ -1,5 +1,5 @@
 /** A scripted stand-in for github.com and api.github.com. Each route answers from a queue, then from its default. */
-export interface FakeRequest { method: string; url: string; headers: Record<string, string>; form: URLSearchParams }
+export interface FakeRequest { method: string; url: string; headers: Record<string, string>; form: URLSearchParams; body: string }
 type Answer = Response | ((request: FakeRequest) => Response | Promise<Response>);
 
 export class FakeGitHub {
@@ -16,7 +16,8 @@ export class FakeGitHub {
 
   readonly fetch = async (input: string, init: RequestInit = {}): Promise<Response> => {
     const headers = Object.fromEntries(new Headers(init.headers).entries());
-    const request: FakeRequest = { method: init.method ?? "GET", url: input, headers, form: new URLSearchParams(typeof init.body === "string" ? init.body : "") };
+    const body = typeof init.body === "string" ? init.body : "";
+    const request: FakeRequest = { method: init.method ?? "GET", url: input, headers, form: new URLSearchParams(body), body };
     this.requests.push(request);
     this.inFlight++; this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
     try {
