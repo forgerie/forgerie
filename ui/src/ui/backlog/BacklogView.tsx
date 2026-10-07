@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, InfoIcon, ListTodoIcon, LogOutIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon, UnlinkIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, InfoIcon, ListTodoIcon, RefreshCwIcon, SearchIcon, Trash2Icon, TriangleAlertIcon, UnlinkIcon, XIcon } from "lucide-react";
 import type { BacklogApi, BacklogClaim, BacklogDetail, BacklogItem, BacklogWarning } from "../../backlog/backlogApi";
-import { ageText, ageWords, authWarnings, bodyUnderTitle, findItem, groupBacklog, HOLDER_WORDS, holderOf, ignoredFix, isGitHub, issueNumber, itemParam, listOf, openCount, otherWarnings,
+import { accessWarnings, ageText, ageWords, bodyUnderTitle, findItem, groupBacklog, HOLDER_WORDS, holderOf, ignoredFix, isGitHub, issueNumber, itemParam, listOf, openCount, otherWarnings,
   priorityWord, projectCount, refOf, relativePath, type BacklogGroup, type BacklogLoad, type BacklogPlace, type Holder, type ItemRef, type SessionLook } from "../../backlog/backlogModel";
 import type { GitHubApi } from "../../backlog/githubApi";
-import { useGitHubAuth } from "../../backlog/useGitHubAuth";
+import { useGitHubApp, type GitHubAppPage } from "../../backlog/useGitHubApp";
 import { writeClipboardText } from "../../clipboard";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import { GitHubConnect } from "./GitHubConnect";
 import "../settings/settings.css";
 import "./backlog.css";
+
+/** A page that cannot leave for GitHub, for bindings that give none. */
+const NO_PAGE: GitHubAppPage = { origin: "", setupReturn: () => undefined, clearSetupReturn: () => undefined, submit: () => undefined };
 
 /** Rows a project group shows before "Show all". Held items always show. */
 const GROUP_ROWS = 8;
@@ -28,8 +31,10 @@ export interface BacklogBinding {
   onLaunch: (item: BacklogItem) => void;
   /** Open the session that holds an item. */
   onOpenSession: (claim: Extract<BacklogClaim, { kind: "claimed" }>) => void;
-  /** This machine's GitHub login. Without it, the list still says when GitHub needs one. */
-  github?: Pick<GitHubApi, "status" | "login" | "disconnect"> | undefined;
+  /** This machine's GitHub App. Without it, the list still says when GitHub needs setting up. */
+  github?: Pick<GitHubApi, "status" | "setup" | "created" | "remove"> | undefined;
+  /** How the page leaves for GitHub and reads what GitHub sent back. */
+  githubPage?: GitHubAppPage | undefined;
   onClose?: (() => void) | undefined;
 }
 
@@ -161,7 +166,7 @@ function Empty({ onClose }: { onClose?: (() => void) | undefined }) {
 
 function ListPage({ binding }: { binding: BacklogBinding }) {
   const { load, onRefresh, onPlace, look, onClose } = binding;
-  const github = useGitHubAuth(binding.github, onRefresh);
+  const github = useGitHubApp(binding.github, binding.githubPage ?? NO_PAGE, onRefresh);
   const [filter, setFilter] = useState("");
   const [showDone, setShowDone] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -172,10 +177,11 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
   const groups = useMemo(() => list ? groupBacklog(list.items, list.warnings, { filter, showDone }) : [], [list, filter, showDone]);
   const problems = useMemo(() => list ? otherWarnings(groupBacklog(list.items, list.warnings, { showDone: true }), list.warnings) : [], [list]);
   const toggle = (set: ReadonlySet<string>, key: string) => { const next = new Set(set); if (next.has(key)) next.delete(key); else next.add(key); return next; };
-  const needsLogin = list ? authWarnings(list.warnings) : [];
-  const pending = github.load.type === "ready" && github.load.value.state === "pending";
-  const loggedIn = github.load.type === "ready" && github.load.value.state === "connected" ? github.load.value.login : undefined;
-  if (load.type === "ready" && list && list.items.length === 0 && problems.length === 0 && needsLogin.length === 0 && !pending) return <Empty onClose={onClose} />;
+  const blocked = list ? accessWarnings(list.warnings) : [];
+  const app = github.load.type === "ready" && github.load.value.state === "configured" ? github.load.value.app : undefined;
+  // While a setup finishes, or fails, the panel must show even if nothing is listed yet.
+  const githubNews = github.busy || github.error !== undefined;
+  if (load.type === "ready" && list && list.items.length === 0 && problems.length === 0 && blocked.length === 0 && !githubNews) return <Empty onClose={onClose} />;
   const names = new Map(list?.items.map((item) => [item.projectId, item.projectName]));
   const open = list ? openCount(list.items) : 0;
   const more = <div className="settings-menu-anchor" ref={menu.anchor}>
@@ -185,8 +191,8 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
       <button role="menuitemcheckbox" aria-checked={showDone} onClick={() => { menu.setOpen(false); setShowDone(!showDone); }}><CheckIcon aria-hidden />Show done items</button>
       <div className="picker-menu-separator" role="separator" />
       <button role="menuitem" onClick={() => { menu.setOpen(false); onRefresh(); }}><RefreshCwIcon aria-hidden />Read the backlog again</button>
-      {loggedIn ? <button role="menuitem" disabled={github.busy} onClick={() => { menu.setOpen(false); github.disconnect(); onRefresh(); }}>
-        <LogOutIcon aria-hidden />Log out of GitHub ({loggedIn})</button> : null}
+      {app ? <button role="menuitem" disabled={github.busy} onClick={() => { menu.setOpen(false); github.remove(); }}>
+        <Trash2Icon aria-hidden />Remove GitHub App ({app.slug})</button> : null}
     </div> : null}
   </div>;
   return <SettingsFrame title="Backlog" actions={<>{more}<CloseButton onClose={onClose} /></>}
@@ -199,8 +205,8 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
           <input type="search" placeholder="Filter by title or label" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
         {list?.items.length ? <span className="bl-total">{open} {open === 1 ? "item" : "items"} in {projectCount(list.items)} {projectCount(list.items) === 1 ? "project" : "projects"}</span> : null}
       </div>
-      {needsLogin.length || pending ? <GitHubConnect load={github.load} warnings={needsLogin} busy={github.busy} error={github.error}
-        onConnect={github.connect} onCancel={github.disconnect} /> : null}
+      {blocked.length || githubNews ? <GitHubConnect load={github.load} warnings={blocked} busy={github.busy} error={github.error}
+        onSetUp={github.setUp} onRefresh={onRefresh} /> : null}
       {!list ? <p className="settings-hint" role="status">Reading every project's backlog…</p>
         : groups.length === 0 ? list.items.length === 0 ? null
           : <p className="settings-hint">{filter.trim() ? <>No items match “{filter.trim()}”.</> : "Every item is done."}</p>

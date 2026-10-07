@@ -47,7 +47,7 @@ try {
       await sleep(300);
       await shot(`sheet-${scheme}-${posture.name}`);
     }
-    for (const state of (process.env.STATES ?? "list code issue").split(" ").filter(Boolean)) {
+    for (const state of (process.env.STATES ?? "setup install issue").split(" ").filter(Boolean)) {
       for (const posture of FOLD8_POSTURES) {
         await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: FOLD8_DPR, mobile: true });
         await load({ state }, `!!document.querySelector('.app-shell')`);

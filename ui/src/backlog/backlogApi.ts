@@ -38,7 +38,7 @@ export type BacklogItem = z.infer<typeof backlogItemSchema>;
 
 export const backlogWarningSchema = z.object({
   projectId: text, path: z.string(),
-  kind: z.enum(["ignored-directory", "invalid-item", "project-error", "scan-limit", "provider-auth", "provider-unavailable", "items-hidden"]).or(z.string()),
+  kind: z.enum(["ignored-directory", "invalid-item", "project-error", "scan-limit", "provider-auth", "provider-install", "provider-unavailable", "items-hidden"]).or(z.string()),
   provider: z.string().optional().catch(undefined),
   message: z.string(),
 });

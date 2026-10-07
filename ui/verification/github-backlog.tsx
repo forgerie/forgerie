@@ -6,7 +6,7 @@
 import { createRoot } from "react-dom/client";
 import type { BacklogItem, BacklogList, BacklogWarning } from "../src/backlog/backlogApi";
 import type { BacklogPlace } from "../src/backlog/backlogModel";
-import type { GitHubAuthState } from "../src/backlog/githubApi";
+import type { GitHubAppState } from "../src/backlog/githubApi";
 import { AppShell } from "../src/ui/AppShell";
 import { BacklogView, type BacklogBinding } from "../src/ui/backlog/BacklogView";
 import "../src/ui/theme.css";
@@ -33,22 +33,24 @@ const ITEMS: BacklogItem[] = [
 ];
 const hidden: BacklogWarning = { projectId: "p-korri", provider: "github", path: "korri-os/korri", kind: "items-hidden",
   message: "3 issues from outside contributors are hidden, because their text goes to an agent. Set backlog.github.authors to \"all\" to list them." };
-const needsLogin: BacklogWarning = { projectId: "p-korri", provider: "github", path: "korri-os/korri", kind: "provider-auth", message: "Connect GitHub to list issues for korri-os/korri." };
+const notSetUp: BacklogWarning = { projectId: "p-korri", provider: "github", path: "korri-os/korri", kind: "provider-auth", message: "Set up GitHub in the backlog to list issues for korri-os/korri." };
+const notInstalled: BacklogWarning = { projectId: "p-korri", provider: "github", path: "korri-os/korri", kind: "provider-install", message: "Not installed." };
+const configured: GitHubAppState = { state: "configured", app: { slug: "forgerie-zao", owner: "simonwjackson", url: "https://github.com/apps/forgerie-zao" },
+  installUrl: "https://github.com/apps/forgerie-zao/installations/new" };
 const ISSUE_BODY = "Audio stops after the device resumes from suspend. It comes back after a reboot.\n\n## Steps\n\n1. Play anything with sound.\n2. Suspend with the power button, wait ten seconds, resume.\n3. No sound until reboot.\n\n## Notes\n\n`dmesg` shows `rk817-codec: probe deferred` after resume. This started with the 2026-09-30 image.";
 
-interface State { label: string; note: string; place: BacklogPlace; items: BacklogItem[]; warnings: BacklogWarning[]; github: GitHubAuthState }
+interface State { label: string; note: string; place: BacklogPlace; items: BacklogItem[]; warnings: BacklogWarning[]; github: GitHubAppState }
 const states: Record<string, State> = {
   list: { label: "Issues beside files", note: "GitHub issues sit in their project with their number. A note in the group says what GitHub left out.",
-    place: {}, items: ITEMS, warnings: [hidden], github: { state: "connected", app, login: "simonwjackson" } },
-  connect: { label: "Connect GitHub", note: "A project lists GitHub issues, and this machine has no login. The files still show.",
-    place: {}, items: ITEMS.filter((item) => item.provider === "markdown"), warnings: [needsLogin], github: { state: "disconnected", app } },
-  code: { label: "Code to enter", note: "After Connect: the code is the one thing to carry to GitHub. The page updates by itself.",
-    place: {}, items: ITEMS.filter((item) => item.provider === "markdown"), warnings: [needsLogin],
-    github: { state: "pending", app, userCode: "WDJB-MJHT", verificationUri: "https://github.com/login/device", expiresAt: new Date(Date.now() + 14 * 60_000).toISOString() } },
-  setup: { label: "Not set up", note: "No GitHub App on this machine yet. The panel names the one command that sets it up.",
-    place: {}, items: [], warnings: [needsLogin], github: { state: "not-configured" } },
+    place: {}, items: ITEMS, warnings: [hidden], github: configured },
+  setup: { label: "Set up GitHub", note: "A project lists GitHub issues, and GitHub is not set up on this machine. One button; the files still show.",
+    place: {}, items: ITEMS.filter((item) => item.provider === "markdown"), warnings: [notSetUp], github: { state: "not-configured" } },
+  install: { label: "Install on the repo", note: "Back from GitHub: the app exists but may not read korri yet. Install opens GitHub; Check again reads the list.",
+    place: {}, items: ITEMS.filter((item) => item.provider === "markdown"), warnings: [notInstalled], github: configured },
+  empty: { label: "Nothing listed yet", note: "No items anywhere, and GitHub not set up: the panel, not the empty-backlog page.",
+    place: {}, items: [], warnings: [notSetUp], github: { state: "not-configured" } },
   issue: { label: "An issue", note: "Links to GitHub, says a stranger may have written it, and starts a session like any item.",
-    place: { item: { projectId: "p-korri", itemId: "212", provider: "github" } }, items: ITEMS, warnings: [], github: { state: "connected", app, login: "simonwjackson" } },
+    place: { item: { projectId: "p-korri", itemId: "212", provider: "github" } }, items: ITEMS, warnings: [], github: configured },
 };
 
 function Screen({ state }: { state: State }) {
@@ -63,7 +65,8 @@ function Screen({ state }: { state: State }) {
       },
       release: () => Promise.resolve({ released: true }),
     },
-    github: { status: () => Promise.resolve(state.github), login: () => Promise.resolve(state.github), disconnect: () => Promise.resolve(state.github) },
+    github: { status: () => Promise.resolve(state.github), setup: () => Promise.reject(new Error("fixture")), created: () => Promise.resolve(state.github),
+      remove: () => Promise.resolve(state.github) },
   };
   return <AppShell open={false} onOpenChange={() => undefined} picker={() => null} thread={<BacklogView place={state.place} binding={binding} />} />;
 }

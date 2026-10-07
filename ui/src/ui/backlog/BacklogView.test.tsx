@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BacklogView, type BacklogBinding } from "./BacklogView";
 import type { BacklogClaim, BacklogItem, BacklogList, BacklogWarning } from "../../backlog/backlogApi";
 import type { BacklogPlace } from "../../backlog/backlogModel";
-import type { GitHubAuthState } from "../../backlog/githubApi";
-import { PENDING_POLL_MS } from "../../backlog/useGitHubAuth";
+import type { GitHubAppState, GitHubSetup } from "../../backlog/githubApi";
+import type { GitHubAppPage } from "../../backlog/useGitHubApp";
 
 let root: Root;
 const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ id: "01A", title: "Fix the nested transcript", provider: "markdown", projectId: "p1", projectName: "forgerie",
@@ -170,15 +170,27 @@ describe("an item", () => {
   });
 });
 
-const app = { clientId: "Iv23liForgerie01", slug: "forgerie-zao" };
+const configured: GitHubAppState = { state: "configured", app: { slug: "forgerie-zao", owner: "simonwjackson", url: "https://github.com/apps/forgerie-zao" },
+  installUrl: "https://github.com/apps/forgerie-zao/installations/new" };
 const issue = (extra: Partial<BacklogItem> = {}) => item({ id: "7", provider: "github", title: "Crash on boot", path: "korri-os/korri#7",
   url: "https://github.com/korri-os/korri/issues/7", status: "Open", priority: undefined, labels: ["bug"], ...extra });
-const needsLogin: BacklogWarning = { projectId: "p1", provider: "github", path: "korri-os/korri", kind: "provider-auth", message: "Connect GitHub to list issues for korri-os/korri." };
-/** A scripted GitHub login: each call answers with the next state, and the last state repeats. */
-function githubLogin(...states: GitHubAuthState[]) {
+const notSetUp: BacklogWarning = { projectId: "p1", provider: "github", path: "korri-os/korri", kind: "provider-auth", message: "Set up GitHub in the backlog to list issues for korri-os/korri." };
+const notInstalled: BacklogWarning = { projectId: "p1", provider: "github", path: "korri-os/korri", kind: "provider-install", message: "Not installed." };
+/** A scripted GitHub App: `status` answers with `state`, and each call is recorded. */
+function githubApp(state: GitHubAppState, options: { created?: () => Promise<GitHubAppState>; returned?: { code: string; state: string } } = {}) {
   const calls: string[] = [];
-  const next = (call: string) => { calls.push(call); return Promise.resolve(states.length > 1 ? states.shift()! : states[0]!); };
-  return { calls, api: { status: () => next("status"), login: () => next("login"), disconnect: () => next("disconnect") } };
+  const submitted: GitHubSetup[] = [];
+  let returned = options.returned;
+  const setup: GitHubSetup = { action: "https://github.com/settings/apps/new?state=forgerie-1", manifest: "{}" };
+  const api = {
+    status: () => { calls.push("status"); return Promise.resolve(state); },
+    setup: (origin: string) => { calls.push(`setup ${origin}`); return Promise.resolve(setup); },
+    created: (code: string, value: string) => { calls.push(`created ${code} ${value}`); return options.created?.() ?? Promise.resolve(configured); },
+    remove: () => { calls.push("remove"); return Promise.resolve<GitHubAppState>({ state: "not-configured" }); },
+  };
+  const page: GitHubAppPage = { origin: "https://forgerie.tail.ts.net", setupReturn: () => returned, clearSetupReturn: () => { calls.push("clear"); returned = undefined; },
+    submit: (value) => { submitted.push(value); } };
+  return { calls, submitted, api, page };
 }
 
 describe("GitHub issues", () => {
@@ -192,47 +204,50 @@ describe("GitHub issues", () => {
     expect(document.querySelector(".bl-problems")).toBeNull();
   });
 
-  it("connects from the list: the code shows, the page waits, and the list reads again once GitHub approves", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const pending: GitHubAuthState = { state: "pending", app, userCode: "WDJB-MJHT", verificationUri: "https://github.com/login/device", expiresAt: "2026-10-07T12:15:00Z" };
-      const github = githubLogin({ state: "disconnected", app }, pending, pending, { state: "connected", app, login: "simonwjackson" });
-      let refreshed = 0;
-      const { b } = binding(list([item()], [needsLogin]), { github: github.api, onRefresh: () => { refreshed++; } });
-      await render({}, b);
-      expect(document.querySelector(".bl-github")!.textContent).toContain("Connect GitHub to list the issues of korri-os/korri.");
-      await click(button("Connect GitHub"));
-      expect(document.querySelector(".bl-code")!.textContent).toBe("WDJB-MJHT");
-      expect(document.querySelector<HTMLAnchorElement>(".bl-github a")!.href).toBe("https://github.com/login/device");
-      expect(document.querySelector<HTMLAnchorElement>(".bl-github a")!.rel).toBe("noopener noreferrer");
-      await act(async () => { vi.advanceTimersByTime(PENDING_POLL_MS); }); await settle();
-      expect(refreshed).toBe(0);
-      await act(async () => { vi.advanceTimersByTime(PENDING_POLL_MS); }); await settle();
-      expect(github.calls).toEqual(["status", "login", "status", "status"]);
-      expect(refreshed).toBe(1);
-      await act(async () => { vi.advanceTimersByTime(PENDING_POLL_MS * 3); }); await settle();
-      expect(github.calls).toHaveLength(4);
-    } finally { vi.useRealTimers(); }
-  });
-
-  it("says how to set GitHub up on a machine that has no app, instead of offering a login that cannot work", async () => {
-    const { b } = binding(list([], [needsLogin]), { github: githubLogin({ state: "not-configured" }).api });
+  it("sets GitHub up from the list: one button leaves for GitHub with this page's address, and no terminal", async () => {
+    const github = githubApp({ state: "not-configured" });
+    const { b } = binding(list([], [notSetUp]), { github: github.api, githubPage: github.page });
     await render({}, b);
     expect(document.querySelector(".bl-empty")).toBeNull();
-    expect(document.querySelector(".bl-github pre")!.textContent).toBe("scripts/github-app-wizard.sh");
-    expect(button("Connect GitHub")).toBeUndefined();
+    expect(document.querySelector(".bl-github")!.textContent).toContain("Set up GitHub to list the issues of korri-os/korri.");
+    expect(document.querySelector(".bl-github pre")).toBeNull();
     // Nothing is listed yet, so nothing is "done".
     expect(document.querySelector(".settings-hint")).toBeNull();
+    await click(button("Set up GitHub"));
+    expect(github.calls).toEqual(["status", "setup https://forgerie.tail.ts.net"]);
+    expect(github.submitted.map((setup) => setup.action)).toEqual(["https://github.com/settings/apps/new?state=forgerie-1"]);
   });
 
-  it("logs out from the list's menu once connected", async () => {
-    const github = githubLogin({ state: "connected", app, login: "simonwjackson" }, { state: "disconnected", app });
-    const { b } = binding(list([issue()]), { github: github.api });
+  it("finishes the setup when GitHub sends the person back, clears the code first, and reads the list again", async () => {
+    const github = githubApp({ state: "not-configured" }, { returned: { code: "code-1", state: "forgerie-1" } });
+    let refreshed = 0;
+    const { b } = binding(list([item()], [notInstalled]), { github: github.api, githubPage: github.page, onRefresh: () => { refreshed++; } });
+    await render({}, b);
+    expect(github.calls).toEqual(["clear", "created code-1 forgerie-1"]);
+    expect(refreshed).toBe(1);
+    const install = document.querySelector<HTMLAnchorElement>(".bl-github a")!;
+    expect([install.textContent, install.href, install.target, install.rel]).toEqual(["Install on GitHub", "https://github.com/apps/forgerie-zao/installations/new", "_blank", "noopener noreferrer"]);
+    expect(document.querySelector(".bl-github")!.textContent).toContain("forgerie-zao is not installed on korri-os/korri.");
+    await click(button("Check again"));
+    expect(refreshed).toBe(2);
+  });
+
+  it("says why a setup return failed, and offers to start again", async () => {
+    const github = githubApp({ state: "not-configured" }, { returned: { code: "old", state: "forgerie-1" }, created: () => Promise.reject(new Error("This GitHub setup is older than an hour. Start the setup again.")) });
+    const { b } = binding(list([]), { github: github.api, githubPage: github.page });
+    await render({}, b);
+    expect(document.querySelector(".bl-github-error")!.textContent).toContain("Start the setup again");
+    expect(button("Set up GitHub")).toBeDefined();
+  });
+
+  it("shows no GitHub panel once the app reads every repo, and removes the app from the list's menu", async () => {
+    const github = githubApp(configured);
+    const { b } = binding(list([issue()]), { github: github.api, githubPage: github.page });
     await render({}, b);
     expect(document.querySelector(".bl-github")).toBeNull();
     await click(button("Backlog commands"));
-    await click(button("Log out of GitHub (simonwjackson)"));
-    expect(github.calls).toEqual(["status", "disconnect"]);
+    await click(button("Remove GitHub App (forgerie-zao)"));
+    expect(github.calls).toEqual(["status", "remove"]);
   });
 
   it("an issue page links to GitHub, warns that a stranger may have written it, and starts like any item", async () => {

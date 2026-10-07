@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BacklogClaim, BacklogItem, BacklogWarning } from "./backlogApi";
-import { ageText, ageWords, authWarnings, bodyUnderTitle, findItem, firstMessage, groupBacklog, heldSessions, holderOf, ignoredFix, issueNumber, matches, openCount, otherWarnings, priorityWord,
+import { accessWarnings, ageText, ageWords, bodyUnderTitle, findItem, firstMessage, groupBacklog, heldSessions, holderOf, ignoredFix, issueNumber, matches, openCount, otherWarnings, priorityWord,
   readBacklogPlace, readItemParam, itemParam, refOf, relativePath, sameItem } from "./backlogModel";
 
 const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({
@@ -117,12 +117,12 @@ describe("grouping", () => {
 
 describe("GitHub notes", () => {
   const note = (projectId: string, kind: string): BacklogWarning => ({ projectId, provider: "github", path: "korri-os/korri", kind, message: kind });
-  it("puts a project's GitHub notes in its group, the login above the list, and the rest under it", () => {
+  it("puts a project's GitHub notes in its group, setup and install above the list, and the rest under it", () => {
     const warnings = [note("p1", "items-hidden"), note("p1", "provider-auth"), note("p2", "provider-unavailable"),
-      { projectId: "p1", path: "work/items/x.md", kind: "invalid-item", message: "bad" }];
+      { projectId: "p1", path: "work/items/x.md", kind: "invalid-item", message: "bad" }, note("p3", "provider-install")];
     const groups = groupBacklog([item({ id: "7", provider: "github" })], warnings);
     expect(groups[0]!.notes).toEqual([warnings[0]]);
-    expect(authWarnings(warnings)).toEqual([warnings[1]]);
+    expect(accessWarnings(warnings)).toEqual([warnings[1], warnings[4]]);
     expect(otherWarnings(groups, warnings)).toEqual([warnings[2], warnings[3]]);
   });
   it("finds an issue by its number or by the word github", () => {

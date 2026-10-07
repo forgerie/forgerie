@@ -16,7 +16,8 @@ import { newSessionShortcut } from "./shortcuts";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
 import { heldSessions, itemParam, listOf, openCount, readBacklogPlace, readItemParam, refOf, type BacklogPlace } from "./backlog/backlogModel";
-import { createGitHubApi } from "./backlog/githubApi";
+import { createGitHubApi, readSetupReturn, submitToGitHub } from "./backlog/githubApi";
+import type { GitHubAppPage } from "./backlog/useGitHubApp";
 import { useBacklogList } from "./backlog/useBacklogList";
 // Settings carry the prompt editor; the chat never pays for it.
 const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
@@ -45,6 +46,19 @@ const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 const backlogApi = createBacklogApi((path, init) => fetch(path, init));
 const githubApi = createGitHubApi((path, init) => fetch(path, init));
+/** GitHub returns from creating the app to this page's root; the backlog finishes the setup. */
+const githubPage: GitHubAppPage = {
+  origin: window.location.origin,
+  setupReturn: () => readSetupReturn(window.location.search),
+  clearSetupReturn: () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("code"); url.searchParams.delete("state");
+    window.history.replaceState(window.history.state, "", url);
+  },
+  submit: (setup) => submitToGitHub(setup),
+};
+/** The backlog opens on GitHub's return, because that is where the setup finishes. */
+const readBacklogOrSetup = () => readBacklog() ?? (readSetupReturn(window.location.search) ? {} : undefined);
 /**
  * Marks the history entry this page load pushed for the dialog, so closing it
  * steps back instead of piling up entries. Per load: after a reload the browser
@@ -60,7 +74,7 @@ export function App() {
   const [composing, setComposing] = useState(readNew);
   const [composeMode, setComposeMode] = useState<LaunchMode>("switch");
   const [settings, setSettings] = useState(readSettings);
-  const [backlog, setBacklog] = useState(readBacklog);
+  const [backlog, setBacklog] = useState(readBacklogOrSetup);
   // The backlog item riding with the new-session dialog.
   const [composeItem, setComposeItem] = useState(readItem);
   const backlogList = useBacklogList(backlogApi);
@@ -98,7 +112,7 @@ export function App() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [inFlight]);
   // With nothing selected there is nothing to cover, so the sheet starts open.
-  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined && readBacklog() === undefined);
+  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined && readBacklogOrSetup() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
   // The URL is the source of truth for the selection, so read it there.
   const closeSession = useCallback(() => {
@@ -297,7 +311,7 @@ export function App() {
       <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
         onLaunch: (item) => { void startNew("switch", item); },
-        onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi }} /></Suspense>
+        onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet. Add a project in the old client, then start a session here."><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId}

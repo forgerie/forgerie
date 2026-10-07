@@ -149,17 +149,16 @@
 .bl-issue-link:hover { text-decoration-color: currentColor; }
 .bl-issue-link::before { content: ""; position: absolute; inset: -0.5rem -0.25rem; }
 
-/* The login panel: the warning's frame, plus the code. The code is the only thing the person must
-   carry to GitHub, so it is the one large element; it scales with the reading column, not the screen. */
+/* The GitHub panel: the warning's frame and one way on. The button is the one emphatic element,
+   because it is the only thing the person has to do here. */
 .bl-github { margin-block: var(--space-2) var(--space-3); }
-.bl-code { display: block; margin-block: var(--space-1); color: var(--foreground); font-family: var(--code-font); font-weight: 600;
-  font-size: clamp(1.25rem, 7cqi, 2rem); letter-spacing: 0.14em; font-variant-numeric: tabular-nums; user-select: all; }
 .bl-github-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); }
 .bl-github-actions .bl-text-button { text-decoration: none; }
 .bl-github-actions .bl-text-button:first-child { margin-inline-start: calc(-1 * var(--space-2)); }
 .bl-github-actions .bl-text-button:not(:first-child) { margin-inline-start: 0; }
-.bl-github-connect { min-block-size: 2.25rem; padding-inline: var(--space-3); border: 1px solid var(--line-focus); border-radius: var(--radius-control);
-  background: var(--background); color: var(--foreground); font-size: var(--small-text); font-weight: 500; }
+.bl-github-connect { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: 2.25rem; padding-inline: var(--space-3);
+  border: 1px solid var(--line-focus); border-radius: var(--radius-control); background: var(--background); color: var(--foreground);
+  font-size: var(--small-text); font-weight: 500; text-decoration: none; }
 .bl-github-connect:hover:not(:disabled) { background: var(--hover-surface); }
 .bl-github-wait { color: var(--muted-foreground); font-size: var(--label-text); }
 .bl-github-error { color: var(--destructive); }

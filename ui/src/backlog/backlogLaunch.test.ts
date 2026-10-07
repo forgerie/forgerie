@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createNewSessionApi } from "../newSession";
 import { createLaunchStore } from "../launches";
 import { createBacklogApi } from "./backlogApi";
-import { createGitHubApi } from "./githubApi";
+import { createGitHubApi, readSetupReturn, submitToGitHub } from "./githubApi";
 
 type Call = { path: string; body?: unknown };
 function server(reply: (call: Call) => { status?: number; body: unknown }) {
@@ -90,11 +90,31 @@ describe("the backlog client", () => {
     const list = await createBacklogApi(fetchFn).list();
     expect(list.items[0]).toMatchObject({ provider: "markdown", claim: { provider: "markdown" } });
   });
-  it("reads a server without GitHub login as not set up, and never shows a token", async () => {
+  it("reads a server without GitHub App setup as not set up, and carries a refused setup's reason", async () => {
     const missing = async () => new Response("{}", { status: 404 });
     expect(await createGitHubApi(missing).status()).toEqual({ state: "not-configured" });
-    const refused = async () => new Response(JSON.stringify({ error: "Device flow is off for this GitHub App." }), { status: 400 });
-    await expect(createGitHubApi(refused).login()).rejects.toThrow("Device flow is off");
+    const refused = async () => new Response(JSON.stringify({ error: "This GitHub setup did not start here. Start the setup again." }), { status: 400 });
+    await expect(createGitHubApi(refused).created("c", "forgerie-x")).rejects.toThrow("Start the setup again");
+  });
+  it("sends the page's origin, and refuses a setup form aimed anywhere but github.com", async () => {
+    const { calls, fetchFn } = server(() => ({ body: { action: "https://github.com/settings/apps/new?state=forgerie-1", manifest: "{}" } }));
+    expect(await createGitHubApi(fetchFn).setup("https://forgerie.tail.ts.net")).toEqual({ action: "https://github.com/settings/apps/new?state=forgerie-1", manifest: "{}" });
+    expect(calls[0]).toEqual({ path: "/api/github/app/setup", body: { origin: "https://forgerie.tail.ts.net" } });
+    const evil = server(() => ({ body: { action: "https://evil.example/steal?state=forgerie-1", manifest: "{}" } }));
+    await expect(createGitHubApi(evil.fetchFn).setup("https://forgerie.tail.ts.net")).rejects.toThrow();
+  });
+  it("reads only Forgerie's own return from GitHub", () => {
+    expect(readSetupReturn("?code=abc&state=forgerie-0123")).toEqual({ code: "abc", state: "forgerie-0123" });
+    expect(readSetupReturn("?code=abc&state=someone-else")).toBeUndefined();
+    expect(readSetupReturn("?backlog")).toBeUndefined();
+  });
+  it("posts the manifest to GitHub as a form field", () => {
+    let submitted: { method: string; action: string; manifest: string | undefined } | undefined;
+    const form = { method: "", action: "", fields: [] as { name: string; value: string }[], append(field: { name: string; value: string }) { this.fields.push(field); },
+      submit() { submitted = { method: this.method, action: this.action, manifest: this.fields.find((field) => field.name === "manifest")?.value }; } };
+    const doc = { createElement: (tag: string) => tag === "form" ? form : { type: "", name: "", value: "" }, body: { append: () => undefined } };
+    submitToGitHub({ action: "https://github.com/settings/apps/new?state=forgerie-1", manifest: "{\"name\":\"Forgerie (zao)\"}" }, doc as unknown as Document);
+    expect(submitted).toEqual({ method: "post", action: "https://github.com/settings/apps/new?state=forgerie-1", manifest: "{\"name\":\"Forgerie (zao)\"}" });
   });
   it("carries the server's refusal and the claim that holds the item", async () => {
     const { fetchFn } = server(() => ({ status: 409, body: { kind: "conflict", error: "Backlog item is already claimed", claim } }));

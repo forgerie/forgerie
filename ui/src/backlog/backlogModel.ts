@@ -106,11 +106,12 @@ export interface BacklogGroup {
   /** What a provider says about this project's list: issues it hid, a cut-short list, a list that is not current. */
   notes?: BacklogWarning[] | undefined;
 }
-/** Provider notes that belong beside a project's items. A login problem is not one: it has its own place, above the list. */
+/** Provider notes that belong beside a project's items. Setup and install problems are not: they have their own place, above the list. */
 const isGroupNote = (warning: BacklogWarning) => warning.provider !== undefined && warning.provider !== MARKDOWN
   && (warning.kind === "items-hidden" || warning.kind === "provider-unavailable" || warning.kind === "scan-limit");
-/** GitHub needs a login before it can list a project's issues. */
-export const authWarnings = (warnings: readonly BacklogWarning[]) => warnings.filter((warning) => warning.kind === "provider-auth");
+const isAccessWarning = (warning: BacklogWarning) => warning.kind === "provider-auth" || warning.kind === "provider-install";
+/** What stops GitHub listing a project's issues: GitHub is not set up here, or its app is not installed on the repo. */
+export const accessWarnings = (warnings: readonly BacklogWarning[]) => warnings.filter(isAccessWarning);
 /**
  * Held items first, from every project, because they have a session to go to.
  * Then one group per project, by name. In a group: priority, then newest.
@@ -147,7 +148,7 @@ export function heldSessions(items: readonly BacklogItem[]): ReadonlySet<string>
  */
 export function otherWarnings(groups: readonly BacklogGroup[], warnings: readonly BacklogWarning[]): BacklogWarning[] {
   const placed = new Set(groups.flatMap((group) => [...group.ignored ? [group.ignored] : [], ...group.notes ?? []]));
-  return warnings.filter((warning) => !placed.has(warning) && warning.kind !== "ignored-directory" && warning.kind !== "provider-auth");
+  return warnings.filter((warning) => !placed.has(warning) && warning.kind !== "ignored-directory" && !isAccessWarning(warning));
 }
 
 /**
