@@ -316,7 +316,7 @@ export function App() {
         onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet. Add a project in the old client, then start a session here."><div className="thread-empty" /></SessionFrame>
-    : selectedId ? <ForgerieSession key={selectedId} id={selectedId}
+    : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread}
       known={known}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}

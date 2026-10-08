@@ -1,3 +1,4 @@
+import type { ReadTracker } from "./readReceipt";
 import { z } from "zod";
 import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
@@ -108,7 +109,7 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
  * machine catalog read: 2.7 MB and ~0.4 s on the reference machine. Without
  * it, the store finds the session's cwd in `/api/sessions/all` itself.
  */
-export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session) {
+export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session, reads?: ReadTracker) {
   let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
   let statusVersion = 0;
   const listeners = new Set<() => void>();
@@ -118,6 +119,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   const initialDelay = timing.retryDelayMs ?? 500;
   let retryDelay = initialDelay;
   let unwatch: (() => void) | undefined;
+  let unwatchUnread: (() => void) | undefined;
+  let readRefreshRequested = false;
   let started = false;
   const update = (next: SessionState) => {
     if (lifetime.signal.aborted) return;
@@ -260,6 +263,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       });
       // Every connection gets its own buffer and watermark. A previous hub's
       // sequence is meaningless after a daemon restart. Subscribe before reads.
+      // Capture the read boundary BEFORE loading history. Never acknowledge a newer unseen completion.
+      const receipt = await reads?.capture(session, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not capture the read boundary.", error); return undefined; });
+      if (!current(attempt)) return;
       const history = await read(readPath("messages", session), historySchema);
       if (!current(attempt)) return;
       const snapshot = await read(readPath("stream-snapshot", session), snapshotSchema);
@@ -294,7 +300,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       statusVersion++;
       retryDelay = initialDelay; // A socket open alone is not a successful join.
       update(joined);
+      if (receipt && reads) void reads.acknowledge(receipt, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not mark the visible session read.", error); });
       void loadCommands(); // Discovery failure must not break history or the live connection.
+      if (readRefreshRequested && reads?.isVisible()) { readRefreshRequested = false; reload(); }
     } catch (error) {
       if (!current(attempt)) return;
       if (permanent(error)) stop(error);
@@ -319,6 +327,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     if (started || lifetime.signal.aborted) return;
     started = true;
     unwatch = transport.watchRecovery?.(recover);
+    unwatchUnread = reads?.observe((sessionId) => {
+      if (sessionId !== id || !reads?.isVisible()) return;
+      if (state.connection.type === "ready") reload();
+      else readRefreshRequested = true;
+    });
     await connect();
   }
   async function runSlash(endpoint: "commands/run" | "commands/respond", body: { text: string } | { requestId: string; value: string }): Promise<CommandResult> {
@@ -618,7 +631,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     cancel: () => command("abort"),
     submitAsk: (answers: AskAnswer[]) => closeAsk("submit", answers),
     dismissAsk: () => closeAsk("dismiss"),
-    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); listeners.clear(); },
+    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); unwatchUnread?.(); listeners.clear(); },
   };
 }
 export type SessionStore = ReturnType<typeof createSessionStore>;

@@ -124,7 +124,7 @@ function SessionPreview() {
     : scenario === "discarded" ? info({ state: { kind: "discarded", at: "t" }, ahead: undefined, dirtyFiles: undefined }) : info();
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(transcript, false), onNew: async () => {} });
   const [command, setCommand] = useState<WorktreeCommand | undefined>(scenario === "land" || scenario === "conflict" ? "land" : scenario === "discard" ? "discard" : undefined);
-  const [open, setOpen] = useState(scenario === "picker" || scenario === "archive-note");
+  const [open, setOpen] = useState(scenario === "picker" || scenario === "response-picker" || scenario === "archive-note");
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (scenario === "session-menu") timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>('[aria-label="Session menu"]')?.click(), 400));
@@ -135,6 +135,7 @@ function SessionPreview() {
   const sessions = [
     { id: "s1", cwd: worktree.path, name: "Fix the empty-password login", modified: "2026-10-06T21:20:00Z", worktree },
     { id: "s2", cwd: `${repo}/.worktree/s-01a115`, name: "Land the picker redesign", modified: "2026-10-06T21:10:00Z",
+      ...(scenario === "response-picker" ? { response: { kind: "needs-response" as const, reason: "reply" as const } } : {}),
       worktree: info({ id: "wt2", branch: "picker-redesign", state: { kind: "landed", sha: "c0ffee1234", at: "t" }, ahead: undefined, dirtyFiles: undefined }) },
     { id: "s3", cwd: `${repo}/.worktree/s-01a116`, name: "Try a darker sidebar", modified: "2026-10-06T20:50:00Z",
       worktree: info({ id: "wt3", branch: "darker-sidebar", state: { kind: "discarded", at: "t" }, ahead: undefined, dirtyFiles: undefined }) },

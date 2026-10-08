@@ -52,6 +52,7 @@ beforeEach(async () => {
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+    if (path.endsWith("/unread/acknowledge")) return Response.json({ catalogId: "test", sessions: [] });
     if (init.method === "POST") {
       posts.push(path);
       const id = /\/api\/sessions\/([^/]+)\/(archive|restore)$/u.exec(path);
@@ -64,7 +65,7 @@ beforeEach(async () => {
     }
     if (path === "/api/sessions/all") return Response.json(listing());
     if (path === "/api/sessions/asks") return Response.json({ sessions: [{ id: "c", pendingAsk: { askId: "q" } }] });
-    if (path === "/api/sessions/unread") return Response.json({ sessions: [{ sessionId: "b" }, { sessionId: "a" }] });
+    if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [{ sessionId: "b", cwd: "/w", completionOrder: 2 }, { sessionId: "a", cwd: "/w", completionOrder: 1 }] });
     if (path === "/api/machines/local/projects") return Response.json([]);
     const session = /^\/api\/sessions\/([^/]+)\//u.exec(path)?.[1];
     if (path.includes("/messages?")) return Response.json({ messages: [], start: 0, total: 0 });

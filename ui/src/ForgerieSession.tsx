@@ -1,3 +1,5 @@
+import { createReadTracker } from "./readReceipt";
+import { afterTranscriptPaint } from "./readPaint";
 import { contextUse } from "./contextUse";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
@@ -37,7 +39,8 @@ import { SessionMenu, WorktreeDialog, type WorktreeCommand } from "./ui/Worktree
 import { WorktreeReceipt, WorktreeSetupCard } from "./ui/WorktreeSetupCard";
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, worktrees, onNewSession }: {
+export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, worktrees, onNewSession }: {
+  onUnread?: ((listener: (id: string) => void) => () => void) | undefined;
   id: string; known?: Session | undefined; initialDraft?: string | undefined;
   /** The catalog's live view of this session's worktree: state, setup, and branch as events report them. */
   worktree?: WorktreeInfo | undefined;
@@ -53,7 +56,7 @@ export function ForgerieSession({ id, known, initialDraft, initialError, drafts,
   drafts?: DraftStore | undefined;
   onSwitchSession: (session: Session, draft?: string) => void;
 }) {
-  const [store] = useState(() => createSessionStore(id, browserTransport, {}, known));
+  const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint })));
   const [dictation] = useState(() => new ForgerieDictationAdapter());
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);

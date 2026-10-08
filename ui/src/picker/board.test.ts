@@ -14,6 +14,18 @@ function input(extra: Partial<BoardInput>): BoardInput {
 }
 
 describe("row state", () => {
+  it("keeps the response request when unread clears, without guessing from text", () => {
+    const waiting = session("a", { response: { kind: "needs-response", reason: "reply" } });
+    expect(rowState(waiting, idle, undefined, true)).toBe("blocked");
+    expect(rowState(waiting, idle, undefined, false)).toBe("blocked");
+    expect(rowState(session("b", { name: "Can you answer this?", response: { kind: "none" } }), idle, undefined, true)).toBe("unread");
+  });
+  it("puts current work and errors before a request, and trusts live declaration data over cached data", () => {
+    const waiting = session("a", { response: { kind: "needs-response", reason: "undeclared" } });
+    expect(rowState(waiting, { ...idle, isStreaming: true }, undefined, true)).toBe("working");
+    expect(rowState(waiting, idle, { phase: "error" }, true)).toBe("errored");
+    expect(rowState(waiting, { ...idle, needsResponse: false }, undefined, true)).toBe("unread");
+  });
   it("ranks archived over blocked over errored over working over unread", () => {
     const s = session("a");
     expect(rowState({ ...s, archived: true }, { ...idle, blocked: true }, undefined, true)).toBe("archived");

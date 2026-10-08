@@ -46,11 +46,12 @@ try {
       await evaluate(cdp, `Promise.all([document.fonts.load('500 13px "Public Sans Variable"'), document.fonts.load('11px "JetBrains Mono Variable"')]).then(() => document.fonts.ready).then(() => true)`);
       await sleep(200);
       const box = await evaluate(cdp, `(() => { const r = document.querySelector(".picker").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
-      const overflow = await evaluate(cdp, `[...document.querySelectorAll(".picker-row, .picker-group-header, .picker-more")].filter((el) => el.scrollWidth > el.clientWidth + 1).length`);
+      const overflowNodes = await evaluate(cdp, `[...document.querySelectorAll(".picker-row, .picker-group-header, .picker-more")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => ({ session: el.dataset.session, text: el.textContent, width: el.clientWidth, scrollWidth: el.scrollWidth }))`);
+      const pageOverflow = await evaluate(cdp, `document.documentElement.scrollWidth > document.documentElement.clientWidth`);
       const shot = await cdp.send("Page.captureScreenshot", { format: "png", clip: { ...box, scale: scale / 2.625 } });
       const file = join(out, `${posture.name}-${scheme}.png`);
       await writeFile(file, Buffer.from(shot.data, "base64"));
-      report.push({ posture: posture.name, scheme, picker: `${Math.round(box.width)}x${Math.round(box.height)}`, overflow, errors });
+      report.push({ posture: posture.name, scheme, picker: `${Math.round(box.width)}x${Math.round(box.height)}`, overflow: overflowNodes.length, overflowNodes, pageOverflow, errors });
       await cdp.close?.();
     }
   }

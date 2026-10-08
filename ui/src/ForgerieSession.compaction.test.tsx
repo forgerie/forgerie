@@ -43,6 +43,7 @@ it.each([false, true])("restores Stop's returned queue only to chat, with a dela
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   const request = vi.spyOn(browserTransport, "request").mockImplementation(async (path) => {
+    if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith("/abort")) {
       const restoredMessages = status.queuedMessages;
       await aborted;

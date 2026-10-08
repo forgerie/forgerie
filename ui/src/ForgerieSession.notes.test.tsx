@@ -52,6 +52,7 @@ async function sessionWithChanges(options: { status?: SessionStatus; storage?: S
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+    if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
     requests.push({ path, ...(body ? { body } : {}) });
     if (path.endsWith("/prompt")) {

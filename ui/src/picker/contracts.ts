@@ -1,3 +1,4 @@
+import { sessionResponseSchema } from "../sessionResponse";
 import { z } from "zod";
 import { worktreeInfoSchema } from "../worktrees/worktreeApi";
 
@@ -10,6 +11,7 @@ export const pickerSessionSchema = z.object({
   archived: z.boolean().optional(),
   pinned: z.boolean().optional(),
   agentSpawned: z.boolean().optional(),
+  response: sessionResponseSchema.optional(),
   // A malformed worktree drops out, not the whole listing.
   worktree: worktreeInfoSchema.optional().catch(undefined),
 });
@@ -25,6 +27,7 @@ export const wireStatusSchema = z.object({
   workingAgents: z.number().optional(),
   runningProcesses: z.number().optional(),
   ...blockers,
+  response: sessionResponseSchema.optional(),
 });
 export type WireStatus = z.infer<typeof wireStatusSchema>;
 export const wireActivitySchema = z.object({

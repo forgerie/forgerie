@@ -23,6 +23,7 @@ interface Timing { retryDelayMs?: number; maxRetryDelayMs?: number }
 const toStatus = (status: WireStatus): PickerStatus => ({
   isStreaming: status.isStreaming, isCompacting: status.isCompacting, isBashRunning: status.isBashRunning,
   workingAgents: status.workingAgents, runningProcesses: status.runningProcesses,
+  needsResponse: status.response === undefined ? undefined : status.response.kind === "needs-response",
   blocked: status.pendingAsk !== undefined || (status.pendingDialogs?.length ?? 0) > 0,
 });
 
@@ -112,7 +113,7 @@ const errorBody = z.object({ error: z.string() });
  *
  * Join order: subscribe, buffer events, read the snapshots, then replay the
  * buffer on top. Every reconnect repeats the whole join, because the server
- * does not replay missed frames and a sessiond restart clears pending asks.
+ * does not replay missed frames and a sessiond restart clears live extension dialogs.
  */
 export function createCatalogStore(transport: SessionTransport, options: { timing?: Timing } = {}) {
   // Local machine only. Slice 4 turns this into one store per machine under
@@ -122,6 +123,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   let state: CatalogState = { connection: { type: "loading" }, sessions: [], statuses: {}, activities: {}, unread: new Set(), projects: [] };
   const listeners = new Set<() => void>();
   /** Startup progress is not catalog state: it goes straight to whoever started the session. */
+  const unreadListeners = new Set<(id: string) => void>();
   const startupListeners = new Set<(event: StartupEvent) => void>();
   /** Worktree changes also go to whoever started a session, before the catalog lists it. */
   const worktreeListeners = new Set<(record: WorktreeRecord) => void>();
@@ -198,6 +200,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         catch (error) { console.warn("Picker ignored a malformed machine event.", error); return; }
         if (!event) return;
         if (current.buffer) current.buffer.push(event); else updateLive(applyCatalogEvent(state, event));
+        if (event.type === "sessions.unread" && event.unread !== null) for (const listener of unreadListeners) listener(event.sessionId);
       });
       socket.addEventListener("close", () => retry(current));
       socket.addEventListener("error", () => retry(current));
@@ -295,12 +298,13 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    onUnread: (listener: (id: string) => void) => { unreadListeners.add(listener); return () => { unreadListeners.delete(listener); }; },
     onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
     onWorktree: (listener: (record: WorktreeRecord) => void) => { worktreeListeners.add(listener); return () => { worktreeListeners.delete(listener); }; },
     start: () => { unwatch = transport.watchRecovery?.(recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
     ...mutations,
-    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); },
+    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); unreadListeners.clear(); },
   };
 }
 export type CatalogStore = ReturnType<typeof createCatalogStore>;

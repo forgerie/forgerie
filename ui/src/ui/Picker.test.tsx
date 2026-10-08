@@ -55,7 +55,7 @@ describe("picker", () => {
   it("draws groups in triage order with counts, and live work as counts", () => {
     render(view([S("ask"), S("run"), S("idle")], { statuses: { ask: { ...idle, blocked: true }, run: { ...idle, isStreaming: true, workingAgents: 3, runningProcesses: 1 } } }));
     const labels = [...host.querySelectorAll(".picker-group-label")].map((node) => node.textContent);
-    expect(labels).toEqual(["Blocked on you", "Working", "Last hour"]);
+    expect(labels).toEqual(["Needs your response", "Working", "Last hour"]);
     const running = host.querySelector('[data-session="run"]');
     expect(running?.querySelector('[aria-label="3 agents working"]')?.textContent).toBe("3");
     expect(running?.querySelector('[aria-label="1 process running"]')?.textContent).toBe("1");

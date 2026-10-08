@@ -139,6 +139,26 @@ describe("live event cost", () => {
 });
 
 describe("machine catalog", () => {
+  it("reads explicit response intent from live status and observes only new unread work", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    const changed = vi.fn();
+    const unwatch = store.onUnread(changed);
+    api.emit({ type: "status.update", status: { sessionId: "a", ...idle, response: { kind: "needs-response", reason: "reply" } } });
+    await until(store, () => store.getSnapshot().statuses["a"]?.needsResponse === true);
+    api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 2, unread: { completionOrder: 1 } });
+    await until(store, () => store.getSnapshot().unread.has("a"));
+    expect(changed).toHaveBeenCalledExactlyOnceWith("a");
+    api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 3, unread: null });
+    await until(store, () => !store.getSnapshot().unread.has("a"));
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().statuses["a"]?.needsResponse).toBe(true);
+    unwatch();
+    api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 4, unread: { completionOrder: 2 } });
+    await until(store, () => store.getSnapshot().unread.has("a"));
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
   it("joins with sessions, statuses, activities, and projects", async () => {
     const api = await machine();
     const store = start(api);

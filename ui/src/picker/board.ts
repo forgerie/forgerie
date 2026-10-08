@@ -1,3 +1,4 @@
+import type { SessionResponse } from "../sessionResponse";
 // Pure picker model: sessions in, grouped rows out. No I/O, no clock of its own.
 // Classification and grouping are ported from the Lit client's sessionBoard.ts
 // and inboxLocation.ts (main, a348db81) so both clients agree on what a
@@ -6,6 +7,7 @@
 import type { WorktreeInfo } from "../worktrees/worktreeApi";
 
 export interface PickerSession {
+  response?: SessionResponse | undefined;
   id: string;
   cwd: string;
   name?: string | undefined;
@@ -25,6 +27,7 @@ export interface PickerStatus {
   workingAgents?: number | undefined;
   runningProcesses?: number | undefined;
   blocked?: boolean | undefined;
+  needsResponse?: boolean | undefined;
 }
 export interface PickerActivity {
   phase: "active" | "idle" | "error";
@@ -39,7 +42,7 @@ export type AgeBand = "hour" | "today" | "yesterday" | "week" | "month" | "older
 
 export const GROUPS: readonly { kind: GroupKind; label: string }[] = [
   { kind: "pinned", label: "Pinned" },
-  { kind: "blocked", label: "Blocked on you" },
+  { kind: "blocked", label: "Needs your response" },
   { kind: "errored", label: "Errored" },
   { kind: "working", label: "Working" },
   { kind: "unread", label: "Unread" },
@@ -101,6 +104,7 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   if (status?.blocked === true) return "blocked";
   if (activity?.phase === "error") return "errored";
   if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true || activity?.phase === "active") return "working";
+  if (status?.needsResponse ?? session.response?.kind === "needs-response") return "blocked";
   return unread ? "unread" : "open";
 }
 

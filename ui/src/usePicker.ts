@@ -106,7 +106,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     return row ? { state: row.state, time: row.time, ...(row.session.name ? { name: row.session.name } : {}) } : undefined;
   }, [rows]);
   return { view, prefs, setPrefs, find, look, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext,
-    onStartup: store.onStartup, onWorktree: store.onWorktree };
+    onUnread: store.onUnread, onStartup: store.onStartup, onWorktree: store.onWorktree };
 }
 
 export type ArchiveOutcome =

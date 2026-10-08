@@ -47,6 +47,7 @@ async function respondingSession() {
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   const request = vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+    if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith("/prompt")) {
       const body = JSON.parse(String(init.body)) as { text: string; streamingBehavior?: "steer" | "followUp" };
       prompts.push(body);
