@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { BotIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon, XIcon } from "lucide-react";
+import { BotIcon, ChevronLeftIcon, PlusIcon, PuzzleIcon, XIcon } from "lucide-react";
 import { agentsApi, type AgentList, type AgentSummary } from "../../agents/agentsApi";
 import { agentDrafts } from "../../agents/agentDrafts";
 import { parseModelSpec, modelSpecText } from "../../agents/agentFile";
 import { draftKey, type SettingsPlace } from "../../agents/agentPlace";
 import { AgentEditor } from "./AgentEditor";
 import { SettingsFrame } from "./SettingsFrame";
+import { SettingsRow } from "./SettingsRow";
+import { PluginsView } from "./PluginsView";
 import "./settings.css";
 
 type ListLoad = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: AgentList };
@@ -35,20 +37,13 @@ const modelText = (agent: AgentSummary) => {
 
 function AgentRow({ agent, replaced, onOpen }: { agent: AgentSummary; replaced: boolean; onOpen: () => void }) {
   const unsaved = agent.scope === "user" && agentDrafts.has(draftKey({ type: "user", file: agent.file }));
-  return <li>
-    <button type="button" className="agent-row" onClick={onOpen} data-replaced={replaced || undefined}>
-      <span className="agent-row-name">{agent.name}</span>
-      <span className="agent-row-model">{modelText(agent)}</span>
-      <span className="agent-row-description">{agent.description || <em>No description</em>}</span>
-      <span className="agent-row-flags">
-        {replaced ? <span>Replaced by yours</span> : agent.advertise ? <span data-on>Offered to sessions</span> : null}
-        {agent.disabled ? <span>Turned off</span> : null}
-        {agent.broken ? <span data-tone="error">{agent.broken}</span> : null}
-        {unsaved ? <span data-tone="draft">Unsaved changes</span> : null}
-      </span>
-      <ChevronRightIcon aria-hidden size={16} className="agent-row-chevron" />
-    </button>
-  </li>;
+  return <SettingsRow name={agent.name} meta={modelText(agent)} description={agent.description || <em>No description</em>}
+    replaced={replaced} onOpen={onOpen} flags={<>
+      {replaced ? <span>Replaced by yours</span> : agent.advertise ? <span data-on>Offered to sessions</span> : null}
+      {agent.disabled ? <span>Turned off</span> : null}
+      {agent.broken ? <span data-tone="error">{agent.broken}</span> : null}
+      {unsaved ? <span data-tone="draft">Unsaved changes</span> : null}
+    </>} />;
 }
 
 /**
@@ -65,6 +60,9 @@ export function SettingsView({ place, onPlace, onClose }: {
   const { load, refresh } = useAgentList();
   const close = onClose ? <button type="button" className="picker-icon" aria-label="Close settings" title="Close settings" onClick={onClose}><XIcon aria-hidden size={16} /></button> : null;
 
+  if (place.section === "plugins") return <PluginsView selected={place.plugin}
+    onOpen={(plugin) => onPlace({ section: "plugins", plugin })} onBack={() => onPlace({ section: "root" })} onClose={onClose} />;
+
   if (place.section === "agents" && place.agent) {
     return <AgentEditor key={JSON.stringify(place.agent)} target={place.agent} home={load.type === "ready" ? load.value.home : undefined}
       onBack={() => onPlace({ section: "agents" })} onClose={onClose}
@@ -73,11 +71,10 @@ export function SettingsView({ place, onPlace, onClose }: {
   if (place.section === "root") {
     return <SettingsFrame title="Settings" actions={close}>
       <ul className="settings-sections">
-        <li><button type="button" className="agent-row" onClick={() => onPlace({ section: "agents" })}>
-          <span className="agent-row-name"><BotIcon aria-hidden size={16} />Agents</span>
-          <span className="agent-row-description">Roles a session can hand work to, each with its own model and instructions.</span>
-          <ChevronRightIcon aria-hidden size={16} className="agent-row-chevron" />
-        </button></li>
+        <SettingsRow name={<><BotIcon aria-hidden size={16} />Agents</>} description="Roles a session can hand work to, each with its own model and instructions."
+          onOpen={() => onPlace({ section: "agents" })} />
+        <SettingsRow name={<><PuzzleIcon aria-hidden size={16} />Plugins</>} description="Pi packages and extensions, and Forgerie's browser plugins."
+          onOpen={() => onPlace({ section: "plugins" })} />
       </ul>
     </SettingsFrame>;
   }

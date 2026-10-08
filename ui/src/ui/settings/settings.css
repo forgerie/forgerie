@@ -40,7 +40,7 @@
 .agent-group-where code { font-family: var(--code-font); }
 .agent-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) auto;
   grid-template-areas: "name model chevron" "description description chevron" "flags flags chevron";
-  align-items: baseline; column-gap: var(--space-3); inline-size: 100%; padding: var(--space-3); border: 0; border-radius: var(--radius-control);
+  align-items: baseline; column-gap: var(--space-3); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-3); border: 0; border-radius: var(--radius-control);
   background: transparent; color: var(--foreground); text-align: start; transition: background-color 150ms; }
 .agent-row:hover, .agent-row:focus-visible { background: var(--hover-surface); }
 .agent-row-name { grid-area: name; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); font-weight: 500; overflow-wrap: anywhere; }

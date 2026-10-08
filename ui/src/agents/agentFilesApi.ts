@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
+import { activeForgerieProfile, agentsInProfile } from "../settings/forgerieProfile";
 
 /**
  * Dev-server API for pi-subagents agent files. The files are the only store:
@@ -19,12 +20,12 @@ export const AGENTS_PREFIX = "/aui/agents";
 export type AgentScope = "user" | "builtin";
 export interface AgentDirs { user: string; builtin: string | undefined }
 
-export function defaultAgentDirs(root: string): AgentDirs {
-  const piDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+export async function defaultAgentDirs(root: string): Promise<AgentDirs> {
+  const profile = await activeForgerieProfile();
   const builtin = process.env.FORGERIE_BUILTIN_AGENTS_DIR
     // This worktree sits in Forgerie's checkout, which bundles pi-subagents.
     ?? resolve(root, "../../node_modules/pi-subagents/agents");
-  return { user: join(piDir, "agents"), builtin };
+  return { user: agentsInProfile(profile), builtin };
 }
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -164,10 +165,10 @@ async function handle(dirs: AgentDirs, request: IncomingMessage, response: Serve
   throw new HttpError(405, "Use GET, PUT, or DELETE.");
 }
 
-export function agentFilesApi(dirs: AgentDirs): Plugin {
+export function agentFilesApi(dirs: AgentDirs | (() => Promise<AgentDirs>)): Plugin {
   const middleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => {
     if (!request.url?.startsWith(AGENTS_PREFIX)) { next(); return; }
-    handle(dirs, request, response).catch((error: unknown) => {
+    Promise.resolve(typeof dirs === "function" ? dirs() : dirs).then((current) => handle(current, request, response)).catch((error: unknown) => {
       response.statusCode = error instanceof HttpError ? error.status : 500;
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));

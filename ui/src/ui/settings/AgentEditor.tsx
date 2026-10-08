@@ -11,6 +11,7 @@ import { framePromptBody } from "../../agents/promptMarkdown";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "../ModelPicker";
 import { PromptEditor } from "./PromptEditor";
 import { SettingsFrame } from "./SettingsFrame";
+import { SettingsToggle } from "./SettingsToggle";
 
 
 type Loaded = { baseText: string; baseMtimeMs: number | null; readOnly: boolean };
@@ -256,8 +257,8 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
         <Field label="Offer to sessions" id="agent-advertise" hint={advertise
           ? "Every new session sees this agent's name and description, and hands it matching work without being told."
           : "Sessions use this agent only when someone names it."}>
-          <button type="button" role="switch" className="agent-switch" aria-checked={advertise} aria-labelledby="agent-advertise" disabled={readOnly}
-            onClick={() => update("advertise", advertise ? undefined : "true")}><span aria-hidden="true" /></button>
+          <SettingsToggle label="Offer to sessions" checked={advertise} disabled={readOnly}
+            onChange={(checked) => update("advertise", checked ? "true" : undefined)} />
         </Field>
         {otherLines.length > 0 ? <Field label="Also in the file" hint="Kept as written. Edit these in the file itself.">
           <pre className="agent-other">{otherLines.join("\n")}</pre>

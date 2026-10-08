@@ -34,14 +34,15 @@ const readSettings = (): SettingsPlace | undefined => {
   const params = new URLSearchParams(window.location.search);
   const section = params.get("settings");
   if (section === null) return undefined;
-  return section === "agents" ? { section, agent: readTarget(params.get("agent") ?? undefined) } : { section: "root" };
+  if (section === "agents") return { section, agent: readTarget(params.get("agent") ?? undefined) };
+  return section === "plugins" ? { section, plugin: params.get("plugin") ?? undefined } : { section: "root" };
 };
 /** `?backlog` keeps the backlog open across a reload; `?backlog=<projectId>/<itemId>` keeps one item open. */
 const readBacklog = () => readBacklogPlace(new URLSearchParams(window.location.search));
 /** `&item=<projectId>/<itemId>` keeps a backlog item riding with the new-session dialog across a reload. */
 const readItem = () => readItemParam(new URLSearchParams(window.location.search).get("item"));
 /** Settings and the backlog both take the thread's place, so opening one closes the other. */
-const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("backlog"); };
+const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("backlog"); };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 const backlogApi = createBacklogApi((path, init) => fetch(path, init));
@@ -247,6 +248,7 @@ export function App() {
     if (place) {
       url.searchParams.set("settings", place.section);
       if (place.section === "agents" && place.agent) url.searchParams.set("agent", targetParam(place.agent));
+      if (place.section === "plugins" && place.plugin) url.searchParams.set("plugin", place.plugin);
     }
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSettings(place);

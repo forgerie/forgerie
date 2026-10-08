@@ -2,7 +2,7 @@
 export type AgentTarget = { type: "new" } | { type: "user" | "builtin" | "customize"; file: string };
 
 /** Where settings is open, as the URL holds it: `?settings=<section>&agent=<target>`. */
-export interface SettingsPlace { section: "root" | "agents"; agent?: AgentTarget | undefined }
+export interface SettingsPlace { section: "root" | "agents" | "plugins"; agent?: AgentTarget | undefined; plugin?: string | undefined }
 
 export const targetParam = (target: AgentTarget) => target.type === "new" ? "new" : `${target.type}/${target.file}`;
 export function readTarget(value: string | undefined): AgentTarget | undefined {
