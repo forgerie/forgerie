@@ -441,6 +441,21 @@ button:disabled { cursor: default; opacity: 0.4; }
 .attachment-file, .attachment-remove { flex: none; }
 .attachment[data-error] { border-color: var(--destructive); }
 .attachment-error { font-size: var(--label-text); color: var(--destructive); overflow-wrap: anywhere; }
+/* Delivery: a full-width row after the chips, inside their scroll budget, so a
+   short window scrolls to it instead of losing the input. Segments like the
+   thinking levels; each option wraps whole, so a narrow bar stacks them. */
+.attachment-delivery { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.attachment-delivery legend { float: left; margin-inline-end: var(--space-2); padding: 0; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+/* Drawn 2rem tall to keep the row short; ::before keeps the full touch target. */
+.delivery-option { position: relative; display: inline-flex; align-items: center; min-block-size: 2rem; max-inline-size: 100%; padding-inline: var(--space-3); border-radius: var(--radius-control); color: var(--muted-foreground); font-size: var(--small-text); cursor: pointer; }
+.delivery-option::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.delivery-option input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
+.delivery-option span { overflow-wrap: anywhere; }
+.delivery-option:hover { background: var(--hover-surface); color: var(--foreground); }
+.delivery-option:has(:checked) { background: var(--active-surface); color: var(--foreground); font-weight: 500; }
+.delivery-option:has(:focus-visible) { outline: 2px solid var(--line-focus); outline-offset: 1px; }
+.attachment-delivery:disabled .delivery-option { cursor: default; opacity: 0.4; }
+.attachment-delivery:disabled .delivery-option:hover { background: transparent; color: var(--muted-foreground); }
 /* Reply and tool images. Tiles never draw narrower than --gallery-tile; the
    column count comes from galleryPlan, so the last tile can open the rest. */
 .image-gallery { margin-block-start: var(--space-3); min-inline-size: 0; }
@@ -471,6 +486,11 @@ button:disabled { cursor: default; opacity: 0.4; }
 .viewer-foot .viewer-caption { flex: 1; min-inline-size: 0; margin: 0; padding-inline: var(--space-2); text-align: center; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .attachment-notice { margin: 0; padding: var(--space-2) var(--space-4); color: var(--destructive); font-size: var(--small-text); }
 .attachment-notice button { margin-inline-start: var(--space-2); }
+/* The way out of a blocked queue, beside the reason, so it shows even when the chips scroll. */
+.ask-route .route-action { flex: none; align-self: center; min-block-size: 2rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; color: var(--foreground); font-size: var(--small-text); }
+.ask-route .route-action:not(:disabled):hover { border-color: var(--line-focus); }
+.ask-route:has(.route-action) { flex-wrap: wrap; }
+.ask-route:has(.route-action) > span { flex: 1 1 12rem; }
 /* Ask mode: the same bar with a question layer on top. The layer takes at most
    42% of the session height and scrolls inside; the input and its action row
    never move off screen. */

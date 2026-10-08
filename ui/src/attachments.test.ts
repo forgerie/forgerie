@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAttachmentAdapter, INLINE_IMAGE_BYTES, MAX_ATTACHMENT_BYTES, promptOf } from "./attachments";
+import { createAttachmentAdapter, INLINE_IMAGE_BYTES, MAX_ATTACHMENT_BYTES, offersDeliveryChoice, promptOf, sendsInline } from "./attachments";
 import type { CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
 
 async function pending(file: File): Promise<PendingAttachment> {
@@ -23,6 +23,28 @@ describe("Forgerie attachments", () => {
       text: "look", attachments: [{ kind: "image", name: "picture.png", mimeType: "image/png", data: "aGk=" }],
     });
     expect(save).not.toHaveBeenCalled();
+  });
+  it("saves a native image as a file when the choice is the folder, read at send time", async () => {
+    const save = vi.fn().mockResolvedValue({ path: ".forgerie/attachments/picture.png", mimeType: "image/png", size: 2 });
+    let delivery: "inline" | "folder" = "inline";
+    const adapter = createAttachmentAdapter(save, () => delivery);
+    const draft = await pending(new File(["hi"], "picture.png", { type: "image/png" }));
+    expect(offersDeliveryChoice([draft])).toBe(true);
+    expect(sendsInline(draft, "inline")).toBe(true);
+    delivery = "folder";
+    const complete = await adapter.send(draft);
+    expect(save).toHaveBeenCalledWith({ kind: "file", name: "picture.png", mimeType: "image/png", data: "aGk=" }, expect.any(AbortSignal));
+    expect(promptOf({ content: [], attachments: [complete] })).toEqual({ text: "@.forgerie/attachments/picture.png" });
+    // A completed attachment keeps its form, whatever the choice is now.
+    expect(sendsInline(complete, "inline")).toBe(false);
+    expect(sendsInline(image(), "folder")).toBe(true);
+    expect(offersDeliveryChoice([complete])).toBe(false);
+  });
+  it("offers no delivery choice for files the folder always takes", async () => {
+    const files = [await pending(new File(["hi"], "notes.txt", { type: "text/plain" })),
+      await pending(new File([new Uint8Array(INLINE_IMAGE_BYTES + 1)], "large.png", { type: "image/png" }))];
+    expect(offersDeliveryChoice(files)).toBe(false);
+    expect(files.some((file) => sendsInline(file, "inline"))).toBe(false);
   });
   it.each(["application/pdf", "text/plain", "image/svg+xml", ""])("saves %s as a file and passes the reference to prompt", async (mimeType) => {
     const save = vi.fn().mockResolvedValue({ path: ".forgerie/attachments/report.txt", mimeType: mimeType || "application/octet-stream", size: 2 });

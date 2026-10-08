@@ -19,6 +19,7 @@ import { NewSession, type LaunchDraft } from "../src/NewSession";
 import { createLaunchStore } from "../src/launches";
 import { createDeferredFiles, type NewSessionApi, type Project, type Workspace } from "../src/newSession";
 import { createAttachmentAdapter } from "../src/attachments";
+import { attachmentDelivery } from "../src/attachmentDelivery";
 import { idleCompaction, isCompactCommand, type CompactionState } from "../src/compaction";
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
 import type { HandoffDoor } from "../src/handoffDoor";
@@ -246,7 +247,10 @@ const queueScenarios: Record<string, QueuedMessage[]> = {
   "compaction-reconnecting": [{ kind: "followUp", text: "/compact retain the deployment decisions" }],
 };
 const queueDrafts: Record<string, string> = { queue: "Also check the folded landscape layout.", "queue-compaction": "Then open a pull request.",
-  "queue-attachments": "Review this screenshot after the run." };
+  "queue-attachments": "Review this screenshot after the run.", "queue-attachments-folder": "Review this screenshot after the run." };
+// The page's delivery choice persists, so each attachment scenario sets the one it shows.
+const queueAttachmentPreview = scenario.startsWith("queue-attachments");
+if (queueAttachmentPreview) attachmentDelivery.set(scenario === "queue-attachments-folder" ? "folder" : "inline");
 const compactionSummary = "Compaction complete.\nTokens before: 84,120\n\nThe session keeps its deployment decisions and test plan.\n" + "Keep the runtime server-owned and do not retry mutations. ".repeat(30);
 const compactionScenarios: Record<string, CompactionState> = {
   "compaction-queued": { type: "queued", text: "/compact retain the test plan, release decisions, and deployment notes" },
@@ -439,7 +443,7 @@ function Preview() {
     setRunning(false);
   }
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
-    adapters: { dictation, ...(attachmentPreview || scenario === "queue-attachments" ? { attachments: createAttachmentAdapter(async () => {
+    adapters: { dictation, ...(attachmentPreview || queueAttachmentPreview ? { attachments: createAttachmentAdapter(async () => {
       if (scenario === "attachments-error") throw new Error("The workspace is read only. Your file stays here.");
       return { path: ".forgerie/attachments/notes.txt", mimeType: "text/plain", size: 5 };
     }) } : {}) },
@@ -448,7 +452,7 @@ function Preview() {
   useEffect(() => {
     const draft = queueDrafts[scenario];
     if (draft !== undefined) runtime.thread.composer.setText(draft);
-    if (scenario !== "queue-attachments") return;
+    if (!queueAttachmentPreview) return;
     const bytes = Uint8Array.from(atob(pixel), (char) => char.charCodeAt(0));
     void runtime.thread.composer.addAttachment(new File([bytes], "layout.png", { type: "image/png" }));
   }, [runtime]);

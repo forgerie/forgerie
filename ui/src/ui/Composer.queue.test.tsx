@@ -1,24 +1,28 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime, type AttachmentAdapter } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompactionState } from "../compaction";
 import type { QueuedMessage, WorkingSend } from "../queue";
 import type { AskBinding } from "./useAskMode";
 import { Thread } from "./Thread";
 import { useThreadMessages } from "../useThreadMessages";
+import { createAttachmentAdapter, type SaveAttachment } from "../attachments";
+import { attachmentDelivery } from "../attachmentDelivery";
 
 let root: Root;
+let runtime: AssistantRuntime;
 interface Props {
   running?: boolean; working?: WorkingSend; items?: QueuedMessage[]; offline?: boolean; compaction?: CompactionState;
   onNew?: (message: AppendMessage) => Promise<void>; onClear?: () => void; onCancel?: () => Promise<void>; ask?: AskBinding;
-  onRun?: (text: string) => Promise<void>;
+  onRun?: (text: string) => Promise<void>; attachments?: AttachmentAdapter;
 }
 const responding: WorkingSend = { queue: true, steer: true };
 function Fixture({ running = true, working = responding, items = [], offline = false, compaction = { type: "idle" },
-  onNew = async () => {}, onClear = () => {}, onCancel = async () => {}, ask, onRun = async () => {} }: Props) {
-  const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], running), onNew, onCancel, isRunning: running, isDisabled: offline });
+  onNew = async () => {}, onClear = () => {}, onCancel = async () => {}, ask, onRun = async () => {}, attachments }: Props) {
+  runtime = useExternalStoreRuntime({ messages: useThreadMessages([], running), onNew, onCancel, isRunning: running, isDisabled: offline,
+    ...(attachments ? { adapters: { attachments } } : {}) });
   return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} working={working} shell={{ availability: { type: "ready" }, onRun }}
     queue={{ items, disabled: offline, onClear }}
     compaction={{ state: compaction, disabled: offline, onSend: async () => {}, onDismiss: () => {} }} /></AssistantRuntimeProvider>;
@@ -42,7 +46,10 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals();
+  attachmentDelivery.set("inline"); localStorage.clear();
+});
 
 describe("sending while the agent works", () => {
   it("offers Queue and Steer beside Stop once there is a draft, and keeps Stop in its place", async () => {
@@ -159,6 +166,77 @@ describe("sending while the agent works", () => {
     expect(button("Stop generating")?.title).toBe("Stop and return queued messages to the draft");
     await render();
     expect(button("Stop generating")?.title).toBe("Stop generating");
+  });
+});
+
+describe("queueing attachments while the agent works", () => {
+  const saved = (path: string) => vi.fn<SaveAttachment>().mockResolvedValue({ path, mimeType: "image/png", size: 2 });
+  const add = (file: File) => act(async () => runtime.thread.composer.addAttachment(file));
+  const picture = () => new File(["hi"], "picture.png", { type: "image/png" });
+  const option = (name: string) => [...document.querySelectorAll<HTMLLabelElement>(".delivery-option")]
+    .find((node) => node.textContent === name)?.querySelector("input");
+  const notice = () => document.querySelector(".ask-route")?.textContent ?? "";
+
+  it("queues a file saved to the workspace as its path", async () => {
+    const onNew = vi.fn<(message: AppendMessage) => Promise<void>>().mockResolvedValue(undefined);
+    const save = saved(".forgerie/attachments/notes.txt");
+    await render({ onNew, attachments: createAttachmentAdapter(save) });
+    await add(new File(["notes"], "notes.txt", { type: "text/plain" }));
+    // A file that is not an image always goes to the folder, so there is no choice to make.
+    expect(document.querySelector(".attachment-delivery")).toBeNull();
+    expect(button("Queue message")?.disabled).toBe(false);
+    await click(button("Queue message"));
+    await vi.waitFor(() => expect(onNew).toHaveBeenCalledOnce());
+    expect(onNew.mock.calls[0]?.[0].attachments?.[0]?.content).toEqual([{ type: "text", text: "@.forgerie/attachments/notes.txt" }]);
+    expect(onNew.mock.calls[0]?.[0].steer).toBeFalsy();
+  });
+
+  it("holds an image attached to the message, and queues it once it is saved to the folder", async () => {
+    const onNew = vi.fn<(message: AppendMessage) => Promise<void>>().mockResolvedValue(undefined);
+    const save = saved(".forgerie/attachments/picture.png");
+    await render({ onNew, attachments: createAttachmentAdapter(save) });
+    await add(picture());
+    expect(option("Attach to message (images only)")?.checked).toBe(true);
+    expect(button("Queue message")?.disabled).toBe(true);
+    expect(button("Steer")?.disabled).toBe(true);
+    expect(notice()).toContain("Images attached to a message cannot be queued");
+    await press("Enter");
+    expect(onNew).not.toHaveBeenCalled();
+
+    // The notice carries the way out, so it shows even when the chips scroll.
+    await click(button("Save to .forgerie/attachments"));
+    expect(option("Save to .forgerie/attachments")?.checked).toBe(true);
+    expect(attachmentDelivery.get()).toBe("folder");
+    expect(localStorage.getItem("pi-web:attachment-delivery")).toBe("folder");
+    expect(notice()).toBe("");
+    expect(document.querySelector(".attachment-detail")?.textContent).toBe("Saved in workspace on send");
+    await click(button("Steer"));
+    await vi.waitFor(() => expect(onNew).toHaveBeenCalledOnce());
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "file", name: "picture.png", mimeType: "image/png" }), expect.any(AbortSignal));
+    expect(onNew.mock.calls[0]?.[0].attachments?.[0]?.content).toEqual([{ type: "text", text: "@.forgerie/attachments/picture.png" }]);
+    expect(onNew.mock.calls[0]?.[0].steer).toBe(true);
+  });
+
+  it("switches back to attaching from the choice row", async () => {
+    attachmentDelivery.set("folder");
+    await render({ attachments: createAttachmentAdapter(saved(".forgerie/attachments/picture.png")) });
+    await add(picture());
+    expect(button("Queue message")?.disabled).toBe(false);
+    await click(option("Attach to message (images only)") ?? undefined);
+    expect(attachmentDelivery.get()).toBe("inline");
+    expect(button("Queue message")?.disabled).toBe(true);
+  });
+
+  it("sends an attached image at once when the agent is idle", async () => {
+    const onNew = vi.fn<(message: AppendMessage) => Promise<void>>().mockResolvedValue(undefined);
+    const save = saved(".forgerie/attachments/picture.png");
+    await render({ onNew, running: false, working: { queue: false, steer: false }, attachments: createAttachmentAdapter(save) });
+    await add(picture());
+    expect(document.querySelector(".attachment-detail")?.textContent).toBe("Image");
+    await click(button("Send message"));
+    await vi.waitFor(() => expect(onNew).toHaveBeenCalledOnce());
+    expect(onNew.mock.calls[0]?.[0].attachments?.[0]?.content).toEqual([{ type: "image", image: "data:image/png;base64,aGk=" }]);
+    expect(save).not.toHaveBeenCalled();
   });
 });
 

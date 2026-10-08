@@ -70,7 +70,7 @@ try {
     }
     result.geometry.push({ scenario, posture: posture.name, scheme, rows: state.rows.length, buttons: state.buttons.map((button) => button.label) });
   }
-  for (const scenario of ["queue", "queue-compaction", "queue-attachments", "compaction-queued"]) {
+  for (const scenario of ["queue", "queue-compaction", "queue-attachments", "queue-attachments-folder", "compaction-queued"]) {
     await navigate(scenario);
     for (const scheme of ["light", "dark"]) {
       await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
@@ -98,8 +98,14 @@ try {
   await navigate("queue-attachments");
   await until("document.querySelectorAll('.composer-attachments .attachment').length === 1");
   assert.equal(await evaluate(cdp, "document.querySelector('[aria-label=\"Queue message\"]').disabled"), true);
-  assert.match(await evaluate(cdp, "document.querySelector('.ask-route').textContent"), /Queued messages are text only/);
+  assert.match(await evaluate(cdp, "document.querySelector('.ask-route').textContent"), /Images attached to a message cannot be queued/);
   result.flows.attachmentsBlocked = true;
+  // Saving the image to the workspace makes the message queueable: it travels as its path.
+  await click("Save to .forgerie/attachments");
+  await until("!document.querySelector('[aria-label=\"Queue message\"]').disabled && !document.querySelector('.ask-route')");
+  await click("Queue message");
+  await until("document.querySelectorAll('.composer-attachments .attachment').length === 0");
+  result.flows.savedAttachmentQueued = true;
 
   // Keyboard and buttons: Enter queues, Ctrl+Shift+Enter steers, Shift+Enter is a new line.
   await navigate("queue-live");

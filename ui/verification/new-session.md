@@ -47,7 +47,7 @@ Nothing is retried. Each failure says which step failed:
 - Reads: `GET /api/projects`, `GET /api/projects/:id/workspaces`, `GET /api/models?cwd=`, `GET /api/projects/:id/workspaces/:id/prompt-resource-catalog`, and the workspace file search. Writes: `POST /api/sessions` with `{ cwd, startupToken, modelSpec?, thinkingLevel? }`, then `POST /api/sessions/:id/attachments` for files, then `/prompt` or `/prompt-resource-command`. Progress arrives as `session.startup` events on `/api/events`, matched by `startupToken`.
 - The composer's pickers mount inside the dialog. A native modal dialog makes the rest of the page inert, so a picker on the page body could not be used.
 - The legacy client also offers other machines as destinations. This client reads only the local machine everywhere, so it cannot open a session it starts elsewhere. Adding a project is still in the legacy client.
-- The legacy "inline or folder" choice for attachments is not here. This client decides per file, as it does in a running session.
+- The "Attachment delivery" choice is the legacy client's "inline or folder" choice, shared with it and with a running session. It decides only images up to 4.5 MiB. Other files, and larger images, always go to `.forgerie/attachments`.
 - Rapidfire in the legacy client allows only the current workspace. Here it follows the tab, because nothing in this client depends on the current workspace.
 - Starts in progress live in this browser tab. A reload during a start warns first; after a reload, the list shows the session once Pi saves it.
 

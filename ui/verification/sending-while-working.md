@@ -35,7 +35,7 @@ The client refuses some sends before any request. The draft stays, and the messa
 | Refusal | Reason |
 | --- | --- |
 | "This message is already queued." | Pi silently drops a text-only message that matches one already waiting. |
-| "Queued messages are text only." | Stop returns only the text of queued work, so a queued image could be lost. The composer disables Queue and Steer and shows this before a send. |
+| "Images attached to a message cannot be queued." | Stop returns only the text of queued work, so a queued inline image could be lost. The composer disables Queue and Steer and shows this before a send. It names the way out: choose "Save to .forgerie/attachments". |
 | "Steering works only while the agent responds." | The state changed between the click and the send. |
 
 A send whose acknowledgement is lost is not retried. Pi can already hold it. Check the queue and the transcript before you send it again.
@@ -48,7 +48,7 @@ The queue is only as fresh as the last `status.update`. The backend publishes st
 
 Limits:
 
-- Queued messages are text only. Attachments wait until the run ends.
+- Queued messages are text. A file saved to `.forgerie/attachments` queues as its `@path` in that text, so Stop returns it with the message and the file stays on disk. Files that are not images always go there. An image attached to the message itself waits until the run ends. The "Attachment delivery" choice under the chips decides which an image is. It shows only while the draft holds an image it decides, and it is shared with the legacy client through `pi-web:attachment-delivery` in `localStorage`.
 - Slash commands other than `/compact` cannot be queued.
 - One queued item cannot be removed, edited, or reordered. Stop returns all of them to the draft for editing.
 - Steering cannot be chosen for a message that is already queued.
@@ -72,6 +72,7 @@ Set `APP_URL` when the dev server is not on port 8510, and `FORGERIE_ROOT` when 
 | Automated checks. | Build, TypeScript, lint, and 493 unit tests passed (after the review fixes and the model picker). Review-fix tests cover one shared "working" rule, focus after Queue, Steer, and Clear, Escape only from an empty draft, keyboard-shortcut names, the always-mounted announcer, and the kind separator. A new test covers a `!` draft during an agent run: it offers "Run command", not Queue or Steer. Another covers an ordinary prompt beside a running shell command: it goes out without a queue behavior. |
 | Browser fixtures. | `queue-acceptance.mjs` passed 48 scenario, theme, and size combinations. Flows: keyboard and buttons, attachments blocked, Stop restores (the preview's own Stop handler; the real path is covered by `ForgerieSession.queue.test.tsx` and the real-session check), and Clear keeps the draft and the run. The queue list stays within `min(9rem, 22cqb)`. No API mutation and no page error. `shell-acceptance.mjs` (36) and `compaction-acceptance.mjs` (72) still pass. |
 | Visual review. | All 24 captures from `queue-shots.mjs` were read in contact sheets: the queue, a queued compaction, and a draft with attachments, at four Fold postures in both themes. Queue rows wrap, the list scrolls inside its budget, and the input, Steer, Queue, and Stop stay on screen. |
+| Saved attachments queue (2026-10-08). | `queue-acceptance.mjs` passed 60 combinations, now with `queue-attachments-folder`. The `attachmentsBlocked` flow then presses the notice's "Save to .forgerie/attachments" and queues the draft (`savedAttachmentQueued`). `Composer.queue.test.tsx` covers the saved-file queue, the blocked inline image, the notice's way out, Steer with a saved image, and the switch back. The 16 `queue-shots.mjs` captures for both attachment scenarios and 8 `attachments` captures were read. At folded landscape and in a short window the choice row scrolls with the chips; the notice and its button stay on screen. |
 | Real session. | `real-queue-acceptance.mjs` passed against the live backend at folded portrait. Enter queued a follow-up and Ctrl+Shift+Enter queued a steer while the agent ran `sleep 25`. Pi listed both. Pi delivered the steer before the follow-up, and the queue list emptied. Stop during a later run returned the queued message to the draft ahead of the typed text, and Pi never delivered it. |
 
 Not verified: a physical Fold keyboard. Ctrl or Cmd+Shift+Enter needs a hardware keyboard; on a touch keyboard, use the Steer button.

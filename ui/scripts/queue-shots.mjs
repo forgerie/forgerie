@@ -5,7 +5,7 @@ const repo = process.env.FORGERIE_ROOT ?? resolve("../..");
 const origin = process.env.APP_URL ?? "http://127.0.0.1:8510";
 const out = process.env.SHOT_DIR ?? "/tmp/aui-queue-shots";
 const chromium = process.env.CHROME_BIN || spawnSync("which", ["chromium"], { encoding: "utf8" }).stdout.trim();
-for (const scenario of ["queue", "queue-compaction", "queue-attachments"]) {
+for (const scenario of (process.env.SCENARIOS?.split(",") ?? ["queue", "queue-compaction", "queue-attachments", "queue-attachments-folder"])) {
   for (const scheme of ["light", "dark"]) {
     const result = spawnSync(process.execPath, [join(repo, "scripts/capture-postures.mjs"),
       "--url", `${origin}/verification/preview.html?scenario=${scenario}`,

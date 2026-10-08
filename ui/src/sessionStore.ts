@@ -398,8 +398,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     if (!state.transcript.isRunning && !working.queue) return undefined;
     if (!working.queue) throw new NotSentError("Wait for the current run to finish.");
     if (steer && !working.steer) throw new NotSentError("Steering works only while the agent responds. Queue the message instead.");
-    // Stop returns only the text of queued work, so a queued image could be lost.
-    if (attachments?.length) throw new NotSentError("Queued messages are text only. Remove the attachments, or send them after the run.");
+    // Stop returns only the text of queued work, so a queued inline image could be lost.
+    // A file saved to the workspace travels as its path in that text, so it can queue.
+    if (attachments?.length) throw new NotSentError("Images attached to a message cannot be queued. Save them to .forgerie/attachments, or send them after the run.");
     // The server folds notes into the queued text, so a noted message never equals a queued one.
     // Notes need no such rule as attachments: Stop returns their text with the message.
     if (!annotated && isAlreadyQueued(state.status, text)) throw new NotSentError("This message is already queued.");

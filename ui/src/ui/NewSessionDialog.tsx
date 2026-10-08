@@ -7,7 +7,7 @@ import type { WorktreeRecord } from "../worktrees/worktreeApi";
 import type { MentionSource } from "../mentionSource";
 import { MAX_ATTACHMENTS } from "../attachments";
 import { PortalLayerProvider } from "./portalLayer";
-import { AttachmentErrors, ComposerAttachments } from "./Attachments";
+import { AttachmentDeliveryChoice, AttachmentErrors, ComposerAttachments } from "./Attachments";
 import { ComposerDictation } from "./ComposerDictation";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
@@ -128,7 +128,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
     </div>
     <ComposerPrimitive.AttachmentDropzone ref={body} className="ns-body" disabled={busy}>
       {carry?.card}
-      <ComposerAttachments />
+      <ComposerAttachments><AttachmentDeliveryChoice disabled={busy} /></ComposerAttachments>
       <AttachmentErrors />
       <ComposerPrimitive.Input ref={input} aria-label="First message" rows={4} className="ns-input"
         placeholder={carry?.placeholder ?? "Describe what the agent should do first…"} submitMode="ctrlEnter" cancelOnEscape={false}

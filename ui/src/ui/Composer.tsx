@@ -9,8 +9,9 @@ import { useDictation } from "../DictationProvider";
 import { ComposerDictation } from "./ComposerDictation";
 import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
-import { AddAttachment, AttachmentErrors, ComposerAttachments } from "./Attachments";
-import { MAX_ATTACHMENTS } from "../attachments";
+import { AddAttachment, AttachmentDeliveryChoice, AttachmentErrors, ComposerAttachments, useAttachmentDelivery } from "./Attachments";
+import { MAX_ATTACHMENTS, sendsInline } from "../attachments";
+import { ATTACHMENT_FOLDER, attachmentDelivery } from "../attachmentDelivery";
 import { isCompactCommand } from "../compaction";
 import type { CompactionBinding } from "./CompactionNotice";
 import { createChatDraft, type ChatDraft } from "../chatDraft";
@@ -67,6 +68,8 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const preparing = useAuiState((s) => s.composer.submission !== undefined);
   const count = useAuiState((s) => s.composer.attachments.length);
   const tooMany = count > MAX_ATTACHMENTS;
+  const delivery = useAttachmentDelivery();
+  const inlineCount = useAuiState((s) => s.composer.attachments.filter((attachment) => sendsInline(attachment, delivery)).length);
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const { state } = useDictation();
   const control = useAskMode(ask, chatDraft);
@@ -119,13 +122,13 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   }
   // While the agent works, an ordinary draft can wait as a follow-up or steer
   // the current response. Pi owns that queue. Commands and shell commands keep
-  // their own rules, and attachments must wait, because Stop can return only
-  // queued text.
+  // their own rules. Files saved to the workspace queue as their paths, but an
+  // image attached to the message must wait, because Stop returns only queued text.
   // `working` is the one rule for "the session works", shared with the store,
   // so the buttons always match what a send does.
   const workingDraft = working.queue && !literal && !compactDraft && !shellMode && !preparing
     && !isCommand(text) && (text.trim() !== "" || count > 0 || notesAlone);
-  const queueBlocked = disabled || dictating || tooMany || count > 0 || (notesAlone ? sendingNotes : !canSend);
+  const queueBlocked = disabled || dictating || tooMany || inlineCount > 0 || (notesAlone ? sendingNotes : !canSend);
   function sendWhileWorking(steer: boolean) {
     if (!workingDraft || queueBlocked || (steer && !working.steer)) return;
     if (notesAlone) void sendNotesAlone(steer);
@@ -175,7 +178,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
       {control && dialog && <p className="composer-hint">
         <PuzzleIcon aria-hidden size={14} />An extension also asks something. It shows after these questions.
       </p>}
-      <ComposerAttachments />
+      <ComposerAttachments>
+        {!dialogInput && <AttachmentDeliveryChoice disabled={disabled || preparing || !!control?.sending} />}
+      </ComposerAttachments>
       {notes && noteCount > 0 && <NoteTray binding={notes} disabled={sendingNotes} />}
       <AttachmentErrors />
       {tooMany && <p role="alert" className="attachment-notice">Send at most 16 attachments. Remove a file to continue.</p>}
@@ -184,8 +189,10 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
           ? "Attachments run as chat messages. Sending closes these questions."
           : "Commands run in Pi. Questions stay open unless Pi closes them."}
       </p>}
-      {workingDraft && count > 0 && <p className="ask-route" role="status">
-        <InfoIcon aria-hidden size={14} />Queued messages are text only. Remove the attachments to queue this message.
+      {workingDraft && inlineCount > 0 && <p className="ask-route" role="status">
+        <InfoIcon aria-hidden size={14} /><span>Images attached to a message cannot be queued.</span>
+        <button type="button" className="route-action" disabled={disabled || preparing} onClick={() => attachmentDelivery.set("folder")}>
+          Save to {ATTACHMENT_FOLDER}</button>
       </p>}
       {notesWait && <p className="composer-hint" role="status">
         <InfoIcon aria-hidden size={14} />Commands do not carry notes. Your notes wait for your next message.

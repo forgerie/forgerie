@@ -1,6 +1,7 @@
-import { generateId, SimpleImageAttachmentAdapter, type AppendMessage, type AttachmentAdapter, type CompleteAttachment } from "@assistant-ui/react";
+import { generateId, SimpleImageAttachmentAdapter, type AppendMessage, type Attachment, type AttachmentAdapter, type CompleteAttachment } from "@assistant-ui/react";
 import { z } from "zod";
 import { isCommand } from "./commands";
+import { attachmentDelivery, type AttachmentDelivery } from "./attachmentDelivery";
 
 // Forgerie's native image contract. Larger images and all other files use the
 // existing workspace upload endpoint rather than an unsupported model input.
@@ -15,8 +16,31 @@ export const savedAttachmentsSchema = z.object({ attachments: z.array(z.object({
 export type SavedAttachment = z.infer<typeof savedAttachmentsSchema>["attachments"][number];
 export type SaveAttachment = (attachment: PromptAttachment, signal?: AbortSignal) => Promise<SavedAttachment>;
 
-/** Session-scoped adapter. Reading/uploading happens only when Send is pressed. */
-export function createAttachmentAdapter(save: SaveAttachment): AttachmentAdapter & { dispose: () => void } {
+/** An image Pi can take as model input. Larger images and every other file are saved instead. */
+function canInline(attachment: Pick<Attachment, "contentType" | "file">): boolean {
+  return imageTypes.has(attachment.contentType ?? "") && attachment.file !== undefined && attachment.file.size <= INLINE_IMAGE_BYTES;
+}
+
+/** The draft holds an image that the delivery choice decides. Without one, the choice changes nothing. */
+export function offersDeliveryChoice(attachments: readonly Attachment[]): boolean {
+  return attachments.some((attachment) => attachment.status.type !== "complete" && canInline(attachment));
+}
+
+/**
+ * The attachment reaches Pi as an image in the prompt, not as a saved file's path.
+ * Pi's queue keeps such an image, but Stop returns only queued text, so it cannot queue.
+ * A completed attachment (restored after a failed send) keeps the form it already has.
+ */
+export function sendsInline(attachment: Attachment, delivery: AttachmentDelivery): boolean {
+  if (attachment.status.type === "complete") return attachment.content?.some((part) => part.type === "image") === true;
+  return delivery === "inline" && canInline(attachment);
+}
+
+/**
+ * Session-scoped adapter. Reading/uploading happens only when Send is pressed,
+ * so the delivery choice in force at that moment decides each image.
+ */
+export function createAttachmentAdapter(save: SaveAttachment, delivery: () => AttachmentDelivery = attachmentDelivery.get): AttachmentAdapter & { dispose: () => void } {
   const reader = new SimpleImageAttachmentAdapter();
   const lifetime = new AbortController();
   return {
@@ -37,8 +61,7 @@ export function createAttachmentAdapter(save: SaveAttachment): AttachmentAdapter
       const content = encoded.content[0];
       if (content?.type !== "image") throw new Error("The file could not be read.");
       const mimeType = attachment.contentType || "application/octet-stream";
-      const inline = imageTypes.has(mimeType) && attachment.file.size <= INLINE_IMAGE_BYTES;
-      if (inline) return encoded;
+      if (sendsInline(attachment, delivery())) return encoded;
       const data = content.image.slice(content.image.indexOf(",") + 1);
       const saved = await save({ kind: "file", name: attachment.name, mimeType, data }, signal);
       signal.throwIfAborted();
