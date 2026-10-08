@@ -82,8 +82,8 @@ export function useDialogMode(binding: DialogBinding | undefined, chatDraft: Cha
     binding!.onCancel();
     keepFocus();
   }
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (!isInput || event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>, shiftKey = event.shiftKey) {
+    if (!isInput || event.key !== "Enter" || shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     submitInput();
   }

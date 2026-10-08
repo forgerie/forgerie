@@ -12,6 +12,7 @@ import { ComposerDictation } from "./ComposerDictation";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
+import { useComposerKeyboard } from "./useComposerKeyboard";
 
 export type StartPhase = { type: "ready" } | { type: "starting"; progress: string } | { type: "failed"; message: string };
 
@@ -91,6 +92,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
   const context = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const keyboard = useComposerKeyboard(input);
   const snapshot = useRef<MentionInputSnapshot>(null);
   const triggers = unstable_useTriggerPopoverRootContext();
   const busy = phase.type === "starting";
@@ -99,12 +101,23 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
   const sendEmpty = empty && !busy && !carry?.blocked ? carry?.onSendEmpty : undefined;
   const remember = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.nativeEvent.isComposing) return;
-    if (sendEmpty && event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); sendEmpty(); return; }
+    if (keyboard.isComposing(event)) { if (event.key === "Enter") event.preventDefault(); return; }
+    const shiftKey = keyboard.enterShift(event);
+    if (busy) return;
+    if (event.key === "Enter" && (event.altKey || event.getModifierState("AltGraph"))) { event.preventDefault(); return; }
+    if (event.key === "Enter" && shiftKey) {
+      if (!event.shiftKey) keyboard.insertNewline(event);
+      return;
+    }
     remember();
     // An open suggestion list takes Enter and Escape first.
     for (const trigger of triggers.getTriggers().values()) {
-      if (trigger.resource.handleKeyDown(event)) return;
+      if (trigger.resource.handleKeyDown({ key: event.key, shiftKey, preventDefault: () => event.preventDefault() })) return;
+    }
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      if (sendEmpty) sendEmpty();
+      else if (!carry?.blocked) event.currentTarget.closest("form")?.requestSubmit();
     }
   }
   const startLabel = busy ? "Starting…" : rapidfire ? "Start in background" : "Start session";
@@ -131,8 +144,11 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
       <ComposerAttachments><AttachmentDeliveryChoice disabled={busy} /></ComposerAttachments>
       <AttachmentErrors />
       <ComposerPrimitive.Input ref={input} aria-label="First message" rows={4} className="ns-input"
-        placeholder={carry?.placeholder ?? "Describe what the agent should do first…"} submitMode="ctrlEnter" cancelOnEscape={false}
-        onKeyDown={onKeyDown} onChange={remember} onSelect={remember} />
+        placeholder={carry?.placeholder ?? "Describe what the agent should do first…"} submitMode="none" cancelOnEscape={false}
+        aria-keyshortcuts="Control+Alt+I Control+Enter Meta+Enter" spellCheck autoCorrect="on" autoCapitalize="sentences" dir="auto"
+        onKeyDown={onKeyDown} onKeyUp={keyboard.onKeyUp} onBlur={keyboard.onBlur}
+        onCompositionStart={keyboard.onCompositionStart} onCompositionEnd={keyboard.onCompositionEnd}
+        onChange={() => { keyboard.onChange(); remember(); }} onSelect={remember} />
     </ComposerPrimitive.AttachmentDropzone>
     {tray}
     <div className="ns-chips" role="group" aria-label="What the first message carries">

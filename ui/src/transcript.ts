@@ -441,6 +441,8 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role !== "assistant") {
     return { id: message.id, role: message.role,
       content: [...(message.skill ? [{ type: "data-skill" as const, data: message.skill }] : []), { type: "text", text: messageText(message) }],
+      // Recall sends the expanded invocation, not just its displayed argument.
+      ...(message.skill ? { metadata: { custom: { promptText: `<skill name="${message.skill.name}" location="${message.skill.location}">\n${message.skill.content}\n</skill>${messageText(message) ? `\n\n${messageText(message)}` : ""}` } } } : {}),
       ...(message.role === "user" && message.attachments ? { attachments: message.attachments } : {}) };
   }
   return {

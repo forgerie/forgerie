@@ -109,7 +109,11 @@ try {
 
   // Keyboard and buttons: Enter queues, Ctrl+Shift+Enter steers, Shift+Enter is a new line.
   await navigate("queue-live");
-  await input("add tests after this"); await pressCombo(cdp, "shift+enter");
+  await input("add tests after this");
+  // Real hardware sends a Shift keydown; a flag alone can be touch autocapitalization.
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, modifiers: 8 });
+  await pressCombo(cdp, "shift+enter");
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 });
   assert.equal(await draft(), "add tests after this\n");
   await pressCombo(cdp, "enter");
   await until("document.querySelectorAll('section.queue .queue-item').length === 1");

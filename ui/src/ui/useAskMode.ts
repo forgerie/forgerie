@@ -125,8 +125,8 @@ export function useAskMode(binding: AskBinding | undefined, chatDraft: ChatDraft
     binding.onSubmit(toAnswers(binding.ask, drafts));
   }
   function primary() { if (route === "chat") void sendChat(); else advance(); }
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>, shiftKey = event.shiftKey) {
+    if (event.key !== "Enter" || shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     primary();
   }

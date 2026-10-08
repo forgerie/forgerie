@@ -22,6 +22,7 @@ import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
 import { modelCommandQuery } from "../modelChoice";
 import { DialogLayer, useDialogMode, type DialogBinding } from "./DialogLayer";
 import { NoteTray, type NotesBinding } from "./NoteTray";
+import { useComposerKeyboard } from "./useComposerKeyboard";
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
@@ -74,6 +75,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const { state } = useDictation();
   const control = useAskMode(ask, chatDraft);
   const input = useRef<HTMLTextAreaElement>(null);
+  const keyboard = useComposerKeyboard(input);
   // An open ask goes first. A dialog waits behind it, and the bar says so.
   const dialogControl = useDialogMode(control ? undefined : dialog, chatDraft, input);
   const dialogInput = dialogControl?.isInput === true;
@@ -141,29 +143,42 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const rememberInput = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
   const triggers = unstable_useTriggerPopoverRootContext();
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.nativeEvent.isComposing) return;
+    if (keyboard.isComposing(event)) { if (event.key === "Enter") event.preventDefault(); return; }
+    const shiftKey = keyboard.enterShift(event);
+    if (disabled || preparing || dictating || control?.sending) return;
+    if (event.key === "Enter" && (event.altKey || event.getModifierState("AltGraph"))) { event.preventDefault(); return; }
+    // Let native Shift+Enter insert a line. Repair only an IME-stripped Shift.
+    if (event.key === "Enter" && shiftKey && !(workingDraft && (event.ctrlKey || event.metaKey))) {
+      if (!event.shiftKey) keyboard.insertNewline(event);
+      return;
+    }
     rememberInput();
     // `/model` typed in full opens the picker on the first Enter, even while the
     // slash list offers it: completing it to "/model " would only ask for a second Enter.
-    if (modelQuery !== undefined && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); chooseModel(); return; }
+    if (modelQuery !== undefined && event.key === "Enter" && !shiftKey) { event.preventDefault(); chooseModel(); return; }
     // Input's custom handler runs before SDK plugins. Trigger selection consumes
     // Enter before ask mode can advance or submit the current question.
     for (const trigger of triggers.getTriggers().values()) {
-      if (trigger.resource.handleKeyDown(event)) return;
+      if (trigger.resource.handleKeyDown({ key: event.key, shiftKey, preventDefault: () => event.preventDefault() })) return;
     }
-    if (shellMode && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void runShell(); return; }
-    if (compactDraft && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendCompaction(); return; }
+    if (keyboard.recall(event, !literal)) return;
+    if (shellMode && event.key === "Enter" && !shiftKey) { event.preventDefault(); void runShell(); return; }
+    if (compactDraft && event.key === "Enter" && !shiftKey) { event.preventDefault(); void sendCompaction(); return; }
     // assistant-ui's keys: Enter queues, Ctrl or Cmd+Shift+Enter steers, Shift+Enter is a new line.
     if (workingDraft && event.key === "Enter") {
-      const steer = event.shiftKey && (event.ctrlKey || event.metaKey);
-      if (event.shiftKey && !steer) return;
+      const steer = shiftKey && (event.ctrlKey || event.metaKey);
+      if (shiftKey && !steer) return;
       event.preventDefault();
       sendWhileWorking(steer);
       return;
     }
-    if (notesAlone && !running && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendNotesAlone(false); return; }
-    if (dialogControl?.isInput) { dialogControl.onKeyDown(event); return; }
-    if (!tooMany) control?.onKeyDown(event);
+    if (notesAlone && !running && event.key === "Enter" && !shiftKey) { event.preventDefault(); void sendNotesAlone(false); return; }
+    if (dialogControl?.isInput) { dialogControl.onKeyDown(event, shiftKey); return; }
+    if (control) { if (!tooMany) control.onKeyDown(event, shiftKey); return; }
+    if (event.key === "Enter" && !shiftKey) {
+      event.preventDefault();
+      if (!running && !working.queue && !tooMany && canSend) event.currentTarget.closest("form")?.requestSubmit();
+    }
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
   return <ComposerPrimitive.Root className="composer">
@@ -207,10 +222,15 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         placeholder={control?.placeholder ?? (dialogInput ? dialogControl.placeholder : "Send a message...")}
         aria-describedby={control?.headingId ?? (dialogInput ? dialogControl.headingId : undefined)}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
+        spellCheck={!shellMode} autoCorrect={shellMode ? "off" : "on"} autoCapitalize={shellMode ? "off" : "sentences"} dir="auto"
+        aria-keyshortcuts="Control+Alt+I"
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
-        submitMode={control || dialogInput || tooMany || compactDraft || modelQuery !== undefined || shellMode || running || working.queue || notesAlone ? "none" : "enter"}
+        // One Enter route sees normalized modifiers before every mode, including ordinary chat.
+        submitMode="none"
         // Escape stops the run only from an empty draft, so it never throws typing into the queue path.
-        cancelOnEscape={!dialogInput && text.trim() === "" && count === 0} onKeyDown={onKeyDown} onChange={rememberInput} onSelect={rememberInput}
+        cancelOnEscape={!dialogInput && text.trim() === "" && count === 0} onKeyDown={onKeyDown}
+        onKeyUp={keyboard.onKeyUp} onBlur={keyboard.onBlur} onCompositionStart={keyboard.onCompositionStart} onCompositionEnd={keyboard.onCompositionEnd}
+        onChange={() => { keyboard.onChange(); rememberInput(); }} onSelect={rememberInput}
         disabled={control?.sending || undefined} />
       <div className="composer-actions">
         {context}

@@ -83,6 +83,39 @@ describe("the new-session dialog", () => {
     expect(textarea().placeholder).toBe("Describe what the agent should do first…");
   });
 
+  it("shares focus and Android modifier handling without changing Ctrl+Enter to start", async () => {
+    const script = scriptedApi(); await render(script.api); await type("first message");
+    const original = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = original(query);
+      if (query === "(pointer: coarse)") Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
+    try {
+      const key = (key: string, init: KeyboardEventInit = {}) => act(async () => { textarea().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })); });
+      const discard = button("Discard draft")!; discard.focus();
+      await act(async () => {
+        const event = new KeyboardEvent("keydown", { key: "i", ctrlKey: true, altKey: true, bubbles: true, cancelable: true });
+        // happy-dom treats left Alt as AltGraph; browsers distinguish them.
+        Object.defineProperty(event, "getModifierState", { value: (modifier: string) => modifier === "Control" || modifier === "Alt" });
+        discard.dispatchEvent(event);
+      });
+      expect(document.activeElement).toBe(textarea());
+      const nested = document.createElement("dialog"); nested.setAttribute("open", ""); dialog()!.append(nested);
+      const nestedButton = document.createElement("button"); nested.append(nestedButton); nestedButton.focus();
+      await act(async () => {
+        const event = new KeyboardEvent("keydown", { key: "i", ctrlKey: true, altKey: true, bubbles: true, cancelable: true });
+        Object.defineProperty(event, "getModifierState", { value: () => false });
+        nestedButton.dispatchEvent(event);
+      });
+      expect(document.activeElement).toBe(nestedButton); nested.remove(); textarea().focus();
+      textarea().setSelectionRange(13, 13); await key("Shift"); await key("Enter", { ctrlKey: true });
+      expect(textarea().value).toBe("first message\n"); expect(script.starts).toEqual([]);
+      await act(async () => { textarea().dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true })); });
+      await send(); expect(script.starts).toHaveLength(1);
+    } finally { media.mockRestore(); }
+  });
+
   it("keeps a plain Enter as a new line; only Ctrl or Cmd+Enter starts", async () => {
     const script = scriptedApi();
     await render(script.api);

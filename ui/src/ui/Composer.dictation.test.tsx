@@ -45,6 +45,32 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 describe("SDK dictation controls in the one composer", () => {
+  const shortcut = (init: KeyboardEventInit = {}, target: HTMLElement = input()) => act(async () => {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key: " ", code: "Space", ctrlKey: true, bubbles: true, cancelable: true, ...init }));
+  });
+  it("starts and finishes dictation with Ctrl+Space while preserving the draft", async () => {
+    await render(); await type("existing draft"); await shortcut();
+    expect(document.querySelector('.dictation-status')?.textContent).toBe("Listening…");
+    expect(button("Stop dictation").getAttribute("aria-keyshortcuts")).toBe("Control+Space");
+    // Capture disables the textarea, so Stop must also work from the workbench.
+    await shortcut({}, document.body);
+    expect(input().value).toBe("existing draft spoken words");
+    expect(button("Voice input").getAttribute("aria-keyshortcuts")).toBe("Control+Space");
+  });
+  it("does not start dictation from another text field, a background modal, offline, or a repeat", async () => {
+    await render(); const search = document.createElement("input"); document.body.append(search);
+    await shortcut({}, search); await shortcut({ repeat: true }); await shortcut({ isComposing: true });
+    const modal = document.createElement("dialog"); modal.setAttribute("open", ""); document.body.append(modal);
+    await shortcut({}, document.body); modal.remove(); await render(undefined, true); await shortcut({}, document.body);
+    expect(document.querySelector('.dictation-status')).toBeNull();
+  });
+  it("does not finish twice while transcription is pending", async () => {
+    let finish!: (result: { text: string }) => void;
+    dependencies.transcribe = () => new Promise((resolve) => { finish = resolve; });
+    await render(); await shortcut(); await shortcut({}, document.body); await shortcut({}, document.body);
+    expect(document.querySelector('.dictation-status')?.textContent).toBe("Transcribing…");
+    await act(async () => finish({ text: "once" })); expect(input().value).toBe("once");
+  });
   it("appends final speech to the existing draft and never sends it automatically", async () => {
     await render(); await type("existing draft"); await click("Voice input");
     expect(input().disabled).toBe(true);

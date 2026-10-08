@@ -36,6 +36,10 @@ Confirm, select, and input dialogs from Pi extensions appear on top of the input
 
 The input bar shows the session's model and thinking level. Press it, or send `/model`, to change either one for this session. See [behavior, verification, and limits](model-thinking.md).
 
+## Composer keyboard
+
+Ctrl+Alt+I focuses the input. Ctrl+Space starts or finishes dictation. Up and Down recall recorded prompts at the text's ends and restore the unsent draft. Hardware Shift+Enter and touch Enter use the legacy modifier evidence rules. See [behavior, checks, and limits](composer-keyboard.md).
+
 ## Sending while working
 
 While the agent works, Queue (or Enter) sends a follow-up and Steer (or Ctrl or Cmd+Shift+Enter) reaches the current response. Pi's queue shows above the composer, and Stop returns it to the draft. See [behavior, verification, and limits](sending-while-working.md).
