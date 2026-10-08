@@ -1,0 +1,80 @@
+import { describe, expect, it } from "vitest";
+import { createPullRequestApi, parsePullEvent, type PullLink, type PullRequest } from "./pullRequestApi";
+
+const SHA = "a".repeat(40);
+const TIME = "2026-10-07T12:00:00.000Z";
+// The server's own fixture shape (src/server/github/pullRequest.testSupport.ts on main), field for field.
+const pull: PullRequest = { repo: "owner/repo", number: 9, title: "Fix tests", url: "https://github.com/owner/repo/pull/9", state: "open", head: "fix", headSha: SHA, base: "main",
+  author: "owner", updatedAt: TIME, mergeability: "clean", files: 1, additions: 2, deletions: 1,
+  checks: [{ id: "run:1", name: "tests", state: "failed", url: "https://github.com/check/1", required: true, updatedAt: TIME, seconds: 12.5, logTail: "boom", logSource: "annotations" }],
+  reviews: [{ reviewer: "jordan", state: "approved", updatedAt: TIME }],
+  comments: [{ id: "c1", kind: "comment", author: "jordan", body: "Rename it.", updatedAt: TIME, url: "https://github.com/c/1", path: "a.ts", line: 3 }],
+  complete: true, merge: { kind: "blocked", reason: "Every check must pass on this head commit." } };
+const link: PullLink = { session: { id: "s1", cwd: "/repo" }, repo: "owner/repo", number: 9, watch: { kind: "watching", since: TIME, wakes: 1, lastWake: TIME } };
+
+function fake(routes: Record<string, { status?: number; body: unknown }>) {
+  const calls: { path: string; method: string; body: unknown }[] = [];
+  const request = async (path: string, init: RequestInit) => {
+    const method = init.method ?? "GET";
+    calls.push({ path, method, body: typeof init.body === "string" ? JSON.parse(init.body) : undefined });
+    const route = routes[`${method} ${path}`];
+    if (!route) return new Response(JSON.stringify({ kind: "pull_request_error", error: "Unexpected" }), { status: 404 });
+    return new Response(JSON.stringify(route.body), { status: route.status ?? 200 });
+  };
+  return { calls, api: createPullRequestApi(request) };
+}
+
+describe("pull request API", () => {
+  const ref = { id: "s1", cwd: "/repo" };
+
+  it("reads a session's link and pull request with its cwd", async () => {
+    const { calls, api } = fake({ "GET /api/sessions/s1/pull-request?cwd=%2Frepo": { body: { link, pull } } });
+    await expect(api.read(ref)).resolves.toEqual({ link, pull });
+    expect(calls).toEqual([{ path: "/api/sessions/s1/pull-request?cwd=%2Frepo", method: "GET", body: undefined }]);
+  });
+
+  it("reads an unlinked session as two nulls", async () => {
+    const { api } = fake({ "GET /api/sessions/s1/pull-request?cwd=%2Frepo": { body: { link: null, pull: null } } });
+    await expect(api.read(ref)).resolves.toEqual({ link: null, pull: null });
+  });
+
+  it("links, watches, and stops with the documented bodies", async () => {
+    const { calls, api } = fake({
+      "PUT /api/sessions/s1/pull-request": { body: { link, pull } },
+      "POST /api/sessions/s1/pull-request/watch": { body: link },
+      "DELETE /api/sessions/s1/pull-request/watch?cwd=%2Frepo": { body: null },
+    });
+    await api.link(ref, 9);
+    await api.watch(ref);
+    await expect(api.stopWatch(ref)).resolves.toBeNull();
+    expect(calls.map(({ method, body }) => ({ method, body }))).toEqual([
+      { method: "PUT", body: { cwd: "/repo", number: 9 } },
+      { method: "POST", body: { cwd: "/repo" } },
+      { method: "DELETE", body: undefined },
+    ]);
+  });
+
+  it("binds a merge to the repository, number, and head SHA the reader saw", async () => {
+    const { calls, api } = fake({ "POST /api/sessions/s1/pull-request/merge": { body: { text: "Merged #9.", url: pull.url } } });
+    await expect(api.merge(ref, pull, "rebase")).resolves.toEqual({ text: "Merged #9.", url: pull.url });
+    expect(calls[0]?.body).toEqual({ cwd: "/repo", repo: "owner/repo", number: 9, headSha: SHA, method: "rebase" });
+  });
+
+  it("surfaces the server's refusal in its own words", async () => {
+    const { api } = fake({ "POST /api/sessions/s1/pull-request/merge": { status: 400, body: { kind: "pull_request_error", error: "The PR head changed after confirmation; read it again." } } });
+    await expect(api.merge(ref, pull, "rebase")).rejects.toThrow("The PR head changed after confirmation; read it again.");
+  });
+
+  it("refuses a response that breaks the contract instead of drawing a guess", async () => {
+    const { api } = fake({ "GET /api/sessions/s1/pull-request?cwd=%2Frepo": { body: { link, pull: { ...pull, merge: undefined } } } });
+    await expect(api.read(ref)).rejects.toThrow();
+  });
+});
+
+describe("pull request events", () => {
+  it("reads a session.pull-request event and ignores every other type", () => {
+    expect(parsePullEvent({ type: "session.pull-request", link })).toEqual(link);
+    expect(parsePullEvent({ type: "status.update" })).toBeUndefined();
+    expect(parsePullEvent(null)).toBeUndefined();
+  });
+});

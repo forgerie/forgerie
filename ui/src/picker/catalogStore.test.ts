@@ -10,7 +10,7 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 const idle = { isStreaming: false, isCompacting: false, isBashRunning: false };
 
 /** A real HTTP + WebSocket server whose catalog the test can change between joins. */
-async function machine(options: { holdListing?: Promise<void>; badListing?: boolean } = {}) {
+async function machine(options: { holdListing?: Promise<void>; badListing?: boolean; pulls?: unknown[] } = {}) {
   let listing = {
     sessions: [
       { id: "a", cwd: "/code/forgerie", name: "Alpha", modified: "2026-09-29T18:00:00.000Z" },
@@ -52,6 +52,8 @@ async function machine(options: { holdListing?: Promise<void>; badListing?: bool
     } else if (path === "/api/sessions/asks") send(asks);
     else if (path === "/api/sessions/unread") send({ catalogId: "c", catalogRevision: 1, sessions: [] });
     else if (path === "/api/machines/local/projects") send([{ id: "p", name: "forgerie", path: "/code/forgerie" }]);
+    // Without pulls, the server predates pull request links and answers 404.
+    else if (path === "/api/github/pulls" && options.pulls) send({ links: options.pulls });
     else { response.writeHead(404); response.end(); }
   });
   http.on("upgrade", (request, socket, head) => sockets.handleUpgrade(request, socket, head, (client) => {
@@ -96,6 +98,25 @@ function start(api: Awaited<ReturnType<typeof machine>>) {
   void store.start();
   return store;
 }
+
+describe("pull request links", () => {
+  const watching = { kind: "watching", since: "2026-10-07T21:00:00.000Z", wakes: 0 };
+  const link = { session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 142, watch: { kind: "off" } };
+  it("joins each session's link from the server's catalog, then follows link events", async () => {
+    const api = await machine({ pulls: [link] });
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    expect(store.getSnapshot().sessions.find((session) => session.id === "a")?.pullRequest).toEqual(link);
+    api.emit({ type: "session.pull-request", link: { ...link, watch: watching } });
+    await until(store, () => store.getSnapshot().sessions.find((session) => session.id === "a")?.pullRequest?.watch.kind === "watching");
+  });
+  it("still lists sessions when the server has no pull request catalog", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    expect(store.getSnapshot().sessions.map((session) => session.pullRequest)).toEqual([undefined, undefined]);
+  });
+});
 
 describe("live event cost", () => {
   const base: CatalogState = { connection: { type: "ready" }, sessions: [], statuses: {}, activities: {}, unread: new Set(), projects: [] };

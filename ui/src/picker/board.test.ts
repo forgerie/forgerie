@@ -26,6 +26,13 @@ describe("row state", () => {
     expect(rowState(waiting, idle, { phase: "error" }, true)).toBe("errored");
     expect(rowState(waiting, { ...idle, needsResponse: false }, undefined, true)).toBe("unread");
   });
+  it("keeps an idle session whose pull request the agent watches in Working, unless it asks for a response", () => {
+    const watched = session("a", { pullRequest: { session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 1, watch: { kind: "watching", since: ago(10), wakes: 0 } } });
+    expect(rowState(watched, idle, undefined, true)).toBe("working");
+    expect(rowState(session("b"), { ...idle, watchingPullRequest: true }, undefined, false)).toBe("working");
+    expect(rowState(session("c"), { ...idle, watchingPullRequest: true, needsResponse: true }, undefined, false)).toBe("blocked");
+    expect(rowState(session("d", { pullRequest: { ...watched.pullRequest!, watch: { kind: "stopped", reason: "Merged.", at: ago(1) } } }), idle, undefined, false)).toBe("open");
+  });
   it("ranks archived over blocked over errored over working over unread", () => {
     const s = session("a");
     expect(rowState({ ...s, archived: true }, { ...idle, blocked: true }, undefined, true)).toBe("archived");

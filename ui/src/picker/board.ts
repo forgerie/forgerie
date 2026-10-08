@@ -5,6 +5,7 @@ import type { SessionResponse } from "../sessionResponse";
 // session "is". Review rules on top: rows carry no chat text and no status
 // words; time is always shorthand.
 import type { WorktreeInfo } from "../worktrees/worktreeApi";
+import type { PullLink } from "../pullRequests/pullRequestApi";
 
 export interface PickerSession {
   response?: SessionResponse | undefined;
@@ -19,6 +20,8 @@ export interface PickerSession {
   starting?: boolean | undefined;
   /** The session-owned worktree it runs in, or ran in before Land or Discard removed it. */
   worktree?: WorktreeInfo | undefined;
+  /** The pull request linked to this session, and whether the agent watches it. */
+  pullRequest?: PullLink | undefined;
 }
 export interface PickerStatus {
   isStreaming: boolean;
@@ -28,6 +31,8 @@ export interface PickerStatus {
   runningProcesses?: number | undefined;
   blocked?: boolean | undefined;
   needsResponse?: boolean | undefined;
+  /** The agent watches a pull request: an idle session stays in Working, not the inbox. */
+  watchingPullRequest?: boolean | undefined;
 }
 export interface PickerActivity {
   phase: "active" | "idle" | "error";
@@ -105,6 +110,8 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   if (activity?.phase === "error") return "errored";
   if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true || activity?.phase === "active") return "working";
   if (status?.needsResponse ?? session.response?.kind === "needs-response") return "blocked";
+  // A watched pull request keeps its session at work between wakes (T3's rule). A request for a response still wins.
+  if (status?.watchingPullRequest === true || session.pullRequest?.watch.kind === "watching") return "working";
   return unread ? "unread" : "open";
 }
 

@@ -1,8 +1,8 @@
 // Dev-only, network-free preview of a session's pull request.
-// ?scenario= failed (default), waiting, blocked, ready, watching, stopped, conflict, draft, merged, closed,
+// ?scenario= failed (default), waiting, blocked, ready, watching, stopped, conflict, unknown, nochecks, draft, merged, closed, unlinked, refused,
 // loading, error, asked (after "Ask the agent to fix": the panel closed, the message box holds the request),
 // header (the panel closed: the header dot), rows (the session list's marks for every tone).
-// Nothing reaches GitHub or Pi. The server does not serve this data yet.
+// Nothing reaches GitHub or Pi. Fixtures use the server's wire shapes (src/pullRequests/pullRequestApi.ts).
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AssistantRuntime } from "@assistant-ui/react";
@@ -15,7 +15,7 @@ import { AppShell } from "../src/ui/AppShell";
 import { ChangesOpener } from "../src/ui/ChangesReview";
 import { TreeOpener } from "../src/ui/SessionTreeNavigator";
 import { PullRequestOpener, PullRequestReview, PullRequestRowMark, type PullLoad } from "../src/ui/PullRequestReview";
-import { fixChecksPrompt, type PullCheck, type PullRequest } from "../src/pullRequests/pullRequestModel";
+import { fixChecksPrompt, type PullCheck, type PullLink, type PullRequest, type PullWatch } from "../src/pullRequests/pullRequestModel";
 import "../src/ui/theme.css";
 
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "failed";
@@ -48,50 +48,63 @@ const lintLog = [
   "Error: Process completed with exit code 1.",
 ].join("\n");
 const run = "https://github.com/simonwjackson/forgerie/actions/runs/18311204417/job/52144";
+const NOW = Date.now();
+const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
 const check = (id: string, name: string, state: PullCheck["state"], extra: Partial<PullCheck> = {}): PullCheck =>
-  ({ id, name, state, url: `${run}${id}`, workflow: "CI", ...extra });
+  ({ id, name, state, url: `${run}${id}`, required: true, ...extra });
 const passing: PullCheck[] = [
   check("1", "verify / typecheck", "passed", { seconds: 41 }),
   check("2", "verify / unit (node 22)", "passed", { seconds: 134 }),
   check("3", "verify / lint", "passed", { seconds: 28 }),
   check("4", "build / vite", "passed", { seconds: 57 }),
-  check("5", "acceptance / fold postures", "passed", { seconds: 312, workflow: "Acceptance" }),
+  check("5", "acceptance / fold postures", "passed", { seconds: 312, required: false }),
 ];
 const base: PullRequest = {
   number: 142, title: "Refuse an empty password at the login form, so SSO keeps calling the validator directly",
   url: "https://github.com/simonwjackson/forgerie/pull/142", state: "open", head: "fix/empty-password", base: "main",
-  author: "forgerie-agent", ago: "12m", conflicts: false, files: 4, additions: 38, deletions: 6,
-  checks: passing, reviews: [], comments: [], watch: { kind: "off" },
+  repo: "simonwjackson/forgerie", headSha: "4f1c2e9a7b3d5f60718293a4b5c6d7e8f9012345",
+  author: "forgerie-agent", updatedAt: at(12), mergeability: "clean", files: 4, additions: 38, deletions: 6,
+  checks: passing, reviews: [], comments: [], complete: true, merge: { kind: "allowed" },
 };
+const held = (reason: string) => ({ merge: { kind: "blocked", reason } as const });
 const comments: PullRequest["comments"] = [
-  { id: "c1", author: "jordan", path: "src/auth/LoginForm.tsx", line: 24, ago: "40m", url: `${base.url}#discussion_r1`,
+  { id: "c1", kind: "comment", author: "jordan", path: "src/auth/LoginForm.tsx", line: 24, updatedAt: at(40), url: `${base.url}#discussion_r1`,
     body: "Trim before the check, but send the untrimmed password. Some people end their password with a space on purpose." },
-  { id: "c2", author: "jordan", path: "src/auth/LoginForm.test.tsx", line: 9, ago: "38m", url: `${base.url}#discussion_r2`,
+  { id: "c2", kind: "comment", author: "jordan", path: "src/auth/LoginForm.test.tsx", line: 9, updatedAt: at(38), url: `${base.url}#discussion_r2`,
     body: "Also cover a password of only spaces." },
-  { id: "c3", author: "alex", ago: "22m", url: `${base.url}#issuecomment-3`,
+  { id: "c3", kind: "comment", author: "alex", updatedAt: at(22), url: `${base.url}#issuecomment-3`,
     body: "Can this land before the SSO change on Friday? It blocks the rollout." },
 ];
+const CHECKS_HELD = held("Every check must pass on this head commit.");
 const PRS: Record<string, PullRequest> = {
-  failed: { ...base, checks: [
+  failed: { ...base, ...CHECKS_HELD, checks: [
     check("1", "verify / typecheck", "passed", { seconds: 39 }),
     check("2", "verify / unit (node 22)", "failed", { seconds: 141, logTail: unitLog }),
     check("3", "verify / lint", "failed", { seconds: 26, logTail: lintLog }),
     check("4", "build / vite", "passed", { seconds: 55 }),
-    check("5", "acceptance / fold postures", "running", { workflow: "Acceptance" }),
-  ], reviews: [{ reviewer: "alex", state: "commented", ago: "22m" }], comments: comments.slice(2) },
-  waiting: { ...base, checks: [passing[0]!, check("2", "verify / unit (node 22)", "running"), passing[2]!,
-    check("4", "build / vite", "queued"), check("5", "acceptance / fold postures", "queued", { workflow: "Acceptance" })] },
-  blocked: { ...base, reviews: [{ reviewer: "jordan", state: "changes_requested", ago: "40m" }, { reviewer: "alex", state: "commented", ago: "22m" }], comments },
-  ready: { ...base, reviews: [{ reviewer: "jordan", state: "approved", ago: "6m" }, { reviewer: "alex", state: "approved", ago: "4m" }] },
-  conflict: { ...base, conflicts: true, reviews: [{ reviewer: "jordan", state: "approved", ago: "6m" }] },
-  draft: { ...base, state: "draft", title: "Spike: stream check logs into the transcript" },
-  merged: { ...base, state: "merged", ago: "3m", reviews: [{ reviewer: "jordan", state: "approved", ago: "1h" }] },
-  closed: { ...base, state: "closed", title: "Try a stricter session cookie", head: "try/strict-cookie", ago: "2d", checks: passing.slice(0, 3) },
+    check("5", "acceptance / fold postures", "running", { required: false }),
+  ], reviews: [{ reviewer: "alex", state: "commented", updatedAt: at(22) }], comments: comments.slice(2) },
+  waiting: { ...base, ...CHECKS_HELD, checks: [passing[0]!, check("2", "verify / unit (node 22)", "running"), passing[2]!,
+    check("4", "build / vite", "queued"), check("5", "acceptance / fold postures", "queued", { required: false })] },
+  blocked: { ...base, ...held("A reviewer requested changes."), reviews: [{ reviewer: "jordan", state: "changes_requested", updatedAt: at(40) }, { reviewer: "alex", state: "commented", updatedAt: at(22) }], comments },
+  ready: { ...base, reviews: [{ reviewer: "jordan", state: "approved", updatedAt: at(6) }, { reviewer: "alex", state: "approved", updatedAt: at(4) }] },
+  conflict: { ...base, ...held("The branch conflicts with its base."), mergeability: "conflicting", reviews: [{ reviewer: "jordan", state: "approved", updatedAt: at(6) }] },
+  unknown: { ...base, ...held("GitHub has not computed mergeability."), mergeability: "unknown" },
+  nochecks: { ...base, ...held("No CI ran on this commit."), checks: [] },
+  draft: { ...base, ...held("Only an open, non-draft PR can merge."), state: "draft", title: "Spike: stream check logs into the transcript" },
+  merged: { ...base, ...held("Only an open, non-draft PR can merge."), state: "merged", updatedAt: at(3), reviews: [{ reviewer: "jordan", state: "approved", updatedAt: at(60) }] },
+  closed: { ...base, ...held("Only an open, non-draft PR can merge."), state: "closed", title: "Try a stricter session cookie", head: "try/strict-cookie", updatedAt: at(2 * 1440), checks: passing.slice(0, 3) },
 };
-PRS.watching = { ...PRS.failed!, watch: { kind: "watching", since: "21:02", wakes: 2, lastWake: "21:24" } };
-PRS.stopped = { ...PRS.blocked!, watch: { kind: "stopped", ago: "5m", reason: "Ten wakes in a row brought only comments, so it stopped to keep a busy thread from running the agent in a loop." } };
+PRS.watching = PRS.failed!;
+PRS.stopped = PRS.blocked!;
 PRS.asked = PRS.failed!;
 PRS.header = PRS.failed!;
+const WATCH: Record<string, PullWatch> = {
+  watching: { kind: "watching", since: at(28), wakes: 2, lastWake: at(6) },
+  stopped: { kind: "stopped", at: at(5), reason: "10 consecutive comment-only wakes." },
+};
+const linkOf = (pr: PullRequest, watch: PullWatch = { kind: "off" }): PullLink =>
+  ({ session: { id: "preview", cwd: "/preview" }, repo: pr.repo, number: pr.number, watch });
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const messages: TranscriptMessage[] = [
@@ -101,11 +114,14 @@ const messages: TranscriptMessage[] = [
 
 function Preview() {
   const pr = PRS[scenario] ?? PRS.failed!;
-  const [watch, setWatch] = useState(pr.watch);
-  const value = { ...pr, watch };
+  const [watch, setWatch] = useState<PullWatch>(WATCH[scenario] ?? { kind: "off" });
+  const value = pr;
+  const link = scenario === "unlinked" ? undefined : linkOf(pr, watch);
   const load: PullLoad = scenario === "loading" ? { type: "loading" }
+    : scenario === "unlinked" ? { type: "none" }
     : scenario === "error" ? { type: "failed", message: "GitHub refused the read: Forgerie's GitHub App cannot see simonwjackson/forgerie. Install the app on that repository from the backlog, then try again." }
     : { type: "ready", value };
+  const notice = scenario === "refused" ? { tone: "error" as const, text: "The PR head changed after confirmation; read it again." } : undefined;
   const [open, setOpen] = useState(scenario !== "header" && scenario !== "asked" && scenario !== "rows");
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(messages, false), onNew: async () => {} });
   const ask = (message: string) => (runtime as AssistantRuntime).thread.composer.setText(message);
@@ -115,13 +131,14 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const frame = <SessionFrame name="Reject empty passwords" status="Connected" actions={<>
-    <PullRequestOpener pr={value} onOpen={() => setOpen(true)} />
+    <PullRequestOpener pr={load.type === "ready" ? value : undefined} link={link} onOpen={() => setOpen(true)} />
     <ChangesOpener notes={0} onOpen={() => {}} />
     <TreeOpener idle onOpen={() => {}} />
   </>}>
     <Thread />
-    {open && <PullRequestReview load={load} onRefresh={() => {}} onAsk={ask} onWatch={(on) => setWatch(on ? { kind: "watching", since: "21:30", wakes: 0 } : { kind: "off" })}
-      onMerge={() => {}} onClose={() => setOpen(false)} />}
+    {open && <PullRequestReview load={load} link={link} notice={notice} writing={false} now={NOW} onRefresh={() => {}} onAsk={ask}
+      onWatch={(on) => setWatch(on ? { kind: "watching", since: new Date().toISOString(), wakes: 0 } : { kind: "stopped", at: new Date().toISOString(), reason: "Stopped from the panel." })}
+      onLink={() => {}} onMerge={() => {}} onClose={() => setOpen(false)} />}
   </SessionFrame>;
   return <AssistantRuntimeProvider runtime={runtime}>
     {scenario === "rows" ? <AppShell open onOpenChange={() => {}} picker={() => <MockPicker />} thread={frame} /> : frame}
@@ -130,15 +147,13 @@ function Preview() {
 
 /** The session list as Picker.tsx draws it, with each row's pull request mark where the worktree mark sits. */
 function MockPicker() {
-  const rows: { title: string; branch: string; time: string; pr: PullRequest; state?: string }[] = [
-    { title: "Reject empty passwords", branch: "fix/empty-password", time: "now", pr: PRS.failed!, state: "working" },
-    { title: "Land the picker redesign", branch: "picker-redesign", time: "4m", pr: PRS.ready! },
-    { title: "Stream check logs into the transcript", branch: "spike/check-logs", time: "18m", pr: PRS.draft! },
-    { title: "Speed up session listing on a busy machine with long names", branch: "speed-up-session-listing", time: "26m", pr: PRS.waiting! },
-    { title: "Address review on the cookie change", branch: "fix/cookie-review", time: "40m", pr: PRS.blocked! },
-    { title: "Rebase the sessiond port", branch: "port/sessiond", time: "1h", pr: { ...PRS.conflict!, number: 139 } },
-    { title: "Ship the backlog launcher", branch: "feat/backlog-launcher", time: "3h", pr: { ...PRS.merged!, number: 131 } },
-    { title: "Try a stricter session cookie", branch: "try/strict-cookie", time: "2d", pr: { ...PRS.closed!, number: 127 } },
+  const rows: { title: string; branch: string; time: string; link: PullLink; state?: string }[] = [
+    { title: "Reject empty passwords", branch: "fix/empty-password", time: "28m", link: linkOf(PRS.failed!, WATCH.watching), state: "working" },
+    { title: "Land the picker redesign", branch: "picker-redesign", time: "4m", link: linkOf({ ...PRS.ready!, number: 145 }) },
+    { title: "Stream check logs into the transcript", branch: "spike/check-logs", time: "18m", link: linkOf({ ...PRS.draft!, number: 144 }) },
+    { title: "Speed up session listing on a busy machine with long names", branch: "speed-up-session-listing", time: "26m", link: linkOf({ ...PRS.waiting!, number: 1043 }, WATCH.watching), state: "working" },
+    { title: "Address review on the cookie change", branch: "fix/cookie-review", time: "40m", link: linkOf({ ...PRS.blocked!, number: 140 }, WATCH.stopped) },
+    { title: "Ship the backlog launcher", branch: "feat/backlog-launcher", time: "3h", link: linkOf({ ...PRS.merged!, number: 131 }) },
   ];
   return <section className="picker" aria-label="Sessions">
     <header className="picker-header">
@@ -153,7 +168,7 @@ function MockPicker() {
         <span className="picker-title">{row.title}</span>
         <span className="picker-time" data-live={row.state === "working" || undefined}>{row.time}</span>
         <span className="picker-sub"><span className="picker-where">forgerie · <span className="picker-branch">{row.branch}</span></span>
-          <PullRequestRowMark pr={row.pr} /></span>
+          <PullRequestRowMark link={row.link} /></span>
       </div>)}
     </div>
   </section>;

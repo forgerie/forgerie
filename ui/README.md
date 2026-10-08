@@ -25,6 +25,8 @@ Press the changes button in the header to read the session's git diff. Select li
 
 A new session in a Git project starts in a fresh worktree from the default branch. Land or discard it from the ⋯ menu in the header. See [session worktrees](verification/session-worktrees.md).
 
+Press the pull request button in the header to see the session's pull request: checks, reviews, open comments, watch, and merge. Without a linked pull request it lets you link one by number. See [pull requests](verification/pull-requests.md).
+
 Press the archive button in the header to archive the session and open the next one waiting for you. See [archive and next](verification/archive-next.md).
 
 On a touch screen, swipe right to see the session list and left to put it away. See [swipe to the session list](verification/sheet-swipe.md).

@@ -22,6 +22,8 @@
 [data-tone="closed"] { --pr-tone: var(--pr-closed); }
 
 /* Header opener: the dot sits where the changes badge sits, so the two read as one family. */
+.pr-opener { position: relative; }
+.pr-opener:not([data-linked]) { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
 .pr-opener .pr-dot { position: absolute; inset-block-start: 0.125rem; inset-inline-end: 0.0625rem; inline-size: 0.5rem; block-size: 0.5rem;
   border-radius: 50%; background: var(--pr-tone); box-shadow: 0 0 0 2px var(--background); }
 .pr-opener[data-tone="waiting"] .pr-dot, .pr-opener[data-tone="draft"] .pr-dot, .pr-opener[data-tone="closed"] .pr-dot {
@@ -33,8 +35,8 @@
 .pr-row-mark { flex: 0 1 auto; min-inline-size: 0; display: inline-flex; align-items: center; gap: 3px; overflow: hidden; white-space: nowrap;
   font-family: var(--code-font); font-size: var(--meta-text); color: var(--muted-foreground); }
 .pr-row-mark svg { flex: none; inline-size: 0.75rem; block-size: 0.75rem; color: var(--pr-tone); }
-.pr-row-short { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; margin-inline-start: 0.25em; color: var(--pr-tone); }
-.pr-row-mark[data-tone="waiting"] .pr-row-short, .pr-row-mark[data-tone="draft"] .pr-row-short, .pr-row-mark[data-tone="closed"] .pr-row-short { color: var(--muted-foreground); }
+.pr-row-mark svg { color: var(--muted-foreground); }
+.pr-row-mark[data-watch="watching"] svg { color: var(--live); }
 
 /* The modal. */
 .pr-dialog { --tree-width: 44rem; --tree-height: 52rem; }
@@ -45,6 +47,23 @@
 .tree-head a.icon-button { inline-size: var(--control-size); block-size: var(--control-size); color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
 .tree-head a.icon-button:hover { color: var(--foreground); }
 .pr-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding-block-end: var(--space-4); }
+
+/* A write's outcome: a refusal in the failed tone, a merge receipt in the ready tone. */
+.pr-notice { margin: var(--space-3) var(--tree-pad) 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
+  font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
+.pr-notice[data-tone="error"] { --pr-tone: var(--pr-failed); background: color-mix(in oklab, var(--pr-tone) 10%, var(--background)); }
+.pr-notice[data-tone="done"] { --pr-tone: var(--pr-ready); background: color-mix(in oklab, var(--pr-tone) 10%, var(--background)); }
+
+/* No linked pull request: one sentence and a number field. */
+.pr-link { display: grid; gap: var(--space-2); padding: var(--space-4) var(--tree-pad); font-size: var(--small-text); line-height: 1.5; }
+.pr-link p { margin: 0 0 var(--space-2); color: var(--muted-foreground); }
+.pr-link label { font-weight: 500; }
+.pr-link-row { display: flex; align-items: center; gap: var(--space-2); max-inline-size: 20rem; }
+.pr-link-row > span { color: var(--muted-foreground); font-family: var(--code-font); }
+.pr-link-row input { flex: 1 1 4rem; min-inline-size: 0; min-block-size: 2.25rem; padding-inline: var(--space-2); border: 1px solid var(--line);
+  border-radius: var(--radius-control); background: transparent; color: var(--foreground); font: inherit; font-family: var(--code-font); }
+.pr-link-row input:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 1px; }
+.pr-foot code { font-family: var(--code-font); font-size: var(--meta-text); }
 
 .pr-summary { padding: var(--space-4) var(--tree-pad) var(--space-3); }
 .pr-title { margin: 0; font-size: clamp(1.0625rem, 2.6cqi, 1.25rem); font-weight: 600; line-height: 1.35; text-wrap: pretty; overflow-wrap: anywhere; }

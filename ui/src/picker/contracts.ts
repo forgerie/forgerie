@@ -26,6 +26,7 @@ export const wireStatusSchema = z.object({
   isBashRunning: z.boolean(),
   workingAgents: z.number().optional(),
   runningProcesses: z.number().optional(),
+  watchingPullRequest: z.boolean().optional(),
   ...blockers,
   response: sessionResponseSchema.optional(),
 });

@@ -3,6 +3,7 @@ import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, pro
 import type { PickerActivity, PickerProject, PickerSession, PickerStatus } from "./board";
 import type { SessionTransport } from "../sessionStore";
 import { mergeRecord, parseWorktreeEvent, type WorktreeRecord } from "../worktrees/worktreeApi";
+import { parsePullEvent, pullCatalogSchema, type PullLink } from "../pullRequests/pullRequestApi";
 
 /** How far the picker's copy of the machine catalog can be trusted. */
 export type CatalogConnection =
@@ -24,6 +25,7 @@ const toStatus = (status: WireStatus): PickerStatus => ({
   isStreaming: status.isStreaming, isCompacting: status.isCompacting, isBashRunning: status.isBashRunning,
   workingAgents: status.workingAgents, runningProcesses: status.runningProcesses,
   needsResponse: status.response === undefined ? undefined : status.response.kind === "needs-response",
+  watchingPullRequest: status.watchingPullRequest,
   blocked: status.pendingAsk !== undefined || (status.pendingDialogs?.length ?? 0) > 0,
 });
 
@@ -35,7 +37,9 @@ export type LocalChange =
   | { type: "local.archived"; sessionId: string; archived: boolean }
   | { type: "local.deleted"; sessionId: string }
   /** A session worktree changed: setup, Land, Discard, archive cleanup, or a branch rename. */
-  | { type: "session.worktree"; worktree: WorktreeRecord };
+  | { type: "session.worktree"; worktree: WorktreeRecord }
+  /** A session's pull request link or watch changed, including each wake. */
+  | { type: "session.pull-request"; link: PullLink };
 
 /** Apply one live event or confirmed local change. Pure so replay after a snapshot uses the same rules. */
 export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | LocalChange): CatalogState {
@@ -73,6 +77,16 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | Loc
       });
       return changed ? { ...state, sessions } : state;
     }
+    case "session.pull-request": {
+      const { link } = event;
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.id !== link.session.id) return session;
+        changed = true;
+        return { ...session, pullRequest: link };
+      });
+      return changed ? { ...state, sessions } : state;
+    }
     case "session.created":
       return state.sessions.some((session) => session.id === event.session.id) ? state
         : { ...state, sessions: [event.session, ...state.sessions] };
@@ -88,6 +102,11 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | Loc
   }
 }
 
+function withPulls(sessions: PickerSession[], links: readonly PullLink[]): PickerSession[] {
+  if (links.length === 0) return sessions;
+  const byId = new Map(links.map((link) => [link.session.id, link]));
+  return sessions.map((session) => { const link = byId.get(session.id); return link ? { ...session, pullRequest: link } : session; });
+}
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 /** About one frame at 60 Hz. */
 const LIVE_FRAME_MS = 16;
@@ -195,6 +214,12 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
             if (current.buffer) current.buffer.push(change); else updateLive(applyCatalogEvent(state, change));
             return;
           }
+          const pull = parsePullEvent(value);
+          if (pull) {
+            const change: LocalChange = { type: "session.pull-request", link: pull };
+            if (current.buffer) current.buffer.push(change); else updateLive(applyCatalogEvent(state, change));
+            return;
+          }
           event = parseCatalogEvent(value);
         }
         catch (error) { console.warn("Picker ignored a malformed machine event.", error); return; }
@@ -209,11 +234,17 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         current.controller.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
       });
       const signal = current.controller.signal;
-      const [listing, asks, unread, projects] = await Promise.all([
+      const [listing, asks, unread, projects, pulls] = await Promise.all([
         read(`${prefix}/sessions/all`, listingSchema, signal),
         read(`${prefix}/sessions/asks`, asksSchema, signal),
         read(`${prefix}/sessions/unread`, unreadSchema, signal),
         read(`${machine}/projects`, projectsSchema, signal),
+        // Pull request links are extra: a server without them still lists sessions.
+        read(`${prefix}/github/pulls`, pullCatalogSchema, signal).catch((error: unknown) => {
+          if (signal.aborted) throw error;
+          console.warn("Picker could not read pull request links.", error);
+          return { links: [] };
+        }),
       ]);
       if (!live()) return;
       const statuses: Record<string, PickerStatus> = {};
@@ -225,7 +256,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
       }
       let next: CatalogState = {
         connection: { type: "ready" },
-        sessions: listing.sessions,
+        sessions: withPulls(listing.sessions, pulls.links),
         statuses,
         activities: Object.fromEntries(listing.activities.map((activity) => [activity.sessionId, toActivity(activity)])),
         unread: new Set(unread.sessions.map((entry) => entry.sessionId)),
