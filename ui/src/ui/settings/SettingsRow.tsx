@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
 
-/** System molecule: one settings destination, with facts that wrap before its navigation mark yields. */
-export function SettingsRow({ name, description, meta, flags, replaced, onOpen }: {
-  name: ReactNode; description?: ReactNode; meta?: ReactNode; flags?: ReactNode; replaced?: boolean; onOpen: () => void;
+/**
+ * System molecule: one settings destination, with facts that wrap before its navigation mark yields.
+ * A dimmed row is present but not in effect: replaced, or turned off.
+ */
+export function SettingsRow({ name, description, meta, flags, dimmed, onOpen }: {
+  name: ReactNode; description?: ReactNode; meta?: ReactNode; flags?: ReactNode; dimmed?: boolean; onOpen: () => void;
 }) {
-  return <li><button type="button" className="agent-row" onClick={onOpen} data-replaced={replaced || undefined}>
+  return <li><button type="button" className="agent-row" onClick={onOpen} data-dimmed={dimmed || undefined}>
     <span className="agent-row-name">{name}</span>
     {meta ? <span className="agent-row-model">{meta}</span> : null}
     {description ? <span className="agent-row-description">{description}</span> : null}

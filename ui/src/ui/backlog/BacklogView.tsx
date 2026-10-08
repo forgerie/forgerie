@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, InfoIcon, ListTodoIcon, RefreshCwIcon, SearchIcon, Trash2Icon, TriangleAlertIcon, UnlinkIcon, XIcon } from "lucide-react";
 import type { BacklogApi, BacklogClaim, BacklogDetail, BacklogItem, BacklogWarning } from "../../backlog/backlogApi";
@@ -8,6 +8,7 @@ import type { GitHubApi } from "../../backlog/githubApi";
 import { useGitHubApp, type GitHubAppPage } from "../../backlog/useGitHubApp";
 import { writeClipboardText } from "../../clipboard";
 import { SettingsFrame } from "../settings/SettingsFrame";
+import { useMenu } from "../useMenu";
 import { GitHubConnect } from "./GitHubConnect";
 import "../settings/settings.css";
 import "./backlog.css";
@@ -46,21 +47,6 @@ export interface BacklogBinding {
 export function BacklogView({ place, binding }: { place: BacklogPlace; binding: BacklogBinding }) {
   return place.item ? <ItemPage key={itemParam(place.item)} item={place.item} binding={binding} />
     : <ListPage binding={binding} />;
-}
-
-/** A menu under a header button. A press outside or Escape closes it. */
-function useMenu() {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: Event) => { if (event.target instanceof Node && !anchor.current?.contains(event.target)) setOpen(false); };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    document.addEventListener("pointerdown", onDown, true);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
-  }, [open]);
-  return { open, setOpen, anchor };
 }
 
 function CloseButton({ onClose }: { onClose?: (() => void) | undefined }) {

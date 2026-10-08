@@ -1,9 +1,13 @@
 import { useId, useLayoutEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-/** System organism: a destructive decision at window level, with native focus containment and return. */
-export function ConfirmDialog({ title, children, confirmLabel, onConfirm, onCancel }: {
-  title: string; children: ReactNode; confirmLabel: string; onConfirm: () => void; onCancel: () => void;
+/**
+ * System organism: a destructive decision at window level. It is the Land and
+ * Discard window's card, so every confirmation in Forgerie looks the same.
+ * Cancel holds focus first; Escape and a press outside the card cancel.
+ */
+export function ConfirmDialog({ title, icon, children, confirmLabel, onConfirm, onCancel }: {
+  title: string; icon?: ReactNode; children: ReactNode; confirmLabel: string; onConfirm: () => void; onCancel: () => void;
 }) {
   const titleId = useId();
   const bodyId = useId();
@@ -11,13 +15,19 @@ export function ConfirmDialog({ title, children, confirmLabel, onConfirm, onCanc
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
   useLayoutEffect(() => { if (dialog && !dialog.open) dialog.showModal?.(); }, [dialog]);
   useLayoutEffect(() => () => { if (opener?.isConnected) opener.focus({ preventScroll: true }); }, [opener]);
-  return createPortal(<dialog ref={setDialog} className="confirm-dialog" aria-labelledby={titleId} aria-describedby={bodyId}
-    onCancel={(event) => { event.preventDefault(); onCancel(); }}>
-    <h2 id={titleId}>{title}</h2>
-    <div id={bodyId}>{children}</div>
-    <div className="confirm-actions">
-      <button type="button" className="plugin-button" autoFocus onClick={onCancel}>Cancel</button>
-      <button type="button" className="plugin-button" data-tone="danger" onClick={onConfirm}>{confirmLabel}</button>
+  return createPortal(<dialog ref={setDialog} className="wt-dialog" aria-labelledby={titleId} aria-describedby={bodyId}
+    onCancel={(event) => { event.preventDefault(); onCancel(); }}
+    onClick={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+    <div className="wt-card">
+      <header className="wt-head">
+        {icon ? <span className="wt-mark" aria-hidden>{icon}</span> : null}
+        <h2 id={titleId}>{title}</h2>
+      </header>
+      <div className="wt-body" id={bodyId}>{children}</div>
+      <footer className="wt-foot">
+        <button type="button" className="wt-secondary" autoFocus onClick={onCancel}>Cancel</button>
+        <button type="button" className="primary wt-primary" data-tone="danger" onClick={onConfirm}>{confirmLabel}</button>
+      </footer>
     </div>
   </dialog>, document.body);
 }

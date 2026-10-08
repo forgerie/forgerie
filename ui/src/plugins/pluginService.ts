@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,11 +18,35 @@ const settingsSchema = z.object({ packages: z.array(packageSchema).default([]), 
 const webConfigSchema = z.object({ plugins: z.record(z.string(), z.object({ enabled: z.boolean().optional(), settings: objectSchema.optional() }).passthrough()).default({}) }).passthrough();
 const webListSchema = z.object({ plugins: z.array(z.object({ id: z.string(), source: z.string(), scope: z.string(), enabled: z.boolean() })) });
 const pendingSchema = z.object({ stamp: z.array(z.string()), required: z.boolean() });
+const packageJsonSchema = z.object({ name: z.string().optional(), version: z.string().optional(), description: z.string().optional() });
+const builtins: readonly (readonly [string, string])[] = [
+  ["pi-subagents", "Lets a session hand work to the agents in Settings."],
+  ["pi-processes", "Runs dev servers, watchers, and other long commands in the background."],
+  ["codemode", "Lets the model run several tool calls from one JavaScript script."],
+  ["ask-user", "Lets the agent ask you a question in a browser form."],
+];
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const packageSource = (entry: z.infer<typeof packageSchema>) => typeof entry === "string" ? entry : entry.source;
 const packageId = (source: string) => `package:${source}`;
 const extensionId = (path: string) => `extension:${path}`;
 const exec = promisify(execFile);
+
+/** A name for a source with no readable package.json: the npm name, the repository, or the folder. */
+export function sourceName(source: string): string {
+  if (source.startsWith("npm:")) {
+    const spec = source.slice("npm:".length);
+    const version = spec.indexOf("@", 1);
+    return version > 0 ? spec.slice(0, version) : spec;
+  }
+  const last = source.replace(/[/\\]+$/u, "").split(/[/\\:]/u).at(-1) ?? "";
+  const remote = /^(git:|git@|[a-z+]+:\/\/)/u.test(source);
+  return (remote ? last.replace(/@[^@]*$/u, "").replace(/\.git$/u, "") : last) || source;
+}
+/** A loose extension is named by its file, or by its folder when the file is an index. */
+export function extensionName(path: string): string {
+  const file = basename(path);
+  return (/^index\.[cm]?[jt]s$/u.test(file) ? basename(dirname(path)) : file.replace(/\.[cm]?[jt]s$/u, "")) || file;
+}
 const units = ["forgerie-web.service", "forgerie-sessiond.service"];
 
 export class PluginError extends Error {
@@ -95,20 +120,32 @@ export class PluginService {
     const manager = new DefaultPackageManager({ cwd: profile.dir, agentDir: profile.dir,
       settingsManager: SettingsManager.create(profile.dir, profile.dir, { projectTrusted: false }) });
     const [resolved, web, services] = await Promise.all([manager.resolve(async () => "skip"), this.gateway("/api/plugins"), this.services.read()]);
+    // Reads package.json as data. Locating a package never loads its code or installs a missing one.
+    const describePackage = async (entry: z.infer<typeof packageSchema>, enabled: boolean): Promise<ManagedPlugin> => {
+      const source = packageSource(entry);
+      let path: string | undefined;
+      try { path = manager.getInstalledPath(source, "user"); } catch { path = undefined; }
+      let info: z.infer<typeof packageJsonSchema> = {};
+      if (path) {
+        try { info = packageJsonSchema.catch({}).parse(JSON.parse(await readFile(join(path, "package.json"), "utf8"))); } catch { info = {}; }
+      }
+      return { id: packageId(source), kind: "package", name: info.name ?? sourceName(source), source, enabled,
+        description: info.description?.trim() ?? "", version: info.version, installed: path !== undefined,
+        filtered: typeof entry !== "string" && Object.keys(entry).some((key) => key !== "source") };
+    };
+    const parked = settings.forgerieDisabledPackages.filter((entry) => !settings.packages.some((active) => packageSource(active) === packageSource(entry)));
+    const packages = await Promise.all([...settings.packages.map((entry) => describePackage(entry, true)), ...parked.map((entry) => describePackage(entry, false))]);
     const plugins: ManagedPlugin[] = [
-      ...settings.packages.map((entry): ManagedPlugin => ({ id: packageId(packageSource(entry)), kind: "package", name: packageSource(entry), source: packageSource(entry),
-        enabled: true, description: typeof entry === "string" ? "Pi package" : "Pi package with resource filters" })),
-      ...settings.forgerieDisabledPackages.filter((entry) => !settings.packages.some((active) => packageSource(active) === packageSource(entry))).map((entry): ManagedPlugin => ({
-        id: packageId(packageSource(entry)), kind: "package", name: packageSource(entry), source: packageSource(entry), enabled: false, description: "Pi package, kept for restore" })),
+      ...packages,
       ...resolved.extensions.filter((entry) => entry.metadata.origin === "top-level" && entry.metadata.scope === "user" && !entry.path.startsWith("builtin:")).map((entry): ManagedPlugin => ({
-        id: extensionId(entry.path), kind: "extension", name: basename(entry.path), source: entry.path, enabled: entry.enabled, description: "Loose Pi extension" })),
+        id: extensionId(entry.path), kind: "extension", name: extensionName(entry.path), source: entry.path, enabled: entry.enabled, description: "" })),
       ...webListSchema.parse(web).plugins.map((entry): ManagedPlugin => ({
-        id: `forgerie:${entry.id}`, kind: "forgerie", name: entry.id, source: entry.source,
-        description: entry.scope === "bundled" ? "Bundled browser plugin" : "Browser plugin", enabled: config.plugins[entry.id]?.enabled !== false,
-        settings: config.plugins[entry.id]?.settings ?? {},
+        id: `forgerie:${entry.id}`, kind: "forgerie", name: entry.id, source: entry.source, description: "",
+        enabled: config.plugins[entry.id]?.enabled !== false, settings: config.plugins[entry.id]?.settings ?? {},
       })),
-      ...[ ["pi-subagents", "Delegated agents"], ["pi-processes", "Managed processes"], ["codemode", "JavaScript tool calls"], ["ask-user", "Browser decision forms"] ].map(([name, description]): ManagedPlugin => ({
-        id: `builtin:${name!}`, kind: "builtin", name: name!, source: "Forgerie", description: description!, enabled: name === "codemode" ? config.codemode !== false : name === "ask-user" ? config.askUser !== false : true,
+      ...builtins.map(([name, description]): ManagedPlugin => ({
+        id: `builtin:${name}`, kind: "builtin", name, source: "Forgerie", description,
+        enabled: name === "codemode" ? config.codemode !== false : name === "ask-user" ? config.askUser !== false : true,
       })),
     ];
     const pendingPath = join(profile.dir, "forgerie-plugin-restart.json");
@@ -116,7 +153,7 @@ export class PluginService {
     // Both services must have restarted, not only web. An external restart clears the notice too.
     const restartRequired = pending.success && pending.data.required && (!services.available ||
       services.stamp.some((stamp, index) => stamp === pending.data.stamp[index]) || pending.data.stamp.length !== services.stamp.length);
-    return { profileDir: profile.dir, configPath: profile.configPath, revision: data.revision,
+    return { profileDir: profile.dir, configPath: profile.configPath, home: homedir(), revision: data.revision,
       plugins, restartRequired, restartAvailable: services.available };
   }
   change(revision: string, rawChange: PluginChange): Promise<PluginCatalog> {

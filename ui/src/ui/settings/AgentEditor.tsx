@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeftIcon, EllipsisIcon, Trash2Icon, XIcon } from "lucide-react";
 import type { SessionModel } from "../../contracts";
 import { modelLabel } from "../../modelChoice";
@@ -12,6 +12,7 @@ import { ModelPicker, type ModelBinding, type PickerOpen } from "../ModelPicker"
 import { PromptEditor } from "./PromptEditor";
 import { SettingsFrame } from "./SettingsFrame";
 import { SettingsToggle } from "./SettingsToggle";
+import { SettingsField as Field } from "./SettingsField";
 
 
 type Loaded = { baseText: string; baseMtimeMs: number | null; readOnly: boolean };
@@ -43,14 +44,6 @@ function resolveModel(spec: string | undefined, models: readonly SessionModel[])
   if (!parsed) return undefined;
   const matches = models.filter((model) => model.id === parsed.id && (!parsed.provider || model.provider === parsed.provider));
   return matches.length === 1 ? matches[0] : { provider: parsed.provider ?? "", id: parsed.id, name: modelSpecText(parsed) };
-}
-
-function Field({ label, hint, children, id }: { label: string; hint?: ReactNode; children: ReactNode; id?: string }) {
-  return <div className="agent-field">
-    <span className="agent-field-label" id={id}>{label}</span>
-    <div className="agent-field-value">{children}</div>
-    {hint ? <p className="agent-field-hint">{hint}</p> : null}
-  </div>;
 }
 
 /**

@@ -1,28 +1,26 @@
-.plugin-restart { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4);
-  padding: var(--space-3); margin-block-end: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-surface);
-  background: var(--tint-surface); color: var(--muted-foreground); font-size: var(--small-text); }
-.plugin-restart p { flex: 1 1 16rem; margin: 0; line-height: var(--line-height); }
-.plugin-restart code { font-family: var(--code-font); font-size: var(--meta-text); overflow-wrap: anywhere; }
-.plugin-button { display: inline-flex; align-items: center; justify-content: center; flex: none; min-block-size: var(--control-size);
-  padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent;
-  color: var(--foreground); font-size: var(--small-text); }
-.plugin-button:hover:not(:disabled) { background: var(--hover-surface); }
-.plugin-button[data-tone="danger"], .plugin-problem { color: var(--destructive); }
-.plugin-button:disabled { opacity: 0.6; }
-.plugin-form { display: flex; flex-direction: column; align-items: start; gap: var(--space-2); margin-block: var(--space-6); }
+/* Plugins reuse the Agents list, document, property rows, and header menu.
+   Only what those lack lives here: plain values, the install field, and the
+   settings editor. Everything follows the column's width. */
+
+.plugin-empty { padding-inline: var(--space-3); }
+.plugin-value { font-size: var(--small-text); overflow-wrap: anywhere; }
+.plugin-value[data-tone="error"] { color: var(--destructive); }
+.plugin-path { min-inline-size: 0; font-family: var(--code-font); font-size: var(--code-size); line-height: 1.5; overflow-wrap: anywhere; }
+
+/* One field and its words, in reading order. */
+.plugin-form { display: flex; flex-direction: column; gap: var(--space-2); }
+.plugin-form .settings-lede { margin-block-end: var(--space-4); }
 .plugin-form label { font-size: var(--small-text); font-weight: 500; }
 .plugin-form .settings-hint { margin: 0; }
-.plugin-form input, .plugin-form textarea { inline-size: 100%; min-inline-size: 0; padding: var(--space-3); border: 1px solid var(--line);
-  border-radius: var(--radius-control); background: var(--code-surface); color: var(--foreground); font-family: var(--code-font); font-size: var(--small-text); }
+.plugin-form input, .plugin-json { display: block; inline-size: 100%; min-inline-size: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line);
+  border-radius: var(--radius-control); background: var(--code-surface); color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size);
+  transition: border-color 150ms; }
 .plugin-form input { min-block-size: var(--control-size); }
-.plugin-form textarea { min-block-size: 12lh; resize: vertical; line-height: var(--line-height); }
-.plugin-source { overflow-wrap: anywhere; font-family: var(--code-font); font-size: var(--small-text); }
-.plugin-remove { margin-block-start: var(--space-6); }
-.plugin-problem { font-size: var(--small-text); margin: 0; }
-.confirm-dialog { inline-size: min(calc(100% - 2 * var(--gutter)), var(--thread-max-width)); max-block-size: calc(100dvh - 2 * var(--gutter));
-  overflow-y: auto; margin: auto; padding: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-thread);
-  background: var(--popover); color: var(--foreground); box-shadow: 0 var(--space-4) var(--space-8) var(--scrim-shadow); }
-.confirm-dialog::backdrop { background: var(--scrim); }
-.confirm-dialog h2 { margin: 0; font-size: var(--text-size); font-weight: 600; overflow-wrap: anywhere; }
-.confirm-dialog p { font-size: var(--small-text); line-height: var(--line-height); overflow-wrap: anywhere; }
-.confirm-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: var(--space-2); }
+.plugin-form input:focus-visible, .plugin-json:focus-visible { outline: none; border-color: var(--line-focus); }
+
+/* Settings: the document's body, sized to what it holds. */
+.plugin-settings .settings-hint { margin-block: 0 var(--space-3); }
+.plugin-json { field-sizing: content; min-block-size: 6lh; padding-block: var(--space-3); line-height: 1.6; tab-size: 2; resize: vertical; }
+.plugin-json[aria-invalid] { border-color: color-mix(in oklab, var(--destructive) 60%, var(--line)); }
+.plugin-problem { margin: var(--space-2) 0 0; color: var(--destructive); font-size: var(--small-text); }
+@media (prefers-reduced-motion: reduce) { .plugin-form input, .plugin-json { transition: none; } }

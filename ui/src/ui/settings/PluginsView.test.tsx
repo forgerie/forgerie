@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PluginsView } from "./PluginsView";
+import { PluginsView, plainName, tildify } from "./PluginsView";
 import type { PluginCatalog, PluginChange, PluginsApi } from "../../plugins/pluginsApi";
 
 let root: Root;
@@ -13,20 +13,24 @@ let selected: string | undefined;
 let api: PluginsApi;
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === text || node.getAttribute("aria-label") === text)!;
-const click = async (text: string) => { const node = button(text); expect(node).toBeDefined(); await act(async () => node.click()); await settle(); };
+const click = async (text: string) => { const node = button(text); expect(node, text).toBeDefined(); await act(async () => node.click()); await settle(); };
+const command = async (text: string) => { await click("Plugin commands"); await click(text); };
 async function render() { await act(async () => root.render(<PluginsView selected={selected} api={api} onOpen={(id) => { selected = id; }} onBack={() => {}} />)); await settle(); }
-async function textarea(text: string) {
-  const input = document.querySelector<HTMLTextAreaElement>("textarea")!;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, text); input.dispatchEvent(new Event("input", { bubbles: true })); });
+async function type(selector: string, text: string) {
+  const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
+  const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  await act(async () => { Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(input, text); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
+const status = () => document.querySelector(".connection-status")?.textContent;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   selected = undefined; calls = []; restarts = 0;
-  catalog = { profileDir: "/owned/agent", configPath: "/owned/config.json", revision: "v1", restartRequired: false, restartAvailable: true,
-    plugins: [ { id: "package:pi-goal", kind: "package", name: "pi-goal", source: "npm:pi-goal", description: "Pi package", enabled: true },
-      { id: "forgerie:quota", kind: "forgerie", name: "quota", source: "local", description: "Browser plugin", enabled: true, settings: { five_hour: false } },
-      { id: "builtin:pi-subagents", kind: "builtin", name: "pi-subagents", source: "Forgerie", description: "Delegated agents", enabled: true } ] };
+  catalog = { profileDir: "/home/me/.forgerie/agent", configPath: "/home/me/.config/forgerie.json", home: "/home/me", revision: "v1", restartRequired: false, restartAvailable: true,
+    plugins: [ { id: "package:pi-goal", kind: "package", name: "@narumitw/pi-goal", source: "npm:@narumitw/pi-goal", version: "0.49.6", installed: true, description: "Autonomous /goal completion.", enabled: true },
+      { id: "package:gone", kind: "package", name: "pi-gone", source: "/home/me/code/pi-gone", installed: false, description: "", enabled: false },
+      { id: "forgerie:quota", kind: "forgerie", name: "quota", source: "local", description: "", enabled: true, settings: { five_hour: false } },
+      { id: "builtin:pi-subagents", kind: "builtin", name: "pi-subagents", source: "Forgerie", description: "Lets a session hand work to the agents in Settings.", enabled: true } ] };
   api = { list: async () => catalog,
     change: async (revision, change) => {
       if (revision !== catalog.revision) throw new Error("Reload before saving");
@@ -34,92 +38,116 @@ beforeEach(() => {
       catalog = { ...catalog, revision: "v2", restartRequired: true, plugins: catalog.plugins.map((entry) => change.type === "toggle" && entry.id === change.id ? { ...entry, enabled: change.enabled } : entry) };
       return catalog;
     },
-    restart: async () => { restarts += 1; return { ...catalog, restartRequired: false }; },
+    restart: async () => { restarts += 1; catalog = { ...catalog, restartRequired: false }; return catalog; },
   };
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
+describe("plugin words", () => {
+  it("drops an npm scope from the shown name and writes home as ~", () => {
+    expect(plainName(catalog.plugins[0]!)).toBe("pi-goal");
+    expect(plainName({ ...catalog.plugins[2]!, name: "@not/a-package" })).toBe("@not/a-package");
+    expect(tildify("/home/me/code/x", "/home/me")).toBe("~/code/x");
+    expect(tildify("/home/meg/code", "/home/me")).toBe("/home/meg/code");
+  });
+});
+
 describe("Plugins settings", () => {
-  it("shows both plugin kinds and built-ins, and opens a row without changing it", async () => {
+  it("lists real names and descriptions, and speaks only for unusual rows", async () => {
     await render();
     expect([...document.querySelectorAll("section")].map((node) => node.getAttribute("aria-label"))).toEqual(["Pi packages", "Pi extensions", "Forgerie plugins", "Built in"]);
-    expect(document.body.textContent).toContain("/owned/agent");
-    await click("quotaOnBrowser plugin");
+    const rows = [...document.querySelectorAll(".agent-row")].map((node) => node.textContent);
+    expect(rows[0]).toBe("pi-goal0.49.6Autonomous /goal completion.");
+    expect(rows[1]).toBe("pi-gone~/code/pi-goneTurned offNot installed");
+    expect(rows[2]).toBe("quotaInstalled on this machine");
+    expect(document.querySelector(".agent-row[data-dimmed]")!.textContent).toContain("pi-gone");
+    expect(document.body.textContent).toContain("Saved in ~/.forgerie/agent");
+    expect(document.body.textContent).not.toContain("Restart Forgerie to apply");
+    await act(async () => (document.querySelectorAll<HTMLButtonElement>(".agent-row")[2]!).click());
     expect(selected).toBe("forgerie:quota");
     expect(calls).toEqual([]);
   });
-  it("installs from the header, without waiting for a service restart", async () => {
+  it("installs from the header, then reports it without restarting", async () => {
     selected = "new"; await render();
-    expect(button("Install package").disabled).toBe(true);
-    expect(button("Install package").closest(".session-header")).not.toBeNull();
-    const input = document.querySelector<HTMLInputElement>("#plugin-source")!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "  npm:test-package  ");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await click("Install package");
+    expect(button("Install").disabled).toBe(true);
+    expect(button("Install").closest(".session-header")).not.toBeNull();
+    await type("#plugin-source", "  npm:test-package  ");
+    await click("Install");
     expect(calls).toEqual([{ type: "add", source: "npm:test-package" }]);
     expect(restarts).toBe(0);
     expect(selected).toBeUndefined();
+    expect(status()).toBe("Installed");
   });
-  it("turns a Pi package off and retains a restart notice", async () => {
+  it("turns a Pi package off, then keeps the restart notice under the header", async () => {
     selected = "package:pi-goal"; await render();
-    await click("Enable pi-goal");
+    expect(document.querySelector("h2.agent-name")!.textContent).toBe("pi-goal");
+    expect(document.body.textContent).toContain("npm:@narumitw/pi-goal");
+    await click("Load pi-goal");
     expect(calls).toEqual([{ type: "toggle", id: "package:pi-goal", enabled: false }]);
     expect(document.querySelector("[role=switch]")!.getAttribute("aria-checked")).toBe("false");
-    expect(document.body.textContent).toContain("Restart needed");
+    expect(document.querySelector(".notice[data-tone=pending]")!.textContent).toContain("Restart Forgerie to apply your changes");
+    expect(status()).toBe("Saved");
+  });
+  it("names a package that is configured but not on disk", async () => {
+    selected = "package:gone"; await render();
+    expect(document.body.textContent).toContain("Not installed");
+    expect(document.body.textContent).toContain("Install it again, or remove it.");
   });
   it("does not edit built-in add-ons", async () => {
     selected = "builtin:pi-subagents"; await render();
-    expect(button("Enable pi-subagents").disabled).toBe(true);
-    expect(document.body.textContent).toContain("read-only");
+    expect(button("Load pi-subagents").disabled).toBe(true);
+    expect(document.body.textContent).toContain("You cannot turn it off here.");
   });
   it("validates a JSON object and saves settings only on demand", async () => {
     selected = "forgerie:quota"; await render();
-    await textarea("[]");
+    await type("textarea", "[]");
     expect(document.querySelector("[role=alert]")!.textContent).toContain("JSON object");
-    expect(button("Save settings").disabled).toBe(true);
-    await textarea('{"five_hour": true}');
+    expect(button("Save").disabled).toBe(true);
+    await type("textarea", '{"five_hour": true}');
+    expect(status()).toBe("Unsaved changes");
     expect(calls).toEqual([]);
-    await click("Save settings");
+    await click("Save");
     expect(calls).toEqual([{ type: "settings", id: "forgerie:quota", settings: { five_hour: true } }]);
-    expect(button("Save settings").disabled).toBe(true);
+    expect(button("Save").disabled).toBe(true);
     expect(localStorage.length).toBe(0);
   });
   it("holds an unsaved draft across navigation and refuses to silently rebase it", async () => {
     selected = "forgerie:quota"; await render();
-    await textarea('{"five_hour": false, "private_key": "not-in-browser-storage"}');
+    await type("textarea", '{"five_hour": false, "private_key": "not-in-browser-storage"}');
     selected = undefined; await render();
     catalog = { ...catalog, revision: "outside-change" };
     selected = "forgerie:quota"; await render();
-    await click("Reload plugins");
-    await click("Save settings");
+    await command("Read plugins again");
+    await click("Save");
     expect(document.body.textContent).toContain("Reload before saving");
     expect(localStorage.length).toBe(0);
-    await click("Discard changes");
+    await command("Discard changes");
+    expect(status()).toBeUndefined();
   });
-  it("requires confirmation before restart and remove, and Cancel writes nothing", async () => {
+  it("confirms a restart in a window, and Cancel restarts nothing", async () => {
     selected = "package:pi-goal"; await render();
-    await click("Restart services");
-    expect(document.querySelector("dialog")!.textContent).toContain("stops active agent runs");
-    expect(restarts).toBe(0);
+    await command("Restart Forgerie…");
+    expect(document.querySelector("dialog")!.textContent).toContain("stops every running agent");
     await click("Cancel"); expect(restarts).toBe(0);
-    await click("Restart services"); await click("Stop runs and restart"); expect(restarts).toBe(1);
-    await click("Remove package");
-    expect(document.querySelector("dialog")!.textContent).toContain("code stays on disk");
-    await click("Cancel"); expect(calls).toEqual([]);
-    await click("Remove package");
-    const confirm = document.querySelector<HTMLButtonElement>("dialog button[data-tone=danger]")!;
-    await act(async () => confirm.click()); await settle();
+    await command("Restart Forgerie…"); await click("Stop runs and restart");
+    expect(restarts).toBe(1);
+    expect(status()).toBe("Restarted");
+  });
+  it("asks twice in the menu before it removes a package", async () => {
+    selected = "package:pi-goal"; await render();
+    await command("Remove package");
+    expect(calls).toEqual([]);
+    await click("Remove? Its code stays on disk");
     expect(calls).toEqual([{ type: "remove", id: "package:pi-goal" }]);
+    expect(selected).toBeUndefined();
   });
   it("clears a failed refresh after a successful retry", async () => {
     let fail = false;
     api = { ...api, list: async () => { if (fail) throw new Error("Gateway unavailable"); return catalog; } };
     await render();
-    fail = true; await click("Reload plugins");
+    fail = true; await command("Read plugins again");
     expect(document.body.textContent).toContain("Gateway unavailable");
-    fail = false; await click("Reload plugins");
+    fail = false; await click("Retry");
     expect(document.body.textContent).not.toContain("Gateway unavailable");
     expect(document.body.textContent).toContain("Pi packages");
   });
@@ -127,6 +155,6 @@ describe("Plugins settings", () => {
     let fail = true;
     api = { ...api, list: async () => { if (fail) throw new Error("sessiond is unavailable"); return catalog; } };
     await render(); expect(document.body.textContent).toContain("sessiond is unavailable");
-    fail = false; await click("Reload"); expect(document.body.textContent).toContain("Pi packages");
+    fail = false; await click("Retry"); expect(document.body.textContent).toContain("Pi packages");
   });
 });

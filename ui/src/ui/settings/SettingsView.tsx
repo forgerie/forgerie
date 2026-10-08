@@ -38,7 +38,7 @@ const modelText = (agent: AgentSummary) => {
 function AgentRow({ agent, replaced, onOpen }: { agent: AgentSummary; replaced: boolean; onOpen: () => void }) {
   const unsaved = agent.scope === "user" && agentDrafts.has(draftKey({ type: "user", file: agent.file }));
   return <SettingsRow name={agent.name} meta={modelText(agent)} description={agent.description || <em>No description</em>}
-    replaced={replaced} onOpen={onOpen} flags={<>
+    dimmed={replaced} onOpen={onOpen} flags={<>
       {replaced ? <span>Replaced by yours</span> : agent.advertise ? <span data-on>Offered to sessions</span> : null}
       {agent.disabled ? <span>Turned off</span> : null}
       {agent.broken ? <span data-tone="error">{agent.broken}</span> : null}

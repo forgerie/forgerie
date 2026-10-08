@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { PluginService, type PluginServices } from "./pluginService";
+import { extensionName, PluginService, sourceName, type PluginServices } from "./pluginService";
 import type { ForgerieProfile, Gateway } from "../settings/forgerieProfile";
 
 let root: string;
@@ -28,7 +28,7 @@ beforeEach(async () => {
   await json(join(root, "global-pi", "settings.json"), { packages: ["do-not-touch"] });
   packagePath = join(root, "local-package");
   await mkdir(packagePath);
-  await json(join(packagePath, "package.json"), { name: "test-plugin", pi: { extensions: ["index.ts"] } });
+  await json(join(packagePath, "package.json"), { name: "@tests/test-plugin", version: "1.2.3", description: "  Adds a test tool.  ", pi: { extensions: ["index.ts"] } });
   await writeFile(join(packagePath, "index.ts"), "throw new Error('Listing must never execute plugin code');");
   await writeFile(join(profile.dir, "extensions", "loose.ts"), "throw new Error('Do not execute');");
   await json(join(profile.dir, "settings.json"), { packages: [{ source: packagePath, extensions: ["index.ts"], themes: [] }], extensions: ["!extensions/*.ts"], theme: "keep-me", arbitrary: { preserve: true } });
@@ -65,8 +65,33 @@ describe("plugin management", () => {
     const catalog = await service.list();
     expect(catalog.profileDir).toBe(profile.dir);
     expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "forgerie", "forgerie", "builtin", "builtin", "builtin", "builtin"]);
-    expect(catalog.plugins.find((entry) => entry.kind === "extension")?.enabled).toBe(false);
+    expect(catalog.plugins.find((entry) => entry.kind === "extension")).toMatchObject({ name: "loose", description: "", enabled: false });
     expect(catalog.restartRequired).toBe(false);
+  });
+  it("describes a package from its package.json, read as data", async () => {
+    const catalog = await service.list();
+    expect(catalog.plugins[0]).toMatchObject({ kind: "package", name: "@tests/test-plugin", source: packagePath, version: "1.2.3",
+      description: "Adds a test tool.", installed: true, filtered: true });
+    expect(catalog.plugins.filter((entry) => entry.kind === "forgerie").map((entry) => entry.description)).toEqual(["", ""]);
+    expect(catalog.plugins.find((entry) => entry.id === "builtin:pi-subagents")?.description).toContain("agents in Settings");
+    expect(catalog.home).not.toBe("");
+  });
+  it("names a configured package that is not on disk, without installing it", async () => {
+    const settings = await readJson(join(profile.dir, "settings.json"));
+    await json(join(profile.dir, "settings.json"), { ...settings, packages: [join(root, "nowhere")] });
+    const catalog = await service.list();
+    expect(catalog.plugins[0]).toMatchObject({ name: "nowhere", installed: false, description: "", filtered: false });
+    expect(catalog.plugins[0]!.version).toBeUndefined();
+  });
+  it("derives a name from a source when there is no package.json", () => {
+    expect(sourceName("npm:@router-for-me/pi-cliproxyapi-provider@1.4.18")).toBe("@router-for-me/pi-cliproxyapi-provider");
+    expect(sourceName("npm:pi-goal@0.4.0")).toBe("pi-goal");
+    expect(sourceName("npm:pi-goal")).toBe("pi-goal");
+    expect(sourceName("git:github.com/someone/pi-tools@v2")).toBe("pi-tools");
+    expect(sourceName("https://github.com/someone/pi-tools.git")).toBe("pi-tools");
+    expect(sourceName("/home/me/code/pi-mobbin/")).toBe("pi-mobbin");
+    expect(extensionName("/profile/extensions/startup-context.ts")).toBe("startup-context");
+    expect(extensionName("/profile/extensions/direnv/index.ts")).toBe("direnv");
   });
   it("disables and restores the entire filtered package entry and preserves other settings", async () => {
     const original = await readJson(join(profile.dir, "settings.json"));
