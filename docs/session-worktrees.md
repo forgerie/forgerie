@@ -81,6 +81,8 @@ Lifecycle mutations serialize per main checkout. Before removal, the server gate
 
 Discard previews fingerprint HEAD, the default branch, the tracked diff, dirty paths, and their file content. Discard removes unlanded commits and dirty work. It also removes ignored files, including dependency and build directories. These ignored files do not count as dirty paths in the preview.
 
+At daemon startup, a missing owner transcript in Pi's active directory does not prove setup failed. The server also checks the archive record and transcript header for the same session ID and worktree cwd. A matching archived transcript preserves ownership and the completed setup. The original transcript path remains the restore target. If neither location contains the owner transcript, startup clears ownership and offers setup retry.
+
 Archive cleanup removes only a clean worktree whose commits are all contained in the default branch. It retains a worktree when any other session has a cwd at or below that path. This inventory includes archived sessions and delegated children hidden by inbox policy. The retained reason is exposed as `worktree.archiveCleanup`. Archive remains an archive operation even when cleanup is retained.
 
 External Git commands are outside Forgerie's mutation queue. Do not switch branches, push, or edit the same checkout during Land or Discard. Git's own locks and precondition checks catch many races, but they do not provide a transaction across external commands and the ownership file.

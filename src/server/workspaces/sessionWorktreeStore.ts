@@ -6,6 +6,8 @@ import { Check } from "typebox/value";
 import { SessionWorktreeRecordSchema, type SessionWorktreeRecord, type SessionWorktreeInfo } from "../../shared/sessionWorktree.js";
 import { cwdPathsEqual } from "../workingDirectory.js";
 import type { SessionInfo } from "../../shared/apiTypes.js";
+import type { ArchivedSessionRecord } from "../sessions/sessionArchiveStore.js";
+import { readSessionHeaderSummary } from "../sessions/sessionFileHeader.js";
 
 const FileSchema = Type.Object({ version: Type.Literal(1), worktrees: Type.Array(SessionWorktreeRecordSchema) }, { additionalProperties: false });
 interface SessionIdentity { id: string; cwd: string }
@@ -18,7 +20,7 @@ export class SessionWorktreeStore {
 
   constructor(private readonly filePath?: string) {}
 
-  async initialize(): Promise<void> {
+  async initialize(archivedSessions: readonly ArchivedSessionRecord[] = []): Promise<void> {
     if (this.filePath === undefined) return;
     let source: string;
     try { source = await readFile(this.filePath, "utf8"); }
@@ -35,8 +37,14 @@ export class SessionWorktreeStore {
         try { await access(record.ownerSession.path); }
         catch (error) {
           if (!isMissing(error)) throw error;
-          await this.update(record.id, { sessionId: undefined, ownerSession: undefined,
-            setup: { ...record.setup, phase: "failed", error: "Session daemon restarted before the first message was persisted. Retry this setup." } });
+          // Archiving moves the transcript out of Pi's active directory. Its
+          // absence there does not prove the first message was never saved.
+          const archived = archivedSessions.find((session) => session.sessionId === record.sessionId && cwdPathsEqual(session.cwd, record.path));
+          const header = archived?.archivePath === undefined ? undefined : await readSessionHeaderSummary(archived.archivePath);
+          if (header === undefined || header.id !== record.sessionId || header.cwd === undefined || !cwdPathsEqual(header.cwd, record.path)) {
+            await this.update(record.id, { sessionId: undefined, ownerSession: undefined,
+              setup: { ...record.setup, phase: "failed", error: "Session daemon restarted before the first message was persisted. Retry this setup." } });
+          }
         }
       }
       // Do not repeat destructive steps at startup. The next explicit action reconciles git state.

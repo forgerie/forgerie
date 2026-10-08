@@ -146,7 +146,7 @@ async function createSessionDaemonRuntime() {
   const projectWorkspaces = new RegisteredProjectWorkspaceCwds(projectWorkspaceDeps);
   const spawnTargets = config.spawnSessions ? new ProjectScopedSpawnTargetResolver(projectWorkspaceDeps) : undefined;
   const worktreeStore = new SessionWorktreeStore(join(piWebDataDir(daemonEnvironment), "session-worktrees.json"));
-  await worktreeStore.initialize();
+  await worktreeStore.initialize(await archiveStore.list());
   const sessionWorktrees: SessionWorktrees = new SessionWorktrees(worktreeStore, {
     publish(record) {
       const event = { type: "session.worktree", worktree: record } as const;
