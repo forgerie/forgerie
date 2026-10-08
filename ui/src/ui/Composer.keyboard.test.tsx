@@ -130,6 +130,15 @@ describe("composer keyboard affordances", () => {
     expect((await press("Enter", { shiftKey: true })).defaultPrevented).toBe(false); expect(onNew).not.toHaveBeenCalled();
     input().focus(); await press("Shift"); await act(async () => input().blur()); await press("Enter"); expect(onNew).toHaveBeenCalledOnce();
   });
+  it("leaves Meta+Enter alone instead of sending or completing a command", async () => {
+    const onNew = vi.fn(async () => {}); await render({ onNew, suggestions: true }); await type("draft");
+    expect((await press("Enter", { metaKey: true })).defaultPrevented).toBe(true);
+    expect(onNew).not.toHaveBeenCalled(); expect(input().value).toBe("draft");
+    await type("/re"); await press("Enter", { metaKey: true }); expect(input().value).toBe("/re");
+    await render({ onNew, running: true }); await type("queued draft");
+    await press("Enter", { metaKey: true }); expect(onNew).not.toHaveBeenCalled(); expect(input().value).toBe("queued draft");
+    await press("Enter", { metaKey: true, shiftKey: true }); expect(onNew).toHaveBeenCalledOnce();
+  });
   it("keeps IME confirmation and Alt+Enter out of submission", async () => {
     const onNew = vi.fn(async () => {}); await render({ onNew }); await type("draft");
     await press("Enter", { isComposing: true }); await press("Enter", { keyCode: 229 }); await press("Enter", { altKey: true });

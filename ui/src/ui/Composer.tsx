@@ -1,5 +1,5 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
@@ -22,7 +22,7 @@ import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
 import { modelCommandQuery } from "../modelChoice";
 import { DialogLayer, useDialogMode, type DialogBinding } from "./DialogLayer";
 import { NoteTray, type NotesBinding } from "./NoteTray";
-import { useComposerKeyboard } from "./useComposerKeyboard";
+import { useComposerKeyboard, type ComposerSessionKeys } from "./useComposerKeyboard";
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
@@ -37,6 +37,8 @@ const sendsNow: WorkingSend = { queue: false, steer: false };
  */
 type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; commands?: CommandBinding; compaction?: CompactionBinding | undefined;
   shell?: ShellBinding | undefined;
+  /** Idle double Escape and active Stop share the session's command paths. */
+  sessionKeys?: ComposerSessionKeys | undefined;
   /** What a draft can do while the session works. Without it, sending waits for the run. */
   working?: WorkingSend | undefined;
   /** Pi holds queued work that Stop would return to the draft. */
@@ -59,7 +61,7 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, working = sendsNow, queued = false, model, dialog, attachments = true, notes, context, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, working = sendsNow, queued = false, model, dialog, attachments = true, notes, context, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
@@ -75,12 +77,14 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const { state } = useDictation();
   const control = useAskMode(ask, chatDraft);
   const input = useRef<HTMLTextAreaElement>(null);
-  const keyboard = useComposerKeyboard(input);
+  const keyboard = useComposerKeyboard(input, sessionKeys);
   // An open ask goes first. A dialog waits behind it, and the bar says so.
   const dialogControl = useDialogMode(control ? undefined : dialog, chatDraft, input);
   const dialogInput = dialogControl?.isInput === true;
   // An ask answer or a dialog answer is literal text: no command, shell, or queue routing.
   const literal = !!control || dialogInput;
+  const { resetEscape } = keyboard;
+  useLayoutEffect(resetEscape, [resetEscape, literal, count, disabled, preparing, dictating]);
   const compactDraft = !!compaction && !literal && count === 0 && !preparing && isCompactCommand(text);
   // Pi has no `/model` command for the web. The bar opens the picker instead,
   // with any text after the command as its search.
@@ -143,9 +147,12 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
   const rememberInput = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
   const triggers = unstable_useTriggerPopoverRootContext();
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (keyboard.isComposing(event)) { if (event.key === "Enter") event.preventDefault(); return; }
+    if (event.defaultPrevented) { keyboard.resetEscape(); return; }
+    if (keyboard.isComposing(event)) { keyboard.resetEscape(); if (event.key === "Enter") event.preventDefault(); return; }
     const shiftKey = keyboard.enterShift(event);
     if (disabled || preparing || dictating || control?.sending) return;
+    // Legacy chat leaves the GUI modifier alone. Cmd+Shift+Enter still steers.
+    if (event.key === "Enter" && event.metaKey && !shiftKey) { event.preventDefault(); return; }
     if (event.key === "Enter" && (event.altKey || event.getModifierState("AltGraph"))) { event.preventDefault(); return; }
     // Let native Shift+Enter insert a line. Repair only an IME-stripped Shift.
     if (event.key === "Enter" && shiftKey && !(workingDraft && (event.ctrlKey || event.metaKey))) {
@@ -159,8 +166,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
     // Input's custom handler runs before SDK plugins. Trigger selection consumes
     // Enter before ask mode can advance or submit the current question.
     for (const trigger of triggers.getTriggers().values()) {
-      if (trigger.resource.handleKeyDown({ key: event.key, shiftKey, preventDefault: () => event.preventDefault() })) return;
+      if (trigger.resource.handleKeyDown({ key: event.key, shiftKey, preventDefault: () => event.preventDefault() })) { keyboard.resetEscape(); return; }
     }
+    if (keyboard.escape(event, literal ? "answer" : count > 0 ? "attachments" : shellMode ? "shell" : "chat", sessionKeys)) return;
     if (keyboard.recall(event, !literal)) return;
     if (shellMode && event.key === "Enter" && !shiftKey) { event.preventDefault(); void runShell(); return; }
     if (compactDraft && event.key === "Enter" && !shiftKey) { event.preventDefault(); void sendCompaction(); return; }
@@ -227,8 +235,8 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, working = sen
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
         // One Enter route sees normalized modifiers before every mode, including ordinary chat.
         submitMode="none"
-        // Escape stops the run only from an empty draft, so it never throws typing into the queue path.
-        cancelOnEscape={!dialogInput && text.trim() === "" && count === 0} onKeyDown={onKeyDown}
+        // Suggestions, shell clearing, Stop, and idle double Escape share one route.
+        cancelOnEscape={false} onKeyDown={onKeyDown}
         onKeyUp={keyboard.onKeyUp} onBlur={keyboard.onBlur} onCompositionStart={keyboard.onCompositionStart} onCompositionEnd={keyboard.onCompositionEnd}
         onChange={() => { keyboard.onChange(); rememberInput(); }} onSelect={rememberInput}
         disabled={control?.sending || undefined} />

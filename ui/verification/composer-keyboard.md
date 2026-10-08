@@ -1,6 +1,6 @@
 # Composer keyboard backport
 
-The new client restores prompt recall, input focus, dictation keys, and the applicable Android modifier handling. It keeps the current queue and steer controls. No CSS, layout, or backend API changed.
+The new client restores prompt recall, input focus, dictation keys, Escape routes, and the applicable Android modifier handling. It keeps the current queue and steer controls. No CSS, layout, or server API changed. The [legacy audit](composer-parity-audit.md) records the broader scan and the missing capabilities. This backport is not full parity.
 
 ## Behavior
 
@@ -8,6 +8,10 @@ The new client restores prompt recall, input focus, dictation keys, and the appl
 | --- | --- |
 | Ctrl+Alt+I | Focuses the foreground composer without replacing its draft. This also works in the new-session dialog. |
 | Ctrl+Space | Starts or finishes dictation through the existing buttons. It does not send the result. Search fields, another editor, IME composition, repeated keys, and background dialogs do not trigger it. |
+| Escape during dictation | Cancels capture or pending transcription without stopping the agent or changing the draft. Late transcription cannot replace the draft. |
+| Escape in chat | Closes suggestions first. Clears a pending shell draft. Stops active work only from an empty draft, including compaction and queued work. |
+| Double Escape with an empty idle draft | Runs `/tree` by default, or `/fork` when Pi configures it. `none` disables the gesture. Presses must be genuine and less than 500 ms apart. Ask/input answers and attachments cannot open the tree. |
+| Meta+Enter in chat | Does not send or select a suggestion. Cmd+Shift+Enter still steers. |
 | Up at the start of the text | Recalls the newest user prompt, then older prompts. Suggestions take the key first. Ask answers and extension input answers do not recall chat prompts. |
 | Down at the end of recalled text | Moves toward newer prompts, then restores the exact unsent draft and caret. Editing a recalled prompt ends browsing. |
 | Enter in chat | Sends, queues, or runs the current special action. Touch autocapitalization's implicit Shift does not turn this into a newline. |
@@ -19,21 +23,22 @@ The shared controller is `src/ui/useComposerKeyboard.ts`. `src/promptHistory.ts`
 
 History reads up to 100 user prompts from the thread. It skips empty prompts and adjacent duplicates. Skill records carry their expanded prompt in SDK metadata so recall does not send only the displayed argument. Recall does not reconstruct attachments.
 
-The legacy sources checked were `main:src/client/src/components/ComposerDraft.ts`, `main:src/client/src/promptHistory.ts`, `main:src/client/src/promptEnterBehavior.ts`, and `main:src/client/src/plugins/core/actions.ts`. Ctrl+Space was an earlier legacy default, added in `582e5433`; current `main` exposes the dictation action without a default key.
+The first scan checked selected editor and core-action files. The follow-up also checked `PromptEditor`, `PiWebApp`, the new-session and voice hosts, completion/runtime helpers, rich editing, and CodeMirror's keymaps. The [audit](composer-parity-audit.md) pins the source commit and links the 25-file candidate inventory. Ctrl+Space was an earlier legacy default, added in `582e5433`; current `main` exposes the dictation action without a default key.
 
 ## Verification
 
 | Check | Result |
 | --- | --- |
-| `npm run verify` | Build, TypeScript, ESLint, and 922 tests pass. |
-| `scripts/composer-keyboard-acceptance.mjs` | 12 theme and size combinations pass with real Chromium key input. All four Fold postures, a 475 × 280 height budget, and a 280 × 500 pane are covered. Recall state survives four posture changes. No API request or browser exception occurs. |
-| Existing browser fixtures | Queue passes 60 combinations, mentions 24, ask 24, dialogs 60, shell 36, new session 42, and slash commands 12. |
-| Visual review | All eight light and dark posture captures were read. The recalled prompt and the composer controls remain readable and inside the window. |
+| `npm run verify` | Build, TypeScript, ESLint, and 949 tests in 98 files pass. |
+| `scripts/composer-keyboard-acceptance.mjs` | 12 keyboard combinations and 12 tree combinations pass with real Chromium key input. All four Fold postures, a 475 × 280 height budget, and a 280 × 500 pane are covered. Recall state survives four posture changes. No API request or browser exception occurs. |
+| Session integration | `ForgerieSession.keyboard.test.tsx` exercises real local HTTP/WebSocket endpoints for default tree, fork, none, compaction Stop, queued-only Stop, and tree refusal/retry. |
+| Existing browser fixtures | Queue passes 60 combinations, tree 60, mentions 24, ask 24, dialogs 60, shell 36, new session 42, and slash commands 12. Dictation recording passes the four postures in both themes. |
+| Visual review | The initial eight composer captures and the follow-up eight tree captures were read. Controls remain readable and inside the window. |
 | Physical acceptance | `adb devices` listed no device. Physical Fold keyboard, microphone, touch, folding, and rotation remain unverified. |
 
 The queue browser script now sends a physical Shift keydown before Shift+Enter. A modifier flag alone is also the touch-autocapitalization sequence under test.
 
-Evidence remains local in `verification/local/composer-keyboard/acceptance.json`, `/tmp/forgerie-composer-keyboard-verify.log`, and `/tmp/forgerie-composer-keyboard-shots/`. Repeat the network-free keyboard check with:
+Evidence remains local in `verification/local/composer-keyboard/acceptance.json`, `/tmp/forgerie-composer-audit-*.log`, and `/tmp/forgerie-composer-audit-shots/`. Initial composer captures remain in `/tmp/forgerie-composer-keyboard-shots/`. Repeat the network-free keyboard check with:
 
 ```sh
 nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/composer-keyboard-acceptance.mjs
@@ -43,6 +48,6 @@ nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/composer-keyboard-a
 
 Textarea recall uses document ends instead of CodeMirror's rendered-line coordinates. This protects wrapped-line caret movement, but Down requires reaching the end of recalled text. History contains recorded user prompts, not an independent log of shell commands or rejected sends. A complete loss of hardware modifier evidence cannot be distinguished from touch input.
 
-The separate legacy keyboard-free voice dialog and configurable app-wide shortcut settings are not part of this backport. Existing bundle warnings remain.
+Rich code editing, CodeMirror keymaps and transaction history, selection-aware dictation, tap/hold voice capture, retained-audio retry, the voice-first dialog, and configurable app-wide shortcuts remain missing. See the [audit](composer-parity-audit.md) for each difference and the parent shortcuts. Existing bundle warnings remain.
 
 This change stays on `new-ui-mvp`. The running Vite preview on port 8510 served the new code during acceptance. Production on port 8504 was not changed or restarted.

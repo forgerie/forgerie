@@ -65,7 +65,7 @@ const messages: TranscriptMessage[] = [
 ];
 
 function Preview() {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(scenario !== "tree-keyboard");
   const [operation, setOperation] = useState<TreeOperation>(operations[scenario] ?? { type: "idle" });
   const [tree] = useState(() => scenario === "tree-empty" ? { nodes: [], activeLeafId: null, activePathIds: [] } : fixtureTree());
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(messages, false), onNew: async () => {} });
@@ -82,7 +82,8 @@ function Preview() {
   const settle = (message: string) => setTimeout(() => setOperation({ type: "idle", notice: { tone: "status", message } }), 1500);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="Reject empty passwords" status="Connected" actions={<TreeOpener idle onOpen={() => setOpen(true)} />}>
-      <Thread />
+      <Thread sessionKeys={{ onDoubleEscapeAction: (action) => { if (action === "tree") setOpen(true); } }}
+        shell={{ availability: { type: "ready" }, onRun: async () => {} }} />
       {open && <SessionTreeNavigator tree={tree} operation={operation}
         onContinue={(_, summary) => { setOperation({ type: "continuing", summarizing: summary.mode !== "none", aborting: false }); settle("Local preview. Pi did not move the session."); }}
         onFork={() => { setOperation({ type: "forking" }); settle("Local preview. Pi did not create a session."); }}

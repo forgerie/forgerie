@@ -16,17 +16,20 @@ export function ComposerDictation({ disabled }: { disabled: boolean }) {
     const toggle = (event: KeyboardEvent) => {
       const form = root.current?.closest("form");
       const input = form?.querySelector("textarea");
-      if (!composerShortcutTarget(input ?? null, event) || !event.ctrlKey || event.altKey || event.shiftKey || event.code !== "Space" && event.key !== " ") return;
+      if (!composerShortcutTarget(input ?? null, event) || event.altKey || event.shiftKey) return;
+      const cancelKey = event.key === "Escape" && !event.ctrlKey;
+      if (!cancelKey && (!event.ctrlKey || event.code !== "Space" && event.key !== " ")) return;
       const target = event.target instanceof Element ? event.target : null;
       // Dictation cannot steal a search or an editor outside this composer.
       if (target?.closest("input, textarea, [contenteditable]:not([contenteditable='false'])") && !form?.contains(target)) return;
-      const button = root.current?.querySelector<HTMLButtonElement>('[aria-label="Voice input"], [aria-label="Stop dictation"]');
+      const button = root.current?.querySelector<HTMLButtonElement>(cancelKey ? '[aria-label="Cancel dictation"]' : '[aria-label="Voice input"], [aria-label="Stop dictation"]');
       if (!button || button.disabled) return;
       event.preventDefault();
       button.click();
     };
-    window.addEventListener("keydown", toggle);
-    return () => window.removeEventListener("keydown", toggle);
+    // Dictation owns Escape before the input's Stop and idle-tree handlers.
+    window.addEventListener("keydown", toggle, true);
+    return () => window.removeEventListener("keydown", toggle, true);
   }, []);
   return <div ref={root} className="composer-dictation">
     <AuiIf condition={(s) => s.composer.dictation == null}>
@@ -37,7 +40,7 @@ export function ComposerDictation({ disabled }: { disabled: boolean }) {
       <ComposerPrimitive.StopDictation type="button" disabled={pending} className="icon-button quiet-button"
         aria-label="Stop dictation" aria-keyshortcuts="Control+Space" title="Stop dictation. Ctrl+Space"><SquareIcon aria-hidden size={14} /></ComposerPrimitive.StopDictation>
       <button type="button" className="icon-button quiet-button" onClick={stop}
-        aria-label="Cancel dictation" title="Cancel dictation"><XIcon aria-hidden size={16} /></button>
+        aria-label="Cancel dictation" aria-keyshortcuts="Escape" title="Cancel dictation. Escape"><XIcon aria-hidden size={16} /></button>
     </AuiIf>
     {active && <span className="dictation-status" role="status" title={pending ? "Transcribing…" : state.type === "starting" ? "Starting microphone…" : "Listening…"}>
       {pending ? "Transcribing…" : state.type === "starting" ? "Starting microphone…" : "Listening…"}

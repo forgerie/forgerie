@@ -80,6 +80,8 @@ export const pendingDialogSchema = z.object({
 export type PendingDialog = z.infer<typeof pendingDialogSchema>;
 /** The longest text an `input` dialog accepts. */
 export const DIALOG_INPUT_MAX_LENGTH = 4_000;
+export const doubleEscapeActionSchema = z.enum(["tree", "fork", "none"]);
+export type DoubleEscapeAction = z.infer<typeof doubleEscapeActionSchema>;
 export const statusSchema = z.object({
   isStreaming: z.boolean(),
   isCompacting: z.boolean(),
@@ -87,6 +89,7 @@ export const statusSchema = z.object({
   pendingAsk: pendingAskSchema.optional(),
   model: sessionModelSchema.optional(),
   thinkingLevel: z.string().optional(),
+  doubleEscapeAction: doubleEscapeActionSchema.optional(),
   // A dialog of a kind this client does not know stays out of the list, not the whole status.
   // A malformed dialog stays out of the list, not the whole status.
   pendingDialogs: z.preprocess((items) => Array.isArray(items) ? items.filter((item) => pendingDialogSchema.safeParse(item).success) : items,

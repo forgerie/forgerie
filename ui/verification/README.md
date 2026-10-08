@@ -38,7 +38,7 @@ The input bar shows the session's model and thinking level. Press it, or send `/
 
 ## Composer keyboard
 
-Ctrl+Alt+I focuses the input. Ctrl+Space starts or finishes dictation. Up and Down recall recorded prompts at the text's ends and restore the unsent draft. Hardware Shift+Enter and touch Enter use the legacy modifier evidence rules. See [behavior, checks, and limits](composer-keyboard.md).
+Ctrl+Alt+I focuses the input. Ctrl+Space starts or finishes dictation. Up and Down recall recorded prompts at the text's ends and restore the unsent draft. Hardware Shift+Enter and touch Enter use the legacy modifier evidence rules. Double Escape on an empty idle draft opens the tree or runs Pi's configured action. Escape cancels dictation before session actions. See [behavior, checks, and limits](composer-keyboard.md) and the [legacy audit with remaining gaps](composer-parity-audit.md).
 
 ## Sending while working
 

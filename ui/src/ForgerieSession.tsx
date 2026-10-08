@@ -133,6 +133,11 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const { info: worktree, refresh: refreshWorktree } = useSessionWorktree(worktrees, { catalog: catalogWorktree, status: state.status?.worktree }, busy);
   // Landed or discarded: the transcript is saved, the folder is gone, Pi does not run here again.
   const readOnly = state.status?.readOnly === true || (worktree !== undefined && worktree.state.kind !== "active");
+  const treeAvailable = state.connection.type === "ready" && !state.sending && !busy && !readOnly;
+  const onIdleAction = (action: "tree" | "fork") => {
+    if (!treeAvailable) return;
+    void send(`/${action}`).catch(() => { /* The store exposes the error. */ });
+  };
   const [worktreeCommand, setWorktreeCommand] = useState<WorktreeCommand>();
   const setup = worktree?.owned ? visibleSetup(worktree.setup, state.transcript.messages.length > 0 || state.transcript.isRunning) : undefined;
   const messages = useThreadMessages(state.transcript.messages, state.transcript.isRunning);
@@ -191,8 +196,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         {pullRef && (pull.link || (!readOnly && pull.load.type === "none")) && <PullRequestOpener pr={pull.load.type === "ready" ? pull.load.value : undefined}
           link={pull.link} onOpen={() => { pull.clearNotice(); setPullOpen(true); }} />}
         {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
-        <TreeOpener idle={state.connection.type === "ready" && !state.sending && !state.transcript.isRunning}
-          onOpen={() => { void store.openTree().catch(() => { /* The store exposes the error. */ }); }} />
+        <TreeOpener idle={treeAvailable} onOpen={() => onIdleAction("tree")} />
         {archive && <ArchiveNextButton onArchive={archive.onArchive}
           // The catalog's status can lag the live one; the server refuses an archive during any run.
           availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
@@ -209,6 +213,10 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           waits: state.transcript.isRunning || isBashRunning(state),
           onSend: send, onDismiss: store.dismissCompaction }}
         shell={{ availability: shellAvailabilityOf(state), onRun: send }}
+        sessionKeys={state.connection.type === "ready" && !state.sending ? {
+          doubleEscapeAction: state.status?.doubleEscapeAction, onDoubleEscapeAction: onIdleAction,
+          onStop: busy || (state.status?.queuedMessages.length ?? 0) > 0 ? () => { void onCancel(); } : undefined,
+        } : undefined}
         queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
         working={workingSend(state.status, state.compaction, state.transcript.isRunning)}

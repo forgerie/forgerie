@@ -16,8 +16,8 @@ const ask: PendingAsk = { askId: "ask", askedAt: "now", questions: [
   { id: "first", question: "Name?", options: [] }, { id: "second", question: "Port?", options: [] },
 ] };
 const nameDialog: PendingDialog = { dialogId: "d1", kind: "input", title: "Name the release", askedAt: "now" };
-function Fixture({ pending, offline = false, dialog }: { pending?: PendingAsk; offline?: boolean; dialog?: PendingDialog }) {
-  const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], false), onNew: async () => {}, adapters: { dictation: adapter }, isDisabled: offline });
+function Fixture({ pending, offline = false, dialog, running = false, onCancel }: { pending?: PendingAsk; offline?: boolean; dialog?: PendingDialog; running?: boolean; onCancel?: () => Promise<void> }) {
+  const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], running), onNew: async () => {}, onCancel, adapters: { dictation: adapter }, isDisabled: offline });
   return <AssistantRuntimeProvider runtime={runtime}><DictationProvider adapter={adapter}>
     <Composer ask={pending && { ask: pending, phase: { type: "answering" }, offline, onSubmit: () => {}, onDismiss: () => {}, onChat: async () => {} }}
       dialog={dialog && { dialog, count: 1, phase: { type: "answering" }, offline, onAnswer: () => {}, onCancel: () => {} }} />
@@ -70,6 +70,30 @@ describe("SDK dictation controls in the one composer", () => {
     await render(); await shortcut(); await shortcut({}, document.body); await shortcut({}, document.body);
     expect(document.querySelector('.dictation-status')?.textContent).toBe("Transcribing…");
     await act(async () => finish({ text: "once" })); expect(input().value).toBe("once");
+  });
+  it("Escape cancels foreground dictation without stopping the agent or losing the draft", async () => {
+    const onCancel = vi.fn(async () => {});
+    await act(async () => root.render(<Fixture running onCancel={onCancel} />));
+    await type("keep this"); await shortcut();
+    await shortcut({ key: "Escape", code: "Escape", ctrlKey: false }, button("Stop dictation"));
+    expect(adapter.getSnapshot().type).toBe("idle"); expect(input().value).toBe("keep this"); expect(input().disabled).toBe(false);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+  it("Escape aborts pending transcription and ignores its late result", async () => {
+    let finish!: (result: { text: string }) => void;
+    dependencies.transcribe = () => new Promise((resolve) => { finish = resolve; });
+    await render(); await type("draft"); await shortcut(); await shortcut({}, document.body);
+    await shortcut({ key: "Escape", code: "Escape", ctrlKey: false }, document.body);
+    expect(input().disabled).toBe(false); expect(input().value).toBe("draft");
+    await act(async () => finish({ text: "stale words" })); expect(input().value).toBe("draft");
+  });
+  it("does not cancel dictation through a modal or from another text field", async () => {
+    await render(); await shortcut();
+    const search = document.createElement("input"); document.body.append(search);
+    await shortcut({ key: "Escape", code: "Escape", ctrlKey: false }, search);
+    const modal = document.createElement("dialog"); modal.setAttribute("open", ""); document.body.append(modal);
+    await shortcut({ key: "Escape", code: "Escape", ctrlKey: false }, modal);
+    expect(adapter.getSnapshot().type).toBe("recording"); modal.remove(); await click("Cancel dictation");
   });
   it("appends final speech to the existing draft and never sends it automatically", async () => {
     await render(); await type("existing draft"); await click("Voice input");

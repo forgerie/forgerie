@@ -1,0 +1,343 @@
+
+# src/client/src/components/ComposerDraft.codeBlock.test.ts
+21: it("converts a typed fence into one editable SQL block and undoes it atomically", async () => {
+42: it("highlights supported SQL code and keeps Shift+Enter inside the block", async () => {
+57: it("uses the shared language aliases in the composer", async () => {
+66: it("converts complete pasted fences and leaves incomplete fences as source", async () => {
+78: it("moves from the final code line into prose with Arrow Down", async () => {
+98: it("moves into an adjacent code block without selecting its hidden opener", async () => {
+111: it("protects hidden fence markers from boundary deletion", async () => {
+129: it("keeps ordinary Shift+Enter as a prose newline", async () => {
+139: it("makes an empty pasted block editable from its visible body", async () => {
+159: it("keeps canonical fenced Markdown through reconnect, persistence, and submission", async () => {
+182: restored.submit();
+188: it("keeps hidden fence source available to selection, plugin insertion, and dictation", async () => {
+204: expect(draft.beginDictationEdit()).toBe(true);
+206: expect(draft.finishDictationEdit()).toBe(true);
+212: it("restores rich code blocks through prompt history", async () => {
+222: it("renders unknown languages as labelled plain code without fuzzy matching", async () => {
+
+# src/client/src/components/ComposerDraft.test.ts
+22: it("dresses the leading command token as the command mark while leaving it editable text", async () => {
+36: it("uses Enter to send and Shift+Enter to insert a new line on mobile-like screens", async () => {
+61: it("ignores Meta+Enter instead of treating the GUI key as a send modifier", async () => {
+72: it("inserts a new line when CodeMirror's Android key delay strips Shift from the Enter it re-dispatches", async () => {
+101: it("keeps Shift+Enter as a new line when the Android IME drops or interleaves the Shift keydown", async () => {
+130: it("mounts in chat and modal hosts with the same runtime contract", async () => {
+152: it("replaces durable and CodeMirror text, moves the cursor, and resets completion state", async () => {
+168: it("commits dictation through one persisted, editable, undoable draft transaction", async () => {
+176: expect(draft.beginDictationEdit()).toBe(true);
+178: expect(draft.finishDictationEdit()).toBe(true);
+191: it("locks mutation surfaces while dictation owns the draft", async () => {
+198: expect(draft.beginDictationEdit()).toBe(true);
+204: draft.submit();
+220: it("aborts dictation ownership before owner and wholesale replacement changes", async () => {
+225: expect(draft.beginDictationEdit()).toBe(true);
+233: expect(draft.beginDictationEdit()).toBe(true);
+240: it("submits text, attachment-only, and delivery snapshots through one public callback", async () => {
+257: it("keeps attachment chips, remove actions, delivery radios, and live updates accessible without focus theft", async () => {
+292: it("announces attachment capture errors assertively without clearing successful attachments", async () => {
+309: it("clears attachments, errors, and late attachment reads when the storage owner changes", async () => {
+338: it("ignores attachment input and late reads after the draft stops owning the result", async () => {
+413: it("blocks submission until an in-flight attachment read settles", async () => {
+421: draft.submit();
+426: draft.submit();
+432: it("keeps edits after an accepted delayed submit and records the submitted text in history", async () => {
+439: draft.submit();
+455: it("does not clear text that changed away from and back to the submitted value", async () => {
+461: draft.submit();
+472: it("keeps an immutable submitted snapshot until the host accepts it", async () => {
+481: draft.submit();
+491: draft.submit();
+497: it("restores one-shot seed snapshots without persisting recovered first-prompt text", async () => {
+516: it("discards completion results after a cursor-only move leaves the trigger", async () => {
+532: it("sizes completions from the composed chat boundary instead of the footer", async () => {
+566: it("uses an explicit transient-surface boundary instead of a small local composer wrapper", async () => {
+591: it("keeps completion navigation ahead of prompt history and updates combobox state", async () => {
+622: it("cancels Tab before accepting a completion and keeps editor focus", async () => {
+652: it("picks a pointer-selected completion and restores editor focus", async () => {
+669: it("browses session prompts and restores the unsent draft", async () => {
+684: it("discards stale completion results after the runtime context changes", async () => {
+698: it("opens no empty menu for unsupported trigger kinds or zero matches", async () => {
+713: it("surfaces completion provider failure without clearing the draft", async () => {
+731: it("clears shown and pending completion results across disconnect and reconnect", async () => {
+759: it("updates the mounted CodeMirror placeholder when the host changes it", async () => {
+767: it("survives disconnect and reconnect without losing the draft", async () => {
+
+# src/client/src/components/NewSessionComposer.agentChoices.test.ts
+22: it("carries the chosen model and thinking level into the launch", async () => {
+39: it("shows and carries Pi's effective defaults before the author picks anything", async () => {
+65: it("does not replace an author choice when an earlier defaults request finishes", async () => {
+
+# src/client/src/components/NewSessionComposer.test.ts
+194: it("exposes host dictation before a session exists and scopes ownership to the destination", async () => {
+208: it("focuses a complete default's prompt and refuses to launch an empty draft", async () => {
+234: it("submits the exact prompt and destination, then remains busy until the root accepts and unmounts it", async () => {
+261: it("keeps the first-prompt caret when Rapidfire is toggled by pointer", async () => {
+279: it("locks the destination while Rapidfire is active and restores it when Rapidfire turns off", async () => {
+298: it("keeps destination choice available when Rapidfire has no destination yet", async () => {
+309: it("clears and refocuses an accepted Rapidfire prompt in the Send event", async () => {
+325: it("waits for the nested prompt to become editable before restoring Rapidfire focus", async () => {
+358: it("keeps Rapidfire open, preserves its destination, and clears each accepted prompt for the next launch", async () => {
+386: it("returns a root rejection to the same mounted draft and permits destination recovery", async () => {
+403: it("turns a synchronous root submission failure into a recoverable editing error", async () => {
+419: it("prevalidates Rapidfire slash commands before Send, then clears in the Send event", async () => {
+451: it("refreshes slash-command identity between accepted Rapidfire prompts", async () => {
+480: it("refreshes slash-command identity after a rejected launch", async () => {
+506: it("uses the shared draft runtime for prompt-resource and file completions, then sends the validated command identity", async () => {
+537: it("blocks unknown slash commands after validation without creating a session through footer or Enter", async () => {
+556: it("drops a pending command catalog after the draft leaves slash mode", async () => {
+576: it("ignores stale slash prevalidation after editing, destination change, or cancel", async () => {
+640: it("retries transient slash validation and blocks missing or ambiguous command names", async () => {
+688: it("cancels Retry auto-submit when the command draft changes", async () => {
+718: it("lets plain text and attachment-only launches proceed when the prompt-resource catalog fails", async () => {
+751: it("says a destination is needed in words that open the chooser", async () => {
+766: it("does not let Rapidfire activate while the destination chooser is open", async () => {
+783: it("cancels dictation before each chooser destination transition", async () => {
+804: it("requires a destination without a default and retains the prompt across a cross-machine choice", async () => {
+844: it("renders stage-specific loading, empty, error, refresh, and Back actions", async () => {
+881: it("keeps unavailable machines visible and Refresh permits selection when one returns online", async () => {
+923: it("recovers from a rejected workspace catalog with Refresh and Back without losing the prompt", async () => {
+954: it("runs Back from a project catalog and preserves the prompt", async () => {
+972: it("settles the active machine request after rapid repeated Change machine", async () => {
+1003: it("settles the active project request after rapid repeated Change project", async () => {
+1036: it("ignores a stale machine result after Refresh starts a newer request", async () => {
+1063: it("lets the island be the only surface, with no dialog box around it", () => {
+1073: it("keeps the accessible modal name without a visible duplicate titlebar or close action", async () => {
+1081: it("states one concise destination in the composer row, without a main branch, status, or path detail", async () => {
+1094: it("omits the local machine from the destination summary", async () => {
+1101: it("keeps a non-main branch when omitting the local machine", async () => {
+1108: it("keeps a non-main branch in the remote destination summary", async () => {
+1115: it("uses semantic button lists, keeps the summary to one line, and lets chooser detail wrap", async () => {
+1142: it("hosts the shared draft rather than retaining textarea-specific prompt styling", () => {
+1149: it("gives the shared composer the full transient surface as its completion boundary", async () => {
+1158: it("Cancel, Escape, and backdrop close without submitting when not busy", async () => {
+1171: it("claims an opaque recovery seed exactly once into the shared draft", async () => {
+1187: it("prevalidates a restored slash-command recovery draft", async () => {
+1209: it("returns the current claimed recovery snapshot on cancel before discarding the draft", async () => {
+1230: it("returns a claimed recovery snapshot when the modal disconnects without cancel", async () => {
+1247: it("waits for pending attachment capture before returning a disconnected recovery draft", async () => {
+1285: it("does not return a claimed recovery draft after its replacement launch is accepted", async () => {
+1310: it("returns only draft-owned fields when a claimed recovery rolls back", async () => {
+1325: it("focusExisting returns focus to the same draft without reinitializing it", async () => {
+1338: it("restarts slash-command prevalidation after reconnecting the same composer", async () => {
+1360: it("preserves the local prompt and destination across ordinary responsive rerenders", async () => {
+
+# src/client/src/components/PiWebApp.pluginPromptEditor.test.ts
+23: it("routes plugin prompt insert and focus through the lock-aware PromptEditor public contract", async () => {
+
+# src/client/src/components/PromptEditor.actions.test.ts
+16: it("opens attachments directly from the composer", async () => {
+26: it("keeps archive directly available wherever the composer fits", async () => {
+35: it("does not offer archive when the current session cannot be archived", async () => {
+41: it("opens the command menu from the rail when the draft is empty", async () => {
+56: it("opens the command menu from a restored command draft whose caret sits at the start", async () => {
+74: it("keeps the command button quiet while prose occupies the draft", async () => {
+88: it("offers no command button when the runtime cannot complete commands", async () => {
+
+# src/client/src/components/PromptEditor.capabilities.test.ts
+19: it("offers only writing and sending when a host declares nothing", async () => {
+37: it("offers model and thinking to any host that can choose them", async () => {
+82: it("preserves scoped-first model order across provider groups", async () => {
+116: it("offers stop, tree, archive, and new session only when declared", async () => {
+139: it("states where it is pointed, and lets a host offer to repoint it", async () => {
+159: it("names a chip once when its words already say what it does", async () => {
+167: it("keeps a session's identity chip a readout, not a control", async () => {
+
+# src/client/src/components/PromptEditor.dictation.test.ts
+37: it("does not start dictation status work after removal before the first update", async () => {
+50: it("renders one persistent microphone with accessible privacy and status text outside the visible rail", async () => {
+67: it("draws the turn in the locked draft box, counts the wait, and cancels it from there", async () => {
+122: it("hides the placeholder it stands in for, and steps aside for a draft that has words", async () => {
+150: it("states a turn the gateway would reject as too short, and never sends it", async () => {
+168: it("covers tap auto-completion: pointerdown/up captures, transcribes, replaces the selected draft, and never sends", async () => {
+208: it("keeps listening after an incomplete Smart Turn check and completes on a later pause", async () => {
+242: it("shows an empty transcription state and lets the microphone start a fresh turn", async () => {
+272: it("distinguishes hold, suppresses endpoint completion, and transcribes only on release", async () => {
+297: it("starts idle dictation from Enter and programmatic button activation as short taps", async () => {
+324: it("ignores delayed pointer compatibility clicks and keeps Space activation singular", async () => {
+352: it("supports keyboard parity, repeat suppression, manual-only readiness, Escape abort, and pointercancel", async () => {
+391: it("cancels and clears latches on lost capture and page-owned background events", async () => {
+433: it("exposes retained-audio retry and discard actions for retryable transcription failures", async () => {
+479: it("does not let a delayed non-ready status poll abort the active turn", async () => {
+512: it("aborts owner replacement and ignores late callbacks for the previous session", async () => {
+538: it("keeps active capture across a transient runtime controls disconnect", async () => {
+567: it("keeps one action rail and one microphone across the Fold viewport set", async () => {
+583: it("closes an open model choice when dictation starts and ignores stale picks without focusing the editor", async () => {
+616: it("locks destination changes but aborts dictation before emergency dismiss restores the draft", async () => {
+647: it("locks the streaming Queue and disclosures, but aborts dictation before emergency Stop restores the draft", async () => {
+
+# src/client/src/components/PromptEditor.draft.test.ts
+29: it("delegates replacement to the shared draft while preserving durable and CodeMirror text", async () => {
+41: it("accepts replacement before the shared draft is mounted", async () => {
+54: it("restores first-prompt recovery text without writing it to durable chat drafts", async () => {
+65: it("clears an existing durable draft and CodeMirror document", async () => {
+
+# src/client/src/components/PromptEditor.escape.test.ts
+18: it("closes autocomplete before stopping active work", async () => {
+36: it.each([
+41: ])("stops active work while $state", async ({ patch }) => {
+51: it("clears a pending shell command before considering double Escape", async () => {
+62: it.each(["tree", "fork"] as const)("runs the configured %s action on two empty-editor presses within 500 ms", async (action) => {
+75: it("uses Pi's tree default when an older daemon omits the setting", async () => {
+88: it("does not run the idle action when disabled, configured as none, non-empty, or too slow", async () => {
+
+# src/client/src/components/PromptEditor.history.test.ts
+17: it("browses session prompts and restores the unsent draft", async () => {
+38: it("keeps autocomplete arrow navigation ahead of prompt history", async () => {
+57: it("adds a sent prompt to history immediately", async () => {
+73: it("moves through a multiline history entry before leaving it", async () => {
+83: it("leaves multiline cursor movement to CodeMirror away from a history boundary", async () => {
+
+# src/client/src/components/PromptEditor.island.test.ts
+7: it("sizes itself from its own container, never from the viewport", () => {
+18: it("draws one inset surface rather than a full-width band", () => {
+24: it("keeps the model named while the composer rests", () => {
+30: it("keeps the context meter off the island's curved corners", () => {
+38: it("writes into the same column the transcript is read in", () => {
+43: it("keeps its chrome inside the arithmetic when the island tightens", () => {
+48: it("measures its text inset from the chrome it actually draws", () => {
+56: it("keeps the context reading on the island's own edge", () => {
+60: it("lets completion menus extend above the island", () => {
+
+# src/client/src/components/PromptEditor.modelCompletion.test.ts
+17: it("requests models for the session and maps a # token to model completions through the shared draft", async () => {
+30: it("lists every model for a bare # token", async () => {
+43: it("clears completions when the models request fails", async () => {
+51: it("does not request models without session context", async () => {
+
+# src/client/src/components/PromptEditor.modelThinking.test.ts
+11: it("reports the model and the thinking level as one control", () => {
+19: it("opens each half as its own anchored choice", async () => {
+35: it("still names a session that has no model yet", () => {
+
+# src/client/src/components/PromptEditor.preSession.test.ts
+19: it("hides the controls that need a running session", async () => {
+30: it("keeps drafting, attachments, and send", async () => {
+38: it("sends the drafted first prompt through the composer's own send", async () => {
+52: it("uses the injected pre-session runtime instead of a session runtime", async () => {
+
+# src/client/src/components/PromptEditor.rail.test.ts
+16: it("offers one send control while the session is idle", () => {
+23: it("does not render resident Stop while runtime controls are available but the session is idle", () => {
+31: it("puts Stop in the send slot and Queue beside it while the agent streams", () => {
+40: it("announces the streaming Queue Steer affordance and expanded state", async () => {
+58: it("puts Stop in the send slot and queues without steering while history is compacting", () => {
+67: it("shows Stop without Send, Queue, or Steer when work is stoppable but follow-up delivery is unavailable", async () => {
+78: it("queues the message when the Queue control is used mid-stream", async () => {
+88: it("keeps /compact in the draft when the selected machine cannot queue it", async () => {
+104: it("holding streaming Queue through the threshold reveals Steer without queueing on release or click", async () => {
+118: it("ignores Queue clicks while a consumed pointer hold is still unreleased", async () => {
+148: it("keeps pointer capture and activation suppression until the held release click", async () => {
+173: it("confirms the disclosed Steer action exactly once and returns focus to the draft", async () => {
+188: it("closes Steer on Escape or outside press without submitting and restores Queue focus only for Escape", async () => {
+210: it("keeps moved pointer capture until cancellation and accepts the next Queue press", async () => {
+240: it("suppresses the release click after a moved Queue pointer and accepts a later Queue activation", async () => {
+263: it("finalizes a held Queue pointer release from the document before the release click", async () => {
+280: it("matches pointer move, up, and cancellation by pointerId", async () => {
+306: it("queues exactly once from a primary pointer release before the hold threshold", async () => {
+323: it("cancels a pending pointer hold when cancellation wins", async () => {
+338: it("does not arm secondary-button pointerdown and opens Steer once from context menu", async () => {
+367: it("supports short and held keyboard Queue activation without repeat or native-click duplication", async () => {
+395: it("keeps held keyboard activation suppression until the release click", async () => {
+413: it.each([" ", "Enter"])("captures held %s Queue keyup from the focused Steer confirmation", async (key) => {
+443: it("expires keyboard click suppression when no native click follows the activation", async () => {
+462: it("keeps compaction Queue plain for long press, keyboard hold, and context menu", async () => {
+484: it("invalidates pending or open Steer state when streaming ends or the component disconnects", async () => {
+513: it("invalidates a pending Steer hold when the session identity changes", async () => {
+532: it("invalidates an open Steer confirmation when the machine identity changes", async () => {
+548: it("invalidates a pending keyboard Steer hold when runtime controls close", async () => {
+567: it("cancels pending Steer when Queue invocability closes before the hold threshold", async () => {
+586: it("cancels open Steer when Queue invocability closes before confirmation", async () => {
+600: it("rejects Steer confirmation if Queue invocability closes before the click is handled", async () => {
+615: it("keeps Steer mutually exclusive with model choices", async () => {
+627: it("keeps Stop invocable while Queue hold or Steer disclosure is active", async () => {
+643: it("resets pending and open Steer state before Stop runs", async () => {
+666: it("consumes a pending Queue pointer activation when Stop runs before release", async () => {
+683: it("consumes held Queue keyboard activation when Stop runs before keyup", async () => {
+702: it("consumes held Queue keyboard activation when state invalidation runs before keyup", async () => {
+719: it("sends straight through when nothing is running", async () => {
+729: it("rejects submit in stop-only state without calling onSend or clearing the draft", async () => {
+752: it("rejects imperative queue-capable submit without a streaming behavior and preserves the draft", async () => {
+760: requiredDraft(composer).submit();
+769: it("accepts Enter as a follow-up submit while queue-capable", async () => {
+780: it.each([
+783: ])("rejects Enter submit when the idle $name gate is closed and preserves the draft", async ({ overrides }) => {
+798: it.each([
+801: ])("rejects Enter submit when the Queue $name gate is closed and preserves the draft", async ({ overrides }) => {
+816: it.each([
+820: ])("keeps Stop invocable when the $name gate blocks Queue", async ({ overrides }) => {
+833: it("accepts nothing from a session that cannot be used", async () => {
+
+# src/client/src/components/PromptEditor.restingState.test.ts
+5: it("rests once the conversation owns the screen and nothing is in hand", () => {
+9: it("stays expanded while the composer holds focus", () => {
+13: it("never swallows text the user has already typed", () => {
+17: it("keeps pending attachments visible", () => {
+21: it("leaves the docked composer at full height, where the space is not contested", () => {
+25: it("treats whitespace as nothing in hand", () => {
+
+# src/client/src/components/PromptEditor.reveal.test.ts
+9: it("carries identity whatever the shell is doing with its bands", () => {
+16: it("keeps every action an icon, and spends the width on the model name", () => {
+
+# src/client/src/components/PromptEditor.runtimeControls.test.ts
+15: it("disables model, thinking, and stop controls when the editor is disabled", async () => {
+36: it("keeps drafting and submission available while runtime-only controls load", async () => {
+57: it("keeps archive available but disables attachments while the editor is read-only", async () => {
+
+# src/client/src/components/PromptEditor.summonedChrome.test.ts
+16: it("carries the session's identity when no chrome band is left to show it", () => {
+23: it("keeps identity on the rail even where the shell still has bands", () => {
+34: it("keeps the icon-only New session action adjacent before the message action", async () => {
+
+# src/client/src/components/VoiceComposerDialog.test.ts
+162: it("hosts the shared composer rather than a second one", async () => {
+182: it("lets the island be the only surface, with no dialog box around it", () => {
+198: it("opens the microphone without being asked", async () => {
+206: it("does not claim to listen while speech status is still pending", async () => {
+215: it("restarts listening after the page returns from the background", async () => {
+233: it("focuses nothing that would raise the keyboard", async () => {
+242: it("sends a heard sentence by itself once the countdown runs out", async () => {
+257: it("stops the countdown when a hand touches the composer, and never sends itself after that", async () => {
+274: it("sends the edited sentence rather than the heard one", async () => {
+288: it("queues an automatic voice send behind active work", async () => {
+299: it("holds the transcript when the countdown reaches a closed send gate", async () => {
+313: it("keeps listening rather than offering an empty sentence to send", async () => {
+323: it("leaves on request without sending anything", async () => {
+337: it("shows a voice arriving, so a reader is not talking into a still screen", async () => {
+351: it("uses the downsampled speech rate for the voiced clock", async () => {
+360: it("notices a silence that no event reports, and keeps what was said", async () => {
+373: it("says up front that nothing will end the turn, rather than promising it will", async () => {
+385: it("can still end a turn when nothing on the server will end it", async () => {
+400: it("says what went wrong in the service's own words rather than closing on the reader", async () => {
+
+# src/client/src/composerRuntime.test.ts
+14: it("lists destination prompt resources and files but not models", async () => {
+43: it("exposes no destination providers until the destination is complete", async () => {
+55: it("distinguishes provider failure from successful zero matches", async () => {
+67: it("requests commands for the session and maps command completions", async () => {
+78: it("requests files for the workspace and maps file completions", async () => {
+88: it("requests models for the session and maps a # token to model completions", async () => {
+98: it("distinguishes session provider failures from missing context", async () => {
+
+# src/client/src/plugins/core/actions.test.ts
+11: it("routes every action through the runtime public contract", async () => {
+50: it("enables machine and workspace actions only for compatible selections", () => {
+69: it("refreshes Git only when the Git panel owns a Git workspace", async () => {
+
+# src/client/src/promptEnterBehavior.test.ts
+15: it("uses the expected mobile media query", () => {
+19: it("always sends Enter and keeps Shift+Enter for a new line", () => {
+24: it("ignores implicit Shift state on mobile-like keyboards", () => {
+32: it("honors a physically held Shift even when the Enter event strips the flag", () => {
+39: it("trusts Shift+Enter on mobile once a hardware Shift keydown has ever been seen", () => {
+
+# src/client/src/promptHistory.test.ts
+23: it("projects the latest 100 user prompts from the visible session transcript", () => {
+36: it("reconstructs Pi skill invocation prompts from their visible transcript lines", () => {
+42: it("reconstructs a skill prompt from its parts when no promptText survived", () => {
+53: it("keeps a skill-only turn separate from a later queued prompt", () => {
+65: it("browses older prompts and restores the unsent draft on the way back down", () => {
+85: it("leaves arrow keys to normal cursor movement away from Pi's history boundaries", () => {
+93: it("trims new prompts, skips consecutive duplicates, and exits browsing after edits", () => {

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent, type RefObject } from "react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { createPromptHistory, promptHistoryEntries, recallPrompt, type PromptSnapshot } from "../promptHistory";
+import type { DoubleEscapeAction } from "../contracts";
 
 /** A background composer must never take keys from the foreground dialog. */
 export function composerShortcutTarget(input: HTMLElement | null, event: globalThis.KeyboardEvent): boolean {
@@ -9,8 +10,15 @@ export function composerShortcutTarget(input: HTMLElement | null, event: globalT
   return !modal || modal.contains(input);
 }
 
+/** Session actions use the same command and Stop paths as their visible controls. */
+export interface ComposerSessionKeys {
+  doubleEscapeAction?: DoubleEscapeAction | undefined;
+  onDoubleEscapeAction: (action: Exclude<DoubleEscapeAction, "none">) => void;
+  onStop?: (() => void) | undefined;
+}
+
 /** Shared input behavior. The host still owns Enter routing and suggestion precedence. */
-export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>) {
+export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>, session?: ComposerSessionKeys) {
   const aui = useAui();
   const messages = useAuiState((state) => state.thread.messages);
   const text = useAuiState((state) => state.composer.text);
@@ -21,6 +29,9 @@ export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>
   const heldShift = useRef(false);
   const hardwareShiftSeen = useRef(false);
   const composing = useRef(false);
+  const escapePress = useRef<{ at: number; action: Exclude<DoubleEscapeAction, "none"> } | undefined>(undefined);
+  const resetEscape = useCallback(() => { escapePress.current = undefined; }, []);
+  useLayoutEffect(resetEscape, [resetEscape, text, session !== undefined, session?.doubleEscapeAction, session?.onStop === undefined]);
 
   useLayoutEffect(() => {
     if (history.current.position.type === "entry" && appliedText.current !== text) history.current = createPromptHistory();
@@ -52,6 +63,7 @@ export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>
     }
   }
   function enterShift(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (event.key !== "Escape") resetEscape();
     if (event.key === "Shift") { heldShift.current = true; hardwareShiftSeen.current = true; }
     if (event.key !== "Enter") {
       if (!event.shiftKey && !["Shift", "Unidentified", "Process"].includes(event.key)) heldShift.current = false;
@@ -85,12 +97,34 @@ export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>
     history.current = createPromptHistory();
     replace({ text: next, start: node.selectionStart + 1, end: node.selectionStart + 1 });
   }
-  return { enterShift, recall, insertNewline,
+  function escape(event: KeyboardEvent<HTMLTextAreaElement>, route: "chat" | "shell" | "answer" | "attachments", session?: ComposerSessionKeys): boolean {
+    if (event.key !== "Escape") return false;
+    if (!composerShortcutTarget(input.current, event.nativeEvent) || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || route === "answer" || route === "attachments") {
+      resetEscape(); return false;
+    }
+    const empty = input.current?.value.trim() === "";
+    // Keep the new client's draft protection. Stop does not consume a typed
+    // message, and a shell draft clears before it can arm the idle gesture.
+    const stop = session?.onStop ?? (aui.composer.getState().canCancel ? () => aui.composer.cancel() : undefined);
+    if (empty && stop) { resetEscape(); event.preventDefault(); stop(); return true; }
+    if (route === "shell") { resetEscape(); event.preventDefault(); aui.composer.setText(""); return true; }
+    if (!empty || stop || !session) { resetEscape(); return false; }
+    event.preventDefault();
+    const action = session.doubleEscapeAction ?? "tree";
+    if (action === "none") { resetEscape(); return true; }
+    const previous = escapePress.current;
+    const now = Date.now();
+    if (previous?.action === action && now - previous.at >= 0 && now - previous.at < 500) {
+      resetEscape(); session.onDoubleEscapeAction(action);
+    } else escapePress.current = { at: now, action };
+    return true;
+  }
+  return { enterShift, recall, insertNewline, escape, resetEscape,
     isComposing: (event: KeyboardEvent<HTMLTextAreaElement>) => composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229,
-    onChange: () => { history.current = createPromptHistory(); selection.current = undefined; },
+    onChange: () => { resetEscape(); history.current = createPromptHistory(); selection.current = undefined; },
     onKeyUp: (event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Shift") heldShift.current = false; },
-    onBlur: () => { heldShift.current = false; composing.current = false; },
-    onCompositionStart: () => { composing.current = true; },
+    onBlur: () => { resetEscape(); heldShift.current = false; composing.current = false; },
+    onCompositionStart: () => { resetEscape(); composing.current = true; },
     onCompositionEnd: () => { composing.current = false; },
   };
 }

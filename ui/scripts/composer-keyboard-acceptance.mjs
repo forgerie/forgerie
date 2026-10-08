@@ -18,7 +18,7 @@ const port = await getFreePort();
 const chromeBin = process.env.CHROME_BIN || spawnSync("which", ["chromium"], { encoding: "utf8" }).stdout.trim();
 assert.ok(chromeBin);
 const chrome = launchChrome(chromeBin, port, profile);
-const result = { combinations: [], transitions: [], errors: [], apiRequests: [] };
+const result = { combinations: [], treeCombinations: [], transitions: [], errors: [], apiRequests: [] };
 let cdp;
 try {
   await waitForDebugger(port);
@@ -47,7 +47,9 @@ try {
       await evaluate(cdp, "document.body.tabIndex = -1; document.body.focus()");
       await pressCombo(cdp, "ctrl+alt+i");
       assert.equal(await evaluate(cdp, "document.activeElement === document.querySelector('.composer textarea')"), true);
-      await cdp.send("Input.insertText", { text: "unfinished draft" }); await setCursor(0);
+      await cdp.send("Input.insertText", { text: "unfinished draft" });
+      await pressCombo(cdp, "meta+enter"); assert.equal(await draft(), "unfinished draft");
+      await setCursor(0);
       await pressCombo(cdp, "arrowup"); assert.equal(await draft(), "Show the smallest session client.");
       await setCursor((await draft()).length); await pressCombo(cdp, "arrowdown");
       assert.equal(await draft(), "unfinished draft");
@@ -66,6 +68,9 @@ try {
       await until("document.querySelector('.dictation-status')?.textContent === 'Listening…'");
       await pressCombo(cdp, "ctrl+space");
       await until("document.querySelector('.composer textarea').value === 'keep This is a local dictation preview.'");
+      await pressCombo(cdp, "ctrl+space"); await until("document.querySelector('.dictation-status')?.textContent === 'Listening…'");
+      await pressCombo(cdp, "escape"); await until("!document.querySelector('.dictation-status') && !document.querySelector('.composer textarea').disabled");
+      assert.equal(await draft(), "keep This is a local dictation preview.");
       const geometry = await evaluate(cdp, `(() => {
         const input = document.querySelector('.composer textarea').getBoundingClientRect();
         const buttons = [...document.querySelectorAll('.composer-actions button')].map(button => ({ name: button.getAttribute('aria-label') || button.textContent, ...button.getBoundingClientRect().toJSON() }));
@@ -74,7 +79,7 @@ try {
       assert.equal(geometry.overflow, false);
       assert.ok(geometry.input.top >= 0 && geometry.input.bottom <= posture.height);
       for (const button of geometry.buttons) assert.ok(button.left >= 0 && button.right <= posture.width && button.top >= 0 && button.bottom <= posture.height, JSON.stringify(button));
-      result.combinations.push({ scheme, posture: posture.name, focus: true, history: true, newline: true, send: true, dictation: true, geometry });
+      result.combinations.push({ scheme, posture: posture.name, focus: true, history: true, newline: true, send: true, dictation: true, dictationEscape: true, metaEnter: true, geometry });
     }
   }
   await type("state survives rotation"); await setCursor(0); await pressCombo(cdp, "arrowup");
@@ -84,9 +89,29 @@ try {
     result.transitions.push(posture.name);
   }
   await setCursor((await draft()).length); await pressCombo(cdp, "arrowdown"); assert.equal(await draft(), "state survives rotation");
+  for (const scheme of ["dark", "light"]) {
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
+    for (const posture of [...FOLD8_POSTURES, { name: "short-pane", width: 475, height: 280 }, { name: "narrow-pane", width: 280, height: 500 }]) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
+      await cdp.send("Page.navigate", { url: `${origin}/verification/tree-preview.html?scenario=tree-keyboard` });
+      await until("!!document.querySelector('.composer textarea')");
+      await evaluate(cdp, "document.querySelector('.composer textarea').focus()");
+      await pressCombo(cdp, "escape"); assert.equal(await evaluate(cdp, "!!document.querySelector('.tree-dialog')"), false);
+      await pressCombo(cdp, "escape"); await until("!!document.querySelector('.tree-dialog[open] [role=tree]')");
+      const geometry = await evaluate(cdp, "document.querySelector('.tree-dialog').getBoundingClientRect().toJSON()");
+      assert.ok(geometry.left >= 0 && geometry.right <= posture.width && geometry.top >= 0 && geometry.bottom <= posture.height, JSON.stringify(geometry));
+      await pressCombo(cdp, "escape"); await until("!document.querySelector('.tree-dialog')");
+      await type("do not discard this"); await pressCombo(cdp, "escape"); await pressCombo(cdp, "escape");
+      assert.equal(await draft(), "do not discard this"); assert.equal(await evaluate(cdp, "!!document.querySelector('.tree-dialog')"), false);
+      await type("!pwd"); await pressCombo(cdp, "escape"); assert.equal(await draft(), "");
+      await pressCombo(cdp, "escape"); assert.equal(await evaluate(cdp, "!!document.querySelector('.tree-dialog')"), false);
+      await pressCombo(cdp, "escape"); await until("!!document.querySelector('.tree-dialog[open]')");
+      result.treeCombinations.push({ scheme, posture: posture.name, doubleEscape: true, close: true, draftProtection: true, shellEscape: true, geometry });
+    }
+  }
   assert.deepEqual(result.errors, []); assert.deepEqual(result.apiRequests, []);
   await writeFile(join(output, "acceptance.json"), JSON.stringify(result, null, 2));
-  console.log(JSON.stringify({ combinations: result.combinations.length, transitions: result.transitions.length, apiRequests: 0, errors: 0 }));
+  console.log(JSON.stringify({ combinations: result.combinations.length, treeCombinations: result.treeCombinations.length, transitions: result.transitions.length, apiRequests: 0, errors: 0 }));
 } finally {
   cdp?.close(); chrome.kill("SIGTERM"); await sleep(200);
   if (chrome.exitCode === null) chrome.kill("SIGKILL");
