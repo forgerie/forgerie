@@ -1,7 +1,15 @@
 # Needs your response
 
-The picker uses the daemon's response declaration. It does not classify text.
-`blocked` remains the internal group key so saved preferences still work.
+The picker requires an explicit response request: `reply` or `questions`.
+A missing `end_turn` declaration is not a request. The backend can still send
+`needs-response` with reason `undeclared`; the picker treats that as ordinary
+work, so Unread clears after the conversation is viewed. This rule applies to
+both cached session listings and live status events. The picker does not
+classify text. `blocked` remains the internal group key so saved preferences
+still work.
+
+Cost: if the agent forgets to declare a real question, the completion appears
+only as Unread. Open forms and extension dialogs still require a response.
 
 A form or extension dialog has the highest actionable priority. Otherwise the
 picker ranks an error before active work, then a response request, then Unread.
@@ -25,18 +33,24 @@ place and does not prevent the conversation from loading.
 
 Tests cover the guarded receipt, paint cancellation, stale history, completion
 during initial loading, observer teardown, and the independent response request.
+Picker regressions cover an undeclared completion moving from Unread to Open
+when its read event arrives. Explicit reply and question requests stay flagged.
 
 ## Visual checks
 
 Use the deterministic fixture:
 
 ```sh
-APP_URL='http://127.0.0.1:8511/verification/worktree-preview.html?scenario=response-picker' \
-OUT=verification/local/response-picker \
+APP_URL='http://127.0.0.1:8510/verification/worktree-preview.html?scenario=response-picker' \
+OUT=verification/local/explicit-response \
 nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/picker-shots.mjs
 ```
 
-The fixture includes Needs your response, Working, Unread, and ordinary rows.
+The fixture includes an explicit request, active work, an unread undeclared
+completion, and an already-read undeclared completion. Only the explicit
+request appears under Needs your response. The unread undeclared completion
+appears under Unread; the read one appears under Earlier today.
+
 All four Fold CSS viewports and 1280 × 860 were captured in light and dark.
 All ten PNGs were read and reviewed. The response heading and count fit. There
 were no page exceptions or horizontal page overflow.
@@ -47,14 +61,14 @@ page remain inside their containers. This is not a clipped response heading.
 The report now names the overflowing node instead of giving only a count.
 
 Captures and the report are local ignored files under
-`verification/local/response-picker/`. These checks use Chromium emulation of
+`verification/local/explicit-response/`. These checks use Chromium emulation of
 the measured Fold viewports. They do not claim a physical-device check.
 
 ## Deployment limit
 
-The backend adds `end_turn` and durable question events. An undeclared hosted
-completion falls back to Needs your response. Older unenrolled turns stay
-legacy. The terminating declaration consumes output tokens. Accepted form
+The backend adds `end_turn` and durable question events. Its undeclared-run
+fallback is not an explicit response request in this client. Older unenrolled
+turns stay legacy. The terminating declaration consumes output tokens. Accepted form
 answers use at-least-once recovery, so a crash during delivery can cause a retry.
 
 The backend must run the new build for response declarations to appear. Building

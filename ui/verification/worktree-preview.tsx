@@ -133,7 +133,8 @@ function SessionPreview() {
   }, []);
   const now = Date.parse("2026-10-06T21:30:00Z");
   const sessions = [
-    { id: "s1", cwd: worktree.path, name: "Fix the empty-password login", modified: "2026-10-06T21:20:00Z", worktree },
+    { id: "s1", cwd: worktree.path, name: "Fix the empty-password login", modified: "2026-10-06T21:20:00Z", worktree,
+      ...(scenario === "response-picker" ? { response: { kind: "needs-response" as const, reason: "undeclared" as const } } : {}) },
     { id: "s2", cwd: `${repo}/.worktree/s-01a115`, name: "Land the picker redesign", modified: "2026-10-06T21:10:00Z",
       ...(scenario === "response-picker" ? { response: { kind: "needs-response" as const, reason: "reply" as const } } : {}),
       worktree: info({ id: "wt2", branch: "picker-redesign", state: { kind: "landed", sha: "c0ffee1234", at: "t" }, ahead: undefined, dirtyFiles: undefined }) },
@@ -141,7 +142,8 @@ function SessionPreview() {
       worktree: info({ id: "wt3", branch: "darker-sidebar", state: { kind: "discarded", at: "t" }, ahead: undefined, dirtyFiles: undefined }) },
     { id: "s4", cwd: `${repo}/.worktree/s-01a117`, name: "Speed up session listing on a busy machine with long names", modified: "2026-10-06T21:25:00Z",
       worktree: info({ id: "wt4", branch: "speed-up-session-listing-on-a-busy-machine", ahead: 12, dirtyFiles: 37 }) },
-    { id: "s5", cwd: repo, name: "Review upstream", modified: "2026-10-06T19:00:00Z" },
+    { id: "s5", cwd: repo, name: "Review upstream", modified: "2026-10-06T19:00:00Z",
+      ...(scenario === "response-picker" ? { response: { kind: "needs-response" as const, reason: "undeclared" as const } } : {}) },
   ];
   const all = boardRows({ sessions, statuses: {}, activities: { s4: { phase: "active", activeSince: "2026-10-06T21:22:00Z" } }, unread: new Set(["s1"]), now,
     locate: createLocationResolver([{ id: "p1", name: "forgerie", path: repo }], []) });

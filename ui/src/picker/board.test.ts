@@ -14,6 +14,16 @@ function input(extra: Partial<BoardInput>): BoardInput {
 }
 
 describe("row state", () => {
+  it("treats an undeclared completion as unread work, not a response request", () => {
+    const completed = session("a", { response: { kind: "needs-response", reason: "undeclared" } });
+    expect(rowState(completed, idle, undefined, true)).toBe("unread");
+    expect(rowState(completed, idle, undefined, false)).toBe("open");
+    expect(attention(rows(input({ sessions: [completed] })))).toBeUndefined();
+  });
+  it("keeps an explicit question request after its completion is read", () => {
+    const question = session("a", { response: { kind: "needs-response", reason: "questions" } });
+    expect(rowState(question, idle, undefined, false)).toBe("blocked");
+  });
   it("keeps the response request when unread clears, without guessing from text", () => {
     const waiting = session("a", { response: { kind: "needs-response", reason: "reply" } });
     expect(rowState(waiting, idle, undefined, true)).toBe("blocked");
@@ -21,7 +31,7 @@ describe("row state", () => {
     expect(rowState(session("b", { name: "Can you answer this?", response: { kind: "none" } }), idle, undefined, true)).toBe("unread");
   });
   it("puts current work and errors before a request, and trusts live declaration data over cached data", () => {
-    const waiting = session("a", { response: { kind: "needs-response", reason: "undeclared" } });
+    const waiting = session("a", { response: { kind: "needs-response", reason: "reply" } });
     expect(rowState(waiting, { ...idle, isStreaming: true }, undefined, true)).toBe("working");
     expect(rowState(waiting, idle, { phase: "error" }, true)).toBe("errored");
     expect(rowState(waiting, { ...idle, needsResponse: false }, undefined, true)).toBe("unread");

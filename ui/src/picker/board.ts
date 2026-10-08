@@ -1,4 +1,4 @@
-import type { SessionResponse } from "../sessionResponse";
+import { requestsResponse, type SessionResponse } from "../sessionResponse";
 // Pure picker model: sessions in, grouped rows out. No I/O, no clock of its own.
 // Classification and grouping are ported from the Lit client's sessionBoard.ts
 // and inboxLocation.ts (main, a348db81) so both clients agree on what a
@@ -109,7 +109,7 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   if (status?.blocked === true) return "blocked";
   if (activity?.phase === "error") return "errored";
   if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true || activity?.phase === "active") return "working";
-  if (status?.needsResponse ?? session.response?.kind === "needs-response") return "blocked";
+  if (status?.needsResponse ?? requestsResponse(session.response)) return "blocked";
   // A watched pull request keeps its session at work between wakes (T3's rule). A request for a response still wins.
   if (status?.watchingPullRequest === true || session.pullRequest?.watch.kind === "watching") return "working";
   return unread ? "unread" : "open";

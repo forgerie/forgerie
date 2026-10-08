@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requestsResponse } from "../sessionResponse";
 import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, startupEventSchema, unreadSchema, type CatalogEvent, type StartupEvent, type WireStatus } from "./contracts";
 import type { PickerActivity, PickerProject, PickerSession, PickerStatus } from "./board";
 import type { SessionTransport } from "../sessionStore";
@@ -24,7 +25,7 @@ interface Timing { retryDelayMs?: number; maxRetryDelayMs?: number }
 const toStatus = (status: WireStatus): PickerStatus => ({
   isStreaming: status.isStreaming, isCompacting: status.isCompacting, isBashRunning: status.isBashRunning,
   workingAgents: status.workingAgents, runningProcesses: status.runningProcesses,
-  needsResponse: status.response === undefined ? undefined : status.response.kind === "needs-response",
+  needsResponse: status.response === undefined ? undefined : requestsResponse(status.response),
   watchingPullRequest: status.watchingPullRequest,
   blocked: status.pendingAsk !== undefined || (status.pendingDialogs?.length ?? 0) > 0,
 });

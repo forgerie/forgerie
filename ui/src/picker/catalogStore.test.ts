@@ -3,6 +3,7 @@ import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyCatalogEvent, createCatalogStore, type CatalogState, type CatalogStore } from "./catalogStore";
 import type { SessionTransport } from "../sessionStore";
+import { attention, rows } from "./board";
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); });
@@ -160,6 +161,21 @@ describe("live event cost", () => {
 });
 
 describe("machine catalog", () => {
+  it("clears an undeclared completion's attention mark when its unread event clears", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    const board = () => rows({ ...store.getSnapshot(), locate: () => ({ projectKey: "p", project: "forgerie" }), now: Date.now() });
+    api.emit({ type: "status.update", status: { sessionId: "a", ...idle, response: { kind: "needs-response", reason: "undeclared" } } });
+    api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 2, unread: { completionOrder: 1 } });
+    await until(store, () => store.getSnapshot().unread.has("a"));
+    expect(board().find((row) => row.session.id === "a")?.state).toBe("unread");
+    expect(attention(board())).toBe("unread");
+    api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 3, unread: null });
+    await until(store, () => !store.getSnapshot().unread.has("a"));
+    expect(board().find((row) => row.session.id === "a")?.state).toBe("open");
+    expect(attention(board())).toBeUndefined();
+  });
   it("reads explicit response intent from live status and observes only new unread work", async () => {
     const api = await machine();
     const store = start(api);
