@@ -81,7 +81,7 @@ describe("Handoff doors", () => {
   it("opens no door on a failed or running handoff, which stays counted in the activity", async () => {
     await render(reply({ type: "thinking", text: "Hand it off." }, handoff({ type: "done", output: "No model.", isError: true })));
     expect(doorButtons()).toHaveLength(0);
-    expect(summaryOf(document.querySelector("details.chain-of-thought"))).toBe("reasoning, 1 failed 1 tool");
+    expect(summaryOf(document.querySelector("details.chain-of-thought"))).toBe("reasoning, 1 failed 1 tool: handoff_session");
     await render(reply(handoff({ type: "running", output: "" })));
     expect(doorButtons()).toHaveLength(0);
     expect(document.querySelector(".session-door")).toBeNull();
@@ -91,7 +91,7 @@ describe("Handoff doors", () => {
     const ran = (id: string): TranscriptPart => tool(id, "bash", { command: `echo ${id}` }, { type: "done", output: "", isError: false });
     await render(reply(ran("before"), tool("s", "spawn_session", { prompt: "Audit" }, handedOff()), ran("after")));
     const groups = [...document.querySelectorAll("details.chain-of-thought")];
-    expect(groups.map(summaryOf)).toEqual(["tool activity 1 tool", "tool activity 1 tool"]);
+    expect(groups.map(summaryOf)).toEqual(["tool activity 1 tool: bash", "tool activity 1 tool: bash"]);
     const order = [...document.querySelectorAll(".message-assistant .message-text > *")].map((node) =>
       node.matches("details.chain-of-thought") ? "group" : node.matches(".session-door") ? "door" : node.className);
     expect(order).toEqual(["group", "door", "group"]);

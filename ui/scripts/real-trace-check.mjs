@@ -53,24 +53,22 @@ try {
     return {
       toolLines: cards.length,
       byLabel: cards.reduce((acc, node) => ({ ...acc, [label(node)]: (acc[label(node)] ?? 0) + 1 }), {}),
-      groups: document.querySelectorAll("details.tool-group").length,
+      // The activity fold holds tool lines and reasoning text, never another fold.
+      nestedFolds: document.querySelectorAll("details.chain-of-thought details:not(.tool-call)").length,
       chainGroups: document.querySelectorAll("details.chain-of-thought").length,
       failedChains: document.querySelectorAll("details.chain-of-thought[data-tone=error]").length,
-      reasoningBlocks: document.querySelectorAll("details.reasoning").length,
-      reasoningParts: document.querySelectorAll("details.reasoning .reasoning-text > .markdown").length,
+      reasoningParts: document.querySelectorAll("details.chain-of-thought > .trace-body > .reasoning-text > .markdown").length,
       assistantReplies: document.querySelectorAll(".message-assistant").length,
       pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   })()`);
-  // Open the first group and its first card, then capture that region.
+  // Open the first activity fold with a tool and its first card, then capture that region.
   await evaluate(cdp, `(() => {
-    const group = document.querySelector("details.tool-group");
-    const chain = (group ?? document.querySelector("details.tool-call"))?.closest("details.chain-of-thought");
+    const card = document.querySelector("details.chain-of-thought details.tool-call");
+    const chain = card?.closest("details.chain-of-thought");
     if (chain) chain.open = true;
-    if (group) group.open = true;
-    const card = (group ?? document).querySelector("details.tool-call");
     if (card) card.open = true;
-    (group ?? card)?.scrollIntoView({ block: "start" });
+    (chain ?? card)?.scrollIntoView({ block: "start" });
     return true;
   })()`);
   await sleep(400);
@@ -87,5 +85,6 @@ if (expected.toolCalls + expected.thinkingParts > 0) assert.ok(result.rendered.c
 if (expected.failedResults > 0) assert.ok(result.rendered.failedChains > 0, "Collapsed activity exposes failures");
 assert.equal(result.rendered.byLabel.failed ?? 0, expected.failedResults, "Failures match");
 assert.equal(result.rendered.reasoningParts, expected.thinkingParts, "Every thinking part renders");
+assert.equal(result.rendered.nestedFolds, 0, "No fold opens only to show another fold");
 assert.deepEqual(result.errors, []);
 assert.equal(result.rendered.pageOverflow, false);

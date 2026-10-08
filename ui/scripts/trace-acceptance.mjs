@@ -20,10 +20,10 @@ assert.ok(chromeBin, "Chromium is required");
 const chrome = launchChrome(chromeBin, port, profile);
 const base = process.env.APP_URL ?? "http://127.0.0.1:8510/";
 const results = [];
-// Opens every group and reasoning block, then the failed and the last tool card.
+// Opens every activity fold, then the failed and the last tool card.
 const openAll = `(() => {
   const open = (details) => { details.open = true; };
-  document.querySelectorAll("details.chain-of-thought, details.reasoning, details.tool-group").forEach(open);
+  document.querySelectorAll("details.chain-of-thought").forEach(open);
   const cards = [...document.querySelectorAll("details.tool-call")];
   cards.filter((card) => card.dataset.tone === "error").forEach(open);
   if (cards.at(-1)) open(cards.at(-1));
@@ -67,9 +67,11 @@ try {
             noOutput: !document.querySelector(".trace-pre"),
             failedOnParent: groups.some((node) => node.dataset.tone === "error" && node.querySelector(":scope > summary .trace-label").textContent.includes("1 failed")),
             answerOutside: [...document.querySelectorAll(".message-text > .markdown")].some((node) => node.textContent.includes("The suite passed.")),
+            nestedFolds: document.querySelectorAll("details.chain-of-thought details:not(.tool-call)").length,
           };
         })()`);
         assert.ok(initial.closed && initial.noOutput, "Activity is collapsed and output is lazy");
+        assert.equal(initial.nestedFolds, 0, "No fold opens only to show another fold");
         assert.ok(initial.failedOnParent, "A collapsed group exposes its failed call");
         if (scenario.startsWith("chain-of-thought")) {
           assert.equal(initial.count, 1, "Alternating reasoning and tools share one section");

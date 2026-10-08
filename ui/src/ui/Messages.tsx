@@ -6,17 +6,19 @@ import { SessionDoorCall } from "./SessionDoor";
 import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
-import { ChainOfThoughtGroup, ReasoningGroup, SkillLoad, SkillLoadGroup, ToolCall, ToolGroup, TraceLine, WorkingLine } from "./Trace";
+import { ChainOfThoughtGroup, SkillLoad, SkillLoadGroup, ToolCall, TraceLine, WorkingLine } from "./Trace";
 import { UserMessageAttachments } from "./Attachments";
 import { ReplyGallery } from "./ImageGallery";
 import { SkillInvocationRecord } from "./SkillInvocation";
 import { skillLoadOf } from "../skills";
 
-// A shared prefix groups consecutive reasoning and tools. Text stays outside.
-type GroupKey = "group-chainOfThought" | "group-reasoning" | "group-tool" | "group-skills";
+// Consecutive reasoning and tools share one fold. Text stays outside. Inside
+// the fold, reasoning reads as text and each tool is one line, so no fold
+// opens only to show another fold.
+type GroupKey = "group-chainOfThought" | "group-skills";
 const groupActivity = groupPartByType<GroupKey>({
-  reasoning: ["group-chainOfThought", "group-reasoning"],
-  "tool-call": ["group-chainOfThought", "group-tool"],
+  reasoning: ["group-chainOfThought"],
+  "tool-call": ["group-chainOfThought"],
 });
 const skillGroup = ["group-skills"] as const;
 // A call that created a session stands outside the collapsed activity, so its
@@ -55,14 +57,11 @@ export function AssistantMessage() {
         {({ part, children }) => {
           switch (part.type) {
             case "group-chainOfThought": return <ChainOfThoughtGroup indices={part.indices} running={part.status.type === "running"}>{children}</ChainOfThoughtGroup>;
-            case "group-reasoning": return <ReasoningGroup running={part.status.type === "running"}>{children}</ReasoningGroup>;
-            case "group-tool": return part.indices.length === 1 ? <>{children}</>
-              : <ToolGroup indices={part.indices} running={part.status.type === "running"}>{children}</ToolGroup>;
             case "group-skills": return part.indices.length === 1 ? <>{children}</>
               : <SkillLoadGroup indices={part.indices} running={part.status.type === "running"}>{children}</SkillLoadGroup>;
             case "text": return part.text === "" && part.status.type === "running"
               ? <TraceLine live label="working" /> : <MarkdownText />;
-            case "reasoning": return <MarkdownText />;
+            case "reasoning": return <div className="reasoning-text"><MarkdownText /></div>;
             case "tool-call": {
               const door = artifactDoor(part.artifact);
               return door ? <SessionDoorCall {...part} door={door} />

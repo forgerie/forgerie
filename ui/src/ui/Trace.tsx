@@ -103,31 +103,6 @@ function ToolBody({ view, input, output, labels = { input: "Input", output: "Out
   </>;
 }
 
-/**
- * Adjacent tool calls collapse into one line that names what ran. Failures are
- * counted on the line, so a collapsed group never hides one.
- */
-export function ToolGroup({ indices, running, children }: { indices: readonly number[]; running: boolean; children: ReactNode }) {
-  const failed = useAuiState((s) => indices.filter((index) => {
-    const part = s.message.parts[index];
-    return part?.type === "tool-call" && part.isError === true && !part.isPreliminary;
-  }).length);
-  const detail = useAuiState((s) => {
-    const tools = indices.flatMap((index) => {
-      const part = s.message.parts[index];
-      return part?.type === "tool-call" ? [part] : [];
-    });
-    const current = running ? tools.findLast((part) => part.result === undefined || part.isPreliminary) : undefined;
-    if (current) return `${current.toolName} ${summarizeToolArgs(current.args)}`.trim();
-    return [...new Set(tools.map((part) => part.toolName))].join(", ");
-  });
-  const label = `${running ? "running" : "ran"} ${indices.length} tools${failed > 0 ? `, ${failed} failed` : ""}:`;
-  return <Disclosure live={running} label={label} detail={detail} className="tool-group"
-    {...(failed > 0 ? { tone: "error" as const } : {})}>
-    {() => children}
-  </Disclosure>;
-}
-
 const skillLabels: Record<ToolView, string> = {
   pending: "loading skill", running: "loading skill", done: "loaded skill", failed: "failed to load skill", interrupted: "stopped loading skill",
 };
@@ -169,7 +144,12 @@ export function SkillLoadGroup({ indices, running, children }: { indices: readon
   </Disclosure>;
 }
 
-/** Consecutive reasoning and tools share one disclosure, without inferred steps or timing. */
+/**
+ * Consecutive reasoning and tools share one disclosure, without inferred steps
+ * or timing. It is the only fold around them: reasoning inside reads as text,
+ * and each tool is one line. The line counts failures and stops, so a closed
+ * fold never hides one.
+ */
 export function ChainOfThoughtGroup({ indices, running, children }: { indices: readonly number[]; running: boolean; children: ReactNode }) {
   const failed = useAuiState((s) => indices.filter((index) => {
     const part = s.message.parts[index];
@@ -191,17 +171,11 @@ export function ChainOfThoughtGroup({ indices, running, children }: { indices: r
     if (tools.length === 0) return "";
     const current = running ? tools.findLast((part) => part.result === undefined || part.isPreliminary) : undefined;
     const count = `${tools.length} ${tools.length === 1 ? "tool" : "tools"}`;
-    return current ? `${count}: ${current.toolName} ${summarizeToolArgs(current.args)}`.trim() : count;
+    return current ? `${count}: ${current.toolName} ${summarizeToolArgs(current.args)}`.trim()
+      : `${count}: ${[...new Set(tools.map((part) => part.toolName))].join(", ")}`;
   });
   return <Disclosure live={running} label={label} {...(detail ? { detail } : {})} className="chain-of-thought"
     {...(failed > 0 ? { tone: "error" as const } : {})}>
     {() => children}
-  </Disclosure>;
-}
-
-/** Model reasoning, collapsed by default. */
-export function ReasoningGroup({ running, children }: { running: boolean; children: ReactNode }) {
-  return <Disclosure live={running} label={running ? "thinking" : "reasoning"} className="reasoning">
-    {() => <div className="reasoning-text">{children}</div>}
   </Disclosure>;
 }

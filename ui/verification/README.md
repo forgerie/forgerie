@@ -1,5 +1,17 @@
 # Verification and limits
 
+## One fold for agent activity
+
+Reasoning and tool calls before a reply share one fold. Inside it, reasoning reads as text and each tool is one line that opens to its input and output. Before this change, a fold could open only to show another fold: thinking alone sat in a `thinking` fold inside a `thinking` fold, and a run of tools took three levels to reach output. The closed line keeps the failure and stop counts, and now names the tools that ran, which the removed tool group used to show.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | `npm run verify` passed the build, lint, and 950 tests. Two new tests (thinking alone, adjacent tools) failed against the previous `Messages.tsx` and `Trace.tsx`. |
+| Fixture browser acceptance. | `scripts/trace-acceptance.mjs` passed 32 scenario, theme, and posture combinations. It now also fails if any fold other than a tool line sits inside an activity fold. |
+| Visual review. | Open-fold captures were read for unfolded portrait (dark), folded portrait (light), and folded landscape (dark), and the closed capture for unfolded landscape (light). Reasoning text and tool lines sit one level inside the fold, with no inner fold. |
+
+Cost: reasoning text and tool lines now share one indented column, so a long thought between tools takes more scroll than a closed `reasoning` line did. `scripts/real-trace-check.mjs` was updated for the new structure but was not run against a real session. Physical Fold touch acceptance is not done.
+
 ## Context use
 
 A thin bar on the input bar's top edge shows how much of the context window the session uses. It turns stronger from 80% and hides until Pi has a reading. See [behavior, verification, and limits](context-use.md).
