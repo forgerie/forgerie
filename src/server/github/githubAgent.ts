@@ -5,6 +5,7 @@ import { loadProjectPiWebConfig } from "../workspaces/projectPiWebConfig.js";
 import { apiHeaders, GITHUB_API, type Fetch, type GitHubApp } from "./githubApp.js";
 import { originGitHubRepo } from "./githubRemote.js";
 import type { GitHubAuthor, GitHubAuthorTrust } from "./githubTrust.js";
+import { readGitHubPull, type GitHubPullSnapshot } from "./githubPullRead.js";
 
 /** A GitHub request the agent can fix or report. The message says what happened and what to do. */
 export class GitHubToolError extends Error {}
@@ -18,6 +19,7 @@ export interface GitHubAgentDependencies {
   trust: Pick<GitHubAuthorTrust, "judge">;
   /** Injected so tests need no checkout. */
   resolveRepo?: (cwd: string) => Promise<SessionRepo>;
+  onPullCreated?: (input: { id: string; cwd: string; repo: string; number: number }) => Promise<void>;
 }
 
 export const READ_ACTIONS = ["issues", "issue", "labels", "prs", "pr"] as const;
@@ -76,6 +78,20 @@ const MAX_COMMENTS = 100;
 export class GitHubAgent {
   private readonly resolveRepo: (cwd: string) => Promise<SessionRepo>;
   constructor(private readonly deps: GitHubAgentDependencies) { this.resolveRepo = deps.resolveRepo ?? sessionRepo; }
+
+  repo(cwd: string): Promise<SessionRepo> { return this.resolveRepo(cwd); }
+
+  async pull(cwd: string, number: number, annotations = false): Promise<GitHubPullSnapshot> {
+    const repo = await this.resolveRepo(cwd);
+    const app = this.deps.app.status();
+    return readGitHubPull(repo, this.caller(repo.slug), this.deps.trust, app.state === "configured" ? `${app.app.slug}[bot]` : undefined, number, annotations);
+  }
+
+  async mergePull(cwd: string, number: number, headSha: string, method: "rebase" | "squash" | "merge", expectedRepo: string): Promise<WriteResult> {
+    const repo = await this.resolveRepo(cwd);
+    if (repo.slug.toLowerCase() !== expectedRepo.toLowerCase()) throw new GitHubToolError("The repository changed after confirmation. Refresh and confirm again.");
+    return this.merge(this.caller(repo.slug), number, method, headSha);
+  }
 
   async read(cwd: string, request: ReadRequest): Promise<string> {
     const repo = await this.resolveRepo(cwd);
@@ -142,6 +158,8 @@ export class GitHubAgent {
         const head = required(request.head, "head", "create_pr");
         const base = request.base ?? (await call.get("", RepoSchema, "Metadata: read")).default_branch;
         const pull = await call.send("POST", "/pulls", { title: required(request.title, "title", "create_pr"), head, base, body: signed(request.body ?? ""), draft: request.draft ?? false }, PullSchema, "Pull requests: write");
+        try { await this.deps.onPullCreated?.({ id: sessionId, cwd, repo: repo.slug, number: pull.number }); }
+        catch (error) { throw new GitHubToolError(`Opened PR #${String(pull.number)} at ${pull.html_url}, but could not save its session link: ${error instanceof Error ? error.message : String(error)}. Do not create another PR; link this one again.`); }
         return { text: `Opened pull request #${String(pull.number)} (${head} → ${base}).`, url: pull.html_url };
       }
       case "merge_pr": return this.merge(call, number(), request.method ?? "rebase");
@@ -225,9 +243,10 @@ export class GitHubAgent {
     return { summary: `all ${String(lines.length)} passed`, lines, passed: true };
   }
 
-  private async merge(call: Caller, number: number, method: "rebase" | "squash" | "merge"): Promise<WriteResult> {
+  private async merge(call: Caller, number: number, method: "rebase" | "squash" | "merge", expectedHeadSha?: string): Promise<WriteResult> {
     const pull = await call.get(`/pulls/${String(number)}`, PullSchema, "Pull requests: read");
     const refuse = (reason: string): never => { throw new GitHubToolError(`Did not merge PR #${String(number)}: ${reason}`); };
+    if (expectedHeadSha !== undefined && pull.head.sha !== expectedHeadSha) refuse("its head changed after confirmation. Read the PR and confirm again.");
     if (pull.merged === true) refuse("it is already merged.");
     if (pull.state !== "open") refuse("it is closed.");
     if (pull.draft === true) refuse("it is a draft. Mark it ready for review first.");
@@ -268,7 +287,7 @@ export class GitHubAgent {
       const url = options.absolute === true ? `${GITHUB_API}${path}` : `${GITHUB_API}/repos/${slug}${path}`;
       const attempt = async (): Promise<Response> => {
         const headers = { ...apiHeaders(token ?? await mint()), ...(body === undefined ? {} : { "Content-Type": "application/json" }) };
-        try { return await this.deps.fetch(url, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
+        try { return await this.deps.fetch(url, { method, headers, signal: AbortSignal.timeout(30_000), ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
         catch (error) { throw new GitHubToolError(`GitHub is unreachable: ${error instanceof Error ? error.message : String(error)}`); }
       };
       let response = await attempt();
@@ -290,6 +309,7 @@ export class GitHubAgent {
       token: async () => token ?? mint(),
       get: (path, schema, permission, options) => request("GET", path, undefined, schema, permission, options),
       send: (method, path, body, schema, permission) => request(method, path, body, schema, permission),
+      graphql: (body, schema) => request("POST", "/graphql", body, schema, "Pull requests: read", { absolute: true }),
       remove: async (path, permission) => { await respond("DELETE", path, undefined, permission, { missingOk: true }); },
     };
   }
@@ -315,8 +335,9 @@ export class GitHubAgent {
   }
 }
 
-interface Caller {
+export interface Caller {
   token(): Promise<string>;
+  graphql<S extends TSchema>(body: unknown, schema: S): Promise<Static<S>>;
   get<S extends TSchema>(path: string, schema: S, permission: string, options?: { absolute?: boolean }): Promise<Static<S>>;
   send<S extends TSchema>(method: string, path: string, body: unknown, schema: S, permission: string): Promise<Static<S>>;
   /** DELETE that treats "already gone" (404) as done. */

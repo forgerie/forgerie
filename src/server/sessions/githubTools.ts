@@ -3,7 +3,9 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { READ_ACTIONS, WRITE_ACTIONS, type GitHubAgent } from "../github/githubAgent.js";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 
-export type GitHubToolDeps = Pick<GitHubAgent, "read" | "write">;
+export type GitHubToolDeps = Pick<GitHubAgent, "read" | "write"> & {
+  watch?: (cwd: string, id: string, action: "start" | "stop", number?: number) => Promise<unknown>;
+};
 
 /** GitHub's own limit for an issue, comment, or pull request body. */
 const BODY_MAX = 65_000;
@@ -73,5 +75,17 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
       return { content: [{ type: "text", text: result.url === undefined ? result.text : `${result.text}\n${result.url}` }], details: { action: params.action, ...(result.url === undefined ? {} : { url: result.url }) } };
     },
   });
-  return [read, write] as const;
+  if (deps.watch === undefined) return [read, write] as const;
+  const watchParams = Type.Object({ action: Type.Union([Type.Literal("start"), Type.Literal("stop")]), number: Type.Optional(Type.Integer({ minimum: 1 })) });
+  const watch = defineTool<typeof watchParams, { action: string }>({
+    name: "github_watch", label: "Watch pull request", exposure: MODEL_ONLY_EXPOSURE,
+    description: "Start or stop watching this session's linked PR. Start may give a PR number. Polls once a minute and wakes this agent on failing checks, passing required checks, other authors' comments/reviews, or conflicts. Watching costs tokens when it wakes the agent. It never authorizes a merge.",
+    promptGuidelines: ["Start github_watch only when the user asks to watch a PR. Stop it when handing work back to the user. End a waiting turn with end_turn awaiting nothing; asking the user a question settles the watch."],
+    parameters: watchParams,
+    async execute(_id, params, _signal, _update, ctx) {
+      const result = await deps.watch?.(cwd, ctx.sessionManager.getSessionId(), params.action, params.number);
+      return { content: [{ type: "text", text: JSON.stringify(result ?? null) }], details: { action: params.action } };
+    },
+  });
+  return [read, write, watch] as const;
 }

@@ -24,6 +24,9 @@ import { GitHubIssueClient } from "./github/githubIssues.js";
 import { GitHubAgent } from "./github/githubAgent.js";
 import { GitHubAuthorTrust } from "./github/githubTrust.js";
 import { registerGitHubRoutes } from "./github/githubRoutes.js";
+import { PullRequestStore } from "./github/pullRequestStore.js";
+import { PullRequestService } from "./github/pullRequestService.js";
+import { registerPullRequestRoutes } from "./github/pullRequestRoutes.js";
 import { defaultSessionNameIndexFilePath } from "./sessions/sessionNameIndex.js";
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
 import { registerProcessRoutes } from "./sessions/processRoutes.js";
@@ -110,10 +113,13 @@ async function createSessionDaemonRuntime() {
   await backlogClaims.releaseSessions((await archiveStore.list()).map((record) => record.sessionId));
   const githubStore = new GitHubAppStore(join(piWebDataDir(daemonEnvironment), "github-app.json"));
   await githubStore.initialize();
-  const github = new GitHubApp({ store: githubStore, fetch: (input, init) => fetch(input, init) });
-  const githubTrust = new GitHubAuthorTrust({ fetch: (input, init) => fetch(input, init) });
-  const githubIssues = new GitHubIssueClient({ app: github, fetch: (input, init) => fetch(input, init), trust: githubTrust });
-  const githubAgent = new GitHubAgent({ app: github, fetch: (input, init) => fetch(input, init), trust: githubTrust });
+  const fetchGitHub = (input: string, init?: RequestInit) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
+  const github = new GitHubApp({ store: githubStore, fetch: fetchGitHub });
+  const githubTrust = new GitHubAuthorTrust({ fetch: fetchGitHub });
+  const githubIssues = new GitHubIssueClient({ app: github, fetch: fetchGitHub, trust: githubTrust });
+  const pullStore = new PullRequestStore(join(piWebDataDir(daemonEnvironment), "pull-requests.json"));
+  await pullStore.initialize();
+  const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, onPullCreated: (input): Promise<void> => pulls.created(input) });
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
   const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
   const workspaceActivity = new WorkspaceActivityService(eventHub);
@@ -168,7 +174,12 @@ async function createSessionDaemonRuntime() {
     subsessionsEnabled: config.subsessions,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
-    github: githubAgent,
+    github: {
+      read: (cwd, request) => githubAgent.read(cwd, request),
+      write: (cwd, id, request) => githubAgent.write(cwd, id, request),
+      watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }),
+    },
+    pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     notificationStore,
     unreadStore,
@@ -183,6 +194,15 @@ async function createSessionDaemonRuntime() {
       },
     }),
   }));
+  const pulls: PullRequestService = new PullRequestService({ github: githubAgent, store: pullStore,
+    sessions: { inspect: (ref) => sessions.inspectPullSession(ref), wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current) },
+    publish: (link) => {
+      eventHub.publish(link.session.id, { type: "session.pull-request", link });
+      eventHub.publishGlobal({ type: "session.pull-request", link });
+      sessions.publishPullWatchStatus(link.session.id);
+    },
+    onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "pull request watch failed"); },
+  });
   auth.subscribe((change) => { sessions.applyAuthChange(change); });
   const terminals = new TerminalService(eventHub, workspaceActivity);
   const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
@@ -194,12 +214,13 @@ async function createSessionDaemonRuntime() {
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })] });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github };
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
+  registerPullRequestRoutes(app, pulls);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
   registerSessionWorktreeRoutes(app, userSessions);
@@ -225,7 +246,8 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessio
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, catalogRefresher }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, catalogRefresher, pulls }: SessionDaemonRuntime): Promise<void> {
+  pulls.start();
   let shuttingDown = false;
   async function shutdown(signal: NodeJS.Signals): Promise<void> {
     if (shuttingDown) return;
@@ -239,6 +261,7 @@ async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, cat
         app.log.error({ err: error, operation }, "session daemon shutdown operation failed");
       }
     };
+    await attempt("dispose PR watches", () => { pulls.dispose(); });
     await attempt("dispose terminals", () => { terminals.dispose(); });
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });
     await attempt("dispose auth", () => { auth.dispose(); });

@@ -1,4 +1,5 @@
 import type { SessionResponse } from "./sessionResponse.js";
+import type { PullLink } from "./pullRequests.js";
 import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktree.js";
 
 /** Public wire types; their runtime schemas live in backlog.ts. */
@@ -355,6 +356,8 @@ export interface SessionNotificationSummaryEvent {
 }
 
 export interface SessionInfo extends SessionRef {
+  /** An opt-in PR watch remains Working while the agent is idle. */
+  watchingPullRequest?: boolean;
   /** Present for a session-owned worktree or a saved session in a completed worktree. */
   worktree?: SessionWorktreeInfo;
   path: string;
@@ -982,6 +985,7 @@ export interface SessionAskCatalogSnapshot {
 
 export interface SessionStatus {
   sessionId: string;
+  watchingPullRequest?: boolean;
   /** Completed worktrees return an inert status without starting Pi in a removed cwd. */
   readOnly?: boolean;
   worktree?: SessionWorktreeInfo;
@@ -1497,12 +1501,13 @@ type SessionUiEventBody =
   | { type: "session.tabs"; sessionId: string; cwd: string; tabs: string[] }
   | { type: "session.created"; session: SessionInfo }
   | WorktreeSessionEvent
+  | { type: "session.pull-request"; link: PullLink }
   | { type: "pi.event"; eventType: string }
   | { type: "processes.update"; snapshot: ManagedProcessesSnapshot }
   | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
 
 export type GlobalSessionEvent =
-  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" }>
+  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" | "session.pull-request" }>
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
   | SessionStartupProgressEvent

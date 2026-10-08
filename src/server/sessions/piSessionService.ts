@@ -102,6 +102,8 @@ import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/p
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
 import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
+import type { PullSessionGateway, PullSessionState } from "../github/pullRequestService.js";
+import type { PullSessionRef } from "../../shared/pullRequests.js";
 import { undeliveredAskAnswers } from "./askAnswerDelivery.js";
 import { createEndTurnToolDefinition, type EndTurnToolDeps } from "./endTurnTool.js";
 import { responseFromBranch, SESSION_RESPONSE_CUSTOM_TYPE, type ResponseProjection, type SessionResponseEvent } from "./sessionResponse.js";
@@ -956,6 +958,7 @@ export interface PiSessionServiceDependencies {
    * project's GitHub repo, acting as Forgerie's GitHub App.
    */
   github?: GitHubToolDeps;
+  pullRequestWatches?: { isWatching(id: string): boolean; stop(id: string, reason?: string): Promise<unknown> };
   /**
    * When true, hosted sessions start with Pi's `codemode` tool active, so an
    * agent can run a script that calls the other tools. Off when omitted.
@@ -1076,6 +1079,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pinStore: SessionPinRepository;
   private readonly tabsStore: SessionTabsRepository;
   private readonly agentDir: string;
+  private readonly pullRequestWatches: PiSessionServiceDependencies["pullRequestWatches"];
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly sessionWorktrees: SessionWorktrees | undefined;
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
@@ -1111,6 +1115,7 @@ export class PiSessionService implements SessionRouteService {
     this.pinStore = deps.pinStore ?? new SessionPinStore();
     this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
     this.agentDir = deps.agentDir;
+    this.pullRequestWatches = deps.pullRequestWatches;
     this.sessionManager = deps.sessionManager;
     this.sessionWorktrees = deps.sessionWorktrees;
     this.modelRuntime = deps.modelRuntime;
@@ -1412,7 +1417,7 @@ export class PiSessionService implements SessionRouteService {
       this.delegatingSessionFiles(),
     );
 
-    const ownedSessions = await this.withSessionWorktrees(sessions);
+    const ownedSessions = (await this.withSessionWorktrees(sessions)).map((session) => this.pullRequestWatches?.isWatching(session.id) === true ? { ...session, watchingPullRequest: true } : session);
     const cwds = new Set([
       ...ownedSessions.map((session) => session.cwd),
       ...listedSessions.map((session) => session.cwd),
@@ -1467,7 +1472,7 @@ export class PiSessionService implements SessionRouteService {
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, sessionsById.get(record.sessionId)))
       .filter(isDefined);
-    const ownedSessions = await this.withSessionWorktrees(await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd), cwd);
+    const ownedSessions = (await this.withSessionWorktrees(await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd), cwd)).map((session) => this.pullRequestWatches?.isWatching(session.id) === true ? { ...session, watchingPullRequest: true } : session);
     return withSessionTabs(withPinnedFlags(ownedSessions, pinnedSessionIdSet(pinnedRecords)), tabsBySessionId(tabsRecords));
   }
 
@@ -2700,6 +2705,44 @@ export class PiSessionService implements SessionRouteService {
     );
   }
 
+  async inspectPullSession(ref: PullSessionRef): Promise<PullSessionState> {
+    const target = await this.resolvePinTarget(ref);
+    const archived = await this.getArchived(ref);
+    if (target === undefined && archived === undefined) return { ref, available: false, settled: false, leaf: null };
+    const resolved = target !== undefined ? { id: target.sessionId, cwd: target.cwd } : archived !== undefined ? { id: archived.sessionId, cwd: archived.cwd } : ref;
+    if (resolved.id !== ref.id || canonicalizeStoredCwd(resolved.cwd) !== canonicalizeStoredCwd(ref.cwd)) throw new Error("Use the full session id and its own workspace.");
+    const manager = await this.historySessionManager(ref);
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    const response = responseFromBranch(manager.getBranch()).response;
+    const active = this.activeForRef(ref)?.runtime.session;
+    const settled = response.kind === "needs-response" && (response.reason !== "undeclared" || active === undefined || !this.hasActiveWork(active));
+    return { ref: resolved, available: archived === undefined && readonly === undefined, settled, leaf: manager.getLeafId() };
+  }
+
+  async wakePullSession(ref: PullSessionRef, notice: { id: string; text: string }, stillCurrent: () => boolean): ReturnType<PullSessionGateway["wake"]> {
+    const state = await this.inspectPullSession(ref);
+    if (!state.available || !stillCurrent()) return "busy";
+    const session = await this.getOrOpen(ref);
+    if (!(await this.inspectPullSession(ref)).available) return "busy";
+    const alreadyDelivered = session.sessionManager.getBranch().some((entry) => isRecord(entry) && entry["type"] === "custom_message" && entry["customType"] === "forgerie:pull-request" && getString(entry["details"], "noticeId") === notice.id);
+    if (alreadyDelivered) return "delivered";
+    // Do not put news in Pi's in-memory follow-up queue. The durable pending record survives restarts while busy.
+    if (!stillCurrent() || this.hasActiveWork(session) || this.preparingHandoffDestinations.has(session.sessionId)) return "busy";
+    // Pi's Promise lasts for the entire agent turn. Do not block other PR polls on that turn.
+    // Keep the outbox record until the next poll observes this notice in the transcript.
+    void this.runSessionEntryMutation(session, "deliver PR activity", () => session.sendCustomMessage(
+      { customType: "forgerie:pull-request", content: notice.text, display: true, details: { noticeId: notice.id } },
+      { triggerTurn: true, deliverAs: "followUp" },
+    )).then(
+      () => { this.publishStatus(session); },
+      (error: unknown) => { this.logger.info({ error, sessionId: session.sessionId, noticeId: notice.id }, "PR activity delivery failed"); this.publishStatus(session); },
+    );
+    this.publishStatus(session);
+    return "busy";
+  }
+
+  publishPullWatchStatus(id: string): void { this.publishStatusForSessionId(id); }
+
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {
     const sessionManager = await this.historySessionManager(ref);
     return pageMessagesAtSafeBoundary(historyMessages(sessionManager), page);
@@ -3657,11 +3700,12 @@ export class PiSessionService implements SessionRouteService {
    * Both are omitted when zero so a resting session carries no extra wire
    * fields and the inbox has nothing to render.
    */
-  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number } {
+  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean } {
     const workingAgents = this.workingAgentsBySession.get(session.sessionId) ?? 0;
     const bridge = this.active.get(session.sessionId)?.runtime.services?.processBridgeSlot;
     const runningProcesses = bridge?.snapshot().processes.filter((process) => process.status === "running").length ?? 0;
     return {
+      ...(this.pullRequestWatches?.isWatching(session.sessionId) === true ? { watchingPullRequest: true } : {}),
       ...(workingAgents > 0 ? { workingAgents } : {}),
       ...(runningProcesses > 0 ? { runningProcesses } : {}),
     };
@@ -3796,6 +3840,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async abort(ref: PiSessionRef): Promise<SessionAbortResult> {
+    if (this.pullRequestWatches !== undefined) {
+      const target = await this.resolvePinTarget(ref);
+      await this.pullRequestWatches.stop(target?.sessionId ?? ref.id, "Session aborted by request.");
+    }
     const active = this.activeForRef(ref);
     if (active === undefined) return { aborted: true, restoredMessages: [] };
     const session = active.runtime.session;
@@ -3823,6 +3871,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async stop(ref: PiSessionRef): Promise<void> {
+    if (this.pullRequestWatches !== undefined) {
+      const target = await this.resolvePinTarget(ref);
+      await this.pullRequestWatches.stop(target?.sessionId ?? ref.id, "Session stopped by request.");
+    }
     const active = this.activeForRef(ref);
     if (active !== undefined) {
       await this.closeActive(active.runtime.session.sessionId);
@@ -3969,6 +4021,9 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async closeActive(sessionId: string, notificationPolicy: NotificationClosePolicy = CLEAR_RUNTIME_NOTIFICATIONS): Promise<void> {
+    if (notificationPolicy.kind === "clear" && (notificationPolicy.reason === "archive" || notificationPolicy.reason === "delete")) {
+      await this.pullRequestWatches?.stop(sessionId, "Session archived or deleted.");
+    }
     // A session whose open is parked on a `session_start` dialog holds its
     // pending open until the dialog settles; settle it first so closing cannot
     // block behind the dialog timeout (which `0` makes infinite).

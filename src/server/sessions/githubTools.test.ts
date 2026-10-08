@@ -11,6 +11,16 @@ function ctxFor(sessionId: string): ExtensionToolContext {
 }
 
 describe("GitHub tools", () => {
+  it("exposes opt-in watch control only when wired and scopes it to the current session", async () => {
+    const calls: unknown[] = [];
+    const tools = createGitHubToolDefinitions("/workspace", { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }),
+      watch: (cwd, id, action, number) => { calls.push([cwd, id, action, number]); return Promise.resolve({ watch: { kind: "watching" } }); } });
+    const watch = tools[2];
+    if (watch === undefined) throw new Error("Watch tool missing");
+    expect(watch.exposure).toBe(MODEL_ONLY_EXPOSURE);
+    await watch.execute("t3", { action: "start", number: 9 }, undefined, undefined, ctxFor("session-7"));
+    expect(calls).toEqual([["/workspace", "session-7", "start", 9]]);
+  });
   it("adds github_read and github_write to every hosted session, delegated or not, only when GitHub is wired", () => {
     const github: GitHubToolDeps = { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }) };
     const names = (delegation: boolean) => createPiWebCustomToolDefinitions("/workspace", delegation, undefined, undefined, undefined, undefined, github).map((tool) => tool.name);

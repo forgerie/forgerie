@@ -35,6 +35,7 @@ export interface SessionServiceDependencyInput {
   codemodeEnabled: boolean;
   /** GitHub work on each session's own repo, as Forgerie's GitHub App. */
   github: NonNullable<PiSessionServiceDependencies["github"]>;
+  pullRequestWatches?: PiSessionServiceDependencies["pullRequestWatches"];
   /** Auto-cancel delay for extension dialogs whose extension set no timeout; `0` waits forever. */
   extensionDialogsTimeoutMs: number;
 }
@@ -67,6 +68,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     askUserEnabled: input.askUserEnabled,
     codemodeEnabled: input.codemodeEnabled,
     github: input.github,
+    ...(input.pullRequestWatches === undefined ? {} : { pullRequestWatches: input.pullRequestWatches }),
     extensionDialogsTimeoutMs: input.extensionDialogsTimeoutMs,
     notificationStore: input.notificationStore,
     unreadStore: input.unreadStore,
