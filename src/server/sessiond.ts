@@ -180,7 +180,7 @@ async function createSessionDaemonRuntime() {
     github: {
       read: (cwd, request) => githubAgent.read(cwd, request),
       write: (cwd, id, request) => githubAgent.write(cwd, id, request),
-      watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }),
+      watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }, number),
     },
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
@@ -202,6 +202,11 @@ async function createSessionDaemonRuntime() {
     publish: (link) => {
       eventHub.publish(link.session.id, { type: "session.pull-request", link });
       eventHub.publishGlobal({ type: "session.pull-request", link });
+      sessions.publishPullWatchStatus(link.session.id);
+    },
+    publishUnlinked: (link) => {
+      eventHub.publish(link.session.id, { type: "session.pull-request.unlinked", link });
+      eventHub.publishGlobal({ type: "session.pull-request.unlinked", link });
       sessions.publishPullWatchStatus(link.session.id);
     },
     onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "pull request watch failed"); },

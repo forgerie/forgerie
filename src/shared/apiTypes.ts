@@ -1502,12 +1502,13 @@ type SessionUiEventBody =
   | { type: "session.created"; session: SessionInfo }
   | WorktreeSessionEvent
   | { type: "session.pull-request"; link: PullLink }
+  | { type: "session.pull-request.unlinked"; link: PullLink }
   | { type: "pi.event"; eventType: string }
   | { type: "processes.update"; snapshot: ManagedProcessesSnapshot }
   | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
 
 export type GlobalSessionEvent =
-  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" | "session.pull-request" }>
+  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" | "session.pull-request" | "session.pull-request.unlinked" }>
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
   | SessionStartupProgressEvent

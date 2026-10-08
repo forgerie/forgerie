@@ -22,14 +22,14 @@ afterEach(async () => {
 describe("machine-scoped session proxy routes", () => {
   it("forwards PR catalogs, structured reads and opt-in watch mutations", async () => {
     await app.inject({ method: "GET", url: "/api/machines/local/github/pulls" });
-    await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/pull-request?cwd=/repo" });
-    await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/pull-request/watch", payload: { cwd: "/repo", number: 9 } });
-    await app.inject({ method: "DELETE", url: "/api/machines/local/sessions/s1/pull-request/watch?cwd=/repo" });
+    await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/pull-requests?cwd=/repo" });
+    await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/pull-requests/9/watch", payload: { cwd: "/repo" } });
+    await app.inject({ method: "DELETE", url: "/api/machines/local/sessions/s1/pull-requests/9/watch?cwd=/repo" });
     expect(daemon.requests).toEqual([
       { method: "GET", path: "/github/pulls", body: undefined },
-      { method: "GET", path: "/sessions/s1/pull-request?cwd=/repo", body: undefined },
-      { method: "POST", path: "/sessions/s1/pull-request/watch", body: { cwd: "/repo", number: 9 } },
-      { method: "DELETE", path: "/sessions/s1/pull-request/watch?cwd=/repo", body: undefined },
+      { method: "GET", path: "/sessions/s1/pull-requests?cwd=/repo", body: undefined },
+      { method: "POST", path: "/sessions/s1/pull-requests/9/watch", body: { cwd: "/repo" } },
+      { method: "DELETE", path: "/sessions/s1/pull-requests/9/watch?cwd=/repo", body: undefined },
     ]);
   });
   it("strips the machine prefix before forwarding session requests", async () => {

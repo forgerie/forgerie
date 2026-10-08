@@ -39,5 +39,8 @@ export const PullRequestSchema = Type.Object({
 export type PullRequest = Static<typeof PullRequestSchema>;
 export const PullLinkSchema = Type.Object({ session: PullRefSchema, repo: text, number: Type.Integer({ minimum: 1 }), watch: PullWatchSchema });
 export type PullLink = Static<typeof PullLinkSchema>;
-export const SessionPullResponseSchema = Type.Object({ link: Type.Union([PullLinkSchema, Type.Null()]), pull: Type.Union([PullRequestSchema, Type.Null()]) });
+/** One linked pull request and its GitHub read. */
+export const SessionPullResponseSchema = Type.Object({ link: PullLinkSchema, pull: PullRequestSchema });
+/** Every pull request linked to a session, oldest first. A failed read keeps its link, with `pull: null` and the reason. */
+export const SessionPullsResponseSchema = Type.Object({ items: Type.Array(Type.Object({ link: PullLinkSchema, pull: Type.Union([PullRequestSchema, Type.Null()]), error: Type.Optional(text) })) });
 export const PullErrorSchema = Type.Object({ kind: Type.Literal("pull_request_error"), error: text });

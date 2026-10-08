@@ -79,7 +79,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
   const watchParams = Type.Object({ action: Type.Union([Type.Literal("start"), Type.Literal("stop")]), number: Type.Optional(Type.Integer({ minimum: 1 })) });
   const watch = defineTool<typeof watchParams, { action: string }>({
     name: "github_watch", label: "Watch pull request", exposure: MODEL_ONLY_EXPOSURE,
-    description: "Start or stop watching this session's linked PR. Start may give a PR number. Polls once a minute and wakes this agent on failing checks, passing required checks, other authors' comments/reviews, or conflicts. Watching costs tokens when it wakes the agent. It never authorizes a merge.",
+    description: "Start or stop watching one of this session's linked PRs. A session can link several PRs; each has its own watch. Give number when the session links more than one; start with a number not yet linked links it. Stop without number stops every watch this session has. Polls once a minute and wakes this agent on failing checks, passing required checks, other authors' comments/reviews, or conflicts. Watching costs tokens when it wakes the agent. It never authorizes a merge.",
     promptGuidelines: ["Start github_watch only when the user asks to watch a PR. Stop it when handing work back to the user. End a waiting turn with end_turn awaiting nothing; asking the user a question settles the watch."],
     parameters: watchParams,
     async execute(_id, params, _signal, _update, ctx) {
