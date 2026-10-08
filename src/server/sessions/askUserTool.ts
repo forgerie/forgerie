@@ -8,8 +8,9 @@ import {
   type AskUserQuestion,
   type AskUserQuestionOption,
 } from "../../shared/apiTypes.js";
+import { assertTerminalToolAlone } from "./sessionResponse.js";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
-import { renderSupersededAskText, type PendingAskOpenResult } from "./pendingAskStore.js";
+import { renderSupersededAskText, type PendingAskOpenResult } from "./sessionAsks.js";
 
 /** One `ask_user` call: the questions to post, for the session that called the tool. */
 export interface AskUserInvocation {
@@ -115,7 +116,8 @@ export function createAskUserToolDefinition(deps: AskUserToolDeps) {
       "When you need decisions from the user, post them together with ask_user instead of asking in prose one at a time. It ends the run and the answers, including the questions the user left unanswered, come back as a follow-up message that wakes you. Call it alone and last, and do not repost the same questions or poll for answers.",
     ],
     parameters: AskUserParams,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      assertTerminalToolAlone(ctx.sessionManager.getBranch(), toolCallId);
       const result = await deps.open({
         sessionId: ctx.sessionManager.getSessionId(),
         questions: params.questions.map(toQuestion),

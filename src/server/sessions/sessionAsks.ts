@@ -1,3 +1,4 @@
+import { type ResponseProjection, type SessionResponseEvent } from "./sessionResponse.js";
 import { randomUUID } from "node:crypto";
 import {
   ASK_USER_ID_MAX_LENGTH,
@@ -15,7 +16,9 @@ import {
   type PendingAskUser,
 } from "../../shared/apiTypes.js";
 
-export interface PendingAskStoreOptions {
+export interface SessionAsksOptions {
+  readResponse: (sessionId: string) => ResponseProjection;
+  appendEvent: (sessionId: string, event: SessionResponseEvent) => void;
   now?: (() => Date) | undefined;
   createAskId?: (() => string) | undefined;
 }
@@ -57,32 +60,23 @@ export class PendingAskValidationError extends Error {
 
 type RecordedAnswers = ReadonlyMap<string, AskUserAnswer>;
 
-/**
- * Daemon-owned open-ask state: one unanswered question set per session.
- *
- * The store is pure domain logic — no Fastify, no Pi session, no I/O, no timers.
- * It validates asks and answers, owns the open/supersede/submit/cancel
- * transitions, and computes the answered-versus-unanswered outcome that both the
- * model-facing message and the browser record are rendered from. Callers publish
- * the returned asks and outcomes; the store never emits anything itself.
- *
- * State is deliberately daemon-lifetime and in-memory. An open ask is meaningful
- * only while the session runtime that posted it exists, and browsers rehydrate it
- * from `SessionStatus` rather than from disk.
- */
-export class PendingAskStore {
+/** Question validation and transitions over the session transcript. No owned ask state. */
+export class SessionAsks {
   private readonly now: () => Date;
   private readonly createAskId: () => string;
-  private readonly openBySessionId = new Map<string, PendingAskUser>();
+  private readonly readResponse: SessionAsksOptions["readResponse"];
+  private readonly appendEvent: SessionAsksOptions["appendEvent"];
 
-  constructor(options: PendingAskStoreOptions = {}) {
+  constructor(options: SessionAsksOptions) {
+    this.readResponse = options.readResponse;
+    this.appendEvent = options.appendEvent;
     this.now = options.now ?? (() => new Date());
     this.createAskId = options.createAskId ?? randomUUID;
   }
 
   /** The session's open ask, for {@link SessionStatus} projection. */
   pendingAsk(sessionId: string): PendingAskUser | undefined {
-    const ask = this.openBySessionId.get(requireSessionId(sessionId));
+    const ask = this.readResponse(requireSessionId(sessionId)).pendingAsk;
     return ask === undefined ? undefined : cloneAsk(ask);
   }
 
@@ -90,13 +84,14 @@ export class PendingAskStore {
     const sessionId = requireSessionId(input.sessionId);
     const questions = validateQuestions(input.questions);
     const askedAt = this.timestamp();
-    const superseded = this.close(sessionId, "superseded", askedAt, new Map());
+    const previous = this.pendingAsk(sessionId);
+    const superseded = previous === undefined ? undefined : askUserOutcome(previous, new Map(), "superseded", askedAt);
     const ask: PendingAskUser = {
       askId: requireId(this.createAskId(), "askId"),
       askedAt,
       questions,
     };
-    this.openBySessionId.set(sessionId, ask);
+    this.appendEvent(sessionId, { version: 1, kind: "asked", ask, ...(superseded === undefined ? {} : { superseded }) });
     return {
       ask: cloneAsk(ask),
       ...(superseded === undefined ? {} : { superseded }),
@@ -109,7 +104,7 @@ export class PendingAskStore {
    * rather than silently truncated; the ask stays open in that case.
    */
   submit(sessionId: string, askId: string, submission: AskUserSubmission): PendingAskCloseResult {
-    const ask = this.openBySessionId.get(requireSessionId(sessionId));
+    const ask = this.pendingAsk(requireSessionId(sessionId));
     if (ask?.askId !== askId) return { status: "stale" };
     // Validate before closing so a submission that does not fit its questions
     // leaves the ask open for the browser to correct.
@@ -122,7 +117,7 @@ export class PendingAskStore {
    * unanswered, because answers only ever reach the daemon through a submit.
    */
   cancel(sessionId: string, askId: string): PendingAskCloseResult {
-    const ask = this.openBySessionId.get(requireSessionId(sessionId));
+    const ask = this.pendingAsk(requireSessionId(sessionId));
     if (ask?.askId !== askId) return { status: "stale" };
     return { status: "closed", outcome: this.requireClose(sessionId, "cancelled", new Map()) };
   }
@@ -138,11 +133,6 @@ export class PendingAskStore {
     return this.close(requireSessionId(sessionId), "answered-in-chat", this.timestamp(), new Map());
   }
 
-  /** Drop the open ask of a session that is going away, without reporting an outcome. */
-  forgetSession(sessionId: string): void {
-    this.openBySessionId.delete(requireSessionId(sessionId));
-  }
-
   private requireClose(sessionId: string, reason: AskUserCloseReason, answers: RecordedAnswers): AskUserOutcome {
     const outcome = this.close(sessionId, reason, this.timestamp(), answers);
     if (outcome === undefined) throw new Error(`Pending ask of session ${sessionId} disappeared while closing`);
@@ -155,10 +145,11 @@ export class PendingAskStore {
     closedAt: string,
     answers: RecordedAnswers,
   ): AskUserOutcome | undefined {
-    const ask = this.openBySessionId.get(sessionId);
+    const ask = this.pendingAsk(sessionId);
     if (ask === undefined) return undefined;
-    this.openBySessionId.delete(sessionId);
-    return askUserOutcome(ask, answers, reason, closedAt);
+    const outcome = askUserOutcome(ask, answers, reason, closedAt);
+    this.appendEvent(sessionId, { version: 1, kind: "answered", outcome });
+    return outcome;
   }
 
   private timestamp(): string {

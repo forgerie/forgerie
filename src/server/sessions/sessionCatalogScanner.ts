@@ -1,3 +1,5 @@
+import { responseCheckpoint } from "./sessionResponse.js";
+import type { SessionResponse } from "../../shared/sessionResponse.js";
 import type { Dirent, Stats } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
@@ -124,6 +126,7 @@ async function readCatalogEntry(filePath: string, stats: Stats): Promise<PiSessi
 
     let suffixName: string | undefined;
     let suffixMessageCount = 0;
+    let response = parsed.response;
     if (stats.size > CATALOG_WINDOW_BYTES) {
       const suffixStart = Math.max(prefixRead.bytesRead, stats.size - CATALOG_WINDOW_BYTES);
       const suffixLength = stats.size - suffixStart;
@@ -134,6 +137,7 @@ async function readCatalogEntry(filePath: string, stats: Stats): Promise<PiSessi
         const suffixMetadata = parseMetadataLines(suffix);
         suffixName = suffixMetadata.name;
         suffixMessageCount = suffixMetadata.messageCount;
+        response = suffixMetadata.response ?? response;
       }
     }
 
@@ -149,6 +153,7 @@ async function readCatalogEntry(filePath: string, stats: Stats): Promise<PiSessi
       messageCount: parsed.messageCount + suffixMessageCount,
       firstMessage: parsed.firstMessage,
       allMessagesText: "",
+      ...(response === undefined ? {} : { response }),
       ...((suffixName ?? parsed.name) === undefined ? {} : { name: suffixName ?? parsed.name }),
       ...(parsed.parentSessionPath === undefined ? {} : { parentSessionPath: parsed.parentSessionPath }),
       ...(parsed.agentSpawned === true ? { agentSpawned: true } : {}),
@@ -161,6 +166,7 @@ async function readCatalogEntry(filePath: string, stats: Stats): Promise<PiSessi
 }
 
 interface PrefixMetadata {
+  response?: SessionResponse;
   id: string;
   cwd: string;
   timestamp?: string;
@@ -198,18 +204,21 @@ function parsePrefix(lines: readonly string[]): PrefixMetadata | undefined {
       : {}),
     ...(header["agentSpawned"] === true ? { agentSpawned: true } : {}),
     firstMessage: metadata.firstMessage,
+    ...(metadata.response === undefined ? {} : { response: metadata.response }),
     ...(metadata.name === undefined ? {} : { name: metadata.name }),
     messageCount: metadata.messageCount,
   };
 }
 
-function parseMetadataLines(lines: readonly string[]): { firstMessage: string; name?: string; messageCount: number } {
+function parseMetadataLines(lines: readonly string[]): { firstMessage: string; name?: string; messageCount: number; response?: SessionResponse } {
   let firstMessage = "";
   let name: string | undefined;
   let messageCount = 0;
+  let response: SessionResponse | undefined;
   for (const line of lines) {
     const entry = parseObject(line);
     if (entry === undefined) continue;
+    response = responseCheckpoint(entry) ?? response;
     if (entry["type"] === "session_info" && typeof entry["name"] === "string" && entry["name"].trim() !== "") {
       name = entry["name"].trim();
     }
@@ -220,7 +229,7 @@ function parseMetadataLines(lines: readonly string[]): { firstMessage: string; n
     if (message?.["role"] !== "user") continue;
     firstMessage = messageText(message["content"]);
   }
-  return { firstMessage, ...(name === undefined ? {} : { name }), messageCount };
+  return { firstMessage, ...(name === undefined ? {} : { name }), messageCount, ...(response === undefined ? {} : { response }) };
 }
 
 function messageText(content: unknown): string {

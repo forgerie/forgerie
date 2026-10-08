@@ -1,7 +1,8 @@
+import { transcriptAsks } from "./sessionAsks.testSupport.js";
 import { describe, expect, it, vi } from "vitest";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes.js";
 import { createPiWebCustomToolDefinitions, PiSessionService } from "./piSessionService.js";
-import { PendingAskStore, PendingAskValidationError } from "./pendingAskStore.js";
+import { PendingAskValidationError } from "./sessionAsks.js";
 import { CapturingSessionEventHub, emptyArchiveStore, fakeRuntime, runtimeCreator, sessionGateway, sessionRecord, sessionRef, testModelRuntime } from "./piSessionService.testSupport.js";
 
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
@@ -15,7 +16,7 @@ const questions = [{ id: "db", question: "Which database?", options: [{ value: "
  * test needs a live runtime to deliver answers into.
  */
 function askService(options: { withActiveSession?: boolean } = {}) {
-  const store = new PendingAskStore({
+  const store = transcriptAsks({
     now: () => new Date("2026-02-01T10:00:00.000Z"),
     createAskId: (() => {
       let next = 0;
@@ -30,7 +31,7 @@ function askService(options: { withActiveSession?: boolean } = {}) {
     sessionManager: sessionGateway(options.withActiveSession === true ? [sessionRecord(ACTIVE_SESSION_ID)] : []),
     archiveStore: emptyArchiveStore(),
     ...(options.withActiveSession === true ? { createAgentRuntime: runtimeCreator(fake.runtime) } : {}),
-    pendingAskStore: store,
+    sessionAsks: store,
     askUserEnabled: true,
     heartbeatIntervalMs: 60_000,
   });
@@ -151,14 +152,14 @@ describe("PiSessionService ask status projection", () => {
     await service.dispose();
   });
 
-  it("drops the open ask when the runtime that posted it is closed", async () => {
+  it("preserves the open ask when its runtime closes", async () => {
     const { service, store } = askService({ withActiveSession: true });
     await service.status(sessionRef(ACTIVE_SESSION_ID));
     await service.openAsk({ sessionId: ACTIVE_SESSION_ID, questions });
 
     await service.stop(sessionRef(ACTIVE_SESSION_ID));
 
-    expect(store.pendingAsk(ACTIVE_SESSION_ID)).toBeUndefined();
+    expect(store.pendingAsk(ACTIVE_SESSION_ID)).toMatchObject({ askId: "ask-1" });
     await service.dispose();
   });
 });

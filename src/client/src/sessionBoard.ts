@@ -1,3 +1,4 @@
+import type { SessionResponse } from "../../shared/sessionResponse.js";
 /**
  * Pure derivation: a flat list of sessions → an inbox board grouped by what
  * each session needs from you.
@@ -29,6 +30,7 @@ export interface SessionBoardPendingDialog {
 
 /** Structural subset of SessionStatus needed for board classification. */
 export interface SessionBoardStatusInput {
+  readonly response?: SessionResponse;
   readonly isStreaming: boolean;
   readonly isCompacting: boolean;
   readonly isBashRunning: boolean;
@@ -48,6 +50,8 @@ export interface SessionBoardActivityInput {
 
 /** Structural subset of SessionInfo needed for board classification. */
 export interface SessionBoardSessionInput {
+  readonly response?: SessionResponse;
+  readonly pendingAsk?: SessionBoardPendingAsk;
   readonly id: string;
   readonly modified: string;
   readonly archived?: boolean;
@@ -84,6 +88,7 @@ export type BoardGroupKind = "pinned" | "blocked" | "errored" | "working" | "unr
 export type SessionBoardState =
   | { readonly kind: "blocked"; readonly reason: "ask"; readonly question: string }
   | { readonly kind: "blocked"; readonly reason: "dialog"; readonly question: string }
+  | { readonly kind: "blocked"; readonly reason: "reply"; readonly question: string }
   | { readonly kind: "errored"; readonly detail: string }
   | { readonly kind: "working"; readonly detail?: string }
   | { readonly kind: "unread"; readonly completedAt?: string }
@@ -117,7 +122,7 @@ export const BOARD_GROUPS: readonly BoardGroupDescriptor[] = [
   },
   {
     kind: "blocked",
-    label: "Blocked on you",
+    label: "Needs your response",
     hint: "The agent asked a question and is waiting.",
     tone: "warning",
   },
@@ -296,11 +301,11 @@ export function sessionBoardState(
       : { kind: "archived" };
   }
 
-  if (status?.pendingAsk != null) {
+  if ((status === undefined ? session.pendingAsk : status.pendingAsk) != null) {
     return {
       kind: "blocked",
       reason: "ask",
-      question: status.pendingAsk.questions[0]?.question ?? "",
+      question: (status?.pendingAsk ?? session.pendingAsk)?.questions[0]?.question ?? "",
     };
   }
 
@@ -327,6 +332,11 @@ export function sessionBoardState(
   // keep their wording because each names a specific thing to wait for.
   if (status?.isStreaming === true) return { kind: "working" };
   if (activity?.phase === "active") return { kind: "working" };
+
+  const response = status?.response ?? session.response;
+  if (response?.kind === "needs-response") {
+    return { kind: "blocked", reason: "reply", question: response.reason === "undeclared" ? "The agent did not declare whether it needs a reply." : "The agent needs your response." };
+  }
 
   if (isUnread) {
     return unreadCompletedAt !== undefined

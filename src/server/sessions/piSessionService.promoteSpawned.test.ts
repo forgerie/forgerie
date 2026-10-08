@@ -1,8 +1,8 @@
+import { transcriptAsks } from "./sessionAsks.testSupport.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PendingAskStore } from "./pendingAskStore.js";
 import { PiSessionService } from "./piSessionService.js";
 import {
   CapturingSessionEventHub,
@@ -46,7 +46,7 @@ function mkService(options: { sessionsRoot: string | undefined }): PiSessionServ
       restore: () => Promise.resolve(),
       isArchived: () => Promise.resolve(false),
     },
-    pendingAskStore: new PendingAskStore(),
+    sessionAsks: transcriptAsks(),
     createAgentRuntime: () => Promise.reject(new Error("no runtime in this test")),
     heartbeatIntervalMs: 60_000,
   });

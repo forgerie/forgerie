@@ -64,7 +64,7 @@ async function hostedSession(codemodeEnabled: boolean, steps: (seenTools: string
   });
   services.push(service);
   const session = await service.start(cwd, { initialModelSpec: "faux/faux-1" });
-  return { service, ref: { id: session.id, cwd }, events, seenTools };
+  return { service, ref: { id: session.id, cwd }, events, seenTools, agentDir, modelRuntime };
 }
 
 /** A step that records the tools the model was offered, then answers. */
@@ -96,6 +96,41 @@ function scriptResultText(events: readonly SessionUiEvent[]): string {
   const end = toolEvents(events).find((event) => event.type === "tool.end");
   return end?.type === "tool.end" ? end.text : "";
 }
+
+describe("Hosted response declarations", () => {
+  it.each(["reply", "nothing"] as const)("ends a real hosted run with %s, without another model response", async (awaiting) => {
+    const harness = await hostedSession(true, () => [fauxAssistantMessage([
+      fauxText("The result is ready."), fauxToolCall("end_turn", { awaiting }, { id: "end-1" }),
+    ], { stopReason: "toolUse" })]);
+    await runPrompt(harness);
+    expect((await harness.service.status(harness.ref)).response).toEqual(awaiting === "reply" ? { kind: "needs-response", reason: "reply" } : { kind: "none" });
+    await harness.service.stop(harness.ref);
+    expect((await harness.service.status(harness.ref)).response).toEqual(awaiting === "reply" ? { kind: "needs-response", reason: "reply" } : { kind: "none" });
+  });
+
+  it("rebuilds an unanswered browser form after constructing a new daemon service", async () => {
+    const harness = await hostedSession(true, () => [fauxAssistantMessage([fauxToolCall("ask_user", { questions: [{ id: "q", question: "Which database?" }] }, { id: "ask-1" })], { stopReason: "toolUse" })]);
+    await runPrompt(harness);
+    const before = await harness.service.status(harness.ref);
+    expect(before.pendingAsk?.questions[0]?.question).toBe("Which database?");
+    await harness.service.dispose();
+    const reopened = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: harness.agentDir, modelRuntime: harness.modelRuntime,
+      sessionManager: createPiSessionManagerGateway({ agentDir: harness.agentDir, env: {}, sessionDirEnvKeys: [] }),
+      askUserEnabled: true, heartbeatIntervalMs: 60_000,
+    });
+    services.push(reopened);
+    const catalog = await reopened.machineListing();
+    expect(catalog.sessions.find((item) => item.id === harness.ref.id)?.response).toEqual({ kind: "needs-response", reason: "questions" });
+    expect((await reopened.status(harness.ref)).pendingAsk).toEqual(before.pendingAsk);
+  });
+
+  it("classifies a hosted run with no declaration as needing a response", async () => {
+    const harness = await hostedSession(true, () => [fauxAssistantMessage("Done.")]);
+    await runPrompt(harness);
+    expect((await harness.service.status(harness.ref)).response).toEqual({ kind: "needs-response", reason: "undeclared" });
+  });
+});
 
 describe("Forgerie codemode", () => {
   it("offers codemode to the model and runs a script's calls as one transcript step", async () => {

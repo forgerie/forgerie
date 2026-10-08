@@ -1,11 +1,12 @@
+import { transcriptAsks } from "./sessionAsks.testSupport.js";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { createAskUserToolDefinition, type AskUserInvocation } from "./askUserTool.js";
-import { PendingAskStore, PendingAskValidationError } from "./pendingAskStore.js";
+import { PendingAskValidationError } from "./sessionAsks.js";
 
 function ctxFor(sessionId: string): ExtensionToolContext {
-  const sessionManager = { getSessionId: () => sessionId, getSessionFile: () => undefined };
+  const sessionManager = { getSessionId: () => sessionId, getSessionFile: () => undefined, getBranch: () => [] };
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test stub with the minimal surface the tool uses.
   return { sessionManager } as unknown as ExtensionToolContext;
 }
@@ -18,7 +19,7 @@ function firstText(content: readonly (TextContent | ImageContent)[]): string {
 /** The tool over a real store, so the schema and the store's contract stay aligned. */
 function toolOverStore(askIds: string[] = ["ask-1", "ask-2"]) {
   const remaining = [...askIds];
-  const store = new PendingAskStore({
+  const store = transcriptAsks({
     now: () => new Date("2026-02-01T10:00:00.000Z"),
     createAskId: () => remaining.shift() ?? "ask-exhausted",
   });

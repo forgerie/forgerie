@@ -102,7 +102,12 @@ import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/p
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
 import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
-import { PendingAskStore, renderAskUserAnswersText, type PendingAskCloseResult, type PendingAskOpenResult } from "./pendingAskStore.js";
+import { undeliveredAskAnswers } from "./askAnswerDelivery.js";
+import { createEndTurnToolDefinition, type EndTurnToolDeps } from "./endTurnTool.js";
+import { responseFromBranch, SESSION_RESPONSE_CUSTOM_TYPE, type ResponseProjection, type SessionResponseEvent } from "./sessionResponse.js";
+import type { PendingAskUser } from "../../shared/apiTypes.js";
+import type { SessionResponse } from "../../shared/sessionResponse.js";
+import { SessionAsks, renderAskUserAnswersText, type PendingAskCloseResult, type PendingAskOpenResult } from "./sessionAsks.js";
 import { PendingExtensionDialogStore, type ExtensionDialogCancelReason } from "./pendingExtensionDialogStore.js";
 import { ExtensionDialogWaiters, effectiveExtensionDialogTimeoutMs, extensionDialogCancelValue } from "./extensionDialogWaiters.js";
 import { DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS } from "../../config.js";
@@ -358,6 +363,8 @@ export interface PiSessionListEntry {
   name?: string;
   parentSessionPath?: string;
   agentSpawned?: boolean;
+  response?: SessionResponse;
+  pendingAsk?: PendingAskUser;
 }
 
 /** A session file located by id without parsing its transcript. */
@@ -799,9 +806,11 @@ export function createPiWebCustomToolDefinitions(
   askUser?: AskUserToolDeps,
   handoff?: HandoffSessionFn,
   github?: GitHubToolDeps,
+  endTurn?: EndTurnToolDeps,
 ) {
   return [
     createPiWebEditToolDefinition(cwd),
+    ...(endTurn === undefined ? [] : [createEndTurnToolDefinition(endTurn)]),
     ...(delegationEnabled && spawn !== undefined ? [createSpawnSessionToolDefinition(cwd, { spawn })] : []),
     ...(delegationEnabled && handoff !== undefined ? [createHandoffSessionToolDefinition(cwd, { handoff })] : []),
     ...(delegationEnabled && subsessions !== undefined ? createSubsessionToolDefinitions(cwd, subsessions) : []),
@@ -851,7 +860,12 @@ function createDefaultRuntimeFactory(
     const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
-    const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser, handoff, github);
+    const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser, handoff, github, {
+      declare: (awaiting) => {
+        sessionManager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, { version: 1, kind: "declared", awaiting });
+        sessionManager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, { version: 1, kind: "checkpoint", response: responseFromBranch(sessionManager.getBranch()).response });
+      },
+    });
     const result = await createAgentSessionFromServices({
       services,
       sessionManager,
@@ -942,8 +956,8 @@ export interface PiSessionServiceDependencies {
    * agent can run a script that calls the other tools. Off when omitted.
    */
   codemodeEnabled?: boolean;
-  /** Daemon-lifetime open-ask state; defaults to an in-memory store in tests. */
-  pendingAskStore?: PendingAskStore;
+  /** Optional transcript-backed question adapter for deterministic test fixtures. */
+  sessionAsks?: SessionAsks;
   /** Daemon-lifetime open-dialog state; defaults to an in-memory store in tests. */
   pendingExtensionDialogStore?: PendingExtensionDialogStore;
   /**
@@ -1070,7 +1084,8 @@ export class PiSessionService implements SessionRouteService {
   private readonly notificationStore: SessionNotificationStore;
   private readonly notificationGenerationBySession = new WeakMap<PiAgentSession, SessionNotificationGeneration>();
   private readonly unreadStore: SessionUnreadStore;
-  private readonly pendingAskStore: PendingAskStore;
+  private readonly sessionAsks: SessionAsks;
+  private readonly responseMemo = new WeakMap<PiSessionManager, { leafId: string | null; projection: ResponseProjection }>();
   private readonly pendingExtensionDialogStore: PendingExtensionDialogStore;
   private readonly extensionDialogsTimeoutMs: number;
   private readonly promptPreflightTimeoutMs: number;
@@ -1100,7 +1115,13 @@ export class PiSessionService implements SessionRouteService {
     this.now = deps.now ?? (() => new Date());
     this.notificationStore = deps.notificationStore ?? new SessionNotificationStore();
     this.unreadStore = deps.unreadStore ?? new SessionUnreadStore();
-    this.pendingAskStore = deps.pendingAskStore ?? new PendingAskStore();
+    this.sessionAsks = deps.sessionAsks ?? new SessionAsks({
+      readResponse: (id) => {
+        const session = this.active.get(id)?.runtime.session ?? this.startupSessions.get(id);
+        return session === undefined ? { response: { kind: "none" } } : this.responseProjection(session);
+      },
+      appendEvent: (id, event) => { this.appendResponseEvent(this.responseSession(id), event); },
+    });
     this.pendingExtensionDialogStore = deps.pendingExtensionDialogStore ?? new PendingExtensionDialogStore();
     this.extensionDialogsTimeoutMs = deps.extensionDialogsTimeoutMs ?? DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS;
     this.promptPreflightTimeoutMs = Math.max(1, deps.promptPreflightTimeoutMs ?? DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS);
@@ -1190,7 +1211,7 @@ export class PiSessionService implements SessionRouteService {
     }
 
     const sessions = [...reachableSessions.values()].flatMap((session) => {
-      const pendingAsk = this.pendingAskStore.pendingAsk(session.sessionId);
+      const pendingAsk = this.sessionAsks.pendingAsk(session.sessionId);
       const pendingDialogs = this.pendingExtensionDialogStore.pendingDialogs(session.sessionId);
       if (pendingAsk === undefined && pendingDialogs.length === 0) return [];
       return [{
@@ -1312,7 +1333,6 @@ export class PiSessionService implements SessionRouteService {
     const activeSessions = Array.from(new Set(this.active.values()));
     for (const active of activeSessions) {
       this.forgetUnreadActivity(active.runtime.session);
-      this.pendingAskStore.forgetSession(active.runtime.session.sessionId);
       this.endSessionExtensionDialogs(active.runtime.session.sessionId);
     }
     this.active.clear();
@@ -2055,20 +2075,43 @@ export class PiSessionService implements SessionRouteService {
     return model;
   }
 
-  /**
-   * Register the question set an agent wants the user to answer as the session's
-   * open ask. Deliberately does not wait for the user: `ask_user` terminates the
-   * run and the submitted answers come back later as a follow-up message.
-   *
-   * Rejected question sets throw {@link PendingAskValidationError}, which the
-   * agent loop reports to the model as an error tool result.
-   */
-  // eslint-disable-next-line @typescript-eslint/require-await -- async so a rejected question set becomes a rejection rather than a synchronous throw from a promise-returning method.
+  private responseSession(sessionId: string): PiAgentSession {
+    const session = this.active.get(sessionId)?.runtime.session ?? this.startupSessions.get(sessionId);
+    if (session === undefined) throw new Error(`Session ${sessionId} has no runtime for a transcript mutation`);
+    return session;
+  }
+
+  private appendResponseEvent(session: PiAgentSession, event: SessionResponseEvent): void {
+    if (session.sessionManager.appendCustomEntry === undefined) throw new Error("Session runtime cannot persist response declarations");
+    session.sessionManager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, event);
+    this.checkpointResponse(session);
+    this.sessionManager.invalidateSessionFile(session.sessionFile ?? "");
+  }
+
+  private responseProjection(session: PiAgentSession): ResponseProjection {
+    const manager = session.sessionManager;
+    const leafId = manager.getLeafId();
+    const cached = this.responseMemo.get(manager);
+    if (cached?.leafId === leafId) return cached.projection;
+    const projection = responseFromBranch(manager.getBranch());
+    this.responseMemo.set(manager, { leafId, projection });
+    return projection;
+  }
+
+  private checkpointResponse(session: PiAgentSession): void {
+    session.sessionManager.appendCustomEntry?.(SESSION_RESPONSE_CUSTOM_TYPE, {
+      version: 1, kind: "checkpoint", response: this.responseProjection(session).response,
+    });
+    this.sessionManager.invalidateSessionFile(session.sessionFile ?? "");
+  }
+
+  /** Persist a validated question set before publishing it. The tool then ends the run. */
+  // eslint-disable-next-line @typescript-eslint/require-await -- tool-facing promise rejection for validation errors.
   async openAsk(input: AskUserInvocation): Promise<PendingAskOpenResult> {
     if (this.preparingHandoffDestinations.has(input.sessionId)) {
       throw new Error("Handoff destination cannot ask questions while preparing context.");
     }
-    const result = this.pendingAskStore.open(input);
+    const result = this.sessionAsks.open(input);
     // A supersede closes the earlier ask, so the browsers watching it must hear
     // that before they hear about its replacement.
     if (result.superseded !== undefined) this.publishAskClosed(input.sessionId, result.superseded);
@@ -2092,7 +2135,7 @@ export class PiSessionService implements SessionRouteService {
     // Checked before the store closes the ask so a refused delivery cannot
     // discard answers the user already submitted.
     this.assertTreeNavigationInactive(session, "answer questions");
-    return this.closeAsk(session, this.pendingAskStore.submit(session.sessionId, askId, submission));
+    return this.closeAsk(session, this.sessionAsks.submit(session.sessionId, askId, submission));
   }
 
   /**
@@ -2105,7 +2148,7 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "dismiss questions");
-    return this.closeAsk(session, this.pendingAskStore.cancel(session.sessionId, askId));
+    return this.closeAsk(session, this.sessionAsks.cancel(session.sessionId, askId));
   }
 
   /**
@@ -2126,6 +2169,21 @@ export class PiSessionService implements SessionRouteService {
     return { result: "closed", outcome, sessionStatus: this.statusFromSession(session) };
   }
 
+  private recoverAskAnswerDelivery(session: PiAgentSession): void {
+    const outcomes = undeliveredAskAnswers(session.sessionManager.getBranch());
+    if (outcomes.length === 0) return;
+    void this.runSessionEntryMutation(session, "recover accepted question answers", async () => {
+      for (const outcome of outcomes) {
+        await session.sendCustomMessage(
+          { customType: ASK_USER_ANSWERS_CUSTOM_TYPE, content: renderAskUserAnswersText(outcome), display: true, details: outcome },
+          { triggerTurn: true, deliverAs: "followUp" },
+        );
+      }
+    }).catch((error: unknown) => {
+      this.logger.info({ sessionId: session.sessionId, error }, "accepted question answers could not be recovered");
+    });
+  }
+
   private publishAskClosed(sessionId: string, outcome: AskUserOutcome): void {
     this.events.publish(sessionId, { type: "ask.closed", askId: outcome.askId, reason: outcome.reason });
   }
@@ -2138,7 +2196,7 @@ export class PiSessionService implements SessionRouteService {
    * than becoming a turn of its own.
    */
   private async voidOpenAskForUserMessage(session: PiAgentSession): Promise<void> {
-    const outcome = this.pendingAskStore.voidForChatReply(session.sessionId);
+    const outcome = this.sessionAsks.voidForChatReply(session.sessionId);
     if (outcome === undefined) return;
     this.publishAskClosed(session.sessionId, outcome);
     await this.runSessionEntryMutation(session, "void the open questions", () => session.sendCustomMessage(
@@ -3062,6 +3120,7 @@ export class PiSessionService implements SessionRouteService {
         return { cancelled: true, ...(result.aborted === undefined ? {} : { aborted: result.aborted }) };
       }
 
+      this.checkpointResponse(session);
       if (this.isCurrentActiveSession(session)) this.publishActivity(session, "session tree navigated", "idle");
       return { cancelled: false, ...(result.editorText === undefined ? {} : { editorText: result.editorText }) };
     } catch (error: unknown) {
@@ -3919,11 +3978,8 @@ export class PiSessionService implements SessionRouteService {
     }
     if (!active) return;
     this.forgetUnreadActivity(active.runtime.session);
-    // An open ask is meaningful only while the runtime that posted it exists: no
-    // one is left to receive the answers, so it is dropped without an outcome.
-    this.pendingAskStore.forgetSession(sessionId);
-    // Open dialogs share that stance, but their extension waiters are parked
-    // Promises inside the dying runtime: settle them rather than dropping them.
+    // Questions remain on the durable branch. Only live extension dialogs own
+    // parked Promises in the dying runtime, so settle those waits.
     this.endSessionExtensionDialogs(sessionId);
     this.active.delete(sessionId);
     this.activities.delete(sessionId);
@@ -4188,6 +4244,7 @@ export class PiSessionService implements SessionRouteService {
         this.detachedHandoffStartupSessions.delete(runtime.session);
       }
       this.bindRuntime(active);
+      this.recoverAskAnswerDelivery(runtime.session);
       runtime.setRebindSession(async (session) => {
         const priorGeneration = notificationGeneration;
         let candidateGeneration: SessionNotificationGeneration | undefined;
@@ -4202,6 +4259,7 @@ export class PiSessionService implements SessionRouteService {
           this.bindProcessBridge(runtime, session);
           this.bindSessionTitleBridge(runtime, session);
           this.bindRuntime(active, session);
+          this.recoverAskAnswerDelivery(session);
           // The runtime being replaced parked every dialog the store still
           // holds for this session; settle those waits before the new
           // runtime's extensions can open fresh dialogs under the same id.
@@ -4529,6 +4587,7 @@ export class PiSessionService implements SessionRouteService {
       }
     }
     active.unsubscribe = session.subscribe((event) => {
+      if (getString(event, "type") === "agent_start") this.appendResponseEvent(session, { version: 1, kind: "started" });
       this.events.publish(session.sessionId, toClientEvent(event, session.thinkingLevel));
       this.publishActivityForEvent(session, event);
       const eventType = getString(event, "type");
@@ -4537,7 +4596,10 @@ export class PiSessionService implements SessionRouteService {
         this.rememberSessionName(session);
         this.publishSessionName(session);
       }
-      if (eventType === "agent_end") this.abortRunScopedExtensionDialogs(session.sessionId);
+      if (eventType === "agent_end") {
+        this.checkpointResponse(session);
+        this.abortRunScopedExtensionDialogs(session.sessionId);
+      }
       if (eventType === "compaction_start") this.resolveCompactionStartGate(session.sessionId);
       if (eventType === "compaction_end") this.scheduleCompactionQueueDrain(session.sessionId);
       if (eventType === "agent_start" || eventType === "agent_end") this.scheduleCompactionQueueDrain(session.sessionId);
@@ -5046,7 +5108,7 @@ export class PiSessionService implements SessionRouteService {
     const model = session.model === undefined ? undefined : modelToClientModel(session.model);
     const contextUsage = session.getContextUsage();
     const warnings = this.warningsForSession(session);
-    const pendingAsk = this.pendingAskStore.pendingAsk(session.sessionId);
+    const pendingAsk = this.sessionAsks.pendingAsk(session.sessionId);
     const pendingDialogs = this.pendingExtensionDialogStore.pendingDialogs(session.sessionId);
     return {
       sessionId: session.sessionId,
@@ -5066,6 +5128,7 @@ export class PiSessionService implements SessionRouteService {
       ...(contextUsage === undefined ? {} : { contextUsage }),
       ...(warnings.length === 0 ? {} : { warnings }),
       ...(pendingAsk === undefined ? {} : { pendingAsk }),
+      response: this.responseProjection(session).response,
       ...(pendingDialogs.length === 0 ? {} : { pendingDialogs }),
     };
   }
@@ -5269,6 +5332,8 @@ function clientSessionFromListEntry(session: PiSessionListEntry): ClientSession 
     modified: session.modified.toISOString(),
     messageCount: session.messageCount,
     firstMessage: boundSessionCatalogFirstMessage(session.firstMessage),
+    ...(session.response === undefined ? {} : { response: session.response }),
+    ...(session.pendingAsk === undefined ? {} : { pendingAsk: session.pendingAsk }),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
     ...(session.agentSpawned === true ? { agentSpawned: true } : {}),
   };

@@ -51,12 +51,14 @@ export interface TestSession extends PiAgentSession {
 }
 
 export function fakeSessionManager(cwd = "/workspace", patch: Partial<PiSessionManager> = {}): PiSessionManager {
+  const entries: unknown[] = [];
   return {
     getCwd: () => cwd,
     getSessionId: () => "session-1",
     getSessionFile: () => undefined,
-    getBranch: () => [],
-    getLeafId: () => "leaf-1",
+    getBranch: () => entries,
+    appendCustomEntry: (customType, data) => { entries.push({ type: "custom", customType, data }); return `entry-${entries.length.toString()}`; },
+    getLeafId: () => `leaf-${entries.length.toString()}`,
     ...patch,
   };
 }

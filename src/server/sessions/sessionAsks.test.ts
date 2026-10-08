@@ -1,18 +1,19 @@
+import { transcriptAsks } from "./sessionAsks.testSupport.js";
 import { describe, expect, it } from "vitest";
 import { ASK_USER_OPTION_LIMIT, ASK_USER_QUESTION_LIMIT, type AskUserQuestion } from "../../shared/apiTypes.js";
 import {
-  PendingAskStore,
+  type SessionAsks,
   PendingAskValidationError,
   renderAskUserAnswersText,
   renderSupersededAskText,
-} from "./pendingAskStore.js";
+} from "./sessionAsks.js";
 
 const sessionId = "session-1";
 
 function testStore() {
   let askCount = 0;
   let tick = 0;
-  return new PendingAskStore({
+  return transcriptAsks({
     createAskId: () => `ask-${(++askCount).toString()}`,
     now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)),
   });
@@ -30,11 +31,11 @@ function question(id: string, overrides: Partial<AskUserQuestion> = {}): AskUser
   };
 }
 
-function openTwoQuestions(store: PendingAskStore) {
+function openTwoQuestions(store: SessionAsks) {
   return store.open({ sessionId, questions: [question("q1"), question("q2")] });
 }
 
-describe("PendingAskStore validation", () => {
+describe("SessionAsks validation", () => {
   it("normalizes an accepted ask and reports it as the session's pending ask", () => {
     const store = testStore();
     const result = store.open({
@@ -94,7 +95,7 @@ describe("PendingAskStore validation", () => {
   });
 });
 
-describe("PendingAskStore submit", () => {
+describe("SessionAsks submit", () => {
   it("reports answered and unanswered questions for a partial submit", () => {
     const store = testStore();
     const { ask } = store.open({
@@ -223,7 +224,7 @@ describe("PendingAskStore submit", () => {
   });
 });
 
-describe("PendingAskStore close transitions", () => {
+describe("SessionAsks close transitions", () => {
   it("supersedes an unanswered ask and reports its questions as unanswered", () => {
     const store = testStore();
     const first = openTwoQuestions(store);
@@ -278,16 +279,6 @@ describe("PendingAskStore close transitions", () => {
     expect(outcome).toMatchObject({ askId: "ask-1", reason: "answered-in-chat", answeredCount: 0, unansweredIds: ["q1", "q2"] });
     expect(store.pendingAsk(sessionId)).toBeUndefined();
     expect(store.voidForChatReply(sessionId)).toBeUndefined();
-  });
-
-  it("forgets the open ask of a session that goes away without reporting an outcome", () => {
-    const store = testStore();
-    const { ask } = openTwoQuestions(store);
-
-    store.forgetSession(sessionId);
-
-    expect(store.pendingAsk(sessionId)).toBeUndefined();
-    expect(store.cancel(sessionId, ask.askId)).toEqual({ status: "stale" });
   });
 
   it("keeps each session's open ask separate", () => {

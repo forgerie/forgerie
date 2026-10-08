@@ -1,5 +1,5 @@
+import { transcriptAsks } from "./sessionAsks.testSupport.js";
 import { describe, expect, it } from "vitest";
-import { PendingAskStore } from "./pendingAskStore.js";
 import { PendingExtensionDialogStore } from "./pendingExtensionDialogStore.js";
 import { PiSessionService } from "./piSessionService.js";
 import {
@@ -17,7 +17,7 @@ const TEST_AGENT_DIR = "/tmp/forgerie-asks-catalog-test-agent";
 
 function catalogStores() {
   return {
-    asks: new PendingAskStore({
+    asks: transcriptAsks({
       now: () => new Date("2026-08-02T10:00:00.000Z"),
       createAskId: () => "ask-1",
     }),
@@ -43,7 +43,7 @@ describe("PiSessionService asks catalog", () => {
       modelRuntime: testModelRuntime,
       sessionManager: sessionGateway([sessionRecord("session-1"), sessionRecord("idle-session")]),
       archiveStore: emptyArchiveStore(),
-      pendingAskStore: stores.asks,
+      sessionAsks: stores.asks,
       pendingExtensionDialogStore: stores.dialogs,
       createAgentRuntime: () => {
         runtimeCreations += 1;
@@ -107,7 +107,7 @@ describe("PiSessionService asks catalog", () => {
       modelRuntime: testModelRuntime,
       sessionManager: sessionGateway([sessionRecord("starting-session", "/starting-workspace")]),
       archiveStore: emptyArchiveStore(),
-      pendingAskStore: stores.asks,
+      sessionAsks: stores.asks,
       pendingExtensionDialogStore: stores.dialogs,
       createAgentRuntime: () => Promise.resolve(starting.runtime),
       extensionDialogsTimeoutMs: 0,

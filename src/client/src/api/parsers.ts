@@ -1,3 +1,5 @@
+import { Check } from "typebox/value";
+import { SessionResponseSchema } from "../../../shared/sessionResponse.js";
 import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, EXTENSION_DIALOG_OPTION_LIMIT, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_TABS_PER_SESSION_LIMIT, SESSION_TABS_TOOL_ID_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_COMPLETED_AT_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_LIMIT, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type ArchiveSessionsResponse, type AskUserCloseReason, type AskUserCloseResponse, type AskUserOutcome, type AskUserQuestion, type AskUserQuestionOption, type AskUserQuestionRecord, type PendingAskUser, type PendingExtensionDialog, type AuthProviderOption, type AuthProviderStatus, type AuthProvidersResponse, type AuthStatusSource, type AuthType, type CommandOption, type CommandResult, type DeleteWorkspaceFileResponse, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogKind, type ExtensionDialogOutcome, type FileContentResponse, type FileSuggestion, type FileTreeEntry, type FileTreeResponse, type GitDiffResponse, type GitFileState, type GitStatusFile, type GitStatusResponse, type GlobalSessionEvent, type Machine, type MachineHealth, type MachineKind, type MachineRuntime, type MachineStatus, type MessagePage, type ModelSelectionResponse, type NewSessionModelSelectionResponse, type MoveWorkspaceFileResponse, type OAuthFlowState, type PiWebAgentDirEnvSource, type PiWebCapability, type PiWebComponentStatus, type PiWebConfigEnvOverrides, type PiWebConfigResponse, type PiWebConfigValues, type PiWebInstallationInfo, type PiWebPluginConfigMap, type PiWebPluginInfo, type PiWebPluginsResponse, type PiWebPluginScope, type PiWebReleaseStatus, type PiWebRuntimeComponent, type PiWebRuntimeResponse, type PiWebServiceComponent, type PiWebShortcutConfig, type PiWebStatusMessage, type PiWebStatusResponse, type PiWebStatusSeverity, type Project, type QueuedSessionMessage, type SavedPrompt, type SavedPromptAttachment, type SessionBulkArchiveResponse, type SessionBulkDeleteArchivedResponse, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupProjectSummary, type SessionCleanupThresholds, type SessionCleanupTotals, type SessionInfo, type SessionModel, type SessionNotification, type SessionNotificationClearReason, type SessionNotificationDismissThrough, type SessionNotificationInboxDelta, type SessionNotificationInboxEvent, type SessionNotificationInboxSnapshot, type SessionNotificationSeverity, type SessionNotificationSummary, type SessionStatus, type SessionStreamSnapshot, type SessionUiEvent, type SessionUnreadCatalogSnapshot, type SessionUnreadEvent, type SessionUnreadSummary, type SessionWarning, type SessionWarningSeverity, type SlashCommand, type TerminalCommandRun, type TerminalCommandRunStatus, type TerminalInfo, type TerminalUiEvent, type ThinkingLevelsResponse, type WriteWorkspaceFileResponse, type Workspace, type WorkspaceEffectiveConfig, type WorkspaceActivity, type WorkspaceActivityUiEvent, type WorkspaceActivityResponse } from "../../../shared/apiTypes";
 import type { PromptResourceCatalogResponse, PromptResourceCommandDescriptor, PromptResourceCommandIdentity } from "../../../shared/promptResourceCommand";
 import type { PromptResourceCommandRunResponse } from "../../../shared/apiTypes";
@@ -177,6 +179,8 @@ export function parseSessionInfo(value: unknown): SessionInfo {
     modified: requireString(record, "modified"),
     messageCount: requireNumber(record, "messageCount"),
     firstMessage: requireString(record, "firstMessage"),
+    ...optionalResponse(record["response"]),
+    ...optionalPendingAsk(record["pendingAsk"]),
     ...(record["agentSpawned"] === true ? { agentSpawned: true } : {}),
     ...(parentSessionPath === undefined ? {} : { parentSessionPath }),
     ...(parentSessionCwd === undefined ? {} : { parentSessionCwd }),
@@ -269,6 +273,12 @@ function parsePendingAskUser(value: unknown): PendingAskUser {
     askedAt: requireNonEmptyString(record, "askedAt"),
     questions,
   };
+}
+
+function optionalResponse(value: unknown): Pick<SessionStatus, "response"> {
+  if (value === undefined) return {};
+  if (!Check(SessionResponseSchema, value)) throw new Error("Invalid session response");
+  return { response: value };
 }
 
 function optionalPendingAsk(value: unknown): Pick<SessionStatus, "pendingAsk"> | object {
@@ -490,6 +500,7 @@ export function parseSessionStatus(value: unknown): SessionStatus {
     ...optionalContextUsage(record["contextUsage"]),
     ...optionalField("thinkingLevel", optionalString(record, "thinkingLevel")),
     ...optionalWarnings(record["warnings"]),
+    ...optionalResponse(record["response"]),
     ...optionalPendingAsk(record["pendingAsk"]),
     ...optionalPendingDialogs(record["pendingDialogs"]),
   };
@@ -2189,6 +2200,7 @@ function parseSessionAskCatalogEntry(value: unknown): SessionAskCatalogEntry {
   return {
     id,
     cwd,
+    ...optionalResponse(record["response"]),
     ...optionalPendingAsk(record["pendingAsk"]),
     ...optionalPendingDialogs(record["pendingDialogs"]),
   };

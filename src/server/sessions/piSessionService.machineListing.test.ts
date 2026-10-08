@@ -1,5 +1,5 @@
+import { transcriptAsks } from "./sessionAsks.testSupport.js";
 import { describe, expect, it } from "vitest";
-import { PendingAskStore } from "./pendingAskStore.js";
 import { PiSessionService } from "./piSessionService.js";
 import {
   CapturingSessionEventHub,
@@ -77,7 +77,7 @@ describe("PiSessionService machine listing", () => {
         });
       },
     };
-    const pendingAsks = new PendingAskStore({
+    const pendingAsks = transcriptAsks({
       now: () => new Date("2026-08-01T14:00:00.000Z"),
       createAskId: () => "ask-main",
     });
@@ -101,7 +101,7 @@ describe("PiSessionService machine listing", () => {
         restore: () => Promise.resolve(),
         isArchived: () => Promise.resolve(false),
       },
-      pendingAskStore: pendingAsks,
+      sessionAsks: pendingAsks,
       createAgentRuntime: () => {
         calls.createRuntime += 1;
         return Promise.resolve(live.runtime);

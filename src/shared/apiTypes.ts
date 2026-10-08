@@ -1,3 +1,4 @@
+import type { SessionResponse } from "./sessionResponse.js";
 import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktree.js";
 
 /** Public wire types; their runtime schemas live in backlog.ts. */
@@ -364,6 +365,8 @@ export interface SessionInfo extends SessionRef {
   modified: string;
   messageCount: number;
   firstMessage: string;
+  response?: SessionResponse;
+  pendingAsk?: PendingAskUser;
   parentSessionPath?: string;
   /**
    * True when a tool reported spawning this session -- an agent-to-agent
@@ -608,7 +611,7 @@ export interface AskUserQuestion {
 }
 
 /**
- * The open, unanswered question set of a session. Daemon-owned and reported in
+ * The open, unanswered question set of a session. Derived from the active transcript branch and reported in
  * {@link SessionStatus}, so a reconnecting or reloading browser rehydrates it
  * without depending on having seen the `ask.opened` event.
  */
@@ -963,6 +966,7 @@ export interface SessionWarning {
 
 export interface SessionAskCatalogEntry extends SessionRef {
   pendingAsk?: PendingAskUser;
+  response?: SessionResponse;
   pendingDialogs?: PendingExtensionDialog[];
 }
 
@@ -1012,6 +1016,7 @@ export interface SessionStatus {
    * user. Daemon-owned, so it survives browser reload and web/API restarts.
    */
   pendingAsk?: PendingAskUser;
+  response?: SessionResponse;
   /**
    * The session's open extension dialogs, oldest first, when any are waiting
    * for the user. Daemon-owned, so they survive browser reload and web/API
