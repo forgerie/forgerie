@@ -5,7 +5,7 @@ import { resolve, join } from "node:path";
 const repo = process.env.FORGERIE_ROOT ?? resolve("../..");
 const origin = process.env.APP_URL ?? "http://127.0.0.1:8510";
 const out = process.env.SHOT_DIR ?? "/tmp/aui-changes-shots";
-const scenarios = (process.env.SCENARIOS ?? "changes,changes-selecting,changes-tray,changes-empty").split(",");
+const scenarios = (process.env.SCENARIOS ?? "changes,changes-file,changes-selecting,changes-tray,changes-empty").split(",");
 const schemes = (process.env.SCHEMES ?? "light,dark").split(",");
 const chromium = process.env.CHROME_BIN || spawnSync("which", ["chromium"], { encoding: "utf8" }).stdout.trim();
 for (const scenario of scenarios) {

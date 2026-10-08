@@ -1,5 +1,5 @@
 // Dev-only, network-free preview of the changes review and the note tray over a session.
-// Scenarios: changes, changes-selecting, changes-tray, changes-empty.
+// Scenarios: changes (on arrival), changes-file (LoginForm.tsx chosen in the tree), changes-selecting, changes-tray, changes-empty.
 // Notes live in local state only. Nothing reaches Pi or git.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
@@ -76,9 +76,9 @@ function Preview() {
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
   const [open, setOpen] = useState<{ focusNoteId?: string } | undefined>(scenario === "changes-tray" ? undefined : {});
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(messages, false), onNew: async () => {} });
-  // The selecting scenario needs two taps and some typing to reach its state.
+  // The file and selecting scenarios choose a file in the tree; selecting then needs two taps and some typing.
   useEffect(() => {
-    if (scenario !== "changes-selecting") return;
+    if (scenario !== "changes-file" && scenario !== "changes-selecting") return;
     // A tap on a line's numbers. The editor draws only lines near the window, so bring the file's end in first.
     const tapNumbers = (line: number) => {
       const cell = [...document.querySelectorAll<HTMLElement>(".changes-dialog .cm-diff-numbers .cm-gutterElement")]
@@ -86,8 +86,10 @@ function Preview() {
       cell?.querySelector<HTMLElement>("[data-line]")?.click();
     };
     const timer = setTimeout(() => {
-      document.querySelector(".change-file:has(.change-path[title='src/auth/LoginForm.tsx']) .diff")?.scrollIntoView({ block: "end" });
+      document.querySelector<HTMLElement>('.file-row[data-row="unstaged:src/auth/LoginForm.tsx"]')?.click();
+      if (scenario !== "changes-selecting") return;
       setTimeout(() => {
+        document.querySelector(".changes-body .diff")?.scrollIntoView({ block: "end" });
         tapNumbers(50);
         // The second tap stretches the selection the first one drew.
         setTimeout(() => tapNumbers(51), 50);
@@ -98,7 +100,7 @@ function Preview() {
           field.dispatchEvent(new Event("input", { bubbles: true }));
           field.closest(".note-editor")?.scrollIntoView({ block: "center" });
         }, 150);
-      }, 150);
+      }, 600);
     }, 300);
     return () => clearTimeout(timer);
   }, []);

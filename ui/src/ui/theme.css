@@ -67,6 +67,7 @@
   /* Diff rows: drawn as faint washes, so the live blue of a note stays the loudest mark on a line. */
   --diff-add: oklch(0.6 0.15 150);
   --diff-remove: oklch(0.6 0.2 25);
+  --diff-modify: oklch(0.6 0.13 70);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -88,6 +89,7 @@
     --scrim-shadow: oklch(0 0 0 / 0.4);
     --diff-add: oklch(0.72 0.16 150);
     --diff-remove: oklch(0.7 0.19 25);
+    --diff-modify: oklch(0.76 0.13 80);
   }
 }
 * { box-sizing: border-box; scrollbar-width: thin; }
@@ -902,10 +904,12 @@ summary.trace-line:hover { color: var(--foreground); }
 .ns-launch-actions > button:not(.icon-button):hover { border-color: var(--line-focus); }
 @media (prefers-reduced-motion: reduce) { .ns-launch[data-state="starting"] .ns-launch-mark svg { animation: none; } }
 
-/* Changes review: the session's git diff as one column of files at every size.
-   Selected lines and the notes written on them share one blue spine down the
-   left edge, so a note always reads as attached to its code. */
-.changes-dialog { --tree-width: 52rem; --tree-height: 54rem; }
+/* Changes review: a tree of the changed files beside one file's diff. The
+   tree docks at the left when the review is as wide as the app's docked
+   sidebar needs, and is a sheet over the file in every Fold posture, with the
+   app sheet's motion and swipe. Selected lines and the notes written on them
+   share one blue spine down the left edge, so a note reads as attached to its code. */
+.changes-dialog { --tree-width: 100rem; --tree-height: 64rem; }
 .changes-opener .changes-badge { position: absolute; inset-block-start: -0.1875rem; inset-inline-end: -0.375rem; min-inline-size: 1rem; block-size: 1rem;
   padding-inline: 0.25rem; border-radius: 0.5rem; background: var(--live); color: var(--primary-foreground); font-size: var(--meta-text); font-weight: 600;
   line-height: 1rem; font-variant-numeric: tabular-nums; text-align: center; pointer-events: none; }
@@ -914,20 +918,56 @@ summary.trace-line:hover { color: var(--foreground); }
 .changes-message p, .change-message p { margin: 0 0 var(--space-2); }
 .changes-message button, .change-message button { min-block-size: 2.25rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
 .changes-message button:hover, .change-message button:hover { border-color: var(--line-focus); }
-.change-file + .change-file { border-block-start: 1px solid var(--line); }
-.change-file-head { position: sticky; inset-block-start: 0; z-index: 1; margin: 0; background: var(--background); font-size: var(--small-text); font-weight: 400; }
-.change-file-head button { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2) var(--tree-pad); border: 0; background: transparent; text-align: start; }
-.change-file-head button:disabled { opacity: 1; }
-.change-file-head button:not(:disabled):hover { background: var(--hover-surface); }
-.change-file-head button[aria-expanded="true"] { border-block-end: 1px solid var(--line); }
-.change-chevron { flex: none; color: var(--muted-foreground); transition: rotate 150ms; }
-.change-file-head [aria-expanded="true"] .change-chevron { rotate: 90deg; }
-.change-file-head button:disabled .change-chevron { visibility: hidden; }
+.changes-layout { --files-width: clamp(15rem, 22%, 20rem); position: relative; flex: 1; min-block-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.changes-layout[data-layout="docked"] { grid-template-columns: var(--files-width) minmax(0, 1fr); }
+.changes-files { min-inline-size: 0; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding-block: var(--space-2); background: var(--tint-surface); }
+.changes-layout[data-layout="docked"] .changes-files { border-inline-end: 1px solid var(--line); }
+.changes-layout[data-layout="overlay"] .changes-files { position: absolute; z-index: 3; inset-block: 0; inset-inline-start: 0; inline-size: min(20rem, calc(100% - 3rem));
+  background: var(--background); border-inline-end: 1px solid var(--line); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transition: transform 300ms ease-in-out, visibility 300ms; }
+.changes-layout[data-layout="overlay"][data-sheet="closed"] .changes-files { transform: translateX(calc(-100% - 1px)); visibility: hidden; box-shadow: none; border-inline-end-color: transparent; transition-duration: 200ms; }
+.changes-scrim { position: absolute; inset: 0; z-index: 2; background: rgb(0 0 0 / 0.5); transition: opacity 300ms ease-in-out, visibility 300ms; }
+.changes-layout[data-sheet="closed"] .changes-scrim { opacity: 0; visibility: hidden; pointer-events: none; transition-duration: 200ms; }
+.changes-layout[data-layout="overlay"][data-drag] .changes-files { transform: translateX(calc((var(--sheet-progress, 0) - 1) * (100% + 1px))); visibility: visible; transition: none;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); border-inline-end-color: var(--line); }
+.changes-layout[data-drag] .changes-scrim { opacity: var(--sheet-progress, 0); visibility: visible; transition: none; }
+@media (prefers-reduced-motion: reduce) { .changes-layout .changes-files, .changes-scrim { transition: none; } }
+.changes-pane { min-inline-size: 0; min-block-size: 0; display: flex; flex-direction: column; }
+
+/* The tree: 44px rows, as in the session picker, indented a step per level. */
+.file-tree { margin: 0; padding: 0; list-style: none; font-size: var(--small-text); }
+.file-row { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size);
+  padding-inline: calc(var(--tree-pad) + (var(--level, 1) - 1) * 0.875rem) var(--tree-pad); color: var(--muted-foreground); cursor: pointer; user-select: none; }
+.file-row:hover { background: var(--hover-surface); }
+.file-row:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
+.file-row[aria-selected="true"] { background: var(--active-surface); }
+.file-row[aria-selected="true"] .file-name { font-weight: 500; }
+.file-row[aria-disabled] { cursor: default; }
+.file-row[aria-disabled]:hover { background: transparent; }
+.file-row[data-kind="group"] { font-size: var(--label-text); font-weight: 500; }
+.file-row[data-kind="file"] .file-name { color: var(--foreground); }
+.file-row[aria-disabled] .file-name { color: var(--muted-foreground); }
+.file-chevron { flex: none; transition: rotate 150ms; }
+.file-row[aria-expanded="true"] .file-chevron { rotate: 90deg; }
+.file-name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One cell as wide as a folder's chevron, so names line up across a level. */
+.file-mark { flex: none; inline-size: 14px; font-family: var(--code-font); font-size: var(--label-text); font-weight: 600; text-align: center; color: var(--diff-modify); }
+.file-mark[data-state="added"], .file-mark[data-state="untracked"] { color: var(--diff-add); }
+.file-mark[data-state="deleted"] { color: var(--diff-remove); }
+.file-mark[data-state="conflicted"] { color: var(--destructive); }
+.file-noted { flex: none; min-inline-size: 1.125rem; padding-inline: 0.3125rem; border-radius: 0.5625rem; background: color-mix(in oklab, var(--live) 16%, transparent);
+  color: var(--live); font-size: var(--meta-text); font-weight: 600; line-height: 1.125rem; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* The open file's bar: its name and facts, then previous and next. Facts sit under the name, so the buttons keep their room. */
+.change-bar { flex: none; display: flex; align-items: center; gap: var(--space-1); min-block-size: var(--header-size); padding: var(--space-1) var(--space-2) var(--space-1) var(--tree-pad); border-block-end: 1px solid var(--line); }
+.change-bar .change-files-opener { margin-inline-end: var(--space-2); }
+.change-bar .icon-button { inline-size: var(--control-size); block-size: var(--control-size); }
+.change-bar-title { flex: 1; min-inline-size: 0; display: flex; flex-direction: column; gap: 0.125rem; }
 /* The name never truncates before its folder does. */
-.change-path { flex: 1 1 12rem; min-inline-size: 0; display: flex; white-space: nowrap; }
+.change-path { min-inline-size: 0; display: flex; margin: 0; font-size: var(--small-text); font-weight: 400; white-space: nowrap; }
+.change-path:focus-visible { outline-offset: 2px; }
 .change-folder { flex: 0 1 auto; min-inline-size: 1.5rem; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
 .change-name { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.change-facts { flex: none; display: flex; gap: var(--space-2); margin-inline-start: auto; padding-inline-start: calc(16px + var(--space-2)); color: var(--muted-foreground); font-size: var(--label-text); white-space: nowrap; }
+.change-facts { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: 0; color: var(--muted-foreground); font-size: var(--label-text); }
 .change-noted { color: var(--live); font-weight: 500; }
 
 /* Each file is a read-only CodeMirror editor. Its colours come from the same
