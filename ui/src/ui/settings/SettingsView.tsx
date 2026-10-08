@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { BotIcon, ChevronLeftIcon, PlusIcon, PuzzleIcon, XIcon } from "lucide-react";
+import { BotIcon, ChevronLeftIcon, CpuIcon, PlusIcon, PuzzleIcon, XIcon } from "lucide-react";
 import { agentsApi, type AgentList, type AgentSummary } from "../../agents/agentsApi";
 import { agentDrafts } from "../../agents/agentDrafts";
 import { parseModelSpec, modelSpecText } from "../../agents/agentFile";
@@ -8,6 +8,7 @@ import { AgentEditor } from "./AgentEditor";
 import { SettingsFrame } from "./SettingsFrame";
 import { SettingsRow } from "./SettingsRow";
 import { PluginsView } from "./PluginsView";
+import { ModelsView } from "./ModelsView";
 import "./settings.css";
 
 type ListLoad = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: AgentList };
@@ -63,6 +64,8 @@ export function SettingsView({ place, onPlace, onClose }: {
   if (place.section === "plugins") return <PluginsView selected={place.plugin}
     onOpen={(plugin) => onPlace({ section: "plugins", plugin })} onBack={() => onPlace({ section: "root" })} onClose={onClose} />;
 
+  if (place.section === "models") return <ModelsView onBack={() => onPlace({ section: "root" })} onClose={onClose} />;
+
   if (place.section === "agents" && place.agent) {
     return <AgentEditor key={JSON.stringify(place.agent)} target={place.agent} home={load.type === "ready" ? load.value.home : undefined}
       onBack={() => onPlace({ section: "agents" })} onClose={onClose}
@@ -71,6 +74,8 @@ export function SettingsView({ place, onPlace, onClose }: {
   if (place.section === "root") {
     return <SettingsFrame title="Settings" actions={close}>
       <ul className="settings-sections">
+        <SettingsRow name={<><CpuIcon aria-hidden size={16} />Models</>} description="The models the model menu offers, and the favorites Ctrl+P switches between."
+          onOpen={() => onPlace({ section: "models" })} />
         <SettingsRow name={<><BotIcon aria-hidden size={16} />Agents</>} description="Roles a session can hand work to, each with its own model and instructions."
           onOpen={() => onPlace({ section: "agents" })} />
         <SettingsRow name={<><PuzzleIcon aria-hidden size={16} />Plugins</>} description="Pi packages and extensions, and Forgerie's browser plugins."

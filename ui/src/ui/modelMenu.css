@@ -1,0 +1,9 @@
+/* The model menu's hidden models: one quiet command at the foot of the list,
+   and a muted row for each hidden model while they are on view. */
+.model-hidden-toggle { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
+  margin-block-start: var(--space-1); padding: var(--space-1) var(--space-3); border: 0; border-block-start: 1px solid var(--line); border-radius: 0;
+  background: transparent; color: var(--muted-foreground); font-size: var(--label-text); text-align: start; }
+.model-hidden-toggle:hover, .model-hidden-toggle:focus-visible { color: var(--foreground); background: var(--hover-surface); }
+.model-hidden-toggle:focus-visible { outline-offset: -2px; }
+.model-hidden-toggle svg { flex: none; }
+.model-row[data-hidden] .model-row-name { color: color-mix(in oklab, var(--foreground) 62%, transparent); }

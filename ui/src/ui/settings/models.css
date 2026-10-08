@@ -1,0 +1,40 @@
+/* Models reuse the Agents groups and switch. Each row holds two choices: the
+   star at the start edge, where the eye begins, and the switch at the end,
+   where every settings switch sits. Both keep their size; the name wraps and
+   the facts under it wrap before either control yields. Nothing keys off the
+   viewport. */
+
+/* The summary continues the lede, so it sits closer to it than the lede sits to the list. */
+.settings-lede:has(+ .models-summary) { margin-block-end: var(--space-3); }
+.models-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: 0 0 var(--space-5);
+  color: var(--muted-foreground); font-size: var(--small-text); line-height: var(--line-height); }
+.models-summary p { flex: 1 1 18rem; margin: 0; }
+.models-search { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); margin-block-end: var(--space-6);
+  padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--muted-foreground); transition: border-color 150ms; }
+.models-search:focus-within { border-color: var(--line-focus); }
+.models-search input { flex: 1; min-inline-size: 0; min-block-size: calc(var(--control-size) - 2px); padding: 0; border: 0; background: transparent;
+  color: var(--foreground); font: inherit; font-size: var(--small-text); outline: none; }
+.models-search input::placeholder { color: var(--muted-foreground); }
+.models-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding-inline-end: var(--space-3); }
+.models-group-head .agent-group-label { min-inline-size: 0; }
+.models-group-head .agent-text-button { flex: none; font-size: var(--label-text); }
+.models-where { margin-block-start: var(--space-8); }
+
+.model-pref { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "star name switch" "star meta switch";
+  align-items: center; column-gap: var(--space-2); min-block-size: var(--control-size); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-1);
+  border-radius: var(--radius-control); transition: background-color 150ms; }
+.model-pref:hover { background: var(--hover-surface); }
+.model-pref-name { grid-area: name; min-inline-size: 0; font-size: var(--small-text); font-weight: 500; overflow-wrap: anywhere; }
+.model-pref-meta { grid-area: meta; display: flex; flex-wrap: wrap; gap: 0 var(--space-3); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--meta-text); }
+.model-pref-meta code { min-inline-size: 0; font-family: var(--code-font); overflow-wrap: anywhere; }
+.model-pref-switch { grid-area: switch; display: flex; padding-inline-start: var(--space-2); }
+.model-pref[data-off] .model-pref-name, .model-pref[data-off] .model-pref-meta { opacity: 0.55; }
+
+.model-pref-star { position: relative; grid-area: star; display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; padding: 0; border: 0;
+  border-radius: var(--radius-control); background: transparent; color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); transition: color 150ms; }
+.model-pref-star::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.model-pref-star:hover:not(:disabled) { color: var(--foreground); }
+.model-pref-star[aria-pressed="true"] { color: var(--foreground); }
+.model-pref-star[aria-pressed="true"] svg { fill: currentColor; }
+.model-pref-star:disabled { opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) { .model-pref, .model-pref-star, .models-search { transition: none; } }

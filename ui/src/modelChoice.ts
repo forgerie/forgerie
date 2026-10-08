@@ -1,4 +1,5 @@
 import type { SessionModel } from "./contracts";
+import { isShown, resolveFavorites, type ModelPrefs } from "./models/modelPrefs";
 
 export type { SessionModel };
 
@@ -15,38 +16,64 @@ export interface ModelRow {
   context?: string;
   /** The model has no reasoning, so thinking levels do not apply. */
   plain: boolean;
+  /** Off the shown list, and offered only because hidden models are on view. */
+  hidden?: boolean;
 }
 export interface ModelGroup { key: string; label: string; rows: ModelRow[] }
 
-const ENABLED_LABEL = "Enabled models";
+const FAVORITES_LABEL = "Favorites";
 const PINNED_DATE = /-(\d{4})(\d{2})(\d{2})$/;
 const ALIAS_SUFFIX = " (latest)";
 
 export const modelKey = (model: Pick<SessionModel, "provider" | "id">) => `${model.provider ?? ""}/${model.id ?? ""}`;
 
+type Pickable = SessionModel & { provider: string; id: string };
+export interface MenuOptions {
+  /** The app's lists. Absent: Pi's `scoped` flag marks favorites and every model is shown. */
+  prefs?: Pick<ModelPrefs, "favorites" | "visible"> | undefined;
+  /** Offer models off the shown list too. */
+  showHidden?: boolean | undefined;
+  /** The session's model. It is always offered, so the menu can show what is in use. */
+  activeKey?: string | undefined;
+}
+export interface ModelMenu { groups: ModelGroup[]; /** Models that match the search but are hidden. */ hidden: number }
+
 /**
- * The picker's groups, in the order Pi sent the models. Pi's enabled models
- * come first as one named set, because they are the ones the user chose to
- * keep close. The server's order is kept: a later run of one provider gets its
- * own group rather than being merged into an earlier one. Models without a
- * provider and ID cannot be picked and are left out.
+ * The picker's groups, in the order Pi sent the models. Favorites come first
+ * as one named set, in the user's order, because they are the ones the user
+ * chose to keep close. The server's order is kept after that: a later run of
+ * one provider gets its own group rather than being merged into an earlier
+ * one. A model off the shown list stays out unless `showHidden` is set. Models
+ * without a provider and ID cannot be picked and are left out.
  */
-export function modelGroups(models: readonly SessionModel[], query = ""): ModelGroup[] {
+export function modelMenu(models: readonly SessionModel[], query = "", options: MenuOptions = {}): ModelMenu {
   const needle = query.trim().toLowerCase();
-  const pickable = models.filter((model): model is SessionModel & { provider: string; id: string } =>
-    !!model.provider && !!model.id && matches(model, needle));
-  const enabled = pickable.filter((model) => model.scoped === true);
-  const rest = pickable.filter((model) => model.scoped !== true);
-  const groups: ModelGroup[] = enabled.length > 0
-    ? [{ key: "enabled", label: ENABLED_LABEL, rows: enabled.map((model) => rowOf(model, true)) }] : [];
+  const pickable = models.filter((model): model is Pickable => !!model.provider && !!model.id);
+  const { prefs } = options;
+  const favorites: Pickable[] = prefs
+    ? resolveFavorites(prefs.favorites, pickable).flatMap((favorite) => pickable.find((model) => modelKey(model) === favorite.key) ?? [])
+    : pickable.filter((model) => model.scoped === true);
+  const favoriteKeys = new Set(favorites.map(modelKey));
+  const shown = (model: Pickable) => !prefs || isShown(prefs, favoriteKeys, modelKey(model)) || modelKey(model) === options.activeKey;
+  const rest = pickable.filter((model) => !favoriteKeys.has(modelKey(model)) && matches(model, needle));
+  const hidden = rest.filter((model) => !shown(model)).length;
+  const groups: ModelGroup[] = [];
+  const favoriteRows = favorites.filter((model) => matches(model, needle));
+  if (favoriteRows.length > 0) groups.push({ key: "favorites", label: FAVORITES_LABEL, rows: favoriteRows.map((model) => rowOf(model, true)) });
   for (const model of rest) {
+    const off = !shown(model);
+    if (off && !options.showHidden) continue;
+    const row = { ...rowOf(model, false), ...(off ? { hidden: true } : {}) };
     const previous = groups.at(-1);
     const key = `provider:${model.provider}`;
-    if (previous && previous.key.startsWith(key)) previous.rows.push(rowOf(model, false));
-    else groups.push({ key: `${key}:${groups.length}`, label: providerLabel(model.provider), rows: [rowOf(model, false)] });
+    if (previous && previous.key.startsWith(key)) previous.rows.push(row);
+    else groups.push({ key: `${key}:${groups.length}`, label: providerLabel(model.provider), rows: [row] });
   }
-  return groups;
+  return { groups, hidden };
 }
+
+/** {@link modelMenu}'s groups alone. */
+export const modelGroups = (models: readonly SessionModel[], query = "", options: MenuOptions = {}): ModelGroup[] => modelMenu(models, query, options).groups;
 
 function matches(model: SessionModel, needle: string): boolean {
   if (needle === "") return true;

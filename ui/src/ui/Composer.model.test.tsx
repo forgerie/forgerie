@@ -91,7 +91,7 @@ describe("model and thinking level in the input bar", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     await click(trigger());
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
-    expect([...panel()!.querySelectorAll(".model-group-label")].map((node) => node.textContent)).toEqual(["Enabled models", "Anthropic", "Openai Codex"]);
+    expect([...panel()!.querySelectorAll(".model-group-label")].map((node) => node.textContent)).toEqual(["Favorites", "Anthropic", "Openai Codex"]);
     expect(button("Claude Opus 5.5", panel()!)!.getAttribute("aria-current")).toBe("true");
     expect(document.activeElement).toBe(button("Claude Opus 5.5", panel()!));
     expect(button("GPT-5.6 Sol", panel()!)!.textContent).toContain("no thinking");

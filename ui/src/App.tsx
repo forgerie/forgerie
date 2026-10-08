@@ -35,6 +35,7 @@ const readSettings = (): SettingsPlace | undefined => {
   const section = params.get("settings");
   if (section === null) return undefined;
   if (section === "agents") return { section, agent: readTarget(params.get("agent") ?? undefined) };
+  if (section === "models") return { section };
   return section === "plugins" ? { section, plugin: params.get("plugin") ?? undefined } : { section: "root" };
 };
 /** `?backlog` keeps the backlog open across a reload; `?backlog=<projectId>/<itemId>` keeps one item open. */
