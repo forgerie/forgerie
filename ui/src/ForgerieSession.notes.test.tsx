@@ -7,18 +7,20 @@ import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import { createDraftStore } from "./draftStore";
 import type { SessionStatus } from "./contracts";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 let server: WebSocketServer | undefined;
 const idle: SessionStatus = { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [] };
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")]
   .find((node) => node.textContent?.trim() === name || node.getAttribute("aria-label") === name);
 const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 2000 }).toBe(true); });
 };
-const setValue = (field: HTMLTextAreaElement, text: string) => act(async () => {
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, text);
+const setValue = (field: HTMLTextAreaElement | ComposerInputElement, text: string) => act(async () => {
+  if (field instanceof HTMLTextAreaElement) Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, text);
+  else field.value = text;
   field.dispatchEvent(new Event("input", { bubbles: true }));
 });
 const click = (node: HTMLElement | undefined) => act(async () => { node!.click(); });

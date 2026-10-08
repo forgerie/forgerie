@@ -9,6 +9,7 @@ import type { ShellAvailability } from "../shellDraft";
 import type { AskBinding } from "./useAskMode";
 import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 const row = (run: ShellRun, id = "shell-1"): TranscriptMessage => ({ id, role: "shell", parts: [{ type: "shell", run }] });
@@ -21,13 +22,13 @@ function Fixture({ messages = [], running = false, availability = { type: "ready
   return <AssistantRuntimeProvider runtime={runtime}><Thread ask={ask} shell={{ availability, onRun }} /></AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")]
   .find((node) => node.textContent === name || node.getAttribute("aria-label") === name);
 const shellRow = () => document.querySelector<HTMLElement>(".shell-run")!;
 function type(text: string) {
   return act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+    input().value = text;
     input().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
@@ -86,8 +87,8 @@ describe("shell mode in the one composer", () => {
     await type("!ls -la");
     expect(document.querySelector(".composer-hint")?.textContent).toBe("Shell command. The agent sees its output.");
     expect(button("Send message")).toBeUndefined();
-    await press("Enter", true); expect(onRun).not.toHaveBeenCalled();
-    await press("Enter");
+    await press("Enter", true); expect(onRun).not.toHaveBeenCalled(); expect(input().value).toBe("!ls -la\n");
+    await press("Backspace"); await press("Enter");
     expect(onRun).toHaveBeenCalledExactlyOnceWith("!ls -la");
     expect(input().value).toBe("");
     await type("!!git status");
@@ -143,6 +144,6 @@ describe("shell mode in the one composer", () => {
     expect(onChat).toHaveBeenCalledWith("!ls src");
     expect(onSubmit).not.toHaveBeenCalled();
     expect(document.querySelector(".ask")).not.toBeNull();
-    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-composer-input]")).toHaveLength(1);
   });
 });

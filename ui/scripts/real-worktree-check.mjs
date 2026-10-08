@@ -65,14 +65,14 @@ async function open(url) { await cdp.send("Page.navigate", { url }); }
 async function startFromDialog(query, label) {
   const url = new URL(app); for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
   await open(url.href);
-  await until("!!document.querySelector('dialog.ns-dialog[open] textarea')", 30_000);
+  await until("!!document.querySelector('dialog.ns-dialog[open] [data-composer-input]')", 30_000);
   await until(`document.querySelector('.destination-value')?.textContent === ${JSON.stringify(label)}`, 30_000);
   await until("!document.querySelector('.model-trigger')?.textContent.startsWith('No model')", 30_000);
-  await evaluate(cdp, `(() => { const input = document.querySelector('.ns-dialog textarea'); input.focus();
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(prompt)});
+  await evaluate(cdp, `(() => { const input = document.querySelector('.ns-dialog [data-composer-input]'); input.focus();
+    input.value = ${JSON.stringify(prompt)};
     input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await sleep(200);
-  await evaluate(cdp, "document.querySelector('.ns-dialog textarea').dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', ctrlKey: true }))");
+  await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', ctrlKey: true }))");
 }
 async function sessionOf(id) { return (await call("/api/sessions/all")).sessions.find((session) => session.id === id); }
 async function waitIdle(session) {
@@ -157,7 +157,7 @@ try {
   assert.equal(landedTitle.slice(-7), git(repo, "rev-parse", "--short=7", "main"));
   step("Land reported the sha main now points at", { landedTitle });
   await clickText(".wt-foot button", "Done");
-  await until("!!document.querySelector('.wt-receipt') && !document.querySelector('.composer textarea')", 30_000);
+  await until("!!document.querySelector('.wt-receipt') && !document.querySelector('[data-composer-input]')", 30_000);
   await openSession(first);
   await until("!!document.querySelector('.wt-receipt') && document.querySelectorAll('.message-group > *').length > 0", 30_000);
   assert.equal(existsSync(created.cwd), false);

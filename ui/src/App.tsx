@@ -199,7 +199,7 @@ export function App() {
     }
     if (readNew() !== undefined) {
       setComposeMode(mode);
-      document.querySelector<HTMLTextAreaElement>(".ns-dialog textarea")?.focus();
+      document.querySelector<HTMLElement>(".ns-dialog [data-composer-input]")?.focus();
       return;
     }
     const current = readSelected();

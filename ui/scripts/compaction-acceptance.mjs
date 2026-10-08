@@ -33,10 +33,10 @@ try {
   }
   async function navigate(scenario) {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
-    await until("!!document.querySelector('.composer textarea')");
+    await until("!!document.querySelector('[data-composer-input]')");
   }
   async function input(text) {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()"); await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   }
   async function clickText(text) {
@@ -47,10 +47,10 @@ try {
     const state = await evaluate(cdp, `(() => {
       const box = element => element?.getBoundingClientRect().toJSON();
       return { overflow: document.documentElement.scrollWidth > innerWidth,
-        inputs: document.querySelectorAll('.composer textarea').length, input: box(document.querySelector('.composer textarea')),
+        inputs: document.querySelectorAll('[data-composer-input]').length, input: box(document.querySelector('[data-composer-input]')),
         footer: box(document.querySelector('.composer-region')), notice: box(document.querySelector('.compaction-notice')),
         buttons: [...document.querySelectorAll('.composer-actions button,.compaction-head button,.queue-head button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
-        draft: document.querySelector('.composer textarea').value };
+        draft: document.querySelector('[data-composer-input]').value };
     })()`);
     assert.equal(state.overflow, false, `${scenario}: overflow`);
     assert.equal(state.inputs, 1);
@@ -78,7 +78,7 @@ try {
   await input("/comp");
   await until("document.querySelector('[role=option]')?.textContent.includes('/compact')");
   await pressCombo(cdp, "enter");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "/compact ");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "/compact ");
   assert.equal(await evaluate(cdp, "!!document.querySelector('.compaction-notice')"), false);
   await input("/compact keep release decisions");
   await pressCombo(cdp, "enter");
@@ -94,12 +94,12 @@ try {
   for (const posture of [...FOLD8_POSTURES, FOLD8_POSTURES[2]]) {
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
     await sleep(80);
-    assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "draft kept across fold and rotation");
+    assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "draft kept across fold and rotation");
     result.transitions.push(posture.name);
   }
   await clickText("Clear entire queue (2)");
   await until("document.querySelector('.compaction-head [role=status]')?.textContent === 'Queued compaction cancelled.'");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "draft kept across fold and rotation");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "draft kept across fold and rotation");
   result.clearQueueKeepsDraft = true;
   assert.deepEqual(result.requests, []); assert.deepEqual(result.errors, []);
   await writeFile(join(output, "acceptance.json"), JSON.stringify(result, null, 2));

@@ -7,6 +7,7 @@ import type { ToolState, TranscriptMessage } from "../transcript";
 import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
 import { SessionFrame } from "./SessionFrame";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 const answer = (text: string, id = "reply"): TranscriptMessage => ({ id, role: "assistant", parts: [{ type: "text", text }] });
@@ -70,7 +71,7 @@ describe("Homepage-derived thread", () => {
 
   it("renders Markdown images as links without loading remote media", async () => {
     await render({ messages: [answer("![Diagram](https://example.test/diagram.png)")] });
-    expect(document.querySelector('img')).toBeNull();
+    expect([...document.querySelectorAll('img')].filter((node) => !node.closest('[data-composer-input]'))).toEqual([]);
     expect(document.querySelector('.markdown a')?.getAttribute('href')).toBe("https://example.test/diagram.png");
     expect(document.querySelector('.markdown a')?.textContent).toBe("Diagram");
   });
@@ -97,7 +98,7 @@ describe("Homepage-derived thread", () => {
     await render({ loading: true, disabled: true });
     expect(document.querySelector('[aria-label="Loading conversation"]')).not.toBeNull();
     expect(document.querySelector('.thread-welcome')).toBeNull();
-    expect(document.querySelector('textarea')?.disabled).toBe(true);
+    expect(document.querySelector<ComposerInputElement>('[data-composer-input]')?.disabled).toBe(true);
   });
 
   it("greets an empty ready session and prevents an empty send", async () => {
@@ -110,9 +111,9 @@ describe("Homepage-derived thread", () => {
   it("sends the typed draft through the existing runtime", async () => {
     const onNew = vi.fn<(message: AppendMessage) => Promise<void>>(async () => {});
     await render({ messages: [reply], onNew });
-    const input = document.querySelector('textarea')!;
+    const input = document.querySelector<ComposerInputElement>('[data-composer-input]')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "hello");
+      input.value = "hello";
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(button("Send message").disabled).toBe(false);
@@ -134,31 +135,31 @@ describe("Homepage-derived thread", () => {
   it("updates streamed Markdown in place and keeps the current draft", async () => {
     const messages: TranscriptMessage[] = [answer("## Par")];
     await render({ messages, running: true });
-    const input = document.querySelector('textarea')!;
+    const input = document.querySelector<ComposerInputElement>('[data-composer-input]')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "next question");
+      input.value = "next question";
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await render({ messages: [answer("## Partial reply\n\nNow complete.")] });
     expect(document.querySelectorAll('.message-assistant')).toHaveLength(1);
     expect(document.querySelector('.message-assistant h2')?.textContent).toBe("Partial reply");
-    expect(document.querySelector('textarea')).toBe(input);
+    expect(document.querySelector<ComposerInputElement>('[data-composer-input]')).toBe(input);
     expect(input.value).toBe("next question");
   });
 
   it("repairs unfinished Markdown only while streaming and keeps the composer mounted", async () => {
     await render({ messages: [answer("A **partial")], running: true });
-    const input = document.querySelector('textarea')!;
+    const input = document.querySelector<ComposerInputElement>('[data-composer-input]')!;
     expect(document.querySelector('.message-assistant strong')?.textContent).toBe("partial");
     expect(document.querySelector('.message-assistant [data-status]')?.getAttribute('data-status')).toBe("running");
     await render({ messages: [answer("A **partial reply** with `cwd")], running: true });
     expect(document.querySelector('.message-assistant strong')?.textContent).toBe("partial reply");
     expect(document.querySelector('.message-assistant code')?.textContent).toBe("cwd");
-    expect(document.querySelector('textarea')).toBe(input);
+    expect(document.querySelector<ComposerInputElement>('[data-composer-input]')).toBe(input);
     await render({ messages: [answer("A **partial")] });
     expect(document.querySelector('.message-assistant strong')).toBeNull();
     expect(document.querySelector('.markdown')?.textContent).toBe("A **partial");
-    expect(document.querySelector('textarea')).toBe(input);
+    expect(document.querySelector<ComposerInputElement>('[data-composer-input]')).toBe(input);
   });
 
   it("streams an unfinished code fence then highlights and copies its final source", async () => {
@@ -183,18 +184,18 @@ describe("Homepage-derived thread", () => {
     await render({ messages: [answer("[Bad](javascript:alert%281%29)\n\n![Bad image](data:image/svg+xml;base64,PHN2Zy8+)\n\n<iframe src=\"https://example.test\"></iframe>")] });
     expect(document.querySelector('.markdown a[href^="javascript:"]')).toBeNull();
     expect(document.querySelector('.markdown a[href^="data:"]')).toBeNull();
-    expect(document.querySelector('img, iframe, script')).toBeNull();
+    expect([...document.querySelectorAll('img, iframe, script')].filter((node) => !node.closest('[data-composer-input]'))).toEqual([]);
   });
 
   it("retains the draft while recovery disables commands, then permits sending again", async () => {
     await render({ messages: [reply] });
-    const input = document.querySelector('textarea')!;
+    const input = document.querySelector<ComposerInputElement>('[data-composer-input]')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "unsent draft");
+      input.value = "unsent draft";
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await render({ messages: [answer("Hello")], disabled: true });
-    expect(document.querySelector('textarea')).toBe(input);
+    expect(document.querySelector<ComposerInputElement>('[data-composer-input]')).toBe(input);
     expect(input.value).toBe("unsent draft");
     expect(button("Send message").disabled).toBe(true);
     await render({ messages: [answer("Hello")] });

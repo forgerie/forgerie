@@ -8,6 +8,7 @@ import { useThreadMessages } from "../useThreadMessages";
 import { Composer } from "./Composer";
 import type { AskBinding } from "./useAskMode";
 import type { DialogBinding } from "./DialogLayer";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 let runtime: AssistantRuntime;
@@ -21,9 +22,9 @@ function Fixture({ messages = past, onNew = async () => {}, running = false, dis
   </AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
-const input = () => document.querySelector<HTMLTextAreaElement>("textarea")!;
+const input = () => document.querySelector<ComposerInputElement>("[data-composer-input]")!;
 const type = (text: string) => act(async () => {
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+  input().value = text;
   input().setSelectionRange(text.length, text.length);
   input().dispatchEvent(new Event("input", { bubbles: true }));
 });
@@ -61,15 +62,22 @@ describe("composer keyboard affordances", () => {
     await press("ArrowDown"); expect(input().value).toBe("my draft"); expect(input().selectionStart).toBe(0);
     expect(onNew).not.toHaveBeenCalled();
   });
-  it("leaves editing, selected text, modifiers, and wrapped-line caret movement alone", async () => {
+  it("leaves editing, selected text, and modified arrows to the editor", async () => {
     await render(); await type("draft");
-    expect((await press("ArrowUp")).defaultPrevented).toBe(false);
-    input().setSelectionRange(0, 3); expect((await press("ArrowUp")).defaultPrevented).toBe(false);
-    input().setSelectionRange(0, 0); expect((await press("ArrowUp", { shiftKey: true })).defaultPrevented).toBe(false);
-    expect((await press("ArrowUp", { ctrlKey: true })).defaultPrevented).toBe(false);
-    await type(""); await press("ArrowUp");
-    input().setSelectionRange(2, 2); expect((await press("ArrowDown")).defaultPrevented).toBe(false);
-    expect(input().value).toBe("recent");
+    await press("ArrowUp"); expect(input().value).toBe("draft");
+    input().setSelectionRange(0, 3); await press("ArrowUp"); expect(input().value).toBe("draft");
+    input().setSelectionRange(0, 0); await press("ArrowUp", { shiftKey: true }); expect(input().value).toBe("draft");
+    await press("ArrowUp", { ctrlKey: true }); expect(input().value).toBe("draft");
+    await type(""); await press("ArrowDown"); expect(input().value).toBe("");
+  });
+  it("moves through a multiline recalled prompt before leaving it, as the legacy editor did", async () => {
+    const lines = fromHistory([{ role: "user", content: "first line\nsecond line" }]).messages;
+    await render({ messages: lines }); await press("ArrowUp");
+    expect(input().value).toBe("first line\nsecond line"); expect(input().selectionStart).toBe(0);
+    await press("ArrowDown"); expect(input().value).toBe("first line\nsecond line");
+    input().setSelectionRange(14, 14); await press("ArrowDown"); expect(input().value).toBe("");
+    await press("ArrowUp"); input().setSelectionRange(14, 14); await press("ArrowUp");
+    expect(input().value).toBe("first line\nsecond line");
   });
   it("leaves history when a recalled prompt is edited or programmatically replaced", async () => {
     await render(); await press("ArrowUp"); await type("edited prompt");
@@ -127,7 +135,7 @@ describe("composer keyboard affordances", () => {
   it("trusts Shift flags after seeing a hardware Shift and clears held Shift on blur", async () => {
     touch(); const onNew = vi.fn(async () => {}); await render({ onNew }); await type("draft");
     await press("Shift"); await act(async () => input().dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true })));
-    expect((await press("Enter", { shiftKey: true })).defaultPrevented).toBe(false); expect(onNew).not.toHaveBeenCalled();
+    await press("Enter", { shiftKey: true }); expect(input().value).toBe("draft\n"); expect(onNew).not.toHaveBeenCalled();
     input().focus(); await press("Shift"); await act(async () => input().blur()); await press("Enter"); expect(onNew).toHaveBeenCalledOnce();
   });
   it("leaves Meta+Enter alone instead of sending or completing a command", async () => {

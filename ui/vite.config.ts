@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -13,6 +14,7 @@ const https = certPath && keyPath ? { cert: readFileSync(certPath), key: readFil
 
 export default defineConfig({
   plugins: [react(), agentFilesApi(() => defaultAgentDirs(import.meta.dirname)), pluginFilesApi()],
+  test: { setupFiles: ["./src/testSetup.ts"] },
   server: {
     https,
     host: "::",

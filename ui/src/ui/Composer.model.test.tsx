@@ -7,6 +7,7 @@ import type { SessionModel } from "../contracts";
 import type { ModelBinding } from "./ModelPicker";
 import { Thread } from "./Thread";
 import { useThreadMessages } from "../useThreadMessages";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 const opus: SessionModel = { provider: "cliproxyapi", id: "claude-opus-5-5", name: "Claude Opus 5.5", contextWindow: 1_000_000, reasoning: true, scoped: true };
@@ -40,13 +41,13 @@ const render = (props: Props = {}) => act(async () => root.render(<Fixture {...p
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const trigger = () => document.querySelector<HTMLButtonElement>(".model-trigger")!;
 const panel = () => document.querySelector<HTMLElement>(".model-panel");
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const buttons = (scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")];
 const button = (name: string, scope: ParentNode = document) => buttons(scope).find((node) => node.textContent?.includes(name) || node.getAttribute("aria-label") === name);
 const click = async (node: HTMLElement | undefined) => { await act(async () => node!.click()); await settle(); };
 function type(text: string) {
   return act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+    input().value = text;
     input().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }

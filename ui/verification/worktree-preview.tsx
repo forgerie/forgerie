@@ -22,6 +22,7 @@ import { SessionMenu, WorktreeDialog, type WorktreeCommand } from "../src/ui/Wor
 import { WorktreeReceipt, WorktreeSetupCard } from "../src/ui/WorktreeSetupCard";
 import { ArchiveNextButton } from "../src/ui/ArchiveNext";
 import { TreeOpener } from "../src/ui/SessionTreeNavigator";
+import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "session";
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
@@ -90,11 +91,10 @@ const newApi: NewSessionApi = {
 const launches = createLaunchStore<LaunchDraft>(newApi, { onWorktree: (listener) => { emitWorktree = listener; return () => {}; } });
 
 function typeAndSend(text: string) {
-  const input = document.querySelector<HTMLTextAreaElement>(".ns-dialog textarea");
+  const input = document.querySelector<ComposerInputElement>(".ns-dialog [data-composer-input]");
   if (!input) return;
   input.focus();
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, text);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.value = text;
   setTimeout(() => input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", ctrlKey: true })), 100);
 }
 

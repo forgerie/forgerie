@@ -24,6 +24,7 @@ import { idleCompaction, isCompactCommand, type CompactionState } from "../src/c
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
 import type { HandoffDoor } from "../src/handoffDoor";
 import type { ShellResult, ShellRun } from "../src/shellRun";
+import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const tool = (id: string, name: string, args: unknown, state: ToolState): TranscriptPart => ({ type: "tool", id, name, args, state });
@@ -468,7 +469,7 @@ function Preview() {
   useEffect(() => {
     if (scenario === "slash-capture") {
       runtime.thread.composer.setText("/");
-      document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+      document.querySelector<HTMLElement>("[data-composer-input]")?.focus();
     }
     if (!attachmentPreview) return;
     void (async () => {
@@ -485,11 +486,10 @@ function Preview() {
     const query = new URLSearchParams(location.search).get("mention") ?? new URLSearchParams(location.search).get("draft");
     if (!scenario.startsWith("mentions") && !shellPreview || query === null) return;
     const timer = setTimeout(() => {
-      const input = document.querySelector<HTMLTextAreaElement>('[aria-label="Message"]');
+      const input = document.querySelector<ComposerInputElement>('[aria-label="Message"]');
       if (!input) return;
       input.focus();
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, query);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.value = query;
     }, 100);
     return () => clearTimeout(timer);
   }, []);

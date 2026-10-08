@@ -13,7 +13,7 @@ The new client restores prompt recall, input focus, dictation keys, Escape route
 | Double Escape with an empty idle draft | Runs `/tree` by default, or `/fork` when Pi configures it. `none` disables the gesture. Presses must be genuine and less than 500 ms apart. Ask/input answers and attachments cannot open the tree. |
 | Meta+Enter in chat | Does not send or select a suggestion. Cmd+Shift+Enter still steers. |
 | Up at the start of the text | Recalls the newest user prompt, then older prompts. Suggestions take the key first. Ask answers and extension input answers do not recall chat prompts. |
-| Down at the end of recalled text | Moves toward newer prompts, then restores the exact unsent draft and caret. Editing a recalled prompt ends browsing. |
+| Down on the last drawn line of recalled text | Moves toward newer prompts, then restores the exact unsent draft and caret. Editing a recalled prompt ends browsing. |
 | Enter in chat | Sends, queues, or runs the current special action. Touch autocapitalization's implicit Shift does not turn this into a newline. |
 | Hardware Shift+Enter | Inserts a newline. A held Shift still counts when an Android IME drops the Enter modifier. Keyup, blur, and consumption clear the held state. |
 | Ctrl or Cmd+Shift+Enter while working | Steers. A Ctrl or Cmd chord counts as hardware modifier evidence. |
@@ -46,8 +46,8 @@ nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/composer-keyboard-a
 
 ## Costs and limits
 
-Textarea recall uses document ends instead of CodeMirror's rendered-line coordinates. This protects wrapped-line caret movement, but Down requires reaching the end of recalled text. History contains recorded user prompts, not an independent log of shell commands or rejected sends. A complete loss of hardware modifier evidence cannot be distinguished from touch input.
+Recall originally used textarea document ends. Since the input became CodeMirror again, it uses the legacy drawn-line rule; see [composer rich editing](composer-rich-editing.md). History contains recorded user prompts, not an independent log of shell commands or rejected sends. A complete loss of hardware modifier evidence cannot be distinguished from touch input.
 
-Rich code editing, CodeMirror keymaps and transaction history, selection-aware dictation, tap/hold voice capture, retained-audio retry, the voice-first dialog, and configurable app-wide shortcuts remain missing. See the [audit](composer-parity-audit.md) for each difference and the parent shortcuts. Existing bundle warnings remain.
+Rich code editing and CodeMirror's keymaps are restored separately; see [composer rich editing](composer-rich-editing.md). Selection-aware dictation, tap/hold voice capture, retained-audio retry, the voice-first dialog, and configurable app-wide shortcuts remain missing. See the [audit](composer-parity-audit.md) for each difference and the parent shortcuts. Existing bundle warnings remain.
 
 This change stays on `new-ui-mvp`. The running Vite preview on port 8510 served the new code during acceptance. Production on port 8504 was not changed or restarted.

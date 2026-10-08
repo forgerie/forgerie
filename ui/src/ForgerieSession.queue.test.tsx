@@ -6,18 +6,19 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import type { SessionStatus, UiEvent } from "./contracts";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 let server: WebSocketServer | undefined;
 const idle: SessionStatus = { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [] };
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")]
   .find((node) => node.textContent === name || node.getAttribute("aria-label") === name);
 const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 2000 }).toBe(true); });
 };
 const type = (text: string) => act(async () => {
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+  input().value = text;
   input().dispatchEvent(new Event("input", { bubbles: true }));
 });
 beforeEach(() => {

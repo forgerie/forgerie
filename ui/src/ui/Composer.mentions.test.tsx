@@ -7,6 +7,7 @@ import type { MentionSource } from "../mentionSource";
 import type { AskBinding } from "./useAskMode";
 import { Composer } from "./Composer";
 import { useThreadMessages } from "../useThreadMessages";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 const files: Unstable_TriggerItem[] = [
@@ -23,12 +24,12 @@ function Fixture({ mentions, ask, disabled = false, onNew = async () => {} }: Pr
   return <AssistantRuntimeProvider runtime={runtime}><Composer mentions={mentions} ask={ask} /></AssistantRuntimeProvider>;
 }
 const render = (props: Props) => act(async () => root.render(<Fixture {...props} />));
-const input = () => document.querySelector<HTMLTextAreaElement>('[aria-label="Message"]')!;
+const input = () => document.querySelector<ComposerInputElement>('[aria-label="Message"]')!;
 const suggestions = () => document.querySelector('[role="listbox"]');
 const options = () => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')];
 async function type(text: string, cursor = text.length) {
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+    input().value = text;
     input().setSelectionRange(cursor, cursor);
     input().dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -137,7 +138,7 @@ describe("assistant-ui mention composer", () => {
     const mentions = source();
     await render({ mentions }); await type("ordinary draft");
     await render({ mentions, ask }); await type("@src"); await settle();
-    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-composer-input]")).toHaveLength(1);
     await press("Enter");
     expect(onSubmit).not.toHaveBeenCalled();
     expect(input().value).toBe("@src/main.ts ");

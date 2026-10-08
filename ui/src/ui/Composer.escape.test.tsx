@@ -9,6 +9,7 @@ import type { AskBinding } from "./useAskMode";
 import { createAttachmentAdapter } from "../attachments";
 import { ImageViewerProvider } from "./ImageViewer";
 import { useThreadMessages } from "../useThreadMessages";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 let runtime: AssistantRuntime;
@@ -21,9 +22,9 @@ function Fixture({ sessionKeys, disabled, shell, suggestions, ask, attachments }
     <button id="outside">Outside</button></ImageViewerProvider></AssistantRuntimeProvider>;
 }
 const render = (props: Props) => act(async () => root.render(<Fixture {...props} />));
-const input = () => document.querySelector<HTMLTextAreaElement>("textarea")!;
+const input = () => document.querySelector<ComposerInputElement>("[data-composer-input]")!;
 const type = (text: string) => act(async () => {
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+  input().value = text;
   input().dispatchEvent(new Event("input", { bubbles: true }));
 });
 async function press(key = "Escape", init: KeyboardEventInit = {}) {

@@ -33,14 +33,14 @@ try {
   }
   async function navigate(scenario, open = scenario !== "model" && scenario !== "model-error") {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
-    await until("!!document.querySelector('.composer textarea') && !!document.querySelector('.model-trigger')");
+    await until("!!document.querySelector('[data-composer-input]') && !!document.querySelector('.model-trigger')");
     if (open) await until("!!document.querySelector('.model-panel .model-row') && !!document.querySelector('.model-thinking button, .model-thinking .model-hint:not([role=status])')");
   }
   async function input(text) {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()"); await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   }
-  const draft = () => evaluate(cdp, "document.querySelector('.composer textarea').value");
+  const draft = () => evaluate(cdp, "document.querySelector('[data-composer-input]').value");
   const trigger = () => evaluate(cdp, "document.querySelector('.model-trigger').textContent");
   const focused = () => evaluate(cdp, "document.activeElement?.className + ':' + (document.activeElement?.textContent ?? '')");
   async function clickText(selector, text) {
@@ -52,7 +52,7 @@ try {
       const box = element => element?.getBoundingClientRect().toJSON();
       const panel = document.querySelector('.model-panel');
       const list = document.querySelector('.model-list');
-      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.composer textarea').length,
+      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('[data-composer-input]').length,
         trigger: box(document.querySelector('.model-trigger')), name: box(document.querySelector('.model-trigger-name')),
         actions: [...document.querySelectorAll('.composer-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
         panel: box(panel), list: box(list), search: box(document.querySelector('.model-search')),

@@ -8,6 +8,7 @@ import { DictationProvider } from "../DictationProvider";
 import type { PendingAsk, PendingDialog } from "../contracts";
 import { useThreadMessages } from "../useThreadMessages";
 import { Composer } from "./Composer";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 let adapter: ForgerieDictationAdapter;
@@ -24,11 +25,11 @@ function Fixture({ pending, offline = false, dialog, running = false, onCancel }
   </DictationProvider></AssistantRuntimeProvider>;
 }
 const button = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
-const input = () => document.querySelector("textarea")!;
+const input = () => document.querySelector<ComposerInputElement>("[data-composer-input]")!;
 const render = (pending?: PendingAsk, offline = false, dialog?: PendingDialog) => act(async () => root.render(<Fixture pending={pending} offline={offline} dialog={dialog} />));
 const click = (label: string) => act(async () => button(label).click());
 const type = (text: string) => act(async () => {
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+  input().value = text;
   input().dispatchEvent(new Event("input", { bubbles: true }));
 });
 beforeEach(() => {
@@ -138,7 +139,7 @@ describe("SDK dictation controls in the one composer", () => {
     await render(ask); await click("Voice input");
     const next = [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent === "Next")!;
     expect(next.disabled).toBe(true);
-    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-composer-input]")).toHaveLength(1);
     await click("Stop dictation"); expect(input().value).toBe("spoken words");
     await act(async () => next.click()); expect(input().value).toBe("");
     expect(document.querySelector(".ask-question")?.textContent).toBe("Port?");

@@ -60,7 +60,7 @@ try {
   await until("!document.querySelector('.model-panel') && document.querySelector('.model-trigger').textContent.includes('Low')");
 
   const shownModel = await evaluate(cdp, "document.querySelector('.model-trigger-name').textContent");
-  await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()");
+  await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').focus()");
   await cdp.send("Input.insertText", { text: "Automated UI test. Reply with the single word OK and do nothing else." });
   await pressCombo(cdp, "ctrl+enter");
   await until("new URLSearchParams(location.search).has('session')", 90_000);
@@ -92,11 +92,11 @@ try {
   await until("!!document.querySelector('dialog.ns-dialog[open]') && !document.querySelector('.ns-dialog .model-trigger').textContent.startsWith('No model')");
   await evaluate(cdp, "document.querySelector('.ns-chips [aria-pressed]').click()");
   await until("document.querySelector('.ns-chips [aria-pressed]').getAttribute('aria-pressed') === 'true'");
-  await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()");
+  await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').focus()");
   await cdp.send("Input.insertText", { text: "Automated Rapidfire test. Reply with the single word OK." });
   await pressCombo(cdp, "ctrl+enter");
   await until("document.querySelector('.ns-launch')?.dataset.state === 'starting'", 10_000);
-  const pendingRow = await evaluate(cdp, "!!document.querySelector('.ns-dialog') && document.querySelector('.ns-dialog .composer textarea').value === ''");
+  const pendingRow = await evaluate(cdp, "!!document.querySelector('.ns-dialog') && document.querySelector('.ns-dialog [data-composer-input]').value === ''");
   assert.equal(pendingRow, true, "the dialog stayed open with an empty bar");
   await until("document.querySelector('.ns-launch')?.dataset.state === 'started'", 90_000);
   assert.equal(await evaluate(cdp, "new URLSearchParams(location.search).get('session')"), id, "Rapidfire moved the reader");

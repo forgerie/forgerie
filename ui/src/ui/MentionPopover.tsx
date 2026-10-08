@@ -5,6 +5,7 @@ import { ComposerPrimitive, useAuiState, unstable_useTriggerPopoverScopeContext,
 import { CpuIcon, FileTextIcon, FolderIcon, XIcon } from "lucide-react";
 import type { MentionSource } from "../mentionSource";
 import { mentionFormatter, mentionMatcher, mentionPlacement, type MentionTrigger } from "../mentionSyntax";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 export type MentionInputSnapshot = { text: string; cursor: number } | null;
 type Adapter = NonNullable<ComponentProps<typeof ComposerPrimitive.Unstable_TriggerPopover>["adapter"]>;
@@ -40,7 +41,7 @@ function useSuggestions(source: MentionSource, char: MentionTrigger, enabled: bo
 
 /** System molecule: assistant-ui owns trigger detection, insertion, keyboard selection and ARIA. */
 export function MentionPopover({ source, char, enabled, input, snapshot }: {
-  source: MentionSource; char: MentionTrigger; enabled: boolean; input: RefObject<HTMLTextAreaElement | null>;
+  source: MentionSource; char: MentionTrigger; enabled: boolean; input: RefObject<ComposerInputElement | null>;
   snapshot: RefObject<MentionInputSnapshot>;
 }) {
   const layer = usePortalTarget();
@@ -105,7 +106,7 @@ function MentionInsertion({ char, snapshot, onCaret }: {
     const reference = formatter.serialize(item);
     const directory = item.type === "file" && item.id.endsWith("/");
     const position = match.offset + reference.length + (directory ? reference.endsWith('"') ? -1 : 0 : 1);
-    // SDK updates its logical cursor, but native textarea selection also needs
+    // SDK updates its logical cursor, but the editor's selection also needs
     // restoring after React commits the inserted text, especially mid-sentence.
     scope.setCursorPosition(position);
     const after = previous.text.slice(match.endOffset);
@@ -114,7 +115,7 @@ function MentionInsertion({ char, snapshot, onCaret }: {
 }
 
 function MentionResults({ label, result, input, snapshot, onQuery }: {
-  label: string; result: Results; input: RefObject<HTMLTextAreaElement | null>; snapshot: RefObject<MentionInputSnapshot>;
+  label: string; result: Results; input: RefObject<ComposerInputElement | null>; snapshot: RefObject<MentionInputSnapshot>;
   onQuery: (query: string | undefined) => void;
 }) {
   const scope = unstable_useTriggerPopoverScopeContext();

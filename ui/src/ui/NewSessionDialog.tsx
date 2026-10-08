@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, unstable_useTriggerPopoverRootContext, useAuiState } from "@assistant-ui/react";
 import { AnvilIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, PaperclipIcon, XIcon, ZapIcon } from "lucide-react";
@@ -13,6 +13,7 @@ import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
 import { useComposerKeyboard } from "./useComposerKeyboard";
+import { ComposerEditor, type ComposerInputElement } from "./ComposerEditor";
 
 export type StartPhase = { type: "ready" } | { type: "starting"; progress: string } | { type: "failed"; message: string };
 
@@ -91,7 +92,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
   const [picker, setPicker] = useState<PickerOpen>();
   const context = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<ComposerInputElement>(null);
   const keyboard = useComposerKeyboard(input);
   const snapshot = useRef<MentionInputSnapshot>(null);
   const triggers = unstable_useTriggerPopoverRootContext();
@@ -100,7 +101,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
   // The composer sends nothing empty. With an item riding along, empty is a whole message.
   const sendEmpty = empty && !busy && !carry?.blocked ? carry?.onSendEmpty : undefined;
   const remember = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function onKeyDown(event: KeyboardEvent) {
     if (keyboard.isComposing(event)) { if (event.key === "Enter") event.preventDefault(); return; }
     const shiftKey = keyboard.enterShift(event);
     if (busy) return;
@@ -117,7 +118,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       if (sendEmpty) sendEmpty();
-      else if (!carry?.blocked) event.currentTarget.closest("form")?.requestSubmit();
+      else if (!carry?.blocked) input.current?.closest("form")?.requestSubmit();
     }
   }
   const startLabel = busy ? "Starting…" : rapidfire ? "Start in background" : "Start session";
@@ -143,12 +144,12 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
       {carry?.card}
       <ComposerAttachments><AttachmentDeliveryChoice disabled={busy} /></ComposerAttachments>
       <AttachmentErrors />
-      <ComposerPrimitive.Input ref={input} aria-label="First message" rows={4} className="ns-input"
-        placeholder={carry?.placeholder ?? "Describe what the agent should do first…"} submitMode="none" cancelOnEscape={false}
-        aria-keyshortcuts="Control+Alt+I Control+Enter Meta+Enter" spellCheck autoCorrect="on" autoCapitalize="sentences" dir="auto"
+      <ComposerEditor inputRef={input} label="First message" className="ns-input"
+        placeholder={carry?.placeholder ?? "Describe what the agent should do first…"}
+        keyShortcuts="Control+Alt+I Control+Enter Meta+Enter"
         onKeyDown={onKeyDown} onKeyUp={keyboard.onKeyUp} onBlur={keyboard.onBlur}
         onCompositionStart={keyboard.onCompositionStart} onCompositionEnd={keyboard.onCompositionEnd}
-        onChange={() => { keyboard.onChange(); remember(); }} onSelect={remember} />
+        onEdit={keyboard.onChange} onSelectionChange={remember} />
     </ComposerPrimitive.AttachmentDropzone>
     {tray}
     <div className="ns-chips" role="group" aria-label="What the first message carries">

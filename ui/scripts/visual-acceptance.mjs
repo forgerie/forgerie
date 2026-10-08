@@ -38,7 +38,7 @@ try {
   await cdp.send("Page.navigate", { url: url.href });
   await until(`document.querySelector('.code-body code')?.textContent.includes('useExternalStoreRuntime')`);
   await evaluate(cdp, `document.fonts.ready.then(() => true)`);
-  await evaluate(cdp, `document.querySelector('textarea').focus()`);
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
   await cdp.send("Input.insertText", { text: "Unsent draft survives fold and rotation" });
   const extraSizes = [{ name: "keyboard-height-emulation", width: 475, height: 280 }, { name: "narrow-pane", width: 280, height: 500 }];
   for (const scheme of ["light", "dark"]) {
@@ -48,11 +48,11 @@ try {
       await sleep(100);
       const state = await evaluate(cdp, `({
         width: innerWidth, height: innerHeight,
-        draft: document.querySelector('textarea').value,
+        draft: document.querySelector('[data-composer-input]').value,
         overflow: document.documentElement.scrollWidth > innerWidth,
         send: document.querySelector('[aria-label="Send message"]').getBoundingClientRect().toJSON(),
         sendHit: (${hitRect})(document.querySelector('[aria-label="Send message"]')),
-        textarea: document.querySelector('textarea').getBoundingClientRect().toJSON(),
+        textarea: document.querySelector('[data-composer-input]').getBoundingClientRect().toJSON(),
         column: document.querySelector('.thread-column').getBoundingClientRect().width,
         bubble: document.querySelector('.user-bubble').getBoundingClientRect().width,
         theme: getComputedStyle(document.body).backgroundColor
@@ -69,12 +69,12 @@ try {
   }
   // Real click and keyboard send, but the fixture cannot call Pi.
   await evaluate(cdp, `document.querySelector('[aria-label="Send message"]').click()`);
-  await until(`document.querySelectorAll('.message').length === 4 && document.querySelector('textarea').value === ''`);
-  await evaluate(cdp, `document.querySelector('textarea').focus()`);
+  await until(`document.querySelectorAll('.message').length === 4 && document.querySelector('[data-composer-input]').value === ''`);
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
   await cdp.send("Input.insertText", { text: "Keyboard send" });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-  await until(`document.querySelectorAll('.message').length === 6 && document.querySelector('textarea').value === ''`);
+  await until(`document.querySelectorAll('.message').length === 6 && document.querySelector('[data-composer-input]').value === ''`);
   result.sendClickAndEnter = true;
   const olderCopyActions = await evaluate(cdp, `[...document.querySelectorAll('.message-actions')].map(element => ({
     visibility: getComputedStyle(element).visibility,
@@ -93,7 +93,7 @@ try {
       status: document.querySelector('.connection-status').textContent,
       welcome: !!document.querySelector('.thread-welcome'),
       loading: !!document.querySelector('[aria-label="Loading conversation"]'),
-      disabled: document.querySelector('textarea').disabled,
+      disabled: document.querySelector('[data-composer-input]').disabled,
       stop: !!document.querySelector('[aria-label="Stop generating"]'),
       stopDisabled: document.querySelector('[aria-label="Stop generating"]')?.disabled,
       sendDisabled: document.querySelector('[aria-label="Send message"]')?.disabled,

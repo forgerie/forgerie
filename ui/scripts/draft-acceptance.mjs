@@ -90,13 +90,13 @@ try {
     });
   };
   const read = () => evaluate(cdp, `({
-    url: location.search, value: document.querySelector('.composer textarea')?.value,
+    url: location.search, value: document.querySelector('[data-composer-input]')?.value,
     question: document.querySelector('.ask-question')?.textContent,
     checked: [...document.querySelectorAll('.ask-option input:checked')].map((n) => n.parentElement.textContent),
     status: document.querySelector('.connection-status')?.textContent,
   })`);
   const type = async (text) => {
-    await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
+    await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
     await cdp.send("Input.insertText", { text });
   };
   const visit = async (target) => {
@@ -107,8 +107,8 @@ try {
   const joined = `['Connected', 'Running', 'Waiting for you'].includes(document.querySelector('.connection-status')?.textContent)`;
   const onNote = `location.search.includes(${JSON.stringify(id)})`
     + ` && document.querySelector('.ask-question')?.textContent === 'Any note for the draft test?'`
-    + ` && document.querySelector('.composer textarea')?.value === ${JSON.stringify(NOTE)}`;
-  const onOther = `location.search.includes(${JSON.stringify(other)}) && ${joined} && !document.querySelector('.ask') && document.querySelector('.composer textarea')?.value === ${JSON.stringify(OTHER_DRAFT)}`;
+    + ` && document.querySelector('[data-composer-input]')?.value === ${JSON.stringify(NOTE)}`;
+  const onOther = `location.search.includes(${JSON.stringify(other)}) && ${joined} && !document.querySelector('.ask') && document.querySelector('[data-composer-input]')?.value === ${JSON.stringify(OTHER_DRAFT)}`;
 
   // 1. A chat draft in the other session.
   const url = new URL(app); url.searchParams.set("session", other);
@@ -155,7 +155,7 @@ try {
       await reload(`${posture.name} ${scheme} restore`, onNote);
       await evaluate(cdp, `document.fonts.ready.then(() => true)`);
       await sleep(250);
-      const box = await evaluate(cdp, `(() => { const r = document.querySelector('.composer textarea').getBoundingClientRect();
+      const box = await evaluate(cdp, `(() => { const r = document.querySelector('[data-composer-input]').getBoundingClientRect();
         return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, overflow: document.documentElement.scrollWidth > innerWidth }; })()`);
       assert.ok(box.top >= 0 && box.bottom <= posture.height && box.left >= 0 && box.right <= posture.width, `${posture.name}: input outside ${JSON.stringify(box)}`);
       assert.equal(box.overflow, false);
@@ -179,16 +179,16 @@ try {
   await evaluate(cdp, `history.forward()`);
   await until("ask again", onNote, 30_000);
   await evaluate(cdp, `[...document.querySelectorAll('button')].find((n) => n.textContent === 'Skip').click()`);
-  await until("ask closed", `!document.querySelector('.ask') && !!document.querySelector('.composer textarea')`, 30_000);
+  await until("ask closed", `!document.querySelector('.ask') && !!document.querySelector('[data-composer-input]')`, 30_000);
   await waitUntil("reply to the dismissal ends", async () => { const s = await status(id); return !s.isStreaming && !s.pendingAsk; });
   const leftAsk = await evaluate(cdp, `localStorage.getItem(${JSON.stringify(`forgerie.draft.v1:${id}`)})`);
   assert.equal(leftAsk, null, `Answers outlived the closed ask: ${leftAsk}`);
   await evaluate(cdp, `history.back()`);
   await until("other session for cleanup", onOther, 30_000);
-  await evaluate(cdp, `document.querySelector('.composer textarea').select()`);
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').select()`);
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
-  await until("draft emptied", `document.querySelector('.composer textarea').value === ''`);
+  await until("draft emptied", `document.querySelector('[data-composer-input]').value === ''`);
   const keys = await evaluate(cdp, `Object.keys(localStorage)`);
   assert.deepEqual(keys.filter((key) => key.startsWith("forgerie.draft")), [], "An emptied draft left a record");
   step("cleanup left no draft records", { keys });

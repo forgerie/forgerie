@@ -2,7 +2,7 @@
 
 Double Escape was missing from the first backport. The first scan covered selected editor files, not the parent and global handlers. Passing the new tests did not establish legacy parity.
 
-This follow-up restores the missed Escape routes and the chat Meta+Enter guard. Full parity remains incomplete.
+This follow-up restores the missed Escape routes and the chat Meta+Enter guard. A later change restores rich editing: see [composer rich editing](composer-rich-editing.md). Full parity remains incomplete.
 
 ## Sources and scope
 
@@ -57,8 +57,8 @@ These families map the remaining candidate tests to current code and fixture che
 
 | Capability or rule | Status and cost |
 | --- | --- |
-| Rich fenced-code blocks | Missing. Typed and pasted fences stay plain text. Language highlighting, hidden fence protection, code/prose navigation, and atomic block undo are absent. Legacy `ComposerDraft.codeBlock.test.ts` is not satisfied. |
-| CodeMirror editing commands | Missing. Tab/Shift+Tab indentation, Markdown list continuation, line move/copy, multiple cursors, syntax selection, bracket matching, comment commands, and selection undo/redo are not implemented by the textarea. Tab without suggestions moves focus. Native text editing is not an equivalent keymap. |
+| Rich fenced-code blocks | Restored by [composer rich editing](composer-rich-editing.md). The 12 legacy `ComposerDraft.codeBlock.test.ts` cases are ported. Labels show the tag as written, like transcript code, instead of capitals. |
+| CodeMirror editing commands | Restored with the legacy keymap order: Tab and Shift+Tab, Markdown list and quote continuation, editor undo and redo, and `defaultKeymap`. Multiple selections stay off, as in the legacy editor. List commands load after the bar draws. |
 | Dictation replaces the selected range in one undoable edit. | Missing. The SDK appends transcription to its captured baseline text. The current code does not preserve the selected range or use CodeMirror's transaction history. |
 | Tap automatic endpoint completion and hold-to-talk | Missing. Current dictation uses explicit Start and Stop. It does not port the legacy microphone's tap/hold state machine or Smart Turn completion. |
 | Retained-audio retry, voice level, and elapsed readouts | Missing. Current dictation reports Starting, Listening, Transcribing, or failure. A failed turn cannot use the legacy retained-audio Retry/Discard workflow. |
@@ -66,7 +66,7 @@ These families map the remaining candidate tests to current code and fixture che
 | Configurable app-wide shortcuts | Missing. The current client has fixed shortcuts, not the legacy action registry, shortcut overrides, conflict handling, or shortcut settings. |
 | Global palette and panel shortcuts | Missing. Ctrl+Shift+P, Ctrl+comma, Ctrl+K Ctrl+S, Ctrl+Shift+E, Ctrl+Shift+G, and Ctrl+backtick are not restored by this work. Visible settings and navigation are not proof of their keyboard behavior. |
 | Legacy plugin prompt insertion/focus contract | Not ported as that contract. The candidate `PiWebApp.pluginPromptEditor.test.ts` routes plugin actions through the old lock-aware editor. This audit does not establish equivalent new-client plugin behavior. |
-| History boundary | Changed. Legacy CodeMirror uses rendered-line positions. The textarea uses document ends. This avoids stealing wrapped-line cursor movement but requires reaching the end before leaving a multiline recall. |
+| History boundary | Restored. Recall uses the legacy drawn-line rule again, now that the input is CodeMirror. |
 | History source | Changed. Recall projects recorded user messages. Legacy also adds an accepted send immediately. Rejected sends and independent shell-command history are not reconstructed. |
 | Escape with typed text during active work | Deliberate retention of the current policy. Legacy stops active work with a typed draft. Here Escape does not stop until the draft is empty. |
 | Enter in a new-session dialog | Deliberate retention of the current policy. Plain Enter inserts a newline. Ctrl/Cmd+Enter starts the session. Legacy shared-editor submission rules differ. |
@@ -74,7 +74,7 @@ These families map the remaining candidate tests to current code and fixture che
 | Abort during shell execution | Backend limitation. The current Stop route calls session abort, not `abortBash()`. Do not claim Escape terminates the shell process. See `shell.md`. |
 | Physical Android modifiers, native undo, and accessibility | Unverified on the acceptance device. No ADB device is attached. Headless Chromium cannot prove hardware/IME sequences, microphone behavior, or screen-reader behavior. |
 
-Restoring rich editing or the voice-first workflow requires separate implementation work. Reproducing CodeMirror with textarea-specific handlers adds ownership cost and still does not supply its transaction model.
+The voice-first workflow and selection-aware dictation still require separate implementation work.
 
 ## Verification of this follow-up
 

@@ -8,6 +8,7 @@ import type { AskAnswer, PendingAsk } from "../contracts";
 import type { CommandCatalog } from "../commands";
 import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 const questions: PendingAsk = { askId: "a", askedAt: "2026-09-29T00:00:00Z", questions: [
@@ -34,7 +35,7 @@ function Fixture({ ask, phase = { type: "answering" }, offline = false, onSubmit
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
 const byText = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === text);
 const byLabel = <T extends HTMLElement = HTMLButtonElement>(label: string) => document.querySelector<T>(`[aria-label="${label}"]`);
-const input = () => byLabel<HTMLTextAreaElement>("Message")!;
+const input = () => byLabel<ComposerInputElement>("Message")!;
 const heading = () => document.querySelector(".ask-question")?.textContent;
 const checked = () => [...document.querySelectorAll<HTMLInputElement>(".ask-option input:checked")].map((node) => node.parentElement?.textContent);
 function choose(label: string) {
@@ -43,7 +44,7 @@ function choose(label: string) {
 }
 function type(text: string) {
   return act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+    input().value = text;
     input().setSelectionRange(text.length, text.length);
     input().dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -104,7 +105,7 @@ describe("assistant-ui slash palette", () => {
     expect(input().value).toBe("/name ");
     expect(onSubmit).not.toHaveBeenCalled();
     expect(onChat).not.toHaveBeenCalled();
-    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-composer-input]")).toHaveLength(1);
     await type("/name New name");
     await press({ key: "Enter" });
     expect(onChat).toHaveBeenCalledWith("/name New name");
@@ -128,7 +129,7 @@ describe("Composer in ask mode", () => {
     const element = input();
     await type("half-written thought");
     await render({ ask: questions });
-    expect(document.querySelectorAll(".composer textarea")).toHaveLength(1);
+    expect(document.querySelectorAll(".composer [data-composer-input]")).toHaveLength(1);
     expect(input()).toBe(element);
     expect(input().value).toBe("");
     expect(input().placeholder).toBe("Or answer in your own words");

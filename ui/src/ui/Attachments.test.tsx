@@ -7,6 +7,7 @@ import { createAttachmentAdapter, type SaveAttachment } from "../attachments";
 import type { PendingAsk } from "../contracts";
 import { Thread } from "./Thread";
 import { sendMessage } from "../sendMessage";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 let runtime: AssistantRuntime;
@@ -23,7 +24,7 @@ function Fixture({ pendingAsk, offline = false }: { pendingAsk?: PendingAsk; off
 }
 const render = (props: { pendingAsk?: PendingAsk; offline?: boolean } = {}) => act(async () => root.render(<Fixture {...props} />));
 const label = (text: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${text}"]`);
-const input = () => document.querySelector<HTMLTextAreaElement>("textarea")!;
+const input = () => document.querySelector<ComposerInputElement>("[data-composer-input]")!;
 const add = (file = new File(["notes"], "notes.txt", { type: "text/plain" })) => act(async () => runtime.thread.composer.addAttachment(file));
 const click = (element: HTMLElement) => act(async () => element.click());
 beforeEach(() => {
@@ -143,7 +144,7 @@ describe("assistant-ui attachment composer", () => {
   it("routes files in ask mode to chat, retains one input, and keeps an unsent file when the ask closes", async () => {
     await render(); await act(async () => runtime.thread.composer.setText("old draft"));
     await render({ pendingAsk: ask }); await add();
-    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-composer-input]")).toHaveLength(1);
     expect(document.body.textContent).toContain("Attachments run as chat messages");
     const sendChat = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Send message")!;
     await click(sendChat);

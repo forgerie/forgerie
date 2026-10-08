@@ -99,7 +99,7 @@ try {
   await cdp.send("Page.navigate", { url: page("mentions-ask") });
   await until(`!!document.querySelector('.ask-question')`);
   await draft("@src"); await pressCombo(cdp, "enter");
-  assert.equal(await evaluate(cdp, `document.querySelectorAll('.composer textarea').length`), 1);
+  assert.equal(await evaluate(cdp, `document.querySelectorAll('[data-composer-input]').length`), 1);
   assert.ok(await evaluate(cdp, `document.querySelector('.ask-question').textContent.startsWith('Where should')`));
   assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "@src/main.ts ");
   await pressCombo(cdp, "enter");

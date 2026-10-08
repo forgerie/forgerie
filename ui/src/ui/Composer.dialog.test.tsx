@@ -9,6 +9,7 @@ import type { AskBinding } from "./useAskMode";
 import { Thread } from "./Thread";
 import { useThreadMessages } from "../useThreadMessages";
 import { createChatDraft, type ChatDraft } from "../chatDraft";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 const confirm: PendingDialog = { dialogId: "c", kind: "confirm", title: "Delete the branch?", message: "This cannot be undone.", askedAt: "2026-10-05T12:00:00Z" };
@@ -28,13 +29,13 @@ function Fixture({ dialog = {}, ask, onNew = async () => {}, chatDraft, commands
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
 const layer = () => document.querySelector<HTMLElement>(".dialog-layer");
-const textarea = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const textarea = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const button = (name: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")]
   .find((node) => node.textContent?.trim() === name || node.getAttribute("aria-label") === name);
 const click = (node: HTMLElement | undefined) => act(async () => node!.click());
 function type(text: string) {
   return act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea(), text);
+    textarea().value = text;
     textarea().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
@@ -55,7 +56,7 @@ describe("extension dialogs in the one input bar", () => {
     expect(layer()!.querySelector("h2")!.textContent).toBe("Delete the branch?");
     expect(layer()!.textContent).toContain("This cannot be undone.");
     expect(document.querySelector(".sr-only[role=status]")!.textContent).toBe("An extension asks: Delete the branch?");
-    expect(document.querySelectorAll(".composer textarea")).toHaveLength(1);
+    expect(document.querySelectorAll(".composer [data-composer-input]")).toHaveLength(1);
     await click(button("Yes", layer()!));
     expect(onAnswer).toHaveBeenLastCalledWith(true);
     await click(button("No", layer()!));

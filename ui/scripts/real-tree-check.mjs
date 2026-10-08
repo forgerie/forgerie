@@ -71,22 +71,22 @@ try {
   await until(`new URLSearchParams(location.search).get('session') !== ${JSON.stringify(id)}`, "fork opened");
   forkId = await evaluate(cdp, "new URLSearchParams(location.search).get('session')");
   await until(connected, "fork connected");
-  await until("document.querySelector('.composer textarea')?.value.length > 0", "fork draft");
-  result.forkDraftMatches = second.startsWith((await evaluate(cdp, "document.querySelector('.composer textarea').value")).slice(0, 40).trimEnd());
+  await until("document.querySelector('[data-composer-input]')?.value.length > 0", "fork draft");
+  result.forkDraftMatches = second.startsWith((await evaluate(cdp, "document.querySelector('[data-composer-input]').value")).slice(0, 40).trimEnd());
   assert.ok(result.forkDraftMatches, "fork draft is the forked message");
   const forkTotal = await history(forkId);
   result.forkTotal = forkTotal;
   assert.ok(forkTotal < originalTotal, "fork holds less history than the original");
 
   // 3. In the fork only: continue from the first user message. Its text returns and the transcript reloads.
-  await evaluate(cdp, "(() => { const t = document.querySelector('.composer textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, ''); t.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await evaluate(cdp, "(() => { const t = document.querySelector('[data-composer-input]'); t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); })()");
   await openTree();
   const first = await evaluate(cdp, `${userRows}[0].querySelector('.tree-summary').textContent`);
   await evaluate(cdp, `${userRows}[0].click()`);
   await press("Continue from here");
   await until("!document.querySelector('dialog.tree-dialog')", "navigator closed");
-  await until("document.querySelector('.composer textarea')?.value.length > 0", "editor text returned");
-  result.continueTextMatches = first.startsWith((await evaluate(cdp, "document.querySelector('.composer textarea').value")).slice(0, 40).trimEnd());
+  await until("document.querySelector('[data-composer-input]')?.value.length > 0", "editor text returned");
+  result.continueTextMatches = first.startsWith((await evaluate(cdp, "document.querySelector('[data-composer-input]').value")).slice(0, 40).trimEnd());
   assert.ok(result.continueTextMatches, "continued text is the first message");
   await until(connected, "fork reloaded");
   await until("document.querySelectorAll('.message').length === 0", "transcript moved to before the first message");

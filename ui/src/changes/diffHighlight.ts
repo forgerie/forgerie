@@ -1,25 +1,13 @@
 import { LanguageDescription, type Language } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { highlightTree, tagHighlighter, tags } from "@lezer/highlight";
+import { highlightTree } from "@lezer/highlight";
+import { codeHighlighter as highlighter } from "../codeTokens";
 import { sideOf, type DiffDocument, type DiffSide } from "./diffDocument";
 
 type Parser = Language["parser"];
 
 /** A highlighted stretch of document text. Never crosses a line. */
 export interface Token { from: number; to: number; className: string }
-
-/**
- * Lezer tags onto the five code colours the theme already gives chat code
- * blocks, so a diff and a code block colour the same word the same way.
- */
-const highlighter = tagHighlighter([
-  { tag: [tags.keyword, tags.bool, tags.null, tags.atom, tags.self, tags.modifier, tags.controlKeyword, tags.operatorKeyword, tags.definitionKeyword], class: "tok-keyword" },
-  { tag: [tags.string, tags.special(tags.string), tags.regexp, tags.escape, tags.attributeValue, tags.character, tags.url], class: "tok-string" },
-  { tag: [tags.number, tags.integer, tags.float, tags.unit, tags.color], class: "tok-number" },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment, tags.meta, tags.processingInstruction], class: "tok-comment" },
-  { tag: [tags.typeName, tags.className, tags.namespace, tags.tagName, tags.heading, tags.function(tags.variableName), tags.function(tags.propertyName),
-    tags.definition(tags.function(tags.variableName)), tags.macroName, tags.attributeName], class: "tok-title" },
-]);
 
 /** Texts larger than this stay plain: one parse of them would hold up the page. */
 export const HIGHLIGHT_LIMIT = 1_000_000;

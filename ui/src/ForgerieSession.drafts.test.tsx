@@ -7,6 +7,7 @@ import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import { createDraftStore, type DraftStore } from "./draftStore";
 import type { PendingAsk, SessionStatus, UiEvent } from "./contracts";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 let server: WebSocketServer;
@@ -20,14 +21,14 @@ const ask: PendingAsk = { askId: "ask-1", askedAt: "2026-10-01T00:00:00Z", quest
   { id: "db", question: "Which database?", options: [{ value: "pg", label: "Postgres" }, { value: "lite", label: "SQLite" }] },
   { id: "name", question: "What should the service be called?", options: [] },
 ] };
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const question = () => document.querySelector(".ask-question")?.textContent;
 const checked = () => [...document.querySelectorAll<HTMLInputElement>(".ask-option input:checked")].map((node) => node.parentElement?.textContent);
 const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 2000 }).toBe(true); });
 };
 const type = (text: string) => act(async () => {
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+  input().value = text;
   input().dispatchEvent(new Event("input", { bubbles: true }));
 });
 const click = (node: Element | null | undefined) => act(async () => { (node as HTMLElement).click(); });

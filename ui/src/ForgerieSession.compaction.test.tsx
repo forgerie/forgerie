@@ -6,17 +6,18 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import type { SessionStatus, UiEvent } from "./contracts";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 let server: WebSocketServer;
 let releaseAbort: (() => void) | undefined;
 const idle: SessionStatus = { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [] };
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 2000 }).toBe(true); });
 };
 const type = (text: string) => act(async () => {
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+  input().value = text;
   input().dispatchEvent(new Event("input", { bubbles: true }));
 });
 beforeEach(() => {
@@ -80,6 +81,6 @@ it.each([false, true])("restores Stop's returned queue only to chat, with a dela
     await until(() => document.querySelector(".ask") === null);
   }
   expect(input().value).toBe("/compact keep deployment notes\n\nunfinished chat thought");
-  expect(document.querySelectorAll(".composer textarea")).toHaveLength(1);
+  expect(document.querySelectorAll(".composer [data-composer-input]")).toHaveLength(1);
   expect(request.mock.calls.filter(([path]) => path.endsWith("/abort"))).toHaveLength(1);
 });

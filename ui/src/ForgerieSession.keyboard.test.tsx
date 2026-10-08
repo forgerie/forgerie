@@ -8,10 +8,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import type { SessionStatus } from "./contracts";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 const cleanup: (() => Promise<void>)[] = [];
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 2000 }).toBe(true); });
 };

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useDictation } from "../DictationProvider";
 import { PuzzleIcon } from "lucide-react";
@@ -37,7 +37,7 @@ function useNow(active: boolean) {
  * the input for its answer, and the chat draft waits until it closes, as with
  * `ask_user`.
  */
-export function useDialogMode(binding: DialogBinding | undefined, chatDraft: ChatDraft, input: RefObject<HTMLTextAreaElement | null>) {
+export function useDialogMode(binding: DialogBinding | undefined, chatDraft: ChatDraft, input: RefObject<HTMLElement | null>) {
   const text = useAuiState((s) => s.composer.text);
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const headingId = useId();
@@ -82,8 +82,8 @@ export function useDialogMode(binding: DialogBinding | undefined, chatDraft: Cha
     binding!.onCancel();
     keepFocus();
   }
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>, shiftKey = event.shiftKey) {
-    if (!isInput || event.key !== "Enter" || shiftKey || event.nativeEvent.isComposing) return;
+  function onKeyDown(event: KeyboardEvent, shiftKey = event.shiftKey) {
+    if (!isInput || event.key !== "Enter" || shiftKey || event.isComposing) return;
     event.preventDefault();
     submitInput();
   }

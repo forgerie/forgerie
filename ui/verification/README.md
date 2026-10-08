@@ -48,9 +48,13 @@ Confirm, select, and input dialogs from Pi extensions appear on top of the input
 
 The input bar shows the session's model and thinking level. Press it, or send `/model`, to change either one for this session. See [behavior, verification, and limits](model-thinking.md).
 
+## Composer rich editing
+
+The input is a CodeMirror editor again. A complete code fence reads as a highlighted block with its language label, and the draft stays fenced Markdown. Tab indents, lists continue, and undo uses the editor history. See [behavior, costs, and checks](composer-rich-editing.md).
+
 ## Composer keyboard
 
-Ctrl+Alt+I focuses the input. Ctrl+Space starts or finishes dictation. Up and Down recall recorded prompts at the text's ends and restore the unsent draft. Hardware Shift+Enter and touch Enter use the legacy modifier evidence rules. Double Escape on an empty idle draft opens the tree or runs Pi's configured action. Escape cancels dictation before session actions. See [behavior, checks, and limits](composer-keyboard.md) and the [legacy audit with remaining gaps](composer-parity-audit.md).
+Ctrl+Alt+I focuses the input. Ctrl+Space starts or finishes dictation. Up and Down recall recorded prompts from the draft's first or last drawn line and restore the unsent draft. Hardware Shift+Enter and touch Enter use the legacy modifier evidence rules. Double Escape on an empty idle draft opens the tree or runs Pi's configured action. Escape cancels dictation before session actions. See [behavior, checks, and limits](composer-keyboard.md) and the [legacy audit with remaining gaps](composer-parity-audit.md).
 
 ## Sending while working
 

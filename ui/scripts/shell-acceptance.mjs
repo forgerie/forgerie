@@ -34,10 +34,10 @@ try {
   };
   const navigate = async (scenario) => {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
-    await until("!!document.querySelector('.composer textarea')");
+    await until("!!document.querySelector('[data-composer-input]')");
   };
   const input = async (text) => {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()"); await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   };
   const text = (selector) => evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`);
@@ -53,10 +53,10 @@ try {
         return { row: box(row), status: box(row.querySelector('.shell-status')), copy: box(row.querySelector('.shell-header button')),
           command: box(row.querySelector('.shell-command')), outputClipsWidth: output ? output.scrollWidth > output.clientWidth + 1 : false };
       });
-      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.composer textarea').length,
-        input: box(document.querySelector('.composer textarea')), rows,
+      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('[data-composer-input]').length,
+        input: box(document.querySelector('[data-composer-input]')), rows,
         buttons: [...document.querySelectorAll('.composer-actions button')].map(b => ({ label: b.getAttribute('aria-label') || b.textContent, ...box(b) })),
-        draft: document.querySelector('.composer textarea').value };
+        draft: document.querySelector('[data-composer-input]').value };
     })()`);
     const where = `${scenario} ${posture.name} ${scheme}`;
     assert.equal(state.overflow, false, `${where}: page overflow`);
@@ -94,11 +94,11 @@ try {
   const rows = await evaluate(cdp, "document.querySelectorAll('.shell-run').length");
   await pressCombo(cdp, "enter");
   await until(`document.querySelectorAll('.shell-run').length === ${rows + 1}`);
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "");
   assert.equal(await evaluate(cdp, "[...document.querySelectorAll('.shell-command')].at(-1).textContent"), "$ ls -la");
   await input("!!git status");
   assert.equal(await text(".composer-hint"), "Shell command. Its output stays out of the agent's context.");
-  assert.equal(await evaluate(cdp, "getComputedStyle(document.querySelector('.composer textarea')).fontFamily.includes('JetBrains Mono')"), true);
+  assert.equal(await evaluate(cdp, "getComputedStyle(document.querySelector('[data-composer-input]')).fontFamily.includes('JetBrains Mono')"), true);
   await input("!@src");
   assert.equal(await text(".composer-hint"), null);
   result.flows.push("enter-runs-and-clears");
@@ -120,7 +120,7 @@ try {
   assert.equal(await text(".composer-hint"), "Wait for the running shell command to finish.");
   assert.equal((await button("Run command")).disabled, true);
   await pressCombo(cdp, "enter");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "!pwd");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "!pwd");
   result.flows.push("blocked-keeps-draft");
 
   // During an agent run, Run and Stop are both reachable.
@@ -140,7 +140,7 @@ try {
   await input("!git diff --stat");
   for (const posture of [...FOLD8_POSTURES, FOLD8_POSTURES[2]]) {
     await resize(posture); await sleep(80);
-    assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "!git diff --stat");
+    assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "!git diff --stat");
     result.transitions.push(posture.name);
   }
   const apiRequests = result.requests.filter((url) => url.includes("/api/"));

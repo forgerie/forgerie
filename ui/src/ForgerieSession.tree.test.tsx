@@ -7,6 +7,7 @@ import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import type { Session, SessionStatus } from "./contracts";
 import type { SessionTreeSnapshot } from "./sessionTree";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 let server: WebSocketServer;
@@ -21,7 +22,7 @@ const tree: SessionTreeSnapshot = {
   ],
   activeLeafId: "a1", activePathIds: ["u1", "a1"],
 };
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 2000 }).toBe(true); });
 };

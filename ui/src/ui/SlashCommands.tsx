@@ -49,7 +49,7 @@ export function SlashCommands({ binding, anchor }: { binding: CommandBinding; an
     // Pi selection is completion, not execution. Keep arguments editable and
     // require Send, especially for commands that mutate the session.
     // The anchor may be the whole box or only part of it, so look from the composer root.
-    execute: () => (anchor.current?.closest(".composer") ?? anchor.current)?.querySelector("textarea")?.focus(),
+    execute: () => (anchor.current?.closest(".composer") ?? anchor.current)?.querySelector<HTMLElement>("[data-composer-input]")?.focus(),
   })) : [] });
 
   useLayoutEffect(() => {

@@ -31,29 +31,29 @@ try {
     while (Date.now() < deadline) { if (await evaluate(cdp, expression)) return; await sleep(40); }
     throw new Error(`Timed out: ${expression}`);
   }
-  const draft = () => evaluate(cdp, "document.querySelector('.composer textarea').value");
+  const draft = () => evaluate(cdp, "document.querySelector('[data-composer-input]').value");
   async function type(text) {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()");
     await pressCombo(cdp, "ctrl+a"); await cdp.send("Input.insertText", { text });
   }
-  const setCursor = (position) => evaluate(cdp, `document.querySelector('.composer textarea').setSelectionRange(${position}, ${position})`);
+  const setCursor = (position) => evaluate(cdp, `document.querySelector('[data-composer-input]').setSelectionRange(${position}, ${position})`);
   for (const scheme of ["dark", "light"]) {
     await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
     for (const posture of [...FOLD8_POSTURES, { name: "short-pane", width: 475, height: 280 }, { name: "narrow-pane", width: 280, height: 500 }]) {
       await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
       await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=history` });
-      await until("!!document.querySelector('.composer textarea')");
+      await until("!!document.querySelector('[data-composer-input]')");
       // Focus is a real key chord from outside the input, not a direct focus call.
       await evaluate(cdp, "document.body.tabIndex = -1; document.body.focus()");
       await pressCombo(cdp, "ctrl+alt+i");
-      assert.equal(await evaluate(cdp, "document.activeElement === document.querySelector('.composer textarea')"), true);
+      assert.equal(await evaluate(cdp, "document.activeElement === document.querySelector('[data-composer-input]')"), true);
       await cdp.send("Input.insertText", { text: "unfinished draft" });
       await pressCombo(cdp, "meta+enter"); assert.equal(await draft(), "unfinished draft");
       await setCursor(0);
       await pressCombo(cdp, "arrowup"); assert.equal(await draft(), "Show the smallest session client.");
       await setCursor((await draft()).length); await pressCombo(cdp, "arrowdown");
       assert.equal(await draft(), "unfinished draft");
-      assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').selectionStart"), 0);
+      assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').selectionStart"), 0);
       // Hardware Shift is a key in its own right, unlike touch autocapitalization.
       await setCursor((await draft()).length);
       await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, modifiers: 8 });
@@ -61,18 +61,18 @@ try {
       await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 });
       assert.equal(await draft(), "unfinished draft\n");
       await cdp.send("Input.insertText", { text: "second line" });
-      await pressCombo(cdp, "enter"); await until("document.querySelector('.composer textarea').value === '' && [...document.querySelectorAll('.message-user')].some(node => node.textContent.includes('second line'))");
+      await pressCombo(cdp, "enter"); await until("document.querySelector('[data-composer-input]').value === '' && [...document.querySelectorAll('.message-user')].some(node => node.textContent.includes('second line'))");
       await pressCombo(cdp, "arrowup"); assert.equal(await draft(), "unfinished draft\nsecond line");
       // Dictation uses the same start/finish controls, and never sends the result.
       await type("keep"); await pressCombo(cdp, "ctrl+space");
       await until("document.querySelector('.dictation-status')?.textContent === 'Listening…'");
       await pressCombo(cdp, "ctrl+space");
-      await until("document.querySelector('.composer textarea').value === 'keep This is a local dictation preview.'");
+      await until("document.querySelector('[data-composer-input]').value === 'keep This is a local dictation preview.'");
       await pressCombo(cdp, "ctrl+space"); await until("document.querySelector('.dictation-status')?.textContent === 'Listening…'");
-      await pressCombo(cdp, "escape"); await until("!document.querySelector('.dictation-status') && !document.querySelector('.composer textarea').disabled");
+      await pressCombo(cdp, "escape"); await until("!document.querySelector('.dictation-status') && !document.querySelector('[data-composer-input]').disabled");
       assert.equal(await draft(), "keep This is a local dictation preview.");
       const geometry = await evaluate(cdp, `(() => {
-        const input = document.querySelector('.composer textarea').getBoundingClientRect();
+        const input = document.querySelector('[data-composer-input]').getBoundingClientRect();
         const buttons = [...document.querySelectorAll('.composer-actions button')].map(button => ({ name: button.getAttribute('aria-label') || button.textContent, ...button.getBoundingClientRect().toJSON() }));
         return { overflow: document.documentElement.scrollWidth > innerWidth, input: input.toJSON(), buttons };
       })()`);
@@ -94,8 +94,8 @@ try {
     for (const posture of [...FOLD8_POSTURES, { name: "short-pane", width: 475, height: 280 }, { name: "narrow-pane", width: 280, height: 500 }]) {
       await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
       await cdp.send("Page.navigate", { url: `${origin}/verification/tree-preview.html?scenario=tree-keyboard` });
-      await until("!!document.querySelector('.composer textarea')");
-      await evaluate(cdp, "document.querySelector('.composer textarea').focus()");
+      await until("!!document.querySelector('[data-composer-input]')");
+      await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()");
       await pressCombo(cdp, "escape"); assert.equal(await evaluate(cdp, "!!document.querySelector('.tree-dialog')"), false);
       await pressCombo(cdp, "escape"); await until("!!document.querySelector('.tree-dialog[open] [role=tree]')");
       const geometry = await evaluate(cdp, "document.querySelector('.tree-dialog').getBoundingClientRect().toJSON()");

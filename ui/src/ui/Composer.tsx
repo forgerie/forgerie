@@ -1,5 +1,5 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
@@ -23,6 +23,7 @@ import { modelCommandQuery } from "../modelChoice";
 import { DialogLayer, useDialogMode, type DialogBinding } from "./DialogLayer";
 import { NoteTray, type NotesBinding } from "./NoteTray";
 import { useComposerKeyboard, type ComposerSessionKeys } from "./useComposerKeyboard";
+import { ComposerEditor, type ComposerInputElement } from "./ComposerEditor";
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
@@ -76,7 +77,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const { state } = useDictation();
   const control = useAskMode(ask, chatDraft);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<ComposerInputElement>(null);
   const keyboard = useComposerKeyboard(input, sessionKeys);
   // An open ask goes first. A dialog waits behind it, and the bar says so.
   const dialogControl = useDialogMode(control ? undefined : dialog, chatDraft, input);
@@ -146,7 +147,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
   const snapshot = useRef<MentionInputSnapshot>(null);
   const rememberInput = () => { if (input.current) snapshot.current = { text: input.current.value, cursor: input.current.selectionStart }; };
   const triggers = unstable_useTriggerPopoverRootContext();
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function onKeyDown(event: KeyboardEvent) {
     if (event.defaultPrevented) { keyboard.resetEscape(); return; }
     if (keyboard.isComposing(event)) { keyboard.resetEscape(); if (event.key === "Enter") event.preventDefault(); return; }
     const shiftKey = keyboard.enterShift(event);
@@ -185,7 +186,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
     if (control) { if (!tooMany) control.onKeyDown(event, shiftKey); return; }
     if (event.key === "Enter" && !shiftKey) {
       event.preventDefault();
-      if (!running && !working.queue && !tooMany && canSend) event.currentTarget.closest("form")?.requestSubmit();
+      if (!running && !working.queue && !tooMany && canSend) input.current?.closest("form")?.requestSubmit();
     }
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
@@ -226,20 +227,18 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
         <TerminalIcon aria-hidden size={14} />{shellReason ?? (shellDraft.excludeFromContext
           ? "Shell command. Its output stays out of the agent's context." : "Shell command. The agent sees its output.")}
       </p>}
-      <ComposerPrimitive.Input ref={input} aria-label={dialogInput ? "Answer" : "Message"} rows={1} className="composer-input"
+      <ComposerEditor inputRef={input} label={dialogInput ? "Answer" : "Message"} className="composer-input"
         placeholder={control?.placeholder ?? (dialogInput ? dialogControl.placeholder : "Send a message...")}
-        aria-describedby={control?.headingId ?? (dialogInput ? dialogControl.headingId : undefined)}
+        describedBy={control?.headingId ?? (dialogInput ? dialogControl.headingId : undefined)}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
-        spellCheck={!shellMode} autoCorrect={shellMode ? "off" : "on"} autoCapitalize={shellMode ? "off" : "sentences"} dir="auto"
-        aria-keyshortcuts="Control+Alt+I"
+        prose={!shellMode} keyShortcuts="Control+Alt+I"
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
         // One Enter route sees normalized modifiers before every mode, including ordinary chat.
-        submitMode="none"
-        // Suggestions, shell clearing, Stop, and idle double Escape share one route.
-        cancelOnEscape={false} onKeyDown={onKeyDown}
+        // Suggestions, shell clearing, Stop, and idle double Escape share it too.
+        onKeyDown={onKeyDown}
         onKeyUp={keyboard.onKeyUp} onBlur={keyboard.onBlur} onCompositionStart={keyboard.onCompositionStart} onCompositionEnd={keyboard.onCompositionEnd}
-        onChange={() => { keyboard.onChange(); rememberInput(); }} onSelect={rememberInput}
-        disabled={control?.sending || undefined} />
+        onEdit={keyboard.onChange} onSelectionChange={rememberInput}
+        disabled={control?.sending} />
       <div className="composer-actions">
         {context}
         {attachments && <AddAttachment disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS} />}

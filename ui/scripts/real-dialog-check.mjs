@@ -39,7 +39,7 @@ async function waitUntil(label, check, timeoutMs = 60_000) {
 }
 const query = () => new URLSearchParams({ cwd });
 const status = (id) => call(`/api/sessions/${id}/status?${query()}`);
-const pageState = `JSON.stringify({ draft: document.querySelector("textarea")?.value, status: document.querySelector(".connection-status")?.textContent,
+const pageState = `JSON.stringify({ draft: document.querySelector("[data-composer-input]")?.value, status: document.querySelector(".connection-status")?.textContent,
   alerts: [...document.querySelectorAll("[role=alert]")].map((node) => node.textContent) })`;
 const probeResult = () => readFile(join(cwd, "dialog-probe-result.json"), "utf8").then(JSON.parse, () => undefined);
 
@@ -63,7 +63,7 @@ try {
     .catch(async (error) => { throw new Error(`${error.message}\nPage: ${await evaluate(cdp, pageState)}\nAPI: ${JSON.stringify((await status(id)).pendingDialogs ?? [])}`); });
   const title = () => evaluate(cdp, "document.querySelector('.dialog-layer .ask-question')?.textContent ?? null");
   const type = async (text) => {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()");
     await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   };
@@ -77,9 +77,9 @@ try {
   await type("/dialog-probe");
   await until("[...document.querySelectorAll('[role=option]')].some(option => option.textContent.includes('dialog-probe'))");
   await pressCombo(cdp, "enter");
-  await until("document.querySelector('textarea').value === '/dialog-probe '");
+  await until("document.querySelector('[data-composer-input]').value === '/dialog-probe '");
   await pressCombo(cdp, "enter");
-  await until("document.querySelector('textarea').value === ''");
+  await until("document.querySelector('[data-composer-input]').value === ''");
   await sleep(25_000); // Longer than the old 20-second client timeout, so a waiting command must not fail.
   await until("document.querySelector('.dialog-layer .ask-question')?.textContent === 'Deploy the probe?'");
   assert.equal((await status(id)).pendingDialogs?.[0]?.kind, "confirm");
@@ -96,15 +96,15 @@ try {
   await type("unsent chat");
   await evaluate(cdp, "[...document.querySelectorAll('.dialog-head button')].find(b => b.textContent === 'Skip').click()");
   await until("document.querySelector('.dialog-layer .ask-question')?.textContent === 'Name the probe'");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').placeholder"), "probe-name");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').placeholder"), "probe-name");
   step("Yes answered the confirm, Skip closed the select, and the input dialog took the input");
 
   await type("probe-1"); await pressCombo(cdp, "enter");
   const answers = await waitUntil("probe result", probeResult, 20_000);
   assert.deepEqual(answers, { confirmed: true, target: null, name: "probe-1" });
   await until("!document.querySelector('.dialog-layer')");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').value"), "unsent chat");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "unsent chat");
   assert.deepEqual((await status(id)).pendingDialogs ?? [], []);
   step("the extension received every answer, and the chat draft came back", { answers });
 

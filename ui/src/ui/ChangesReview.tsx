@@ -326,7 +326,7 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
         <button type="button" className="primary changes-write" onClick={() => {
           onClose();
           // The notes are written; the message is next.
-          requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus());
+          requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-composer-input]")?.focus());
         }}>Write message</button>
       </footer>}
     </div>

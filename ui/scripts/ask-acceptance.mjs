@@ -41,7 +41,7 @@ try {
   }
   // One bar: exactly one input. The question layer lives inside the composer.
   const surfaces = () => evaluate(cdp, `(() => { const visible = ${shown};
-    return { inputs: document.querySelectorAll('.composer textarea').length, input: visible('[aria-label="Message"]'),
+    return { inputs: document.querySelectorAll('[data-composer-input]').length, input: visible('[aria-label="Message"]'),
       questions: visible('.composer [aria-label="Questions from the agent"]'), chatSend: visible('[aria-label="Send message"]') }; })()`);
   const pressEnter = async () => {
     await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
@@ -100,7 +100,7 @@ try {
           const body = document.querySelector('.ask-body');
           const buttons = [...document.querySelectorAll('.composer-actions button, .ask-head > button')].map((n) => ({ text: n.textContent || n.getAttribute('aria-label'), ...n.getBoundingClientRect().toJSON(), hit: (${hitRect})(n) }));
           return { width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth,
-            ask: box('.composer'), input: box('[aria-label="Message"]'), inputs: document.querySelectorAll('.composer textarea').length, buttons,
+            ask: box('.composer'), input: box('[aria-label="Message"]'), inputs: document.querySelectorAll('[data-composer-input]').length, buttons,
             bodyScrolls: body.scrollHeight > body.clientHeight + 1, shadow: getComputedStyle(body).backgroundImage.includes('radial-gradient'),
             share: document.querySelector('.ask').getBoundingClientRect().height / document.querySelector('.session-shell').getBoundingClientRect().height };
         })()`);

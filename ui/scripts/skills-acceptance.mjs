@@ -33,7 +33,7 @@ try {
   }
   async function navigate(scenario) {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
-    await until("!!document.querySelector('.composer textarea') && !!document.querySelector('.skill-chip')");
+    await until("!!document.querySelector('[data-composer-input]') && !!document.querySelector('.skill-chip')");
   }
   const labels = `[...document.querySelectorAll('details.skill-load > summary .trace-text, details.skill-loads > summary .trace-text')].map(node => node.textContent)`;
   // Every record and its open body stays inside the posture, with no page overflow.
@@ -46,7 +46,7 @@ try {
         records: [...document.querySelectorAll('.skill-chip, details.skill-load > summary, details.skill-loads > summary, .skill-invocation-body, .skill-load .trace-body')]
           .map(element => ({ name: element.className || element.parentElement.className, ...box(element) })),
         chipHeight: box(document.querySelector('.skill-chip')).height,
-        inputs: document.querySelectorAll('.composer textarea').length };
+        inputs: document.querySelectorAll('[data-composer-input]').length };
     })()`);
     assert.equal(state.overflow, false, `${scenario} ${posture.name}: page overflow`);
     assert.equal(state.inputs, 1);

@@ -65,7 +65,7 @@ try {
       content.querySelectorAll('.code-header').forEach(header => header.remove());
       return (${blockText})(content).replace(/\\s+/g, ' ').trim();
     }),
-    draft: document.querySelector('textarea')?.value,
+    draft: document.querySelector('[data-composer-input]')?.value,
     alert: document.querySelector('[role=alert]')?.textContent,
     width: innerWidth, height: innerHeight,
     overflow: document.documentElement.scrollWidth > innerWidth,
@@ -113,7 +113,7 @@ try {
   result.historyMessages = state.messages.length;
   assert.ok(result.historyMessages > 0, "Expected existing history");
   if (shouldSend) {
-    await evaluate(cdp, `document.querySelector('textarea').focus()`);
+    await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
     await cdp.send("Input.insertText", { text: "hello" });
     await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
@@ -133,7 +133,7 @@ try {
     assert.equal(state.messages.filter((text, index) => index >= result.historyMessages && text === "hello").length, 1);
     assert.equal(state.messages.length, result.historyMessages + 2, "Expected one user and one assistant message");
   }
-  await evaluate(cdp, `document.querySelector('textarea').focus()`);
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
   await cdp.send("Input.insertText", { text: "Unsent draft survives rotation" });
   for (const posture of FOLD8_POSTURES) {
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });

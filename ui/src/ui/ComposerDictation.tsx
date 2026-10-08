@@ -15,7 +15,7 @@ export function ComposerDictation({ disabled }: { disabled: boolean }) {
   useEffect(() => {
     const toggle = (event: KeyboardEvent) => {
       const form = root.current?.closest("form");
-      const input = form?.querySelector("textarea");
+      const input = form?.querySelector<HTMLElement>("[data-composer-input]");
       if (!composerShortcutTarget(input ?? null, event) || event.altKey || event.shiftKey) return;
       const cancelKey = event.key === "Escape" && !event.ctrlKey;
       if (!cancelKey && (!event.ctrlKey || event.code !== "Space" && event.key !== " ")) return;

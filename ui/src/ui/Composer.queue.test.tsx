@@ -10,6 +10,7 @@ import { Thread } from "./Thread";
 import { useThreadMessages } from "../useThreadMessages";
 import { createAttachmentAdapter, type SaveAttachment } from "../attachments";
 import { attachmentDelivery } from "../attachmentDelivery";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 let runtime: AssistantRuntime;
@@ -28,13 +29,13 @@ function Fixture({ running = true, working = responding, items = [], offline = f
     compaction={{ state: compaction, disabled: offline, onSend: async () => {}, onDismiss: () => {} }} /></AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")]
   .find((node) => node.textContent === name || node.getAttribute("aria-label") === name);
 const click = (node: HTMLElement | undefined) => act(async () => node!.click());
 function type(text: string) {
   return act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+    input().value = text;
     input().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
@@ -76,8 +77,8 @@ describe("sending while the agent works", () => {
     const onNew = vi.fn<(message: AppendMessage) => Promise<void>>().mockResolvedValue(undefined);
     await render({ onNew });
     await type("first"); await press("Enter", { shiftKey: true });
-    expect(onNew).not.toHaveBeenCalled();
-    await press("Enter");
+    expect(onNew).not.toHaveBeenCalled(); expect(input().value).toBe("first\n");
+    await press("Backspace"); await press("Enter");
     expect(sentText(onNew.mock.calls[0]?.[0])).toBe("first");
     expect(onNew.mock.calls[0]?.[0].steer).toBeFalsy();
     await type("second"); await press("Enter", { shiftKey: true, ctrlKey: true });

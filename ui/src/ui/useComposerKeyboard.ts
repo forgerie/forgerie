@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { createPromptHistory, promptHistoryEntries, recallPrompt, type PromptSnapshot } from "../promptHistory";
 import type { DoubleEscapeAction } from "../contracts";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 /** A background composer must never take keys from the foreground dialog. */
-export function composerShortcutTarget(input: HTMLElement | null, event: globalThis.KeyboardEvent): boolean {
+export function composerShortcutTarget(input: HTMLElement | null, event: KeyboardEvent): boolean {
   if (!input?.isConnected || event.defaultPrevented || event.isComposing || event.repeat || event.metaKey || event.getModifierState("AltGraph")) return false;
   const modal = [...document.querySelectorAll("dialog[open]")].at(-1);
   return !modal || modal.contains(input);
@@ -18,13 +19,12 @@ export interface ComposerSessionKeys {
 }
 
 /** Shared input behavior. The host still owns Enter routing and suggestion precedence. */
-export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>, session?: ComposerSessionKeys) {
+export function useComposerKeyboard(input: RefObject<ComposerInputElement | null>, session?: ComposerSessionKeys) {
   const aui = useAui();
   const messages = useAuiState((state) => state.thread.messages);
   const text = useAuiState((state) => state.composer.text);
   const entries = useMemo(() => promptHistoryEntries(messages), [messages]);
   const history = useRef(createPromptHistory());
-  const selection = useRef<PromptSnapshot | undefined>(undefined);
   const appliedText = useRef<string | undefined>(undefined);
   const heldShift = useRef(false);
   const hardwareShiftSeen = useRef(false);
@@ -33,17 +33,13 @@ export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>
   const resetEscape = useCallback(() => { escapePress.current = undefined; }, []);
   useLayoutEffect(resetEscape, [resetEscape, text, session !== undefined, session?.doubleEscapeAction, session?.onStop === undefined]);
 
+  // A change from outside the editor, such as dictation, ends browsing.
   useLayoutEffect(() => {
     if (history.current.position.type === "entry" && appliedText.current !== text) history.current = createPromptHistory();
-    const pending = selection.current;
-    if (pending && pending.text === text && input.current) {
-      input.current.setSelectionRange(pending.start, pending.end);
-      selection.current = undefined;
-    } else if (pending && pending.text !== text) selection.current = undefined;
-  }, [text, input]);
+  }, [text]);
 
   useEffect(() => {
-    const focus = (event: globalThis.KeyboardEvent) => {
+    const focus = (event: KeyboardEvent) => {
       if (!composerShortcutTarget(input.current, event) || !event.ctrlKey || !event.altKey || event.shiftKey || event.key.toLowerCase() !== "i" || input.current?.disabled) return;
       event.preventDefault();
       input.current?.focus({ preventScroll: true });
@@ -54,15 +50,10 @@ export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>
 
   function replace(next: PromptSnapshot) {
     appliedText.current = next.text;
-    selection.current = next;
-    aui.composer.setText(next.text);
-    // No render is needed when two entries have the same text.
-    if (input.current?.value === next.text) {
-      input.current.setSelectionRange(next.start, next.end);
-      selection.current = undefined;
-    }
+    if (input.current) input.current.replace(next.text, next.start, next.end);
+    else aui.composer.setText(next.text);
   }
-  function enterShift(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  function enterShift(event: KeyboardEvent): boolean {
     if (event.key !== "Escape") resetEscape();
     if (event.key === "Shift") { heldShift.current = true; hardwareShiftSeen.current = true; }
     if (event.key !== "Enter") {
@@ -76,30 +67,32 @@ export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>
     heldShift.current = false;
     return shift;
   }
-  function recall(event: KeyboardEvent<HTMLTextAreaElement>, enabled: boolean): boolean {
-    if (!enabled || !input.current || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return false;
+  function recall(event: KeyboardEvent, enabled: boolean): boolean {
     const node = input.current;
-    const state = history.current.position.type === "draft" ? createPromptHistory(entries) : history.current;
-    // The textarea does not expose visual-line coordinates. Use document edges,
-    // so wrapped lines always keep their native caret movement.
-    if (event.key === "ArrowUp" && node.selectionStart !== 0 || event.key === "ArrowDown" && node.selectionEnd !== node.value.length) return false;
-    const next = recallPrompt(state, event.key === "ArrowUp" ? "older" : "newer", { text: node.value, start: node.selectionStart, end: node.selectionEnd });
+    if (!enabled || !node || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return false;
+    const older = event.key === "ArrowUp";
+    const browsing = history.current.position.type === "entry";
+    // As in the legacy editor: a draft leaves for history only from its start;
+    // a recalled prompt leaves from its first or last drawn line.
+    if (node.selectionStart !== node.selectionEnd || !older && !browsing) return false;
+    if (older && !browsing && node.value.length > 0 && node.selectionStart !== 0) return false;
+    if (!node.atEdgeLine(older ? "top" : "bottom")) return false;
+    const state = browsing ? history.current : createPromptHistory(entries);
+    const next = recallPrompt(state, older ? "older" : "newer", { text: node.value, start: node.selectionStart, end: node.selectionEnd });
     if (!next) return false;
     event.preventDefault();
     history.current = next.state;
     replace(next.editor);
     return true;
   }
-  function insertNewline(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function insertNewline(event: KeyboardEvent) {
     event.preventDefault();
-    const node = event.currentTarget;
-    const next = node.value.slice(0, node.selectionStart) + "\n" + node.value.slice(node.selectionEnd);
     history.current = createPromptHistory();
-    replace({ text: next, start: node.selectionStart + 1, end: node.selectionStart + 1 });
+    input.current?.insertNewline();
   }
-  function escape(event: KeyboardEvent<HTMLTextAreaElement>, route: "chat" | "shell" | "answer" | "attachments", session?: ComposerSessionKeys): boolean {
+  function escape(event: KeyboardEvent, route: "chat" | "shell" | "answer" | "attachments", session?: ComposerSessionKeys): boolean {
     if (event.key !== "Escape") return false;
-    if (!composerShortcutTarget(input.current, event.nativeEvent) || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || route === "answer" || route === "attachments") {
+    if (!composerShortcutTarget(input.current, event) || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || route === "answer" || route === "attachments") {
       resetEscape(); return false;
     }
     const empty = input.current?.value.trim() === "";
@@ -120,9 +113,9 @@ export function useComposerKeyboard(input: RefObject<HTMLTextAreaElement | null>
     return true;
   }
   return { enterShift, recall, insertNewline, escape, resetEscape,
-    isComposing: (event: KeyboardEvent<HTMLTextAreaElement>) => composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229,
-    onChange: () => { resetEscape(); history.current = createPromptHistory(); selection.current = undefined; },
-    onKeyUp: (event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Shift") heldShift.current = false; },
+    isComposing: (event: KeyboardEvent) => composing.current || event.isComposing || event.keyCode === 229,
+    onChange: () => { resetEscape(); history.current = createPromptHistory(); },
+    onKeyUp: (event: KeyboardEvent) => { if (event.key === "Shift") heldShift.current = false; },
     onBlur: () => { resetEscape(); heldShift.current = false; composing.current = false; },
     onCompositionStart: () => { resetEscape(); composing.current = true; },
     onCompositionEnd: () => { composing.current = false; },

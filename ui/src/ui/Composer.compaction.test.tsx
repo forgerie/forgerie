@@ -7,6 +7,7 @@ import type { CompactionState } from "../compaction";
 import type { AskBinding } from "./useAskMode";
 import { Thread } from "./Thread";
 import { useThreadMessages } from "../useThreadMessages";
+import type { ComposerInputElement } from "./ComposerEditor";
 
 let root: Root;
 interface Props {
@@ -24,12 +25,12 @@ function Fixture({ state = { type: "idle" }, running = false, waits, offline = f
     queue={{ items, disabled: offline || sending, onClear }} /></AssistantRuntimeProvider>;
 }
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
-const input = () => document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === name || node.getAttribute("aria-label") === name);
 const click = (node: HTMLElement | undefined) => act(async () => node!.click());
 function type(text: string) {
   return act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input(), text);
+    input().value = text;
     input().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
@@ -55,7 +56,7 @@ describe("compaction in the one composer", () => {
     await click(button("Queue compaction"));
     expect(onSend).toHaveBeenCalledExactlyOnceWith("/compact keep decisions");
     expect(input().value).toBe("");
-    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-composer-input]")).toHaveLength(1);
     await click(button("Stop generating"));
     expect(onCancel).toHaveBeenCalledOnce();
   });
@@ -70,8 +71,8 @@ describe("compaction in the one composer", () => {
     await render({ onSend });
     await type("/compact preserve tests");
     expect(button("Compact history")).toBeDefined();
-    await press("Enter", true); expect(onSend).not.toHaveBeenCalled();
-    await press("Enter");
+    await press("Enter", true); expect(onSend).not.toHaveBeenCalled(); expect(input().value).toBe("/compact preserve tests\n");
+    await press("Backspace"); await press("Enter");
     expect(onSend).toHaveBeenCalledWith("/compact preserve tests");
     expect(input().value).toBe("/compact preserve tests");
     await click(button("Compact history")); expect(input().value).toBe("");
@@ -110,7 +111,7 @@ describe("compaction in the one composer", () => {
     await click(button("Send message"));
     expect(onChat).toHaveBeenCalledWith("/compact keep tests");
     expect(document.querySelector(".ask")).not.toBeNull();
-    expect(document.querySelectorAll("textarea")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-composer-input]")).toHaveLength(1);
   });
   it("restores a rejected compaction to the chat draft across a replacement ask", async () => {
     let reject!: (error: Error) => void;

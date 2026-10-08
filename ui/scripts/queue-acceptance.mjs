@@ -33,13 +33,13 @@ try {
   }
   async function navigate(scenario) {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
-    await until("!!document.querySelector('.composer textarea') && !!document.querySelector('[aria-label=\"Stop generating\"]')");
+    await until("!!document.querySelector('[data-composer-input]') && !!document.querySelector('[aria-label=\"Stop generating\"]')");
   }
   async function input(text) {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()"); await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   }
-  const draft = () => evaluate(cdp, "document.querySelector('.composer textarea').value");
+  const draft = () => evaluate(cdp, "document.querySelector('[data-composer-input]').value");
   const rows = () => evaluate(cdp, "[...document.querySelectorAll('section.queue .queue-item')].map(row => row.querySelector('.queue-kind').textContent + ': ' + row.querySelector('.queue-text').textContent)");
   async function click(label) {
     assert.equal(await evaluate(cdp, `(() => { const button = [...document.querySelectorAll('button')].find(button => button.textContent === ${JSON.stringify(label)} || button.getAttribute('aria-label') === ${JSON.stringify(label)}); button?.click(); return !!button; })()`), true, `no ${label}`);
@@ -50,7 +50,7 @@ try {
       const box = element => element?.getBoundingClientRect().toJSON();
       const column = box(document.querySelector('.thread-column'));
       return { overflow: document.documentElement.scrollWidth > innerWidth, column,
-        inputs: document.querySelectorAll('.composer textarea').length, input: box(document.querySelector('.composer textarea')),
+        inputs: document.querySelectorAll('[data-composer-input]').length, input: box(document.querySelector('[data-composer-input]')),
         list: box(document.querySelector('.queue-items')), rows: [...document.querySelectorAll('.queue-item')].map(box),
         buttons: [...document.querySelectorAll('.composer-actions button,.queue-head button,.compaction-head button')]
           .map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })) };

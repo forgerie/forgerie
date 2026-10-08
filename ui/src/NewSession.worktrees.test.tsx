@@ -9,6 +9,7 @@ import { createDraftStore } from "./draftStore";
 import { createLaunchStore, type WorktreeListener } from "./launches";
 import type { WorktreeApi, WorktreeRecord } from "./worktrees/worktreeApi";
 import { WorktreeDialog } from "./ui/WorktreeActions";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 const opus: SessionModel = { provider: "p", id: "opus", name: "Opus", reasoning: true };
@@ -50,13 +51,13 @@ async function render(h: ReturnType<typeof harness>, options: { cwd?: string; pl
     launches={h.launches} deferred={createDeferredFiles()} drafts={createDraftStore(undefined)} onStarted={() => {}} onClose={() => {}} onDestination={options.onDestination} />));
   await settle();
 }
-const textarea = () => document.querySelector<HTMLTextAreaElement>(".ns-dialog textarea")!;
+const textarea = () => document.querySelector<ComposerInputElement>(".ns-dialog [data-composer-input]")!;
 const label = () => document.querySelector(".destination-value")!.textContent;
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim().startsWith(name) || node.getAttribute("aria-label") === name);
 const click = async (node: HTMLElement | undefined) => { expect(node).toBeDefined(); await act(async () => node!.click()); await settle(); };
 async function type(text: string) {
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea(), text);
+    textarea().value = text;
     textarea().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }

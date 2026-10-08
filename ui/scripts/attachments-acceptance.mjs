@@ -74,7 +74,7 @@ async function shape(cdp, name) {
     const actions = document.querySelector('.composer-actions').getBoundingClientRect();
     return { width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth,
       bar: { left: bar.left, right: bar.right, bottom: bar.bottom }, actions: { top: actions.top, bottom: actions.bottom },
-      inputs: document.querySelectorAll('.composer textarea').length };
+      inputs: document.querySelectorAll('[data-composer-input]').length };
   })()`);
   assert.equal(geometry.overflow, false, `${name}: page overflow`);
   assert.equal(geometry.inputs, 1, `${name}: one composer`);
@@ -123,8 +123,8 @@ try {
     assert.equal(await evaluate(cdp, `document.querySelectorAll('.composer-attachments .attachment').length`), 2);
   }
   await evaluate(cdp, `(() => {
-    const input = document.querySelector('.composer-input');
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, 'This is a UI acceptance test. Reply with OK only. Do not use tools.');
+    const input = document.querySelector('[data-composer-input]');
+    input.value = 'This is a UI acceptance test. Reply with OK only. Do not use tools.';
     input.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
   await click(cdp, "Send message");
@@ -151,7 +151,7 @@ try {
     && message.content.some((part) => part.type === "image")), "persisted native image");
   await addFiles(cdp, [join(workspace, "white.png")]);
   await wait(() => evaluate(cdp, `document.querySelectorAll('.composer-attachments .attachment').length === 1`), "image-only draft");
-  assert.equal(await evaluate(cdp, `document.querySelector('.composer-input').value`), "", "image-only composer has no text");
+  assert.equal(await evaluate(cdp, `document.querySelector('[data-composer-input]').value`), "", "image-only composer has no text");
   await click(cdp, "Send message");
   await wait(() => writes.filter((request) => request.path.endsWith("/prompt")).length === 2, "image-only prompt once");
   await wait(() => evaluate(cdp, `document.querySelectorAll('.message-attachments .attachment-image').length >= 2`), "image-only live row");

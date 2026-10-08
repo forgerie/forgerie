@@ -36,9 +36,9 @@ try {
   const read = () => evaluate(cdp, `({
     status: document.querySelector('.connection-status')?.textContent,
     alert: document.querySelector('[role=alert]')?.textContent,
-    draft: document.querySelector('textarea')?.value,
-    sameInput: !!document.querySelector('textarea[data-recovery-proof]'),
-    disabled: document.querySelector('textarea')?.disabled,
+    draft: document.querySelector('[data-composer-input]')?.value,
+    sameInput: !!document.querySelector('[data-composer-input][data-recovery-proof]'),
+    disabled: document.querySelector('[data-composer-input]')?.disabled,
     sendDisabled: document.querySelector('[aria-label="Send message"]')?.disabled,
     messageCount: document.querySelectorAll('.message').length,
     history: [...document.querySelectorAll('.message-text')].map(e => e.textContent).join('\\n'),
@@ -62,7 +62,7 @@ try {
   await until((state) => state.status === "Connected" && state.messageCount > 0);
   await evaluate(cdp, `document.fonts.ready.then(() => true)`);
   await evaluate(cdp, `(() => {
-    const input = document.querySelector('textarea');
+    const input = document.querySelector('[data-composer-input]');
     input.dataset.recoveryProof = 'draft';
     input.focus();
     const details = document.querySelector('.message-assistant details');

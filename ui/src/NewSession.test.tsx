@@ -7,6 +7,7 @@ import { createDeferredFiles, type AgentChoice, type FirstPrompt, type NewSessio
 import type { Session, SessionModel } from "./contracts";
 import { createDraftStore, type DraftStore } from "./draftStore";
 import { createLaunchStore } from "./launches";
+import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 const opus: SessionModel = { provider: "cliproxyapi", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true, scoped: true };
@@ -49,13 +50,13 @@ async function render(api: NewSessionApi, options: Options = {}) {
   return launches;
 }
 const dialog = () => document.querySelector<HTMLDialogElement>("dialog.ns-dialog");
-const textarea = () => document.querySelector<HTMLTextAreaElement>(".ns-dialog .composer textarea")!;
+const textarea = () => document.querySelector<ComposerInputElement>(".ns-dialog [data-composer-input]")!;
 const button = (name: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")]
   .find((node) => node.textContent?.trim().startsWith(name) || node.getAttribute("aria-label")?.startsWith(name));
 const click = async (node: HTMLElement | undefined) => { await act(async () => node!.click()); await settle(); };
 async function type(text: string) {
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea(), text);
+    textarea().value = text;
     textarea().dispatchEvent(new Event("input", { bubbles: true }));
   });
 }

@@ -30,16 +30,16 @@ try {
       if (await evaluate(cdp, expression)) return;
       await sleep(30);
     }
-    const state = await evaluate(cdp, `({ draft: document.querySelector('textarea')?.value, options: [...document.querySelectorAll('[role=option]')].map(item => item.textContent) })`);
+    const state = await evaluate(cdp, `({ draft: document.querySelector('[data-composer-input]')?.value, options: [...document.querySelectorAll('[role=option]')].map(item => item.textContent) })`);
     throw new Error(`Timed out: ${expression}: ${JSON.stringify(state)}`);
   }
   async function input(text) {
-    await evaluate(cdp, "document.querySelector('textarea').focus()");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()");
     await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   }
   await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=slash` });
-  await until("!!document.querySelector('textarea')");
+  await until("!!document.querySelector('[data-composer-input]')");
   await input("/");
   await until("document.querySelectorAll('[role=option]').length === 26");
   for (const scheme of ["light", "dark"]) {
@@ -49,7 +49,7 @@ try {
       await sleep(100);
       const state = await evaluate(cdp, `({ width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth,
         popup: document.querySelector('.command-popover').getBoundingClientRect().toJSON(),
-        input: document.querySelector('textarea').getBoundingClientRect().toJSON(), draft: document.querySelector('textarea').value,
+        input: document.querySelector('[data-composer-input]').getBoundingClientRect().toJSON(), draft: document.querySelector('[data-composer-input]').value,
         scrollable: document.querySelector('.command-popover').scrollHeight > document.querySelector('.command-popover').clientHeight })`);
       assert.equal(state.overflow, false);
       assert.equal(state.draft, "/");
@@ -69,7 +69,7 @@ try {
   await until("document.querySelectorAll('[role=option]').length === 3");
   await pressCombo(cdp, "arrowdown");
   await pressCombo(cdp, "enter");
-  assert.equal(await evaluate(cdp, "document.querySelector('textarea').value"), "/review ");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "/review ");
   assert.equal(await evaluate(cdp, "document.querySelectorAll('.message').length"), 2);
   await input("/review src/commands.ts");
   await pressCombo(cdp, "enter");
@@ -81,8 +81,8 @@ try {
   await input("/name");
   await until("document.querySelectorAll('[role=option]').length === 1");
   await pressCombo(cdp, "enter");
-  assert.equal(await evaluate(cdp, "document.querySelector('textarea').value"), "/name ");
-  assert.equal(await evaluate(cdp, "document.querySelectorAll('.composer textarea').length"), 1);
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "/name ");
+  assert.equal(await evaluate(cdp, "document.querySelectorAll('[data-composer-input]').length"), 1);
   assert.equal(await evaluate(cdp, "!!document.querySelector('.ask-question')"), true);
   await input("/name new name");
   await pressCombo(cdp, "enter");

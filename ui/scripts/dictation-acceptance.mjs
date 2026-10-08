@@ -40,7 +40,7 @@ try {
   cdp.listeners.set("Network.requestWillBeSent", [(e) => { if (new URL(e.request.url).pathname.startsWith("/api/")) result.requests.push({ url: e.request.url, method: e.request.method }); }]);
   await cdp.send("Page.navigate", { url: `${base}/verification/preview.html` });
   await until(`!!document.querySelector('[aria-label="Voice input"]')`);
-  await evaluate(cdp, `document.querySelector('textarea').focus()`);
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
   await cdp.send("Input.insertText", { text: "Existing draft" });
   await click("Voice input");
   await until(`document.querySelector('.dictation-status')?.textContent === 'Listening…'`);
@@ -49,7 +49,7 @@ try {
     for (const posture of FOLD8_POSTURES) {
       await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
       await sleep(100);
-      const state = await evaluate(cdp, `({ draft: document.querySelector('textarea').value,
+      const state = await evaluate(cdp, `({ draft: document.querySelector('[data-composer-input]').value,
         overflow: document.documentElement.scrollWidth > innerWidth,
         rects: [...document.querySelectorAll('.composer-actions button')].map(e => e.getBoundingClientRect().toJSON()) })`);
       assert.equal(state.draft, "Existing draft"); assert.equal(state.overflow, false);
@@ -59,7 +59,7 @@ try {
     }
   }
   await click("Stop dictation");
-  await until(`document.querySelector('textarea').value === 'Existing draft This is a local dictation preview.'`);
+  await until(`document.querySelector('[data-composer-input]').value === 'Existing draft This is a local dictation preview.'`);
   assert.equal(result.requests.length, 0, "preview must not call a live API");
   // Ask mode shares the controls and the same input at every posture.
   await cdp.send("Page.navigate", { url: `${base}/verification/preview.html?scenario=ask` });
@@ -70,7 +70,7 @@ try {
     for (const posture of FOLD8_POSTURES) {
       await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
       await sleep(100); await shot(`${scheme}-${posture.name}-ask-recording`);
-      assert.equal(await evaluate(cdp, `[...document.querySelectorAll('textarea')].filter(e => e.getAttribute('aria-hidden') !== 'true').length`), 1);
+      assert.equal(await evaluate(cdp, `[...document.querySelectorAll('[data-composer-input]')].filter(e => e.getAttribute('aria-hidden') !== 'true').length`), 1);
     }
   }
   await click("Cancel dictation");
@@ -84,8 +84,8 @@ try {
     await until(`document.querySelector('.dictation-status')?.textContent === 'Listening…'`);
     await sleep(7_000);
     await click("Stop dictation");
-    await until(`!!document.querySelector('textarea').value`, 120_000);
-    result.live = await evaluate(cdp, `({ text: document.querySelector('textarea').value, editable: !document.querySelector('textarea').disabled, secureContext: isSecureContext })`);
+    await until(`!!document.querySelector('[data-composer-input]').value`, 120_000);
+    result.live = await evaluate(cdp, `({ text: document.querySelector('[data-composer-input]').value, editable: !document.querySelector('[data-composer-input]').disabled, secureContext: isSecureContext })`);
     assert.match(result.live.text.toLowerCase(), /fox/);
     assert.equal(result.live.editable, true);
     await shot("live-final");

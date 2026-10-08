@@ -43,17 +43,17 @@ try {
     }
   }
   async function type(text) {
-    await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
+    await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').focus()"); await pressCombo(cdp, "ctrl+a");
     await cdp.send("Input.insertText", { text });
   }
-  const draft = () => evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea')?.value");
+  const draft = () => evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]')?.value");
   async function geometry(scenario, posture, scheme) {
     await sleep(150);
     const state = await evaluate(cdp, `(() => {
       // A control in the dialog's scrolling stack counts once scrolled to, as a finger would.
       const box = element => { element?.scrollIntoView?.({ block: "nearest" }); return element?.getBoundingClientRect().toJSON(); };
-      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.ns-dialog .composer textarea').length,
-        input: box(document.querySelector('.ns-dialog .composer textarea')), destination: box(document.querySelector('.destination-trigger')),
+      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.ns-dialog [data-composer-input]').length,
+        input: box(document.querySelector('.ns-dialog [data-composer-input]')), destination: box(document.querySelector('.destination-trigger')),
         value: box(document.querySelector('.destination-value')), model: box(document.querySelector('.ns-dialog .model-trigger')),
         actions: [...document.querySelectorAll('.ns-dialog .ns-context button, .ns-chips button, .ns-foot button, .ns-close, .ns-launch-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
         panel: box(document.querySelector('.destination-panel')), firstRow: box(document.querySelector('.destination-row')),
@@ -97,7 +97,7 @@ try {
   await type("Fix the build");
   await pressCombo(cdp, "ctrl+enter");
   await until("document.querySelector('.ns-status')?.textContent === 'Starting session…'");
-  assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog .composer textarea').disabled || document.querySelector('.ns-dialog .model-trigger').disabled"), true);
+  assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').disabled || document.querySelector('.ns-dialog .model-trigger').disabled"), true);
   await until("!!document.documentElement.dataset.started");
   assert.deepEqual(JSON.parse(await evaluate(cdp, "document.documentElement.dataset.started")), { cwd: "/home/simon/code/sandbox/forgerie", text: "Fix the build" });
   result.flows.startHere = true;

@@ -25,7 +25,7 @@ export function QueuedMessages({ items, disabled, onClear }: QueueBinding) {
   function clear(event: MouseEvent<HTMLButtonElement>) {
     onClear();
     // The list unmounts when Pi confirms. Keep focus, and the touch keyboard, in the input.
-    event.currentTarget.closest(".composer-region")?.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus({ preventScroll: true });
+    event.currentTarget.closest(".composer-region")?.querySelector<HTMLElement>(".composer [data-composer-input]")?.focus({ preventScroll: true });
   }
   return <>
     <span className="queue-announcer sr-only" role="status">{announcement}</span>

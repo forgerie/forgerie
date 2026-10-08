@@ -36,10 +36,10 @@ try {
     await until(scenario === "dialog-ask" ? "!!document.querySelector('.ask .ask-question')" : "!!document.querySelector('.dialog-layer .ask-question')");
   }
   async function type(text) {
-    await evaluate(cdp, "document.querySelector('.composer textarea').focus()"); await pressCombo(cdp, "ctrl+a");
+    await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()"); await pressCombo(cdp, "ctrl+a");
     if (text === "") await pressCombo(cdp, "backspace"); else await cdp.send("Input.insertText", { text });
   }
-  const draft = () => evaluate(cdp, "document.querySelector('.composer textarea').value");
+  const draft = () => evaluate(cdp, "document.querySelector('[data-composer-input]').value");
   const title = () => evaluate(cdp, "document.querySelector('.dialog-layer .ask-question')?.textContent ?? null");
   const answer = () => evaluate(cdp, "document.documentElement.dataset.dialogAnswer ?? 'unset'");
   async function click(selector, text) {
@@ -49,8 +49,8 @@ try {
     await sleep(150);
     const state = await evaluate(cdp, `(() => {
       const box = element => element?.getBoundingClientRect().toJSON();
-      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('.composer textarea').length,
-        input: box(document.querySelector('.composer textarea')), question: box(document.querySelector('.ask-question')),
+      return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('[data-composer-input]').length,
+        input: box(document.querySelector('[data-composer-input]')), question: box(document.querySelector('.ask-question')),
         controls: [...document.querySelectorAll('.dialog-head button, .dialog-confirm button, .composer-actions button, .ask-head button')]
           .map(button => ({ label: button.getAttribute('aria-label') || button.textContent.trim(), ...box(button) })),
         firstOption: box(document.querySelector('.dialog-option')), hint: box(document.querySelector('.composer-hint')) };
@@ -93,13 +93,13 @@ try {
   await until("document.querySelector('.dialog-layer .ask-question')?.textContent === 'Name the release tag'");
   assert.equal(await answer(), "\"production\"");
   assert.equal(await draft(), "");
-  assert.equal(await evaluate(cdp, "document.querySelector('.composer textarea').placeholder"), "v1.2.3");
+  assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').placeholder"), "v1.2.3");
   await type("v2.0.0");
   await pressCombo(cdp, "enter");
   await until("!document.querySelector('.dialog-layer')");
   assert.equal(await answer(), "\"v2.0.0\"");
   assert.equal(await draft(), "unsent chat");
-  assert.match(await evaluate(cdp, "document.activeElement?.tagName"), /TEXTAREA/);
+  assert.equal(await evaluate(cdp, "document.activeElement?.matches('[data-composer-input]') ?? false"), true);
   result.flows.threeInTurn = true;
 
   // Skip closes without an answer.
