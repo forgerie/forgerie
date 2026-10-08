@@ -59,6 +59,28 @@ Run the browser checks with the existing dev server on port 8510:
 The fixture is `verification/github-backlog.html`, with `state=azure-list`,
 `state=azure-item`, or `state=azure-auth`. All Azure records there are synthetic.
 
+## Landing and activation
+
+Backend commit `7350dbb3` is on `main`. It rebased onto the independently landed
+Durable runtime migration. After landing, `npm install`, `npm run build`, and
+all 83 backlog/config tests passed on main. The backend worktree and temporary
+branch were removed. Client commit `b5f832d0` stays on `new-ui-mvp`; the active
+Vite service already serves these source changes.
+
+The safe activation attempt refused to restart because two sessions still had
+active work. The new backend is built but activation is not verified. On this
+machine, run the following when the sessions are idle:
+
+```sh
+~/.local/share/forgerie/deployments/activate-azure-backlog.mjs
+```
+
+That machine-local script checks for active work, restarts both user units,
+checks API readiness, and probes whether the live daemon recognizes the Azure
+provider without creating a project or session. It writes its result to
+`~/.local/share/forgerie/deployments/azure-backlog.json`. It does not configure
+or read a PAT, and it does not prove access to the real Azure organization.
+
 ## Limits that remain
 
 Live access to Amaze Insights is unverified. The operator must save a PAT
