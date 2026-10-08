@@ -895,8 +895,8 @@ summary.trace-line:hover { color: var(--foreground); }
 .changes-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; }
 .changes-message, .change-message { margin: 0; padding: var(--space-4) var(--tree-pad); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
 .changes-message p, .change-message p { margin: 0 0 var(--space-2); }
-.changes-message button, .change-message button, .diff-more { min-block-size: 2.25rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
-.changes-message button:hover, .change-message button:hover, .diff-more:hover { border-color: var(--line-focus); }
+.changes-message button, .change-message button { min-block-size: 2.25rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
+.changes-message button:hover, .change-message button:hover { border-color: var(--line-focus); }
 .change-file + .change-file { border-block-start: 1px solid var(--line); }
 .change-file-head { position: sticky; inset-block-start: 0; z-index: 1; margin: 0; background: var(--background); font-size: var(--small-text); font-weight: 400; }
 .change-file-head button { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2) var(--tree-pad); border: 0; background: transparent; text-align: start; }
@@ -913,24 +913,50 @@ summary.trace-line:hover { color: var(--foreground); }
 .change-facts { flex: none; display: flex; gap: var(--space-2); margin-inline-start: auto; padding-inline-start: calc(16px + var(--space-2)); color: var(--muted-foreground); font-size: var(--label-text); white-space: nowrap; }
 .change-noted { color: var(--live); font-weight: 500; }
 
-.diff { --diff-num: 3.5ch; font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6; font-variant-ligatures: none; tab-size: 4; padding-block-end: var(--space-2); }
-.diff-row { display: grid; grid-template-columns: auto 1.75ch minmax(0, 1fr); min-block-size: 1.5rem; cursor: pointer; }
-.diff-row[data-kind="hunk"], .diff-row[data-kind="marker"] { display: block; padding: var(--space-1) var(--tree-pad); color: var(--muted-foreground); background: var(--tint-surface); cursor: default; overflow-wrap: anywhere; }
-.diff-row[data-kind="marker"] { background: transparent; font-style: italic; }
-.diff-row[data-kind="add"] { background: color-mix(in oklab, var(--diff-add) 14%, transparent); }
-.diff-row[data-kind="remove"] { background: color-mix(in oklab, var(--diff-remove) 12%, transparent); }
-.diff-row[data-selected] { background: color-mix(in oklab, var(--live) 18%, transparent); }
-.diff-gutter { display: grid; grid-template-columns: repeat(2, var(--diff-num)); gap: var(--space-2); align-content: start; padding: 0 var(--space-2) 0 var(--tree-pad);
-  border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--muted-foreground) 80%, transparent); font: inherit; text-align: end;
-  font-variant-numeric: tabular-nums; user-select: none; box-shadow: inset 3px 0 transparent; }
-.diff-gutter:focus-visible { outline-offset: -2px; }
-.diff-row:hover .diff-gutter { color: var(--foreground); }
-.diff-row[data-noted] .diff-gutter { box-shadow: inset 3px 0 color-mix(in oklab, var(--live) 50%, transparent); }
-.diff-row[data-selected] .diff-gutter { box-shadow: inset 3px 0 var(--live); color: var(--foreground); }
-.diff-sign { color: var(--muted-foreground); text-align: center; user-select: none; }
-.diff-text { min-inline-size: 0; padding-inline-end: var(--tree-pad); white-space: pre-wrap; overflow-wrap: anywhere; }
-.diff-more { display: block; margin: var(--space-3) var(--tree-pad); }
+/* Each file is a read-only CodeMirror editor. Its colours come from the same
+   tokens as chat code blocks. CodeMirror injects its own theme after this file,
+   so these rules name .cm-editor too, to win over it. Long lines wrap,
+   so the review never scrolls sideways at any width. */
+.diff { padding-block-end: var(--space-2); }
 .diff-moved { border-block-end: 1px solid var(--line); }
+.diff-editor { --diff-num: 3.5ch; --diff-add-tint: color-mix(in oklab, var(--diff-add) 14%, transparent);
+  --diff-remove-tint: color-mix(in oklab, var(--diff-remove) 12%, transparent); --diff-selected-tint: color-mix(in oklab, var(--live) 18%, transparent); }
+.diff-editor .cm-editor { background: transparent; color: var(--foreground); font-size: var(--code-size); }
+.diff-editor .cm-editor.cm-focused { outline: none; }
+.diff-editor .cm-editor .cm-scroller { font-family: var(--code-font); line-height: 1.6; font-variant-ligatures: none; tab-size: 4; overflow: visible; }
+.diff-editor .cm-editor .cm-content { padding-block: 0; caret-color: var(--foreground); }
+/* 1.6 × the code size plus this padding gives each line a 1.5rem target for a finger. */
+.diff-editor .cm-editor .cm-line { padding: 0.125rem var(--tree-pad) 0.125rem var(--space-2); }
+.diff-editor .cm-editor .cm-cursor { border-inline-start-color: var(--foreground); }
+.diff-editor .cm-editor .cm-selectionLayer .cm-selectionBackground, .diff-editor .cm-editor.cm-focused .cm-selectionLayer .cm-selectionBackground { background: color-mix(in oklab, var(--live) 28%, transparent); }
+.diff-editor .cm-editor:not(.cm-focused) .cm-cursorLayer { display: none; }
+.diff-editor .cm-editor .cm-gutters { border: 0; background: var(--background); color: color-mix(in oklab, var(--muted-foreground) 80%, transparent); }
+/* Padding sits on the cell: the gutter's hidden spacer element would carry it as height. */
+.diff-editor .cm-editor .cm-diff-numbers .cm-gutterElement { padding: 0; cursor: pointer; user-select: none; }
+.diff-editor .cm-editor .cm-diff-numbers-cell { display: grid; padding: 0.125rem 0 0.125rem var(--tree-pad); grid-template-columns: repeat(2, minmax(var(--diff-num), auto)) 1.75ch; gap: var(--space-2); text-align: end; font-variant-numeric: tabular-nums; }
+.diff-editor .cm-editor .cm-diff-sign { text-align: center; color: var(--muted-foreground); }
+.diff-editor .cm-editor .cm-diff-numbers .cm-gutterElement:hover { color: var(--foreground); }
+.diff-editor .cm-editor .cm-diff-add { background: var(--diff-add-tint); }
+.diff-editor .cm-editor .cm-diff-remove { background: var(--diff-remove-tint); }
+/* Selected lines and their notes share one blue spine at the code's left edge. */
+.diff-editor .cm-editor .cm-line.cm-diff-noted { box-shadow: inset 3px 0 color-mix(in oklab, var(--live) 50%, transparent); }
+.diff-editor .cm-editor .cm-diff-selected { background: var(--diff-selected-tint); }
+.diff-editor .cm-editor .cm-line.cm-diff-selected { box-shadow: inset 3px 0 var(--live); }
+.diff-editor .cm-editor .cm-gutterElement.cm-diff-selected { color: var(--foreground); }
+.diff-editor .cm-editor .cm-diff-gap, .diff-editor .cm-editor .cm-diff-fold { display: block; inline-size: 100%; padding: var(--space-1) var(--tree-pad) var(--space-1) var(--space-2);
+  color: var(--muted-foreground); background: var(--tint-surface); font: inherit; text-align: start; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-editor .cm-editor .cm-diff-fold { min-block-size: 2rem; border: 0; border-block: 1px solid var(--line); border-radius: 0; cursor: pointer; }
+.diff-editor .cm-editor .cm-diff-fold:hover { color: var(--foreground); background: var(--hover-surface); }
+.diff-editor .cm-editor .cm-diff-fold:focus-visible { outline-offset: -2px; }
+.diff-editor .cm-editor .cm-diff-marker { padding: var(--space-1) var(--tree-pad) var(--space-1) var(--space-2); color: var(--muted-foreground); font-style: italic; }
+/* flow-root keeps the note's margins inside the slot, where the editor measures its height. */
+.diff-editor .cm-editor .cm-diff-slot { display: flow-root; white-space: normal; cursor: auto; caret-color: auto; }
+.diff-editor .cm-editor .cm-diff-slot .diff-note { margin-inline-start: 0; padding-inline-start: var(--space-3); }
+.diff-editor .tok-keyword { color: var(--code-keyword); }
+.diff-editor .tok-string { color: var(--code-string); }
+.diff-editor .tok-number { color: var(--code-number); }
+.diff-editor .tok-comment { color: var(--code-comment); }
+.diff-editor .tok-title { color: var(--code-title); }
 
 .diff-note { margin: 0 var(--tree-pad) var(--space-3) 0; padding: var(--space-2) var(--space-3) var(--space-3) calc(var(--tree-pad) + var(--space-1));
   border: 1px solid var(--line); border-inline-start: 3px solid var(--live); border-start-end-radius: 0; border-end-end-radius: var(--radius-surface);

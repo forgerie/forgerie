@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocket as Socket, WebSocketServer } from "ws";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import { createDraftStore } from "./draftStore";
@@ -22,7 +22,11 @@ const setValue = (field: HTMLTextAreaElement, text: string) => act(async () => {
   field.dispatchEvent(new Event("input", { bubbles: true }));
 });
 const click = (node: HTMLElement | undefined) => act(async () => { node!.click(); });
+/** The line numbers of one document line in the changes review's editor. */
+const numbers = (line: number) => document.querySelector<HTMLElement>(`.cm-diff-numbers [data-line="${String(line)}"]`) ?? undefined;
 const chips = () => [...document.querySelectorAll(".note-chip-where")].map((node) => node.textContent);
+// The review loads its editor on demand. Loading it once here keeps that cold import out of each test's time limit.
+beforeAll(async () => { await import("./ui/DiffEditor"); }, 30_000);
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -80,9 +84,10 @@ async function sessionWithChanges(options: { status?: SessionStatus; storage?: S
 /** Open the review, select the removed and the added line, and add a note. */
 async function noteTheRetryLimit(comment = "Keep the retry limit.") {
   await click(button("Review changes"));
-  await until(() => document.querySelectorAll(".diff-gutter").length === 4);
-  await click(button("Select removed line 8"));
-  await click(button("Stretch the selection to added line 8"));
+  await until(() => document.querySelectorAll(".cm-diff-numbers [data-line]").length === 4);
+  // Line numbers by document line: 0 is context, 1 the removed line 8, 2 the added line 8.
+  await click(numbers(1));
+  await click(numbers(2));
   expect(document.querySelector(".note-editor label")?.textContent).toBe("Note on line 8");
   await setValue(document.querySelector<HTMLTextAreaElement>(".note-editor textarea")!, comment);
   await click(button("Add note"));

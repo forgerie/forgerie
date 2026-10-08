@@ -1,0 +1,27 @@
+diff --git a/src/auth/session.ts b/src/auth/session.ts
+index ef1ba612..c79c4ca8 100644
+--- a/src/auth/session.ts
++++ b/src/auth/session.ts
+@@ -1,21 +1,21 @@
+ import type { CookieOptions } from "./cookies";
+ 
+ /** The cookie that carries the session id. */
+ export const SESSION_COOKIE = "sid";
+ 
+ /** Two weeks, in seconds. A reader who signs in on Monday stays in through the next Sunday. */
+ const SESSION_AGE = 60 * 60 * 24 * 14;
+ 
+ export function cookieOptions(secure: boolean): CookieOptions {
+   return {
+     httpOnly: true,
+-    sameSite: "lax",
++    sameSite: "strict",
+     secure,
+     maxAge: SESSION_AGE,
+     path: "/",
+   };
+ }
+ 
+ export function clearedCookieOptions(secure: boolean): CookieOptions {
+   return { ...cookieOptions(secure), maxAge: 0 };
+ }

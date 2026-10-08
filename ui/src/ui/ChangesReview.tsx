@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRightIcon, FileDiffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, XIcon } from "lucide-react";
 import type { ChangeEntry, Changes, ChangesSource, FileDiff } from "../changes/changesSource";
@@ -6,7 +6,11 @@ import {
   commentProblem, linesOf, newNoteId, NOTE_LIMITS, noteRange, placeNotes, selectionBounds, selectionProblem, tapRow, trayProblem,
   type DiffNote, type RowSelection,
 } from "../changes/diffNotes";
-import { isCodeRow, type DiffRow } from "../changes/unifiedDiff";
+import { diffDocument, type DiffDocument } from "../changes/diffDocument";
+import type { DiffBlock } from "./DiffEditor";
+
+// CodeMirror and its language parsers are about 325 kB. They load when a review first shows a diff.
+const DiffEditor = lazy(() => import("./DiffEditor").then((module) => ({ default: module.DiffEditor })));
 
 export interface ChangesBinding {
   source: ChangesSource;
@@ -45,8 +49,6 @@ type Draft = { type: "new"; text: string; error?: string } | { type: "edit"; id:
 
 /** Files open on arrival while there are this few of them. More would read as a wall of code. */
 const OPEN_ON_ARRIVAL = 6;
-/** Rows drawn before "Show more". A 2 MB diff is tens of thousands of rows. */
-const ROW_PAGE = 1500;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 const STATE_LABEL: Record<ChangeEntry["state"], string> = {
   modified: "Modified", added: "Added", deleted: "Deleted", renamed: "Renamed", copied: "Copied", untracked: "New file", conflicted: "Conflicted",
@@ -130,21 +132,19 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   };
   const refresh = () => load(new Set(Object.entries(files).flatMap(([key, view]) => view.open ? [key] : [])));
 
-  const tap = (entry: ChangeEntry, index: number, event: MouseEvent) => {
-    // A drag that selected text is for copying, not for a note.
-    const text = window.getSelection?.();
-    if (text && !text.isCollapsed && event.currentTarget.contains(text.anchorNode)) return;
+  const select = (entry: ChangeEntry, rows: RowSelection | undefined, typeNext: boolean) => {
     if (draft?.type === "edit") return;
-    const rows = selection?.key === entry.key ? tapRow(selection.rows, index) : tapRow(undefined, index);
     setSelection(rows && { key: entry.key, rows });
     if (!rows) { setDraft(undefined); return; }
     setDraft((current) => current?.type === "new" ? { type: "new", text: current.text } : { type: "new", text: "" });
-    // A mouse user types next. On a touch screen the keyboard would cover the lines still to tap.
-    if (pointer.current === "mouse") requestAnimationFrame(() => dialog.current?.querySelector<HTMLTextAreaElement>(".note-editor textarea")?.focus({ preventScroll: true }));
+    if (typeNext) requestAnimationFrame(() => dialog.current?.querySelector<HTMLTextAreaElement>(".note-editor textarea")?.focus({ preventScroll: true }));
   };
+  // A mouse user types next. On a touch screen the keyboard would cover the lines still to tap.
+  const tap = (entry: ChangeEntry, index: number) =>
+    select(entry, tapRow(selection?.key === entry.key ? selection.rows : undefined, index), pointer.current === "mouse");
   const clearSelection = () => { setSelection(undefined); setDraft(undefined); };
 
-  const addNote = (entry: ChangeEntry, rows: readonly DiffRow[]) => {
+  const addNote = (entry: ChangeEntry, rows: DiffDocument["lines"]) => {
     if (draft?.type !== "new" || selection?.key !== entry.key) return;
     const lines = linesOf(rows, selection.rows);
     const problem = selectionProblem(entry.path, lines) ?? commentProblem(draft.text)
@@ -199,7 +199,9 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
         {entries.map((entry) => <ChangeFile key={entry.key} entry={entry} view={files[entry.key]}
           notes={notes.filter((note) => note.path === entry.path && note.staged === entry.staged)}
           selection={selection?.key === entry.key ? selection.rows : undefined} draft={draft}
-          onToggle={() => toggle(entry)} onRetry={() => readDiff(entry)} onTap={(index, event) => tap(entry, index, event)}
+          reveal={focusNoteId && !focused.current ? focusNoteId : undefined} onRevealed={() => { focused.current = true; }}
+          onToggle={() => toggle(entry)} onRetry={() => readDiff(entry)} onTap={(index) => tap(entry, index)}
+          onSelectLines={(rows) => select(entry, rows, true)}
           onDraft={(text) => setDraft((current) => current && { ...current, text, error: undefined })}
           onAdd={(rows) => addNote(entry, rows)} onCancel={clearSelection}
           onEdit={(note) => { setSelection(undefined); setDraft({ type: "edit", id: note.id, text: note.comment }); }}
@@ -223,18 +225,22 @@ interface ChangeFileProps {
   notes: DiffNote[];
   selection: RowSelection | undefined;
   draft: Draft | undefined;
+  /** A note to bring into view once its file draws it. */
+  reveal: string | undefined;
+  onRevealed: () => void;
   onToggle: () => void;
   onRetry: () => void;
-  onTap: (index: number, event: MouseEvent) => void;
+  onTap: (line: number) => void;
+  onSelectLines: (rows: RowSelection) => void;
   onDraft: (text: string) => void;
-  onAdd: (rows: readonly DiffRow[]) => void;
+  onAdd: (rows: DiffDocument["lines"]) => void;
   onCancel: () => void;
   onEdit: (note: DiffNote) => void;
   onSave: () => void;
   onRemove: (id: string) => void;
 }
 
-function ChangeFile({ entry, view, notes, selection, draft, onToggle, onRetry, onTap, onDraft, onAdd, onCancel, onEdit, onSave, onRemove }: ChangeFileProps) {
+function ChangeFile({ entry, view, onToggle, ...body }: ChangeFileProps) {
   const headId = useId();
   const slash = entry.path.lastIndexOf("/", entry.path.length - 2);
   const folder = entry.path.slice(0, slash + 1);
@@ -249,68 +255,47 @@ function ChangeFile({ entry, view, notes, selection, draft, onToggle, onRetry, o
           {folder && <span className="change-folder">{folder}</span>}<span className="change-name">{name}</span>
         </span>
         <span className="change-facts">
-          {notes.length > 0 && <span className="change-noted">{notes.length === 1 ? "1 note" : `${notes.length} notes`}</span>}
+          {body.notes.length > 0 && <span className="change-noted">{body.notes.length === 1 ? "1 note" : `${body.notes.length} notes`}</span>}
           <span>{entry.diffable ? `${STATE_LABEL[entry.state]}${entry.staged ? ", staged" : ""}` : "Untracked folder, no diff"}</span>
         </span>
       </button>
     </h3>
-    {open && <FileBody diff={view.diff} notes={notes} selection={selection} draft={draft} onRetry={onRetry} onTap={onTap}
-      onDraft={onDraft} onAdd={onAdd} onCancel={onCancel} onEdit={onEdit} onSave={onSave} onRemove={onRemove} />}
+    {open && <FileBody path={entry.path} diff={view.diff} {...body} />}
   </section>;
 }
 
-function FileBody({ diff, notes, selection, draft, onRetry, onTap, onDraft, onAdd, onCancel, onEdit, onSave, onRemove }:
-  Omit<ChangeFileProps, "entry" | "view" | "onToggle"> & { diff: Load<FileDiff> | undefined }) {
-  const [shown, setShown] = useState(ROW_PAGE);
+function FileBody({ path, diff, notes, selection, draft, reveal, onRevealed, onRetry, onTap, onSelectLines, onDraft, onAdd, onCancel, onEdit, onSave, onRemove }:
+  Omit<ChangeFileProps, "entry" | "view" | "onToggle"> & { path: string; diff: Load<FileDiff> | undefined }) {
   const rows = diff?.type === "ready" ? diff.value.rows : undefined;
-  const placement = useMemo(() => rows ? placeNotes(rows, notes) : undefined, [rows, notes]);
+  const document = useMemo(() => rows && diffDocument(rows), [rows]);
+  const placement = useMemo(() => document ? placeNotes(document.lines, notes) : undefined, [document, notes]);
   if (!diff || diff.type === "loading") return <p className="change-message" role="status">Reading the diff…</p>;
   if (diff.type === "failed") return <div className="change-message" role="alert"><p>{diff.message}</p><button type="button" onClick={onRetry}>Try again</button></div>;
   const { value } = diff;
   if (value.binary) return <p className="change-message">A binary file. It has no lines to note.</p>;
-  if (!rows || !placement || !rows.some(isCodeRow)) return <p className="change-message">No line changes, such as a change to the file's mode only.</p>;
-  const [from, to] = selection ? selectionBounds(selection) : [-1, -1];
+  if (!document || !placement || document.lines.length === 0) return <p className="change-message">No line changes, such as a change to the file's mode only.</p>;
+  const bounds = selection ? selectionBounds(selection) : undefined;
   const card = (note: DiffNote) => draft?.type === "edit" && draft.id === note.id
     ? <NoteEditor key={note.id} range={noteRange(note.lines)} draft={draft} submit="Save note" onDraft={onDraft} onSubmit={onSave} onCancel={onCancel} />
     : <NoteCard key={note.id} note={note} onEdit={() => onEdit(note)} onRemove={() => onRemove(note.id)} />;
-  const selected = selection && linesOf(rows, selection);
+  const selected = selection && linesOf(document.lines, selection);
+  const blocks: DiffBlock[] = [];
+  if (bounds && draft?.type === "new" && selected) blocks.push({ key: "draft", line: bounds[1], node: <NoteEditor range={noteRange(selected)} draft={draft} submit="Add note"
+    hint={selected.length === 0 ? undefined : "Tap another line to stretch the selection."}
+    onDraft={onDraft} onSubmit={() => onAdd(document.lines)} onCancel={onCancel} /> });
+  for (const [line, ended] of [...placement.ends].sort(([a], [b]) => a - b)) {
+    for (const note of ended) blocks.push({ key: `note:${note.id}`, line, node: card(note) });
+  }
   return <div className="diff" data-selecting={selection ? true : undefined}>
     {placement.moved.length > 0 && <div className="diff-moved">
       <p className="change-message">The code under {placement.moved.length === 1 ? "this note" : "these notes"} changed after you wrote {placement.moved.length === 1 ? "it" : "them"}. {placement.moved.length === 1 ? "It still goes" : "They still go"} with your next message as written.</p>
       {placement.moved.map(card)}
     </div>}
-    {rows.slice(0, shown).map((row, index) => {
-      if (row.kind === "meta") return null;
-      const inSelection = index >= from && index <= to;
-      const ends = placement.ends.get(index);
-      return <div key={index} className="diff-chunk">
-        <DiffLine row={row} selected={inSelection} noted={placement.covered.has(index)} extending={!!selection && !inSelection}
-          onTap={(event) => onTap(index, event)} />
-        {index === to && draft?.type === "new" && selected && <NoteEditor range={noteRange(selected)} draft={draft} submit="Add note"
-          hint={selected.length === 0 ? undefined : "Tap another line to stretch the selection."}
-          onDraft={onDraft} onSubmit={() => onAdd(rows)} onCancel={onCancel} />}
-        {ends?.map(card)}
-      </div>;
-    })}
-    {rows.length > shown && <button type="button" className="diff-more" onClick={() => setShown((count) => count + ROW_PAGE)}>
-      Show {Math.min(ROW_PAGE, rows.length - shown).toLocaleString()} more lines</button>}
+    <Suspense fallback={<p className="change-message" role="status">Reading the diff…</p>}>
+      <DiffEditor path={path} document={document} covered={placement.covered} selected={bounds} blocks={blocks}
+        reveal={reveal && `note:${reveal}`} onRevealed={onRevealed} onTapLine={onTap} onSelectLines={onSelectLines} />
+    </Suspense>
     {value.truncated && <p className="change-message">Git stopped reading at 2 MB, so the end of this diff is not shown.</p>}
-  </div>;
-}
-
-function DiffLine({ row, selected, noted, extending, onTap }: { row: DiffRow; selected: boolean; noted: boolean; extending: boolean; onTap: (event: MouseEvent) => void }) {
-  if (!isCodeRow(row)) return <div className="diff-row" data-kind={row.kind}><span className="diff-text">{row.text}</span></div>;
-  const oldNumber = "oldLineNumber" in row ? row.oldLineNumber : undefined;
-  const newNumber = "newLineNumber" in row ? row.newLineNumber : undefined;
-  const where = row.kind === "remove" ? `removed line ${oldNumber}` : row.kind === "add" ? `added line ${newNumber}` : `line ${newNumber}`;
-  return <div className="diff-row" data-kind={row.kind} data-selected={selected || undefined} data-noted={noted || undefined} onClick={onTap}>
-    <button type="button" className="diff-gutter" aria-pressed={selected} aria-label={extending ? `Stretch the selection to ${where}` : `Select ${where}`}
-      // The row's click handles the press, so the button's own click does not count twice.
-      onClick={(event) => { event.stopPropagation(); onTap(event); }}>
-      <span>{oldNumber}</span><span>{newNumber}</span>
-    </button>
-    <span className="diff-sign" aria-hidden>{row.kind === "add" ? "+" : row.kind === "remove" ? "−" : ""}</span>
-    <span className="diff-text">{row.text}</span>
   </div>;
 }
 

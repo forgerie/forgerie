@@ -13,36 +13,18 @@ import { TreeOpener } from "../src/ui/SessionTreeNavigator";
 import { createNoteTray } from "../src/changes/noteTray";
 import { entriesOf, type ChangesSource } from "../src/changes/changesSource";
 import { linesOf, type DiffNote } from "../src/changes/diffNotes";
-import { parseUnifiedDiff } from "../src/changes/unifiedDiff";
+import { parseUnifiedDiff, type CodeRow } from "../src/changes/unifiedDiff";
+import { diffDocument } from "../src/changes/diffDocument";
 import "../src/ui/theme.css";
+import loginFormDiff from "./changes-fixtures/LoginForm.tsx.diff?raw";
+import sessionDiff from "./changes-fixtures/session.ts.diff?raw";
 
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "changes";
 
+// Full-context diffs, as the server sends them for `/git/diff?context=full`.
 const DIFFS: Record<string, string> = {
-  "src/auth/LoginForm.tsx": [
-    "@@ -18,10 +18,14 @@ export function LoginForm({ onSubmit }: LoginFormProps) {",
-    "   const [email, setEmail] = useState(\"\");",
-    "   const [password, setPassword] = useState(\"\");",
-    "   const [error, setError] = useState<string>();",
-    "-  const submit = (event: FormEvent) => {",
-    "+  const submit = async (event: FormEvent) => {",
-    "     event.preventDefault();",
-    "-    onSubmit({ email, password });",
-    "+    if (password.trim() === \"\") {",
-    "+      setError(\"Enter your password.\");",
-    "+      return;",
-    "+    }",
-    "+    await onSubmit({ email, password });",
-    "   };",
-    "   return <form onSubmit={submit} noValidate>",
-    "     <EmailField value={email} onChange={setEmail} />",
-    "     <PasswordField value={password} onChange={setPassword} invalid={error !== undefined} />",
-    "@@ -61,3 +65,4 @@ export function LoginForm({ onSubmit }: LoginFormProps) {",
-    "     </form>;",
-    " }",
-    "+// The SSO callback calls validatePassword directly and must keep accepting an empty value.",
-    " ",
-  ].join("\n"),
+  "src/auth/LoginForm.tsx": loginFormDiff,
+  "src/auth/session.ts": sessionDiff,
   "src/auth/LoginForm.test.tsx": [
     "@@ -0,0 +1,9 @@",
     "+import { render, screen } from \"@testing-library/react\";",
@@ -55,17 +37,6 @@ const DIFFS: Record<string, string> = {
     "+  expect(onSubmit).not.toHaveBeenCalled();",
     "+});",
   ].join("\n"),
-  "src/auth/session.ts": [
-    "@@ -40,7 +40,7 @@ export const SESSION_COOKIE = \"sid\";",
-    " export function cookieOptions(secure: boolean): CookieOptions {",
-    "   return {",
-    "     httpOnly: true,",
-    "-    sameSite: \"lax\",",
-    "+    sameSite: \"strict\",",
-    "     secure,",
-    "     maxAge: 60 * 60 * 24 * 14,",
-    "   };",
-  ].join("\n"),
 };
 const FILES = scenario === "changes-empty" ? [] : [
   { path: "src/auth/LoginForm.tsx", index: "unmodified" as const, workingTree: "modified" as const },
@@ -77,15 +48,20 @@ const source: ChangesSource = {
   changes: async () => ({ isGitRepo: true, branch: "fix/empty-password", entries: entriesOf(FILES) }),
   diff: async (entry) => ({ ...parseUnifiedDiff(DIFFS[entry.path] ?? ""), truncated: false }),
 };
-function note(id: string, path: string, from: number, to: number, comment: string): DiffNote {
-  const { rows } = parseUnifiedDiff(DIFFS[path] ?? "");
-  return { id, path, staged: path.endsWith(".test.tsx"), comment, lines: linesOf(rows, { anchor: from, focus: to }) };
+/** A note from the first line `first` matches to the first line after it that `last` matches. */
+function note(id: string, path: string, first: (line: CodeRow) => boolean, last: (line: CodeRow) => boolean, comment: string): DiffNote {
+  const { lines } = diffDocument(parseUnifiedDiff(DIFFS[path] ?? "").rows);
+  const anchor = lines.findIndex(first);
+  const focus = lines.findIndex((line, index) => index >= anchor && last(line));
+  return { id, path, staged: path.endsWith(".test.tsx"), comment, lines: linesOf(lines, { anchor, focus }) };
 }
+const newLine = (number: number) => (line: CodeRow) => line.kind !== "remove" && line.newLineNumber === number;
+const oldLine = (number: number) => (line: CodeRow) => line.kind !== "add" && line.oldLineNumber === number;
 const seeded: DiffNote[] = scenario === "changes-empty" ? [] : [
-  note("n1", "src/auth/LoginForm.tsx", 7, 11, "Trim before the check, but send the untrimmed password. Some users have spaces at the end on purpose."),
+  note("n1", "src/auth/LoginForm.tsx", newLine(24), newLine(27), "Trim before the check, but send the untrimmed password. Some users have spaces at the end on purpose."),
   ...scenario === "changes-tray" ? [
-    note("n2", "src/auth/session.ts", 4, 5, "Revert this. Strict breaks the SSO redirect back to us."),
-    note("n3", "src/auth/LoginForm.test.tsx", 4, 9, "Also cover a password of only spaces."),
+    note("n2", "src/auth/session.ts", oldLine(12), newLine(12), "Revert this. Strict breaks the SSO redirect back to us."),
+    note("n3", "src/auth/LoginForm.test.tsx", newLine(4), newLine(9), "Also cover a password of only spaces."),
   ] : [],
 ];
 
@@ -103,19 +79,26 @@ function Preview() {
   // The selecting scenario needs two taps and some typing to reach its state.
   useEffect(() => {
     if (scenario !== "changes-selecting") return;
-    const press = (label: string) => document.querySelector<HTMLButtonElement>(`.changes-dialog button[aria-label="${label}"]`)?.click();
+    // A tap on a line's numbers. The editor draws only lines near the window, so bring the file's end in first.
+    const tapNumbers = (line: number) => {
+      const cell = [...document.querySelectorAll<HTMLElement>(".changes-dialog .cm-diff-numbers .cm-gutterElement")]
+        .find((element) => element.querySelector(".cm-diff-new")?.textContent === String(line));
+      cell?.querySelector<HTMLElement>("[data-line]")?.click();
+    };
     const timer = setTimeout(() => {
-      press("Select line 65");
+      document.querySelector(".change-file:has(.change-path[title='src/auth/LoginForm.tsx']) .diff")?.scrollIntoView({ block: "end" });
       setTimeout(() => {
-        press("Stretch the selection to added line 67");
+        tapNumbers(50);
+        // The second tap stretches the selection the first one drew.
+        setTimeout(() => tapNumbers(51), 50);
         setTimeout(() => {
           const field = document.querySelector<HTMLTextAreaElement>(".note-editor textarea");
           if (!field) return;
-          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "Move this comment to validatePassword, where the rule lives.");
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "Say this where the SSO callback calls it, not here.");
           field.dispatchEvent(new Event("input", { bubbles: true }));
           field.closest(".note-editor")?.scrollIntoView({ block: "center" });
-        }, 50);
-      }, 50);
+        }, 150);
+      }, 150);
     }, 300);
     return () => clearTimeout(timer);
   }, []);

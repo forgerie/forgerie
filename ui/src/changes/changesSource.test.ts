@@ -44,7 +44,7 @@ describe("changes source", () => {
     expect(diff.truncated).toBe(true);
     expect(diff.rows.map((row) => row.kind)).toEqual(["hunk", "remove", "add"]);
     expect(paths).toEqual(["/api/projects", "/api/projects/p/workspaces", "/api/projects/p/workspaces/w/git/status",
-      "/api/projects/p/workspaces/w/git/diff?path=a.ts&staged=true"]);
+      "/api/projects/p/workspaces/w/git/diff?path=a.ts&staged=true&context=full"]);
   });
 
   it("says plainly when the session's folder is not a registered workspace", async () => {

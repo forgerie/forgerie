@@ -73,7 +73,8 @@ export function createChangesSource(cwd: string, request: ChangesRequest): Chang
       return { isGitRepo: status.isGitRepo, ...(status.branch ? { branch: status.branch } : {}), entries: entriesOf(status.files) };
     },
     async diff(entry, signal) {
-      const params = new URLSearchParams({ path: entry.path, staged: String(entry.staged) });
+      // The whole file around its changes, so the review can unfold any unchanged code. A server without this option sends git's usual hunks.
+      const params = new URLSearchParams({ path: entry.path, staged: String(entry.staged), context: "full" });
       const result = await read(`${await root(signal)}/diff?${params}`, diffSchema, signal);
       return { ...parseUnifiedDiff(result.diff), truncated: result.truncated };
     },

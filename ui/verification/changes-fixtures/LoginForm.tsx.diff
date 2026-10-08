@@ -1,0 +1,61 @@
+diff --git a/src/auth/LoginForm.tsx b/src/auth/LoginForm.tsx
+index 4ae088d9..8264d24b 100644
+--- a/src/auth/LoginForm.tsx
++++ b/src/auth/LoginForm.tsx
+@@ -1,49 +1,54 @@
+ import { useState, type FormEvent } from "react";
+ import { EmailField } from "./EmailField";
+ import { PasswordField } from "./PasswordField";
+ import { SubmitButton } from "../ui/SubmitButton";
+ 
+ /** What the form hands to its owner once the reader presses Sign in. */
+ export interface Credentials {
+   email: string;
+   password: string;
+ }
+ 
+ export interface LoginFormProps {
+   onSubmit: (credentials: Credentials) => Promise<void> | void;
+   /** Shown above the fields, such as "Your session ended." */
+   notice?: string;
+ }
+ 
+ export function LoginForm({ onSubmit, notice }: LoginFormProps) {
+   const [email, setEmail] = useState("");
+   const [password, setPassword] = useState("");
+   const [error, setError] = useState<string>();
+-  const submit = (event: FormEvent) => {
++  const submit = async (event: FormEvent) => {
+     event.preventDefault();
+-    onSubmit({ email, password });
++    if (password.trim() === "") {
++      setError("Enter your password.");
++      return;
++    }
++    await onSubmit({ email, password });
+   };
+   return <form onSubmit={submit} noValidate>
+     {notice && <p className="login-notice">{notice}</p>}
+     <EmailField value={email} onChange={setEmail} />
+     <PasswordField value={password} onChange={setPassword} invalid={error !== undefined} />
+     {error && <p className="login-error" role="alert">{error}</p>}
+     <SubmitButton>Sign in</SubmitButton>
+   </form>;
+ }
+ 
+ /**
+  * The SSO callback signs a reader in without this form. It still checks the
+  * address, because the identity provider lets a user type one by hand.
+  */
+ export function validateEmail(value: string): string | undefined {
+   const trimmed = value.trim();
+   if (trimmed === "") return "Enter your email address.";
+   if (!trimmed.includes("@")) return "An email address has an @ in it.";
+   return undefined;
+ }
+ 
++// The SSO callback calls validatePassword directly and must keep accepting an empty value.
+ export function validatePassword(value: string): string | undefined {
+   if (value.length > 256) return "Use at most 256 characters.";
+   return undefined;
+ }
