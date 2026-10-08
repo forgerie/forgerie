@@ -273,7 +273,22 @@ const shellMessages = (live: boolean): TranscriptMessage[] => [
   shellRow("shell-5", { command: "git log --oneline -30", excludeFromContext: false,
     result: live ? { type: "running", output: gitLog.split("\n").slice(0, 12).join("\n") + "\n" } : shellDone(`${gitLog}\n`, 0) }),
 ];
+const summaryText = ["## Goal", "- Make the session picker show which sessions wait for a reply.",
+  "- Keep the picker readable on the folded cover screen.", "", "## Constraints & Preferences",
+  ...Array.from({ length: 14 }, (_, index) => `- Constraint ${index + 1}: keep each change small, typed, and covered by a test before it lands on \`main\`.`),
+  "", "## Progress", "### Done", ...Array.from({ length: 18 }, (_, index) => `- [x] Step ${index + 1} landed with its test and a posture capture.`),
+  "", "### Next", "- Measure the Tab Ultra 11 viewport.", "", "```ts", "const waiting = sessions.filter((session) => session.needsReply);", "```"].join("\n");
+// A compaction seam and a branch summary between turns. `summary-open` opens the compaction and scrolls it to the top.
+const summaryMessages: TranscriptMessage[] = [
+  say("before-q", "user", "Plan the picker change."), say("before-a", "assistant", "The picker reads `needsReply` from the status read."),
+  { id: "compacted", role: "system", summary: "compaction", parts: [{ type: "text", text: summaryText }] },
+  say("after-q", "user", "Continue with the folded layout."),
+  say("after-a", "assistant", "The folded layout keeps the second line. I moved the unread dot into the title row."),
+  { id: "branch", role: "system", summary: "branch", parts: [{ type: "text", text: "Tried a separate waiting list. It hid sessions the user had pinned." }] },
+  say("last-a", "assistant", "Back on the main branch with the dot in the title row."),
+];
 const scenarios: Record<string, TranscriptMessage[]> = {
+  summary: summaryMessages, "summary-open": summaryMessages,
   shell: shellMessages(false), "shell-running": shellMessages(true), "shell-blocked": shellMessages(true),
   "shell-agent": [...shellMessages(false), ...toolMessages(true).slice(0, 2)], "shell-ask": shellMessages(false),
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
@@ -298,6 +313,16 @@ function Preview() {
   const [compaction, setCompaction] = useState<CompactionState>(compactionScenarios[scenario] ?? idleCompaction);
   // `skills-open` opens every skill record for screenshots. `skills-invocation`
   // opens the first command and scrolls it to the top of the transcript.
+  useEffect(() => {
+    if (scenario !== "summary-open") return;
+    const timer = setTimeout(() => {
+      const row = document.querySelector<HTMLDetailsElement>("details.history-summary");
+      if (!row) return;
+      row.open = true;
+      setTimeout(() => row.scrollIntoView({ block: "start" }), 200);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, []);
   useEffect(() => {
     if (scenario !== "skills-open" && scenario !== "skills-invocation") return;
     const timer = setTimeout(() => {

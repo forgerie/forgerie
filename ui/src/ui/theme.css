@@ -164,6 +164,23 @@ button:disabled { cursor: default; opacity: 0.4; }
 .skill-location code { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
 .message-system { color: var(--muted-foreground); font-size: var(--small-text); padding-inline-start: var(--space-3); border-inline-start: 2px solid var(--line-focus); }
 .system-label { display: block; font-weight: 500; margin-block-end: var(--space-1); }
+/* A history summary is a seam in the thread: a rule with the trace grammar's
+   label on it. Its text opens below at the column's width and scrolls inside
+   a share of the pane, so a long summary never pushes the thread away. */
+.history-summary-line { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); cursor: pointer; list-style: none; border-radius: var(--radius-document); font-family: var(--code-font); font-size: 0.75rem; font-variant-ligatures: none; color: var(--muted-foreground); }
+.history-summary-line::-webkit-details-marker { display: none; }
+.history-summary-line::before, .history-summary-line::after { content: ""; flex: 1 1 var(--space-4); min-inline-size: var(--space-4); border-block-start: 1px solid var(--line); }
+.history-summary-line:hover { color: var(--foreground); }
+.history-summary-line:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
+.history-summary[open] > summary .trace-marker { transform: rotate(90deg); }
+.history-summary-label { flex: 0 1 auto; min-inline-size: 0; overflow-wrap: anywhere; text-align: center; }
+.history-summary-body { margin-block-start: var(--space-2); min-inline-size: 0; }
+.history-summary-text { max-block-size: min(32rem, 55cqb); overflow-y: auto; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-document); background: var(--tint-surface); font-size: var(--small-text); }
+/* A summary is reference text: its headings step down so they do not outrank the thread's replies. */
+.history-summary-text .markdown :is(h1, h2) { font-size: 1rem; margin-block-start: var(--space-4); }
+.history-summary-text .markdown :is(h3, h4) { font-size: var(--small-text); }
+.history-summary-text .markdown :is(h1, h2, h3, h4, p, ul, ol):first-child { margin-block-start: 0; }
+.history-summary-text:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
 /* Action bar from messages.tsx and action-bar.tsx: mt-2, gap-1.5, and
    actionButtonClass (p-1 around a 16px icon, muted-foreground/70). */
 .message-actions { display: flex; align-items: center; gap: 0.375rem; margin-block-start: var(--space-2); }

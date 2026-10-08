@@ -14,6 +14,17 @@ const tools = (state: Transcript) => state.messages.flatMap((message) => message
 const apply = (state: Transcript, ...events: SessionEvent[]) => events.reduce(reduceEvent, state);
 
 describe("transcript history", () => {
+  it("marks compaction and branch summaries and keeps only their summary text", () => {
+    const state = fromHistory([user("before"),
+      { role: "system", source: "compaction", content: "Compacted history:\n\n## Goal\n- Ship it" },
+      { role: "system", source: "branch_summary", content: "Branch summary:\n\nTried sessions." },
+      { role: "system", content: "Plain system text" }]);
+    expect(state.messages.map((message) => [message.summary, messageText(message)])).toEqual([
+      [undefined, "before"], ["compaction", "## Goal\n- Ship it"], ["branch", "Tried sessions."], [undefined, "Plain system text"]]);
+    expect(convertMessage(state.messages[1]!)).toMatchObject({ role: "system", metadata: { custom: { summary: "compaction" } } });
+    expect(historySchema.parse({ messages: [{ role: "system", source: "compaction", content: "x" }], start: 0, total: 1 })
+      .messages[0]?.source).toBe("compaction");
+  });
   it("keeps image-only user messages and converts their persisted images into attachments", () => {
     const state = fromHistory([{ role: "user", timestamp: 1, content: [{ type: "image", mimeType: "image/png", data: "aGk=" }] }]);
     expect(state.messages).toHaveLength(1);

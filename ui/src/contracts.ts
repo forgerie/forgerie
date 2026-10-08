@@ -35,6 +35,8 @@ export const piMessageSchema = z.object({
   truncated: z.boolean().optional(),
   fullOutputPath: z.string().optional(),
   excludeFromContext: z.boolean().optional(),
+  // Server-made system messages only: `compaction` or `branch_summary` marks a summary of earlier history.
+  source: z.string().optional(),
 });
 export type PiMessage = z.infer<typeof piMessageSchema>;
 export const sessionSchema = z.object({

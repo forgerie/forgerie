@@ -1,5 +1,5 @@
 import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
-import { outputOf, partsOf, type PiMessage, type SessionEvent } from "./contracts";
+import { outputOf, partsOf, textOf, type PiMessage, type SessionEvent } from "./contracts";
 import { imageSource } from "./images";
 import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
 import { parseSkillInvocation, type SkillInvocation } from "./skills";
@@ -34,7 +34,11 @@ export interface TranscriptMessage {
   key?: string;
   provisional?: boolean;
   failure?: "error" | "cancelled";
+  /** A system message that summarizes earlier history. Its text is the summary alone. */
+  summary?: HistorySummaryKind;
 }
+/** Compaction replaces earlier messages with a summary; a branch summary describes the branch the session left. */
+export type HistorySummaryKind = "compaction" | "branch";
 export interface Transcript {
   messages: readonly TranscriptMessage[];
   liveId?: string;
@@ -78,7 +82,20 @@ function skillOf(message: PiMessage): { skill: SkillRecord; parts: TranscriptPar
   const { argument, ...skill } = invocation;
   return { skill, parts: argument === undefined ? [] : [{ type: "text", text: argument }] };
 }
+// The server prefixes each summary with a heading line. The marker names the kind, so only the summary stays.
+const summarySources: Record<string, { kind: HistorySummaryKind; heading: RegExp }> = {
+  compaction: { kind: "compaction", heading: /^Compacted history:\s*/u },
+  branch_summary: { kind: "branch", heading: /^Branch summary:\s*/u },
+};
+function asSummary(message: PiMessage, id: string): TranscriptMessage | undefined {
+  const source = message.role === "system" && message.source !== undefined ? summarySources[message.source] : undefined;
+  if (!source) return undefined;
+  const text = textOf(message).replace(source.heading, "").trim();
+  return { id, role: "system", parts: text ? [{ type: "text", text }] : [], summary: source.kind };
+}
 function asMessage(message: PiMessage, id: string): TranscriptMessage | undefined {
+  const summary = asSummary(message, id);
+  if (summary) return summary;
   const role = message.role;
   if (role === "bashExecution") return { id, role: "shell", parts: [{ type: "shell", run: runFromRecord(message) }], key: keyOf(message) };
   if (role !== "user" && role !== "assistant" && role !== "system") return undefined;
@@ -411,12 +428,16 @@ export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
 }
 /** UI data of a shell row, carried as the system message's custom metadata. */
 export type ShellArtifact = { shell: ShellRun };
+/** UI data of a history summary row, carried as the system message's custom metadata. */
+export type SummaryArtifact = { summary: HistorySummaryKind };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role === "shell") {
     const run = shellRunOf(message)!;
     return { id: message.id, role: "system", content: [{ type: "text", text: shellText(run) }],
       metadata: { custom: { shell: run } satisfies ShellArtifact } };
   }
+  if (message.summary) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { summary: message.summary } satisfies SummaryArtifact } };
   if (message.role !== "assistant") {
     return { id: message.id, role: message.role,
       content: [...(message.skill ? [{ type: "data-skill" as const, data: message.skill }] : []), { type: "text", text: messageText(message) }],

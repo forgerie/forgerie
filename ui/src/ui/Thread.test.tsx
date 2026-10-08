@@ -453,3 +453,24 @@ describe("Skill records", () => {
     expect(document.querySelector("details.chain-of-thought details.tool-call > summary .trace-text")?.textContent).toBe("ran read docs/SKILL-notes.md");
   });
 });
+
+describe("History summaries", () => {
+  const summaryText = "## Goal\n\n- Ship the Studio spike\n\n" + "Long detail. ".repeat(400);
+  it("shows a compaction as one closed divider line and opens its summary as Markdown on request", async () => {
+    await render({ messages: [answer("Before", "a1"),
+      { id: "s", role: "system", summary: "compaction", parts: [{ type: "text", text: summaryText }] }, answer("After", "a2")] });
+    const row = document.querySelector<HTMLDetailsElement>(".message-summary details.history-summary")!;
+    expect(row.querySelector("summary")?.textContent).toBe(">earlier messages compacted into a summary");
+    expect(row.open).toBe(false);
+    expect(document.body.textContent).not.toContain("Ship the Studio spike");
+    expect(document.querySelector(".message-system")).toBeNull();
+    await act(async () => { row.open = true; row.dispatchEvent(new Event("toggle")); });
+    expect(row.querySelector(".history-summary-text h2")?.textContent).toBe("Goal");
+    expect(row.querySelector('button[aria-label="Copy summary"]')).not.toBeNull();
+  });
+  it("names a branch summary apart from a compaction", async () => {
+    await render({ messages: [{ id: "b", role: "system", summary: "branch", parts: [{ type: "text", text: "Tried sessions." }] }] });
+    expect(document.querySelector(".message-summary")?.getAttribute("data-summary")).toBe("branch");
+    expect(document.querySelector(".history-summary-label")?.textContent).toBe("summary of the branch left behind");
+  });
+});

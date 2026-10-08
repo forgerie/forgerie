@@ -1,6 +1,7 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
-import { artifactDoor, type ShellArtifact } from "../transcript";
+import { useState } from "react";
+import { artifactDoor, type HistorySummaryKind, type ShellArtifact, type SummaryArtifact } from "../transcript";
 import { SessionDoorCall } from "./SessionDoor";
 import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
@@ -89,12 +90,50 @@ function isShellArtifact(value: Record<string, unknown> | undefined): value is S
   const shell = value?.["shell"];
   return typeof shell === "object" && shell !== null && "result" in shell;
 }
-/** System messages carry Pi system text or a user's `!` command, which selects its own view. */
+function isSummaryArtifact(value: Record<string, unknown> | undefined): value is SummaryArtifact {
+  return value?.["summary"] === "compaction" || value?.["summary"] === "branch";
+}
+const summaryLabels: Record<HistorySummaryKind, string> = {
+  compaction: "earlier messages compacted into a summary",
+  branch: "summary of the branch left behind",
+};
+const summaryParts = { Text: MarkdownText };
+
+function SummaryCopy() {
+  const aui = useAui();
+  return <CopyButton label="Copy summary" getText={() => aui.message.getCopyText()} />;
+}
+
+/**
+ * A summary that stands in for earlier history. It reads as a divider in the
+ * thread, and its text opens on request. A summary can run to many thousands
+ * of characters, so the body renders only while open and scrolls on its own.
+ */
+function HistorySummary({ kind }: { kind: HistorySummaryKind }) {
+  const [open, setOpen] = useState(false);
+  return <MessagePrimitive.Root className="message message-summary" data-role="system" data-summary={kind}>
+    <details className="history-summary" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="history-summary-line">
+        <span className="trace-marker" aria-hidden>{">"}</span>
+        <span className="history-summary-label">{summaryLabels[kind]}</span>
+      </summary>
+      {open && <div className="history-summary-body">
+        <div className="history-summary-text message-text" tabIndex={0} role="region" aria-label="Summary text">
+          <MessagePrimitive.Parts components={summaryParts} />
+        </div>
+        <div className="message-actions"><SummaryCopy /></div>
+      </div>}
+    </details>
+  </MessagePrimitive.Root>;
+}
+
+/** System messages carry Pi system text, a history summary, or a user's `!` command; each selects its own view. */
 export function SystemMessage() {
   const custom = useAuiState((s) => s.message.metadata.custom);
   if (isShellArtifact(custom)) return <MessagePrimitive.Root className="message message-shell" data-role="shell">
     <ShellRun run={custom.shell} />
   </MessagePrimitive.Root>;
+  if (isSummaryArtifact(custom)) return <HistorySummary kind={custom.summary} />;
   return <MessagePrimitive.Root className="message message-system" data-role="system">
     <span className="system-label">System</span>
     <div className="message-text"><MessagePrimitive.Parts /></div>
