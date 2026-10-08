@@ -83,7 +83,7 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     expect(hub.globalEvents.some((event) => event.type === "session.created" && event.session.id === "session-1" && event.session.cwd === "/workspace")).toBe(true);
 
     await service.dispose();
-    expect(fake.calls.abort).toBe(1);
+    expect(fake.calls.abort).toBe(0);
     expect(fake.calls.dispose).toBe(1);
   });
 
@@ -387,7 +387,7 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
 
     expect(settledWhileOpening).toBe(false);
     expect(service.activeCount()).toBe(0);
-    expect(fake.calls.abort).toBe(1);
+    expect(fake.calls.abort).toBe(0);
     expect(fake.calls.dispose).toBe(1);
   });
 

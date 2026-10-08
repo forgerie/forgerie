@@ -6,8 +6,6 @@ import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { clampThinkingLevel, type ImageContent } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import {
-  createAgentSessionFromServices,
-  createAgentSessionRuntime,
   createAgentSessionServices,
   createEditToolDefinition,
   defineTool,
@@ -26,6 +24,8 @@ import {
   type ResourceDiagnostic,
 } from "@earendil-works/pi-coding-agent";
 import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
+import { DurableAgentSession } from "./durableAgentSession.js";
+import { DurableSessionRuntime, type DurableRuntimeFactory, type DurableRuntimeResult } from "./durableSessionRuntime.js";
 import { projectBrowserMessage } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
@@ -753,14 +753,14 @@ type PiWebRuntimeFactoryOptions = Parameters<CreateAgentSessionRuntimeFactory>[0
 
 type PiWebCreateAgentSessionRuntimeFactory = (
   options: PiWebRuntimeFactoryOptions
-) => ReturnType<CreateAgentSessionRuntimeFactory>;
+) => Promise<DurableRuntimeResult>;
 
 type CreateAgentRuntime = (createRuntime: PiWebCreateAgentSessionRuntimeFactory, options: CreateAgentRuntimeOptions) => Promise<PiSessionRuntime>;
 
 function defaultCreateAgentRuntime(createRuntime: PiWebCreateAgentSessionRuntimeFactory, options: CreateAgentRuntimeOptions): Promise<PiSessionRuntime> {
   if (!(options.sessionManager instanceof SessionManager)) throw new Error("Default runtime creation requires an SDK SessionManager");
   const runtimeFactory = createRuntimeWithOneShotSessionOptions(createRuntime, options.initialModel, options.initialThinkingLevel, options.delegationToolsEnabled, options.scopedModels);
-  return createAgentSessionRuntime(runtimeFactory, {
+  return DurableSessionRuntime.open(runtimeFactory, {
     cwd: options.cwd,
     agentDir: options.agentDir,
     sessionManager: options.sessionManager,
@@ -773,7 +773,7 @@ function createRuntimeWithOneShotSessionOptions(
   initialThinkingLevel: ClientThinkingLevel | undefined,
   delegationToolsEnabled: boolean,
   scopedModels: readonly ScopedAgentModel[],
-): CreateAgentSessionRuntimeFactory {
+): DurableRuntimeFactory {
   // These inputs belong only to the session being opened. A later runtime
   // replacement resolves its own model and delegation capability, and restores
   // the thinking level from the existing session file.
@@ -873,19 +873,17 @@ function createDefaultRuntimeFactory(
         );
       },
     });
-    const result = await createAgentSessionFromServices({
+    const session = await DurableAgentSession.open({
       services,
       sessionManager,
       customTools,
-      // Agent questions use ask_user. Keep extension hooks and their UI dialogs,
-      // but exclude the competing tool from the registry, including on reload.
-      excludeTools: ["question"],
+      // The adapter excludes question on initial registration and reload.
       ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
-      ...(initialModel === undefined ? {} : { model: initialModel }),
-      ...(initialThinkingLevel === undefined ? {} : { thinkingLevel: initialThinkingLevel }),
-      ...(scopedModels === undefined || scopedModels.length === 0 ? {} : { scopedModels: [...scopedModels] }),
+      ...(initialModel === undefined ? {} : { initialModel }),
+      ...(initialThinkingLevel === undefined ? {} : { initialThinkingLevel }),
+      ...(scopedModels === undefined || scopedModels.length === 0 ? {} : { scopedModels }),
     });
-    return { ...result, services, diagnostics: services.diagnostics };
+    return { session, services, diagnostics: services.diagnostics };
   };
 }
 
@@ -1363,11 +1361,8 @@ export class PiSessionService implements SessionRouteService {
       active.unsubscribe();
       active.runtime.setRebindSession(undefined);
       this.workspaceActivity?.removeSession(active.runtime.session.sessionId, active.runtime.session.sessionManager.getCwd());
-      try {
-        await this.abortSessionOperations(active.runtime.session);
-      } finally {
-        await active.runtime.dispose();
-      }
+      // Daemon shutdown closes journals and leaves unfinished work resumable. Stop remains an explicit abort operation.
+      await active.runtime.dispose();
     }));
     await this.sessionManager.flushSessionNames?.();
     await this.publishUnreadMutations([]);

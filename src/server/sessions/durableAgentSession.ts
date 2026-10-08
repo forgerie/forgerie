@@ -1,0 +1,458 @@
+import { readFile } from "node:fs/promises";
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent } from "@earendil-works/pi-ai";
+import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult } from "@earendil-works/pi-durable";
+import type { PiAgentSession } from "./piSessionService.js";
+import { DurableSessionJournal } from "./durableSessionJournal.js";
+import { DurableSdkTools } from "./durableSdkTools.js";
+import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
+
+export interface DurableAgentSessionOptions {
+  services: AgentSessionServices;
+  sessionManager: SessionManager;
+  customTools?: readonly ToolDefinition[];
+  initialModel?: NonNullable<PiAgentSession["model"]>;
+  initialThinkingLevel?: PiAgentSession["thinkingLevel"];
+  scopedModels?: PiAgentSession["scopedModels"];
+  sessionStartEvent?: SessionStartEvent;
+}
+
+/** SDK resources and extension hooks around a Durable execution engine. No AgentSession is constructed. */
+export class DurableAgentSession implements PiAgentSession {
+  readonly modelRuntime;
+  readonly settingsManager;
+  readonly resourceLoader;
+  readonly sessionManager;
+  readonly scopedModels;
+  private runner: ExtensionRunner;
+  readonly agent;
+  model: PiAgentSession["model"];
+  thinkingLevel: PiAgentSession["thinkingLevel"];
+  private readonly registry = createRegistry();
+  private tools: DurableSdkTools;
+  private errorListener: ((error: { extensionPath: string; event: string; error: string; stack?: string }) => void) | undefined;
+  private journalValue: DurableSessionJournal | undefined;
+  private stream: AgentEventStream | undefined;
+  private readonly listeners = new Set<(event: unknown) => void>();
+  private partial: AssistantMessage | undefined;
+  private streaming = false;
+  private compacting = false;
+  private bashController: AbortController | undefined;
+  private compactionTask: TaskId<CompactionResult> | undefined;
+  private queued: readonly InboxItem[] = [];
+  private mutation: Promise<void> = Promise.resolve();
+  private systemPrompt = "";
+  private basePrompt: BuildSystemPromptOptions;
+  private closed = false;
+  private bound = false;
+
+  private constructor(private readonly options: DurableAgentSessionOptions) {
+    const { services, sessionManager } = options;
+    this.modelRuntime = services.modelRuntime;
+    this.settingsManager = services.settingsManager;
+    this.resourceLoader = services.resourceLoader;
+    this.sessionManager = sessionManager;
+    this.scopedModels = options.scopedModels ?? [];
+    const saved = sessionManager.buildSessionContext();
+    const defaultProvider = this.settingsManager.getDefaultProvider();
+    const defaultModel = this.settingsManager.getDefaultModel();
+    this.model = options.initialModel
+      ?? (saved.model === null ? undefined : this.modelRuntime.getModel(saved.model.provider, saved.model.modelId))
+      ?? (defaultProvider === undefined || defaultModel === undefined ? undefined : this.modelRuntime.getModel(defaultProvider, defaultModel))
+      ?? this.modelRuntime.getAvailableSnapshot()[0];
+    const savedLevel = this.validThinkingLevel(saved.thinkingLevel);
+    const level = options.initialThinkingLevel ?? savedLevel ?? this.settingsManager.getDefaultThinkingLevel() ?? "off";
+    this.thinkingLevel = this.model === undefined ? "off" : clampThinkingLevel(this.model, level);
+    const extensions = this.resourceLoader.getExtensions();
+    this.runner = new ExtensionRunner(extensions.extensions, extensions.runtime, services.cwd, sessionManager, new ModelRegistry(this.modelRuntime));
+    this.tools = new DurableSdkTools({ cwd: services.cwd, settings: this.settingsManager, runner: this.extensionRunner, customTools: options.customTools ?? [],
+      beforeCall: () => this.journal.project(), emit: (event) => { this.emit(event); } });
+    this.basePrompt = this.promptOptions();
+    this.agent = { streamFunction: this.modelRuntime.streamSimple.bind(this.modelRuntime) };
+    this.bindCore();
+  }
+
+  static async open(options: DurableAgentSessionOptions): Promise<DurableAgentSession> {
+    const session = new DurableAgentSession(options);
+    try {
+      await session.initialize();
+      return session;
+    } catch (error) {
+      await session.stream?.stop();
+      await session.journalValue?.close();
+      session.extensionRunner.invalidate("Durable session initialization failed");
+      throw error;
+    }
+  }
+
+  get extensionRunner(): ExtensionRunner { return this.runner; }
+  get journal(): DurableSessionJournal {
+    if (this.journalValue === undefined) throw new Error("Durable session has not opened");
+    return this.journalValue;
+  }
+  get sessionId(): string { return this.sessionManager.getSessionId(); }
+  get sessionFile(): string | undefined { return this.sessionManager.getSessionFile(); }
+  get sessionName(): string | undefined { return this.sessionManager.getSessionName(); }
+  get messages() { return this.sessionManager.buildSessionContext().messages; }
+  get promptTemplates() { return this.resourceLoader.getPrompts().prompts; }
+  get state(): { streamingMessage?: AssistantMessage } { return this.partial === undefined ? {} : { streamingMessage: this.partial }; }
+  get isStreaming(): boolean { return this.streaming; }
+  get isCompacting(): boolean { return this.compacting; }
+  get isBashRunning(): boolean { return this.bashController !== undefined; }
+  get pendingMessageCount(): number { return this.queued.filter((item) => item.mode !== "write").length; }
+
+  private async initialize(): Promise<void> {
+    this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
+    this.registry.install(this.tools.extension());
+    this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", () => this.systemPrompt, { tag: false })],
+      hooks: [hook(GenerationTask, {
+        beforeRequest: async (request) => {
+          await this.mutation;
+          this.journal.assertOwned();
+          await this.journal.project();
+          return { messages: convertToLlm(await this.extensionRunner.emitContext([...request.messages])) };
+        },
+        afterResponse: async (message) => {
+          const replaced = await this.extensionRunner.emitMessageEnd({ type: "message_end", message });
+          if (replaced?.role === "assistant") Object.assign(message, replaced);
+        },
+      })],
+    }));
+    this.journalValue = await DurableSessionJournal.open({ manager: this.sessionManager, models: this.modelRuntime, registry: this.registry,
+      agent: { ...(this.model === undefined ? {} : { model: { provider: this.model.provider, modelId: this.model.id } }), thinkingLevel: this.thinkingLevel, cwd: this.options.services.cwd },
+      settings: { contextRetentionMs: 0, steeringMode: this.settingsManager.getSteeringMode(), followUpMode: this.settingsManager.getFollowUpMode(),
+        compaction: { enabled: this.settingsManager.getCompactionEnabled(), reserveTokens: this.settingsManager.getCompactionReserveTokens(this.model), keepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(this.model) } },
+      onReport: (error) => { this.extensionRunner.emitError({ extensionPath: "<durable>", event: "runtime", error: String(error) }); },
+    });
+    this.stream = await watchEvents(this.journal.harness, this.journal.conversation.id, context);
+    await this.applyEvent(this.stream.snapshot);
+    this.stream.start(async (events) => { for (const event of events) await this.applyEvent(event); });
+  }
+
+  subscribe(listener: (event: unknown) => void): () => void {
+    this.listeners.add(listener);
+    if (this.bound) this.journal.harness.resume();
+    return () => { this.listeners.delete(listener); };
+  }
+  private emit(event: unknown): void { for (const listener of this.listeners) listener(event); }
+
+  async bindExtensions(bindings: { uiContext?: ExtensionUIContext; mode?: "rpc"; onError?: (error: { extensionPath: string; event: string; error: string; stack?: string }) => void }): Promise<void> {
+    this.extensionRunner.setUIContext(bindings.uiContext, bindings.mode ?? "rpc");
+    this.errorListener = bindings.onError;
+    if (bindings.onError !== undefined) this.extensionRunner.onError(bindings.onError);
+    await this.extensionRunner.emit(this.options.sessionStartEvent ?? { type: "session_start", reason: "startup" });
+    this.bound = true;
+    if (this.listeners.size > 0) this.journal.harness.resume();
+  }
+
+  private bindCore(): void {
+    this.extensionRunner.bindCore({
+      sendMessage: (message, options) => { void this.sendCustomMessage(message, options).catch((error: unknown) => { this.report(error); }); },
+      sendUserMessage: (content, options) => {
+        const text = typeof content === "string" ? content : content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+        const images = typeof content === "string" ? [] : content.filter((part) => part.type === "image");
+        void this.prompt(text, { images, source: "extension", ...(options?.deliverAs === undefined ? {} : { streamingBehavior: options.deliverAs }) }).catch((error: unknown) => { this.report(error); });
+      },
+      appendEntry: (type, data) => { this.sessionManager.appendCustomEntry(type, data); },
+      setSessionName: (name) => { this.setSessionName(name); }, getSessionName: () => this.sessionName,
+      setLabel: (id, label) => { this.sessionManager.appendLabelChange(id, label); },
+      getActiveTools: () => this.tools.getActive(),
+      getAllTools: () => this.tools.getDefinitions().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters,
+        exposure: tool.exposure ?? "direct", sourceInfo: createSyntheticSourceInfo(`<durable:${tool.name}>`, { source: "sdk" }),
+        ...(tool.promptGuidelines === undefined ? {} : { promptGuidelines: tool.promptGuidelines }), ...(tool.namespace === undefined ? {} : { namespace: tool.namespace }),
+        ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }) })),
+      getSettings: () => this.settingsManager.getSettings(),
+      setActiveTools: (names) => { this.tools.setActive(names); this.registry.install(this.tools.extension()); },
+      refreshTools: () => { this.tools.refresh(); this.registry.install(this.tools.extension()); },
+      getCommands: () => this.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, description: command.description ?? "", source: "extension" as const, sourceInfo: command.sourceInfo })),
+      setModel: async (model) => { await this.setModel(model); return true; },
+      getThinkingLevel: () => this.thinkingLevel, setThinkingLevel: (level) => { this.setThinkingLevel(level); },
+    }, {
+      getModel: () => this.model, getScopedModels: () => this.scopedModels,
+      isIdle: () => !this.isStreaming, isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
+      getSignal: () => undefined, abort: () => { void this.abort().catch((error: unknown) => { this.report(error); }); },
+      shutdown: () => { /* the host owns process shutdown */ }, hasPendingMessages: () => this.pendingMessageCount > 0,
+      getContextUsage: () => this.getContextUsage(),
+      compact: (options) => { void this.compact(options?.customInstructions).then((result) => options?.onComplete?.(result), (error: unknown) => options?.onError?.(error instanceof Error ? error : new Error(String(error)))); },
+      getSystemPrompt: () => this.systemPrompt, getSystemPromptOptions: () => this.basePrompt,
+      executeTool: (id, name, args, options) => this.tools.executeNested(id, name, args, options), getCallableTools: () => this.tools.getCallable(),
+    }, {
+      registerProvider: (name, config) => { this.modelRuntime.registerProvider(name, config); }, registerNativeProvider: (provider) => { this.modelRuntime.registerNativeProvider(provider); },
+      unregisterProvider: (name) => { this.modelRuntime.unregisterProvider(name); }, registerVirtualModel: (definition) => { this.modelRuntime.registerVirtualModel(definition); },
+      unregisterVirtualModel: (provider, id) => { this.modelRuntime.unregisterVirtualModel(provider, id); },
+    });
+    this.extensionRunner.bindCommandContext({ waitForIdle: () => this.journal.conversation.waitForIdle(context),
+      newSession: () => Promise.reject(new Error("Use Forgerie's session creation command")), fork: () => Promise.reject(new Error("Use Forgerie's fork command")),
+      switchSession: () => Promise.reject(new Error("Use Forgerie's session picker")),
+      navigateTree: (id, options) => this.navigateTree(id, options), reload: () => this.reload(),
+    });
+  }
+
+  private report(error: unknown): void { this.extensionRunner.emitError({ extensionPath: "<durable>", event: "extension_action", error: String(error) }); }
+
+  private promptOptions(): BuildSystemPromptOptions {
+    const customPrompt = this.resourceLoader.getSystemPrompt();
+    return { cwd: this.options.services.cwd, selectedTools: this.tools.getActive(), contextFiles: this.resourceLoader.getAgentsFiles().agentsFiles,
+      skills: this.resourceLoader.getSkills().skills, appendSystemPrompt: this.resourceLoader.getAppendSystemPrompt().join("\n\n"),
+      ...(customPrompt === undefined ? {} : { customPrompt }),
+      toolSnippets: Object.fromEntries(this.tools.getDefinitions().filter((tool) => tool.promptSnippet !== undefined).map((tool) => [tool.name, tool.promptSnippet ?? ""])),
+      toolGuidelines: Object.fromEntries(this.tools.getDefinitions().map((tool) => [tool.name, tool.promptGuidelines ?? []])) };
+  }
+
+  async prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; source?: PromptOptions["source"]; preflightResult?: PromptOptions["preflightResult"] }): Promise<void> {
+    await this.mutation;
+    if (this.closed) throw new Error("Session is closed");
+    if (options?.expandPromptTemplates !== false) {
+      const command = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
+      const registered = command?.[1] === undefined ? undefined : this.extensionRunner.getCommand(command[1]);
+      if (registered !== undefined) { await registered.handler(command?.[2] ?? "", this.extensionRunner.createCommandContext()); options?.preflightResult?.("handled"); return; }
+      text = await expandSdkPrompt(text, this.promptTemplates);
+      if (command?.[1]?.startsWith("skill:") === true) {
+        const skill = this.resourceLoader.getSkills().skills.find((candidate) => candidate.name === command[1]?.slice(6));
+        if (skill !== undefined) text = `<skill name="${skill.name}" location="${skill.filePath}">\n${await readFile(skill.filePath, "utf8")}\n</skill>\n${command[2] ?? ""}`;
+      }
+    }
+    const input = await this.extensionRunner.emitInput(text, options?.images, options?.source ?? "interactive", this.isStreaming ? options?.streamingBehavior : undefined);
+    if (input.action === "handled") { options?.preflightResult?.("handled"); return; }
+    const images = input.action === "transform" ? input.images : options?.images;
+    text = input.action === "transform" ? input.text : text;
+    this.basePrompt = this.promptOptions();
+    const before = await this.extensionRunner.emitBeforeAgentStart(text, images, this.basePrompt);
+    this.tools.setActive(before.systemPromptOptions.selectedTools);
+    this.registry.install(this.tools.extension());
+    this.systemPrompt = await buildSdkSystemPrompt(before.systemPromptOptions);
+    for (const message of before.messages) await this.sendCustomMessage(message);
+    const content = images === undefined || images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
+    const submission = await this.journal.conversation.submit({ type: "input", content, ...(options?.streamingBehavior === undefined ? { whenBusy: "reject" as const } : { whenBusy: options.streamingBehavior }) }, context);
+    const state = await submission.status(context);
+    options?.preflightResult?.(state.status === "queued" ? "queued" : "started");
+    if (state.status === "queued") { this.queued = (await this.journal.harness.snapshot(InboxDoc, this.journal.conversation.id, context))?.items ?? []; return; }
+    await submission.wait(context);
+    await this.journal.project();
+  }
+
+  async sendCustomMessage(message: { customType: string; content: string | ({ type: "text"; text: string } | ImageContent)[]; display: boolean; details?: unknown }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
+    this.sessionManager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
+    const converted = convertToLlm([{ role: "custom", ...message, timestamp: Date.now() }]);
+    for (const modelMessage of converted) await this.journal.appendMessage(modelMessage);
+    this.emit({ type: "message_end", message: { role: "custom", ...message, timestamp: Date.now() } });
+    if (options?.triggerTurn === true) await this.prompt("Continue with the new message.", { streamingBehavior: options.deliverAs === "steer" ? "steer" : "followUp", expandPromptTemplates: false });
+  }
+
+  async executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }) {
+    if (this.bashController !== undefined) throw new Error("A bash command is already running");
+    const controller = new AbortController();
+    this.bashController = controller;
+    try {
+      const override = await this.extensionRunner.emitUserBash({ type: "user_bash", command, excludeFromContext: options?.excludeFromContext === true, cwd: this.options.services.cwd });
+      const shellPath = this.settingsManager.getShellPath();
+      const result = override?.result ?? await executeSdkBash(command, this.options.services.cwd,
+        override?.operations ?? createLocalBashOperations(shellPath === undefined ? {} : { shellPath }),
+        { signal: controller.signal, ...(onChunk === undefined ? {} : { onChunk }) });
+      const message = { role: "bashExecution" as const, command, ...result, excludeFromContext: options?.excludeFromContext === true, timestamp: Date.now() };
+      this.sessionManager.appendMessage(message);
+      for (const modelMessage of convertToLlm([message])) await this.journal.appendMessage(modelMessage);
+      return result;
+    } finally { this.bashController = undefined; }
+  }
+
+  async compact(instructions?: string): Promise<{ summary: string; tokensBefore: number; firstKeptEntryId: string }> {
+    const tokensBefore = this.messages.reduce((total, message) => total + estimateTokens(message), 0);
+    this.compactionTask = await this.journal.conversation.compact(instructions, context);
+    const task = await this.journal.harness.waitForTask(this.compactionTask, context);
+    this.compactionTask = undefined;
+    if (task.state.outcome.status !== "completed") throw new Error("Compaction cancelled or failed");
+    const id = task.state.outcome.result.submissionId;
+    if (id !== undefined) await (await this.journal.harness.submission(id, context))?.wait(context);
+    const view = await this.journal.conversation.context(context);
+    const summary = view.head?.model?.flatMap((message) => message.role === "user" ? typeof message.content === "string" ? [message.content] : message.content.flatMap((part) => part.type === "text" ? [part.text] : []) : []).join("\n") ?? "";
+    const firstKeptEntryId = this.sessionManager.appendCompaction(summary, this.sessionManager.getLeafId(), tokensBefore);
+    return { summary, tokensBefore, firstKeptEntryId };
+  }
+  abortCompaction(): void { if (this.compactionTask !== undefined) void this.journal.harness.abortTask(this.compactionTask, context).catch((error: unknown) => { this.report(error); }); }
+  abortBranchSummary(): void { this.abortCompaction(); }
+  async abort(): Promise<void> { this.bashController?.abort(); await this.mutation; await this.journal.conversation.abort(context); }
+
+  clearQueue(): { steering: string[]; followUp: string[] } {
+    const result = { steering: [...this.getSteeringMessages()], followUp: [...this.getFollowUpMessages()] };
+    const queued = this.queued;
+    this.queued = [];
+    this.mutation = this.mutation.then(async () => { for (const item of queued) if (item.mode !== "write") await this.journal.harness.abortSubmission(item.id, context, this.journal.conversation.id); });
+    return result;
+  }
+  getSteeringMessages(): readonly string[] { return this.queueText("steer"); }
+  getFollowUpMessages(): readonly string[] { return this.queueText("followUp"); }
+  private queueText(mode: "steer" | "followUp"): string[] {
+    return this.queued.flatMap((item) => item.mode !== mode || !("content" in item) ? [] : typeof item.content === "string" ? [item.content] : [item.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")]);
+  }
+
+  async setModel(model: NonNullable<PiAgentSession["model"]>): Promise<void> {
+    await this.mutation;
+    await this.journal.conversation.configure({ model: { provider: model.provider, modelId: model.id } }, context);
+    this.model = model;
+    this.sessionManager.appendModelChange(model.provider, model.id);
+    this.setThinkingLevel(clampThinkingLevel(model, this.thinkingLevel));
+  }
+  async cycleModel(direction: "forward" | "backward" = "forward") {
+    const models = this.scopedModels.length === 0 ? this.modelRuntime.getAvailableSnapshot() : this.scopedModels.map((scoped) => scoped.model);
+    if (models.length < 2) return undefined;
+    const index = models.findIndex((model) => model.provider === this.model?.provider && model.id === this.model.id);
+    const next = models[(index + (direction === "forward" ? 1 : -1) + models.length) % models.length];
+    if (next === undefined) return undefined;
+    await this.setModel(next);
+    return { model: next };
+  }
+  getAvailableThinkingLevels(): PiAgentSession["thinkingLevel"][] { return this.model === undefined ? ["off"] : getSupportedThinkingLevels(this.model); }
+  setThinkingLevel(level: PiAgentSession["thinkingLevel"]): void {
+    this.thinkingLevel = this.model === undefined ? "off" : clampThinkingLevel(this.model, level);
+    this.sessionManager.appendThinkingLevelChange(this.thinkingLevel);
+    const thinkingLevel = this.thinkingLevel;
+    this.mutation = this.mutation.then(() => this.journal.conversation.configure({ thinkingLevel }, context));
+    this.emit({ type: "thinking_level_changed", level: this.thinkingLevel });
+  }
+  cycleThinkingLevel(): PiAgentSession["thinkingLevel"] | undefined {
+    const levels = this.getAvailableThinkingLevels();
+    if (levels.length < 2) return undefined;
+    const next = levels[(levels.indexOf(this.thinkingLevel) + 1) % levels.length];
+    if (next !== undefined) this.setThinkingLevel(next);
+    return next;
+  }
+  setSessionName(name: string): void { this.sessionManager.appendSessionInfo(name); this.emit({ type: "session_info_changed", name }); }
+  getUserMessagesForForking(): readonly { entryId: string; text: string }[] {
+    return this.sessionManager.getBranch().flatMap((entry) => entry.type !== "message" || entry.message.role !== "user" ? [] : [{ entryId: entry.id,
+      text: typeof entry.message.content === "string" ? entry.message.content : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") }]);
+  }
+  getSessionStats(): ReturnType<PiAgentSession["getSessionStats"]> {
+    const messages = this.messages;
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    let cost = 0;
+    for (const message of messages) if (message.role === "assistant") {
+      tokens.input += message.usage.input; tokens.output += message.usage.output; tokens.cacheRead += message.usage.cacheRead; tokens.cacheWrite += message.usage.cacheWrite;
+      tokens.total += message.usage.totalTokens; cost += message.usage.cost.total;
+    }
+    return { sessionId: this.sessionId, totalMessages: messages.length, userMessages: messages.filter((message) => message.role === "user").length,
+      assistantMessages: messages.filter((message) => message.role === "assistant").length,
+      toolCalls: messages.reduce((count, message) => count + (message.role === "assistant" ? message.content.filter((part) => part.type === "toolCall").length : 0), 0), tokens, cost };
+  }
+  getContextUsage() {
+    if (this.model === undefined) return undefined;
+    const tokens = this.messages.reduce((total, message) => total + estimateTokens(message), 0);
+    return { tokens, contextWindow: this.model.contextWindow, percent: this.model.contextWindow === 0 ? null : tokens / this.model.contextWindow * 100 };
+  }
+
+  async navigateTree(targetId: string, options?: { summarize?: boolean; customInstructions?: string }) {
+    await this.journal.conversation.waitForIdle(context);
+    const entry = this.sessionManager.getEntry(targetId);
+    if (entry === undefined) throw new Error("Tree entry does not exist");
+    const editorText = entry.type === "message" && entry.message.role === "user"
+      ? typeof entry.message.content === "string" ? entry.message.content : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") : undefined;
+    const leaf = editorText === undefined ? entry.id : entry.parentId;
+    if (options?.summarize === true) {
+      const result = await this.compact(options.customInstructions);
+      this.sessionManager.branchWithSummary(leaf, result.summary);
+    } else if (leaf === null) this.sessionManager.resetLeaf();
+    else this.sessionManager.branch(leaf);
+    await this.journal.selectBranch();
+    return { cancelled: false, ...(editorText === undefined ? {} : { editorText }) };
+  }
+  async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+    if (this.isStreaming) throw new Error("Cannot reload an active session");
+    const old = this.extensionRunner;
+    const ui = old.getUIContext();
+    const flags = old.getFlagValues();
+    await old.emit({ type: "session_shutdown", reason: "reload" });
+    await this.settingsManager.reload();
+    await this.resourceLoader.reload();
+    const loaded = this.resourceLoader.getExtensions();
+    for (const [name, value] of flags) loaded.runtime.flagValues.set(name, value);
+    const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, this.options.services.cwd, this.sessionManager, new ModelRegistry(this.modelRuntime));
+    runner.setUIContext(ui, "rpc");
+    if (this.errorListener !== undefined) runner.onError(this.errorListener);
+    this.runner = runner;
+    this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.options.customTools ?? [],
+      beforeCall: () => this.journal.project(), emit: (event) => { this.emit(event); } });
+    this.bindCore();
+    this.registry.install(this.tools.extension());
+    this.basePrompt = this.promptOptions();
+    this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
+    old.invalidate("Durable extensions reloaded");
+    await options?.beforeSessionStart?.();
+    await runner.emit({ type: "session_start", reason: "reload" });
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    this.bashController?.abort();
+    await this.journal.close();
+    await this.stream?.stop();
+    await this.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    this.extensionRunner.invalidate("Durable session closed");
+    this.listeners.clear();
+  }
+
+  private async applyEvent(event: AgentEvent): Promise<void> {
+    await this.journal.project();
+    switch (event.type) {
+      case "snapshot":
+        this.streaming = event.run !== undefined;
+        this.partial = event.generation?.message;
+        this.compacting = event.compactions.length > 0;
+        this.queued = (await this.journal.harness.snapshot(InboxDoc, this.journal.conversation.id, context))?.items ?? [];
+        break;
+      case "run_start": this.streaming = true; this.emit({ type: "agent_start" }); await this.extensionRunner.emit({ type: "agent_start" }); break;
+      case "run_end":
+        this.streaming = false; this.partial = undefined;
+        this.emit({ type: "agent_end", messages: this.messages, willRetry: false });
+        await this.extensionRunner.emit({ type: "agent_end", messages: this.messages });
+        this.emit({ type: "agent_settled", aborted: false }); await this.extensionRunner.emit({ type: "agent_settled", aborted: false });
+        break;
+      case "message_start": if (event.message.role === "assistant") this.partial = structuredClone(event.message); this.emit(event); break;
+      case "message_update":
+        for (const change of event.changes) {
+          this.applyChange(change);
+          this.emit({ type: "message_update", message: this.partial, assistantMessageEvent: { ...change, partial: this.partial } });
+        }
+        break;
+      case "message_end": for (const message of event.entry.model ?? []) this.emit({ type: "message_end", message }); this.partial = undefined; break;
+      case "tool_execution_start": this.emit(event); break;
+      case "tool_execution_update": this.emit({ ...event, partialResult: event.details }); break;
+      case "tool_execution_end": {
+        const result = event.entry?.model?.find((message) => message.role === "toolResult");
+        // Durable coalesces rapid updates into the terminal commit. Publish that
+        // committed state before ending the SDK step so progress cannot stay stale.
+        if (result !== undefined) this.emit({ ...event, type: "tool_execution_update", partialResult: result });
+        this.emit({ ...event, result, isError: result?.isError ?? true });
+        break;
+      }
+      case "inbox_update": this.queued = (await this.journal.harness.snapshot(InboxDoc, this.journal.conversation.id, context))?.items ?? []; this.emit({ type: "queue_update", steering: this.getSteeringMessages(), followUp: this.getFollowUpMessages() }); break;
+      case "compaction_start": this.compacting = true; this.emit({ type: "compaction_start", reason: event.reason }); break;
+      case "compaction_end": this.compacting = false; this.emit({ type: "compaction_end", reason: event.reason, result: undefined, aborted: false, willRetry: false }); break;
+      case "task_failed": this.report(event.message); break;
+      case "submission":
+      case "turn_start":
+      case "turn_end":
+      case "auto_retry_start":
+      case "auto_retry_end":
+      case "deferred_poll":
+      case "entry_appended":
+      case "agent_changed":
+      case "usage_changed": this.emit(event); break;
+    }
+  }
+
+  private validThinkingLevel(level: string): PiAgentSession["thinkingLevel"] | undefined {
+    if (level === "off" || level === "minimal" || level === "low" || level === "medium" || level === "high" || level === "xhigh") return level;
+    return undefined;
+  }
+
+  private applyChange(change: MessageChange): void {
+    if (change.type === "message") { this.partial = structuredClone(change.message); return; }
+    if (this.partial === undefined) return;
+    if ("block" in change) { this.partial.content[change.contentIndex] = structuredClone(change.block); return; }
+    const block = this.partial.content[change.contentIndex];
+    if (change.type === "text_delta" && block?.type === "text") block.text += change.delta;
+    if (change.type === "thinking_delta" && block?.type === "thinking") block.thinking += change.delta;
+  }
+}

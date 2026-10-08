@@ -76,6 +76,8 @@
   },
   "dependencies": {
     "@aliou/pi-processes": "file:vendor/pi-processes/aliou-pi-processes-0.10.4-forgerie.1.tgz",
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-go": "^6.0.1",
@@ -108,9 +110,9 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
-    "@earendil-works/pi-agent-core": "^1.0.4",
-    "@earendil-works/pi-ai": "^1.0.4",
-    "@earendil-works/pi-coding-agent": "^1.0.4",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.3",
     "@types/ws": "^8.18.1",

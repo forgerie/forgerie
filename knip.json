@@ -13,6 +13,6 @@
     "extensions/**/*.ts",
     "pi-web-plugins/**/*.ts"
   ],
-  "ignoreBinaries": ["chromium"],
+  "ignoreBinaries": ["chromium", "flock"],
   "ignoreExportsUsedInFile": true
 }

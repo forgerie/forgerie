@@ -151,10 +151,12 @@ describe("Forgerie codemode", () => {
     const tools = toolEvents(events);
     expect(new Set(tools.map((event) => event.toolCallId))).toEqual(new Set(["call_script"]));
     expect(tools.find((event) => event.type === "tool.start")).toMatchObject({ toolName: "codemode", summary: "List the project and read one file" });
-    const progress = tools.filter((event) => event.type === "tool.update").at(-1);
-    expect(progress?.details).toMatchObject({ calls: [{ name: "bash" }, { name: "read" }] });
     const end = tools.find((event) => event.type === "tool.end");
     expect(end).toMatchObject({ isError: false, details: { calls: [{ name: "bash", status: "ok" }, { name: "read", status: "ok" }] } });
+    const progress = tools.filter((event) => event.type === "tool.update").at(-1);
+    expect(progress?.details).toMatchObject({ calls: [{ name: "bash", status: "ok" }, { name: "read", status: "ok" }] });
+    const eventTypes = tools.map((event) => event.type);
+    expect(eventTypes.lastIndexOf("tool.update")).toBeLessThan(eventTypes.indexOf("tool.end"));
     expect(scriptResultText(events)).toContain("hello from a file");
 
     // A reload draws the same step from history.
