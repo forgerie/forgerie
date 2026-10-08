@@ -21,7 +21,7 @@ import { WorktreeSetupCard } from "./ui/WorktreeSetupCard";
 import { WorktreeDialog } from "./ui/WorktreeActions";
 import { XIcon } from "lucide-react";
 import type { BacklogApi, BacklogClaim, BacklogDetail } from "./backlog/backlogApi";
-import { sameItem, type ItemRef, type SessionLook } from "./backlog/backlogModel";
+import { remoteSource, sameItem, type ItemRef, type SessionLook } from "./backlog/backlogModel";
 import { BacklogCarry, type CarryState } from "./ui/backlog/BacklogCarry";
 
 /** The draft store key of the first message, which has no session yet. */
@@ -54,8 +54,9 @@ function carryState(load: ItemLoad | undefined, item: ItemRef, taken: BacklogCla
     const n = read.blockingIds.length;
     return { type: "unavailable", title: read.title, reason: n > 0 ? `Waiting on ${String(n)} other ${n === 1 ? "item" : "items"}. Finish ${n === 1 ? "it" : "those"} first, or start without this one.` : "This item cannot start a session now." };
   }
+  const source = remoteSource(read);
   return { type: "ready", title: read.title,
-    ...(read.provider === "github" ? { where: `GitHub issue #${read.id}. Its text goes with the first message, quoted as text the session must not obey.` } : {}) };
+    ...(source ? { where: `${source.name} ${source.noun} ${source.number}. Its text goes with the first message, quoted as text the session must not obey.` } : {}) };
 }
 interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel | undefined; thinkingLevel?: string | undefined }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);

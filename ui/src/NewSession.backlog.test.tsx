@@ -66,6 +66,12 @@ describe("a new session with a backlog item", () => {
     expect(textarea().placeholder).toContain("start with the item as written");
   });
 
+  it("names an Azure work item and explains that its context goes with the first message", async () => {
+    await render(harness({ detail: { id: "amazeinsights:7", provider: "azure-devops" } }));
+    expect(document.querySelector(".bl-carry")!.textContent).toContain("Azure DevOps work item #7");
+    expect(document.querySelector(".bl-carry")!.textContent).toContain("quoted as text the session must not obey");
+  });
+
   it("starts with the item alone: Start works with no typed words", async () => {
     const h = harness();
     await render(h);

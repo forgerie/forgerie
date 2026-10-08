@@ -84,6 +84,18 @@ describe("the backlog client", () => {
     await createBacklogApi(paths.fetchFn).release({ projectId: "p1", itemId: "01A", provider: "markdown" }, "c2");
     expect(paths.calls.map((call) => call.path)).toEqual(["/api/backlog/p1/items/7/release?provider=github", "/api/backlog/p1/items/01A/release"]);
   });
+  it("keeps Azure's organization-qualified identity through launch and release", async () => {
+    const { calls, fetchFn } = server(({ path }) => path.includes("/launch")
+      ? { body: { session: { id: "s1", cwd: "/code/amaze" }, claim: { ...claim, provider: "azure-devops", itemId: "amazeinsights:7", sessionId: "s1" }, initialPrompt: "Azure work item context", reused: false } }
+      : { body: { accepted: true } });
+    await createNewSessionApi(fetchFn).start("/code/amaze", { text: "Check the totals." }, {},
+      { startupToken: "azure-7", item: { projectId: "p1", itemId: "amazeinsights:7", provider: "azure-devops" } });
+    expect(calls[0]!.path).toBe("/api/backlog/p1/items/amazeinsights%3A7/launch?provider=azure-devops");
+    expect(calls[1]!.body).toMatchObject({ text: "Azure work item context\n\nCheck the totals." });
+    const paths = server(() => ({ body: { released: true } }));
+    await createBacklogApi(paths.fetchFn).release({ projectId: "p1", itemId: "amazeinsights:7", provider: "azure-devops" }, "c1");
+    expect(paths.calls[0]!.path).toBe("/api/backlog/p1/items/amazeinsights%3A7/release?provider=azure-devops");
+  });
   it("reads an item from a server older than providers as markdown", async () => {
     const { fetchFn } = server(() => ({ body: { items: [{ id: "01A", title: "Fix", projectId: "p1", projectName: "forgerie", repo: "/r", path: "a.md", status: "To Do",
       labels: [], open: true, readiness: "ready", blockingIds: [], claim: { ...claim, provider: undefined } }], warnings: [], generatedAt: "now" } }));

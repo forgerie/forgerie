@@ -31,6 +31,13 @@ describe("the backlog place in the URL", () => {
     // A markdown id may hold anything after the first slash, including a tilde.
     expect(readItemParam("p1/odd~id/x")).toEqual({ projectId: "p1", itemId: "odd~id/x", provider: "markdown" });
   });
+  it("keeps Azure organization identity in URLs while displaying the short work-item number", () => {
+    const azure = item({ provider: "azure-devops", id: "amazeinsights:42" });
+    expect(readItemParam(itemParam(refOf(azure)))).toEqual(refOf(azure));
+    expect(issueNumber(azure)).toBe("#42");
+    expect(matches(azure, "#42")).toBe(true);
+    expect(sameItem(refOf(azure), refOf(item({ provider: "azure-devops", id: "other:42" })))).toBe(false);
+  });
   it("tells the same id from two providers apart", () => {
     const issue = item({ id: "7", provider: "github" });
     const file = item({ id: "7" });

@@ -262,6 +262,41 @@ describe("GitHub issues", () => {
     expect(launched.map((entry) => [entry.provider, entry.id])).toEqual([["github", "7"]]);
   });
 
+  it("shows Azure work-item links and actions without GitHub or file labels", async () => {
+    const azure = item({ id: "amazeinsights:7", provider: "azure-devops", path: "amazeinsights/Amaze Insights#7",
+      url: "https://dev.azure.com/amazeinsights/Amaze%20Insights/_workitems/edit/7", status: "Active" });
+    const { b, launched } = binding(list([azure]));
+    await render({}, b);
+    expect(document.querySelector(".bl-issue")!.textContent).toBe("#7");
+    expect(document.querySelector(".bl-issue")!.getAttribute("title")).toBe("Azure DevOps work item");
+    await render({ item: { projectId: "p1", itemId: azure.id, provider: azure.provider } }, b);
+    expect(document.querySelector<HTMLAnchorElement>(".bl-issue-link")!.href).toBe(azure.url);
+    expect(document.body.textContent).toContain("Status on Azure DevOps");
+    expect(document.body.textContent).toContain("does not change its Azure assignment or status");
+    await click(button("Item commands"));
+    expect(button("Copy work item link")).toBeDefined();
+    expect(button("Copy file path")).toBeUndefined();
+    await click(button("Start session"));
+    expect(launched).toEqual([azure]);
+  });
+
+  it("keeps Azure access failures out of GitHub setup and visible with no items", async () => {
+    const { b } = binding(list([], [{ projectId: "p1", provider: "azure-devops", path: "amazeinsights/Amaze Insights", kind: "provider-auth",
+      message: "Azure DevOps rejected the PAT. Replace it on the server." }]));
+    await render({}, b);
+    expect(document.querySelector(".bl-github")).toBeNull();
+    expect(document.querySelector(".bl-problems summary")!.textContent).toContain("Azure DevOps has 1 note");
+    expect(document.querySelector(".bl-problems")!.textContent).toContain("Replace it on the server");
+    expect(document.querySelector(".bl-empty")).toBeNull();
+  });
+
+  it("explains that Azure items can leave the assigned list", async () => {
+    const { b } = binding(list([]));
+    await render({ item: { projectId: "p1", itemId: "amazeinsights:7", provider: "azure-devops" } }, b);
+    expect(document.querySelector(".notice")!.textContent).toContain("It was reassigned");
+    expect(document.querySelector(".notice")!.textContent).not.toContain("front matter");
+  });
+
   it("says why an issue left the list", async () => {
     const { b } = binding(list([]));
     await render({ item: { projectId: "p1", itemId: "7", provider: "github" } }, b);

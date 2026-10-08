@@ -37,9 +37,13 @@ export const sameItem = (a: ItemRef | undefined, b: ItemRef | undefined) => a !=
   && a.projectId === b.projectId && a.itemId === b.itemId && providerOf(a) === providerOf(b);
 /** The list's item for a reference. */
 export const findItem = (items: readonly BacklogItem[] | undefined, ref: ItemRef) => items?.find((item) => sameItem(refOf(item), ref));
-/** A GitHub issue reads as its number; a file's id is too long and too private to show. */
-export const isGitHub = (item: Pick<BacklogItem, "provider">) => item.provider === "github";
-export const issueNumber = (item: Pick<BacklogItem, "provider" | "id">) => isGitHub(item) ? `#${item.id}` : undefined;
+/** Keep provider words and display numbers together; Azure IDs include the organization for claim identity. */
+export function remoteSource(item: Pick<BacklogItem, "provider" | "id">) {
+  if (item.provider === "github") return { name: "GitHub", noun: "issue", number: `#${item.id}` };
+  if (item.provider === "azure-devops") return { name: "Azure DevOps", noun: "work item", number: `#${item.id.slice(item.id.lastIndexOf(":") + 1)}` };
+  return undefined;
+}
+export const issueNumber = (item: Pick<BacklogItem, "provider" | "id">) => remoteSource(item)?.number;
 
 const DAY = 86_400_000;
 /** Whole days since `created`, or undefined when the file gives no readable date. */
@@ -109,7 +113,7 @@ export interface BacklogGroup {
 /** Provider notes that belong beside a project's items. Setup and install problems are not: they have their own place, above the list. */
 const isGroupNote = (warning: BacklogWarning) => warning.provider !== undefined && warning.provider !== MARKDOWN
   && (warning.kind === "items-hidden" || warning.kind === "provider-unavailable" || warning.kind === "scan-limit");
-const isAccessWarning = (warning: BacklogWarning) => warning.kind === "provider-auth" || warning.kind === "provider-install";
+const isAccessWarning = (warning: BacklogWarning) => warning.provider === "github" && (warning.kind === "provider-auth" || warning.kind === "provider-install");
 /** What stops GitHub listing a project's issues: GitHub is not set up here, or its app is not installed on the repo. */
 export const accessWarnings = (warnings: readonly BacklogWarning[]) => warnings.filter(isAccessWarning);
 /**

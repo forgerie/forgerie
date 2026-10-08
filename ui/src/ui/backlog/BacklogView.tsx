@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, InfoIcon, ListTodoIcon, RefreshCwIcon, SearchIcon, Trash2Icon, TriangleAlertIcon, UnlinkIcon, XIcon } from "lucide-react";
 import type { BacklogApi, BacklogClaim, BacklogDetail, BacklogItem, BacklogWarning } from "../../backlog/backlogApi";
-import { accessWarnings, ageText, ageWords, bodyUnderTitle, findItem, groupBacklog, HOLDER_WORDS, holderOf, ignoredFix, isGitHub, issueNumber, itemParam, listOf, openCount, otherWarnings,
+import { accessWarnings, ageText, ageWords, bodyUnderTitle, findItem, groupBacklog, HOLDER_WORDS, holderOf, ignoredFix, remoteSource, issueNumber, itemParam, listOf, openCount, otherWarnings,
   priorityWord, projectCount, refOf, relativePath, type BacklogGroup, type BacklogLoad, type BacklogPlace, type Holder, type ItemRef, type SessionLook } from "../../backlog/backlogModel";
 import type { GitHubApi } from "../../backlog/githubApi";
 import { useGitHubApp, type GitHubAppPage } from "../../backlog/useGitHubApp";
@@ -72,7 +72,7 @@ function ItemRow({ item, holder, showProject, now, onOpen }: { item: BacklogItem
     <span className="bl-meta">
       {holder ? <span className="bl-held">{showProject ? <span className="bl-project">{item.projectName}</span> : null}{holderLine(holder)}</span>
         : <>{item.readiness === "closed" ? <span className="bl-state">Done</span> : item.readiness === "blocked" ? <span className="bl-state">Blocked</span> : null}
-          {issueNumber(item) ? <span className="bl-issue" title="GitHub issue">{issueNumber(item)}</span> : null}
+          {issueNumber(item) ? <span className="bl-issue" title={`${remoteSource(item)?.name ?? "Remote"} ${remoteSource(item)?.noun ?? "item"}`}>{issueNumber(item)}</span> : null}
           {priority ? <span className="bl-priority" data-priority={item.priority?.toLowerCase()}>{priority}</span> : null}
           {item.labels.length ? <span className="bl-labels">{item.labels.join("  ")}</span> : null}</>}
     </span>
@@ -125,14 +125,16 @@ function Problems({ warnings, projectName }: { warnings: readonly BacklogWarning
   if (warnings.length === 0) return null;
   const files = warnings.filter((warning) => warning.kind === "invalid-item").length;
   const github = warnings.filter((warning) => warning.provider === "github").length;
-  const projects = warnings.length - files - github;
+  const azure = warnings.filter((warning) => warning.provider === "azure-devops").length;
+  const projects = warnings.length - files - github - azure;
   const parts = [files ? `${String(files)} ${files === 1 ? "file is" : "files are"} not readable as items` : "",
     projects ? `${String(projects)} ${projects === 1 ? "project" : "projects"} could not be read` : "",
-    github ? `GitHub has ${String(github)} ${github === 1 ? "note" : "notes"}` : ""].filter(Boolean);
+    github ? `GitHub has ${String(github)} ${github === 1 ? "note" : "notes"}` : "",
+    azure ? `Azure DevOps has ${String(azure)} ${azure === 1 ? "note" : "notes"}` : ""].filter(Boolean);
   return <details className="bl-problems">
     <summary><TriangleAlertIcon aria-hidden size={14} />{parts.join(", and ")}</summary>
     {files ? <p className="bl-problems-lede">An item needs <code>id</code> and <code>title</code> in its front matter. Other files in the folder are skipped.</p> : null}
-    <ul>{warnings.map((warning) => <li key={`${warning.kind}:${warning.path}`}>
+    <ul>{warnings.map((warning) => <li key={`${warning.projectId}:${warning.provider ?? "markdown"}:${warning.kind}:${warning.path}`}>
       <span className="bl-problem-where" title={warning.path}><bdi dir="ltr">{projectName(warning.projectId) ? `${projectName(warning.projectId)!}: ` : ""}{warning.path}</bdi></span>
       <span className="bl-problem-why">{warning.message}</span>
     </li>)}</ul>
@@ -144,7 +146,8 @@ function Empty({ onClose }: { onClose?: (() => void) | undefined }) {
     <div className="bl-empty">
       <ListTodoIcon aria-hidden size={20} />
       <strong>No backlog items yet</strong>
-      <p>Forgerie lists the Markdown files in each project's <code>.forgerie/backlog/</code> folder. Ask a session to write an item there, or add the file yourself.</p>
+      <p>No items were found in the configured backlog sources. Forgerie supports Markdown files, GitHub issues, and Azure DevOps work items assigned to you.</p>
+      <p>Without provider settings, Forgerie reads each project's <code>.forgerie/backlog/</code> folder.</p>
       <p>To use another folder, set <code>backlog.dir</code> in the project's <code>.forgerie/config.json</code>.</p>
     </div>
   </SettingsFrame>;
@@ -228,6 +231,7 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
   const listed = findItem(listOf(load)?.items, ref);
   const listedClaim = listed?.claim?.claimId;
   const github = ref.provider === "github";
+  const azure = ref.provider === "azure-devops";
   useEffect(() => {
     const controller = new AbortController();
     api.detail(ref, controller.signal).then((value) => { if (!controller.signal.aborted) setDetail({ type: "ready", value }); },
@@ -240,6 +244,7 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
     return <SettingsFrame back={back} title={listed?.title ?? "Backlog item"} actions={<CloseButton onClose={onClose} />}
       error={detail.type === "failed" ? detail.missing
         ? github ? "This issue is no longer listed. It was closed, its author is outside the repo, or the project no longer lists GitHub issues."
+          : azure ? "This work item is no longer listed. It was reassigned, removed, or is outside this project's Azure backlog settings."
           : "This item is no longer in the backlog. Its file was moved, renamed, or lost its front matter."
         : `Could not read this item: ${detail.message}` : undefined}
       recovery={detail.type === "failed" && !detail.missing ? <button onClick={() => setAttempt((n) => n + 1)}>Retry</button> : undefined}>
@@ -268,14 +273,15 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
     : <button type="button" className="settings-primary" disabled={item.readiness !== "ready"} title={item.readiness === "blocked" ? "Waiting on other items" : undefined}
       onClick={() => onLaunch(item)}>Start session</button>;
   const file = relativePath(item);
-  const issue = isGitHub(item);
+  const source = remoteSource(item);
+  const issue = source !== undefined;
   const where = issue ? item.url ?? file : file;
   const commands = <div className="settings-menu-anchor" ref={menu.anchor}>
     <button type="button" className="picker-icon" aria-label="Item commands" aria-haspopup="menu" aria-expanded={menu.open}
       onClick={() => { menu.setOpen(!menu.open); if (release === "confirm") setRelease("idle"); }}><EllipsisIcon aria-hidden size={16} /></button>
     {menu.open ? <div className="picker-menu" role="menu" aria-label="Item commands">
-      <button role="menuitem" onClick={() => { menu.setOpen(false); void writeClipboardText(where); }}><CopyIcon aria-hidden />{issue ? "Copy issue link" : "Copy file path"}</button>
-      <button role="menuitem" onClick={() => { menu.setOpen(false); onRefresh(); setAttempt((n) => n + 1); }}><RefreshCwIcon aria-hidden />{issue ? "Read the issue again" : "Read the file again"}</button>
+      <button role="menuitem" onClick={() => { menu.setOpen(false); void writeClipboardText(where); }}><CopyIcon aria-hidden />{source ? `Copy ${source.noun} link` : "Copy file path"}</button>
+      <button role="menuitem" onClick={() => { menu.setOpen(false); onRefresh(); setAttempt((n) => n + 1); }}><RefreshCwIcon aria-hidden />{source ? `Read the ${source.noun} again` : "Read the file again"}</button>
       {claim ? <button role="menuitem" data-tone="danger" disabled={release === "running"}
         onClick={() => { if (release === "confirm") { menu.setOpen(false); void doRelease(); } else setRelease("confirm"); }}>
         <UnlinkIcon aria-hidden />{release === "confirm" ? "Release? The session keeps running" : "Release item"}</button> : null}
@@ -300,16 +306,17 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
           <span className="bl-blockers">{blockers.map((blocker) => <button key={blocker.id} type="button" className="bl-link"
             onClick={() => onPlace({ item: { projectId: item.projectId, itemId: blocker.id, provider: item.provider } })}>{blocker.title}</button>)}</span></Property> : null}
         {ageWords(item.created, now) ? <Property label={issue ? "Opened" : "Added"}>{ageWords(item.created, now)}</Property> : null}
-        {issue ? <Property label="Issue">{item.url
+        {issue ? <Property label={source?.noun === "work item" ? "Work item" : "Issue"}>{item.url
           ? <a className="bl-issue-link" href={item.url} target="_blank" rel="noopener noreferrer"><bdi dir="ltr">{file}</bdi><ExternalLinkIcon aria-hidden size={14} /></a>
           : <span className="bl-file"><bdi dir="ltr">{file}</bdi></span>}</Property>
           : <Property label="File"><span className="bl-file" title={file}><bdi dir="ltr">{file}</bdi></span>
           <button type="button" className="icon-button quiet-button" aria-label="Copy file path" title="Copy file path" onClick={() => void writeClipboardText(file)}>
             <CopyIcon aria-hidden size={14} /></button></Property>}
-        {item.status ? <Property label={issue ? "Status on GitHub" : "Status in file"} hint={claim ? "Forgerie shows the session that holds the item, not this field." : undefined}>{item.status}</Property> : null}
+        {item.status ? <Property label={source ? `Status on ${source.name}` : "Status in file"} hint={claim ? "Forgerie shows the session that holds the item, not this field." : undefined}>{item.status}</Property> : null}
       </div>
       {issue ? <p className="bl-note-line bl-untrusted"><InfoIcon aria-hidden size={14} />
-        Someone on GitHub wrote this issue. Read it before you start a session: the session gets it as quoted text and is told not to follow instructions in it.</p> : null}
+        Someone on {source?.name} wrote this {source?.noun}. Read it before you start a session: the session gets it as quoted text and is told not to follow instructions in it.
+        {item.provider === "azure-devops" ? " Starting or releasing a session does not change its Azure assignment or status." : null}</p> : null}
       <div className="markdown bl-body">
         <Streamdown className="markdown-content" mode="static" controls={false} skipHtml linkSafety={{ enabled: false }} components={markdownComponents}>
           {bodyUnderTitle(detail.value.body, item.title)}</Streamdown>

@@ -39,8 +39,23 @@ const configured: GitHubAppState = { state: "configured", app: { slug: "forgerie
   installUrl: "https://github.com/apps/forgerie-zao/installations/new" };
 const ISSUE_BODY = "Audio stops after the device resumes from suspend. It comes back after a reboot.\n\n## Steps\n\n1. Play anything with sound.\n2. Suspend with the power button, wait ten seconds, resume.\n3. No sound until reboot.\n\n## Notes\n\n`dmesg` shows `rk817-codec: probe deferred` after resume. This started with the 2026-09-30 image.";
 
-interface State { label: string; note: string; place: BacklogPlace; items: BacklogItem[]; warnings: BacklogWarning[]; github: GitHubAppState }
+const AZURE_ITEMS: BacklogItem[] = [
+  { ...issue(42, "Verify incentive totals after an adjustment", ["User Story", "incentives"], 2), id: "amazeinsights:42", provider: "azure-devops", projectId: "p-amaze", projectName: "Amaze Insights",
+    repo: "/code/amaze", path: "amazeinsights/Amaze Insights#42", url: "https://dev.azure.com/amazeinsights/Amaze%20Insights/_workitems/edit/42", status: "Active", priority: "high" },
+  { ...issue(43, "Exclude duplicate entries from the monthly report", ["Bug", "reports"], 4), id: "amazeinsights:43", provider: "azure-devops", projectId: "p-amaze", projectName: "Amaze Insights",
+    repo: "/code/amaze", path: "amazeinsights/Amaze Insights#43", url: "https://dev.azure.com/amazeinsights/Amaze%20Insights/_workitems/edit/43", status: "New" },
+];
+const azureAuth: BacklogWarning = { projectId: "p-amaze", provider: "azure-devops", path: "amazeinsights/Amaze Insights", kind: "provider-auth",
+  message: "Azure DevOps rejected the PAT. Replace the expired or revoked token on the server, then refresh the backlog." };
+const AZURE_BODY = "## Description\n\nCompare the monthly totals before and after applying an adjustment.\n\n## Acceptance criteria\n\nEach adjustment appears once. Totals match the source records.\n\nThese are synthetic preview records, not data read from Azure DevOps.";
+interface State { label: string; note: string; place: BacklogPlace; items: BacklogItem[]; warnings: BacklogWarning[]; github: GitHubAppState; body?: string }
 const states: Record<string, State> = {
+  "azure-list": { label: "Assigned Azure work items", note: "Synthetic Azure stories and bugs use the existing project list, beside GitHub issues and files.",
+    place: {}, items: [...AZURE_ITEMS, ...ITEMS], warnings: [], github: configured },
+  "azure-item": { label: "Azure work item", note: "Azure links, workflow state, description, and acceptance criteria. The session action does not write to Azure.",
+    place: { item: { projectId: "p-amaze", itemId: "amazeinsights:42", provider: "azure-devops" } }, items: AZURE_ITEMS, warnings: [], github: configured, body: AZURE_BODY },
+  "azure-auth": { label: "Azure access problem", note: "The Azure warning stays visible without sending the user to GitHub setup.",
+    place: {}, items: [], warnings: [azureAuth], github: { state: "not-configured" } },
   list: { label: "Issues beside files", note: "GitHub issues sit in their project with their number. A note in the group says what GitHub left out.",
     place: {}, items: ITEMS, warnings: [hidden], github: configured },
   setup: { label: "Set up GitHub", note: "A project lists GitHub issues, and GitHub is not set up on this machine. One button; the files still show.",
@@ -61,7 +76,7 @@ function Screen({ state }: { state: State }) {
     api: {
       detail: (ref) => {
         const item = state.items.find((entry) => entry.id === ref.itemId && entry.provider === (ref.provider ?? "markdown"))!;
-        return Promise.resolve({ item, body: ISSUE_BODY, initialPrompt: "" });
+        return Promise.resolve({ item, body: state.body ?? ISSUE_BODY, initialPrompt: "" });
       },
       release: () => Promise.resolve({ released: true }),
     },
