@@ -64,6 +64,38 @@ describe("ask_user registration", () => {
 });
 
 describe("PiSessionService.openAsk", () => {
+  it.each(["checkpoint", "asked"] as const)("handles a %s write failure without confusing the event with its cache", async (failedKind) => {
+    const fake = fakeRuntime(ACTIVE_SESSION_ID);
+    const manager = fake.runtime.session.sessionManager;
+    const append = manager.appendCustomEntry?.bind(manager);
+    if (append === undefined) throw new Error("Missing transcript writer");
+    vi.spyOn(manager, "appendCustomEntry").mockImplementation((type, data) => {
+      if (typeof data === "object" && data !== null && "kind" in data && data.kind === failedKind) throw new Error("Disk write failed");
+      return append(type, data);
+    });
+    const info = vi.fn();
+    const events = new CapturingSessionEventHub();
+    const service = new PiSessionService(events, {
+      agentDir: TEST_AGENT_DIR, modelRuntime: testModelRuntime,
+      sessionManager: sessionGateway([sessionRecord(ACTIVE_SESSION_ID)]),
+      archiveStore: emptyArchiveStore(), createAgentRuntime: runtimeCreator(fake.runtime),
+      askUserEnabled: true, heartbeatIntervalMs: 60_000, logger: { info },
+    });
+    try {
+      await service.status(sessionRef(ACTIVE_SESSION_ID));
+      const opening = service.openAsk({ sessionId: ACTIVE_SESSION_ID, questions });
+      if (failedKind === "asked") {
+        await expect(opening).rejects.toThrow("Disk write failed");
+        expect((await service.status(sessionRef(ACTIVE_SESSION_ID))).pendingAsk).toBeUndefined();
+        expect(askEvents(events)).toHaveLength(0);
+      } else {
+        const result = await opening;
+        expect((await service.status(sessionRef(ACTIVE_SESSION_ID))).pendingAsk?.askId).toBe(result.ask.askId);
+        expect(askEvents(events)).toHaveLength(1);
+        expect(info).toHaveBeenCalledWith(expect.objectContaining({ sessionId: ACTIVE_SESSION_ID }), "Could not persist the derived response checkpoint");
+      }
+    } finally { await service.dispose(); }
+  });
   it("registers the question set as the session's open ask", async () => {
     const { service, store } = askService();
 

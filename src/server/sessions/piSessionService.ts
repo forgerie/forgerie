@@ -105,6 +105,7 @@ import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.
 import { undeliveredAskAnswers } from "./askAnswerDelivery.js";
 import { createEndTurnToolDefinition, type EndTurnToolDeps } from "./endTurnTool.js";
 import { responseFromBranch, SESSION_RESPONSE_CUSTOM_TYPE, type ResponseProjection, type SessionResponseEvent } from "./sessionResponse.js";
+import { writeResponseCheckpoint } from "./sessionResponseCheckpoint.js";
 import type { PendingAskUser } from "../../shared/apiTypes.js";
 import type { SessionResponse } from "../../shared/sessionResponse.js";
 import { SessionAsks, renderAskUserAnswersText, type PendingAskCloseResult, type PendingAskOpenResult } from "./sessionAsks.js";
@@ -863,7 +864,11 @@ function createDefaultRuntimeFactory(
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser, handoff, github, {
       declare: (awaiting) => {
         sessionManager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, { version: 1, kind: "declared", awaiting });
-        sessionManager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, { version: 1, kind: "checkpoint", response: responseFromBranch(sessionManager.getBranch()).response });
+        writeResponseCheckpoint(
+          (type, data) => { sessionManager.appendCustomEntry(type, data); },
+          responseFromBranch(sessionManager.getBranch()).response,
+          (error) => { console.warn("Could not persist the derived response checkpoint.", error); },
+        );
       },
     });
     const result = await createAgentSessionFromServices({
@@ -2099,9 +2104,11 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private checkpointResponse(session: PiAgentSession): void {
-    session.sessionManager.appendCustomEntry?.(SESSION_RESPONSE_CUSTOM_TYPE, {
-      version: 1, kind: "checkpoint", response: this.responseProjection(session).response,
-    });
+    writeResponseCheckpoint(
+      (type, data) => { session.sessionManager.appendCustomEntry?.(type, data); },
+      this.responseProjection(session).response,
+      (error) => { this.logger.info({ sessionId: session.sessionId, error }, "Could not persist the derived response checkpoint"); },
+    );
     this.sessionManager.invalidateSessionFile(session.sessionFile ?? "");
   }
 
