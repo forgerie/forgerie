@@ -140,3 +140,46 @@ describe("browser message projection", () => {
     expect(finalEvent.message).toBe(message);
   });
 });
+
+describe("turn declarations", () => {
+  const declaring = {
+    role: "assistant",
+    content: [
+      { type: "text", text: "Which option?" },
+      { type: "toolCall", id: "end-1", name: "end_turn", arguments: { awaiting: "reply" } },
+    ],
+  };
+  const declared = { role: "toolResult", toolCallId: "end-1", toolName: "end_turn", content: [{ type: "text", text: "Needs your response." }], details: { awaiting: "reply" } };
+  const working = { role: "assistant", content: [{ type: "toolCall", id: "bash-1", name: "bash", arguments: { command: "ls" } }] };
+  const worked = { role: "toolResult", toolCallId: "bash-1", toolName: "bash", content: [{ type: "text", text: "a.txt" }] };
+
+  it("shows the reply without the declaration in history, and keeps raw paging positions", () => {
+    const page: MessagePage = { messages: [{ role: "user", content: "go" }, working, worked, declaring, declared], start: 10, total: 15 };
+    const projected = projectBrowserMessageResponse(page);
+    expect(projected).toEqual({ start: 10, total: 15, messages: [{ role: "user", content: "go" }, working, worked, { role: "assistant", content: [{ type: "text", text: "Which option?" }] }] });
+    expect(page.messages).toHaveLength(5);
+    expect(declaring.content).toHaveLength(2);
+    const tools = projected.messages.flatMap((message) => normalizeMessage(message).flatMap((line) => line.parts)).filter((part) => part.type === "toolCall" || part.type === "toolResult");
+    expect(tools.map((part) => part.toolName)).toEqual(["bash", "bash"]);
+  });
+
+  it("drops the declaration from the preview without moving any other message", () => {
+    const page: MessagePage = { messages: [{ role: "user", content: "go" }, declaring, declared], start: 0, total: 3 };
+    const preview = projectBrowserMessagePreviewResponse(page);
+    expect(preview.messages).toHaveLength(3);
+    expect(preview.messages[1]).toMatchObject({ role: "assistant", content: [{ type: "text", text: "Which option?" }] });
+    expect(preview.messages[2]).toEqual({});
+  });
+
+  it("keeps live declaration events out of the transcript, and leaves other tools alone", () => {
+    expect(projectBrowserSessionEvent({ type: "tool.start", toolName: "end_turn", toolCallId: "end-1", summary: "", args: { awaiting: "reply" } }))
+      .toEqual({ type: "pi.event", eventType: "tool_execution_start" });
+    expect(projectBrowserSessionEvent({ type: "tool.end", toolName: "end_turn", toolCallId: "end-1", text: "Needs your response.", isError: false }))
+      .toEqual({ type: "pi.event", eventType: "tool_execution_end" });
+    expect(projectBrowserSessionEvent({ type: "message.end", message: declared })).toEqual({ type: "message.end" });
+    expect(projectBrowserSessionEvent({ type: "message.end", message: declaring })).toEqual({ type: "message.end", message: { role: "assistant", content: [{ type: "text", text: "Which option?" }] } });
+    const bash = { type: "tool.start" as const, toolName: "bash", toolCallId: "bash-1", summary: "ls" };
+    expect(projectBrowserSessionEvent(bash)).toBe(bash);
+    expect(projectBrowserMessage(working)).toBe(working);
+  });
+});

@@ -1,27 +1,45 @@
 import type { MessagePage, SessionUiEvent } from "../shared/apiTypes.js";
+import { END_TURN_TOOL_NAME } from "./sessions/endTurnTool.js";
 
 /**
- * Remove provider-only thinking data at the browser transport boundary. The
- * runtime message remains unchanged because only affected messages and content
- * blocks are copied.
+ * Tools whose call only declares how a run ended. The session response
+ * protocol records the declaration, so the transcript shows neither the call
+ * nor its result. Paging keeps raw positions: `start` still counts them.
+ */
+const TURN_DECLARATION_TOOLS: ReadonlySet<string> = new Set([END_TURN_TOOL_NAME]);
+
+function isTurnDeclarationCall(part: unknown): boolean {
+  return isRecord(part) && part["type"] === "toolCall" && typeof part["name"] === "string" && TURN_DECLARATION_TOOLS.has(part["name"]);
+}
+
+function isTurnDeclarationResult(message: unknown): boolean {
+  return isRecord(message) && message["role"] === "toolResult" && typeof message["toolName"] === "string" && TURN_DECLARATION_TOOLS.has(message["toolName"]);
+}
+
+/**
+ * Remove provider-only thinking data and turn declarations at the browser
+ * transport boundary. The runtime message remains unchanged because only
+ * affected messages and content blocks are copied.
  */
 export function projectBrowserMessage(message: unknown): unknown {
   if (!isRecord(message)) return message;
   const originalContent = message["content"];
   if (!isUnknownArray(originalContent)) return message;
 
-  const content = mapChanged(originalContent, (part) => {
+  const unsigned = mapChanged(originalContent, (part) => {
     if (!isRecord(part) || part["type"] !== "thinking" || !Object.hasOwn(part, "thinkingSignature")) return part;
     const projected = { ...part };
     delete projected["thinkingSignature"];
     return projected;
   });
+  const content = unsigned.some(isTurnDeclarationCall) ? unsigned.filter((part) => !isTurnDeclarationCall(part)) : unsigned;
 
   return content === originalContent ? message : { ...message, content };
 }
 
 export function projectBrowserMessageResponse(response: MessagePage): MessagePage {
-  const messages = mapChanged(response.messages, projectBrowserMessage);
+  const visible = response.messages.some(isTurnDeclarationResult) ? response.messages.filter((message) => !isTurnDeclarationResult(message)) : response.messages;
+  const messages = mapChanged(visible, projectBrowserMessage);
   return messages === response.messages ? response : { ...response, messages };
 }
 
@@ -54,7 +72,7 @@ export function projectBrowserMessagePreviewResponse(response: MessagePage): Mes
   return {
     ...response,
     start: response.start + omitted,
-    messages: messages.map((message, index) => included.has(index) ? projectBrowserMessagePreview(message) : {}),
+    messages: messages.map((message, index) => included.has(index) && !isTurnDeclarationResult(message) ? projectBrowserMessagePreview(message) : {}),
   };
 }
 
@@ -95,7 +113,7 @@ function projectBrowserMessagePreview(message: unknown): unknown {
     if (typeof part === "string") return [truncatePreviewText(part, readableTextLimit(role))];
     if (!isRecord(part)) return [part];
     const type = part["type"];
-    if (type === "image") return [];
+    if (type === "image" || isTurnDeclarationCall(part)) return [];
     const boundedPart = projectToolArguments(part, 0, budget);
     const projected = isRecord(boundedPart) ? boundedPart : {};
     if (type === "text" && typeof part["text"] === "string") {
@@ -194,7 +212,11 @@ function projectToolArguments(value: unknown, depth: number, budget = structured
 }
 
 export function projectBrowserSessionEvent(event: SessionUiEvent): SessionUiEvent {
+  if ((event.type === "tool.start" || event.type === "tool.update" || event.type === "tool.end") && TURN_DECLARATION_TOOLS.has(event.toolName)) {
+    return { type: "pi.event", eventType: `tool_execution_${event.type.slice("tool.".length)}` };
+  }
   if (event.type !== "message.end" || event.message === undefined) return event;
+  if (isTurnDeclarationResult(event.message)) return { type: "message.end" };
   const message = projectBrowserMessage(event.message);
   return message === event.message ? event : { ...event, message };
 }

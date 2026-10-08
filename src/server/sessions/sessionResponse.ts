@@ -84,17 +84,41 @@ export function responseAfterEntry(current: ResponseProjection, raw: unknown): R
   return current;
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+/** The content of the assistant message that made the current call. Direct tool unit tests can have none. */
+function callingAssistantContent(entries: readonly unknown[]): unknown[] | undefined {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const message = record(record(entries[i])?.["message"]);
+    const content: unknown = message?.["content"];
+    if (message?.["role"] === "assistant" && isUnknownArray(content)) return content;
+  }
+  return undefined;
+}
+
 /** A terminal declaration cannot share a batch with work that can keep the run alive. */
 export function assertTerminalToolAlone(entries: readonly unknown[], toolCallId: string): void {
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = record(entries[i]);
-    const message = record(entry?.["message"]);
-    if (message?.["role"] !== "assistant" || !Array.isArray(message["content"])) continue;
-    const calls = message["content"].map(record).filter((part) => part?.["type"] === "toolCall");
-    if (calls.length !== 1 || calls[0]?.["id"] !== toolCallId) throw new Error("Call this turn-ending tool alone, after all other tools finish.");
-    return;
-  }
-  // Direct tool unit tests can have no assistant entry; real runtimes always have one.
+  const content = callingAssistantContent(entries);
+  if (content === undefined) return;
+  const calls = content.map(record).filter((part) => part?.["type"] === "toolCall");
+  if (calls.length !== 1 || calls[0]?.["id"] !== toolCallId) throw new Error("Call this turn-ending tool alone, after all other tools finish.");
+}
+
+/**
+ * A declaration ends the run, so the reply must already be visible text in the
+ * same message. Thinking is never shown, and text in an earlier message of the
+ * run came before tool calls, so it is narration, not the reply.
+ */
+export function assertReplyWritten(entries: readonly unknown[]): void {
+  const content = callingAssistantContent(entries);
+  if (content === undefined) return;
+  const written = content.some((part) => {
+    const block = record(part);
+    return block?.["type"] === "text" && typeof block["text"] === "string" && block["text"].trim() !== "";
+  });
+  if (!written) throw new Error("The user sees no reply: this message has no text, and thinking is not shown. Write your reply as text, then call end_turn alone in the same message.");
 }
 
 /** Compact, reconstructible catalog projection stored in the same session log at settlement. */
