@@ -7,6 +7,8 @@ import { normalizeRelativePath } from "../workspaces/pathSafety.js";
 import { sanitizedGitEnv } from "./gitEnv.js";
 
 const MAX_OUTPUT = 2 * 1024 * 1024;
+/** Git's largest context count: every unchanged line of any file. */
+const FULL_CONTEXT = "--unified=2147483647";
 
 /**
  * A submodule row parsed from the superproject status. `git status` reports a
@@ -116,17 +118,22 @@ async function resolveSubmoduleToCommit(cwd: string, sub: SubmoduleRecord): Prom
   return head.code === 0 && resolved !== "" ? resolved : sub.indexOid;
 }
 
-export async function gitDiff(cwd: string, options: { path?: string; staged?: boolean }): Promise<GitDiffResponse> {
+/**
+ * `fullContext` asks git for every unchanged line of the file as context, so a
+ * viewer can show the whole file around its changes. Git's output cap still applies.
+ */
+export async function gitDiff(cwd: string, options: { path?: string; staged?: boolean; fullContext?: boolean }): Promise<GitDiffResponse> {
   const staged = options.staged === true;
+  const context = options.fullContext === true ? [FULL_CONTEXT] : [];
   let path: string | undefined;
   if (options.path !== undefined && options.path !== "") path = normalizeRelativePath(options.path);
 
   if (path !== undefined) {
     const owner = await submoduleForPath(cwd, path);
-    if (owner !== undefined) return submoduleDiff(cwd, owner, path, staged);
+    if (owner !== undefined) return submoduleDiff(cwd, owner, path, staged, context);
   }
 
-  const args = ["diff", "--no-ext-diff", "--color=never"];
+  const args = ["diff", "--no-ext-diff", "--color=never", ...context];
   if (staged) args.push("--cached");
   if (path !== undefined) args.push("--", path);
 
@@ -146,11 +153,11 @@ export async function gitDiff(cwd: string, options: { path?: string; staged?: bo
  * The response path stays the full superproject-relative path so the viewer and
  * the selected row line up.
  */
-async function submoduleDiff(cwd: string, owner: string, path: string, staged: boolean): Promise<GitDiffResponse> {
+async function submoduleDiff(cwd: string, owner: string, path: string, staged: boolean, context: string[]): Promise<GitDiffResponse> {
   const subCwd = join(cwd, owner);
   const rel = normalizeRelativePath(path.slice(owner.length + 1));
 
-  const args = ["diff", "--no-ext-diff", "--color=never"];
+  const args = ["diff", "--no-ext-diff", "--color=never", ...context];
   if (staged) args.push("--cached");
   args.push("--", rel);
 

@@ -245,3 +245,35 @@ describe("gitDiff routing into submodules", () => {
     expect(diff.diff).toContain("Subproject commit");
   });
 });
+
+describe("gitDiff full context", () => {
+  function createLongFile(): string {
+    const dir = mkdtempSync(join(tmpdir(), "pi-web-context-"));
+    created.push(dir);
+    git(dir, ["init", "-b", "main"]);
+    writeFileSync(join(dir, "long.txt"), Array.from({ length: 40 }, (_, index) => `line ${String(index + 1)}`).join("\n") + "\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "c1"]);
+    writeFileSync(join(dir, "long.txt"), Array.from({ length: 40 }, (_, index) => index === 19 ? "line twenty" : `line ${String(index + 1)}`).join("\n") + "\n");
+    return dir;
+  }
+
+  it("keeps git's default three lines of context unless asked", async () => {
+    const diff = await gitDiff(createLongFile(), { path: "long.txt" });
+    expect(diff.diff).toContain("@@ -17,7 +17,7 @@");
+    expect(diff.diff).not.toContain(" line 1\n");
+  });
+
+  it("sends every unchanged line in one hunk when asked for full context", async () => {
+    const dir = createLongFile();
+    const unstaged = await gitDiff(dir, { path: "long.txt", fullContext: true });
+    expect(unstaged.diff).toContain("@@ -1,40 +1,40 @@");
+    expect(unstaged.diff).toContain(" line 1\n");
+    expect(unstaged.diff).toContain(" line 40\n");
+
+    git(dir, ["add", "long.txt"]);
+    const staged = await gitDiff(dir, { path: "long.txt", staged: true, fullContext: true });
+    expect(staged.diff).toContain("@@ -1,40 +1,40 @@");
+    expect(staged.diff).toContain("+line twenty");
+  });
+});
