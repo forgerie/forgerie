@@ -18,6 +18,9 @@ import { registerBacklogRoutes } from "./backlog/backlogRoutes.js";
 import { withBacklogClaimRelease } from "./backlog/backlogArchive.js";
 import { markdownBacklogProvider } from "./backlog/markdownBacklog.js";
 import { createGitHubBacklogProvider } from "./backlog/githubBacklog.js";
+import { createAzureDevopsBacklogProvider } from "./backlog/azureDevopsBacklog.js";
+import { AzureDevopsClient } from "./azureDevops/azureDevopsClient.js";
+import { AzureDevopsPatStore } from "./azureDevops/azureDevopsPat.js";
 import { GitHubApp } from "./github/githubApp.js";
 import { GitHubAppStore } from "./github/githubAppStore.js";
 import { GitHubIssueClient } from "./github/githubIssues.js";
@@ -212,8 +215,10 @@ async function createSessionDaemonRuntime() {
     activeAgentProfile,
   });
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
+  const azureCredentials = new AzureDevopsPatStore(join(piWebDataDir(daemonEnvironment), "azure-devops"));
+  const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
-    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })] });
+    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
   return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls };
 }
 

@@ -213,6 +213,19 @@ These routes also exist under `/api/machines/local` and the federated machine pr
 
 The app lives in `github-app.json` in Forgerie's data directory with owner-only permissions (`0600`). It holds the private key, which can do everything the app's permissions allow on every repo where the app is installed, including merging pull requests, until you delete the key on GitHub. Forgerie drops the client secret and webhook secret GitHub sends at setup, and no response contains the key or a token. If GitHub stops accepting the app because it was deleted or its key revoked, the backlog shows a `provider-auth` warning: remove the app in the backlog and set GitHub up again.
 
+### Azure DevOps work items
+
+Set `backlog.providers` to include `"azure-devops"`, and configure
+`backlog.azureDevops` with `organization`, `project`, and an optional `areaPath`.
+The provider lists work items assigned to the owner of an organization-scoped
+PAT with Work Items: Read permission. The token lives outside Git in
+`<data directory>/azure-devops/<organization>.pat`, with mode `0600`.
+
+The first release reads descriptions, acceptance criteria, and reproduction
+steps, and uses the existing session launch and claim flow. It does not write
+to Azure or manage Azure Repos pull requests. See [Azure DevOps setup and
+limits](azure-devops.md) before configuring a project.
+
 ## Worktree pre-remove hook
 
 Before Forgerie deletes a workspace (a secondary Git worktree), it gives the repository one chance to tear down project-owned infrastructure tied to that worktree. To use the hook, provide an executable script at:

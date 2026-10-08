@@ -36,7 +36,9 @@ export class BacklogService {
     if (selected === undefined) throw new BacklogError("not-found", `Backlog provider ${provider} is not enabled`);
     const project = await this.requireProject(projectId);
     const scan = await scanProjectBacklog(project, await this.deps.claims.list(), [selected]);
-    const failure = scan.warnings.find((warning) => warning.kind === "project-error" || warning.kind === "scan-limit");
+    const failure = scan.warnings.find((warning) => warning.kind === "project-error" || warning.kind === "scan-limit"
+      || warning.kind === "provider-auth" || warning.kind === "provider-install"
+      || warning.kind === "provider-unavailable" && scan.entries.length === 0);
     if (failure !== undefined) throw new BacklogError("unavailable", failure.message);
     const entry = scan.entries.find(({ item }) => item.id === itemId);
     if (entry === undefined) throw new BacklogError("not-found", "Backlog item not found or invalid");

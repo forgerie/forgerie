@@ -9,11 +9,20 @@ export const BacklogGitHubConfigSchema = Type.Object({
   repo: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$" })),
   authors: Type.Optional(BacklogGitHubAuthorsSchema),
 }, { additionalProperties: false });
+/** Server-owned credentials are never accepted in project config. */
+export const BacklogAzureDevopsConfigSchema = Type.Object({
+  organization: Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{0,49}$" }),
+  project: Type.String({ minLength: 1, maxLength: 128, pattern: "^(?!\\.{1,2}$)[^\\u0000-\\u001f/\\\\]+$" }),
+  /** Optional routing boundary when one Azure project contains several code repositories. */
+  areaPath: Type.Optional(Type.String({ minLength: 1, maxLength: 1024, pattern: "^[^\\u0000-\\u001f]+$" })),
+}, { additionalProperties: false });
+export type BacklogAzureDevopsConfig = Static<typeof BacklogAzureDevopsConfigSchema>;
 export const BacklogConfigSchema = Type.Object({
   dir: Type.Optional(text),
   /** Providers this project lists. Omitted means markdown only. */
-  providers: Type.Optional(Type.Array(Type.Union([Type.Literal("markdown"), Type.Literal("github")]), { minItems: 1, maxItems: 2, uniqueItems: true })),
+  providers: Type.Optional(Type.Array(Type.Union([Type.Literal("markdown"), Type.Literal("github"), Type.Literal("azure-devops")]), { minItems: 1, maxItems: 3, uniqueItems: true })),
   github: Type.Optional(BacklogGitHubConfigSchema),
+  azureDevops: Type.Optional(BacklogAzureDevopsConfigSchema),
 }, { additionalProperties: false });
 export type BacklogConfig = Static<typeof BacklogConfigSchema>;
 

@@ -72,7 +72,7 @@ function parseBacklogConfig(value: unknown, path: string): BacklogConfig {
     throw new Error(`backlog.dir must be a non-empty path inside the project, written from the project root (work/items), not from .forgerie/: ${path}`);
   }
   if (!Check(BacklogConfigSchema, value)) {
-    throw new Error(`backlog must be an object with optional dir, providers ("markdown", "github"), and github { repo: "owner/name", authors: "trusted" | "all" }: ${path}`);
+    throw new Error(`backlog must be an object with optional dir, providers ("markdown", "github", "azure-devops"), github { repo: "owner/name", authors: "trusted" | "all" }, and azureDevops { organization, project, areaPath? }: ${path}`);
   }
   return value;
 }
