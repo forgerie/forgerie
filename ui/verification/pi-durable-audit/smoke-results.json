@@ -1,0 +1,51 @@
+{
+  "packageVersion": "1.1.0",
+  "work": "/tmp/forgerie-durable-smoke-lIvFFJ",
+  "results": [
+    {
+      "name": "ModelRuntime reuse",
+      "passed": true,
+      "detail": "The coding-agent ModelRuntime serves durable generation without AgentSession."
+    },
+    {
+      "name": "History fork",
+      "passed": true,
+      "detail": "A new conversation sees the parent history at the selected entry."
+    },
+    {
+      "name": "Image adapter",
+      "passed": true,
+      "detail": "SDK read tool returns a PNG through durable model context; native durable read rejects that same PNG."
+    },
+    {
+      "name": "Codemode package reuse",
+      "passed": true,
+      "detail": "Standalone QuickJS sandbox returns 42 inside a durable tool. Nested-call replay policy still needs design."
+    },
+    {
+      "name": "Owned child",
+      "passed": true,
+      "detail": "A durable tool creates, awaits, and reads an owned child conversation. This does not load pi-subagents."
+    },
+    {
+      "name": "Turn-ending tool and custom state",
+      "passed": true,
+      "detail": "Termination avoids the next model request, with reply state committed first."
+    },
+    {
+      "name": "Manual compaction",
+      "passed": true,
+      "detail": "Compaction commits a summary while retaining old transcript entries and the custom reply document."
+    },
+    {
+      "name": "Event stream",
+      "passed": true,
+      "detail": "Committed message and tool events observed; message_end uses entry, not coding-agent message."
+    },
+    {
+      "name": "Reopen, deduplication, reconnect",
+      "passed": true,
+      "detail": "The same request ID finds its settled submission; custom state and transcript snapshot survive SQLite reopen."
+    }
+  ]
+}

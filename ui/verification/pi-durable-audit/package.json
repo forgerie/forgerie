@@ -1,0 +1,9 @@
+{
+  "name": "forgerie-durable-feasibility-audit",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-durable": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0"
+  }
+}

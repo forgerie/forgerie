@@ -1,0 +1,59 @@
+[
+  {
+    "safety": "safe",
+    "passed": true,
+    "directory": "/tmp/forgerie-durable-crash-safe-IDK5wx",
+    "attempts": 2,
+    "receipt": {
+      "submissionId": 8,
+      "status": "done",
+      "toolResult": {
+        "role": "toolResult",
+        "toolCallId": "tool:1791481595171:mwb6yasyzr",
+        "toolName": "slow_tool",
+        "content": [
+          {
+            "type": "text",
+            "text": "completed"
+          }
+        ],
+        "details": {
+          "phase": "running"
+        },
+        "isError": false,
+        "durationMs": 102,
+        "timestamp": 1791481595616
+      }
+    }
+  },
+  {
+    "safety": "unsafe",
+    "passed": true,
+    "directory": "/tmp/forgerie-durable-crash-unsafe-f2Oad2",
+    "attempts": 1,
+    "receipt": {
+      "submissionId": 8,
+      "status": "done",
+      "toolResult": {
+        "role": "toolResult",
+        "toolCallId": "tool:1791481595863:c7qfv6oi8v",
+        "toolName": "slow_tool",
+        "content": [
+          {
+            "type": "text",
+            "text": "started\n"
+          },
+          {
+            "type": "text",
+            "text": "<harness>\n[error] Tool slow_tool was interrupted and may have partially run\n</harness>"
+          }
+        ],
+        "details": {
+          "phase": "running"
+        },
+        "isError": true,
+        "timestamp": 1791481596174
+      }
+    }
+  }
+]
