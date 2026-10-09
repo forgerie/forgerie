@@ -119,6 +119,7 @@ export function retainedText(reason: string, defaultBranch: string): string | un
     case "unlanded-commits": return `it has commits that are not on ${defaultBranch}. Land or discard it to remove it`;
     case "dirty": return "it has uncommitted changes. Land or discard it to remove it";
     case "shared": return "another session still works in it";
+    case "checkout-changed": return "its folder or branch changed outside Forgerie";
     case "related-worktrees-active": return "the chat still owns related worktrees. Finish those from the session menu (⋯) first";
     // Landed or discarded already: nothing is left to remove, so there is nothing to say.
     case "already-completed": return undefined;

@@ -264,7 +264,8 @@ export class SessionWorktrees {
       if ((await this.activeRelated(current)).length > 0) return { kind: "retained", reason: "related-worktrees-active" };
       if (sessions.some((session) => session.id !== current.sessionId && pathInside(current.path, session.cwd))) return { kind: "retained", reason: "shared" };
       try {
-        await assertOwnedCheckout(current);
+        // A checkout moved, removed, or switched outside Forgerie is not Forgerie's to remove. Say so with a code, not git's words.
+        try { await assertOwnedCheckout(current); } catch { return { kind: "retained", reason: "checkout-changed" }; }
         if ((await dirtyFiles(current.path)).length !== 0) return { kind: "retained", reason: "dirty" };
         if ((await git(current.path, "rev-list", "--count", `${current.defaultBranch}..HEAD`)).trim() !== "0") return { kind: "retained", reason: "unlanded-commits" };
         await this.change(id, { operation: "archive" });

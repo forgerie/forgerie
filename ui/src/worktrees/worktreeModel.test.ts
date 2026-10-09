@@ -85,6 +85,7 @@ describe("Land and Discard outcomes", () => {
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "unlanded-commits" } }))
       .toBe("Kept worktree fix: it has commits that are not on main. Land or discard it to remove it.");
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "shared" } })).toBe("Kept worktree fix: another session still works in it.");
+    expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "checkout-changed" } })).toBe("Kept worktree fix: its folder or branch changed outside Forgerie.");
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "a new reason" } })).toBe("Kept worktree fix: a new reason.");
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "already-completed" } })).toBeUndefined();
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "removed", cleanup: { kind: "done" } } })).toBeUndefined();

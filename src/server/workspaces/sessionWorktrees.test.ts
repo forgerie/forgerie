@@ -145,6 +145,13 @@ describe("session-owned worktrees with real git", () => {
     expect((await f.store.readOnly(f.session))?.state.kind).toBe("landed");
   });
 
+  it("archive cleanup keeps a checkout switched outside Forgerie and reports a code, not git's words", async () => {
+    const f = await fixture();
+    await f.git(f.record.path, "switch", "-c", "elsewhere");
+    expect(await f.worktrees.archiveCleanup(f.record.id, [f.session])).toEqual({ kind: "retained", reason: "checkout-changed" });
+    await access(f.record.path);
+  });
+
   it("streams and retains a failed post-create hook and prevents a failed pre-remove hook from deleting", async () => {
     const f = await fixture();
     await mkdir(join(f.repo, ".forgerie/hooks"), { recursive: true });
