@@ -5,6 +5,15 @@ multi-session, server-hosted, browser-driven. It is a **hard fork** of
 [jmfederico/pi-web](https://github.com/jmfederico/pi-web), kept as its own
 product. The UX will diverge heavily from upstream by design.
 
+## Backlog
+
+Track open work in [forgerie/forgerie GitHub Issues](https://github.com/forgerie/forgerie/issues).
+Before creating an issue, search existing open and closed issues for the same work.
+Use `priority: high`, `priority: medium`, or `priority: low` for priority.
+The `parking-lot` label marks deferred work. Do not create new markdown backlog
+items under `work/items/`; its completed records remain as history.
+The original item-to-issue mapping is in `docs/backlog/2026-10-09-github-migration.md`.
+
 ## Fork model: quasi-upstream via `upstream.lock`
 
 We do not merge from upstream. Upstream is a supplier of ideas and fixes that

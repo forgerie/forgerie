@@ -1,6 +1,9 @@
 {
   "version": 1,
   "backlog": {
-    "dir": "work/items/"
+    "providers": ["github"],
+    "github": {
+      "repo": "forgerie/forgerie"
+    }
   }
 }
