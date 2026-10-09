@@ -42,13 +42,15 @@ Build warnings remain for the large JS chunk and upstream Zod annotation comment
 
 ## Command confirmation fix, 2026-10-09
 
-Confirmations dismiss after five seconds. Hover or keyboard focus pauses the timer. A new confirmation starts a fresh timer, including repeated text. The toast does not move the composer or take focus. Long names scroll within a height budget, with the close action outside the scroll region. Detailed output is keyboard-scrollable.
+Confirmations use the existing `.picker-toast` presentation, centred below the header at the reading-column width. They dismiss after the existing 2.5-second information interval. Hover or keyboard focus pauses the timer. A new confirmation starts a fresh timer, including repeated text. The toast does not move the composer or take focus. Long names scroll within a height budget, with the close action outside the scroll region. Detailed output is keyboard-scrollable.
 
 From the repository root, run `APP_URL=http://127.0.0.1:5173 nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node ui/scripts/command-feedback-acceptance.mjs`.
 
-Verified with 48 browser layout cases: four Fold postures plus two constrained sizes, both themes, and four feedback states. Drafts survive four posture transitions. Manual dismissal, hover pause, expiry, choice confirmation, and an extreme name also pass. Six Caliper states across four postures render without errors or spill; both image samples were reviewed. The two folded-landscape panel states retain incomplete contrast audits for scroll-clipped text. There are no reported axe violations or accepted exceptions. Baseline comparisons, Caliper-authored interactions, and physical-device checks were not run.
+Verified with 48 browser layout cases: four Fold postures plus two constrained sizes, both themes, and four feedback states. Drafts survive four posture transitions. Manual dismissal, hover pause, expiry, choice confirmation, and an extreme name also pass. Nine Caliper states across four postures render without errors or spill; both image samples were reviewed. The two folded-landscape panel states retain incomplete contrast audits for scroll-clipped text. There are no reported axe violations or accepted exceptions. Baseline comparisons, Caliper-authored interactions, and physical-device checks were not run.
 
-Evidence is under `/tmp/forgerie-command-feedback/`: `acceptance.json`, posture captures, and the two `caliper-*/result.json` files. This fix remains on the session worktree until Land; the running app is unchanged.
+Archive Undo retains its five-second window. Errors, notes, and update offers stay until dismissed. These callers share the extracted presentation, but keep their original lifetime owners. The gate inventory drops seven entries; it gains none.
+
+Evidence is under `/tmp/forgerie-existing-toasts/`: `acceptance.json`, posture captures, and the two `caliper-*/result.json` files. This fix remains on the session worktree until Land; the running app is unchanged.
 
 ## References
 

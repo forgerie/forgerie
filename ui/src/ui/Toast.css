@@ -23,6 +23,8 @@
 .toast[data-tone="alert"] .toast-dismiss { grid-column: 3; }
 .toast[data-tone="alert"] :is(.toast-detail, .toast-foot) { grid-column: 2 / -1; }
 .toast-message { grid-column: 1; margin: 0; padding-block-start: 0.0625rem; overflow-wrap: anywhere; color: var(--quiet-foreground); text-wrap: pretty; }
+/* Long confirmations stay inside their reading budget; dismiss remains outside this scroller. */
+.toast-message { max-block-size: max(var(--control-size), calc(40cqb - var(--space-3))); overflow-y: auto; }
 .toast-message strong { font-weight: 600; color: var(--foreground); }
 .toast[data-tone="alert"] .toast-message { color: var(--foreground); font-weight: 500; }
 .toast-detail[hidden] { display: none; }

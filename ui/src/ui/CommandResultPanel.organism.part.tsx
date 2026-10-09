@@ -5,7 +5,7 @@ import { CommandResultPanel } from "./CommandResultPanel";
 export const name = "Command feedback";
 export const note = "Short confirmations are transient. Detailed output and choices stay until dismissed.";
 export const composition = {
-  default: [{ part: "src/ui/Toast.molecule.part.tsx", state: "default" }],
+  default: [{ part: "src/ui/Toast.molecule.part.tsx", state: "MessageOnly" }],
   LongName: [{ part: "src/ui/Toast.molecule.part.tsx", state: "LongText" }],
 };
 

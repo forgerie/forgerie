@@ -1,6 +1,6 @@
-import { useMemo } from "react";
 import type { CommandResult } from "../commands";
 import { Toast } from "./Toast";
+import { INFO_TOAST_MS } from "./toastTiming";
 
 export interface CommandResultBinding {
   result: CommandResult;
@@ -11,10 +11,9 @@ export interface CommandResultBinding {
 
 /** Shape: feedback and follow-up choices from Pi, separate from transcript history. `/tree` opens its own navigator. */
 export function CommandResultPanel({ result, disabled, onChoose, onClose }: CommandResultBinding) {
-  const notice = useMemo(() => result.type === "done" && result.presentation === "toast" && result.message
-    ? { message: result.message } : undefined, [result]);
   if (result.type === "done" && !result.message || result.type === "unsupported" || result.type === "tree") return null;
-  if (notice) return <Toast notice={notice} onDismiss={onClose} />;
+  if (result.type === "done" && result.presentation === "toast") return <Toast message={result.message}
+    timerKey={result} onDismiss={onClose} durationMs={INFO_TOAST_MS} />;
   return <section className="command-result" aria-label="Command result">
     <div className="command-result-head">
       {result.type === "select" ? <h2>{result.title}</h2> : <span>Pi command</span>}

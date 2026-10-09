@@ -40,15 +40,17 @@ describe("Pi command follow-up", () => {
     expect(document.querySelector(".command-result")).toBeNull();
     expect(document.querySelector('[role="status"]')?.textContent).toBe("Session named: skill editing");
     expect(document.body.textContent).not.toContain("Pi command");
-    await act(async () => vi.advanceTimersByTime(5000));
+    await act(async () => vi.advanceTimersByTime(2499));
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
     expect(onClose).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
   it("renders the toast states declared by the command feedback scenarios", async () => {
     await act(async () => root.render(<Renamed />));
-    expect(document.querySelector('.toast [role="status"]')?.textContent).toBe("Session named: skill editing");
+    expect(document.querySelector('.toast[role="status"]')?.textContent).toBe("Session named: skill editing");
     await act(async () => root.render(<LongName />));
-    expect(document.querySelector('.toast [role="status"]')?.textContent).toContain("very-long-session-name-");
+    expect(document.querySelector('.toast[role="status"]')?.textContent).toContain("very-long-session-name-");
     expect(document.querySelector(".command-result")).toBeNull();
   });
   it("leaves a tree to the session tree navigator", async () => {

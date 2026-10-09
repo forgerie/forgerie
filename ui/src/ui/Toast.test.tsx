@@ -12,7 +12,7 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => {
-  act(() => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals();
+  act(() => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); vi.useRealTimers();
   Reflect.deleteProperty(HTMLElement.prototype, "scrollWidth"); Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
 });
 
@@ -92,5 +92,57 @@ describe("toast", () => {
     expect(document.querySelector(".toast-detail")?.textContent).toBe("Kept it.");
     act(() => root.render(<Toast message="Plain" />));
     expect(document.querySelectorAll(".toast button")).toHaveLength(0);
+  });
+
+  it("keeps notices persistent unless the caller supplies a timeout", () => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    act(() => root.render(<Toast message="Update ready" onDismiss={dismiss} />));
+    act(() => vi.advanceTimersByTime(10000));
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it("expires a timed notice without taking focus", () => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    const input = document.body.appendChild(document.createElement("input")); input.focus();
+    act(() => root.render(<><ToastRegion /><Toast message="Saved" durationMs={2500} onDismiss={dismiss} /></>));
+    expect(document.querySelector('[data-toast-region] .toast')?.textContent).toBe("Saved");
+    expect(document.activeElement).toBe(input);
+    act(() => vi.advanceTimersByTime(2499)); expect(dismiss).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1)); expect(dismiss).toHaveBeenCalledOnce();
+  });
+
+  it.each(["hover", "focus"])("pauses a timed notice on %s and restarts its interval on leaving", (mode) => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    act(() => root.render(<Toast message="Saved" durationMs={2500} onDismiss={dismiss} />));
+    act(() => vi.advanceTimersByTime(2000));
+    const element = document.querySelector<HTMLElement>(mode === "hover" ? ".toast" : ".toast-message")!;
+    act(() => { if (mode === "hover") element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); else element.focus(); });
+    act(() => vi.advanceTimersByTime(10000)); expect(dismiss).not.toHaveBeenCalled();
+    act(() => { if (mode === "hover") element.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })); else element.blur(); });
+    act(() => vi.advanceTimersByTime(2499)); expect(dismiss).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1)); expect(dismiss).toHaveBeenCalledOnce();
+  });
+
+  it("restarts for a new notice with the same words and uses the latest callback without resetting", () => {
+    vi.useFakeTimers();
+    const first = vi.fn(); const latest = vi.fn(); const initial = {}; const next = {};
+    act(() => root.render(<Toast message="Saved" timerKey={initial} durationMs={2500} onDismiss={first} />));
+    act(() => vi.advanceTimersByTime(2000));
+    act(() => root.render(<Toast message="Saved" timerKey={next} durationMs={2500} onDismiss={first} />));
+    act(() => vi.advanceTimersByTime(2000)); expect(first).not.toHaveBeenCalled();
+    act(() => root.render(<Toast message="Saved" timerKey={next} durationMs={2500} onDismiss={latest} />));
+    act(() => vi.advanceTimersByTime(500));
+    expect(first).not.toHaveBeenCalled(); expect(latest).toHaveBeenCalledOnce();
+  });
+
+  it("clears a timed notice on unmount", () => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    act(() => root.render(<Toast message="Saved" durationMs={2500} onDismiss={dismiss} />));
+    act(() => root.render(null));
+    act(() => vi.advanceTimersByTime(10000)); expect(dismiss).not.toHaveBeenCalled();
   });
 });

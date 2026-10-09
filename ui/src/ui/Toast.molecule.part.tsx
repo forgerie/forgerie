@@ -26,3 +26,7 @@ export function Alert() {
 export function MessageOnly() {
   return <Toast message="Copied the link." onDismiss={() => {}} />;
 }
+export function LongText() {
+  const [dismissed, setDismissed] = useState(false);
+  return dismissed ? <p>Dismissed.</p> : <Toast message={`Saved: ${"a-long-name-without-spaces-".repeat(8)}`} onDismiss={() => setDismissed(true)} />;
+}

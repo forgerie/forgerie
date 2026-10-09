@@ -1,5 +1,5 @@
 import { ChevronDownIcon, ChevronUpIcon, CircleAlertIcon, XIcon } from "lucide-react";
-import { useId, useLayoutEffect, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import "./Toast.css";
 
@@ -21,7 +21,7 @@ export interface ToastAction { label: string; onPress: () => void }
  * It always shows in the page's `ToastRegion`, wherever it is rendered. With
  * no region on the page (a test, a part), it shows in place.
  */
-export function Toast({ tone = "plain", message, detail, action, onDismiss, dismissLabel = "Dismiss", lessLabel = "Less" }: {
+export function Toast({ tone = "plain", message, detail, action, onDismiss, dismissLabel = "Dismiss", lessLabel = "Less", durationMs, timerKey = message }: {
   tone?: "plain" | "alert";
   /** The title. Keep the one fact that matters here, so a closed detail hides nothing the reader must act on. */
   message: ReactNode;
@@ -32,6 +32,10 @@ export function Toast({ tone = "plain", message, detail, action, onDismiss, dism
   dismissLabel?: string;
   /** Closes an open detail. */
   lessLabel?: string;
+  /** Persistent unless the caller supplies a reading interval. Hover and focus pause it. */
+  durationMs?: number;
+  /** A new notice can restart the interval even when its words repeat. */
+  timerKey?: unknown;
 }) {
   // undefined until looked up; null when the page has no region.
   const [region, setRegion] = useState<Element | null>();
@@ -40,6 +44,14 @@ export function Toast({ tone = "plain", message, detail, action, onDismiss, dism
   const [cut, setCut] = useState(false);
   const [preview, setPreview] = useState<HTMLElement | null>(null);
   const detailId = useId();
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const dismiss = useEffectEvent(() => onDismiss?.());
+  useEffect(() => {
+    if (durationMs === undefined || hovered || focused) return;
+    const timer = setTimeout(() => dismiss(), durationMs);
+    return () => clearTimeout(timer);
+  }, [durationMs, timerKey, hovered, focused]);
   useLayoutEffect(() => { setRegion(document.querySelector("[data-toast-region]")); }, []);
   useLayoutEffect(() => {
     if (!preview) return;
@@ -59,9 +71,11 @@ export function Toast({ tone = "plain", message, detail, action, onDismiss, dism
     : cut ? <button type="button" className="toast-more" aria-expanded={false} aria-controls={detailId} onClick={() => setOpen(true)}>
       {closed}<ChevronDownIcon aria-hidden /></button>
     : <p className="toast-preview">{closed}</p>;
-  const card = <div className="toast" data-tone={tone} role={tone === "alert" ? "alert" : "status"}>
+  const card = <div className="toast" data-tone={tone} role={tone === "alert" ? "alert" : "status"}
+    onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+    onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
     {tone === "alert" ? <span className="toast-mark" aria-hidden><CircleAlertIcon /></span> : null}
-    <p className="toast-message">{message}</p>
+    <p className="toast-message" tabIndex={durationMs === undefined ? undefined : 0}>{message}</p>
     {onDismiss ? <button type="button" className="toast-dismiss" aria-label={dismissLabel} title={dismissLabel} onClick={onDismiss}><XIcon aria-hidden /></button> : null}
     {hasDetail ? <p id={detailId} className="toast-detail" hidden={!open}>{detail}</p> : null}
     {disclosure || action ? <div className="toast-foot">

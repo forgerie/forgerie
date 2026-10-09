@@ -1,6 +1,7 @@
 // Runs row commands against the catalog and owns the one message line under
 // the list: the undo offer after an archive, a copy confirmation, or a refusal.
 import { MutationError, type SessionRef } from "./catalogStore";
+import { INFO_TOAST_MS } from "../ui/toastTiming";
 import type { RowCommandKind } from "./commands";
 
 /** The writes a row command needs. The catalog store provides them. */
@@ -28,7 +29,6 @@ interface Timers { set: (run: () => void, ms: number) => unknown; clear: (handle
 
 /** How long the undo offer stays (inventory 6.2). */
 export const UNDO_MS = 5000;
-const INFO_MS = 2500;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 const titleOf = (target: Target) => target.name ?? "Untitled session";
 
@@ -51,7 +51,7 @@ export function createRowActions(deps: {
     timers.clear(toastTimer);
     toastTimer = undefined;
     // Errors and notes stay until dismissed or replaced: a reason read after it vanished is no help.
-    if (toast && toast.type !== "error" && toast.type !== "note" && !(toast.type === "undo" && toast.note)) toastTimer = timers.set(() => update({ ...state, toast: undefined }), toast.type === "undo" ? UNDO_MS : INFO_MS);
+    if (toast && toast.type !== "error" && toast.type !== "note" && !(toast.type === "undo" && toast.note)) toastTimer = timers.set(() => update({ ...state, toast: undefined }), toast.type === "undo" ? UNDO_MS : INFO_TOAST_MS);
     update({ ...state, toast });
   };
   const setPending = (id: string, on: boolean) => {

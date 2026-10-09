@@ -27,6 +27,7 @@ async function until(expression) {
 async function navigate(scenario) {
   await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
   await until("!!document.querySelector('[data-composer-input]')");
+  await sleep(300);
 }
 async function input(text) {
   await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()");
@@ -57,6 +58,11 @@ try {
           assert.ok(box.left >= 0 && box.right <= posture.width + 1 && box.top >= 0 && box.bottom <= posture.height + 1, JSON.stringify({ scenario, posture, box }));
         }
         assert.equal(before.reserved, !confirmation);
+        if (confirmation) {
+          assert.equal(await evaluate(cdp, "!!document.querySelector('[data-toast-region] .toast')"), true, "command confirmation uses the existing notification region");
+          const style = await evaluate(cdp, "({ shadow: getComputedStyle(document.querySelector('.toast')).boxShadow })");
+          assert.notEqual(style.shadow, "none");
+        }
         await evaluate(cdp, `document.querySelector('${confirmation ? ".toast-dismiss" : ".command-result-head button"}').click()`);
         await until(confirmation ? "!document.querySelector('.toast')" : "!document.querySelector('.command-result')");
         if (confirmation) {
@@ -81,8 +87,9 @@ try {
   }
   await input("/name renamed again"); await pressCombo(cdp, "enter");
   await until("document.querySelector('.toast-message')?.textContent === 'Session named: renamed again'");
+  await sleep(300);
   const center = await evaluate(cdp, "(() => { const r = document.querySelector('.toast').getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; })()");
-  await move(center.x, center.y); await sleep(5300);
+  await move(center.x, center.y); await sleep(2800);
   assert.equal(await evaluate(cdp, "!!document.querySelector('.toast')"), true);
   await move(1, 1); await until("!document.querySelector('.toast')");
   result.hoverPauseAndExpiry = true;

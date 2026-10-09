@@ -1,6 +1,7 @@
 // Separate dev-only entry point. This preview has no transport or network data.
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { ToastRegion } from "../src/ui/ToastRegion";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import type { QueuedMessage } from "../src/queue";
 import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transcript";
@@ -835,4 +836,4 @@ function NewSessionPreview() {
 }
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing preview root");
-createRoot(root).render(scenario.startsWith("new-session") ? <NewSessionPreview /> : <Preview />);
+createRoot(root).render(<><ToastRegion />{scenario.startsWith("new-session") ? <NewSessionPreview /> : <Preview />}</>);

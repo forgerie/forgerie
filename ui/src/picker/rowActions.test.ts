@@ -114,8 +114,14 @@ describe("row actions", () => {
     const ok = actions();
     await ok.store.run("copyPath", target);
     expect(ok.store.getSnapshot().toast).toEqual({ type: "info", text: "Copied workspace path" });
+    vi.advanceTimersByTime(2499);
+    expect(ok.store.getSnapshot().toast?.type).toBe("info");
+    vi.advanceTimersByTime(1);
+    expect(ok.store.getSnapshot().toast).toBeUndefined();
     const refused = actions({ copy: false });
     await refused.store.run("copyPath", target);
     expect(refused.store.getSnapshot().toast).toEqual({ type: "error", text: "Could not copy. The path is /code/forgerie" });
+    vi.advanceTimersByTime(10000);
+    expect(refused.store.getSnapshot().toast?.type).toBe("error");
   });
 });
