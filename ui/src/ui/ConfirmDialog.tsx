@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useState, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -17,8 +17,13 @@ export function ConfirmDialog({ title, icon, children, confirmLabel, busyLabel, 
   const titleId = useId();
   const bodyId = useId();
   const [dialog, setDialog] = useState<HTMLDialogElement | null>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
-  useLayoutEffect(() => { if (dialog && !dialog.open) dialog.showModal?.(); }, [dialog]);
+  // showModal moves focus to the first focusable element, and a body that scrolls is one. Cancel takes it back.
+  useLayoutEffect(() => {
+    if (dialog && !dialog.open) dialog.showModal?.();
+    cancel.current?.focus({ preventScroll: true });
+  }, [dialog]);
   useLayoutEffect(() => () => { if (opener?.isConnected) opener.focus({ preventScroll: true }); }, [opener]);
   return createPortal(<dialog ref={setDialog} className="wt-dialog" aria-labelledby={titleId} aria-describedby={bodyId}
     onCancel={(event) => { event.preventDefault(); onCancel(); }}
@@ -30,7 +35,7 @@ export function ConfirmDialog({ title, icon, children, confirmLabel, busyLabel, 
       </header>
       <div className="wt-body" id={bodyId}>{children}</div>
       <footer className="wt-foot">
-        <button type="button" className="wt-secondary" autoFocus onClick={onCancel}>Cancel</button>
+        <button ref={cancel} type="button" className="wt-secondary" onClick={onCancel}>Cancel</button>
         <button type="button" className="primary wt-primary" data-tone={tone === "danger" ? "danger" : undefined} disabled={busy || held}
           onClick={onConfirm}>{busy ? busyLabel ?? confirmLabel : confirmLabel}</button>
       </footer>

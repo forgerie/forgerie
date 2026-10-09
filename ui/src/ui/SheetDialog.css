@@ -9,10 +9,11 @@
   block-size: min(var(--sheet-height), 100dvh - 2 * var(--sheet-room-block));
   max-inline-size: none; max-block-size: none; overflow: hidden;
   border: var(--hairline) solid var(--line); border-radius: min(var(--radius-thread), var(--sheet-room-inline), var(--sheet-room-block));
-  background: var(--background); color: var(--foreground); box-shadow: 0 var(--space-4) var(--space-8) var(--scrim-shadow);
+  background: var(--modal-surface); color: var(--foreground); box-shadow: var(--modal-shadow); animation: modal-in var(--modal-enter);
 }
 .sheet-dialog[open] { display: flex; }
-.sheet-dialog::backdrop { background: var(--scrim); }
+.sheet-dialog::backdrop { background: var(--scrim); backdrop-filter: var(--modal-backdrop); animation: modal-scrim-in var(--modal-enter); }
+@media (prefers-reduced-motion: reduce) { .sheet-dialog, .sheet-dialog::backdrop { animation: none; } }
 .sheet-dialog-frame:focus { outline: none; }
 .sheet-dialog-frame { --sheet-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column;
   min-inline-size: 0; min-block-size: 0;

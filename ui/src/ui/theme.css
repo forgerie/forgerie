@@ -74,6 +74,13 @@
   --bracket-miss: color-mix(in oklab, var(--destructive) 22%, transparent);
   --scrim: oklch(0 0 0 / 0.32);
   --scrim-shadow: oklch(0 0 0 / 0.16);
+  /* A modal over the page. Three shadows set its height: a tight one where it
+     meets the page, a middle one for its edge, and a wide one for its lift.
+     The page behind goes soft, so the modal is the only sharp plane. */
+  --modal-surface: var(--popover);
+  --modal-shadow: 0 1px 2px oklch(0 0 0 / 0.08), 0 0.5rem 1.5rem -0.5rem oklch(0 0 0 / 0.2), 0 1.75rem 4rem -1rem oklch(0 0 0 / 0.28);
+  --modal-backdrop: blur(3px);
+  --modal-enter: 200ms cubic-bezier(0.2, 0.9, 0.3, 1);
   /* Diff rows: drawn as faint washes, so the live blue of a note stays the loudest mark on a line. */
   --diff-add: oklch(0.6 0.15 150);
   --diff-remove: oklch(0.6 0.2 25);
@@ -132,6 +139,9 @@
     --code-title: #a3c3e6;
     --scrim: oklch(0 0 0 / 0.55);
     --scrim-shadow: oklch(0 0 0 / 0.4);
+    /* A shadow is lost on a dark page, so the modal is lighter than the page
+       and its top edge catches the light. */
+    --modal-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent), 0 1px 2px oklch(0 0 0 / 0.5), 0 1.75rem 4rem -1rem oklch(0 0 0 / 0.7);
     --diff-add: oklch(0.72 0.16 150);
     --diff-remove: oklch(0.7 0.19 25);
     --diff-modify: oklch(0.76 0.13 80);
@@ -458,10 +468,10 @@ button:disabled { cursor: default; opacity: 0.4; }
   block-size: min(var(--tree-height), 100dvh - 2 * var(--tree-room-block));
   max-inline-size: none; max-block-size: none; overflow: hidden;
   border: 1px solid var(--line); border-radius: min(var(--radius-thread), var(--tree-room-inline), var(--tree-room-block));
-  background: var(--background); color: var(--foreground); box-shadow: 0 var(--space-4) var(--space-8) var(--scrim-shadow);
+  background: var(--modal-surface); color: var(--foreground); box-shadow: var(--modal-shadow); animation: modal-in var(--modal-enter);
 }
 .tree-dialog[open] { display: flex; }
-.tree-dialog::backdrop { background: var(--scrim); }
+.tree-dialog::backdrop { background: var(--scrim); backdrop-filter: var(--modal-backdrop); animation: modal-scrim-in var(--modal-enter); }
 .tree-sheet { --tree-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0;
   padding: max(0px, env(safe-area-inset-top) - var(--tree-room-block)) max(0px, env(safe-area-inset-right) - var(--tree-room-inline))
     max(0px, env(safe-area-inset-bottom) - var(--tree-room-block)) max(0px, env(safe-area-inset-left) - var(--tree-room-inline)); }
@@ -912,6 +922,7 @@ summary.trace-line:hover { color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
   .ask, .app-scrim, .picker-menu, .picker-row-menu { animation: none; }
+  .tree-dialog, .tree-dialog::backdrop, .wt-card, .wt-dialog::backdrop { animation: none; }
   .trace-text[data-live] { animation: none; background: none; color: var(--foreground); }
 }
 /* New session, after Paperclip's new-task dialog: a titled window in sections.
@@ -1230,23 +1241,30 @@ summary.trace-line:hover { color: var(--foreground); }
 .wt-receipt-text strong { color: var(--foreground); font-weight: 500; }
 .wt-receipt .wt-secondary { margin-inline-start: auto; }
 
-/* Land and Discard: a small window. A card while there is room; at a narrow or short edge it meets the screen. */
+/* Land and Discard, and every confirmation: a small window. It is always a card. It keeps
+   a narrow margin at the cover screen's width, so it never turns into a band across the page. */
 .wt-dialog {
   --wt-width: 30rem;
-  --wt-room: clamp(0px, (100dvw - var(--wt-width)) / 2, 1.5rem);
+  --wt-room: clamp(var(--space-3), (100dvw - var(--wt-width)) / 2, var(--space-6));
   position: fixed; inset: 0; margin: auto; padding: 0; border: 0; background: transparent; color: var(--foreground); overflow: visible;
-  inline-size: min(var(--wt-width), 100dvw - 2 * var(--wt-room)); max-inline-size: none; block-size: fit-content; max-block-size: 100dvh;
+  inline-size: min(var(--wt-width), 100dvw - 2 * var(--wt-room)); max-inline-size: none; block-size: fit-content;
+  max-block-size: calc(100dvh - 2 * var(--wt-room));
 }
 .wt-dialog[open] { display: flex; }
-.wt-dialog::backdrop { background: var(--scrim); }
-.wt-card { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; max-block-size: 100dvh; overflow: hidden;
-  border: 1px solid var(--line); border-radius: min(var(--radius-thread), var(--wt-room)); background: var(--background); box-shadow: 0 var(--space-4) var(--space-8) var(--scrim-shadow); }
-.wt-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: var(--space-4) var(--space-5) var(--space-2); }
-.wt-head h2 { flex: 1 1 auto; margin: 0; font-size: var(--text-size); font-weight: 500; }
+.wt-dialog::backdrop { background: var(--scrim); backdrop-filter: var(--modal-backdrop); animation: modal-scrim-in var(--modal-enter); }
+.wt-card { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; max-block-size: calc(100dvh - 2 * var(--wt-room)); overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius-thread); background: var(--modal-surface); box-shadow: var(--modal-shadow);
+  animation: modal-in var(--modal-enter); }
+@keyframes modal-in { from { opacity: 0; translate: 0 0.5rem; scale: 0.98; } }
+@keyframes modal-scrim-in { from { opacity: 0; } }
+.wt-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-5) var(--space-5) var(--space-2); }
+.wt-head h2 { flex: 1 1 auto; margin: 0; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; text-wrap: balance; }
 .wt-mark { flex: none; display: grid; place-items: center; inline-size: 1.75rem; block-size: 1.75rem; border-radius: var(--radius-control); background: var(--muted); color: var(--muted-foreground); }
 .wt-head .wt-branch { flex-basis: 100%; padding-inline-start: calc(1.75rem + var(--space-2)); }
 .wt-body { flex: 1 1 auto; min-block-size: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-2) var(--space-5) var(--space-3); font-size: var(--small-text); line-height: 1.55; }
 .wt-body p { margin: 0; }
+/* A body that scrolls takes keyboard focus. The card clips an outside ring to two bars, so the ring sits inside. */
+.wt-body:focus-visible { outline-offset: -2px; outline-color: var(--line-focus); }
 .wt-lead { color: var(--foreground); }
 .wt-lead[data-tone="danger"] { color: var(--destructive); font-weight: 500; }
 .wt-note, .wt-status { color: var(--muted-foreground); }
