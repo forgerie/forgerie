@@ -58,6 +58,11 @@ export const QUOTA_WITH_RESETS = parseQuotaPayload(withResets({
   "codex/team@example.com": { expiresAt: ["2026-10-22T20:26:38Z", "2026-10-29T18:51:16Z", "2026-11-06T23:20:10Z"], restartsWindows: true },
   "codex/spare@example.com": { expiresAt: ["2026-11-06T23:41:50Z"], restartsWindows: true },
 }));
+/** The same, with Codex holding its resets back until a limit is near, as the router read it on 2026-10-09. */
+export const QUOTA_RESETS_HELD = parseQuotaPayload(withResets({
+  "claude/work@example.com": { ...CLAUDE_RESET, applicableCount: 1 },
+  "codex/team@example.com": { expiresAt: ["2026-10-22T20:26:38Z", "2026-10-29T18:51:16Z", "2026-11-06T23:20:10Z"], restartsWindows: true, applicableCount: 0 },
+}));
 /** The same, with Codex's first reset two days from lapsing. */
 export const QUOTA_RESET_LAPSING = parseQuotaPayload(withResets({
   "claude/work@example.com": CLAUDE_RESET,

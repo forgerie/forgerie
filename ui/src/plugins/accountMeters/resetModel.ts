@@ -1,5 +1,5 @@
 import { meterAccount, shortDate, type MeterAccount } from "./meterModel";
-import { formatAmount, isUnmeteredWindow, orderedWindows, windowSeconds, type QuotaPayload, type QuotaWindow } from "./quotaData";
+import { formatAmount, isUnmeteredWindow, orderedWindows, windowSeconds, type QuotaPayload, type QuotaResets, type QuotaWindow } from "./quotaData";
 
 /**
  * What spending one banked reset would do to an account, drawn in the meters'
@@ -8,6 +8,8 @@ import { formatAmount, isUnmeteredWindow, orderedWindows, windowSeconds, type Qu
  */
 export interface ResetPreview {
   key: string;
+  /** The router's provider id, which a redemption names. */
+  providerId: string;
   provider: string;
   email: string;
   /** Codex starts the refilled windows over; Claude keeps their reset dates. */
@@ -23,6 +25,19 @@ export interface ResetPreview {
   expires: string;
   /** The ones left after, soonest first. */
   later: string[];
+  /** Why the provider would refuse a reset right now, in words. Undefined when it would not, or did not say. */
+  hold: string | undefined;
+}
+
+/** Why a provider would refuse this account a reset now: a cooldown, or no reset applicable yet. */
+function holdOf(provider: string, resets: QuotaResets, now: Date, zone: string | undefined): string | undefined {
+  if (resets.cooldownUntil && new Date(resets.cooldownUntil).getTime() > now.getTime()) {
+    return `${provider} is not taking resets until ${longDate(resets.cooldownUntil, zone)}.`;
+  }
+  if (resets.applicableCount === 0) {
+    return `${provider} keeps these resets banked for now and would refuse one. It has not said when one applies; try again when a limit is close.`;
+  }
+  return undefined;
 }
 
 /** "Sat, Oct 10, 8:00 AM", to the nearest minute. `zone` is for tests; the reader's own zone otherwise. */
@@ -61,7 +76,8 @@ export function resetPreview(payload: QuotaPayload, key: string, now: Date, zone
       const longBefore = longestIndex === undefined ? undefined : windows[longestIndex];
       const longAfter = longestIndex === undefined ? undefined : refilled[longestIndex];
       return {
-        key, provider: provider.name, email: account.email, restarts: resets.restartsWindows,
+        key, providerId: provider.id, provider: provider.name, email: account.email, restarts: resets.restartsWindows,
+        hold: holdOf(provider.name, resets, now, zone),
         before: meterAccount(provider.id, { ...account, resets: undefined }, windows, false, now, zone),
         after: meterAccount(provider.id, { ...account, resets: undefined }, refilled, false, now, zone),
         horizon: longBefore?.resetsAt && longAfter?.resetsAt ? {

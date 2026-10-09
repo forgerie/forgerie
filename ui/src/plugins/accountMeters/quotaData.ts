@@ -66,9 +66,10 @@ const windowSchema = z.object({
   lengthSeconds: z.number().positive().optional().catch(undefined),
 });
 /**
- * Banked usage-limit resets the provider granted this account. Proposed
- * contract: no router build sends it yet, so absent is the normal case, and a
- * malformed value is dropped rather than failing the whole reading.
+ * Banked usage-limit resets the provider granted this account. The router
+ * sends it for Claude and Codex accounts only, so absent is the normal case
+ * elsewhere. A malformed value, or an account with none, is dropped rather
+ * than failing the whole reading.
  */
 const resetsSchema = z.object({
   /** One instant per unused reset, soonest first. */
@@ -81,6 +82,14 @@ const resetsSchema = z.object({
    * because only the provider knows.
    */
   restartsWindows: z.boolean(),
+  /**
+   * How many resets the provider would let this account spend right now. Zero
+   * means it holds them back (Codex does until a limit is near); null or
+   * absent means it did not say.
+   */
+  applicableCount: z.number().int().nonnegative().nullable().optional().catch(undefined),
+  /** The provider refuses a reset until this instant. */
+  cooldownUntil: instant("resets.cooldownUntil").nullable().optional().catch(undefined),
 });
 const accountSchema = z.object({
   email: z.string(),

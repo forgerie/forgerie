@@ -6,9 +6,13 @@ import { createPortal } from "react-dom";
  * Discard window's card, so every confirmation in Forgerie looks the same.
  * Cancel holds focus first; Escape and a press outside the card cancel.
  * `plain` is for a decision that cannot be undone but loses nothing.
+ * `busy` holds the card while the decision is carried out: the confirm button
+ * says `busyLabel` and takes no second press. `held` disables it when the
+ * decision cannot be made now; the body says why.
  */
-export function ConfirmDialog({ title, icon, children, confirmLabel, tone = "danger", onConfirm, onCancel }: {
-  title: string; icon?: ReactNode; children: ReactNode; confirmLabel: string; tone?: "danger" | "plain"; onConfirm: () => void; onCancel: () => void;
+export function ConfirmDialog({ title, icon, children, confirmLabel, busyLabel, tone = "danger", busy = false, held = false, onConfirm, onCancel }: {
+  title: string; icon?: ReactNode; children: ReactNode; confirmLabel: string; busyLabel?: string; tone?: "danger" | "plain";
+  busy?: boolean; held?: boolean; onConfirm: () => void; onCancel: () => void;
 }) {
   const titleId = useId();
   const bodyId = useId();
@@ -19,7 +23,7 @@ export function ConfirmDialog({ title, icon, children, confirmLabel, tone = "dan
   return createPortal(<dialog ref={setDialog} className="wt-dialog" aria-labelledby={titleId} aria-describedby={bodyId}
     onCancel={(event) => { event.preventDefault(); onCancel(); }}
     onClick={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-    <div className="wt-card">
+    <div className="wt-card" aria-busy={busy || undefined}>
       <header className="wt-head">
         {icon ? <span className="wt-mark" aria-hidden>{icon}</span> : null}
         <h2 id={titleId}>{title}</h2>
@@ -27,7 +31,8 @@ export function ConfirmDialog({ title, icon, children, confirmLabel, tone = "dan
       <div className="wt-body" id={bodyId}>{children}</div>
       <footer className="wt-foot">
         <button type="button" className="wt-secondary" autoFocus onClick={onCancel}>Cancel</button>
-        <button type="button" className="primary wt-primary" data-tone={tone === "danger" ? "danger" : undefined} onClick={onConfirm}>{confirmLabel}</button>
+        <button type="button" className="primary wt-primary" data-tone={tone === "danger" ? "danger" : undefined} disabled={busy || held}
+          onClick={onConfirm}>{busy ? busyLabel ?? confirmLabel : confirmLabel}</button>
       </footer>
     </div>
   </dialog>, document.body);

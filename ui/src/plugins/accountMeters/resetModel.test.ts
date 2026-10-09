@@ -82,3 +82,17 @@ describe("spanWords", () => {
     expect(spanWords(1)).toBe("1 hour");
   });
 });
+
+describe("reset hold", () => {
+  it("says why the provider would refuse a reset now, and nothing when it would not", () => {
+    expect(resetPreview(payload({ claude: { ...claude, applicableCount: 1 } }), "claude/me@work.example", now, ZONE)?.hold).toBeUndefined();
+    expect(resetPreview(payload({ codex }), "codex/a@example", now, ZONE)?.hold).toBeUndefined();
+    expect(resetPreview(payload({ codex: { ...codex, applicableCount: 0 } }), "codex/a@example", now, ZONE)?.hold).toMatch(/^Codex keeps these resets banked/u);
+    expect(resetPreview(payload({ claude: { ...claude, cooldownUntil: "2026-10-09T18:00:00Z" } }), "claude/me@work.example", now, ZONE)?.hold)
+      .toBe("Claude is not taking resets until Fri, Oct 9, 6:00 PM.");
+    expect(resetPreview(payload({ claude: { ...claude, cooldownUntil: "2026-10-09T12:00:00Z" } }), "claude/me@work.example", now, ZONE)?.hold).toBeUndefined();
+  });
+  it("names the provider id a redemption sends", () => {
+    expect(resetPreview(payload({ codex }), "codex/a@example", now, ZONE)?.providerId).toBe("codex");
+  });
+});
