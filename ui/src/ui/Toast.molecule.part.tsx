@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Toast } from "./Toast";
 
 export const name = "Toast";
-export const note = "A short message with one action and a dismiss button; a detail opens on request, on its own line";
+export const note = "A short message with one action and a dismiss button; actions under it; a long detail shows its first words and opens on a tap";
 
 export default function WithAction() {
   const [said, setSaid] = useState("");
@@ -14,7 +14,11 @@ export default function WithAction() {
 }
 export function WithDetail() {
   return <Toast message={<>Archived <strong>Account meters plugin backport</strong>. Worktree kept.</>} action={{ label: "Undo", onPress: () => {} }} onDismiss={() => {}}
-    detail="The worktree account-meters-plugin-backport has commits that are not on main. Land or discard it to remove it." />;
+    detail="It has commits that are not on main. Land or discard account-meters-plugin-backport to remove it." />;
+}
+export function ShortDetail() {
+  return <Toast message={<>Archived <strong>Fix</strong>. Worktree kept.</>} action={{ label: "Undo", onPress: () => {} }} onDismiss={() => {}}
+    detail="Another session still works in fix." />;
 }
 export function Alert() {
   return <Toast tone="alert" message="“Fix the parser” did not start." action={{ label: "Review", onPress: () => {} }} onDismiss={() => {}} />;

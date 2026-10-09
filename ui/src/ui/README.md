@@ -56,5 +56,5 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ReplyBox` (molecule): a short text field with send and an optional second action; Enter sends and the text stays until the send succeeds.
 - `QuestionCard` (molecule): a question that waits on the reader, with a reply box while open and the answer once given.
 - `Glyph` (atom): a one-colour mark from an SVG path on a 24-unit grid, at the size and colour of the text beside it.
-- `Toast` (molecule): a short message that does not stop the reader, with one action and a dismiss button; a detail starts closed and opens from a chevron onto its own line, and it always shows in the page's `ToastRegion`.
+- `Toast` (molecule): a short message that does not stop the reader: the message at full width with dismiss in its corner, and a foot row with the detail's first words (cut, they open the whole text) and one action; it always shows in the page's `ToastRegion`.
 - `ToastRegion` (organism): the one place toasts appear, at the window's top end under the header, above the sheet and the thread; mounted once at the entry.

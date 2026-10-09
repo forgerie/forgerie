@@ -83,12 +83,12 @@ describe("Land and Discard outcomes", () => {
     expect(receiptText({ kind: "landed", sha: "abcdef0123", at: "t" }, "main")).toBe("Landed on main at abcdef0");
     expect(receiptText({ kind: "discarded", at: "t" }, "main")).toBe("Worktree discarded");
     const kept = (reason: string) => archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason } });
-    expect(kept("unlanded-commits")).toEqual({ title: "Worktree kept", text: "The worktree fix has commits that are not on main. Land or discard it to remove it." });
-    expect(kept("shared")?.text).toBe("Another session still works in the worktree fix.");
-    expect(kept("checkout-changed")?.text).toBe("The folder or branch of the worktree fix changed outside Forgerie.");
-    expect(kept("a new reason")?.text).toBe("The worktree fix was kept: a new reason");
+    expect(kept("unlanded-commits")).toEqual({ title: "Worktree kept", text: "It has commits that are not on main. Land or discard fix to remove it." });
+    expect(kept("shared")?.text).toBe("Another session still works in fix.");
+    expect(kept("checkout-changed")?.text).toBe("Its folder or branch changed outside Forgerie. Remove fix yourself if you no longer need it.");
+    expect(kept("a new reason")?.text).toBe("a new reason (fix)");
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "removed", cleanup: { kind: "failed", error: "busy" } } }))
-      .toEqual({ title: "Worktree not removed", text: "The worktree fix was not removed: busy" });
+      .toEqual({ title: "Worktree not removed", text: "busy (fix)" });
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "already-completed" } })).toBeUndefined();
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "removed", cleanup: { kind: "done" } } })).toBeUndefined();
   });

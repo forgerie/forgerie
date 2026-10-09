@@ -149,7 +149,7 @@ function SessionPreview() {
   const all = boardRows({ sessions, statuses: {}, activities: { s4: { phase: "active", activeSince: "2026-10-06T21:22:00Z" } }, unread: new Set(["s1"]), now,
     locate: createLocationResolver([{ id: "p1", name: "forgerie", path: repo }], []) });
   const toast = scenario === "archive-note" ? { type: "undo" as const, target: { id: "s1", cwd: worktree.path, name: "Fix the empty-password login" },
-    note: { title: "Worktree kept", text: `The worktree ${branch} has commits that are not on main. Land or discard it to remove it.` } } : undefined;
+    note: { title: "Worktree kept", text: `It has commits that are not on main. Land or discard ${branch} to remove it.` } } : undefined;
   return <AssistantRuntimeProvider runtime={runtime}>
     <ToastRegion />
     {toast ? <PickerToast toast={toast} onUndo={() => {}} onDismiss={() => {}} /> : null}

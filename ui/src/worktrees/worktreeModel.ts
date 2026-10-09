@@ -117,20 +117,20 @@ export function discardSummary(preview: Pick<DiscardPreview, "commits" | "dirtyF
 export interface ArchiveNote { title: string; text: string }
 
 /**
- * Why archiving kept a worktree, as a sentence that names the branch. The
- * server sends a code; an unknown one shows as sent.
+ * Why archiving kept a worktree. The toast shows only the first words until
+ * the reader opens it, so each sentence starts with the cause and names the
+ * branch after it. The server sends a code; an unknown one shows as sent.
  */
 export function retainedText(reason: string, branch: string, defaultBranch: string): string | undefined {
-  const worktree = `The worktree ${branch}`;
   switch (reason) {
-    case "unlanded-commits": return `${worktree} has commits that are not on ${defaultBranch}. Land or discard it to remove it.`;
-    case "dirty": return `${worktree} has uncommitted changes. Land or discard it to remove it.`;
-    case "shared": return `Another session still works in the worktree ${branch}.`;
-    case "checkout-changed": return `The folder or branch of the worktree ${branch} changed outside Forgerie.`;
-    case "related-worktrees-active": return `The chat still owns worktrees related to ${branch}. Finish those from the session menu (⋯) first.`;
+    case "unlanded-commits": return `It has commits that are not on ${defaultBranch}. Land or discard ${branch} to remove it.`;
+    case "dirty": return `It has uncommitted changes. Land or discard ${branch} to remove it.`;
+    case "shared": return `Another session still works in ${branch}.`;
+    case "checkout-changed": return `Its folder or branch changed outside Forgerie. Remove ${branch} yourself if you no longer need it.`;
+    case "related-worktrees-active": return `The chat still owns related worktrees. Finish those from the session menu (⋯), then archive again.`;
     // Landed or discarded already: nothing is left to remove, so there is nothing to say.
     case "already-completed": return undefined;
-    default: return `${worktree} was kept: ${reason}`;
+    default: return `${reason} (${branch})`;
   }
 }
 
@@ -145,7 +145,7 @@ export function archiveNote(info: Pick<WorktreeInfo, "archiveCleanup" | "branch"
     const text = retainedText(cleanup.reason, info.branch, info.defaultBranch);
     return text ? { title: "Worktree kept", text } : undefined;
   }
-  if (cleanup?.kind === "removed" && cleanup.cleanup.kind === "failed") return { title: "Worktree not removed", text: `The worktree ${info.branch} was not removed: ${cleanup.cleanup.error}` };
+  if (cleanup?.kind === "removed" && cleanup.cleanup.kind === "failed") return { title: "Worktree not removed", text: `${cleanup.cleanup.error} (${info.branch})` };
   return undefined;
 }
 
